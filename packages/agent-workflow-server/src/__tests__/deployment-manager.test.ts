@@ -304,13 +304,15 @@ describe('BeeGameDeploymentManager', () => {
     )
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
+      version: 5,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
-        asset_format_capabilities: [],
+        asset_format_capabilities: ['png'],
       },
-      slots: [],
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
     const report = {
       validatorId: 'beegame-acceptance-validator',

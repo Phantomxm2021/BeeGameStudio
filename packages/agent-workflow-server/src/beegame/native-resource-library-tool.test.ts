@@ -282,17 +282,19 @@ async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-resource-tool-'))
   await mkdir(join(workspace, 'assets'), { recursive: true })
   await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-    version: 4,
+    version: 5,
     project_target: {
       integration_mode: 'filesystem',
       asset_format_capabilities: ['glb'],
       resource_library_usage: 'preferred',
     },
-    slots: [{
+    requirements: [{
       id: 'ground',
-      target: { path: 'public/assets/ground.glb' },
+      status: 'planned',
       resource_requirement: { accepted_formats: ['glb'], tags: ['ground'] },
     }],
+    imports: [],
+    compositions: [],
   }))
   return workspace
 }

@@ -4769,9 +4769,16 @@ describe('beegame session routes', () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { kind: 'native', engine: 'custom-engine', integration_mode: 'filesystem' },
-      slots: [],
+      version: 5,
+      project_target: {
+        platform: 'native',
+        runtime: 'custom-engine',
+        integration_mode: 'filesystem',
+        asset_format_capabilities: ['png'],
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
     const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
     const app = createAgentWorkflowApp({
@@ -5108,18 +5115,20 @@ describe('beegame session routes', () => {
       await writeFile(
         join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
           },
-          slots: [{
+          requirements: [{
             id: 'title_logo',
             name: 'Title logo',
             type: 'image_2d',
             accepted_formats: ['png'],
             target: { path: 'public/assets/title-logo.png' },
           }],
+          imports: [],
+          compositions: [],
         }),
       )
       const assetsRes = await app.request(`/api/projects/${projectId}/assets`)
@@ -5273,18 +5282,21 @@ describe('beegame session routes', () => {
       await writeFile(
         join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: {
-            kind: 'web',
+            platform: 'web',
             integration_mode: 'filesystem',
+            asset_format_capabilities: ['png'],
           },
-          slots: [{
+          requirements: [{
             id: 'hero_background',
             name: 'Hero background',
             type: 'image_2d',
             purpose: 'Landing screen background',
             target: { path: 'public/assets/hero-background.png' },
           }],
+          imports: [],
+          compositions: [],
         }),
       )
 
@@ -6442,14 +6454,15 @@ describe('beegame session routes', () => {
       await writeFile(
         join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: {
-            kind: 'game_engine',
-            engine: 'custom-engine',
+            platform: 'game-engine',
+            runtime: 'custom-engine',
             integration_mode: 'mcp',
             mcp_server: 'engine-mcp',
+            asset_format_capabilities: ['glb', 'fbx'],
           },
-          slots: [{
+          requirements: [{
             id: 'player_model',
             name: 'Player model',
             type: 'model_3d',
@@ -6465,6 +6478,8 @@ describe('beegame session routes', () => {
               capabilities: ['import_asset', 'replace_prefab_mesh'],
             },
           }],
+          imports: [],
+          compositions: [],
         }),
       )
 
@@ -6486,7 +6501,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('reads categorized asset contract slots from an owned project workspace', async () => {
+  test('rejects categorized legacy asset contracts instead of silently migrating them', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-categorized-assets-'))
     const workspace = join(projectsRoot, 'categorized-project')
     const app = createAgentWorkflowApp({
@@ -6545,23 +6560,9 @@ describe('beegame session routes', () => {
 
       const assetsRes = await app.request('/api/projects/project_categorized_assets/assets')
 
-      expect(assetsRes.status).toBe(200)
-      const assets = await assetsRes.json()
-      expect(assets.project_target).toEqual(expect.objectContaining({
-        platform: 'web',
-        runtime: 'react-three-fiber',
-        integration_mode: 'filesystem',
-      }))
-      expect(assets.requirements).toHaveLength(2)
-      expect(assets.requirements[0]).toEqual(expect.objectContaining({
-        id: 'grass_top',
-        purpose: 'Block face textures',
-        status: 'planned',
-      }))
-      expect(assets.requirements[1]).toEqual(expect.objectContaining({
-        id: 'sfx_break_block',
-        purpose: 'Sound effects',
-        status: 'blocked',
+      expect(assetsRes.status).toBe(400)
+      expect(await assetsRes.json()).toEqual(expect.objectContaining({
+        error: 'Request failed',
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -6626,17 +6627,19 @@ describe('beegame session routes', () => {
       await writeFile(
         join(sessionWorkspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
           },
-          slots: [{
+          requirements: [{
             id: 'main_logo',
             name: 'Main logo',
             status: 'uploaded',
             uploaded_files: ['public/assets/logo.png'],
           }],
+          imports: [],
+          compositions: [],
         }),
       )
 
@@ -6775,15 +6778,17 @@ describe('beegame session routes', () => {
       await writeFile(
         join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-          slots: [{
+          requirements: [{
             id: 'main_logo',
             name: 'Main logo',
             type: 'image_2d',
             purpose: 'Title screen logo',
             target: { path: 'public/assets/logo.png' },
           }],
+          imports: [],
+          compositions: [],
         }),
       )
       const form = new FormData()
@@ -6872,17 +6877,19 @@ describe('beegame session routes', () => {
       await writeFile(
         join(sessionWorkspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
-          version: 1,
+          version: 5,
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
           },
-          slots: [{
+          requirements: [{
             id: 'main_logo',
             name: 'Main logo',
             accepted_formats: ['png'],
             target: { path: 'public/assets/logo.png' },
           }],
+          imports: [],
+          compositions: [],
         }),
       )
       const form = new FormData()
@@ -8888,13 +8895,15 @@ async function writeAcceptedDeliveryReport(
   )
   await mkdir(join(workspace, 'assets'), { recursive: true })
   await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-    version: 1,
+    version: 5,
     project_target: {
       platform: 'selected-target',
       runtime: 'project-native',
-      asset_format_capabilities: [],
+      asset_format_capabilities: ['png'],
     },
-    slots: [],
+    requirements: [],
+    imports: [],
+    compositions: [],
   }))
   const report = {
       validatorId: 'beegame-acceptance-validator',

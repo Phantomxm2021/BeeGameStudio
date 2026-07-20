@@ -32,8 +32,14 @@ unchanged where translation would make them invalid.
 
 For an empty or newly scaffolded workspace:
 
-1. Establish the project-specific documentation baseline before authored game
-   implementation. At minimum maintain:
+1. Inspect the Skills that are actually available in the current Claude Code
+   session. Evaluate their descriptions and instructions against the confirmed
+   project intent; use applicable game-design, art, audio, UI/UX, target-runtime
+   and testing Skills while authoring their respective work. Do not infer Skill
+   availability from a remembered name, ask BeeGame to choose a Skill, or
+   replace an unavailable Skill with a hard-coded imitation.
+2. Draft the project-specific product and technical baseline before authored
+   game implementation. At minimum maintain:
    - `docs/GDD.md`
    - `docs/ART_DIRECTION.md`
    - `docs/UI_UX_SPEC.md`
@@ -42,24 +48,37 @@ For an empty or newly scaffolded workspace:
    - `docs/ASSET_PLAN.md`
    - `docs/acceptance/gameplay-checklist.md`
    - `assets/asset-manifest.json`
-2. Give requirements and player paths stable IDs. Each acceptance item must
+3. Give requirements and player paths stable IDs. Each acceptance item must
    define an action, observable expected result, and required evidence.
-3. Inspect the read-only `ProjectDeliveryContract` capability and pass its
+4. Determine the selected target's real consumable asset file extensions and
+   write them to `project_target.asset_format_capabilities`. These values are
+   file-format facts, not renderer names, implementation techniques, engines,
+   platforms, or library names.
+5. Apply the confirmed Resource Library policy before finalizing presentation
+   and asset decisions. Explore Packs and logical elements through the native
+   catalog capability, inspect objective resource facts, and let the approved
+   art direction guide authored choices. Record independent imported inventory
+   under `imports`, game responsibilities under `requirements`, and target-native
+   assembly under `compositions`; do not create or preserve a parallel `slots`
+   contract.
+6. Reconcile the draft documents and acceptance expectations with the observed
+   resource facts. The final documentation baseline must describe the actual
+   adopted resource families, authored substitutions, composition intent,
+   dependencies and target-native integration plan.
+7. Inspect the read-only `ProjectDeliveryContract` capability and pass its
    current deterministic diagnostics to the native
    `beegame-document-reviewer` in a fresh context. Handle
    every material finding. Do not use the documents as the implementation
    baseline until the current document revision is `READY`.
-4. Apply the confirmed Resource Library policy and establish the art/resource
-   plan before implementing presentation that depends on it.
-5. Implement the playable project using the relevant native Skills and
+8. Implement the playable project using the relevant native Skills and
    specialist subagents. Keep documents, resource contract, code, and tests
    current as the design changes.
-6. Invoke the independent native `beegame-implementation-auditor`. Repair
+9. Invoke the independent native `beegame-implementation-auditor`. Repair
    structural, traceability, test, and resource-integration findings.
-7. Invoke the independent native `beegame-acceptance-validator` for the current
+10. Invoke the independent native `beegame-acceptance-validator` for the current
    workspace revision. It must observe the applicable player paths in the
    target runtime, not merely compile or inspect source.
-8. If review, audit, or validation fails, repair the project and rerun the
+11. If review, audit, or validation fails, repair the project and rerun the
    affected independent check. Any material project change makes older evidence
    stale.
 
@@ -111,10 +130,23 @@ by BeeGame.
 Work Pack-first. Select a primary Pack that fits the approved art direction,
 then explore its logical assets and modular families. Cross-Pack use is allowed
 only when style, scale, technical compatibility, and licensing remain coherent.
+Begin with an unfiltered or canonical-structure catalog browse. For authored
+free-text metadata such as style, game type and Pack tags, refine only with
+exact values returned by catalog facets; never translate a project phrase into
+an assumed catalog value or treat an over-constrained zero result as proof that
+the library has no suitable resources.
 Import dependency closure, preserve authored family relationships, and compose
 the selected elements in the target runtime. A copied file is only available;
 it is not integrated until the shipped game references it and its contribution
 is observable in preview/runtime evidence.
+
+Pack exploration is not one-to-one slot filling. Claude Code may inspect and
+import multiple logical roots, reuse one import across several responsibilities,
+and assemble scenes, UI, characters, animation-bearing roots, effects, audio,
+tilemaps, sprite sheets or atlases according to the selected target's native
+workflow. Preserve bundled roots such as skinned model plus animation when the
+source declares them as one logical asset. BeeGame supplies catalog and file
+facts only; it does not prescribe scene composition or generate target code.
 
 Do not assume a game engine, asset format, scene representation, package
 manager, or test framework. Discover them from the confirmed brief, project,

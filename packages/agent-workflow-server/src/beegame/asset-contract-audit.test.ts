@@ -16,7 +16,7 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace)).toMatchObject({ present: false, valid: true })
   })
 
-  test('rejects integrated slots whose files or references are missing', async () => {
+  test('rejects legacy slots manifests instead of silently validating a second contract', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-missing-'))
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
@@ -32,8 +32,10 @@ describe('asset contract audit', () => {
 
     const audit = auditAssetContract(workspace)
     expect(audit.valid).toBe(false)
-    expect(audit.slots[0]).toMatchObject({ stage: 'failed' })
-    expect(audit.issues).toContain('character-primary: Integrated slot files are missing from the project.')
+    expect(audit.slots).toEqual([])
+    expect(audit.issues).toEqual([
+      'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
+    ])
   })
 
   test('reports exact canonical manifest shape errors instead of treating legacy maps as missing fields', async () => {
@@ -45,21 +47,36 @@ describe('asset contract audit', () => {
     }))
 
     expect(auditAssetContract(workspace).issues).toEqual([
-      'slots must be an array; received object.',
-      'project_target.asset_format_capabilities must be an array of strings; received object.',
+      'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
     ])
+  })
+
+  test('rejects a stale canonical schema version explicitly', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-version-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 4,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    }))
+
+    expect(auditAssetContract(workspace).issues).toContain('version must be 5; received 4.')
   })
 
   test('rejects an invented resource library usage without inferring it from the platform', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-policy-'))
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
+      version: 5,
       project_target: {
         asset_format_capabilities: ['glb'],
         resource_library_usage: 'web-assets',
       },
-      slots: [],
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
 
     expect(auditAssetContract(workspace).issues).toEqual([
@@ -67,212 +84,28 @@ describe('asset contract audit', () => {
     ])
   })
 
-  test('treats manifest runtime event IDs as declarations rather than proof', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-complete-'))
-    await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
-    await mkdir(join(workspace, 'src'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'models', 'character.glb'), 'asset')
-    await writeFile(join(workspace, 'src', 'game-entry.ts'), 'export const character = true\n')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['glb'] },
-      slots: [{
-        id: 'character-primary',
-        status: 'integrated',
-        target: { path: 'assets/models/character.glb' },
-        uploaded_files: ['assets/models/character.glb'],
-        resource_binding: { pack_id: 'pack', element_id: 'element', version: '1' },
-        integration_evidence: {
-          references: ['src/game-entry.ts'],
-          runtime_event_ids: ['runtime-check-1'],
-        },
-      }],
-    }))
-
-    expect(auditAssetContract(workspace)).toMatchObject({
-      present: true,
-      valid: true,
-      slots: [{
-        id: 'character-primary',
-        stage: 'referenced',
-        runtimeEventIds: ['runtime-check-1'],
-      }],
-    })
-  })
-
-  test('uses the explicit project target capability contract', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-format-'))
-    await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'models', 'character.engineasset'), 'asset')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['portable-model'] },
-      slots: [{
-        id: 'character-primary',
-        status: 'placeholder',
-        target: { path: 'assets/models/character.engineasset' },
-        uploaded_files: ['assets/models/character.engineasset'],
-      }],
-    }))
-
-    expect(auditAssetContract(workspace).issues).toContain(
-      'character-primary: File format is outside project_target capabilities: assets/models/character.engineasset',
-    )
-  })
-
-  test('accepts sparse authored intent when technical integration formats are explicit', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-selection-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['portable-model'] },
-      slots: [{
-        id: 'primary-visual',
-        status: 'missing',
-        target: { path: 'assets/primary.portable-model' },
-        resource_requirement: {
-          accepted_formats: ['portable-model'],
-        },
-      }],
-    }))
-
-    expect(auditAssetContract(workspace)).toMatchObject({ valid: true })
-  })
-
-  test('accepts an explicit platform-neutral resource exploration requirement', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-selection-valid-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['glb'] },
-      slots: [{
-        id: 'primary-visual',
-        status: 'missing',
-        target: { path: 'assets/primary.glb' },
-        resource_requirement: {
-          category: 'models',
-          dimension: '3D',
-          accepted_formats: ['glb'],
-          tags: ['character'],
-        },
-      }],
-    }))
-
-    expect(auditAssetContract(workspace)).toMatchObject({ valid: true })
-  })
-
-  test('does not treat embedded source references as uploaded resource files', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-embedded-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await mkdir(join(workspace, 'src'), { recursive: true })
-    await writeFile(join(workspace, 'src', 'embedded-visual.ts'), 'export const visual = `<svg />`\n')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['svg'] },
-      slots: [{
-        id: 'embedded-visual',
-        delivery_mode: 'embedded',
-        status: 'integrated',
-        target: { path: 'src/embedded-visual.ts' },
-        integration_evidence: {
-          references: ['src/embedded-visual.ts'],
-          runtime_event_ids: ['visual-observed'],
-        },
-      }],
-    }))
-
-    expect(auditAssetContract(workspace)).toMatchObject({
-      valid: true,
-      slots: [{
-        id: 'embedded-visual',
-        deliveryMode: 'embedded',
-        stage: 'referenced',
-      }],
-    })
-  })
-
-  test('reports the canonical usage-tag vocabulary with invalid values', async () => {
+  test('reports canonical usage-tag values for an invalid authored requirement', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-tag-vocabulary-'))
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['portable-audio'] },
-      slots: [{
+      version: 5,
+      project_target: { asset_format_capabilities: ['ogg'] },
+      requirements: [{
         id: 'feedback-audio',
-        status: 'missing',
-        target: { path: 'assets/feedback.portable-audio' },
+        status: 'planned',
         resource_requirement: {
-          category: 'audio',
-          dimension: 'agnostic',
-          accepted_formats: ['portable-audio'],
+          accepted_formats: ['ogg'],
           tags: ['noncanonical-purpose'],
         },
       }],
+      imports: [],
+      compositions: [],
     }))
 
     const issue = auditAssetContract(workspace).issues.find(value =>
       value.startsWith('feedback-audio: Unbound resource_requirement.tags contains unsupported usage tags:'),
     )
     expect(issue).toContain('Allowed canonical values:')
-  })
-
-  test('validates an engine-neutral composition against its member slots and recipe', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-composition-'))
-    await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
-    await mkdir(join(workspace, 'src'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'models', 'hero.glb'), 'asset')
-    await writeFile(join(workspace, 'src', 'hero-recipe.ts'), 'export const hero = true\n')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['glb'] },
-      slots: [{
-        id: 'hero-model', status: 'integrated', target: { path: 'assets/models/hero.glb' },
-        uploaded_files: ['assets/models/hero.glb'], resource_binding: { pack_id: 'pack' },
-        integration_evidence: { references: ['src/hero-recipe.ts'] },
-      }],
-      compositions: [{
-        id: 'hero', kind: 'character', status: 'integrated',
-        members: [{ slot_id: 'hero-model', role: 'visual', required: true }],
-        recipe: { path: 'src/hero-recipe.ts' },
-        integration_evidence: { references: ['src/hero-recipe.ts'] },
-      }],
-    }))
-
-    expect(auditAssetContract(workspace)).toMatchObject({
-      valid: true,
-      compositions: [{ id: 'hero', kind: 'character', status: 'integrated', memberSlotIds: ['hero-model'], issues: [] }],
-    })
-  })
-
-  test('rejects an assembled composition with an unknown member or missing recipe', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-composition-invalid-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: [] },
-      slots: [],
-      compositions: [{ id: 'level', kind: 'scene', status: 'assembled', members: [{ slot_id: 'missing-layout', role: 'layout' }] }],
-    }))
-
-    expect(auditAssetContract(workspace).issues).toEqual(expect.arrayContaining([
-      'level: Member references an unknown slot: missing-layout',
-      'level: Assembled composition must declare recipe.path.',
-    ]))
-  })
-
-  test('allows a direct composition to load one complete logical asset without a recipe', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-direct-composition-'))
-    await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'models', 'hero.glb'), 'glTF')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: ['glb'] },
-      slots: [{ id: 'hero-root', required: true, target: { path: 'assets/models/hero.glb' }, uploaded_files: ['assets/models/hero.glb'], resource_binding: { pack_id: 'characters', pack_version: '1.0.0', element_id: 'hero', source_url: 'https://resource.test/hero.glb', selected_at: '2026-01-01T00:00:00Z', selection_reason: ['compatible'] }, integration_evidence: { references: ['assets/models/hero.glb'] }, status: 'integrated' }],
-      compositions: [{ id: 'hero', kind: 'character', assembly_mode: 'direct', status: 'integrated', members: [{ slot_id: 'hero-root', role: 'primary' }] }],
-    }))
-
-    const result = await auditAssetContract(workspace)
-    expect(result.compositions).toEqual([expect.objectContaining({ id: 'hero', status: 'integrated', issues: [] })])
   })
 
   test('accepts reusable imports composed by target-native project code', async () => {

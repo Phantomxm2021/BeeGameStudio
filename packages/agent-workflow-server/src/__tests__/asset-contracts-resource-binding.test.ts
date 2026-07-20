@@ -10,12 +10,12 @@ import {
   uploadBeeGameAsset,
 } from '../beegame/asset-contracts'
 
-describe('BeeGame resource contract migration', () => {
+describe('BeeGame canonical resource contract', () => {
   test('intersects explicit requirement formats with the target runtime format contract', () => {
     const manifest = normalizeBeeGameAssetManifest({
       version: 1,
       project_target: { asset_format_capabilities: ['glb', 'png', 'ogg'] },
-      slots: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['fbx', 'glb'] } }],
+      requirements: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['fbx', 'glb'] } }],
     })
     expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual(['glb'])
   })
@@ -23,7 +23,7 @@ describe('BeeGame resource contract migration', () => {
   test('does not claim technical compatibility without project target capabilities', () => {
     const manifest = normalizeBeeGameAssetManifest({
       version: 1,
-      slots: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['glb'] } }],
+      requirements: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['glb'] } }],
     })
     expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual([])
   })
@@ -55,39 +55,10 @@ describe('BeeGame resource contract migration', () => {
     expect(manifest.requirements[0]?.resource_requirement).toEqual({ category: 'models', accepted_formats: [], styles: [], game_types: [], tags: ['character'], purpose: undefined })
   })
 
-  test('normalizes legacy slot dictionaries without inventing metadata from their keys', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: '1.1.0', integration_mode: 'filesystem',
-      slots: {
-        old_key: {
-          slot_id: 'player-placeholder', purpose: 'Player character model', target_path: 'assets/models/player.fbx',
-          status: 'placeholder', resource_requirement: { tags: ['character'], accepted_formats: ['fbx'] },
-        },
-      },
-    })
-    expect(manifest.project_target?.integration_mode).toBe('filesystem')
-    expect(manifest.requirements).toEqual([expect.objectContaining({
-      id: 'player-placeholder', target: expect.objectContaining({ path: 'assets/models/player.fbx' }),
-      resource_requirement: expect.objectContaining({ tags: ['character'], accepted_formats: ['fbx'] }),
-    })])
-  })
-
-  test('migrates a historical slot binding into an independent import exactly once', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: 4,
-      slots: [{
-        id: 'hero', status: 'integrated', uploaded_files: ['assets/models/hero.glb'],
-        integration_evidence: { runtime_event_ids: ['runtime.hero.loaded'] },
-        resource_binding: {
-          pack_id: 'character-pack', pack_version: '2.0.0', element_id: 'hero-root', element_path: 'models/hero.glb',
-          source_url: 'https://storage.invalid/signed', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['explicit-selection'],
-        },
-      }],
-    })
-    expect(manifest.imports).toEqual([expect.objectContaining({
-      id: 'legacy.hero', status: 'referenced', root_path: 'assets/models/hero.glb',
-      source: expect.objectContaining({ type: 'resource-library', pack_id: 'character-pack', element_id: 'hero-root' }),
-    })])
+  test('rejects legacy slot structures instead of silently migrating uncertain semantics', () => {
+    expect(() => normalizeBeeGameAssetManifest({ version: 4, slots: [] })).toThrow(
+      'legacy slots manifests require explicit migration',
+    )
   })
 
   test('records a user upload as an import instead of creating a Pack binding on the requirement', async () => {
@@ -110,12 +81,14 @@ describe('BeeGame resource contract migration', () => {
     }
   })
 
-  test('marks a migrated import failed when its recorded project file no longer exists', async () => {
+  test('marks a canonical import failed when its recorded project file no longer exists', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-missing-import-'))
     try {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
-        version: 4,
-        slots: [{ id: 'item', status: 'integrated', uploaded_files: ['assets/models/item.glb'] }],
+        version: 5,
+        requirements: [],
+        imports: [{ id: 'item', source: { type: 'user-upload' }, status: 'available', root_path: 'assets/models/item.glb', local_files: ['assets/models/item.glb'], selected_at: '2026-07-21T00:00:00.000Z', selection_reason: ['user upload'] }],
+        compositions: [],
       }))
       const manifest = await readBeeGameAssetManifest(workspace)
       expect(manifest.imports?.[0]).toEqual(expect.objectContaining({ status: 'failed', error: expect.any(String) }))

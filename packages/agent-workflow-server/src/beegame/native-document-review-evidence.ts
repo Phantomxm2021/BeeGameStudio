@@ -358,9 +358,7 @@ function digestibleAssetContract(source: string): string {
   try {
     const manifest = JSON.parse(source) as unknown
     if (!isRecord(manifest)) return source
-    const requirementsSource = Array.isArray(manifest.requirements)
-      ? manifest.requirements
-      : manifest.slots
+    const requirementsSource = manifest.requirements
     const requirements = Array.isArray(requirementsSource)
       ? requirementsSource.map(requirement => {
           if (!isRecord(requirement)) return requirement

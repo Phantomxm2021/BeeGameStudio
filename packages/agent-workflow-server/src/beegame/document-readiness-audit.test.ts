@@ -29,13 +29,15 @@ describe('document readiness audit', () => {
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
+      version: 5,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
-        asset_format_capabilities: [],
+        asset_format_capabilities: ['glb'],
       },
-      slots: [],
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
 
     expect(auditDocumentReadiness(workspace)).toEqual({ valid: true, issues: [] })
@@ -62,10 +64,7 @@ describe('document readiness audit', () => {
     const audit = auditDocumentReadiness(workspace)
     expect(audit.valid).toBe(false)
     expect(audit.issues).toContain(
-      'assets/asset-manifest.json: project_target must be an object; received undefined.',
-    )
-    expect(audit.issues).toContain(
-      'assets/asset-manifest.json: slots must be an array; received undefined.',
+      'assets/asset-manifest.json: requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
     )
   })
 
@@ -82,13 +81,15 @@ describe('document readiness audit', () => {
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
+      version: 5,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
-        asset_format_capabilities: [],
+        asset_format_capabilities: ['glb'],
       },
-      slots: [],
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
 
     expect(auditDocumentReadiness(workspace).issues).toEqual([
@@ -111,9 +112,11 @@ describe('document readiness audit', () => {
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: [] },
-      slots: [],
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
 
     expect(auditDocumentReadiness(workspace)).toEqual({ valid: true, issues: [] })

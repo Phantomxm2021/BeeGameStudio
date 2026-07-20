@@ -146,20 +146,22 @@ async function createWorkspace(slotOverrides: Record<string, unknown> = {}): Pro
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-project-resources-'))
   await mkdir(join(workspace, 'assets'), { recursive: true })
   await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-    version: 4,
+    version: 5,
     project_target: {
       integration_mode: 'filesystem',
       asset_format_capabilities: ['glb', 'png'],
       resource_library_usage: 'preferred',
     },
-    slots: [{
+    requirements: [{
       id: 'primary-character',
-      target: { path: 'public/assets/character.glb' },
+      status: 'planned',
       resource_requirement: {
         category: 'models', dimension: '3D', accepted_formats: ['glb'], tags: ['character'],
       },
       ...slotOverrides,
     }],
+    imports: [],
+    compositions: [],
   }))
   return workspace
 }

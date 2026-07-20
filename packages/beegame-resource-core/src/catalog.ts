@@ -35,11 +35,12 @@ export function browseResourceCatalogPacks(
     list.push(element)
     readyByPack.set(element.packId, list)
   }
-  const filtered = published
+  const available = published
     .map(pack => ({ pack, elements: readyByPack.get(pack.id) ?? [] }))
+  const filtered = available
     .filter(entry => packMatches(entry.pack, entry.elements, request.filters))
     .sort((left, right) => compareText(left.pack.name, right.pack.name) || compareText(left.pack.id, right.pack.id))
-  const facets = collectFacets(filtered.map(entry => entry.pack), filtered.flatMap(entry => entry.elements))
+  const facets = collectFacets(available.map(entry => entry.pack), available.flatMap(entry => entry.elements))
   return page(filtered.map(({ pack, elements: packElements }) => summarizePack(pack, packElements)), request, facets, item => item.packId)
 }
 
@@ -51,7 +52,7 @@ export function browseResourceCatalogPackSummaries(
   const filtered = summaries
     .filter(pack => catalogPackMatches(pack, request.filters))
     .sort((left, right) => compareText(left.packName, right.packName) || compareText(left.packId, right.packId))
-  return page(filtered, request, collectSummaryFacets(filtered), item => item.packId)
+  return page(filtered, request, collectSummaryFacets(summaries), item => item.packId)
 }
 
 /**
@@ -68,16 +69,17 @@ export function browseResourcePackElements(
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const readyIds = readyDependencyIds(elements)
-  const eligible = elements
+  const available = elements
     .filter(element => element.packId === packId && element.status === 'ready' && packById.has(element.packId) && hasCompleteDependencyClosure(element, readyIds))
+  const eligible = available
     .filter(element => elementMatches(element, packById.get(element.packId)!, request.filters))
     .sort((left, right) => {
       const leftPack = packById.get(left.packId)!
       const rightPack = packById.get(right.packId)!
       return compareText(leftPack.name, rightPack.name) || compareText(left.path, right.path) || compareText(left.id, right.id)
     })
-  const scopedPacks = [...new Map(eligible.map(element => [element.packId, packById.get(element.packId)!])).values()]
-  const facets = collectFacets(scopedPacks, eligible)
+  const scopedPacks = [...new Map(available.map(element => [element.packId, packById.get(element.packId)!])).values()]
+  const facets = collectFacets(scopedPacks, available)
   return page(eligible.map(element => summarizeElement(packById.get(element.packId)!, element)), request, facets, item => item.elementId)
 }
 

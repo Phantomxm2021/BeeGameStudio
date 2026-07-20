@@ -47,7 +47,7 @@ describe('native document review evidence', () => {
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
-      '{"version":1,"project_target":{"asset_format_capabilities":[]},"slots":[]}',
+      '{"version":5,"project_target":{"asset_format_capabilities":["glb"]},"requirements":[],"imports":[],"compositions":[]}',
     )
     recordNativeDocumentReviewForTest({
       dataRoot: dataRootFor(workspace),
@@ -57,7 +57,7 @@ describe('native document review evidence', () => {
     })
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
-      '{"version":1,"project_target":{"asset_format_capabilities":[]},"slots":[{"id":"new"}]}',
+      '{"version":5,"project_target":{"asset_format_capabilities":["glb"]},"requirements":[{"id":"new","status":"planned"}],"imports":[],"compositions":[]}',
     )
 
     expect(current(workspace).state).toBe('stale')
@@ -66,39 +66,45 @@ describe('native document review evidence', () => {
   test('does not make document review stale when only asset integration state changes', async () => {
     workspace = await createWorkspace()
     await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'primary.portable-model'), 'asset')
+    await writeFile(join(workspace, 'src', 'game.ts'), 'export const game = true\n')
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
-        version: 1,
+        version: 5,
         project_target: { asset_format_capabilities: ['portable-model'] },
-        slots: [{
+        requirements: [{
           id: 'primary-visual',
-          delivery_mode: 'managed-file',
-          target: { path: 'assets/primary.portable-model' },
           resource_requirement: { accepted_formats: ['portable-model'] },
-          status: 'missing',
+          status: 'planned',
         }],
+        imports: [{
+          id: 'primary-import', source: { type: 'user-upload' }, status: 'available',
+          root_path: 'assets/primary.portable-model', local_files: ['assets/primary.portable-model'],
+          selected_at: '2026-07-21T00:00:00.000Z', selection_reason: ['user upload'],
+        }],
+        compositions: [],
       }),
     )
     recordReady(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
-        slots: [{
-          integration_evidence: {
-            references: ['src/game.ts'],
-            runtime_event_ids: ['runtime-1'],
-          },
-          uploaded_files: ['assets/primary.portable-model'],
-          status: 'integrated',
-          resource_binding: { pack_id: 'pack', element_id: 'element' },
-          target: { path: 'assets/primary.portable-model' },
+        requirements: [{
+          status: 'satisfied',
+          satisfied_by: { import_ids: ['primary-import'] },
           resource_requirement: { accepted_formats: ['portable-model'] },
-          delivery_mode: 'managed-file',
           id: 'primary-visual',
         }],
+        imports: [{
+          id: 'primary-import', source: { type: 'user-upload' }, status: 'referenced',
+          root_path: 'assets/primary.portable-model', local_files: ['assets/primary.portable-model'],
+          selected_at: '2026-07-21T00:00:00.000Z', selection_reason: ['user upload'],
+          usage_evidence: { references: ['src/game.ts'], runtime_event_ids: ['runtime-1'] },
+        }],
+        compositions: [],
         project_target: { asset_format_capabilities: ['portable-model'] },
-        version: 1,
+        version: 5,
       }),
     )
 
@@ -416,13 +422,15 @@ async function createWorkspace(): Promise<string> {
   }
   await mkdir(join(root, 'assets'), { recursive: true })
   await writeFile(join(root, 'assets', 'asset-manifest.json'), JSON.stringify({
-    version: 1,
+    version: 5,
     project_target: {
       platform: 'selected-target',
       runtime: 'project-native',
-      asset_format_capabilities: [],
+      asset_format_capabilities: ['glb'],
     },
-    slots: [],
+    requirements: [],
+    imports: [],
+    compositions: [],
   }))
   return root
 }

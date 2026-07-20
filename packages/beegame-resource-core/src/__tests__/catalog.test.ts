@@ -33,6 +33,15 @@ describe('resource catalog browsing', () => {
     expect(page.facets.formats).toEqual(['glb', 'webm'])
   })
 
+  test('keeps available facets when an exact authored filter has no matches', () => {
+    const page = browseResourceCatalogPacks(packs, elements, {
+      filters: { gameTypes: ['nonexistent-authored-value'] },
+    })
+    expect(page.items).toEqual([])
+    expect(page.facets.gameTypes).toEqual(['Action', 'Adventure'])
+    expect(page.facets.styles).toEqual(['Stylized'])
+  })
+
   test('keeps element exploration inside the Pack deliberately selected by the Agent', () => {
     const page = browseResourcePackElements(packs, elements, 'world-kit', {
       filters: { assetKinds: ['model'] },

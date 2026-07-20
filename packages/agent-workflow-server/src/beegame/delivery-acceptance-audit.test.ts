@@ -43,14 +43,16 @@ describe('native delivery acceptance gate', () => {
   test('does not accept a preferred Resource Library policy without observed Pack exploration', async () => {
     workspace = await createWorkspace()
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
+      version: 5,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
-        asset_format_capabilities: [],
+        asset_format_capabilities: ['glb'],
         resource_library_usage: 'preferred',
       },
-      slots: [],
+      requirements: [],
+      imports: [],
+      compositions: [],
     }))
     recordReadyDocumentReview(workspace)
     record(workspace, 'passed', 'The validator report cannot replace Pack exploration.')
@@ -175,8 +177,7 @@ describe('native delivery acceptance gate', () => {
     const result = evaluate(workspace)
     expect(result.allowed).toBe(false)
     expect(result.outcome).toBe('rejected')
-    expect(result.issues.join(' ')).toContain('project_target must be an object')
-    expect(result.issues.join(' ')).toContain('slots must be an array')
+    expect(result.issues.join(' ')).toContain('requirements must be an array')
   })
 
   test('binds acceptance to the revision observed when the validator starts', async () => {
@@ -960,13 +961,15 @@ async function createWorkspace(): Promise<string> {
   }
   await mkdir(join(root, 'assets'), { recursive: true })
   await writeFile(join(root, 'assets', 'asset-manifest.json'), JSON.stringify({
-    version: 1,
+    version: 5,
     project_target: {
       platform: 'selected-target',
       runtime: 'project-native',
-      asset_format_capabilities: [],
+      asset_format_capabilities: ['glb'],
     },
-    slots: [],
+    requirements: [],
+    imports: [],
+    compositions: [],
   }))
   await writeFile(join(root, 'src', 'entry.ts'), 'export const ready = true\n')
   recordReadyDocumentReview(root)

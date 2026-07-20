@@ -2491,13 +2491,15 @@ describe('agent workflow server routes', () => {
       )
       await mkdir(join(projectRoot, 'assets'), { recursive: true })
       await writeFile(join(projectRoot, 'assets', 'asset-manifest.json'), JSON.stringify({
-        version: 1,
+        version: 5,
         project_target: {
           platform: 'selected-target',
           runtime: 'project-native',
-          asset_format_capabilities: [],
+          asset_format_capabilities: ['png'],
         },
-        slots: [],
+        requirements: [],
+        imports: [],
+        compositions: [],
       }))
       const acceptanceReport = {
         validatorId: 'beegame-acceptance-validator',

@@ -218,7 +218,58 @@ export type BeeGameAssetUploadResult = {
 
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 const ASSET_UPLOAD_ROOT = 'assets/uploads'
-const CURRENT_ASSET_MANIFEST_VERSION = 5
+export const CURRENT_ASSET_MANIFEST_VERSION = 5
+
+/**
+ * The single authoring example exposed to Claude Code. It intentionally
+ * describes responsibilities, imported inventory, and target-native
+ * compositions as separate concepts. BeeGame validates these facts but does
+ * not decide which resources to use or how the target project assembles them.
+ */
+export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
+  version: CURRENT_ASSET_MANIFEST_VERSION,
+  project_target: {
+    asset_format_capabilities: ['<actual-file-extension-consumable-by-target>'],
+    resource_library_usage: 'preferred',
+  },
+  requirements: [{
+    id: '<stable-game-responsibility-id>',
+    required: true,
+    status: 'planned',
+    resource_requirement: {
+      accepted_formats: ['<actual-file-extension>'],
+      purpose: '<authored-game-purpose>',
+    },
+    satisfied_by: {
+      import_ids: [],
+      composition_ids: [],
+      project_references: [],
+    },
+  }],
+  imports: [{
+    id: '<stable-import-id>',
+    source: {
+      type: 'resource-library',
+      pack_id: '<pack-id>',
+      pack_version: '<locked-version>',
+      element_id: '<element-id>',
+      element_path: '<immutable-source-path>',
+    },
+    status: 'available',
+    root_path: '<workspace-relative-import-root>',
+    local_files: ['<workspace-relative-import-root>'],
+    selected_at: '<iso-timestamp>',
+    selection_reason: ['<authored-reason>'],
+  }],
+  compositions: [{
+    id: '<stable-composition-id>',
+    kind: 'scene',
+    assembly_mode: 'composed',
+    status: 'planned',
+    members: [{ import_id: '<stable-import-id>', role: '<target-native-role>' }],
+    recipe: { path: '<workspace-relative-target-native-recipe>' },
+  }],
+} as const
 
 export async function readBeeGameAssetManifest(
   workspacePath: string,
@@ -554,23 +605,18 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
     throw new Error('Invalid asset manifest')
   }
   const record = value as Record<string, unknown>
-  const canonicalRequirements = Array.isArray(record.requirements) ? record.requirements : undefined
-  const requirements = canonicalRequirements
-    ? canonicalRequirements.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
-    : Array.isArray(record.slots)
-    ? record.slots.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
-    // Older generated manifests used an object keyed by slot id. Preserve the
-    // explicit entries without deriving new semantics from their keys.
-    : objectValue(record.slots)
-      ? normalizeNestedAssetSlots(record.slots)
-      : normalizeCategorizedAssetSlots(record.categories)
-        .concat(normalizeNestedAssetSlots(record.assets ?? record.resources))
+  if (!Array.isArray(record.requirements)) {
+    throw new Error('Invalid asset manifest: requirements must be an array; legacy slots manifests require explicit migration')
+  }
+  const requirements = record.requirements
+    .map(requirement => normalizeAssetSlot(requirement))
+    .filter(Boolean) as BeeGameAssetSlot[]
   const explicitImports = normalizeResourceImports(record.imports)
   return {
     version: normalizeManifestVersion(record.version),
     project_target: normalizeProjectTarget(record.project_target ?? record),
     requirements,
-    imports: mergeResourceImports(explicitImports, requirements.map(migrateLegacySlotImport).filter((entry): entry is BeeGameResourceImport => Boolean(entry))),
+    imports: explicitImports,
     compositions: normalizeAssetCompositions(record.compositions),
   }
 }
@@ -629,47 +675,6 @@ function primitiveRecord(value: unknown): Record<string, string | number | boole
     return typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))
   })
   return entries.length ? Object.fromEntries(entries) : undefined
-}
-
-function mergeResourceImports(explicit: BeeGameResourceImport[], migrated: BeeGameResourceImport[]): BeeGameResourceImport[] {
-  const byId = new Map(explicit.map(entry => [entry.id, entry]))
-  for (const entry of migrated) if (!byId.has(entry.id)) byId.set(entry.id, entry)
-  return [...byId.values()]
-}
-
-function migrateLegacySlotImport(slot: BeeGameAssetSlot): BeeGameResourceImport | undefined {
-  const files = slot.uploaded_files ?? []
-  const rootPath = files[0] || slot.target?.path
-  if (!rootPath || (!slot.resource_binding && !files.length)) return undefined
-  const id = `legacy.${normalizeImportId(slot.id)}`
-  const binding = slot.resource_binding
-  return {
-    id,
-    source: binding ? {
-      type: 'resource-library',
-      pack_id: binding.pack_id,
-      pack_version: binding.pack_version,
-      element_id: binding.element_id,
-      element_path: binding.element_path || basename(rootPath),
-    } : { type: 'user-upload' },
-    status: slot.status === 'integrated' && Boolean(slot.integration_evidence?.references?.length || slot.integration_evidence?.runtime_event_ids?.length)
-      ? 'referenced'
-      : 'available',
-    root_path: rootPath,
-    local_files: files.length ? files : [rootPath],
-    selected_at: binding?.selected_at || slot.updated_at || new Date(0).toISOString(),
-    selection_reason: binding?.selection_reason ?? ['legacy-project-migration'],
-    ...(binding?.dependencies?.length ? { dependencies: binding.dependencies.map(dependency => ({
-      key: dependency.key,
-      parent_key: dependency.parent_key,
-      element_id: dependency.element_id,
-      element_path: dependency.element_path,
-      reference_path: dependency.reference_path,
-      local_path: files.find(path => path.endsWith(dependency.reference_path.split('\\').join('/'))) || dependency.reference_path,
-      ...(dependency.kind ? { kind: dependency.kind } : {}),
-    })) } : {}),
-    ...(slot.integration_evidence ? { usage_evidence: slot.integration_evidence } : {}),
-  }
 }
 
 function normalizeImportDependency(value: unknown): BeeGameResourceImportDependency | undefined {
@@ -1024,57 +1029,6 @@ function normalizeBindingDependency(value: unknown): BeeGameResourceBindingDepen
   return { key, parent_key: parentKey, element_id: elementId, element_path: elementPath, reference_path: referencePath, source_url: sourceUrl, ...(trimString(record.kind) ? { kind: trimString(record.kind) } : {}) }
 }
 
-function normalizeNestedAssetSlots(value: unknown): BeeGameAssetSlot[] {
-  const slots: BeeGameAssetSlot[] = []
-  const visit = (item: unknown, keyHint = '') => {
-    if (Array.isArray(item)) {
-      for (const child of item) visit(child)
-      return
-    }
-    if (!item || typeof item !== 'object') return
-    const record = item as Record<string, unknown>
-    if ((typeof record.id === 'string' && record.id.trim()) || isAssetLikeRecord(record)) {
-      const slot = normalizeAssetSlot(record, keyHint)
-      if (slot) slots.push(slot)
-      return
-    }
-    for (const [key, child] of Object.entries(record)) visit(child, key)
-  }
-  visit(value)
-  return slots
-}
-
-function normalizeCategorizedAssetSlots(value: unknown): BeeGameAssetSlot[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-  const slots: BeeGameAssetSlot[] = []
-  for (const [categoryKey, categoryValue] of Object.entries(value as Record<string, unknown>)) {
-    if (!categoryValue || typeof categoryValue !== 'object' || Array.isArray(categoryValue)) continue
-    const category = categoryValue as Record<string, unknown>
-    const categorySlots = Array.isArray(category.slots) ? category.slots : []
-    const categoryDescription = trimString(category.description)
-    for (const slotValue of categorySlots) {
-      const slot = normalizeAssetSlot(slotValue, '', {
-        type: categoryKey,
-        purpose: categoryDescription,
-      })
-      if (slot) slots.push(slot)
-    }
-  }
-  return slots
-}
-
-function isAssetLikeRecord(record: Record<string, unknown>): boolean {
-  return typeof record.slot_id === 'string' ||
-    typeof record.path === 'string' ||
-    typeof record.type === 'string' ||
-    typeof record.purpose === 'string' ||
-    typeof record.description === 'string' ||
-    typeof record.placeholder_status === 'string' ||
-    record.specs !== undefined ||
-    record.format !== undefined ||
-    record.replacement !== undefined
-}
-
 function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
@@ -1227,14 +1181,12 @@ async function writeAssetManifest(root: string, manifest: BeeGameAssetManifest):
 }
 
 export function toCanonicalBeeGameAssetManifest(manifest: BeeGameAssetManifest): Record<string, unknown> {
-  const migratedImports = manifest.requirements.map(migrateLegacySlotImport).filter((entry): entry is BeeGameResourceImport => Boolean(entry))
-  const imports = mergeResourceImports(manifest.imports ?? [], migratedImports)
   return {
     version: Math.max(CURRENT_ASSET_MANIFEST_VERSION, manifest.version),
     ...(manifest.project_target ? { project_target: manifest.project_target } : {}),
     requirements: manifest.requirements.map(slot => {
       const satisfiedBy = {
-        import_ids: [...new Set([...(slot.satisfied_by?.import_ids ?? []), ...(migrateLegacySlotImport(slot) ? [`legacy.${normalizeImportId(slot.id)}`] : [])])],
+        import_ids: [...new Set(slot.satisfied_by?.import_ids ?? [])],
         composition_ids: slot.satisfied_by?.composition_ids ?? [],
         project_references: [...new Set([...(slot.satisfied_by?.project_references ?? []), ...(slot.integration_evidence?.references ?? [])])],
       }
@@ -1248,7 +1200,7 @@ export function toCanonicalBeeGameAssetManifest(manifest: BeeGameAssetManifest):
         status: slot.status === 'integrated' ? 'satisfied' : slot.status === 'failed' || slot.status === 'missing' ? 'blocked' : 'planned',
       }
     }),
-    imports,
+    imports: manifest.imports ?? [],
     compositions: manifest.compositions ?? [],
   }
 }

@@ -75,11 +75,14 @@ describe('native Resource Library evidence', () => {
       await writeFile(join(workspace, 'docs', 'ART_DIRECTION.md'), '# Art\n')
       await writeFile(join(workspace, 'docs', 'ASSET_PLAN.md'), '# Assets\n')
       await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 5,
         project_target: {
           asset_format_capabilities: ['portable-model'],
           resource_library_usage: 'preferred',
         },
-        slots: [],
+        requirements: [],
+        imports: [],
+        compositions: [],
       }))
       observeNativeResourceLibraryToolEvent({
         dataRoot,

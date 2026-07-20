@@ -1,5 +1,15 @@
 import { z } from 'zod/v4'
+import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_CATEGORIES,
+  RESOURCE_COMPOSITION_KINDS,
+  RESOURCE_DIMENSIONS,
+  RESOURCE_LIBRARY_USAGE,
+  RESOURCE_USAGE_TAGS,
+} from '@bee-game-studio/beegame-resource-core'
 import { auditDocumentReadiness, REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
+import { CANONICAL_ASSET_MANIFEST_EXAMPLE } from './asset-contracts'
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 
@@ -35,18 +45,25 @@ export function createNativeDeliveryContractTool(options: {
           canonical_contract: {
             required_documents: REQUIRED_PROJECT_DOCUMENTS,
             checklist_task_shape: '- [ ] <stable-id> <observable action, expected result, and evidence>',
-            asset_manifest_minimum: {
-              version: 1,
-              project_target: {
-                asset_format_capabilities: [],
-              },
-              slots: [],
+            asset_manifest_example: CANONICAL_ASSET_MANIFEST_EXAMPLE,
+            asset_manifest_rules: {
+              inventory_field: 'imports',
+              responsibility_field: 'requirements',
+              target_native_assembly_field: 'compositions',
+              legacy_slots_accepted: false,
+              asset_format_capabilities_semantics: 'Actual file extensions that the selected target runtime can consume; implementation libraries, render techniques, and platform names are invalid.',
             },
             resource_library_usage_allowed_values: [
-              'optional',
-              'preferred',
-              'required',
+              ...RESOURCE_LIBRARY_USAGE,
             ],
+            asset_manifest_vocabularies: {
+              dimensions: RESOURCE_DIMENSIONS,
+              categories: RESOURCE_CATEGORIES,
+              usage_tags: RESOURCE_USAGE_TAGS,
+              asset_kinds: RESOURCE_ASSET_KINDS,
+              capabilities: RESOURCE_CAPABILITIES,
+              composition_kinds: RESOURCE_COMPOSITION_KINDS,
+            },
           },
         },
       }
