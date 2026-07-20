@@ -1034,7 +1034,11 @@ async function fetchBeeGameEvents(
 }
 
 async function fetchBeeGameTranscript(sessionId: string, workspacePath: string): Promise<BeeGameEvent[]> {
-  return getJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`);
+  const response = await authenticatedFetch(
+    `/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`,
+    { headers: { 'x-beegame-transcript-view': 'chat' } },
+  );
+  return readResponse<BeeGameEvent[]>(response);
 }
 
 async function fetchBeeGameEventsForBinding(

@@ -4252,6 +4252,21 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
+      expect(events.some((event: { type: string }) => event.type === 'assistant.partial')).toBe(true)
+
+      const chatTranscriptRes = await app.request(
+        `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+        { headers: { 'x-beegame-transcript-view': 'chat' } },
+      )
+      expect(chatTranscriptRes.status).toBe(200)
+      const chatTranscript = await chatTranscriptRes.json()
+      expect(chatTranscript.some((event: { type: string }) => event.type === 'assistant.partial')).toBe(false)
+      expect(chatTranscript).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'assistant.message',
+          text: 'First complete sentence. Second complete sentence.',
+        }),
+      ]))
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

@@ -4254,6 +4254,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/transcript`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const chatHistoryView = c.req.header('x-beegame-transcript-view') === 'chat' ||
+      c.req.query('view') === 'chat'
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) {
       const legacyWorkspacePath = getWorkspacePathHint(
@@ -4272,6 +4274,8 @@ function registerBeeGameSessionRoutes(
             workspacePath,
             defaultWorkspacePath,
             getDashboardDataRoot(defaultWorkspacePath),
+            0,
+            chatHistoryView,
           )
         } catch {
           // Keep the session/workspace relationship opaque when ownership or
@@ -4281,7 +4285,8 @@ function registerBeeGameSessionRoutes(
       return c.json(sessionForbidden, 404)
     }
     try {
-      return c.json(beeGameSessions.transcript(c.req.param('id')))
+      const transcript = beeGameSessions.transcript(c.req.param('id'))
+      return c.json(chatHistoryView ? compactTranscriptForChatHistory(transcript) : transcript)
     } catch (err) {
       const workspacePath = c.req.query('workspacePath')
       if (toErrorMessage(err) === 'Session not found' && workspacePath) {
@@ -4290,6 +4295,8 @@ function registerBeeGameSessionRoutes(
           workspacePath,
           defaultWorkspacePath,
           getDashboardDataRoot(defaultWorkspacePath),
+          0,
+          chatHistoryView,
         )
       }
       return publicSessionRouteError(
@@ -5031,6 +5038,7 @@ async function readTranscriptFromWorkspace(
   defaultWorkspacePath?: string,
   dashboardDataRoot?: string,
   after = 0,
+  chatHistoryView = false,
 ): Promise<Response> {
   try {
     const resolvedWorkspace = await resolveSessionWorkspacePath(
@@ -5050,10 +5058,13 @@ async function readTranscriptFromWorkspace(
       sessionId: event.sessionId || sessionId,
       createdAt: new Date(event.createdAt),
     }))
+    const filteredEvents = after > 0
+      ? recoveredEvents.filter(event => event.id > after)
+      : recoveredEvents
     return Response.json(
-      after > 0
-        ? recoveredEvents.filter(event => event.id > after)
-        : recoveredEvents,
+      chatHistoryView
+        ? compactTranscriptForChatHistory(filteredEvents)
+        : filteredEvents,
     )
   } catch (err) {
     return tracedRouteResponse(
@@ -5062,6 +5073,100 @@ async function readTranscriptFromWorkspace(
       404,
     )
   }
+}
+
+function compactTranscriptForChatHistory<T extends {
+  id: number
+  type: BeeGameEvent['type']
+  text: string
+  payload?: BeeGameEvent['payload']
+}>(events: T[]): T[] {
+  const terminalToolIds = new Set<string>()
+  const latestOpenProgressId = new Map<string, number>()
+  for (const event of events) {
+    const toolUseID = typeof event.payload?.toolUseID === 'string'
+      ? event.payload.toolUseID
+      : ''
+    if (!toolUseID) continue
+    if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+      terminalToolIds.add(toolUseID)
+    } else if (event.type === 'tool.progress') {
+      latestOpenProgressId.set(toolUseID, event.id)
+    }
+  }
+  return events.flatMap(event => {
+    // Streaming and thinking events are transport detail. The Chat history
+    // renders terminal assistant messages and intentionally hides these types.
+    if (event.type === 'assistant.partial' || event.type === 'assistant.thinking') {
+      return []
+    }
+    if (
+      event.type === 'system.status' &&
+      event.payload?.type !== 'credit.settled' &&
+      event.payload?.type !== 'credit.refunded'
+    ) {
+      return []
+    }
+    if (event.type === 'tool.started') {
+      const toolUseID = typeof event.payload?.toolUseID === 'string'
+        ? event.payload.toolUseID
+        : ''
+      if (toolUseID && terminalToolIds.has(toolUseID)) return []
+    }
+    if (event.type === 'tool.progress') {
+      const toolUseID = typeof event.payload?.toolUseID === 'string'
+        ? event.payload.toolUseID
+        : ''
+      if (!toolUseID || terminalToolIds.has(toolUseID)) return []
+      if (latestOpenProgressId.get(toolUseID) !== event.id) return []
+    }
+    if (
+      event.type === 'tool.started' ||
+      event.type === 'tool.progress' ||
+      event.type === 'tool.completed' ||
+      event.type === 'tool.failed'
+    ) {
+      return [{
+        ...event,
+        text: truncateChatHistoryText(event.text, 4_096),
+        ...(event.payload
+          ? { payload: compactChatHistoryPayload(event.payload) }
+          : {}),
+      } as T]
+    }
+    return [event]
+  })
+}
+
+function compactChatHistoryPayload(payload: NonNullable<BeeGameEvent['payload']>): NonNullable<BeeGameEvent['payload']> {
+  const compacted: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === 'output' && typeof value === 'string') {
+      compacted[key] = truncateChatHistoryText(value, 4_096)
+      continue
+    }
+    compacted[key] = compactChatHistoryValue(value, 0)
+  }
+  return compacted as NonNullable<BeeGameEvent['payload']>
+}
+
+function compactChatHistoryValue(value: unknown, depth: number): unknown {
+  if (typeof value === 'string') return truncateChatHistoryText(value, 1_024)
+  if (value === null || typeof value !== 'object') return value
+  if (depth >= 4) return '[nested value omitted]'
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map(item => compactChatHistoryValue(item, depth + 1))
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 50)
+      .map(([key, item]) => [key, compactChatHistoryValue(item, depth + 1)]),
+  )
+}
+
+function truncateChatHistoryText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength)}\n…[historical output truncated]`
 }
 
 type RecoveredTranscriptEvent = Awaited<
