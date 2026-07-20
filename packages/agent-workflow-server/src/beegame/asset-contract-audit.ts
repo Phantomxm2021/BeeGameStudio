@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
 import {
   RESOURCE_ASSET_KINDS,
@@ -202,7 +202,17 @@ function auditCanonicalImport(value: unknown, index: number, workspace: string, 
   if (!rootPath) issues.push('root_path is required.')
   if (!files.length) issues.push('local_files must contain the imported root.')
   if (rootPath && !files.includes(rootPath)) issues.push('local_files must include root_path.')
-  for (const path of files) if (!isWorkspaceRelativePath(workspace, path) || ((status === 'available' || status === 'referenced') && !existsSync(resolve(workspace, path)))) issues.push(`Imported file does not exist: ${path}`)
+  for (const path of files) {
+    if (!isWorkspaceRelativePath(workspace, path)) {
+      issues.push(`Imported file path is outside the project: ${path}`)
+      continue
+    }
+    if (status !== 'available' && status !== 'referenced') continue
+    const artifact = inspectImportedArtifact(resolve(workspace, path))
+    if (artifact === 'missing') issues.push(`Imported file does not exist: ${path}`)
+    else if (artifact === 'not-file') issues.push(`Imported artifact is not a file: ${path}`)
+    else if (artifact === 'empty') issues.push(`Imported file is empty: ${path}`)
+  }
   const dependencies = Array.isArray(value.dependencies) ? value.dependencies : []
   for (const [dependencyIndex, dependency] of dependencies.entries()) {
     if (!isRecord(dependency)) { issues.push(`Dependency ${dependencyIndex + 1} must be an object.`); continue }
@@ -216,6 +226,17 @@ function auditCanonicalImport(value: unknown, index: number, workspace: string, 
   for (const reference of evidenceReferences) if (!isWorkspaceRelativePath(workspace, reference) || !existsSync(resolve(workspace, reference))) issues.push(`Usage reference does not exist in the project: ${reference}`)
   if (status === 'referenced' && !evidenceReferences.length && !runtimeEventIds.length) issues.push('A referenced import must include usage_evidence.')
   return { id, status, rootPath, files, issues }
+}
+
+function inspectImportedArtifact(path: string): 'valid' | 'missing' | 'not-file' | 'empty' {
+  try {
+    if (!existsSync(path)) return 'missing'
+    const stats = statSync(path)
+    if (!stats.isFile()) return 'not-file'
+    return stats.size > 0 ? 'valid' : 'empty'
+  } catch {
+    return 'missing'
+  }
 }
 
 function isPrimitiveRecord(value: unknown): value is Record<string, string | number | boolean> {

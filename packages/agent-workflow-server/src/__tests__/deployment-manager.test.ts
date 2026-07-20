@@ -309,6 +309,7 @@ describe('BeeGameDeploymentManager', () => {
         platform: 'selected-target',
         runtime: 'project-native',
         asset_format_capabilities: ['png'],
+        resource_library_usage: 'optional',
       },
       requirements: [],
       imports: [],
@@ -318,6 +319,7 @@ describe('BeeGameDeploymentManager', () => {
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Observed acceptance passed.',
+      validatedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
       evidence: passingNativeAcceptanceEvidence(),
       findings: [],
     }
@@ -462,6 +464,7 @@ function recordReadyDocumentReview(
       reviewerId: 'beegame-document-reviewer',
       verdict: 'READY',
       summary: 'The current documents are implementation-ready.',
+      confirmedResourceLibraryUsage: 'optional',
       findings: [],
     },
   })
@@ -480,6 +483,7 @@ function recordPassedImplementationAudit(
       auditorId: 'beegame-implementation-auditor',
       status: 'passed',
       summary: 'The implementation matches the approved project contract.',
+      auditedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
       evidence: [{ source: 'src/entry.ts', detail: 'The documented implementation exists.' }],
       findings: [],
     },

@@ -8,6 +8,7 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
+import { readAcceptanceChecklistIds } from './document-readiness-audit'
 import {
   parseNativeBackgroundTaskLaunch,
   parseNativeCompletedTaskOutput,
@@ -46,12 +47,13 @@ type NativeAcceptanceReport = {
   validatorId: string
   status: NativeAcceptanceResult
   summary: string
+  validatedChecklistIds: string[]
   evidence: NativeAcceptanceReportEvidence[]
   findings: NativeAcceptanceReportFinding[]
 }
 
 type NativeAcceptanceDispatch = {
-  version: 3
+  version: 4
   kind: 'dispatch'
   sessionId: string
   turnId?: string
@@ -62,7 +64,7 @@ type NativeAcceptanceDispatch = {
 }
 
 type NativeAcceptanceBackgroundTask = {
-  version: 3
+  version: 4
   kind: 'background-task'
   sessionId: string
   turnId?: string
@@ -74,7 +76,7 @@ type NativeAcceptanceBackgroundTask = {
 }
 
 type NativeAcceptanceTerminal = {
-  version: 3
+  version: 4
   kind: 'terminal'
   sessionId: string
   turnId?: string
@@ -85,7 +87,7 @@ type NativeAcceptanceTerminal = {
 }
 
 export type NativeAcceptanceEvidence = {
-  version: 3
+  version: 4
   kind: 'result'
   sessionId: string
   turnId?: string
@@ -93,8 +95,10 @@ export type NativeAcceptanceEvidence = {
   validatorId: string
   status: NativeAcceptanceResult
   summary: string
+  validatedChecklistIds: string[]
   reportDigest: string
   workspaceDigest: string
+  startedAt: string
   evidence: NativeAcceptanceReportEvidence[]
   findings: NativeAcceptanceReportFinding[]
   createdAt: string
@@ -155,7 +159,7 @@ export function observeNativeAcceptanceToolEvent(input: {
 
   if (input.eventType === 'tool.started') {
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 3,
+      version: 4,
       kind: 'dispatch',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -186,7 +190,7 @@ export function observeNativeAcceptanceToolEvent(input: {
       observation.toolUseID === toolUseID
     )) {
       appendObservation(input.dataRoot, input.sessionId, {
-        version: 3,
+        version: 4,
         kind: 'background-task',
         sessionId: input.sessionId,
         ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -205,6 +209,7 @@ export function observeNativeAcceptanceToolEvent(input: {
   const report = parseNativeAcceptanceReport(
     output,
     validatorId,
+    input.workspacePath,
     Boolean(nativeResult),
     {
       dataRoot: input.dataRoot,
@@ -214,7 +219,7 @@ export function observeNativeAcceptanceToolEvent(input: {
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
+    version: 4,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -222,8 +227,10 @@ export function observeNativeAcceptanceToolEvent(input: {
     validatorId,
     status: report.status,
     summary: report.summary,
+    validatedChecklistIds: report.validatedChecklistIds,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
+    startedAt: dispatch.createdAt,
     evidence: report.evidence,
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
@@ -264,6 +271,7 @@ function observeLinkedTaskOutput(
   const report = parseNativeAcceptanceReport(
     taskOutput.result,
     dispatch.validatorId,
+    input.workspacePath,
     true,
     {
       dataRoot: input.dataRoot,
@@ -273,7 +281,7 @@ function observeLinkedTaskOutput(
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
+    version: 4,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -281,8 +289,10 @@ function observeLinkedTaskOutput(
     validatorId: dispatch.validatorId,
     status: report.status,
     summary: report.summary,
+    validatedChecklistIds: report.validatedChecklistIds,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
+    startedAt: dispatch.createdAt,
     evidence: report.evidence,
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
@@ -315,7 +325,7 @@ function observeNativeBackgroundAcceptanceEvent(input: {
     )
     if (!dispatch || dispatch.kind !== 'dispatch') return
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 3,
+      version: 4,
       kind: 'background-task',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -356,6 +366,7 @@ export function observeNativeAcceptanceTaskNotification(input: {
   const report = parseNativeAcceptanceReport(
     terminal.result,
     dispatch.validatorId,
+    input.workspacePath,
     true,
     {
       dataRoot: input.dataRoot,
@@ -365,7 +376,7 @@ export function observeNativeAcceptanceTaskNotification(input: {
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
+    version: 4,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -373,8 +384,10 @@ export function observeNativeAcceptanceTaskNotification(input: {
     validatorId: dispatch.validatorId,
     status: report.status,
     summary: report.summary,
+    validatedChecklistIds: report.validatedChecklistIds,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
+    startedAt: dispatch.createdAt,
     evidence: report.evidence,
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
@@ -390,7 +403,7 @@ function appendTerminal(
     observation.kind === 'terminal' && observation.toolUseID === toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
+    version: 4,
     kind: 'terminal',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -507,6 +520,7 @@ export function digestWorkspace(workspacePath: string): string {
 function parseNativeAcceptanceReport(
   text: string,
   validatorId: string,
+  workspacePath: string,
   allowNativePreface = false,
   provenance?: {
     dataRoot: string
@@ -526,6 +540,7 @@ function parseNativeAcceptanceReport(
   }
   const evidence = report.evidence.flatMap(parseReportEvidence)
   const findings = report.findings.flatMap(parseReportFinding)
+  const validatedChecklistIds = uniqueStrings(report.validatedChecklistIds)
   if (evidence.length !== report.evidence.length || findings.length !== report.findings.length) {
     return undefined
   }
@@ -539,6 +554,7 @@ function parseNativeAcceptanceReport(
       return undefined
     }
     if (!provenance) return undefined
+    if (!sameIdentifiers(validatedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return undefined
     const capabilities = getNativeValidatorToolCapabilities(provenance)
     // A source read or a model-authored label is not execution evidence.
     // Build/test require an actually completed executable tool, Skill evidence
@@ -552,7 +568,16 @@ function parseNativeAcceptanceReport(
       return undefined
     }
   }
-  return { validatorId, status, summary, evidence, findings }
+  return { validatorId, status, summary, validatedChecklistIds, evidence, findings }
+}
+
+function uniqueStrings(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) return []
+  return [...new Set(value.map(item => (item as string).trim()))]
+}
+
+function sameIdentifiers(actual: string[], expected: string[]): boolean {
+  return actual.length === expected.length && expected.every(identifier => actual.includes(identifier))
 }
 
 function parseReportEvidence(value: unknown): NativeAcceptanceReportEvidence[] {
@@ -595,7 +620,7 @@ function readObservations(
       if (!line.trim()) return []
       try {
         const observation = JSON.parse(line) as NativeAcceptanceObservation
-        return observation.version === 3 && observation.sessionId === sessionId &&
+        return observation.version === 4 && observation.sessionId === sessionId &&
           observation.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
           (
             observation.kind === 'dispatch' ||

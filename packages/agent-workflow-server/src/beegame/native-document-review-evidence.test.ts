@@ -209,6 +209,7 @@ describe('native document review evidence', () => {
         reviewerId: 'beegame-document-reviewer',
         verdict: 'NEEDS_REVISION',
         summary: 'The documents need work.',
+        confirmedResourceLibraryUsage: 'preferred',
         findings: [],
       },
     })
@@ -449,6 +450,7 @@ function readyReport(): object {
     reviewerId: 'beegame-document-reviewer',
     verdict: 'READY',
     summary: 'The current documents are complete and internally consistent.',
+    confirmedResourceLibraryUsage: 'preferred',
     findings: [],
   }
 }

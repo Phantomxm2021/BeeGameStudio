@@ -27,6 +27,7 @@ BeeGame is only the dashboard shell. Claude Code owns planning, implementation, 
 7. Verify every cited implementation and test path in the current revision. A test name counts only when its current assertions exercise the mapped requirement. Do not accept a traceability table, stale report, file name, or symbol as execution evidence.
 8. Verify that required assets exist in the built or packaged result and are actually referenced and loadable at runtime. Validate `assets/asset-manifest.json` against the canonical contract exposed by the current BeeGame runtime instead of duplicating a schema inside this Skill. Do not impose a platform-specific format or loader.
 9. Verify that build/typecheck outputs are isolated from authored source directories. Generated siblings must not be able to shadow the sources that were reviewed and tested.
+10. Preserve every stable id from `docs/acceptance/gameplay-checklist.md` in the terminal result's `validatedChecklistIds`. Do not collapse several unobserved paths into a generic statement such as “all tests passed.”
 
 ## Result Discipline
 

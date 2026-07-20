@@ -2496,6 +2496,7 @@ describe('agent workflow server routes', () => {
           platform: 'selected-target',
           runtime: 'project-native',
           asset_format_capabilities: ['png'],
+          resource_library_usage: 'optional',
         },
         requirements: [],
         imports: [],
@@ -2505,6 +2506,7 @@ describe('agent workflow server routes', () => {
         validatorId: 'beegame-acceptance-validator',
         status: 'passed',
         summary: 'Observed acceptance passed.',
+        validatedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
         evidence: [
           { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
           { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build passed.' },
@@ -2572,6 +2574,7 @@ describe('agent workflow server routes', () => {
           reviewerId: 'beegame-document-reviewer',
           verdict: 'READY',
           summary: 'The current documents are implementation-ready.',
+          confirmedResourceLibraryUsage: 'optional',
           findings: [],
         },
       })
@@ -2583,6 +2586,7 @@ describe('agent workflow server routes', () => {
           auditorId: 'beegame-implementation-auditor',
           status: 'passed',
           summary: 'The implementation matches the approved project contract.',
+          auditedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
           evidence: [{ source: 'src/main.ts', detail: 'The implementation entrypoint exists.' }],
           findings: [],
         },

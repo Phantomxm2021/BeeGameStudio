@@ -17,6 +17,25 @@ export type DocumentReadinessAudit = {
   issues: string[]
 }
 
+/** Returns stable checklist ids without interpreting any project-specific semantics. */
+export function readAcceptanceChecklistIds(workspacePath: string): string[] {
+  const path = join(resolve(workspacePath), 'docs/acceptance/gameplay-checklist.md')
+  try {
+    if (!existsSync(path) || !statSync(path).isFile()) return []
+    const identifiers: string[] = []
+    for (const rawLine of readFileSync(path, 'utf8').split('\n')) {
+      const line = rawLine.trimStart()
+      const marker = checklistMarker(line)
+      if (!marker) continue
+      const identifier = checklistIdentifier(line.slice(marker.length).trim())
+      if (identifier && !identifiers.includes(identifier.value)) identifiers.push(identifier.value)
+    }
+    return identifiers
+  } catch {
+    return []
+  }
+}
+
 /**
  * Checks only deterministic delivery-contract facts. This deliberately does
  * not interpret game semantics or advance Claude Code's task state.

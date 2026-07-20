@@ -53,6 +53,7 @@ BeeGame 可以：
 - 被动记录原生工具调用树，以核验 Validator 声明的运行、Skill 与资源证据确实来自其当前调用。
 - 使用当前 workspace revision 判断证据是否过期。
 - 在缺少当前版本有效证据时阻止部署。
+- 核验资源工具的结构化结果、实际导入文件和原生 Agent 调用之间的因果顺序；`tool.completed` 本身不代表资源导入成功。
 
 BeeGame 禁止：
 
@@ -182,6 +183,7 @@ Acceptance Validator 使用新的只读 Claude Code 上下文验证当前 worksp
 - 观察进度、状态变化、胜负、重开、UI、声音和资源加载。
 - 对视觉和资源要求观察最终渲染结果，而不是只检查 import 或文件存在。
 - 返回唯一终态：`passed`、`failed` 或 `blocked`。
+- 终态结果必须枚举当前验收清单的全部稳定 ID；测试数量或概括性结论不能替代逐项覆盖。
 
 Validator 报告中的 `runtime`、`skill` 和 `asset` 字段不是自证。BeeGame 只做
 机器事实核验：对应原生 Agent 调用树中必须存在已完成的目标运行能力、Skill
@@ -243,6 +245,11 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 当前产品的新项目默认值为 `preferred`。只有确认简报显式保存了 `optional` 或
 `required` 时才覆盖该默认值。
 
+原生 Document Reviewer 必须从调用方提供的确认简报中原样返回该策略；BeeGame
+只比较这一结构化事实与当前 Asset Manifest 是否一致。这样可以阻止项目通过把
+`preferred` 或 `required` 静默改为 `optional` 来绕过资源阶段，但 BeeGame 仍不
+选择 Pack、不决定元素，也不规定目标项目如何组装资源。
+
 `preferred` 和 `required` 的“已探索”必须来自当前 Art Direction、Asset Plan
 与项目目标上下文中的原生 ResourceLibrary Pack 浏览记录，不能由文档中的一句
 “已评估”代替。`required` 还必须存在真实导入记录。该校验只核验调用事实，
@@ -262,6 +269,10 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 8. 启动预览并观察最终结果。
 9. 根据视觉和玩家体验继续迭代。
 10. 由独立 Validator 验证当前运行时。
+
+只有结构化工具结果确认至少一个文件成功复制，并且 Manifest 中的每个
+`local_files` 都是工作区内真实、非空的文件时，导入才成立。空目录、仅元数据
+刷新、全部失败的批次和缺失文件的历史记录都不得进入后续审计证据。
 
 资源文件被复制到项目只表示 `available`，不表示 `integrated`。Resource Library 不验证美术完成度，也不生成跨引擎通用场景。
 
@@ -285,6 +296,11 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 ```
 
 BeeGame 可以从原生事件被动显示进度，但这些显示不得反过来控制 Claude Code。
+
+部署证据必须保持真实依赖顺序：当前文档 Review 完成后才能形成当前 Auditor
+证据；当前资源事实完成后才能形成当前 Auditor 证据；当前 Auditor 终态完成后
+才能形成 Validator 证据。这只是对原生调用时间和 revision 的被动核验，不是
+BeeGame 调度或推进这些 Agent。
 
 ## 8. 失败、后台任务和恢复
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { IMPLEMENTATION_AUDITOR_AGENT_TYPE } from './delivery-validation-agents'
+import { readAcceptanceChecklistIds } from './document-readiness-audit'
 import { digestWorkspace } from './native-acceptance-evidence'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -23,12 +24,13 @@ type NativeImplementationAuditReport = {
   auditorId: string
   status: NativeImplementationAuditStatus
   summary: string
+  auditedChecklistIds: string[]
   evidence: NativeImplementationAuditFact[]
   findings: NativeImplementationAuditFact[]
 }
 
 type NativeImplementationAuditDispatch = {
-  version: 1
+  version: 2
   kind: 'dispatch'
   sessionId: string
   turnId?: string
@@ -39,7 +41,7 @@ type NativeImplementationAuditDispatch = {
 }
 
 type NativeImplementationAuditBackgroundTask = {
-  version: 1
+  version: 2
   kind: 'background-task'
   sessionId: string
   turnId?: string
@@ -51,7 +53,7 @@ type NativeImplementationAuditBackgroundTask = {
 }
 
 type NativeImplementationAuditTerminal = {
-  version: 1
+  version: 2
   kind: 'terminal'
   sessionId: string
   turnId?: string
@@ -62,7 +64,7 @@ type NativeImplementationAuditTerminal = {
 }
 
 export type NativeImplementationAuditEvidence = {
-  version: 1
+  version: 2
   kind: 'result'
   sessionId: string
   turnId?: string
@@ -70,10 +72,12 @@ export type NativeImplementationAuditEvidence = {
   auditorId: string
   status: NativeImplementationAuditStatus
   summary: string
+  auditedChecklistIds: string[]
   evidence: NativeImplementationAuditFact[]
   findings: NativeImplementationAuditFact[]
   reportDigest: string
   workspaceDigest: string
+  startedAt: string
   createdAt: string
 }
 
@@ -116,7 +120,7 @@ export function observeNativeImplementationAuditToolEvent(input: {
 
   if (input.eventType === 'tool.started') {
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 1,
+      version: 2,
       kind: 'dispatch',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -138,7 +142,7 @@ export function observeNativeImplementationAuditToolEvent(input: {
     return
   }
   appendTerminal(input, toolUseID, 'completed')
-  const report = parseReport(output, Boolean(nativeResult))
+  const report = parseReport(output, input.workspacePath, Boolean(nativeResult))
   if (report) appendResult(input, dispatch, report)
 }
 
@@ -161,7 +165,7 @@ export function observeNativeImplementationAuditTaskNotification(input: {
   if (!dispatch) return
   appendTerminal(input, terminal.toolUseId, terminal.status)
   if (terminal.status !== 'completed' || !terminal.result) return
-  const report = parseReport(terminal.result, true)
+  const report = parseReport(terminal.result, input.workspacePath, true)
   if (report) appendResult(input, dispatch, report)
 }
 
@@ -208,7 +212,7 @@ export function recordNativeImplementationAuditReportForTest(input: {
   workspacePath: string
   report: unknown
 }): void {
-  const toolUseID = 'test-implementation-auditor-tool-use'
+  const toolUseID = `test-implementation-auditor-tool-use-${nextTestAuditSequence++}`
   const payload = {
     toolName: 'Agent',
     toolUseID,
@@ -227,6 +231,8 @@ export function recordNativeImplementationAuditReportForTest(input: {
     createdAt: new Date(),
   })
 }
+
+let nextTestAuditSequence = 1
 
 function observeBackgroundStart(input: {
   dataRoot: string
@@ -270,7 +276,7 @@ function observeLinkedTaskOutput(
   if (!dispatch) return
   appendTerminal(input, dispatch.toolUseID, output.status)
   if (output.status !== 'completed' || !output.result) return
-  const report = parseReport(output.result, true)
+  const report = parseReport(output.result, input.workspacePath, true)
   if (report) appendResult(input, dispatch, report)
 }
 
@@ -286,7 +292,7 @@ function appendBackgroundTask(
     item.toolUseID === dispatch.toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 1,
+    version: 2,
     kind: 'background-task',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -308,7 +314,7 @@ function appendTerminal(
     item.kind === 'terminal' && item.toolUseID === toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 1,
+    version: 2,
     kind: 'terminal',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -329,7 +335,7 @@ function appendResult(
     item.kind === 'result' && item.toolUseID === dispatch.toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 1,
+    version: 2,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -337,10 +343,12 @@ function appendResult(
     auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
     status: report.status,
     summary: report.summary,
+    auditedChecklistIds: report.auditedChecklistIds,
     evidence: report.evidence,
     findings: report.findings,
     reportDigest: createHash('sha256').update(stableJson(report)).digest('hex'),
     workspaceDigest: dispatch.workspaceDigest,
+    startedAt: dispatch.createdAt,
     createdAt: input.createdAt.toISOString(),
   })
 }
@@ -358,6 +366,7 @@ function findDispatch(
 
 function parseReport(
   source: string,
+  workspacePath: string,
   allowNativePreface = false,
 ): NativeImplementationAuditReport | undefined {
   const value = parseTerminalJsonObject(source, allowNativePreface)
@@ -372,16 +381,28 @@ function parseReport(
   ) return
   const evidence = value.evidence.flatMap(parseFact)
   const findings = value.findings.flatMap(parseFact)
+  const auditedChecklistIds = uniqueStrings(value.auditedChecklistIds)
   if (evidence.length !== value.evidence.length || findings.length !== value.findings.length) return
   if (status === 'passed' && (evidence.length === 0 || findings.length > 0)) return
+  if (status === 'passed' && !sameIdentifiers(auditedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return
   if (status !== 'passed' && findings.length === 0) return
   return {
     auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
     status,
     summary,
+    auditedChecklistIds,
     evidence,
     findings,
   }
+}
+
+function uniqueStrings(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) return []
+  return [...new Set(value.map(item => (item as string).trim()))]
+}
+
+function sameIdentifiers(actual: string[], expected: string[]): boolean {
+  return actual.length === expected.length && expected.every(identifier => actual.includes(identifier))
 }
 
 function parseFact(value: unknown): NativeImplementationAuditFact[] {
@@ -428,7 +449,7 @@ function readObservations(
     if (!line.trim()) return []
     try {
       const value = JSON.parse(line) as NativeImplementationAuditObservation
-      return value.version === 1 &&
+      return value.version === 2 &&
         value.sessionId === sessionId &&
         value.auditorId === IMPLEMENTATION_AUDITOR_AGENT_TYPE
         ? [value]

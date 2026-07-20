@@ -82,6 +82,18 @@ For an empty or newly scaffolded workspace:
    affected independent check. Any material project change makes older evidence
    stale.
 
+Do not start the Implementation Auditor until the current document review is
+READY and every Resource Library operation selected for this revision has a
+terminal result. A completed tool call with zero imported artifacts is a failed
+import, not resource evidence. Do not start the Acceptance Validator until the
+current Implementation Auditor has returned `passed`.
+
+Preserve the confirmed brief's `resource_library_usage` value exactly in
+`assets/asset-manifest.json`. The Document Reviewer must echo that explicit
+value in `confirmedResourceLibraryUsage`; it may not infer or downgrade the
+policy from project files. Under `preferred` or `required`, a failed import
+attempt with no usable imported file must be repaired before audit begins.
+
 For one workspace revision, do not launch a second Reviewer, Auditor, or
 Validator while the same native Agent type is still active. Let Claude Code's
 native lifecycle produce that Agent's terminal result; do not use a replacement
@@ -140,6 +152,11 @@ the selected elements in the target runtime. A copied file is only available;
 it is not integrated until the shipped game references it and its contribution
 is observable in preview/runtime evidence.
 
+For every successful import, verify that returned `local_files` are real,
+non-empty files in the workspace. An empty directory, metadata-only refresh,
+failed batch, or manifest entry without its files is not an imported artifact
+and must not be handed to audit or acceptance as success.
+
 Pack exploration is not one-to-one slot filling. Claude Code may inspect and
 import multiple logical roots, reuse one import across several responsibilities,
 and assemble scenes, UI, characters, animation-bearing roots, effects, audio,
@@ -160,6 +177,11 @@ results:
 - Document Reviewer: `READY`;
 - Implementation Auditor: `passed`;
 - Acceptance Validator: `passed`.
+
+The Auditor and Validator terminal objects must enumerate every stable id from
+the current gameplay checklist in `auditedChecklistIds` and
+`validatedChecklistIds`. A test count or generic runtime summary cannot replace
+per-checklist coverage.
 
 Inspect `ProjectDeliveryContract` again before the final claim. A native Agent
 summary cannot override a failed deterministic contract diagnostic. Runtime,

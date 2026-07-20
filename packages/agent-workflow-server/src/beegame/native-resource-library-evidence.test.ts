@@ -39,14 +39,87 @@ describe('native Resource Library evidence', () => {
       'utf8',
     ))
     expect(line).toEqual(expect.objectContaining({
-      version: 3,
+      version: 4,
       phase: 'completed',
       action: 'browse_packs',
+      outcome: 'succeeded',
       sessionId: 'session-a',
       turnId: 'turn-a',
     }))
     expect(line).not.toHaveProperty('selection')
     expect(line).not.toHaveProperty('policy')
+  })
+
+  test('does not count a completed import call when every requested artifact failed', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observeNativeResourceLibraryToolEvent({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'ResourceLibrary',
+        toolUseID: 'tool-import',
+        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }] },
+        output: JSON.stringify({
+          data: {
+            result: 'failed',
+            requested_count: 1,
+            imported_count: 0,
+            failed_count: 1,
+            imported: [],
+            failures: [{ error: 'download failed', import_ids: ['asset-a'] }],
+          },
+        }),
+      },
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+    })
+
+    expect(getObservedNativeResourceLibraryEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+    })).toMatchObject({
+      state: 'current',
+      actions: [],
+      failedActions: ['import_elements'],
+      successfulImportCount: 0,
+      failedImportCount: 1,
+    })
+  })
+
+  test('records only the artifacts actually copied by a partial import', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observeNativeResourceLibraryToolEvent({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'ResourceLibrary',
+        toolUseID: 'tool-import',
+        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }, { import_id: 'asset-b' }] },
+        output: JSON.stringify({ data: {
+          result: 'partially_imported',
+          requested_count: 2,
+          imported_count: 1,
+          failed_count: 1,
+          imported: [{ import_id: 'asset-a', local_files: ['assets/library/a.glb'] }],
+          failures: [{ error: 'download failed', import_ids: ['asset-b'] }],
+        } }),
+      },
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+    })
+
+    expect(getObservedNativeResourceLibraryEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+    })).toMatchObject({
+      actions: ['import_elements'],
+      successfulImportCount: 1,
+      failedImportCount: 1,
+    })
   })
 
   test('ignores unsupported tools and does not create an evidence file', async () => {

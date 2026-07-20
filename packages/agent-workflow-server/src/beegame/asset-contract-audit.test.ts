@@ -165,6 +165,27 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace).issues).toContain('play-space: A copied import cannot satisfy a requirement until project usage is evidenced: wall')
   })
 
+  test('rejects empty files and directories masquerading as imported artifacts', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-canonical-import-artifacts-'))
+    await mkdir(join(workspace, 'assets', 'library', 'directory.glb'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'library', 'empty.glb'), '')
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [],
+      imports: [
+        { id: 'directory', source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'directory', element_path: 'directory.glb' }, status: 'available', root_path: 'assets/library/directory.glb', local_files: ['assets/library/directory.glb'], selected_at: 'now', selection_reason: ['Selected logical root'] },
+        { id: 'empty', source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'empty', element_path: 'empty.glb' }, status: 'available', root_path: 'assets/library/empty.glb', local_files: ['assets/library/empty.glb'], selected_at: 'now', selection_reason: ['Selected logical root'] },
+      ],
+      compositions: [],
+    }))
+
+    expect(auditAssetContract(workspace).issues).toEqual(expect.arrayContaining([
+      'directory: Imported artifact is not a file: assets/library/directory.glb',
+      'empty: Imported file is empty: assets/library/empty.glb',
+    ]))
+  })
+
   test('accepts objective primitive technical facts and rejects target settings or nested guesses', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-canonical-technical-facts-'))
     await mkdir(join(workspace, 'assets', 'library'), { recursive: true })

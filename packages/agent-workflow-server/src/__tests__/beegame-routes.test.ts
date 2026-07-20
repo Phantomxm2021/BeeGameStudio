@@ -4471,6 +4471,7 @@ describe('beegame session routes', () => {
       reviewerId: 'beegame-document-reviewer',
       verdict: 'READY',
       summary: 'The current documents are complete and internally consistent.',
+      confirmedResourceLibraryUsage: 'optional',
       findings: [],
     }
     const fake = createFakeRunner([
@@ -8987,6 +8988,7 @@ async function writeAcceptedDeliveryReport(
       platform: 'selected-target',
       runtime: 'project-native',
       asset_format_capabilities: ['png'],
+      resource_library_usage: 'optional',
     },
     requirements: [],
     imports: [],
@@ -8996,6 +8998,7 @@ async function writeAcceptedDeliveryReport(
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Observed acceptance passed.',
+      validatedChecklistIds: ['REQ-001', 'PATH-001'],
       evidence: passingNativeAcceptanceEvidence(),
       findings: [],
   }
@@ -9012,6 +9015,7 @@ async function writeAcceptedDeliveryReport(
         reviewerId: 'beegame-document-reviewer',
         verdict: 'READY',
         summary: 'The current documents are implementation-ready.',
+        confirmedResourceLibraryUsage: 'optional',
         findings: [],
       },
     })
@@ -9023,6 +9027,7 @@ async function writeAcceptedDeliveryReport(
         auditorId: 'beegame-implementation-auditor',
         status: 'passed',
         summary: 'The current implementation is structurally consistent with its contracts.',
+        auditedChecklistIds: ['REQ-001', 'PATH-001'],
         evidence: [{
           source: 'current workspace',
           detail: 'Documented requirements map to current implementation, tests, and asset references.',

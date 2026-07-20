@@ -54,7 +54,7 @@ describe('native delivery acceptance gate', () => {
       imports: [],
       compositions: [],
     }))
-    recordReadyDocumentReview(workspace)
+    recordReadyDocumentReview(workspace, 'preferred')
     record(workspace, 'passed', 'The validator report cannot replace Pack exploration.')
 
     expect(evaluate(workspace)).toEqual({
@@ -76,11 +76,144 @@ describe('native delivery acceptance gate', () => {
       },
       createdAt: new Date(),
     })
+    record(workspace, 'passed', 'The current revision was audited and validated after Pack exploration.')
 
     expect(evaluate(workspace)).toEqual({
       allowed: true,
       outcome: 'passed',
       issues: [],
+    })
+  })
+
+  test('does not treat an all-failed Resource Library import as a required project artifact', async () => {
+    workspace = await createWorkspace()
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'required',
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    }))
+    recordReadyDocumentReview(workspace, 'required')
+    for (const [toolUseID, action, output] of [
+      ['browse', 'browse_packs', { data: { items: [], total: 0 } }],
+      ['import', 'import_elements', { data: { result: 'failed', requested_count: 1, imported_count: 0, failed_count: 1, imported: [], failures: [{ error: 'download failed', import_ids: ['asset-a'] }] } }],
+    ] as const) {
+      observeNativeResourceLibraryToolEvent({
+        dataRoot: dataRootFor(workspace),
+        sessionId: TEST_SESSION_ID,
+        workspacePath: workspace,
+        eventType: 'tool.completed',
+        payload: { toolName: 'ResourceLibrary', toolUseID, input: { action }, output: JSON.stringify(output) },
+        createdAt: new Date(),
+      })
+    }
+    record(workspace, 'passed', 'A Validator claim cannot replace a missing imported file.')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The Resource Library import completed without producing a usable project file.'],
+    })
+  })
+
+  test('does not allow the manifest to downgrade the confirmed Resource Library policy', async () => {
+    workspace = await createWorkspace()
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'optional',
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    }))
+    recordReadyDocumentReview(workspace, 'preferred')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The asset manifest resource_library_usage (optional) does not preserve the confirmed brief policy (preferred).'],
+    })
+  })
+
+  test('does not continue after a failed import under a preferred Resource Library policy', async () => {
+    workspace = await createWorkspace()
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'preferred',
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    }))
+    recordReadyDocumentReview(workspace, 'preferred')
+    for (const [toolUseID, action, output] of [
+      ['preferred-browse', 'browse_packs', { data: { items: [], total: 0 } }],
+      ['preferred-import', 'import_elements', { data: { result: 'failed', requested_count: 1, imported_count: 0, failed_count: 1, imported: [], failures: [{ error: 'copy failed', import_ids: ['asset-a'] }] } }],
+    ] as const) {
+      observeNativeResourceLibraryToolEvent({
+        dataRoot: dataRootFor(workspace),
+        sessionId: TEST_SESSION_ID,
+        workspacePath: workspace,
+        eventType: 'tool.completed',
+        payload: { toolName: 'ResourceLibrary', toolUseID, input: { action }, output: JSON.stringify(output) },
+        createdAt: new Date(),
+      })
+    }
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The Resource Library import completed without producing a usable project file.'],
+    })
+  })
+
+  test('rejects a passed Validator that started before the current Auditor completed', async () => {
+    workspace = await createWorkspace()
+    const pending = startForegroundValidator(workspace)
+    recordPassedImplementationAudit(workspace)
+    completeForegroundValidator(workspace, pending, passingReport())
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The Acceptance Validator started before the current Implementation Auditor completed.'],
+    })
+  })
+
+  test('rejects passing native reports that omit a current checklist id', async () => {
+    workspace = await createWorkspace()
+    recordNativeImplementationAuditReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: {
+        auditorId: 'beegame-implementation-auditor',
+        status: 'passed',
+        summary: 'The audit omitted the project checklist coverage.',
+        auditedChecklistIds: [],
+        evidence: [{ source: 'src/entry.ts', detail: 'A source file exists.' }],
+        findings: [],
+      },
+    })
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: { ...passingReport(), validatedChecklistIds: [] },
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['Deployment requires an observed native Implementation Auditor result.'],
     })
   })
 
@@ -244,6 +377,7 @@ describe('native delivery acceptance gate', () => {
 
   test('captures the terminal result of a native Validator moved to the background', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-validator-tool'
     const taskId = 'background-validator-task'
@@ -296,6 +430,7 @@ describe('native delivery acceptance gate', () => {
 
   test('uses the native terminal result when SDK metadata omits output_file', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-validator-empty-notification-path'
     const taskId = 'background-validator-empty-notification-task'
@@ -343,6 +478,7 @@ describe('native delivery acceptance gate', () => {
 
   test('does not inspect a background Validator output file during native resume', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-validator-init-resume'
     const taskId = 'background-validator-init-task'
@@ -735,6 +871,7 @@ describe('native delivery acceptance gate', () => {
 
   test('rejects a workspace without an observed native validator result', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
 
     expect(evaluate(workspace)).toEqual({
       allowed: false,
@@ -770,6 +907,7 @@ describe('native delivery acceptance gate', () => {
         reviewerId: 'beegame-document-reviewer',
         verdict: 'BLOCKED',
         summary: 'The confirmed brief is unavailable.',
+        confirmedResourceLibraryUsage: 'preferred',
         findings: [{
           source: 'confirmed brief',
           detail: 'The reviewer cannot compare the documents without the approved brief.',
@@ -787,6 +925,7 @@ describe('native delivery acceptance gate', () => {
 
   test('does not accept a passing validator result without runtime evidence', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
     const report = passingReport() as {
       evidence: Array<{ kind: string }>
     }
@@ -918,6 +1057,7 @@ describe('native delivery acceptance gate', () => {
 
   test('does not accept an assistant completion claim as native validator evidence', async () => {
     workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
     observeNativeAcceptanceToolEvent({
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
@@ -966,6 +1106,7 @@ async function createWorkspace(): Promise<string> {
       platform: 'selected-target',
       runtime: 'project-native',
       asset_format_capabilities: ['glb'],
+      resource_library_usage: 'optional',
     },
     requirements: [],
     imports: [],
@@ -976,7 +1117,10 @@ async function createWorkspace(): Promise<string> {
   return root
 }
 
-function recordReadyDocumentReview(workspace: string): void {
+function recordReadyDocumentReview(
+  workspace: string,
+  confirmedResourceLibraryUsage: 'optional' | 'preferred' | 'required' = 'optional',
+): void {
   recordNativeDocumentReviewForTest({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -985,6 +1129,7 @@ function recordReadyDocumentReview(workspace: string): void {
       reviewerId: 'beegame-document-reviewer',
       verdict: 'READY',
       summary: 'The current project documents are implementation-ready.',
+      confirmedResourceLibraryUsage,
       findings: [],
     },
   })
@@ -1046,7 +1191,6 @@ function completeForegroundValidator(
   pending: { toolUseID: string },
   report: unknown,
 ): void {
-  recordPassedImplementationAudit(workspace)
   observeNativeAcceptanceToolEvent({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -1063,6 +1207,7 @@ function completeForegroundValidator(
 }
 
 function recordForegroundResult(workspace: string, report: unknown): void {
+  recordPassedImplementationAudit(workspace)
   completeForegroundValidator(workspace, startForegroundValidator(workspace), report)
 }
 
@@ -1094,7 +1239,6 @@ function notifyAcceptance(
   taskId: string,
   report: unknown,
 ): void {
-  recordPassedImplementationAudit(workspace)
   recordNativeValidatorToolCapabilitiesForTest({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -1127,6 +1271,7 @@ function recordPassedImplementationAudit(workspace: string): void {
       auditorId: 'beegame-implementation-auditor',
       status: 'passed',
       summary: 'The current implementation and asset contract are structurally consistent.',
+      auditedChecklistIds: ['PATH-001'],
       evidence: [{
         source: 'current workspace',
         detail: 'Approved requirements map to current implementation, tests, and asset references.',
@@ -1141,6 +1286,7 @@ function passingReport(summary = 'Observed every documented player path.'): obje
     validatorId: 'beegame-acceptance-validator',
     status: 'passed',
     summary,
+    validatedChecklistIds: ['PATH-001'],
     evidence: [
       { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
       { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build completed successfully.' },

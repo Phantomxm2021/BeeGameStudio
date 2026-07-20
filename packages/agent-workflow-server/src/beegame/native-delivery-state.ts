@@ -5,6 +5,7 @@ import { getObservedNativeDocumentReview } from './native-document-review-eviden
 import { getObservedNativeImplementationAudit } from './native-implementation-audit-evidence'
 import { auditDocumentReadiness } from './document-readiness-audit'
 import { getObservedNativeResourceLibraryEvidence } from './native-resource-library-evidence'
+import { auditAssetContract } from './asset-contract-audit'
 
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
@@ -15,11 +16,13 @@ export type NativeDeliveryStateReason =
   | 'resource_exploration_missing'
   | 'resource_exploration_stale'
   | 'resource_import_missing'
+  | 'implementation_audit_out_of_order'
   | 'acceptance_missing'
   | 'acceptance_running'
   | 'acceptance_stale'
   | 'acceptance_failed'
   | 'acceptance_blocked'
+  | 'acceptance_out_of_order'
   | 'implementation_audit_missing'
   | 'implementation_audit_running'
   | 'implementation_audit_stale'
@@ -163,6 +166,15 @@ export function getNativeDeliveryState(input: {
   }
 
   const resourcePolicy = readResourceLibraryPolicy(input.workspacePath)
+  if (resourcePolicy !== review.evidence.confirmedResourceLibraryUsage) {
+    return {
+      status: 'failed',
+      reason: 'document_review_needs_revision',
+      summary: `The asset manifest resource_library_usage (${resourcePolicy ?? 'missing'}) does not preserve the confirmed brief policy (${review.evidence.confirmedResourceLibraryUsage}).`,
+      observedAt: review.evidence.createdAt,
+    }
+  }
+  let resourceObservedAt: string | undefined
   if (resourcePolicy === 'preferred' || resourcePolicy === 'required') {
     const resourceEvidence = getObservedNativeResourceLibraryEvidence(input)
     if (resourceEvidence.state === 'missing') {
@@ -189,52 +201,29 @@ export function getNativeDeliveryState(input: {
         observedAt: resourceEvidence.observedAt,
       }
     }
+    resourceObservedAt = resourceEvidence.observedAt
+    const hasUsableImport = hasUsableResourceLibraryImport(input.workspacePath)
     if (
-      resourcePolicy === 'required' &&
-      !resourceEvidence.actions.includes('import_elements')
+      resourceEvidence.failedActions.includes('import_elements') &&
+      !hasUsableImport
     ) {
       return {
         status: 'failed',
         reason: 'resource_import_missing',
-        summary: 'The required Resource Library policy has no observed element import for the current resource context.',
+        summary: 'The Resource Library import completed without producing a usable project file.',
         observedAt: resourceEvidence.observedAt,
       }
     }
-  }
-
-  const acceptance = getObservedNativeAcceptance(input)
-  if (acceptance.state === 'missing') {
-    return {
-      status: 'not_run',
-      reason: 'acceptance_missing',
-      summary: 'Acceptance has not produced a valid native Validator result.',
-      observedAt: review.evidence.createdAt,
-    }
-  }
-  if (acceptance.state === 'running') {
-    return {
-      status: 'not_run',
-      reason: 'acceptance_running',
-      summary: 'The native acceptance Validator is still running.',
-      observedAt: acceptance.createdAt,
-    }
-  }
-  if (acceptance.state === 'stale') {
-    return {
-      status: 'stale',
-      reason: 'acceptance_stale',
-      summary: acceptance.evidence.summary,
-      observedAt: acceptance.evidence.createdAt,
-    }
-  }
-  if (acceptance.evidence.status !== 'passed') {
-    return {
-      status: acceptance.evidence.status,
-      reason: acceptance.evidence.status === 'blocked'
-        ? 'acceptance_blocked'
-        : 'acceptance_failed',
-      summary: acceptance.evidence.summary,
-      observedAt: acceptance.evidence.createdAt,
+    if (
+      resourcePolicy === 'required' &&
+      !hasUsableImport
+    ) {
+      return {
+        status: 'failed',
+        reason: 'resource_import_missing',
+        summary: 'The required Resource Library policy has no usable imported project file.',
+        observedAt: resourceEvidence.observedAt,
+      }
     }
   }
 
@@ -244,7 +233,7 @@ export function getNativeDeliveryState(input: {
       status: 'not_run',
       reason: 'implementation_audit_missing',
       summary: 'Implementation audit has not produced a valid native terminal result.',
-      observedAt: acceptance.evidence.createdAt,
+      observedAt: review.evidence.createdAt,
     }
   }
   if (audit.state === 'running') {
@@ -273,11 +262,86 @@ export function getNativeDeliveryState(input: {
       observedAt: audit.evidence.createdAt,
     }
   }
+  const auditStarted = Date.parse(audit.evidence.startedAt)
+  if (
+    !Number.isFinite(auditStarted) ||
+    auditStarted < Date.parse(review.evidence.createdAt) ||
+    (resourceObservedAt && auditStarted < Date.parse(resourceObservedAt))
+  ) {
+    return {
+      status: 'stale',
+      reason: 'implementation_audit_out_of_order',
+      summary: 'The Implementation Auditor started before its current document and resource prerequisites completed.',
+      observedAt: audit.evidence.createdAt,
+    }
+  }
+
+  const acceptance = getObservedNativeAcceptance(input)
+  if (acceptance.state === 'missing') {
+    return {
+      status: 'not_run',
+      reason: 'acceptance_missing',
+      summary: 'Acceptance has not produced a valid native Validator result.',
+      observedAt: audit.evidence.createdAt,
+    }
+  }
+  if (acceptance.state === 'running') {
+    return {
+      status: 'not_run',
+      reason: 'acceptance_running',
+      summary: 'The native acceptance Validator is still running.',
+      observedAt: acceptance.createdAt,
+    }
+  }
+  if (acceptance.state === 'stale') {
+    return {
+      status: 'stale',
+      reason: 'acceptance_stale',
+      summary: acceptance.evidence.summary,
+      observedAt: acceptance.evidence.createdAt,
+    }
+  }
+  if (acceptance.evidence.status !== 'passed') {
+    return {
+      status: acceptance.evidence.status,
+      reason: acceptance.evidence.status === 'blocked'
+        ? 'acceptance_blocked'
+        : 'acceptance_failed',
+      summary: acceptance.evidence.summary,
+      observedAt: acceptance.evidence.createdAt,
+    }
+  }
+  if (Date.parse(acceptance.evidence.startedAt) < Date.parse(audit.evidence.createdAt)) {
+    return {
+      status: 'stale',
+      reason: 'acceptance_out_of_order',
+      summary: 'The Acceptance Validator started before the current Implementation Auditor completed.',
+      observedAt: acceptance.evidence.createdAt,
+    }
+  }
   return {
     status: 'passed',
     reason: 'accepted',
     summary: acceptance.evidence.summary,
     observedAt: acceptance.evidence.createdAt,
+  }
+}
+
+function hasUsableResourceLibraryImport(workspacePath: string): boolean {
+  const audit = auditAssetContract(workspacePath)
+  if (!audit.valid || !audit.imports?.length) return false
+  const path = join(workspacePath, 'assets', 'asset-manifest.json')
+  try {
+    const manifest = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (!isRecord(manifest) || !Array.isArray(manifest.imports)) return false
+    return manifest.imports.some(resourceImport =>
+      isRecord(resourceImport) &&
+      isRecord(resourceImport.source) &&
+      resourceImport.source.type === 'resource-library' &&
+      (resourceImport.status === 'available' || resourceImport.status === 'referenced')
+    )
+  } catch {
+    return false
   }
 }
 

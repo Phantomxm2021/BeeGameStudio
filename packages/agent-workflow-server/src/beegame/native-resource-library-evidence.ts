@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { normalizeResourceLibraryCall } from './native-resource-library-call'
 
 type ResourceLibraryObservation = {
-  version: 3
+  version: 4
   sessionId: string
   turnId?: string
   toolUseID: string
@@ -13,6 +13,9 @@ type ResourceLibraryObservation = {
   resourceContextDigest: string
   inputDigest: string
   outputDigest?: string
+  outcome?: 'succeeded' | 'partial' | 'failed'
+  importedCount?: number
+  failedCount?: number
   createdAt: string
 }
 
@@ -42,8 +45,11 @@ export function observeNativeResourceLibraryToolEvent(input: {
     input.eventType !== 'tool.failed'
   ) return
   const output = stringValue(input.payload.output)
+  const completion = input.eventType === 'tool.completed'
+    ? classifyCompletion(normalized.validAction, output)
+    : undefined
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
+    version: 4,
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
@@ -56,14 +62,19 @@ export function observeNativeResourceLibraryToolEvent(input: {
     resourceContextDigest: digestResourceContext(input.workspacePath),
     inputDigest: digest(normalized.input),
     ...(output ? { outputDigest: digest(output) } : {}),
+    ...(completion ? {
+      outcome: completion.outcome,
+      ...(completion.importedCount !== undefined ? { importedCount: completion.importedCount } : {}),
+      ...(completion.failedCount !== undefined ? { failedCount: completion.failedCount } : {}),
+    } : {}),
     createdAt: input.createdAt.toISOString(),
   })
 }
 
 export type NativeResourceLibraryEvidenceState =
   | { state: 'missing' }
-  | { state: 'stale'; actions: string[]; observedAt: string }
-  | { state: 'current'; actions: string[]; observedAt: string }
+  | { state: 'stale'; actions: string[]; failedActions: string[]; successfulImportCount: number; failedImportCount: number; observedAt: string }
+  | { state: 'current'; actions: string[]; failedActions: string[]; successfulImportCount: number; failedImportCount: number; observedAt: string }
 
 export function getObservedNativeResourceLibraryEvidence(input: {
   dataRoot: string
@@ -78,9 +89,13 @@ export function getObservedNativeResourceLibraryEvidence(input: {
     observation => observation.resourceContextDigest === currentDigest,
   )
   const selected = current.length ? current : observations
+  const succeeded = selected.filter(observation => observation.outcome !== 'failed')
   return {
     state: current.length ? 'current' : 'stale',
-    actions: [...new Set(selected.map(observation => observation.action))],
+    actions: [...new Set(succeeded.map(observation => observation.action))],
+    failedActions: [...new Set(selected.filter(observation => observation.outcome === 'failed').map(observation => observation.action))],
+    successfulImportCount: selected.reduce((total, observation) => total + (observation.importedCount ?? 0), 0),
+    failedImportCount: selected.reduce((total, observation) => total + (observation.failedCount ?? 0), 0),
     observedAt: selected.at(-1)!.createdAt,
   }
 }
@@ -117,13 +132,49 @@ function readObservations(dataRoot: string, sessionId: string): ResourceLibraryO
     if (!line.trim()) return []
     try {
       const observation = JSON.parse(line) as ResourceLibraryObservation
-      return observation.version === 3 && observation.sessionId === sessionId
+      return observation.version === 4 && observation.sessionId === sessionId
         ? [observation]
         : []
     } catch {
       return []
     }
   })
+}
+
+function classifyCompletion(
+  action: string,
+  output: string,
+): { outcome: 'succeeded' | 'partial' | 'failed'; importedCount?: number; failedCount?: number } {
+  if (action !== 'import_elements') return { outcome: 'succeeded' }
+  const value = parseJson(output)
+  const data = isRecord(value) && isRecord(value.data) ? value.data : value
+  if (!isRecord(data)) return { outcome: 'failed', importedCount: 0 }
+  const importedCount = finiteCount(data.imported_count) ?? (Array.isArray(data.imported) ? data.imported.length : 0)
+  const failedCount = finiteCount(data.failed_count) ?? countFailureIds(data.failures)
+  return {
+    outcome: importedCount > 0
+      ? failedCount > 0 ? 'partial' : 'succeeded'
+      : 'failed',
+    importedCount,
+    failedCount,
+  }
+}
+
+function parseJson(value: string): unknown {
+  if (!value) return undefined
+  try { return JSON.parse(value) as unknown } catch { return undefined }
+}
+
+function finiteCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
+}
+
+function countFailureIds(value: unknown): number {
+  if (!Array.isArray(value)) return 0
+  return value.reduce((total, item) => {
+    if (!isRecord(item) || !Array.isArray(item.import_ids)) return total
+    return total + item.import_ids.length
+  }, 0)
 }
 
 function readProjectTarget(path: string): string {

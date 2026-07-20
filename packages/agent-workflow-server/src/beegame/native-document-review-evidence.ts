@@ -9,6 +9,7 @@ import {
 import { dirname, join, relative, resolve } from 'node:path'
 import { DOCUMENT_REVIEWER_AGENT_TYPE } from './delivery-validation-agents'
 import { auditDocumentReadiness } from './document-readiness-audit'
+import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import {
   parseNativeBackgroundTaskLaunch,
   parseNativeCompletedTaskOutput,
@@ -29,11 +30,12 @@ type NativeDocumentReviewReport = {
   reviewerId: string
   verdict: NativeDocumentReviewVerdict
   summary: string
+  confirmedResourceLibraryUsage: ResourceLibraryUsage
   findings: NativeDocumentReviewFinding[]
 }
 
 type NativeDocumentReviewDispatch = {
-  version: 1
+  version: 2
   kind: 'dispatch'
   sessionId: string
   turnId?: string
@@ -44,7 +46,7 @@ type NativeDocumentReviewDispatch = {
 }
 
 type NativeDocumentReviewBackgroundTask = {
-  version: 1
+  version: 2
   kind: 'background-task'
   sessionId: string
   turnId?: string
@@ -56,7 +58,7 @@ type NativeDocumentReviewBackgroundTask = {
 }
 
 type NativeDocumentReviewTerminal = {
-  version: 1
+  version: 2
   kind: 'terminal'
   sessionId: string
   turnId?: string
@@ -67,7 +69,7 @@ type NativeDocumentReviewTerminal = {
 }
 
 export type NativeDocumentReviewEvidence = {
-  version: 1
+  version: 2
   kind: 'result'
   sessionId: string
   turnId?: string
@@ -75,6 +77,7 @@ export type NativeDocumentReviewEvidence = {
   reviewerId: string
   verdict: NativeDocumentReviewVerdict
   summary: string
+  confirmedResourceLibraryUsage: ResourceLibraryUsage
   findings: NativeDocumentReviewFinding[]
   reportDigest: string
   documentsDigest: string
@@ -125,7 +128,7 @@ export function observeNativeDocumentReviewToolEvent(input: {
 
   if (input.eventType === 'tool.started') {
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 1,
+      version: 2,
       kind: 'dispatch',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -154,7 +157,7 @@ export function observeNativeDocumentReviewToolEvent(input: {
       observation.toolUseID === toolUseID
     )) {
       appendObservation(input.dataRoot, input.sessionId, {
-        version: 1,
+        version: 2,
         kind: 'background-task',
         sessionId: input.sessionId,
         ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -285,7 +288,7 @@ function appendTerminal(
     observation.kind === 'terminal' && observation.toolUseID === toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 1,
+    version: 2,
     kind: 'terminal',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -440,7 +443,7 @@ function observeBackgroundEvent(input: {
     )
     if (!dispatch || dispatch.kind !== 'dispatch') return
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 1,
+      version: 2,
       kind: 'background-task',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -477,6 +480,7 @@ function appendResult(
     ? {
         reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
         verdict: 'NEEDS_REVISION',
+        confirmedResourceLibraryUsage: report.confirmedResourceLibraryUsage,
         summary: [
           'Deterministic project-contract checks rejected the Reviewer READY result.',
           ...deterministicIssues,
@@ -488,7 +492,7 @@ function appendResult(
       }
     : report
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 1,
+    version: 2,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -496,6 +500,7 @@ function appendResult(
     reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
     verdict: effectiveReport.verdict,
     summary: effectiveReport.summary,
+    confirmedResourceLibraryUsage: effectiveReport.confirmedResourceLibraryUsage,
     findings: effectiveReport.findings,
     reportDigest: digestJson(effectiveReport),
     documentsDigest,
@@ -524,7 +529,12 @@ function parseReport(
     return undefined
   }
   const summary = stringValue(report.summary)
-  if (!summary || !Array.isArray(report.findings)) return undefined
+  const confirmedResourceLibraryUsage = stringValue(report.confirmedResourceLibraryUsage)
+  if (
+    !summary ||
+    !Array.isArray(report.findings) ||
+    !isResourceLibraryUsage(confirmedResourceLibraryUsage)
+  ) return undefined
   const findings = report.findings.flatMap(parseFinding)
   if (findings.length !== report.findings.length) return undefined
   if (verdict === 'READY' && findings.length > 0) return undefined
@@ -533,6 +543,7 @@ function parseReport(
     reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
     verdict,
     summary,
+    confirmedResourceLibraryUsage,
     findings,
   }
 }
@@ -556,7 +567,7 @@ function readObservations(
       if (!line.trim()) return []
       try {
         const observation = JSON.parse(line) as NativeDocumentReviewObservation
-        return observation.version === 1 &&
+        return observation.version === 2 &&
           observation.sessionId === sessionId &&
           observation.reviewerId === DOCUMENT_REVIEWER_AGENT_TYPE &&
           ['dispatch', 'background-task', 'terminal', 'result'].includes(observation.kind)
@@ -625,6 +636,10 @@ function parseJsonObject(text: string): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function isResourceLibraryUsage(value: string): value is ResourceLibraryUsage {
+  return value === 'optional' || value === 'preferred' || value === 'required'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -288,7 +288,16 @@ function summarizeImportBatch(
     const error = item.error ?? 'Resource import failed'
     failuresByError.set(error, [...(failuresByError.get(error) ?? []), item.importId])
   }
+  const failures = [...failuresByError].map(([error, importIds]) => ({ error, import_ids: importIds }))
   return {
+    result: imported.length === result.results.length
+      ? 'imported'
+      : imported.length > 0
+        ? 'partially_imported'
+        : 'failed',
+    requested_count: result.results.length,
+    imported_count: imported.length,
+    failed_count: result.results.length - imported.length,
     manifest: {
       version: result.manifest.version,
       project_target: result.manifest.project_target,
@@ -297,6 +306,6 @@ function summarizeImportBatch(
       composition_count: result.manifest.compositions?.length ?? 0,
     },
     imported,
-    failures: [...failuresByError].map(([error, importIds]) => ({ error, import_ids: importIds })),
+    failures,
   }
 }

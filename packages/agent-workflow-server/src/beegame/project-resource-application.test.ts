@@ -90,6 +90,67 @@ describe('project resource application', () => {
     await expect(readFile(join(workspace, 'assets', 'library', 'new-element', 'new.glb'))).rejects.toThrow()
   })
 
+  test('repairs a missing pinned import file without creating a duplicate manifest entry', async () => {
+    workspace = await createWorkspace()
+    const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46])
+    const application = new ProjectResourceApplication(client({
+      resolveSelections: async selections => selections.map(selection => ({
+        importId: selection.importId,
+        packId: selection.packId,
+        packVersion: '1.0.0',
+        elementId: selection.elementId,
+        elementPath: 'models/root.glb',
+        sourceUrl: 'https://resource.test/root.glb',
+        selectionReason: selection.selectionReason,
+      })),
+    }), async () => new Response(bytes))
+    const selection = {
+      importId: 'root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'root',
+      destinationPath: 'assets/library/root', selectionReason: ['Approved kit'],
+    }
+    await application.importExplicitSelections(workspace, [selection])
+    const rootPath = join(workspace, 'assets/library/root/root.glb')
+    await rm(rootPath)
+
+    const repaired = await application.importExplicitSelections(workspace, [selection])
+
+    expect(repaired.results).toEqual([expect.objectContaining({ importId: 'root', status: 'available' })])
+    expect(repaired.manifest.imports?.map(resourceImport => resourceImport.id)).toEqual(['root'])
+    await expect(readFile(rootPath)).resolves.toEqual(Buffer.from(bytes))
+  })
+
+  test('does not overwrite a locally modified pinned resource during retry', async () => {
+    workspace = await createWorkspace()
+    const original = new Uint8Array([0x67, 0x6c, 0x54, 0x46])
+    const application = new ProjectResourceApplication(client({
+      resolveSelections: async selections => selections.map(selection => ({
+        importId: selection.importId,
+        packId: selection.packId,
+        packVersion: '1.0.0',
+        elementId: selection.elementId,
+        elementPath: 'models/root.glb',
+        sourceUrl: 'https://resource.test/root.glb',
+        selectionReason: selection.selectionReason,
+      })),
+    }), async () => new Response(original))
+    const selection = {
+      importId: 'root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'root',
+      destinationPath: 'assets/library/root', selectionReason: ['Approved kit'],
+    }
+    await application.importExplicitSelections(workspace, [selection])
+    const rootPath = join(workspace, 'assets/library/root/root.glb')
+    await writeFile(rootPath, new Uint8Array([9, 8, 7]))
+
+    const retried = await application.importExplicitSelections(workspace, [selection])
+
+    expect(retried.results).toEqual([expect.objectContaining({
+      importId: 'root',
+      status: 'failed',
+      error: expect.stringContaining('will not be overwritten'),
+    })])
+    await expect(readFile(rootPath)).resolves.toEqual(Buffer.from([9, 8, 7]))
+  })
+
   test('refreshes objective metadata for pinned existing imports without replacing project files or usage evidence', async () => {
     workspace = await createWorkspace()
     const application = new ProjectResourceApplication(client({

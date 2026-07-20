@@ -369,11 +369,20 @@ export async function importBeeGameLibraryResourceInWorkspace(
   const manifest = await readBeeGameAssetManifest(root)
   const importId = normalizeImportId(input.id)
   if (!importId) throw new Error('Resource import id is required')
-  if ((manifest.imports ?? []).some(entry => entry.id === importId)) throw new Error(`Resource import already exists: ${importId}`)
+  const existingImport = (manifest.imports ?? []).find(entry => entry.id === importId)
+  if (existingImport && !isSamePinnedLibraryImport(existingImport, input)) {
+    throw new Error(`Resource import id belongs to a different pinned resource: ${importId}`)
+  }
   const filename = sanitizeFilename(input.element_path)
   assertFilenameFormatAllowed(filename, normalizeFormats(manifest.project_target?.asset_format_capabilities))
   const targetPath = resolveImportTarget(root, input.destination_path, filename)
-  if (existsSync(targetPath)) throw new Error(`Resource import target already exists: ${normalizeRelativePath(root, targetPath)}`)
+  const rootPath = normalizeRelativePath(root, targetPath)
+  if (existingImport && existingImport.root_path !== rootPath) {
+    throw new Error(`Resource import destination differs from its pinned project path: ${importId}`)
+  }
+  if (existsSync(targetPath) && !existingImport) {
+    throw new Error(`Resource import target already exists: ${rootPath}`)
+  }
 
   const response = await fetchImpl(input.source_url)
   if (!response.ok) throw new Error(`Resource download failed (${response.status})`)
@@ -382,6 +391,14 @@ export async function importBeeGameLibraryResourceInWorkspace(
   const detectedFormat = detectResourceBinaryFormat(bytes)
   if (detectedFormat && declaredFormat && !formatsAgree(declaredFormat, detectedFormat)) {
     throw new Error(`Resource binary format mismatch: library declares .${declaredFormat}, received ${detectedFormat}`)
+  }
+  let writeRoot = true
+  if (existingImport && existsSync(targetPath)) {
+    const existingBytes = await readExistingResourceFile(targetPath, root)
+    if (existingBytes.byteLength > 0 && !bytesEqual(existingBytes, bytes)) {
+      throw new Error(`Pinned resource file was modified locally and will not be overwritten: ${rootPath}`)
+    }
+    writeRoot = existingBytes.byteLength === 0
   }
 
   const dependencyInput: BeeGameResourceBinding = {
@@ -425,10 +442,9 @@ export async function importBeeGameLibraryResourceInWorkspace(
   }
 
   const rollbackFiles = await commitResourceWrites([
-    { targetPath, bytes },
+    ...(writeRoot ? [{ targetPath, bytes }] : []),
     ...dependenciesToWrite.map(dependency => ({ targetPath: dependency.targetPath, bytes: dependency.bytes })),
   ])
-  const rootPath = normalizeRelativePath(root, targetPath)
   const dependencies = (input.dependencies ?? []).map(dependency => {
     const copied = pendingDependencies.find(candidate => candidate.key === dependency.key)
     return {
@@ -450,7 +466,7 @@ export async function importBeeGameLibraryResourceInWorkspace(
       element_id: input.element_id,
       element_path: input.element_path,
     },
-    status: 'available',
+    status: existingImport?.status === 'referenced' ? 'referenced' : 'available',
     root_path: rootPath,
     local_files: [rootPath, ...pendingDependencies.map(dependency => normalizeRelativePath(root, dependency.targetPath))],
     selected_at: new Date().toISOString(),
@@ -460,11 +476,12 @@ export async function importBeeGameLibraryResourceInWorkspace(
     ...(input.content_profile ? { content_profile: input.content_profile } : {}),
     ...(input.technical_facts ? { technical_facts: input.technical_facts } : {}),
     ...(dependencies.length ? { dependencies } : {}),
+    ...(existingImport?.usage_evidence ? { usage_evidence: existingImport.usage_evidence } : {}),
   }
   const updatedManifest: BeeGameAssetManifest = {
     ...manifest,
     version: Math.max(CURRENT_ASSET_MANIFEST_VERSION, manifest.version),
-    imports: [...(manifest.imports ?? []), resourceImport],
+    imports: [...(manifest.imports ?? []).filter(entry => entry.id !== importId), resourceImport],
   }
   try {
     await writeAssetManifest(root, updatedManifest)
@@ -519,6 +536,25 @@ export async function refreshBeeGameLibraryImportMetadataInWorkspace(
   const updatedManifest = { ...manifest, imports }
   if (refreshedImportIds.length) await writeAssetManifest(root, updatedManifest)
   return { manifest: updatedManifest, refreshedImportIds }
+}
+
+function isSamePinnedLibraryImport(
+  resourceImport: BeeGameResourceImport,
+  input: BeeGameResolvedResourceImportInput,
+): boolean {
+  return resourceImport.source.type === 'resource-library' &&
+    resourceImport.source.pack_id === input.pack_id &&
+    resourceImport.source.pack_version === input.pack_version &&
+    resourceImport.source.element_id === input.element_id &&
+    resourceImport.source.element_path === input.element_path
+}
+
+async function readExistingResourceFile(path: string, root: string): Promise<Uint8Array> {
+  try {
+    return new Uint8Array(await readFile(path))
+  } catch {
+    throw new Error(`Pinned resource path is not a readable file: ${normalizeRelativePath(root, path)}`)
+  }
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
