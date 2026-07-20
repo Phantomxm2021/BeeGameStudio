@@ -33,7 +33,12 @@ import {
   observeNativeDocumentReviewTaskNotification,
   observeNativeDocumentReviewToolEvent,
 } from './native-document-review-evidence'
+import {
+  observeNativeImplementationAuditTaskNotification,
+  observeNativeImplementationAuditToolEvent,
+} from './native-implementation-audit-evidence'
 import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
+import { observeNativeToolProvenance } from './native-tool-provenance'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
@@ -179,6 +184,7 @@ export type BeeGameRuntimeSnapshot = {
   roleTokens: {
     mainAgent: number
     reviewer: number
+    auditor: number
     validator: number
     otherSubagents: number
     waiting: number
@@ -197,6 +203,7 @@ export type BeeGameRuntimeSnapshot = {
     roleTokens: {
       mainAgent: number
       reviewer: number
+      auditor: number
       validator: number
       otherSubagents: number
       waiting: number
@@ -1178,6 +1185,14 @@ export class BeeGameSessionManager {
         cause: error instanceof Error ? error.name : 'unknown_error',
       })
     }
+    try {
+      observeNativeImplementationAuditTaskNotification(evidenceInput)
+    } catch (error) {
+      console.warn('[BeeGame] Failed to persist native implementation audit notification', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
   }
 
   private appendAssistantPartialText(
@@ -1358,6 +1373,21 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
     try {
+      observeNativeToolProvenance({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      console.warn('[BeeGame] Failed to persist native tool provenance', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
+    try {
       observeNativeDocumentReviewToolEvent({
         dataRoot: this.dashboardDataRoot,
         sessionId: record.session.id,
@@ -1389,6 +1419,24 @@ export class BeeGameSessionManager {
       // Acceptance provenance is a deployment gate, never an Agent runtime
       // controller. Failure to persist it must not interrupt Claude Code.
       console.warn('[BeeGame] Failed to persist native delivery evidence', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
+    try {
+      observeNativeImplementationAuditToolEvent({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      // Audit provenance is passive evidence. Persistence failure must not
+      // interrupt or steer Claude Code's native Agent lifecycle.
+      console.warn('[BeeGame] Failed to persist native implementation audit evidence', {
         sessionId: record.session.id,
         cause: error instanceof Error ? error.name : 'unknown_error',
       })
@@ -2513,16 +2561,19 @@ function deriveObservedRoleTokens(
   }
 
   let reviewer = 0
+  let auditor = 0
   let validator = 0
   let otherSubagents = 0
   for (const value of latestTerminalByTask.values()) {
     if (value.role === 'beegame-document-reviewer') reviewer += value.tokens
+    else if (value.role === 'beegame-implementation-auditor') auditor += value.tokens
     else if (value.role === 'beegame-acceptance-validator') validator += value.tokens
     else otherSubagents += value.tokens
   }
   return {
-    mainAgent: Math.max(0, total - reviewer - validator - otherSubagents),
+    mainAgent: Math.max(0, total - reviewer - auditor - validator - otherSubagents),
     reviewer,
+    auditor,
     validator,
     otherSubagents,
     waiting: 0,
@@ -2778,6 +2829,7 @@ function normalizeRoleTokens(
   return {
     mainAgent: Number(record.mainAgent ?? 0),
     reviewer: Number(record.reviewer ?? 0),
+    auditor: Number(record.auditor ?? 0),
     validator: Number(record.validator ?? 0),
     otherSubagents: Number(record.otherSubagents ?? 0),
     waiting: 0,
@@ -3772,6 +3824,7 @@ function mapSDKMessageToToolEvents(
     text: string
     payload: DashboardSDKMessage
   }> = []
+  const parentToolUseID = getStringField(message, 'parent_tool_use_id')
   for (const block of extractContentBlocks(message)) {
     const blockType = getStringField(block, 'type')
     if (
@@ -3793,6 +3846,7 @@ function mapSDKMessageToToolEvents(
           type: 'tool.started',
           toolUseID,
           toolName,
+          ...(parentToolUseID ? { parentToolUseID } : {}),
           ...(input ? { input } : {}),
         },
       })
@@ -3819,6 +3873,7 @@ function mapSDKMessageToToolEvents(
           type: failed ? 'tool.failed' : 'tool.completed',
           toolUseID,
           toolName,
+          ...(parentToolUseID ? { parentToolUseID } : {}),
           ...(cached?.input ? { input: cached.input } : {}),
           output,
           ...(nativeResult ? { nativeResult } : {}),

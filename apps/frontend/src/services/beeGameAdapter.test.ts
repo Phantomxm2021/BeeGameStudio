@@ -70,6 +70,25 @@ const bootstrapResponse = (
   }, 202);
 };
 
+const seedBoundProject = (sessionId: string, workspacePath: string) => {
+  const now = 1710000000000;
+  const project = {
+    id: `project_${sessionId}`,
+    name: 'Adapter transport test',
+    root_path: workspacePath,
+    created_at: now,
+    updated_at: now,
+  };
+  localStorage.setItem('beegame-adapter-projects', JSON.stringify([project]));
+  localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+    projectId: project.id,
+    sessionId,
+    workspacePath,
+    language: 'en',
+  }]));
+  return { project };
+};
+
 describe('beeGameAdapter prompt rules', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1741,53 +1760,6 @@ describe('beeGameAdapter prompt rules', () => {
     expect(JSON.stringify(body)).not.toContain('Do not count log-only scripts');
   });
 
-  it('keeps intake prompts free of package-name branding policy blocks', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_test',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_test/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_test',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_test/idea' &&
-      init?.method === 'POST'
-    ));
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { idea?: string };
-
-    expect(body.idea).toBe('LLM generated idea');
-    expect(JSON.stringify(body)).not.toContain('Do not apply BeeGame branding to code identifiers');
-    expect(JSON.stringify(body)).not.toContain('Never invent or rewrite package scopes such as @beegame/*');
-    expect(JSON.stringify(body)).not.toContain('use the real package name @ant/ink');
-  });
-
   it('sends follow-up messages without repeating session policy blocks', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -1839,10 +1811,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects/followup',
-    });
+    const result = seedBoundProject('beegame_followup', '/tmp/beegame-projects/followup');
     await beeGameAdapter.sendMessage({
       project_id: result.project.id,
       content: '开始游戏后蛇没有吃食物也会变长，请修复。',
@@ -1924,10 +1893,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_tools', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toHaveLength(2);
@@ -2014,10 +1980,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_question', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
     const reviews = await beeGameAdapter.getPendingUserReviews(result.project.id);
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
@@ -2120,10 +2083,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_multi', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages.map(message => message.content)).toEqual([
@@ -2185,10 +2145,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject(sessionId, '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     const assistantMessages = polled.messages.filter(message => message.type === 'agent_message');
@@ -2236,10 +2193,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_idle', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     const status = polled.messages.find(message => message.type === 'status');
@@ -2288,10 +2242,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_empty_turn', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual(expect.arrayContaining([
@@ -2340,10 +2291,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_review', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual(expect.arrayContaining([
@@ -2396,10 +2344,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_failed_check', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual(expect.arrayContaining([
@@ -2459,10 +2404,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_stream', '/tmp/beegame-projects');
     const firstPoll = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(firstPoll.messages).toEqual([
@@ -2585,10 +2527,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_order', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages.map(message => message.message_id)).toEqual([
@@ -2695,10 +2634,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_subagent', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages[0]).toEqual(expect.objectContaining({
@@ -2764,10 +2700,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_usage', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual([
@@ -2827,10 +2760,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_assistant_usage', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual([
@@ -2914,10 +2844,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_observe', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
 
@@ -2995,10 +2922,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_gate', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
 
@@ -3049,10 +2973,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
+    const result = seedBoundProject('beegame_delete', '/tmp/beegame-projects');
 
     await beeGameAdapter.deleteProject(result.project.id);
 
@@ -3101,14 +3022,10 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-      confirmedBrief: {
-        title: 'Classic Match3 Levels',
-        projectFolderName: 'sample-level-game',
-      },
-    } as any);
+    const result = seedBoundProject(
+      'beegame_delete_missing',
+      '/tmp/beegame-projects/sample-level-game',
+    );
 
     await expect(beeGameAdapter.deleteProject(result.project.id)).resolves.toEqual({ ok: true });
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);

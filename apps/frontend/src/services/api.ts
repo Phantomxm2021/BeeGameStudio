@@ -125,6 +125,11 @@ export interface ProjectBaselineStatusPayload {
     summary?: string;
     validated_at?: string;
   };
+  delivery_evidence?: {
+    document_review?: DeliveryEvidenceFactPayload;
+    implementation_audit?: DeliveryEvidenceFactPayload;
+    runtime_acceptance?: DeliveryEvidenceFactPayload;
+  } | null;
   last_resume_task_id?: string;
   last_resume_failure?: Record<string, unknown> | null;
   last_resume_failure_stage?: string | null;
@@ -144,6 +149,12 @@ export interface ProjectBaselineStatusPayload {
   project_target?: BeeGameAssetManifestPayload['project_target'] | null;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
+}
+
+export interface DeliveryEvidenceFactPayload {
+  status?: 'not_run' | 'running' | 'ready' | 'needs_revision' | 'passed' | 'failed' | 'blocked' | 'stale';
+  summary?: string;
+  observed_at?: string;
 }
 
 export interface OperatorVisibilityPayload {
@@ -179,6 +190,7 @@ export interface ContextVisibilityPayload {
     role_tokens?: {
       mainAgent?: number;
       reviewer?: number;
+      auditor?: number;
       validator?: number;
       otherSubagents?: number;
       waiting?: number;
@@ -808,6 +820,8 @@ export const normalizeProjectBaselineStatusPayload = (
     execution_evidence: normalizedPayload.execution_evidence,
     model_config_id: normalizedPayload.model_config_id,
     review_status: normalizeReviewStatusPayload(normalizedPayload.review_status),
+    acceptance: normalizedPayload.acceptance,
+    delivery_evidence: normalizedPayload.delivery_evidence ?? null,
     context: normalizeContextVisibilityPayload(normalizedPayload.context),
     build_report: normalizeBuildReportPayload(normalizedPayload.build_report) ?? null,
     project_target: normalizedPayload.project_target && typeof normalizedPayload.project_target === 'object'

@@ -73,6 +73,20 @@ describe('DashboardRepository Supabase boundaries', () => {
         'utf8',
       )).resolves.toContain('name: beegame-acceptance-validator')
       await expect(readFile(
+        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-implementation-auditor.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-implementation-auditor')
+      await expect(readFile(
+        join(
+          ownerBEnv.CLAUDE_CONFIG_DIR,
+          'skills',
+          'game-art-director-expert',
+          'references',
+          'lighting-mood-framework.md',
+        ),
+        'utf8',
+      )).resolves.toContain('#')
+      await expect(readFile(
         join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
       )).resolves.toContain('"skillSearchEnabled": true')
@@ -120,6 +134,8 @@ describe('DashboardRepository Supabase boundaries', () => {
               FEATURE_MCP_SKILLS: '0',
               CLAUDE_CONFIG_DIR: '/forged/other-user',
               BEEGAME_CONFIG_DIR: '/forged/other-user',
+              NPM_CONFIG_CACHE: '/forged/other-user/npm-cache',
+              NPM_CONFIG_USERCONFIG: '/forged/other-user/npmrc',
             },
           })
         }) as unknown as typeof fetch,
@@ -142,6 +158,8 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
       expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env.BEEGAME_CONFIG_DIR).toBe(env.CLAUDE_CONFIG_DIR)
+      expect(env.NPM_CONFIG_CACHE).toBe(join(userRoot, '.runtime', 'tooling', 'npm-cache'))
+      expect(env.NPM_CONFIG_USERCONFIG).toBe(join(userRoot, '.runtime', 'tooling', 'npmrc'))
       await expect(readFile(
         join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
         'utf8',
@@ -220,6 +238,15 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(
           env.CLAUDE_CONFIG_DIR,
           'skills',
+          'beegame-game-delivery',
+          'SKILL.md',
+        ),
+        'utf8',
+      )).resolves.toContain('name: beegame-game-delivery')
+      await expect(readFile(
+        join(
+          env.CLAUDE_CONFIG_DIR,
+          'skills',
           'beegame-game-acceptance',
           'SKILL.md',
         ),
@@ -233,6 +260,10 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-document-reviewer.md'),
         'utf8',
       )).resolves.toContain('name: beegame-document-reviewer')
+      await expect(readFile(
+        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-implementation-auditor.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-implementation-auditor')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })

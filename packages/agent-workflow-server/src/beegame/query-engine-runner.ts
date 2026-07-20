@@ -28,6 +28,7 @@ import {
   type ResourceLibraryAction,
 } from './native-resource-library-call'
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
+import { createNativeDeliveryContractTool } from './native-delivery-contract-tool'
 import { createResourceSelectionClient } from './resource-selection-client'
 
 export { parseNativeTerminalTaskNotification } from './native-task-notification'
@@ -580,6 +581,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.cwd,
     )
     const nativeTools = call(toolsModule, 'getTools', permissionContext) as unknown[]
+    const deliveryContractTool = createNativeDeliveryContractTool({
+      buildTool: definition => call(toolModule, 'buildTool', definition),
+      workspacePath: this.input.cwd,
+    })
     const resourceTool = this.input.resourceSelectionConfig
       ? createNativeResourceLibraryTool({
           buildTool: definition => call(toolModule, 'buildTool', definition),
@@ -591,7 +596,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           fetchImpl: PLATFORM_SERVICE_FETCH,
         })
       : undefined
-    const tools = resourceTool ? [...nativeTools, resourceTool] : nativeTools
+    const tools = resourceTool
+      ? [...nativeTools, deliveryContractTool, resourceTool]
+      : [...nativeTools, deliveryContractTool]
     const [commands, discoveredAgentDefinitions] = await Promise.all([
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),

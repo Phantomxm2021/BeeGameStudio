@@ -17,6 +17,7 @@ const STORE_FILE = 'runtime-settings.json'
 const RUNTIME_DIR = '.runtime'
 const APP_RUNTIME_DIR = 'app'
 const CORE_RUNTIME_DIR = 'core'
+const TOOLING_RUNTIME_DIR = 'tooling'
 
 export type RuntimeSettingsConfig = {
   autoMemoryEnabled?: boolean
@@ -100,10 +101,19 @@ export function mapRuntimeSettingsToEnv(
   options: RuntimeSettingsStoreOptions = {},
 ): Record<string, string> {
   migrateLegacyRuntimeLayout(options)
+  const runtimeRoot = getRuntimeDir(options)
+  const toolingDir = join(runtimeRoot, TOOLING_RUNTIME_DIR)
+  const npmCacheDir = join(toolingDir, 'npm-cache')
+  const npmUserConfig = join(toolingDir, 'npmrc')
+  mkdirSync(npmCacheDir, { recursive: true })
   const env: Record<string, string> = {
     BEEGAME_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
     CLAUDE_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
     BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
+    NPM_CONFIG_CACHE: npmCacheDir,
+    npm_config_cache: npmCacheDir,
+    NPM_CONFIG_USERCONFIG: npmUserConfig,
+    npm_config_userconfig: npmUserConfig,
   }
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'

@@ -45,6 +45,11 @@ describe('runtime settings store', () => {
 
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
       expect(env.CLAUDE_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
+      expect(env.NPM_CONFIG_CACHE).toBe(join(dataDir, '.runtime', 'tooling', 'npm-cache'))
+      expect(env.npm_config_cache).toBe(env.NPM_CONFIG_CACHE)
+      expect(env.NPM_CONFIG_USERCONFIG).toBe(join(dataDir, '.runtime', 'tooling', 'npmrc'))
+      expect(env.npm_config_userconfig).toBe(env.NPM_CONFIG_USERCONFIG)
+      expect(existsSync(env.NPM_CONFIG_CACHE)).toBe(true)
       expect(existsSync(join(dataDir, 'beegame-config'))).toBe(false)
       expect(existsSync(join(dataDir, 'claude-config'))).toBe(false)
       expect(

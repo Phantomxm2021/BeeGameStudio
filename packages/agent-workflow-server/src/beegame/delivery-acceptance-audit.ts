@@ -62,6 +62,19 @@ export function evaluatePersistedDeliveryAcceptance(
       'The project changed after native acceptance; validate the current revision before deployment.',
     )
   }
+  if (state.reason === 'implementation_audit_missing') {
+    return rejected(
+      'Deployment requires an observed native Implementation Auditor result.',
+    )
+  }
+  if (state.reason === 'implementation_audit_running') {
+    return rejected('The native Implementation Auditor is still running.')
+  }
+  if (state.reason === 'implementation_audit_stale') {
+    return rejected(
+      'The project changed after implementation audit; audit the current revision before deployment.',
+    )
+  }
   return {
     allowed: false,
     outcome: 'rejected',

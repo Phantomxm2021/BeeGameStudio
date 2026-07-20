@@ -1046,6 +1046,10 @@ export class DashboardRepository {
         CLAUDE_CONFIG_DIR: hostIsolationEnv.CLAUDE_CONFIG_DIR,
         BEEGAME_PROJECT_CONFIG_DIR_NAME:
           hostIsolationEnv.BEEGAME_PROJECT_CONFIG_DIR_NAME,
+        NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
+        npm_config_cache: hostIsolationEnv.npm_config_cache,
+        NPM_CONFIG_USERCONFIG: hostIsolationEnv.NPM_CONFIG_USERCONFIG,
+        npm_config_userconfig: hostIsolationEnv.npm_config_userconfig,
       }
     }
     if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)

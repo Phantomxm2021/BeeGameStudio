@@ -205,6 +205,7 @@ export type BeeGameIntakeSettings = {
   inputs: string[];
   scope: string;
   notes?: string;
+  resourceLibraryUsage?: 'optional' | 'preferred' | 'required';
 };
 
 export type BeeGameBuildBrief = {
@@ -214,6 +215,7 @@ export type BeeGameBuildBrief = {
   language?: BeeGameLanguage | string;
   documentLanguage?: BeeGameLanguage | string;
   gameUserVisibleLanguage?: BeeGameLanguage | string;
+  agentResponseLanguage?: BeeGameLanguage | string;
   root_path?: string;
   title?: string;
   confirmedGdd?: string;
@@ -227,7 +229,6 @@ const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
-const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ?? '').trim();
 const ALLOW_CLIENT_WORKSPACE_ROOT = String(import.meta.env.VITE_BEEGAME_ALLOW_CLIENT_WORKSPACE_ROOT ?? '').trim() === '1' ||
   import.meta.env.MODE === 'test';
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
@@ -364,49 +365,6 @@ export const beeGameAdapter = {
       task_id: bootstrap.task_id,
       status: bootstrap.status,
       pipeline: bootstrap.pipeline,
-    };
-  },
-
-  async bootstrapProjectFromIdea(data: {
-    idea: string;
-    root_path?: string;
-    title?: string;
-    language?: string;
-  }): Promise<{
-    project: Project;
-    task_id: string;
-    status: string;
-    pipeline: { pipeline_id: string; status: string };
-  }> {
-    // Compatibility path for callers that explicitly skip Landing intake.
-    // The server treats /idea as a direct build; normal UI builds use
-    // bootstrapProjectFromBrief after the user confirms an intake option.
-    const title = data.title || summarizeTitle(data.idea);
-    const requestedWorkspacePath = await resolveNewProjectClientWorkspacePath(data.root_path, title);
-    const project = createLocalProject(title, requestedWorkspacePath);
-    saveProjects(upsertProject(readProjects(), project));
-    await syncProjectMetadata(project);
-    const language = normalizeBeeGameLanguage(data.language, data.idea);
-    const session = await startBeeGameSession({
-      workspacePath: requestedWorkspacePath,
-      projectName: title,
-      projectId: project.id,
-      language,
-    });
-    const workspacePath = session.cwd;
-    const syncedProject = { ...project, root_path: workspacePath };
-    saveProjects(upsertProject(readProjects(), syncedProject));
-    await syncProjectMetadata(syncedProject);
-    saveBinding({ projectId: project.id, sessionId: session.id, workspacePath, language });
-    await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/idea`, {
-      idea: data.idea,
-      language,
-    });
-    return {
-      project: syncedProject,
-      task_id: session.id,
-      status: 'running',
-      pipeline: { pipeline_id: session.id, status: 'running' },
     };
   },
 
@@ -938,32 +896,6 @@ function isDeleteStaleWorkspacePathError(error: unknown): boolean {
   );
 }
 
-async function resolveWorkspacePath(input?: string): Promise<string> {
-  const workspacePath = (input || ENV_WORKSPACE_PATH || readConfiguredWorkspaceRoot() || '').trim();
-  if (isAbsolutePath(workspacePath)) {
-    return workspacePath;
-  }
-
-  return resolveDefaultWorkspacePath();
-}
-
-async function resolveProjectWorkspacePath(input: string | undefined, folderName: string): Promise<string> {
-  if (input?.trim()) {
-    return resolveWorkspacePath(input);
-  }
-  const projectsRoot = await resolveWorkspacePath();
-  const projectPath = joinPath(projectsRoot, slugifyPathSegment(folderName || 'game-project', 'game-project'));
-  return projectPath;
-}
-
-async function resolveNewProjectClientWorkspacePath(
-  input: string | undefined,
-  folderName: string,
-): Promise<string | undefined> {
-  if (!ALLOW_CLIENT_WORKSPACE_ROOT) return undefined;
-  return resolveProjectWorkspacePath(input, folderName);
-}
-
 function readConfiguredWorkspaceRoot(): string {
   if (!ALLOW_CLIENT_WORKSPACE_ROOT) return '';
   const value = String(localStorage.getItem(WORKSPACE_ROOT_KEY) || '').trim();
@@ -1002,26 +934,6 @@ function slugifyPathSegment(value: string, fallback = 'game-project'): string {
 
 function stableProjectFolderName(value: string): string {
   return `game-project-${stableTextHash(value || 'BeeGame Project')}`;
-}
-
-function joinPath(root: string, segment: string): string {
-  return `${root.replace(/\/+$/, '')}/${segment.replace(/^\/+/, '')}`;
-}
-
-async function startBeeGameSession(
-  options: {
-    workspacePath?: string;
-    projectId?: string;
-    projectName?: string;
-    language?: BeeGameLanguage;
-  },
-): Promise<BeeGameSession> {
-  return postJson('/api/beegame-sessions', {
-    ...(options.workspacePath ? { workspacePath: options.workspacePath } : {}),
-    ...(options.projectId ? { projectId: options.projectId } : {}),
-    ...(options.projectName ? { projectName: options.projectName } : {}),
-    ...(options.language ? { language: options.language } : {}),
-  });
 }
 
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {

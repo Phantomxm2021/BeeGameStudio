@@ -183,6 +183,48 @@ describe('normalizeProjectBaselineStatusPayload', () => {
         expect(payload.review_status?.message?.message_key).toBe('review.board.awaiting_user');
     });
 
+    it('preserves passive delivery evidence without interpreting agent state', () => {
+        const payload = normalizeProjectBaselineStatusPayload({
+            project_id: 'proj_evidence',
+            phase: 'idle',
+            blocked: false,
+            acceptance: {
+                status: 'stale',
+                summary: 'Workspace changed after validation.',
+            },
+            delivery_evidence: {
+                document_review: {
+                    status: 'ready',
+                    summary: 'Document Reviewer returned READY.',
+                },
+                implementation_audit: {
+                    status: 'passed',
+                    summary: 'Implementation Auditor returned passed.',
+                },
+                runtime_acceptance: {
+                    status: 'stale',
+                    summary: 'Acceptance evidence is stale.',
+                },
+            },
+        });
+
+        expect(payload.acceptance?.status).toBe('stale');
+        expect(payload.delivery_evidence).toEqual({
+            document_review: {
+                status: 'ready',
+                summary: 'Document Reviewer returned READY.',
+            },
+            implementation_audit: {
+                status: 'passed',
+                summary: 'Implementation Auditor returned passed.',
+            },
+            runtime_acceptance: {
+                status: 'stale',
+                summary: 'Acceptance evidence is stale.',
+            },
+        });
+    });
+
     it('unwraps operator visibility payloads and preserves expanded runtime fields', () => {
         const payload = normalizeProjectBaselineStatusPayload({
             operator_visibility: {

@@ -574,6 +574,11 @@ describe('DashboardView runtime loading', () => {
                 status: 'passed',
                 summary: 'Native validator observed the current revision.',
             },
+            delivery_evidence: {
+                document_review: { status: 'ready', summary: 'Current document review.' },
+                implementation_audit: { status: 'passed', summary: 'Current implementation audit.' },
+                runtime_acceptance: { status: 'passed', summary: 'Current runtime acceptance.' },
+            },
         };
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
@@ -598,8 +603,11 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
         expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
         expect(screen.getByText('Agent 状态')).toBeInTheDocument();
-        expect(screen.getByText('交付验收')).toBeInTheDocument();
-        expect(screen.getByText('已通过')).toBeInTheDocument();
+        expect(screen.getByText('部署就绪')).toBeInTheDocument();
+        expect(screen.getByText('文档审查')).toBeInTheDocument();
+        expect(screen.getByText('实现审计')).toBeInTheDocument();
+        expect(screen.getByText('运行验收')).toBeInTheDocument();
+        expect(screen.getAllByText('已通过')).toHaveLength(3);
     });
 
     it('shows the sync state as an icon with text in the live preview header', async () => {

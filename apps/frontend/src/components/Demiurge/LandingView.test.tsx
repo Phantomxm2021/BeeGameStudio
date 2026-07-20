@@ -1661,6 +1661,7 @@ describe('LandingView bootstrap submission', () => {
             language: 'zh',
             documentLanguage: 'zh',
             gameUserVisibleLanguage: 'zh',
+            agentResponseLanguage: 'zh',
             title: 'LLM Mode A',
             option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {
@@ -1671,6 +1672,7 @@ describe('LandingView bootstrap submission', () => {
                 visualStyle: 'Cartoon',
                 inputs: ['Keyboard/mouse', 'Touch'],
                 notes: '优先验证关卡节奏。',
+                resourceLibraryUsage: 'preferred',
             },
         });
     });

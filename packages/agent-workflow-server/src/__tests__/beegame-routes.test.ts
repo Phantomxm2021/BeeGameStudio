@@ -40,6 +40,7 @@ import {
 } from '../beegame/native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
 import { getObservedNativeDocumentReview } from '../beegame/native-document-review-evidence'
+import { recordNativeImplementationAuditReportForTest } from '../beegame/native-implementation-audit-evidence'
 import type { ProjectResourceSelectionClient } from '../beegame/project-resource-application'
 
 const testDashboardRoots: string[] = []
@@ -2432,6 +2433,7 @@ describe('beegame session routes', () => {
             idea: 'A confirmed product idea',
             documentLanguage: 'zh',
             gameUserVisibleLanguage: 'en',
+            agentResponseLanguage: 'zh-TW',
             option: {
               id: 'selected-mode',
               title: 'Selected mode',
@@ -2452,20 +2454,22 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('"kind": "confirmed_build_brief"')
       expect(submitted).toContain('"confirmed_gdd": "# Approved design"')
       expect(submitted).toContain('Build and deliver the confirmed game project below.')
+      expect(submitted).toContain('Before planning or modifying project files, use the native beegame-game-delivery Skill')
       expect(submitted).toContain('"document_language": "zh"')
       expect(submitted).toContain('"game_user_visible_language": "en"')
+      expect(submitted).toContain('"agent_response_language": "zh-TW"')
       expect(submitted).toContain('"resource_library_usage": "preferred"')
       expect(submitted).toContain('Simplified Chinese')
       expect(submitted).toContain('Write all player-visible game text in English.')
-      expect(submitted).toContain('Treat document language and player-visible game language as separate confirmed requirements')
-      expect(submitted).not.toContain('Use native Claude Code Skills')
-      expect(submitted).not.toContain('observable evidence')
-      expect(submitted).not.toContain('repair loop')
-      expect(submitted).not.toContain('decide autonomously')
+      expect(submitted).toContain('Respond to the user in Traditional Chinese.')
+      expect(submitted).toContain('Treat response language, document language, and player-visible game language as separate confirmed requirements')
+      expect(submitted).toContain('Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another.')
+      expect(submitted).toContain('A delivery claim requires independent native document review, implementation audit, and runtime acceptance evidence for the current workspace revision.')
+      expect(submitted).toContain('Claude Code owns its plan, Skills, tools, subagents, implementation, verification, and repair decisions.')
+      expect(submitted).not.toContain('Follow this document-led game development contract:')
       expect(submitted).not.toContain('beegame-document-reviewer')
       expect(submitted).not.toContain('beegame-acceptance-validator')
       expect(submitted).not.toContain('ResourceLibrary import_elements')
-      expect(submitted).not.toContain('Follow the document dependency order')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
 
@@ -2486,7 +2490,27 @@ describe('beegame session routes', () => {
       expect(withoutResourcePreference.status).toBe(200)
       await waitFor(() => fake.runtimes[0]?.submits.length === 2)
       const secondSubmitted = String(fake.runtimes[0]?.submits[1]?.prompt ?? '')
-      expect(secondSubmitted).toContain('"resource_library_usage": "optional"')
+      expect(secondSubmitted).toContain('"resource_library_usage": "preferred"')
+
+      const explicitlyOptional = await app.request(
+        `/api/beegame-sessions/${session.id}/confirmed-brief`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            language: 'zh',
+            brief: {
+              idea: 'A confirmed project without library assets',
+              option: { id: 'third-mode', title: 'Third mode' },
+              settings: { resourceLibraryUsage: 'optional' },
+            },
+          }),
+        },
+      )
+      expect(explicitlyOptional.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 3)
+      const thirdSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
+      expect(thirdSubmitted).toContain('"resource_library_usage": "optional"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -2503,9 +2527,18 @@ describe('beegame session routes', () => {
           content: [
             { type: 'text', text: 'Built with usage.' },
             { type: 'tool_use', id: 'agent-call', name: 'Agent', input: { subagent_type: 'beegame-document-reviewer' } },
+            { type: 'tool_use', id: 'auditor-call', name: 'Agent', input: { subagent_type: 'beegame-implementation-auditor' } },
             { type: 'tool_use', id: 'task-output-call', name: 'TaskOutput', input: {} },
           ],
         },
+      },
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'audit-task',
+        tool_use_id: 'auditor-call',
+        status: 'completed',
+        usage: { total_tokens: 300 },
       },
       {
         type: 'system',
@@ -2643,14 +2676,15 @@ describe('beegame session routes', () => {
           total_tokens: 40_000,
         },
         roleTokens: {
-          mainAgent: 39_500,
+          mainAgent: 39_200,
           reviewer: 500,
+          auditor: 300,
           validator: 0,
           otherSubagents: 0,
           waiting: 0,
         },
         turnDiagnostics: expect.objectContaining({
-          agentCalls: 1,
+          agentCalls: 2,
           taskOutputCalls: 1,
           usage: {
             prompt_tokens: 30_000,
@@ -2660,8 +2694,9 @@ describe('beegame session routes', () => {
             total_tokens: 40_000,
           },
           roleTokens: {
-            mainAgent: 39_500,
+            mainAgent: 39_200,
             reviewer: 500,
+            auditor: 300,
             validator: 0,
             otherSubagents: 0,
             waiting: 0,
@@ -4314,6 +4349,7 @@ describe('beegame session routes', () => {
           }],
         },
       },
+      ...nativeValidatorCapabilityMessages('tool_native_acceptance'),
       {
         type: 'user',
         message: {
@@ -4540,6 +4576,7 @@ describe('beegame session routes', () => {
           }],
         },
       },
+      ...nativeValidatorCapabilityMessages(toolUseID),
       {
         type: 'system',
         subtype: 'task_started',
@@ -4782,6 +4819,11 @@ describe('beegame session routes', () => {
         approval_required: true,
         active_agents: ['claude-code'],
         acceptance: expect.objectContaining({ status: 'not_run' }),
+        delivery_evidence: {
+          document_review: expect.objectContaining({ status: 'not_run' }),
+          implementation_audit: expect.objectContaining({ status: 'not_run' }),
+          runtime_acceptance: expect.objectContaining({ status: 'not_run' }),
+        },
         project_target: expect.objectContaining({
           platform: 'native',
           runtime: 'custom-engine',
@@ -8877,6 +8919,21 @@ async function writeAcceptedDeliveryReport(
         findings: [],
       },
     })
+    recordNativeImplementationAuditReportForTest({
+      dataRoot,
+      sessionId,
+      workspacePath: workspace,
+      report: {
+        auditorId: 'beegame-implementation-auditor',
+        status: 'passed',
+        summary: 'The current implementation is structurally consistent with its contracts.',
+        evidence: [{
+          source: 'current workspace',
+          detail: 'Documented requirements map to current implementation, tests, and asset references.',
+        }],
+        findings: [],
+      },
+    })
     recordNativeAcceptanceReportForTest({ dataRoot, sessionId, workspacePath: workspace, report })
   }
 }
@@ -8890,6 +8947,39 @@ function passingNativeAcceptanceEvidence() {
     { kind: 'asset', source: 'packaged assets', result: 'passed', detail: 'Required assets loaded at runtime.' },
     { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance Skill was invoked.' },
   ]
+}
+
+function nativeValidatorCapabilityMessages(
+  parentToolUseID: string,
+): DashboardSDKMessage[] {
+  return ['Bash', 'Skill', 'ExecuteExtraTool'].flatMap((name, index) => {
+    const toolUseID = `${parentToolUseID}-evidence-${index}`
+    return [
+      {
+        type: 'assistant',
+        parent_tool_use_id: parentToolUseID,
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: toolUseID,
+            name,
+            input: {},
+          }],
+        },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: parentToolUseID,
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseID,
+            content: 'completed',
+          }],
+        },
+      },
+    ]
+  })
 }
 
 function createEmptyResourceSelectionClient(): ProjectResourceSelectionClient {

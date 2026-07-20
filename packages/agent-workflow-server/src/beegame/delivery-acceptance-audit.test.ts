@@ -10,7 +10,14 @@ import {
   recordNativeAcceptanceReportForTest,
 } from './native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from './native-document-review-evidence'
+import { recordNativeImplementationAuditReportForTest } from './native-implementation-audit-evidence'
 import { REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
+import { getNativeDeliveryEvidenceSummary } from './native-delivery-state'
+import {
+  observeNativeToolProvenance,
+  recordNativeValidatorToolCapabilitiesForTest,
+} from './native-tool-provenance'
+import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 
 const TEST_SESSION_ID = 'native-acceptance-test-session'
 
@@ -30,6 +37,130 @@ describe('native delivery acceptance gate', () => {
       allowed: true,
       outcome: 'passed',
       issues: [],
+    })
+  })
+
+  test('does not accept a preferred Resource Library policy without observed Pack exploration', async () => {
+    workspace = await createWorkspace()
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: {
+        platform: 'selected-target',
+        runtime: 'project-native',
+        asset_format_capabilities: [],
+        resource_library_usage: 'preferred',
+      },
+      slots: [],
+    }))
+    recordReadyDocumentReview(workspace)
+    record(workspace, 'passed', 'The validator report cannot replace Pack exploration.')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The current resource policy requires an observed native Resource Library exploration, but none was recorded.'],
+    })
+
+    observeNativeResourceLibraryToolEvent({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'ResourceLibrary',
+        toolUseID: 'pack-exploration',
+        input: { action: 'browse_packs' },
+        output: JSON.stringify({ items: [] }),
+      },
+      createdAt: new Date(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
+  test('reports document review, implementation audit, and runtime acceptance independently', async () => {
+    workspace = await createWorkspace()
+    record(workspace, 'passed', 'Observed the documented player paths.')
+
+    expect(getNativeDeliveryEvidenceSummary({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({
+      documentReview: expect.objectContaining({ status: 'ready' }),
+      implementationAudit: expect.objectContaining({ status: 'passed' }),
+      runtimeAcceptance: expect.objectContaining({ status: 'passed' }),
+    })
+  })
+
+  test('requires a native implementation audit in addition to review and acceptance', async () => {
+    workspace = await createWorkspace()
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: passingReport(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['Deployment requires an observed native Implementation Auditor result.'],
+    })
+  })
+
+  test('preserves a native implementation audit failure as a deployment failure', async () => {
+    workspace = await createWorkspace()
+    recordNativeImplementationAuditReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: {
+        auditorId: 'beegame-implementation-auditor',
+        status: 'failed',
+        summary: 'A documented asset is copied but never referenced.',
+        evidence: [],
+        findings: [{
+          source: 'assets/asset-manifest.json',
+          detail: 'The imported asset has no target-runtime reference.',
+        }],
+      },
+    })
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: passingReport(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['A documented asset is copied but never referenced.'],
+    })
+  })
+
+  test('requires a new implementation audit after the audited workspace changes', async () => {
+    workspace = await createWorkspace()
+    recordPassedImplementationAudit(workspace)
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: passingReport(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: [
+        'The project changed after implementation audit; audit the current revision before deployment.',
+      ],
     })
   })
 
@@ -63,6 +194,11 @@ describe('native delivery acceptance gate', () => {
       eventType: 'tool.started',
       payload,
       createdAt: new Date(),
+    })
+    recordNativeValidatorToolCapabilitiesForTest({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      validatorToolUseID: payload.toolUseID,
     })
     await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
     observeNativeAcceptanceToolEvent({
@@ -123,6 +259,11 @@ describe('native delivery acceptance gate', () => {
       eventType: 'tool.started',
       payload: agentPayload,
       createdAt: new Date(),
+    })
+    recordNativeValidatorToolCapabilitiesForTest({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      validatorToolUseID: toolUseID,
     })
     observeNativeAcceptanceToolEvent({
       dataRoot,
@@ -374,6 +515,11 @@ describe('native delivery acceptance gate', () => {
       eventType: 'tool.started',
       payload: agentPayload,
       createdAt: new Date(),
+    })
+    recordNativeValidatorToolCapabilitiesForTest({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      validatorToolUseID: toolUseID,
     })
     observeNativeAcceptanceToolEvent({
       dataRoot,
@@ -658,6 +804,52 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
+  test('does not accept source inspection labelled as runtime evidence', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'source-only-validator'
+    const payload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload,
+      createdAt: new Date(),
+    })
+    for (const [childID, toolName] of [['read-source', 'Read'], ['run-tests', 'Bash'], ['read-skill', 'Skill']] as const) {
+      observeNativeToolProvenance({
+        dataRoot,
+        sessionId: TEST_SESSION_ID,
+        eventType: 'tool.completed',
+        payload: {
+          toolUseID: childID,
+          parentToolUseID: toolUseID,
+          toolName,
+        },
+        createdAt: new Date(),
+      })
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: { ...payload, output: JSON.stringify(passingReport()) },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+  })
+
   test('invalidates acceptance when implementation or approved documents change', async () => {
     workspace = await createWorkspace()
     record(workspace, 'passed', 'Accepted current revision.')
@@ -800,6 +992,7 @@ function record(
   status: 'passed' | 'failed' | 'blocked',
   summary: string,
 ): void {
+  recordPassedImplementationAudit(workspace)
   recordNativeAcceptanceReportForTest({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -837,6 +1030,11 @@ function startForegroundValidator(workspace: string): {
     },
     createdAt: new Date(),
   })
+  recordNativeValidatorToolCapabilitiesForTest({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    validatorToolUseID: toolUseID,
+  })
   return { toolUseID }
 }
 
@@ -845,6 +1043,7 @@ function completeForegroundValidator(
   pending: { toolUseID: string },
   report: unknown,
 ): void {
+  recordPassedImplementationAudit(workspace)
   observeNativeAcceptanceToolEvent({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -892,6 +1091,12 @@ function notifyAcceptance(
   taskId: string,
   report: unknown,
 ): void {
+  recordPassedImplementationAudit(workspace)
+  recordNativeValidatorToolCapabilitiesForTest({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    validatorToolUseID: toolUseID,
+  })
   observeNativeAcceptanceTaskNotification({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
@@ -907,6 +1112,24 @@ function notifyAcceptance(
       ].join(''),
     },
     createdAt: new Date(),
+  })
+}
+
+function recordPassedImplementationAudit(workspace: string): void {
+  recordNativeImplementationAuditReportForTest({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    report: {
+      auditorId: 'beegame-implementation-auditor',
+      status: 'passed',
+      summary: 'The current implementation and asset contract are structurally consistent.',
+      evidence: [{
+        source: 'current workspace',
+        detail: 'Approved requirements map to current implementation, tests, and asset references.',
+      }],
+      findings: [],
+    },
   })
 }
 

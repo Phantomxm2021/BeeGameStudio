@@ -54,3 +54,7 @@ Any future change that can alter what Claude Code does next, which Agent it
 calls, when it retries, or whether its work is complete belongs in Claude Code
 or user-authored configuration—not in BeeGame. BeeGame changes may observe and
 display those decisions but may not create them.
+
+The complete document-led game delivery, native Subagent, Resource Library and
+response-language architecture is recorded in
+[BeeGame native Claude Code game delivery architecture](./beegame-native-game-delivery-architecture.md).

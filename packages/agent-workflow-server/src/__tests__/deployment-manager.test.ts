@@ -9,6 +9,7 @@ import {
 } from '../beegame/deployment-manager'
 import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
+import { recordNativeImplementationAuditReportForTest } from '../beegame/native-implementation-audit-evidence'
 
 describe('BeeGameDeploymentManager', () => {
   let root: string
@@ -323,6 +324,7 @@ describe('BeeGameDeploymentManager', () => {
       JSON.stringify(report),
     )
     recordReadyDocumentReview(root, 'delivery-gated-session', workspace)
+    recordPassedImplementationAudit(root, 'delivery-gated-session', workspace)
     recordNativeAcceptanceReportForTest({
       dataRoot: root,
       sessionId: 'delivery-gated-session',
@@ -458,6 +460,25 @@ function recordReadyDocumentReview(
       reviewerId: 'beegame-document-reviewer',
       verdict: 'READY',
       summary: 'The current documents are implementation-ready.',
+      findings: [],
+    },
+  })
+}
+
+function recordPassedImplementationAudit(
+  dataRoot: string,
+  sessionId: string,
+  workspacePath: string,
+): void {
+  recordNativeImplementationAuditReportForTest({
+    dataRoot,
+    sessionId,
+    workspacePath,
+    report: {
+      auditorId: 'beegame-implementation-auditor',
+      status: 'passed',
+      summary: 'The implementation matches the approved project contract.',
+      evidence: [{ source: 'src/entry.ts', detail: 'The documented implementation exists.' }],
       findings: [],
     },
   })

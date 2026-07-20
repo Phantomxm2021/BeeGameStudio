@@ -51,7 +51,11 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
-import { getNativeDeliveryState } from './beegame/native-delivery-state'
+import {
+  getNativeDeliveryEvidenceSummary,
+  getNativeDeliveryState,
+  type NativeDeliveryEvidenceSummary,
+} from './beegame/native-delivery-state'
 import {
   readBeeGameAssetManifest,
   toCanonicalBeeGameAssetManifest,
@@ -1259,7 +1263,7 @@ export function createAgentWorkflowApp(
 
       const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
         brief,
-        'optional',
+        'preferred',
       )
       void beeGameSessions.sendWithDisplay(
         session.id,
@@ -3311,6 +3315,9 @@ async function getBeeGameProjectRuntimeState(input: {
   const acceptance = evidenceProvenance
     ? toProjectAcceptanceState(getNativeDeliveryState(evidenceProvenance))
     : { status: 'not_run' }
+  const deliveryEvidence = evidenceProvenance
+    ? toProjectDeliveryEvidence(getNativeDeliveryEvidenceSummary(evidenceProvenance))
+    : null
   return {
     project_id: input.project.id,
     phase: runtime.phase,
@@ -3334,6 +3341,7 @@ async function getBeeGameProjectRuntimeState(input: {
       : null,
     review_status: null,
     acceptance,
+    delivery_evidence: deliveryEvidence,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
@@ -3475,6 +3483,7 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     build_report: null,
     review_status: null,
     acceptance: { status: 'not_run' },
+    delivery_evidence: null,
     model_config_id: null,
     pending_permissions: [],
   }
@@ -3487,6 +3496,23 @@ function toProjectAcceptanceState(
     status: state.status,
     summary: state.summary,
     ...(state.observedAt ? { validated_at: state.observedAt } : {}),
+  }
+}
+
+function toProjectDeliveryEvidence(
+  summary: NativeDeliveryEvidenceSummary,
+): JsonObject {
+  const toEvidence = (
+    value: NativeDeliveryEvidenceSummary[keyof NativeDeliveryEvidenceSummary],
+  ): JsonObject => ({
+    status: value.status,
+    summary: value.summary,
+    ...(value.observedAt ? { observed_at: value.observedAt } : {}),
+  })
+  return {
+    document_review: toEvidence(summary.documentReview),
+    implementation_audit: toEvidence(summary.implementationAudit),
+    runtime_acceptance: toEvidence(summary.runtimeAcceptance),
   }
 }
 
@@ -3698,6 +3724,7 @@ function deriveBeeGameContextVisibility(
       role_tokens: snapshot?.roleTokens ?? {
         mainAgent: usage.total_tokens,
         reviewer: 0,
+        auditor: 0,
         validator: 0,
         otherSubagents: 0,
         waiting: 0,
@@ -4700,7 +4727,7 @@ function registerBeeGameSessionRoutes(
       const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
       const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
         brief,
-        'optional',
+        'preferred',
       )
       const prompt = buildConfirmedBriefPrompt(
         brief,
@@ -5072,14 +5099,18 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
 function buildConfirmedBriefPrompt(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
-  defaultResourceLibraryUsage: ResourceLibraryUsage = 'optional',
+  defaultResourceLibraryUsage: ResourceLibraryUsage = 'preferred',
 ): string {
   const documentLanguage = resolveConfirmedBriefLanguage(
-    brief.documentLanguage,
+    brief.documentLanguage ?? brief.document_language,
     language,
   )
   const gameUserVisibleLanguage = resolveConfirmedBriefLanguage(
-    brief.gameUserVisibleLanguage,
+    brief.gameUserVisibleLanguage ?? brief.game_user_visible_language,
+    language,
+  )
+  const agentResponseLanguage = resolveConfirmedBriefLanguage(
+    brief.agentResponseLanguage ?? brief.agent_response_language,
     language,
   )
   const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
@@ -5090,6 +5121,7 @@ function buildConfirmedBriefPrompt(
     kind: 'confirmed_build_brief',
     document_language: documentLanguage ?? null,
     game_user_visible_language: gameUserVisibleLanguage ?? null,
+    agent_response_language: agentResponseLanguage ?? null,
     idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
     selected_option: toCanonicalConfirmedOption(brief.option),
     settings: isObject(brief.settings) ? brief.settings : null,
@@ -5100,6 +5132,7 @@ function buildConfirmedBriefPrompt(
   }, null, 2)
   return [
     'Build and deliver the confirmed game project below.',
+    'Before planning or modifying project files, use the native beegame-game-delivery Skill and follow its new-project or existing-project contract as applicable.',
     '',
     documentLanguage
       ? `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`
@@ -5107,9 +5140,14 @@ function buildConfirmedBriefPrompt(
     gameUserVisibleLanguage
       ? `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`
       : 'Write player-visible game text in the language used by the confirmed user brief.',
-    'Treat document language and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
+    agentResponseLanguage
+      ? `Respond to the user in ${getDocumentLanguageName(agentResponseLanguage)}.`
+      : 'Respond to the user in the explicitly selected session language.',
+    'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
-    'Use the confirmed brief as the source of truth. Preserve its explicit choices and constraints, create the agreed project documentation, and implement the playable game.',
+    'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another. New projects require an implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
+    'A delivery claim requires independent native document review, implementation audit, and runtime acceptance evidence for the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene composition strategy.',
+    'Claude Code owns its plan, Skills, tools, subagents, implementation, verification, and repair decisions. The delivery Skill defines product acceptance requirements; BeeGame does not prescribe commands, select assets, advance phases, or replace Claude Code\'s native lifecycle.',
     '',
     'Confirmed brief:',
     confirmedBrief,

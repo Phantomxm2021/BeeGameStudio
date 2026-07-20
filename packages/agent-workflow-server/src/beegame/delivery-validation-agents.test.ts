@@ -6,6 +6,7 @@ import {
   DELIVERY_VALIDATOR_AGENT_TYPE,
   DELIVERY_VALIDATOR_AGENT_TYPES,
   DOCUMENT_REVIEWER_AGENT_TYPE,
+  IMPLEMENTATION_AUDITOR_AGENT_TYPE,
   materializeBeeGameNativeAgents,
 } from './delivery-validation-agents'
 
@@ -23,6 +24,10 @@ describe('native delivery agents', () => {
         join(agentsDir, `${DOCUMENT_REVIEWER_AGENT_TYPE}.md`),
         'utf8',
       )
+      const auditor = await readFile(
+        join(agentsDir, `${IMPLEMENTATION_AUDITOR_AGENT_TYPE}.md`),
+        'utf8',
+      )
 
       expect(DELIVERY_VALIDATOR_AGENT_TYPES).toEqual([
         'beegame-acceptance-validator',
@@ -33,7 +38,7 @@ describe('native delivery agents', () => {
       expect(validator).toContain('Do not assume or favor any game engine or platform')
       expect(validator).toContain('Completion claims, prior reports and transcripts are context rather than evidence')
       expect(validator).toContain('Keep the terminal JSON concise')
-      expect(validator).toContain('explicitly non-blocking observations')
+      expect(validator).toContain('explicitly mark optional or future scope')
       expect(validator).toContain("terminal status as authoritative")
       expect(validator).not.toContain('Run as a foreground native subagent')
       expect(validator).not.toContain('run_in_background')
@@ -51,7 +56,7 @@ describe('native delivery agents', () => {
       expect(validatorFrontmatter.has('background')).toBe(false)
       expect(validatorFrontmatter.has('permissionMode')).toBe(false)
       expect(reviewer).toContain(`name: ${DOCUMENT_REVIEWER_AGENT_TYPE}`)
-      expect(reviewer).toContain('tools: [Read, Glob, Grep, Skill]')
+      expect(reviewer).toContain('tools: [Read, Glob, Grep, Skill, ProjectDeliveryContract]')
       expect(reviewer).not.toContain('tools: [Read, Glob, Grep, Skill, Bash]')
       expect(reviewer).toContain('confirmed project intent')
       expect(reviewer).toContain('language requirements')
@@ -65,6 +70,14 @@ describe('native delivery agents', () => {
       expect(reviewer).not.toContain('RESOURCE_ASSET_MANIFEST_VOCABULARY')
       expect(reviewer).not.toContain('Cross-Pack composition')
       expect(reviewer).not.toContain('asset_format_capabilities')
+      expect(auditor).toContain(`name: ${IMPLEMENTATION_AUDITOR_AGENT_TYPE}`)
+      expect(auditor).toContain('tools: [Read, Glob, Grep, Skill, ProjectDeliveryContract]')
+      expect(auditor).toContain('disallowedTools: [Write, Edit, MultiEdit, NotebookEdit, Bash]')
+      expect(auditor).toContain('copied-but-unreferenced assets')
+      expect(auditor).toContain('Do not operate the game')
+      expect(auditor).toContain('response language requirement')
+      expect(auditor).toContain('Return exactly one terminal JSON object')
+      expect(auditor).toContain('"status":"passed|failed|blocked"')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

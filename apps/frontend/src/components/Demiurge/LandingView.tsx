@@ -381,10 +381,12 @@ function buildAttachmentBrief(
             genre: '',
             inputs: [],
             scope: option.scope,
+            resourceLibraryUsage: 'preferred',
         },
         language,
         documentLanguage: language,
         gameUserVisibleLanguage: language,
+        agentResponseLanguage: language,
         title,
         confirmedGdd: analysis.gddDraft,
         buildSource: analysis.sourceType,
@@ -1298,11 +1300,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             settings: {
                 ...settings,
                 engine: normalizeEngine(settings.engine),
+                resourceLibraryUsage: settings.resourceLibraryUsage ?? 'preferred',
             },
             title: selectedOption.title,
             language: lang,
             documentLanguage: lang,
             gameUserVisibleLanguage: lang,
+            agentResponseLanguage: lang,
         };
         setIntakeError('');
         setIsPreparing(true);

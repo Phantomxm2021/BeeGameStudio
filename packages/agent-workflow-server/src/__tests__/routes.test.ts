@@ -8,6 +8,7 @@ import type { AgentWorkflowAppOptions } from '../app'
 import { createAgentWorkflowApp } from '../app'
 import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
+import { recordNativeImplementationAuditReportForTest } from '../beegame/native-implementation-audit-evidence'
 import type {
   BeeGameModelRuntimeHost,
 } from '../beegame/model-runtime-host'
@@ -2569,6 +2570,18 @@ describe('agent workflow server routes', () => {
           reviewerId: 'beegame-document-reviewer',
           verdict: 'READY',
           summary: 'The current documents are implementation-ready.',
+          findings: [],
+        },
+      })
+      recordNativeImplementationAuditReportForTest({
+        dataRoot: workspace,
+        sessionId: ensured.session.id,
+        workspacePath: projectRoot,
+        report: {
+          auditorId: 'beegame-implementation-auditor',
+          status: 'passed',
+          summary: 'The implementation matches the approved project contract.',
+          evidence: [{ source: 'src/main.ts', detail: 'The implementation entrypoint exists.' }],
           findings: [],
         },
       })

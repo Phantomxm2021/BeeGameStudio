@@ -641,6 +641,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 roleTokens={projectStatus?.context?.token_budget?.role_tokens ? {
                     mainAgent: Number(projectStatus.context.token_budget.role_tokens.mainAgent) || 0,
                     reviewer: Number(projectStatus.context.token_budget.role_tokens.reviewer) || 0,
+                    auditor: Number(projectStatus.context.token_budget.role_tokens.auditor) || 0,
                     validator: Number(projectStatus.context.token_budget.role_tokens.validator) || 0,
                     otherSubagents: Number(projectStatus.context.token_budget.role_tokens.otherSubagents) || 0,
                     waiting: 0,
@@ -653,6 +654,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 buildReport={projectStatus?.build_report || null}
                 projectTarget={projectTargetLabel}
                 acceptance={projectRuntimeDisplay?.acceptance}
+                deliveryEvidence={projectStatus?.delivery_evidence ? {
+                    documentReview: projectStatus.delivery_evidence.document_review,
+                    implementationAudit: projectStatus.delivery_evidence.implementation_audit,
+                    runtimeAcceptance: projectStatus.delivery_evidence.runtime_acceptance,
+                } : null}
                 deployments={deploymentHistory}
                 previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}

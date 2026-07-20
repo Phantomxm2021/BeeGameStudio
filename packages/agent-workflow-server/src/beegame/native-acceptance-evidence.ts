@@ -16,6 +16,10 @@ import {
   parseNativeTerminalTaskNotification,
   type BeeGameNativeTaskNotification,
 } from './native-task-notification'
+import {
+  getNativeValidatorToolCapabilities,
+  recordNativeValidatorToolCapabilitiesForTest,
+} from './native-tool-provenance'
 
 type NativeAcceptanceResult = 'passed' | 'failed' | 'blocked'
 type NativeAcceptanceEvidenceKind =
@@ -202,6 +206,11 @@ export function observeNativeAcceptanceToolEvent(input: {
     output,
     validatorId,
     Boolean(nativeResult),
+    {
+      dataRoot: input.dataRoot,
+      sessionId: input.sessionId,
+      validatorToolUseID: toolUseID,
+    },
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
@@ -256,6 +265,11 @@ function observeLinkedTaskOutput(
     taskOutput.result,
     dispatch.validatorId,
     true,
+    {
+      dataRoot: input.dataRoot,
+      sessionId: input.sessionId,
+      validatorToolUseID: dispatch.toolUseID,
+    },
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
@@ -343,6 +357,11 @@ export function observeNativeAcceptanceTaskNotification(input: {
     terminal.result,
     dispatch.validatorId,
     true,
+    {
+      dataRoot: input.dataRoot,
+      sessionId: input.sessionId,
+      validatorToolUseID: dispatch.toolUseID,
+    },
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
@@ -439,6 +458,11 @@ export function recordNativeAcceptanceReportForTest(input: {
       input: { subagent_type: DELIVERY_VALIDATOR_AGENT_TYPES[0] },
     },
   }
+  recordNativeValidatorToolCapabilitiesForTest({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    validatorToolUseID: toolUseID,
+  })
   observeNativeAcceptanceToolEvent({
     ...base,
     eventType: 'tool.started',
@@ -484,6 +508,11 @@ function parseNativeAcceptanceReport(
   text: string,
   validatorId: string,
   allowNativePreface = false,
+  provenance?: {
+    dataRoot: string
+    sessionId: string
+    validatorToolUseID: string
+  },
 ): NativeAcceptanceReport | undefined {
   const report = parseTerminalJsonObject(text, allowNativePreface)
   if (!report || stringValue(report.validatorId) !== validatorId) return undefined
@@ -507,6 +536,15 @@ function parseNativeAcceptanceReport(
     }
     const kinds = new Set(evidence.map(item => item.kind))
     if ([...REQUIRED_PASSING_EVIDENCE].some(kind => !kinds.has(kind))) {
+      return undefined
+    }
+    if (!provenance) return undefined
+    const capabilities = getNativeValidatorToolCapabilities(provenance)
+    // A source read or a model-authored label is not execution evidence.
+    // Build/test require an actually completed executable tool, Skill evidence
+    // requires an observed native Skill call, and runtime evidence requires a
+    // target-native capability invocation rather than source inspection.
+    if (!capabilities.executable || !capabilities.skill || !capabilities.runtime) {
       return undefined
     }
   } else {

@@ -37,6 +37,7 @@ interface BeeGameLivePreviewPageProps {
     roleTokens?: {
         mainAgent: number;
         reviewer: number;
+        auditor: number;
         validator: number;
         otherSubagents: number;
         waiting: number;
@@ -59,6 +60,11 @@ interface BeeGameLivePreviewPageProps {
         status: 'not_run' | 'passed' | 'failed' | 'blocked' | 'stale';
         summary?: string;
     };
+    deliveryEvidence?: {
+        documentReview?: { status?: string; summary?: string };
+        implementationAudit?: { status?: string; summary?: string };
+        runtimeAcceptance?: { status?: string; summary?: string };
+    } | null;
     deployments?: BeeGameDeploymentPayload[];
     previewRefreshNonce?: number;
     onStartPreview?: () => void | Promise<void>;
@@ -152,6 +158,7 @@ export function BeeGameLivePreviewPage({
     buildReport,
     projectTarget,
     acceptance,
+    deliveryEvidence,
     deployments = [],
     previewRefreshNonce = 0,
     onStartPreview,
@@ -364,6 +371,7 @@ export function BeeGameLivePreviewPage({
                                         <div className="my-2 border-t border-zinc-800" />
                                         <ProjectHintRow label={labels.mainAgentTokens || 'Main Agent'} value={roleTokens.mainAgent.toLocaleString()} />
                                         <ProjectHintRow label={labels.reviewerTokens || 'Reviewer'} value={roleTokens.reviewer.toLocaleString()} />
+                                        <ProjectHintRow label={labels.auditorTokens || 'Implementation Auditor'} value={roleTokens.auditor.toLocaleString()} />
                                         <ProjectHintRow label={labels.validatorTokens || 'Validator'} value={roleTokens.validator.toLocaleString()} />
                                         <ProjectHintRow label={labels.otherSubagentTokens || 'Other subagents'} value={roleTokens.otherSubagents.toLocaleString()} />
                                         <ProjectHintRow label={labels.waitingTokens || 'Waiting'} value={roleTokens.waiting.toLocaleString()} />
@@ -378,9 +386,25 @@ export function BeeGameLivePreviewPage({
                                 <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                                 {acceptance ? (
                                     <ProjectHintRow
-                                        label={lang === 'zh' ? '交付验收' : lang === 'zh-TW' ? '交付驗收' : 'Acceptance'}
+                                        label={labels.deploymentReadiness || 'Deployment readiness'}
                                         value={acceptanceStatusLabel(acceptance.status, lang)}
                                     />
+                                ) : null}
+                                {deliveryEvidence ? (
+                                    <>
+                                        <ProjectHintRow
+                                            label={labels.documentReview || 'Document Review'}
+                                            value={deliveryEvidenceStatusLabel(deliveryEvidence.documentReview?.status, lang)}
+                                        />
+                                        <ProjectHintRow
+                                            label={labels.implementationAudit || 'Implementation Audit'}
+                                            value={deliveryEvidenceStatusLabel(deliveryEvidence.implementationAudit?.status, lang)}
+                                        />
+                                        <ProjectHintRow
+                                            label={labels.runtimeAcceptance || 'Runtime Acceptance'}
+                                            value={deliveryEvidenceStatusLabel(deliveryEvidence.runtimeAcceptance?.status, lang)}
+                                        />
+                                    </>
                                 ) : null}
                             </div>
                         ) : null}
@@ -883,6 +907,17 @@ function acceptanceStatusLabel(
         return ({ not_run: '未驗收', passed: '已通過', failed: '未通過', blocked: '受阻', stale: '需重新驗收' })[status];
     }
     return ({ not_run: 'Not run', passed: 'Passed', failed: 'Failed', blocked: 'Blocked', stale: 'Revalidation required' })[status];
+}
+
+function deliveryEvidenceStatusLabel(status: string | undefined, lang: Language): string {
+    const key = status || 'not_run';
+    if (lang === 'zh') {
+        return ({ not_run: '未运行', running: '运行中', ready: '已就绪', needs_revision: '需要修订', passed: '已通过', failed: '未通过', blocked: '受阻', stale: '已过期' } as Record<string, string>)[key] || key;
+    }
+    if (lang === 'zh-TW') {
+        return ({ not_run: '未執行', running: '執行中', ready: '已就緒', needs_revision: '需要修訂', passed: '已通過', failed: '未通過', blocked: '受阻', stale: '已過期' } as Record<string, string>)[key] || key;
+    }
+    return ({ not_run: 'Not run', running: 'Running', ready: 'Ready', needs_revision: 'Needs revision', passed: 'Passed', failed: 'Failed', blocked: 'Blocked', stale: 'Stale' } as Record<string, string>)[key] || key;
 }
 
 function ProjectHintRow({ label, value }: { label: string; value: string }) {
