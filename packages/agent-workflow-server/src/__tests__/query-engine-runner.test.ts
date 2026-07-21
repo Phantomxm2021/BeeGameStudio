@@ -16,7 +16,9 @@ import {
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
+  installInheritedBeeGameTools,
   NativeExtraToolPermissionBroker,
+  NativeBackgroundTaskLedger,
   NativeSandboxNetworkPermissionBroker,
   parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
@@ -26,6 +28,26 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('publishes BeeGame capabilities through the native subagent tool pool', () => {
+    const existing = { name: 'existing-mcp-tool' }
+    const contract = { name: 'ProjectDeliveryContract' }
+    const resourceLibrary = { name: 'ResourceLibrary' }
+    const state = installInheritedBeeGameTools({
+      mcp: {
+        clients: [],
+        tools: [existing],
+        commands: [],
+        resources: {},
+      },
+    }, [contract, resourceLibrary])
+
+    expect((state.mcp as { tools: unknown[] }).tools).toEqual([
+      existing,
+      contract,
+      resourceLibrary,
+    ])
+  })
 
   test('initializes embedded QueryEngine as Claude Code native non-interactive mode', () => {
     const values: boolean[] = []
@@ -373,6 +395,68 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(processed).toEqual([
       '<task-notification><task-id>validator-gap</task-id><status>completed</status></task-notification>',
     ])
+  })
+
+  test('keeps a started native task pending across compaction state gaps until its terminal notification', async () => {
+    const ledger = new NativeBackgroundTaskLedger()
+    const queued: Array<{ value: string; mode: string }> = []
+    const processed: string[] = []
+    let waits = 0
+
+    ledger.observe({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'auditor-long-running',
+    })
+
+    await drainNativeBackgroundNotifications({
+      signal: new AbortController().signal,
+      takeNotifications: () => queued.splice(0),
+      // Model the native AppState temporarily losing the task during
+      // compaction. The transport ledger, not that snapshot, keeps the bridge
+      // alive.
+      hasRunningTasks: () => ledger.hasPendingTasks(),
+      waitForProgress: async () => {
+        waits += 1
+        if (waits === 1) {
+          ledger.observe({ type: 'system', subtype: 'init' })
+          return
+        }
+        queued.push({
+          value: '<task-notification><task-id>auditor-long-running</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
+          mode: 'task-notification',
+        })
+      },
+      onTerminalNotification: notification => {
+        ledger.settleNotification(notification)
+      },
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
+    })
+
+    expect(waits).toBe(2)
+    expect(ledger.hasPendingTasks()).toBe(false)
+    expect(processed).toHaveLength(1)
+  })
+
+  test('does not resurrect a settled native task when task_started is replayed', () => {
+    const ledger = new NativeBackgroundTaskLedger()
+    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'review-replayed' })
+    ledger.settleTask('review-replayed')
+    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'review-replayed' })
+
+    expect(ledger.hasPendingTasks()).toBe(false)
+  })
+
+  test('releases pending transport tasks after an explicit interruption', () => {
+    const ledger = new NativeBackgroundTaskLedger()
+    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'validator-stopped' })
+
+    ledger.interruptPendingTasks()
+    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'validator-stopped' })
+
+    expect(ledger.hasPendingTasks()).toBe(false)
   })
 
   test('returns a failed native validator notification unchanged to the same session', async () => {

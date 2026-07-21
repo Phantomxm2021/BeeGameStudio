@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getObservedNativeImplementationAudit,
+  interruptUnfinishedNativeImplementationAudits,
   observeNativeImplementationAuditTaskNotification,
   observeNativeImplementationAuditToolEvent,
   recordNativeImplementationAuditReportForTest,
@@ -148,7 +149,10 @@ describe('native implementation audit evidence', () => {
         dataRoot,
         sessionId: SESSION_ID,
         workspacePath: workspace,
-      }).state).toBe('missing')
+      })).toEqual(expect.objectContaining({
+        state: 'invalid',
+        reason: 'terminal_result_invalid',
+      }))
     } finally {
       await rm(workspace, { recursive: true, force: true })
       await rm(dataRoot, { recursive: true, force: true })
@@ -173,7 +177,58 @@ describe('native implementation audit evidence', () => {
       })
       expect(getObservedNativeImplementationAudit({
         dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
-      })).toEqual({ state: 'missing' })
+      })).toEqual(expect.objectContaining({
+        state: 'invalid',
+        reason: 'delivery_contract_not_observed',
+      }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('marks an unfinished audit interrupted on recovery and accepts a fresh dispatch for the same revision', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-auditor-recovery-'))
+    const dataRoot = `${workspace}-runtime`
+    try {
+      await writeFile(join(workspace, 'game.ts'), 'export const playable = true\n')
+      observeNativeImplementationAuditToolEvent({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+        eventType: 'tool.started', payload: auditorPayload('orphaned-audit'), createdAt: new Date(),
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      }).state).toBe('running')
+
+      interruptUnfinishedNativeImplementationAudits({
+        dataRoot,
+        sessionId: SESSION_ID,
+        reason: 'session_recovered',
+        createdAt: new Date(),
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      })).toEqual(expect.objectContaining({ state: 'interrupted' }))
+
+      const retryPayload = auditorPayload('fresh-audit')
+      observeNativeImplementationAuditToolEvent({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+        eventType: 'tool.started', payload: retryPayload, createdAt: new Date(),
+      })
+      recordNativeDeliveryContractForTest({
+        dataRoot,
+        sessionId: SESSION_ID,
+        agentToolUseID: 'fresh-audit',
+      })
+      observeNativeImplementationAuditToolEvent({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+        eventType: 'tool.completed',
+        payload: { ...retryPayload, output: JSON.stringify(passedReport()) },
+        createdAt: new Date(),
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      }).state).toBe('current')
     } finally {
       await rm(workspace, { recursive: true, force: true })
       await rm(dataRoot, { recursive: true, force: true })
@@ -218,7 +273,10 @@ describe('native implementation audit evidence', () => {
       })
       expect(getObservedNativeImplementationAudit({
         dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
-      })).toEqual({ state: 'missing' })
+      })).toEqual(expect.objectContaining({
+        state: 'invalid',
+        reason: 'terminal_result_invalid',
+      }))
 
       recordNativeImplementationAuditReportForTest({
         dataRoot,

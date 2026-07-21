@@ -287,6 +287,7 @@ async function createWorkspace(): Promise<string> {
       integration_mode: 'filesystem',
       asset_format_capabilities: ['glb'],
       resource_library_usage: 'preferred',
+      runtime_asset_root: 'assets/library',
     },
     requirements: [{
       id: 'ground',

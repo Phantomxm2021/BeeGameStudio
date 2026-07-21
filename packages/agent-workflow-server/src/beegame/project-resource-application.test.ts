@@ -245,6 +245,7 @@ async function createWorkspace(slotOverrides: Record<string, unknown> = {}): Pro
       integration_mode: 'filesystem',
       asset_format_capabilities: ['glb', 'png'],
       resource_library_usage: 'preferred',
+      runtime_asset_root: 'assets/library',
     },
     requirements: [{
       id: 'primary-character',

@@ -4654,7 +4654,7 @@ describe('beegame session routes', () => {
         dataRoot,
         sessionId: session.id,
         workspacePath: workspace,
-      })).toEqual({ state: 'missing' })
+      })).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
       await rm(workspace, { recursive: true, force: true })

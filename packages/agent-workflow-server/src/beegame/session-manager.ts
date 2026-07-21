@@ -26,20 +26,24 @@ import {
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
+  interruptUnfinishedNativeAcceptances,
   observeNativeAcceptanceTaskNotification,
   observeNativeAcceptanceToolEvent,
 } from './native-acceptance-evidence'
 import {
+  interruptUnfinishedNativeDocumentReviews,
   observeNativeDocumentReviewTaskNotification,
   observeNativeDocumentReviewToolEvent,
 } from './native-document-review-evidence'
 import {
+  interruptUnfinishedNativeImplementationAudits,
   observeNativeImplementationAuditTaskNotification,
   observeNativeImplementationAuditToolEvent,
 } from './native-implementation-audit-evidence'
 import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import { observeNativeToolProvenance } from './native-tool-provenance'
+import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
@@ -65,6 +69,8 @@ export type BeeGameFileAttachment = {
 export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_PROJECT_AGENT_RAW_LOG_BYTES = 8 * 1024 * 1024
+const PROJECT_AGENT_RAW_LOG_ARCHIVES = 3
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -559,6 +565,26 @@ export class BeeGameSessionManager {
       })
     }
     archiveInterruptedRecoveredTurn(record)
+    if (recoveredTranscript) {
+      interruptUnfinishedNativeDocumentReviews({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: session.id,
+        reason: 'session_recovered',
+        createdAt: now,
+      })
+      interruptUnfinishedNativeImplementationAudits({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: session.id,
+        reason: 'session_recovered',
+        createdAt: now,
+      })
+      interruptUnfinishedNativeAcceptances({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: session.id,
+        reason: 'session_recovered',
+        createdAt: now,
+      })
+    }
     this.sessions.set(session.id, record)
     this.persistRuntimeSnapshot(record)
     if (!recoveredTranscript) {
@@ -942,6 +968,7 @@ export class BeeGameSessionManager {
       record.session.status = 'stopped'
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
+      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', record.session.updatedAt)
       this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped')
     }
@@ -959,6 +986,7 @@ export class BeeGameSessionManager {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
+      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', new Date())
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session deleted before permission was resolved',
@@ -984,11 +1012,28 @@ export class BeeGameSessionManager {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
+      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', new Date())
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'BeeGame server stopped before permission was resolved',
       })
     }
+  }
+
+  private interruptUnfinishedNativeEvidence(
+    record: SessionRecord,
+    reason: 'session_recovered' | 'session_stopped',
+    createdAt: Date,
+  ): void {
+    const input = {
+      dataRoot: this.dashboardDataRoot,
+      sessionId: record.session.id,
+      reason,
+      createdAt,
+    }
+    interruptUnfinishedNativeDocumentReviews(input)
+    interruptUnfinishedNativeImplementationAudits(input)
+    interruptUnfinishedNativeAcceptances(input)
   }
 
   async readArtifact(sessionId: string, path: string): Promise<BeeGameArtifact> {
@@ -3782,7 +3827,7 @@ function appendProjectAgentRawLog(
   try {
     updateProjectLogIndex(record)
     const path = getProjectAgentRawLogPath(record.session.cwd)
-    appendFileSync(
+    appendBoundedDiagnosticRecord(
       path,
       `${JSON.stringify({
         sessionId: record.session.id,
@@ -3790,7 +3835,10 @@ function appendProjectAgentRawLog(
         createdAt: new Date().toISOString(),
         message,
       })}\n`,
-      'utf8',
+      {
+        maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
+        archiveCount: PROJECT_AGENT_RAW_LOG_ARCHIVES,
+      },
     )
   } catch {
     // Raw agent logs must never interrupt the active turn.

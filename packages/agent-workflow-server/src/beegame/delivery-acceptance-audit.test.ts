@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
 import {
   getObservedNativeAcceptance,
+  interruptUnfinishedNativeAcceptances,
   observeNativeAcceptanceTaskNotification,
   observeNativeAcceptanceToolEvent,
   recordNativeAcceptanceReportForTest,
@@ -39,6 +40,29 @@ describe('native delivery acceptance gate', () => {
       outcome: 'passed',
       issues: [],
     })
+  })
+
+  test('allows a fresh validator for the same revision after session recovery', async () => {
+    workspace = await createWorkspace()
+    const interrupted = startForegroundValidator(workspace, 'interrupted-validator')
+    interruptUnfinishedNativeAcceptances({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      reason: 'session_recovered',
+      createdAt: new Date(),
+    })
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toMatchObject({ state: 'interrupted', toolUseID: interrupted.toolUseID })
+
+    const retry = startForegroundValidator(workspace, 'retried-validator')
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toMatchObject({ state: 'running', toolUseID: retry.toolUseID })
   })
 
   test('does not accept asset runtime evidence without exact current import and composition coverage', async () => {
@@ -80,7 +104,7 @@ describe('native delivery acceptance gate', () => {
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
-    })).toEqual({ state: 'missing' })
+    })).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
 
     recordNativeAcceptanceReportForTest({
       dataRoot: dataRootFor(workspace),
@@ -108,6 +132,7 @@ describe('native delivery acceptance gate', () => {
         runtime: 'project-native',
         asset_format_capabilities: ['glb'],
         resource_library_usage: 'preferred',
+        runtime_asset_root: 'assets/library',
       },
       requirements: [],
       imports: [],
@@ -151,6 +176,7 @@ describe('native delivery acceptance gate', () => {
       project_target: {
         asset_format_capabilities: ['glb'],
         resource_library_usage: 'required',
+        runtime_asset_root: 'assets/library',
       },
       requirements: [],
       imports: [],
@@ -237,6 +263,7 @@ describe('native delivery acceptance gate', () => {
       project_target: {
         asset_format_capabilities: ['glb'],
         resource_library_usage: 'preferred',
+        runtime_asset_root: 'assets/library',
       },
       requirements: [],
       imports: [],
@@ -273,10 +300,11 @@ describe('native delivery acceptance gate', () => {
       project_target: {
         asset_format_capabilities: ['glb'],
         resource_library_usage: 'preferred',
+        runtime_asset_root: 'assets/library',
       },
       requirements: [{
         id: 'world-module',
-        required: false,
+        required: true,
         status: 'planned',
         resource_requirement: { accepted_formats: ['glb'] },
       }],
@@ -362,7 +390,7 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace)).toEqual({
       allowed: false,
       outcome: 'rejected',
-      issues: ['Deployment requires an observed native Implementation Auditor result.'],
+      issues: ['The native Implementation Auditor terminal result is invalid: terminal_result_invalid.'],
     })
   })
 
@@ -971,7 +999,7 @@ describe('native delivery acceptance gate', () => {
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
-    })).toEqual({ state: 'missing' })
+    })).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('rejects a passing claim without complete native evidence', async () => {
@@ -993,7 +1021,7 @@ describe('native delivery acceptance gate', () => {
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
-    })).toEqual({ state: 'missing' })
+    })).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('does not accept a completion that has no matching native dispatch', async () => {
@@ -1089,7 +1117,7 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace)).toEqual({
       allowed: false,
       outcome: 'rejected',
-      issues: ['Deployment requires an observed native acceptance Validator result.'],
+      issues: ['The native Acceptance Validator terminal result is invalid: terminal_result_invalid.'],
     })
   })
 
@@ -1136,7 +1164,7 @@ describe('native delivery acceptance gate', () => {
       dataRoot,
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
-    })).toEqual({ state: 'missing' })
+    })).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('invalidates acceptance when implementation or approved documents change', async () => {
@@ -1311,10 +1339,12 @@ function record(
   })
 }
 
-function startForegroundValidator(workspace: string): {
+function startForegroundValidator(
+  workspace: string,
+  toolUseID = 'native-validator-agent-tool',
+): {
   toolUseID: string
 } {
-  const toolUseID = 'native-validator-agent-tool'
   observeNativeAcceptanceToolEvent({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,

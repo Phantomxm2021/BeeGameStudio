@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import type { NativeResourceLibraryEvidenceState } from './native-resource-library-evidence'
+import { auditAssetContract } from './asset-contract-audit'
 
 export type ResourceDeliveryReadiness = {
   /** The resource plan is structurally usable for document review. */
@@ -35,6 +36,12 @@ export function auditResourceDeliveryReadiness(input: {
   resourceEvidence?: NativeResourceLibraryEvidenceState
 }): ResourceDeliveryReadiness {
   const issues: string[] = []
+  const assetContract = auditAssetContract(input.workspacePath)
+  if (!assetContract.valid) {
+    issues.push(...assetContract.issues.map(issue =>
+      `assets/asset-manifest.json: ${issue}`
+    ))
+  }
   const manifest = readManifest(input.workspacePath)
   const projectTarget = isRecord(manifest?.project_target)
     ? manifest.project_target
@@ -67,6 +74,9 @@ export function auditResourceDeliveryReadiness(input: {
   }
   const failedActions =
     resourceEvidence.state === 'missing' ? [] : resourceEvidence.failedActions
+  const failedImportCount =
+    resourceEvidence.state === 'missing' ? 0 : resourceEvidence.failedImportCount
+  const integrationIssues: string[] = []
 
   if (input.confirmedPolicy && manifestPolicy !== input.confirmedPolicy) {
     issues.push(
@@ -86,6 +96,21 @@ export function auditResourceDeliveryReadiness(input: {
         `assets/asset-manifest.json: ${effectivePolicy} Resource Library usage has no imported resource artifacts in the current manifest.`,
       )
     }
+    if (importCount > 0 && resourceEvidence.state === 'missing') {
+      integrationIssues.push(
+        'Resource Library: imported artifacts exist, but no current native ResourceLibrary provenance was observed for this session.',
+      )
+    }
+    if (importCount > 0 && resourceEvidence.state === 'stale') {
+      integrationIssues.push(
+        'Resource Library: the latest native ResourceLibrary provenance belongs to an older art or target context.',
+      )
+    }
+    if (failedImportCount > 0) {
+      integrationIssues.push(
+        `Resource Library: ${failedImportCount} explicitly requested imports remain unresolved after the latest native operations.`,
+      )
+    }
     if (failedActions.length > 0) {
       issues.push(
         `Resource Library: unresolved failed native actions for the current resource context: ${failedActions.join(', ')}.`,
@@ -93,7 +118,6 @@ export function auditResourceDeliveryReadiness(input: {
     }
   }
 
-  const integrationIssues: string[] = []
   if (pendingRequirementCount > 0) {
     integrationIssues.push(
       `assets/asset-manifest.json: ${pendingRequirementCount} resource requirements are still planned. Before implementation audit, each declared responsibility must be satisfied or explicitly blocked.`,

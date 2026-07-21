@@ -85,10 +85,11 @@ describe('native project delivery contract tool', () => {
       project_target: {
         resource_library_usage: 'preferred',
         asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/library',
       },
       requirements: [{
         id: 'world-module',
-        required: false,
+        required: true,
         status: 'planned',
         resource_requirement: { accepted_formats: ['glb'] },
       }],

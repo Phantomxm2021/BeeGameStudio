@@ -193,6 +193,12 @@ the selected elements in the target runtime. A copied file is only available;
 it is not integrated until the shipped game references it and its contribution
 is observable in preview/runtime evidence.
 
+Before importing, inspect the selected target's own asset/build conventions and
+record one project-relative `project_target.runtime_asset_root` in the canonical
+manifest. Import Resource Library files directly beneath that target-native
+root. Do not copy the same imported inventory through a second ad-hoc asset
+tree, and do not assume a Web, Unity, Godot, Unreal, or other platform path.
+
 For every successful import, verify that returned `local_files` are real,
 non-empty files in the workspace. An empty directory, metadata-only refresh,
 failed batch, or manifest entry without its files is not an imported artifact

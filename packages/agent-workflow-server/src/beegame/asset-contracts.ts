@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   RESOURCE_ASSET_KINDS,
   RESOURCE_CAPABILITIES,
@@ -30,6 +30,12 @@ export type BeeGameAssetProjectTarget = {
   asset_format_capabilities?: string[]
   /** Availability preference supplied to the authoring Agent, not a selector state machine. */
   resource_library_usage?: ResourceLibraryUsage
+  /**
+   * Project-relative directory consumed by the target-native asset pipeline.
+   * Claude Code derives this from the selected project/toolchain. BeeGame only
+   * keeps Resource Library imports inside it; it never assumes a platform.
+   */
+  runtime_asset_root?: string
 }
 
 export type BeeGameAssetIntegrationProvider = {
@@ -231,6 +237,7 @@ export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
   project_target: {
     asset_format_capabilities: ['<actual-file-extension-consumable-by-target>'],
     resource_library_usage: 'preferred',
+    runtime_asset_root: '<workspace-relative-target-native-asset-root>',
   },
   requirements: [{
     id: '<stable-game-responsibility-id>',
@@ -376,6 +383,7 @@ export async function importBeeGameLibraryResourceInWorkspace(
   const filename = sanitizeFilename(input.element_path)
   assertFilenameFormatAllowed(filename, normalizeFormats(manifest.project_target?.asset_format_capabilities))
   const targetPath = resolveImportTarget(root, input.destination_path, filename)
+  assertImportInsideRuntimeAssetRoot(root, targetPath, manifest.project_target)
   const rootPath = normalizeRelativePath(root, targetPath)
   if (existingImport && existingImport.root_path !== rootPath) {
     throw new Error(`Resource import destination differs from its pinned project path: ${importId}`)
@@ -1075,6 +1083,25 @@ function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | und
     mcp_server: trimString(record.mcp_server),
     asset_format_capabilities: stringArray(record.asset_format_capabilities ?? record.supported_asset_formats),
     resource_library_usage: normalizeResourceLibraryUsage(record.resource_library_usage ?? migrateLegacyResourceUsage(record.resource_sourcing_policy)),
+    runtime_asset_root: trimString(record.runtime_asset_root),
+  }
+}
+
+function assertImportInsideRuntimeAssetRoot(
+  workspace: string,
+  targetPath: string,
+  target?: BeeGameAssetProjectTarget,
+): void {
+  const policy = target?.resource_library_usage
+  if (policy !== 'preferred' && policy !== 'required') return
+  const runtimeAssetRoot = trimString(target?.runtime_asset_root)
+  if (!runtimeAssetRoot || !isConcreteRelativePath(runtimeAssetRoot)) {
+    throw new Error('Target runtime project_target.runtime_asset_root must be a concrete project-relative directory before Resource Library import')
+  }
+  const absoluteRoot = resolveInsideWorkspace(workspace, runtimeAssetRoot)
+  const fromRoot = relative(absoluteRoot, targetPath)
+  if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`Resource import destination must be inside project_target.runtime_asset_root: ${runtimeAssetRoot}`)
   }
 }
 

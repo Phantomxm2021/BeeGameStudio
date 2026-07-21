@@ -16,6 +16,9 @@ type ResourceLibraryObservation = {
   outcome?: 'succeeded' | 'partial' | 'failed'
   importedCount?: number
   failedCount?: number
+  requestedImportIds?: string[]
+  importedImportIds?: string[]
+  failedImportIds?: string[]
   createdAt: string
 }
 
@@ -66,8 +69,13 @@ export function observeNativeResourceLibraryToolEvent(input: {
       outcome: completion.outcome,
       ...(completion.importedCount !== undefined ? { importedCount: completion.importedCount } : {}),
       ...(completion.failedCount !== undefined ? { failedCount: completion.failedCount } : {}),
+      ...(completion.importedImportIds.length ? { importedImportIds: completion.importedImportIds } : {}),
+      ...(completion.failedImportIds.length ? { failedImportIds: completion.failedImportIds } : {}),
     } : input.eventType === 'tool.failed'
       ? { outcome: 'failed' as const }
+      : {}),
+    ...(normalized.validAction === 'import_elements'
+      ? { requestedImportIds: extractRequestedImportIds(normalized.input) }
       : {}),
     createdAt: input.createdAt.toISOString(),
   })
@@ -96,15 +104,37 @@ export function getObservedNativeResourceLibraryEvidence(input: {
   const succeeded = selected.filter(observation => observation.outcome !== 'failed')
   const latestByAction = new Map<string, ResourceLibraryObservation>()
   for (const observation of selected) latestByAction.set(observation.action, observation)
-  const unresolvedFailures = [...latestByAction.values()].filter(
-    observation => observation.outcome === 'failed',
+  const latestImportState = new Map<string, 'succeeded' | 'failed'>()
+  for (const observation of selected) {
+    if (observation.action !== 'import_elements') continue
+    for (const importId of observation.importedImportIds ?? []) {
+      latestImportState.set(importId, 'succeeded')
+    }
+    const failedIds = observation.failedImportIds?.length
+      ? observation.failedImportIds
+      : observation.phase === 'failed'
+        ? observation.requestedImportIds ?? []
+        : []
+    for (const importId of failedIds) latestImportState.set(importId, 'failed')
+  }
+  const latestImport = selected.filter(item => item.action === 'import_elements').at(-1)
+  const successfulImportCount = latestImportState.size
+    ? [...latestImportState.values()].filter(state => state === 'succeeded').length
+    : latestImport?.importedCount ?? 0
+  const failedImportCount = latestImportState.size
+    ? [...latestImportState.values()].filter(state => state === 'failed').length
+    : latestImport?.failedCount ?? 0
+  const unresolvedFailures = [...latestByAction.values()].filter(observation =>
+    observation.action === 'import_elements'
+      ? failedImportCount > 0 || observation.outcome === 'failed' || observation.outcome === 'partial'
+      : observation.outcome === 'failed'
   )
   return {
     state: current.length ? 'current' : 'stale',
     actions: [...new Set(succeeded.map(observation => observation.action))],
     failedActions: [...new Set(unresolvedFailures.map(observation => observation.action))],
-    successfulImportCount: selected.reduce((total, observation) => total + (observation.importedCount ?? 0), 0),
-    failedImportCount: selected.reduce((total, observation) => total + (observation.failedCount ?? 0), 0),
+    successfulImportCount,
+    failedImportCount,
     observedAt: selected.at(-1)!.createdAt,
   }
 }
@@ -153,20 +183,47 @@ function readObservations(dataRoot: string, sessionId: string): ResourceLibraryO
 function classifyCompletion(
   action: string,
   output: string,
-): { outcome: 'succeeded' | 'partial' | 'failed'; importedCount?: number; failedCount?: number } {
-  if (action !== 'import_elements') return { outcome: 'succeeded' }
+): {
+  outcome: 'succeeded' | 'partial' | 'failed'
+  importedCount?: number
+  failedCount?: number
+  importedImportIds: string[]
+  failedImportIds: string[]
+} {
+  if (action !== 'import_elements') return { outcome: 'succeeded', importedImportIds: [], failedImportIds: [] }
   const value = parseJson(output)
   const data = isRecord(value) && isRecord(value.data) ? value.data : value
-  if (!isRecord(data)) return { outcome: 'failed', importedCount: 0 }
+  if (!isRecord(data)) return { outcome: 'failed', importedCount: 0, importedImportIds: [], failedImportIds: [] }
   const importedCount = finiteCount(data.imported_count) ?? (Array.isArray(data.imported) ? data.imported.length : 0)
   const failedCount = finiteCount(data.failed_count) ?? countFailureIds(data.failures)
+  const importedImportIds = extractImportIds(data.imported, 'import_id')
+  const failedImportIds = Array.isArray(data.failures)
+    ? uniqueStrings(data.failures.flatMap(item => isRecord(item) && Array.isArray(item.import_ids) ? item.import_ids : []))
+    : []
   return {
     outcome: importedCount > 0
       ? failedCount > 0 ? 'partial' : 'succeeded'
       : 'failed',
     importedCount,
     failedCount,
+    importedImportIds,
+    failedImportIds,
   }
+}
+
+function extractRequestedImportIds(input: Record<string, unknown>): string[] {
+  return Array.isArray(input.selections)
+    ? extractImportIds(input.selections, 'import_id')
+    : []
+}
+
+function extractImportIds(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) return []
+  return uniqueStrings(value.flatMap(item => isRecord(item) ? [item[field]] : []))
+}
+
+function uniqueStrings(value: unknown[]): string[] {
+  return [...new Set(value.flatMap(item => typeof item === 'string' && item.trim() ? [item.trim()] : []))]
 }
 
 function parseJson(value: string): unknown {

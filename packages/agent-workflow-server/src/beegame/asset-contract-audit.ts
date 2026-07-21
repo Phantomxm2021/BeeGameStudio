@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { extname, isAbsolute, relative, resolve } from 'node:path'
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   RESOURCE_ASSET_KINDS,
   RESOURCE_CAPABILITIES,
@@ -113,15 +113,37 @@ function auditCanonicalAssetContract(
   if (target.resource_library_usage !== undefined && !RESOURCE_LIBRARY_USAGE.includes(target.resource_library_usage as never)) {
     issues.push(`project_target.resource_library_usage must be one of ${RESOURCE_LIBRARY_USAGE.join(', ')}; received ${JSON.stringify(target.resource_library_usage)}.`)
   }
+  const resourcePolicy = normalizedString(target.resource_library_usage)
+  const runtimeAssetRoot = normalizedString(target.runtime_asset_root)
+  if (resourcePolicy === 'preferred' || resourcePolicy === 'required') {
+    if (!runtimeAssetRoot || !isWorkspaceRelativePath(workspace, runtimeAssetRoot)) {
+      issues.push('project_target.runtime_asset_root must be a concrete project-relative directory when Resource Library usage is preferred or required.')
+    }
+  } else if (target.runtime_asset_root !== undefined && (!runtimeAssetRoot || !isWorkspaceRelativePath(workspace, runtimeAssetRoot))) {
+    issues.push('project_target.runtime_asset_root must be a concrete project-relative directory when present.')
+  }
   const capabilities = new Set(stringArray(target.asset_format_capabilities).map(normalizeFormat))
 
   const requirementIds = new Set<string>()
   const requirements = (manifest.requirements as unknown[]).map((value, index) => auditCanonicalRequirement(value, index, workspace, capabilities, requirementIds))
   for (const requirement of requirements) issues.push(...requirement.issues.map(issue => `${requirement.id}: ${issue}`))
+  if (requirements.length > 0 && requirements.every(requirement => !requirement.required)) {
+    issues.push('requirements cannot all be optional. Keep committed delivery responsibilities required and move genuinely optional or future work out of the current contract.')
+  }
 
   const importIds = new Set<string>()
   const imports = (manifest.imports as unknown[]).map((value, index) => auditCanonicalImport(value, index, workspace, importIds))
   for (const resourceImport of imports) issues.push(...resourceImport.issues.map(issue => `${resourceImport.id}: ${issue}`))
+  if (runtimeAssetRoot && isWorkspaceRelativePath(workspace, runtimeAssetRoot)) {
+    const absoluteRuntimeAssetRoot = resolve(workspace, runtimeAssetRoot)
+    for (const resourceImport of imports) {
+      if (!resourceImport.rootPath || !isWorkspaceRelativePath(workspace, resourceImport.rootPath)) continue
+      const fromRoot = relative(absoluteRuntimeAssetRoot, resolve(workspace, resourceImport.rootPath))
+      if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+        issues.push(`${resourceImport.id}: Imported root is outside project_target.runtime_asset_root: ${resourceImport.rootPath}`)
+      }
+    }
+  }
 
   const compositionIds = new Set<string>()
   const compositions = Array.isArray(manifest.compositions)

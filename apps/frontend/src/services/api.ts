@@ -152,7 +152,7 @@ export interface ProjectBaselineStatusPayload {
 }
 
 export interface DeliveryEvidenceFactPayload {
-  status?: 'not_run' | 'running' | 'ready' | 'needs_revision' | 'passed' | 'failed' | 'blocked' | 'stale';
+  status?: 'not_run' | 'running' | 'interrupted' | 'invalid' | 'ready' | 'needs_revision' | 'passed' | 'failed' | 'blocked' | 'stale';
   summary?: string;
   observed_at?: string;
 }
@@ -320,6 +320,7 @@ export interface BeeGameAssetManifestPayload {
     mcp_server?: string;
     asset_format_capabilities?: string[];
     resource_library_usage?: 'optional' | 'preferred' | 'required';
+    runtime_asset_root?: string;
   };
   requirements: BeeGameAssetRequirementPayload[];
   imports?: BeeGameAssetImportPayload[];

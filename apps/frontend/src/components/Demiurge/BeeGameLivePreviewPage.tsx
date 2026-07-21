@@ -395,14 +395,17 @@ export function BeeGameLivePreviewPage({
                                         <ProjectHintRow
                                             label={labels.documentReview || 'Document Review'}
                                             value={deliveryEvidenceStatusLabel(deliveryEvidence.documentReview?.status, lang)}
+                                            detail={deliveryEvidence.documentReview?.summary}
                                         />
                                         <ProjectHintRow
                                             label={labels.implementationAudit || 'Implementation Audit'}
                                             value={deliveryEvidenceStatusLabel(deliveryEvidence.implementationAudit?.status, lang)}
+                                            detail={deliveryEvidence.implementationAudit?.summary}
                                         />
                                         <ProjectHintRow
                                             label={labels.runtimeAcceptance || 'Runtime Acceptance'}
                                             value={deliveryEvidenceStatusLabel(deliveryEvidence.runtimeAcceptance?.status, lang)}
+                                            detail={deliveryEvidence.runtimeAcceptance?.summary}
                                         />
                                     </>
                                 ) : null}
@@ -912,21 +915,21 @@ function acceptanceStatusLabel(
 function deliveryEvidenceStatusLabel(status: string | undefined, lang: Language): string {
     const key = status || 'not_run';
     if (lang === 'zh') {
-        return ({ not_run: '未运行', running: '运行中', ready: '已就绪', needs_revision: '需要修订', passed: '已通过', failed: '未通过', blocked: '受阻', stale: '已过期' } as Record<string, string>)[key] || key;
+        return ({ not_run: '未运行', running: '运行中', interrupted: '已中断', invalid: '结果无效', ready: '已就绪', needs_revision: '需要修订', passed: '已通过', failed: '未通过', blocked: '受阻', stale: '已过期' } as Record<string, string>)[key] || key;
     }
     if (lang === 'zh-TW') {
-        return ({ not_run: '未執行', running: '執行中', ready: '已就緒', needs_revision: '需要修訂', passed: '已通過', failed: '未通過', blocked: '受阻', stale: '已過期' } as Record<string, string>)[key] || key;
+        return ({ not_run: '未執行', running: '執行中', interrupted: '已中斷', invalid: '結果無效', ready: '已就緒', needs_revision: '需要修訂', passed: '已通過', failed: '未通過', blocked: '受阻', stale: '已過期' } as Record<string, string>)[key] || key;
     }
-    return ({ not_run: 'Not run', running: 'Running', ready: 'Ready', needs_revision: 'Needs revision', passed: 'Passed', failed: 'Failed', blocked: 'Blocked', stale: 'Stale' } as Record<string, string>)[key] || key;
+    return ({ not_run: 'Not run', running: 'Running', interrupted: 'Interrupted', invalid: 'Invalid result', ready: 'Ready', needs_revision: 'Needs revision', passed: 'Passed', failed: 'Failed', blocked: 'Blocked', stale: 'Stale' } as Record<string, string>)[key] || key;
 }
 
-function ProjectHintRow({ label, value }: { label: string; value: string }) {
+function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
     return (
         <div className="flex items-start justify-between gap-4 border-b border-zinc-800/70 py-2 last:border-b-0">
             <div className="type-caption-1 shrink-0 text-zinc-500">
                 {label}
             </div>
-            <div className="type-callout min-w-0 truncate text-right text-zinc-100">
+            <div className="type-callout min-w-0 truncate text-right text-zinc-100" title={detail}>
                 {value}
             </div>
         </div>

@@ -128,6 +128,39 @@ describe('BeeGame canonical resource contract', () => {
     }
   })
 
+  test('keeps preferred Resource Library imports inside the target-native asset root', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-runtime-asset-root-'))
+    try {
+      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
+        version: 5,
+        project_target: {
+          asset_format_capabilities: ['glb'],
+          resource_library_usage: 'preferred',
+          runtime_asset_root: 'runtime/assets',
+        },
+        requirements: [], imports: [], compositions: [],
+      }))
+      const input = {
+        id: 'model', pack_id: 'pack-a', pack_version: '1.0.0',
+        element_id: 'model-id', element_path: 'models/model.glb', source_url: 'https://signed.example/model',
+      }
+      const fetchImpl = async () => new Response(new Uint8Array([1, 2, 3]))
+
+      await expect(importBeeGameLibraryResourceInWorkspace(workspace, {
+        ...input,
+        destination_path: 'inventory/models',
+      }, fetchImpl)).rejects.toThrow('must be inside project_target.runtime_asset_root')
+
+      const result = await importBeeGameLibraryResourceInWorkspace(workspace, {
+        ...input,
+        destination_path: 'runtime/assets/models',
+      }, fetchImpl)
+      expect(result.resourceImport.root_path).toBe('runtime/assets/models/model.glb')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('refuses to overwrite a shared dependency with different bytes', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-conflicting-dependency-'))
     try {

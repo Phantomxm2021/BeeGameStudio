@@ -399,10 +399,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private engine: QueryEngineLike | null = null
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
+  private confirmedBriefContext: string | undefined
   private activateNativeSession: (() => void) | null = null
   private notificationQueue: NativeNotificationQueue | null = null
   private sdkEventQueue: NativeSdkEventQueue | null = null
   private readonly consumedTaskNotifications = new Set<string>()
+  private readonly backgroundTaskLedger = new NativeBackgroundTaskLedger()
 
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
@@ -413,6 +415,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.approvedOutboundTargets,
       async () => {
         this.currentSubmitInput = input
+        if (input.confirmedBriefContext?.trim()) {
+          this.confirmedBriefContext = input.confirmedBriefContext
+        }
         const engine = await this.ensureEngine()
         // The worker owns one native session. Reactivate it before every turn
         // so a native compaction or resume transition cannot leave a stale
@@ -440,6 +445,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   stop(): void {
     this.engine?.interrupt()
+    this.backgroundTaskLedger.interruptPendingTasks()
     void stopRunningNativeBackgroundTasks(this.appState, updater => {
       if (!this.appState) throw new Error('App state was not initialized')
       this.appState = updater(this.appState)
@@ -461,7 +467,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       flushProgress: () => this.flushNativeSdkEvents(input),
       onMessage: message => {
         const consumedTaskId = getCompletedNativeTaskOutputTaskId(message)
-        if (consumedTaskId) this.consumedTaskNotifications.add(consumedTaskId)
+        if (consumedTaskId) {
+          this.consumedTaskNotifications.add(consumedTaskId)
+          this.backgroundTaskLedger.settleTask(consumedTaskId)
+        }
         input.onMessage(message)
       },
     })
@@ -469,6 +478,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   private flushNativeSdkEvents(input: BeeGameSessionSubmitInput): void {
     for (const event of this.sdkEventQueue?.drain() ?? []) {
+      this.backgroundTaskLedger.observe(event)
       input.onMessage(event)
     }
   }
@@ -488,12 +498,16 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       signal: input.signal,
       takeNotifications: () =>
         this.notificationQueue?.takeMainThreadTaskNotifications() ?? [],
-      hasRunningTasks: () => hasRunningNativeBackgroundTasks(this.appState),
+      hasRunningTasks: () =>
+        this.backgroundTaskLedger.hasPendingTasks() ||
+        hasRunningNativeBackgroundTasks(this.appState),
       flushProgress: () => this.flushNativeSdkEvents(input),
-      onTerminalNotification: notification =>
-        (this.input.onNativeTaskNotification ?? input.onNativeTaskNotification)?.(
+      onTerminalNotification: notification => {
+        this.backgroundTaskLedger.settleNotification(notification)
+        ;(this.input.onNativeTaskNotification ?? input.onNativeTaskNotification)?.(
           notification,
-        ),
+        )
+      },
       runNotification: notification => this.runNativeTurn(
         engine,
         notification.value,
@@ -585,7 +599,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const deliveryContractTool = createNativeDeliveryContractTool({
       buildTool: definition => call(toolModule, 'buildTool', definition),
       workspacePath: this.input.cwd,
-      getConfirmedBriefContext: () => this.currentSubmitInput?.confirmedBriefContext,
+      getConfirmedBriefContext: () => this.confirmedBriefContext,
       ...(this.input.deliveryEvidenceDataRoot
         ? {
             getResourceLibraryEvidence: () =>
@@ -615,11 +629,11 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
     ])
-    const appState = {
+    const appState = installInheritedBeeGameTools({
       ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
       agentDefinitions: discoveredAgentDefinitions,
       toolPermissionContext: permissionContext,
-    }
+    }, resourceTool ? [deliveryContractTool, resourceTool] : [deliveryContractTool])
     this.appState = appState
     const extraToolPermissionBroker = new NativeExtraToolPermissionBroker(
       () => this.input.requestPermission ?? this.currentSubmitInput?.requestPermission,
@@ -749,6 +763,71 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     })
 
     return this.engine
+  }
+}
+
+/**
+ * Transport-only ledger for native background task lifecycles. Claude Code's
+ * mutable AppState may temporarily omit a task while an Agent is backgrounded,
+ * compacted, or resumed. A task_started event therefore remains pending until
+ * its matching native terminal envelope is actually consumed. The ledger does
+ * not inspect results, retry work, or advance any product workflow.
+ */
+export class NativeBackgroundTaskLedger {
+  private readonly pendingTaskIds = new Set<string>()
+  private readonly settledTaskIds = new Set<string>()
+
+  observe(message: DashboardSDKMessage): void {
+    if (
+      message.type !== 'system' ||
+      getField(message, 'subtype', '' as string) !== 'task_started'
+    ) {
+      return
+    }
+    const taskId = getField(message, 'task_id', '')
+    if (!taskId || this.settledTaskIds.has(taskId)) return
+    this.pendingTaskIds.add(taskId)
+  }
+
+  settleNotification(notification: BeeGameNativeTaskNotification): void {
+    const terminal = parseNativeTerminalTaskNotification(notification)
+    if (terminal?.taskId) this.settleTask(terminal.taskId)
+  }
+
+  settleTask(taskId: string): void {
+    if (!taskId) return
+    this.pendingTaskIds.delete(taskId)
+    this.settledTaskIds.add(taskId)
+  }
+
+  hasPendingTasks(): boolean {
+    return this.pendingTaskIds.size > 0
+  }
+
+  interruptPendingTasks(): void {
+    for (const taskId of this.pendingTaskIds) this.settledTaskIds.add(taskId)
+    this.pendingTaskIds.clear()
+  }
+}
+
+/**
+ * Publishes BeeGame's read-only/project-scoped capabilities through Claude
+ * Code's supported inherited tool pool. The main QueryEngine still receives
+ * the same tool instances directly; native subagents receive them through
+ * appState.mcp.tools when Claude Code assembles their own worker tool pool.
+ */
+export function installInheritedBeeGameTools(
+  appState: MutableAppState,
+  inheritedTools: unknown[],
+): MutableAppState {
+  const currentMcp = getField<Record<string, unknown>>(appState, 'mcp', {})
+  const currentTools = getField<unknown[]>(currentMcp, 'tools', [])
+  return {
+    ...appState,
+    mcp: {
+      ...currentMcp,
+      tools: [...currentTools, ...inheritedTools],
+    },
   }
 }
 

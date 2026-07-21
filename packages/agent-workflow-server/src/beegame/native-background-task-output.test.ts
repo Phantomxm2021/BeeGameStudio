@@ -25,6 +25,17 @@ describe('native background task output', () => {
     })
   })
 
+  test('keeps only the opaque agent id when Claude Code appends an annotation', () => {
+    expect(parseNativeBackgroundTaskLaunch([
+      'Async agent launched successfully.',
+      'agentId: task-annotated (internal ID - do not mention it to the user)',
+      'output_file: /runtime/task-annotated.output',
+    ].join('\n'))).toEqual({
+      taskId: 'task-annotated',
+      outputFile: '/runtime/task-annotated.output',
+    })
+  })
+
   test('deduplicates repeated message snapshots in a completed subagent transcript', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-native-task-usage-'))
     const outputFile = join(root, 'task.output')

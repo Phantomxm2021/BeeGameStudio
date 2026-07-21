@@ -77,6 +77,26 @@ type NativeDocumentReviewTerminal = {
   createdAt: string
 }
 
+type NativeDocumentReviewInterruption = {
+  version: 2
+  kind: 'interruption'
+  sessionId: string
+  toolUseID: string
+  reviewerId: string
+  reason: 'session_recovered' | 'session_stopped'
+  createdAt: string
+}
+
+type NativeDocumentReviewInvalidResult = {
+  version: 2
+  kind: 'invalid-result'
+  sessionId: string
+  toolUseID: string
+  reviewerId: string
+  reason: string
+  createdAt: string
+}
+
 export type NativeDocumentReviewEvidence = {
   version: 2
   kind: 'result'
@@ -99,6 +119,8 @@ type NativeDocumentReviewObservation =
   | NativeDocumentReviewDispatch
   | NativeDocumentReviewBackgroundTask
   | NativeDocumentReviewTerminal
+  | NativeDocumentReviewInterruption
+  | NativeDocumentReviewInvalidResult
   | NativeDocumentReviewEvidence
 
 /**
@@ -135,9 +157,7 @@ export function observeNativeDocumentReviewToolEvent(input: {
     const duplicateActiveReview = observations.some(observation =>
       observation.kind === 'dispatch' &&
       observation.documentsDigest === documentsDigest &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
-      )
+      !isClosed(observations, observation.toolUseID)
     )
     if (duplicateActiveReview) return
     appendObservation(input.dataRoot, input.sessionId, {
@@ -185,12 +205,18 @@ export function observeNativeDocumentReviewToolEvent(input: {
   }
   appendTerminal(input, toolUseID, 'completed')
   const report = parseReport(output, input.workspacePath, Boolean(nativeResult))
-  if (!report) return
+  if (!report) {
+    appendInvalidResult(input, toolUseID, 'terminal_result_invalid')
+    return
+  }
   if (!hasCompletedNativeDeliveryContract({
     dataRoot: input.dataRoot,
     sessionId: input.sessionId,
     agentToolUseID: toolUseID,
-  })) return
+  })) {
+    appendInvalidResult(input, toolUseID, 'delivery_contract_not_observed')
+    return
+  }
   appendResult(input, toolUseID, dispatch.documentsDigest, report)
 }
 
@@ -201,6 +227,8 @@ export function getObservedNativeDocumentReview(input: {
 }):
   | { state: 'missing' }
   | { state: 'running'; toolUseID: string; documentsDigest: string; createdAt: string }
+  | { state: 'interrupted'; toolUseID: string; reason: NativeDocumentReviewInterruption['reason']; createdAt: string }
+  | { state: 'invalid'; toolUseID: string; reason: string; createdAt: string }
   | { state: 'stale'; evidence: NativeDocumentReviewEvidence }
   | { state: 'current'; evidence: NativeDocumentReviewEvidence } {
   const observations = readObservations(input.dataRoot, input.sessionId)
@@ -209,12 +237,7 @@ export function getObservedNativeDocumentReview(input: {
     .filter((observation): observation is NativeDocumentReviewDispatch =>
       observation.kind === 'dispatch' &&
       observation.documentsDigest === currentDigest &&
-      !observations.some(result =>
-        result.kind === 'result' && result.toolUseID === observation.toolUseID
-      ) &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
-      )
+      !isClosed(observations, observation.toolUseID)
     )
     .at(-1)
   if (running) return {
@@ -229,7 +252,17 @@ export function getObservedNativeDocumentReview(input: {
         observation.kind === 'result',
     )
     .at(-1)
-  if (!latest) return { state: 'missing' }
+  if (!latest) {
+    const invalid = observations.filter(
+      (item): item is NativeDocumentReviewInvalidResult => item.kind === 'invalid-result',
+    ).at(-1)
+    if (invalid) return { state: 'invalid', toolUseID: invalid.toolUseID, reason: invalid.reason, createdAt: invalid.createdAt }
+    const interrupted = observations.filter(
+      (item): item is NativeDocumentReviewInterruption => item.kind === 'interruption',
+    ).at(-1)
+    if (interrupted) return { state: 'interrupted', toolUseID: interrupted.toolUseID, reason: interrupted.reason, createdAt: interrupted.createdAt }
+    return { state: 'missing' }
+  }
   return latest.documentsDigest === currentDigest
     ? { state: 'current', evidence: latest }
     : { state: 'stale', evidence: latest }
@@ -255,15 +288,76 @@ export function observeNativeDocumentReviewTaskNotification(input: {
   )
   if (!dispatch || dispatch.kind !== 'dispatch') return
   appendTerminal(input, terminal.toolUseId, terminal.status)
-  if (terminal.status !== 'completed' || !terminal.result) return
+  if (terminal.status !== 'completed') {
+    appendInvalidResult(input, terminal.toolUseId, `native_task_${terminal.status}`)
+    return
+  }
+  if (!terminal.result) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_missing')
+    return
+  }
   const report = parseReport(terminal.result, input.workspacePath, true)
-  if (!report) return
+  if (!report) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_invalid')
+    return
+  }
   if (!hasCompletedNativeDeliveryContract({
     dataRoot: input.dataRoot,
     sessionId: input.sessionId,
     agentToolUseID: dispatch.toolUseID,
-  })) return
+  })) {
+    appendInvalidResult(input, terminal.toolUseId, 'delivery_contract_not_observed')
+    return
+  }
   appendResult(input, terminal.toolUseId, dispatch.documentsDigest, report)
+}
+
+export function interruptUnfinishedNativeDocumentReviews(input: {
+  dataRoot: string
+  sessionId: string
+  reason: NativeDocumentReviewInterruption['reason']
+  createdAt: Date
+}): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  for (const dispatch of observations.filter(
+    (item): item is NativeDocumentReviewDispatch => item.kind === 'dispatch',
+  )) {
+    if (isClosed(observations, dispatch.toolUseID)) continue
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 2,
+      kind: 'interruption',
+      sessionId: input.sessionId,
+      toolUseID: dispatch.toolUseID,
+      reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
+      reason: input.reason,
+      createdAt: input.createdAt.toISOString(),
+    })
+  }
+}
+
+function appendInvalidResult(
+  input: { dataRoot: string; sessionId: string; createdAt: Date },
+  toolUseID: string,
+  reason: string,
+): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (observations.some(item => item.kind === 'invalid-result' && item.toolUseID === toolUseID)) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 2,
+    kind: 'invalid-result',
+    sessionId: input.sessionId,
+    toolUseID,
+    reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
+    reason,
+    createdAt: input.createdAt.toISOString(),
+  })
+}
+
+function isClosed(observations: NativeDocumentReviewObservation[], toolUseID: string): boolean {
+  return observations.some(item =>
+    item.toolUseID === toolUseID &&
+    (item.kind === 'terminal' || item.kind === 'result' || item.kind === 'interruption' || item.kind === 'invalid-result')
+  )
 }
 
 function appendTerminal(
@@ -589,7 +683,7 @@ function readObservations(
         return observation.version === 2 &&
           observation.sessionId === sessionId &&
           observation.reviewerId === DOCUMENT_REVIEWER_AGENT_TYPE &&
-          ['dispatch', 'background-task', 'terminal', 'result'].includes(observation.kind)
+          ['dispatch', 'background-task', 'terminal', 'interruption', 'invalid-result', 'result'].includes(observation.kind)
           ? [observation]
           : []
       } catch {

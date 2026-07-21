@@ -117,6 +117,7 @@ function getCanonicalContract(): Record<string, unknown> {
       target_native_assembly_field: 'compositions',
       legacy_slots_accepted: false,
       asset_format_capabilities_semantics: 'Actual file extensions that the selected target runtime can consume; implementation libraries, render techniques, and platform names are invalid.',
+      runtime_asset_root_semantics: 'A workspace-relative directory consumed by the selected target-native asset pipeline. Claude Code derives it from the project toolchain; BeeGame does not prescribe a platform path.',
       stage_semantics: {
         document_plan_ready: 'Documents and the resource plan are structurally ready for independent document review. This is not implementation or delivery completion.',
         resource_integration_ready: 'Every declared resource responsibility and composition has reached a terminal integration state suitable for implementation audit.',

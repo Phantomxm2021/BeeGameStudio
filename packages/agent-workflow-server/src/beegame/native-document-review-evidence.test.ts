@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getObservedNativeDocumentReview,
+  interruptUnfinishedNativeDocumentReviews,
   observeNativeDocumentReviewTaskNotification,
   observeNativeDocumentReviewToolEvent,
   recordNativeDocumentReviewForTest,
@@ -28,7 +29,7 @@ describe('native document review evidence', () => {
     observe('tool.started', workspace, payload)
     observe('tool.completed', workspace, { ...payload, output: '' })
 
-    expect(current(workspace)).toEqual({ state: 'missing' })
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('requires an exact structured terminal result', async () => {
@@ -40,7 +41,25 @@ describe('native document review evidence', () => {
       output: `READY ${JSON.stringify(readyReport())}`,
     })
 
-    expect(current(workspace)).toEqual({ state: 'missing' })
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
+  })
+
+  test('allows a fresh review for the same documents after session recovery', async () => {
+    workspace = await createWorkspace()
+    observe('tool.started', workspace, reviewerPayload('interrupted-review'))
+    interruptUnfinishedNativeDocumentReviews({
+      dataRoot: dataRootFor(workspace),
+      sessionId: SESSION_ID,
+      reason: 'session_recovered',
+      createdAt: new Date(),
+    })
+    expect(current(workspace)).toMatchObject({ state: 'interrupted', reason: 'session_recovered' })
+
+    const retry = reviewerPayload('retried-review')
+    observe('tool.started', workspace, retry)
+    expect(current(workspace)).toMatchObject({ state: 'running', toolUseID: 'retried-review' })
+    observe('tool.completed', workspace, { ...retry, output: JSON.stringify(readyReport()) })
+    expect(current(workspace).state).toBe('current')
   })
 
   test('does not accept a complete Reviewer result when the Reviewer never read the native contract', async () => {
@@ -59,7 +78,7 @@ describe('native document review evidence', () => {
         createdAt: new Date(),
       })
     }
-    expect(current(workspace)).toEqual({ state: 'missing' })
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'delivery_contract_not_observed' })
   })
 
   test('does not accept a targeted re-review as project-wide READY', async () => {
@@ -73,7 +92,7 @@ describe('native document review evidence', () => {
         reviewedDocumentPaths: [REQUIRED_PROJECT_DOCUMENTS[0]],
       }),
     })
-    expect(current(workspace)).toEqual({ state: 'missing' })
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('makes a review stale when the canonical asset contract changes', async () => {
@@ -248,7 +267,7 @@ describe('native document review evidence', () => {
       },
     })
 
-    expect(current(workspace)).toEqual({ state: 'missing' })
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
   test('records a linked native background reviewer terminal result', async () => {

@@ -12,6 +12,8 @@ import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
   | 'document_review_running'
+  | 'document_review_interrupted'
+  | 'document_review_invalid'
   | 'document_review_stale'
   | 'document_review_needs_revision'
   | 'document_review_blocked'
@@ -22,12 +24,16 @@ export type NativeDeliveryStateReason =
   | 'implementation_audit_out_of_order'
   | 'acceptance_missing'
   | 'acceptance_running'
+  | 'acceptance_interrupted'
+  | 'acceptance_invalid'
   | 'acceptance_stale'
   | 'acceptance_failed'
   | 'acceptance_blocked'
   | 'acceptance_out_of_order'
   | 'implementation_audit_missing'
   | 'implementation_audit_running'
+  | 'implementation_audit_interrupted'
+  | 'implementation_audit_invalid'
   | 'implementation_audit_stale'
   | 'implementation_audit_failed'
   | 'implementation_audit_blocked'
@@ -42,17 +48,17 @@ export type NativeDeliveryState = {
 
 export type NativeDeliveryEvidenceSummary = {
   documentReview: {
-    status: 'not_run' | 'running' | 'ready' | 'needs_revision' | 'blocked' | 'stale'
+    status: 'not_run' | 'running' | 'interrupted' | 'invalid' | 'ready' | 'needs_revision' | 'blocked' | 'stale'
     summary: string
     observedAt?: string
   }
   implementationAudit: {
-    status: 'not_run' | 'running' | 'passed' | 'failed' | 'blocked' | 'stale'
+    status: 'not_run' | 'running' | 'interrupted' | 'invalid' | 'passed' | 'failed' | 'blocked' | 'stale'
     summary: string
     observedAt?: string
   }
   runtimeAcceptance: {
-    status: 'not_run' | 'running' | 'passed' | 'failed' | 'blocked' | 'stale'
+    status: 'not_run' | 'running' | 'interrupted' | 'invalid' | 'passed' | 'failed' | 'blocked' | 'stale'
     summary: string
     observedAt?: string
   }
@@ -83,6 +89,10 @@ export function getNativeDeliveryEvidenceSummary(input: {
         }
       : review.state === 'running'
         ? { status: 'running', summary: 'The native Document Reviewer is still running.', observedAt: review.createdAt }
+        : review.state === 'interrupted'
+          ? { status: 'interrupted', summary: 'The native Document Reviewer was interrupted before producing a terminal result.', observedAt: review.createdAt }
+          : review.state === 'invalid'
+            ? { status: 'invalid', summary: `The native Document Reviewer terminal result is invalid: ${review.reason}.`, observedAt: review.createdAt }
         : review.state === 'stale'
           ? { status: 'stale', summary: 'Project documents changed after the latest native review.', observedAt: review.evidence.createdAt }
           : { status: 'not_run', summary: 'No valid native Document Reviewer result has been observed.' },
@@ -90,6 +100,10 @@ export function getNativeDeliveryEvidenceSummary(input: {
       ? { status: audit.evidence.status, summary: audit.evidence.summary, observedAt: audit.evidence.createdAt }
       : audit.state === 'running'
         ? { status: 'running', summary: 'The native Implementation Auditor is still running.', observedAt: audit.createdAt }
+        : audit.state === 'interrupted'
+          ? { status: 'interrupted', summary: 'The native Implementation Auditor was interrupted before producing a terminal result.', observedAt: audit.createdAt }
+          : audit.state === 'invalid'
+            ? { status: 'invalid', summary: `The native Implementation Auditor terminal result is invalid: ${audit.reason}.`, observedAt: audit.createdAt }
         : audit.state === 'stale'
           ? { status: 'stale', summary: 'The project changed after the latest native implementation audit.', observedAt: audit.evidence.createdAt }
           : { status: 'not_run', summary: 'No valid native Implementation Auditor result has been observed.' },
@@ -97,6 +111,10 @@ export function getNativeDeliveryEvidenceSummary(input: {
       ? { status: acceptance.evidence.status, summary: acceptance.evidence.summary, observedAt: acceptance.evidence.createdAt }
       : acceptance.state === 'running'
         ? { status: 'running', summary: 'The native Acceptance Validator is still running.', observedAt: acceptance.createdAt }
+        : acceptance.state === 'interrupted'
+          ? { status: 'interrupted', summary: 'The native Acceptance Validator was interrupted before producing a terminal result.', observedAt: acceptance.createdAt }
+          : acceptance.state === 'invalid'
+            ? { status: 'invalid', summary: `The native Acceptance Validator terminal result is invalid: ${acceptance.reason}.`, observedAt: acceptance.createdAt }
         : acceptance.state === 'stale'
           ? { status: 'stale', summary: acceptance.evidence.summary, observedAt: acceptance.evidence.createdAt }
           : { status: 'not_run', summary: 'No valid native Acceptance Validator result has been observed.' },
@@ -127,6 +145,22 @@ export function getNativeDeliveryState(input: {
       status: 'not_run',
       reason: 'document_review_running',
       summary: 'The native Document Reviewer is still running.',
+      observedAt: review.createdAt,
+    }
+  }
+  if (review.state === 'interrupted') {
+    return {
+      status: 'not_run',
+      reason: 'document_review_interrupted',
+      summary: 'The native Document Reviewer was interrupted before producing a terminal result.',
+      observedAt: review.createdAt,
+    }
+  }
+  if (review.state === 'invalid') {
+    return {
+      status: 'failed',
+      reason: 'document_review_invalid',
+      summary: `The native Document Reviewer terminal result is invalid: ${review.reason}.`,
       observedAt: review.createdAt,
     }
   }
@@ -279,6 +313,22 @@ export function getNativeDeliveryState(input: {
       observedAt: audit.createdAt,
     }
   }
+  if (audit.state === 'interrupted') {
+    return {
+      status: 'not_run',
+      reason: 'implementation_audit_interrupted',
+      summary: 'The native Implementation Auditor was interrupted before producing a terminal result.',
+      observedAt: audit.createdAt,
+    }
+  }
+  if (audit.state === 'invalid') {
+    return {
+      status: 'failed',
+      reason: 'implementation_audit_invalid',
+      summary: `The native Implementation Auditor terminal result is invalid: ${audit.reason}.`,
+      observedAt: audit.createdAt,
+    }
+  }
   if (audit.state === 'stale') {
     return {
       status: 'stale',
@@ -325,6 +375,22 @@ export function getNativeDeliveryState(input: {
       status: 'not_run',
       reason: 'acceptance_running',
       summary: 'The native acceptance Validator is still running.',
+      observedAt: acceptance.createdAt,
+    }
+  }
+  if (acceptance.state === 'interrupted') {
+    return {
+      status: 'not_run',
+      reason: 'acceptance_interrupted',
+      summary: 'The native Acceptance Validator was interrupted before producing a terminal result.',
+      observedAt: acceptance.createdAt,
+    }
+  }
+  if (acceptance.state === 'invalid') {
+    return {
+      status: 'failed',
+      reason: 'acceptance_invalid',
+      summary: `The native Acceptance Validator terminal result is invalid: ${acceptance.reason}.`,
       observedAt: acceptance.createdAt,
     }
   }

@@ -88,6 +88,26 @@ type NativeAcceptanceTerminal = {
   createdAt: string
 }
 
+type NativeAcceptanceInterruption = {
+  version: 5
+  kind: 'interruption'
+  sessionId: string
+  toolUseID: string
+  validatorId: string
+  reason: 'session_recovered' | 'session_stopped'
+  createdAt: string
+}
+
+type NativeAcceptanceInvalidResult = {
+  version: 5
+  kind: 'invalid-result'
+  sessionId: string
+  toolUseID: string
+  validatorId: string
+  reason: string
+  createdAt: string
+}
+
 export type NativeAcceptanceEvidence = {
   version: 5
   kind: 'result'
@@ -112,6 +132,8 @@ type NativeAcceptanceObservation =
   | NativeAcceptanceDispatch
   | NativeAcceptanceBackgroundTask
   | NativeAcceptanceTerminal
+  | NativeAcceptanceInterruption
+  | NativeAcceptanceInvalidResult
   | NativeAcceptanceEvidence
 
 const REQUIRED_PASSING_EVIDENCE = new Set<NativeAcceptanceEvidenceKind>([
@@ -159,9 +181,7 @@ export function observeNativeAcceptanceToolEvent(input: {
     const duplicateActiveValidation = observations.some(observation =>
       observation.kind === 'dispatch' &&
       observation.workspaceDigest === workspaceDigest &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
-      )
+      !isClosed(observations, observation.toolUseID)
     )
     if (duplicateActiveValidation) return
     appendObservation(input.dataRoot, input.sessionId, {
@@ -223,7 +243,10 @@ export function observeNativeAcceptanceToolEvent(input: {
       validatorToolUseID: toolUseID,
     },
   )
-  if (!report) return
+  if (!report) {
+    appendInvalidResult(input, toolUseID, 'terminal_result_invalid')
+    return
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 5,
     kind: 'result',
@@ -308,7 +331,14 @@ export function observeNativeAcceptanceTaskNotification(input: {
   )
   if (!dispatch || dispatch.kind !== 'dispatch') return
   appendTerminal(input, terminal.toolUseId, terminal.status)
-  if (terminal.status !== 'completed' || !terminal.result) return
+  if (terminal.status !== 'completed') {
+    appendInvalidResult(input, terminal.toolUseId, `native_task_${terminal.status}`)
+    return
+  }
+  if (!terminal.result) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_missing')
+    return
+  }
   const report = parseNativeAcceptanceReport(
     terminal.result,
     dispatch.validatorId,
@@ -320,7 +350,10 @@ export function observeNativeAcceptanceTaskNotification(input: {
       validatorToolUseID: dispatch.toolUseID,
     },
   )
-  if (!report) return
+  if (!report) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_invalid')
+    return
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 5,
     kind: 'result',
@@ -340,6 +373,29 @@ export function observeNativeAcceptanceTaskNotification(input: {
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
   })
+}
+
+export function interruptUnfinishedNativeAcceptances(input: {
+  dataRoot: string
+  sessionId: string
+  reason: NativeAcceptanceInterruption['reason']
+  createdAt: Date
+}): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  for (const dispatch of observations.filter(
+    (item): item is NativeAcceptanceDispatch => item.kind === 'dispatch',
+  )) {
+    if (isClosed(observations, dispatch.toolUseID)) continue
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 5,
+      kind: 'interruption',
+      sessionId: input.sessionId,
+      toolUseID: dispatch.toolUseID,
+      validatorId: dispatch.validatorId,
+      reason: input.reason,
+      createdAt: input.createdAt.toISOString(),
+    })
+  }
 }
 
 function appendTerminal(
@@ -362,6 +418,31 @@ function appendTerminal(
   })
 }
 
+function appendInvalidResult(
+  input: { dataRoot: string; sessionId: string; createdAt: Date },
+  toolUseID: string,
+  reason: string,
+): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (observations.some(item => item.kind === 'invalid-result' && item.toolUseID === toolUseID)) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 5,
+    kind: 'invalid-result',
+    sessionId: input.sessionId,
+    toolUseID,
+    validatorId: DELIVERY_VALIDATOR_AGENT_TYPES[0],
+    reason,
+    createdAt: input.createdAt.toISOString(),
+  })
+}
+
+function isClosed(observations: NativeAcceptanceObservation[], toolUseID: string): boolean {
+  return observations.some(item =>
+    item.toolUseID === toolUseID &&
+    (item.kind === 'terminal' || item.kind === 'result' || item.kind === 'interruption' || item.kind === 'invalid-result')
+  )
+}
+
 export function getObservedNativeAcceptance(input: {
   dataRoot: string
   sessionId: string
@@ -369,6 +450,8 @@ export function getObservedNativeAcceptance(input: {
 }):
   | { state: 'missing' }
   | { state: 'running'; toolUseID: string; workspaceDigest: string; createdAt: string }
+  | { state: 'interrupted'; toolUseID: string; reason: NativeAcceptanceInterruption['reason']; createdAt: string }
+  | { state: 'invalid'; toolUseID: string; reason: string; createdAt: string }
   | { state: 'stale'; evidence: NativeAcceptanceEvidence }
   | { state: 'current'; evidence: NativeAcceptanceEvidence } {
   const workspaceDigest = digestWorkspace(input.workspacePath)
@@ -377,12 +460,7 @@ export function getObservedNativeAcceptance(input: {
     .filter((observation): observation is NativeAcceptanceDispatch =>
       observation.kind === 'dispatch' &&
       observation.workspaceDigest === workspaceDigest &&
-      !observations.some(result =>
-        result.kind === 'result' && result.toolUseID === observation.toolUseID
-      ) &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
-      )
+      !isClosed(observations, observation.toolUseID)
     )
     .at(-1)
   if (running) return {
@@ -396,7 +474,17 @@ export function getObservedNativeAcceptance(input: {
       observation.kind === 'result'
     )
     .at(-1)
-  if (!latest) return { state: 'missing' }
+  if (!latest) {
+    const invalid = observations.filter(
+      (item): item is NativeAcceptanceInvalidResult => item.kind === 'invalid-result',
+    ).at(-1)
+    if (invalid) return { state: 'invalid', toolUseID: invalid.toolUseID, reason: invalid.reason, createdAt: invalid.createdAt }
+    const interrupted = observations.filter(
+      (item): item is NativeAcceptanceInterruption => item.kind === 'interruption',
+    ).at(-1)
+    if (interrupted) return { state: 'interrupted', toolUseID: interrupted.toolUseID, reason: interrupted.reason, createdAt: interrupted.createdAt }
+    return { state: 'missing' }
+  }
   return latest.workspaceDigest === workspaceDigest
     ? { state: 'current', evidence: latest }
     : { state: 'stale', evidence: latest }
@@ -595,6 +683,8 @@ function readObservations(
             observation.kind === 'dispatch' ||
             observation.kind === 'background-task' ||
             observation.kind === 'terminal' ||
+            observation.kind === 'interruption' ||
+            observation.kind === 'invalid-result' ||
             observation.kind === 'result'
           )
           ? [observation]

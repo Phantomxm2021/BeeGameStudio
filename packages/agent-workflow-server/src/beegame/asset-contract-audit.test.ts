@@ -117,7 +117,7 @@ describe('asset contract audit', () => {
     await writeFile(join(workspace, 'src', 'level.ts'), 'export const level = true')
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
       version: 5,
-      project_target: { asset_format_capabilities: ['glb'], resource_library_usage: 'preferred' },
+      project_target: { asset_format_capabilities: ['glb'], resource_library_usage: 'preferred', runtime_asset_root: 'assets/library' },
       requirements: [{ id: 'playable-level', required: true, status: 'satisfied', satisfied_by: { composition_ids: ['level-one'] } }],
       imports: [
         { id: 'ground', source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'ground', element_path: 'ground.glb' }, status: 'referenced', root_path: 'assets/library/ground.glb', local_files: ['assets/library/ground.glb'], selected_at: 'now', selection_reason: ['Fits the approved composition'], usage_evidence: { references: ['src/level.ts'] } },
@@ -148,6 +148,55 @@ describe('asset contract audit', () => {
       'root: A referenced import must include usage_evidence.',
       'Composition cycle is not allowed: a -> b -> a',
     ]))
+  })
+
+  test('rejects a current contract whose responsibilities were all downgraded to optional', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-all-optional-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [
+        { id: 'current-responsibility-a', required: false, status: 'satisfied', satisfied_by: { project_references: ['assets/asset-manifest.json'] } },
+        { id: 'current-responsibility-b', required: false, status: 'blocked' },
+      ],
+      imports: [],
+      compositions: [],
+    }))
+
+    expect(auditAssetContract(workspace).issues).toContain(
+      'requirements cannot all be optional. Keep committed delivery responsibilities required and move genuinely optional or future work out of the current contract.',
+    )
+  })
+
+  test('requires library imports to stay under the declared target-native asset root', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-runtime-root-'))
+    await mkdir(join(workspace, 'inventory'), { recursive: true })
+    await writeFile(join(workspace, 'inventory', 'model.glb'), 'glTF')
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'preferred',
+        runtime_asset_root: 'runtime/assets',
+      },
+      requirements: [],
+      imports: [{
+        id: 'model',
+        source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'model', element_path: 'model.glb' },
+        status: 'available',
+        root_path: 'inventory/model.glb',
+        local_files: ['inventory/model.glb'],
+        selected_at: 'now',
+        selection_reason: ['Selected by the native agent'],
+      }],
+      compositions: [],
+    }))
+
+    expect(auditAssetContract(workspace).issues).toContain(
+      'model: Imported root is outside project_target.runtime_asset_root: inventory/model.glb',
+    )
   })
 
   test('does not let a copied library element satisfy a game requirement by itself', async () => {

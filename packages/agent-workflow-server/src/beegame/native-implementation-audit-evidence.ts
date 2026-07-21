@@ -69,6 +69,26 @@ type NativeImplementationAuditTerminal = {
   createdAt: string
 }
 
+type NativeImplementationAuditInterruption = {
+  version: 3
+  kind: 'interruption'
+  sessionId: string
+  toolUseID: string
+  auditorId: string
+  reason: 'session_recovered' | 'session_stopped'
+  createdAt: string
+}
+
+type NativeImplementationAuditInvalidResult = {
+  version: 3
+  kind: 'invalid-result'
+  sessionId: string
+  toolUseID: string
+  auditorId: string
+  reason: string
+  createdAt: string
+}
+
 export type NativeImplementationAuditEvidence = {
   version: 3
   kind: 'result'
@@ -93,6 +113,8 @@ type NativeImplementationAuditObservation =
   | NativeImplementationAuditDispatch
   | NativeImplementationAuditBackgroundTask
   | NativeImplementationAuditTerminal
+  | NativeImplementationAuditInterruption
+  | NativeImplementationAuditInvalidResult
   | NativeImplementationAuditEvidence
 
 /**
@@ -125,9 +147,7 @@ export function observeNativeImplementationAuditToolEvent(input: {
     const duplicateActiveAudit = observations.some(observation =>
       observation.kind === 'dispatch' &&
       observation.workspaceDigest === workspaceDigest &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
-      )
+      !isClosed(observations, observation.toolUseID)
     )
     if (duplicateActiveAudit) return
     appendObservation(input.dataRoot, input.sessionId, {
@@ -154,11 +174,19 @@ export function observeNativeImplementationAuditToolEvent(input: {
   }
   appendTerminal(input, toolUseID, 'completed')
   const report = parseReport(output, input.workspacePath, Boolean(nativeResult))
-  if (report && hasCompletedNativeDeliveryContract({
+  if (!report) {
+    appendInvalidResult(input, toolUseID, 'terminal_result_invalid')
+    return
+  }
+  if (!hasCompletedNativeDeliveryContract({
     dataRoot: input.dataRoot,
     sessionId: input.sessionId,
     agentToolUseID: dispatch.toolUseID,
-  })) appendResult(input, dispatch, report)
+  })) {
+    appendInvalidResult(input, toolUseID, 'delivery_contract_not_observed')
+    return
+  }
+  appendResult(input, dispatch, report)
 }
 
 /** Passively persists a native terminal background notification. */
@@ -179,13 +207,52 @@ export function observeNativeImplementationAuditTaskNotification(input: {
   const dispatch = findDispatch(input.dataRoot, input.sessionId, terminal.toolUseId)
   if (!dispatch) return
   appendTerminal(input, terminal.toolUseId, terminal.status)
-  if (terminal.status !== 'completed' || !terminal.result) return
+  if (terminal.status !== 'completed') {
+    appendInvalidResult(input, terminal.toolUseId, `native_task_${terminal.status}`)
+    return
+  }
+  if (!terminal.result) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_missing')
+    return
+  }
   const report = parseReport(terminal.result, input.workspacePath, true)
-  if (report && hasCompletedNativeDeliveryContract({
+  if (!report) {
+    appendInvalidResult(input, terminal.toolUseId, 'terminal_result_invalid')
+    return
+  }
+  if (!hasCompletedNativeDeliveryContract({
     dataRoot: input.dataRoot,
     sessionId: input.sessionId,
     agentToolUseID: dispatch.toolUseID,
-  })) appendResult(input, dispatch, report)
+  })) {
+    appendInvalidResult(input, terminal.toolUseId, 'delivery_contract_not_observed')
+    return
+  }
+  appendResult(input, dispatch, report)
+}
+
+/** Records only that the native worker which owned an unfinished audit ended. */
+export function interruptUnfinishedNativeImplementationAudits(input: {
+  dataRoot: string
+  sessionId: string
+  reason: NativeImplementationAuditInterruption['reason']
+  createdAt: Date
+}): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  for (const dispatch of observations.filter(
+    (item): item is NativeImplementationAuditDispatch => item.kind === 'dispatch',
+  )) {
+    if (isClosed(observations, dispatch.toolUseID)) continue
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 3,
+      kind: 'interruption',
+      sessionId: input.sessionId,
+      toolUseID: dispatch.toolUseID,
+      auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
+      reason: input.reason,
+      createdAt: input.createdAt.toISOString(),
+    })
+  }
 }
 
 export function getObservedNativeImplementationAudit(input: {
@@ -195,6 +262,8 @@ export function getObservedNativeImplementationAudit(input: {
 }):
   | { state: 'missing' }
   | { state: 'running'; toolUseID: string; workspaceDigest: string; createdAt: string }
+  | { state: 'interrupted'; toolUseID: string; reason: NativeImplementationAuditInterruption['reason']; createdAt: string }
+  | { state: 'invalid'; toolUseID: string; reason: string; createdAt: string }
   | { state: 'stale'; evidence: NativeImplementationAuditEvidence }
   | { state: 'current'; evidence: NativeImplementationAuditEvidence } {
   const workspaceDigest = digestWorkspace(input.workspacePath)
@@ -203,12 +272,7 @@ export function getObservedNativeImplementationAudit(input: {
     (item): item is NativeImplementationAuditDispatch =>
       item.kind === 'dispatch' &&
       item.workspaceDigest === workspaceDigest &&
-      !observations.some(result =>
-        result.kind === 'result' && result.toolUseID === item.toolUseID
-      ) &&
-      !observations.some(terminal =>
-        terminal.kind === 'terminal' && terminal.toolUseID === item.toolUseID
-      ),
+      !isClosed(observations, item.toolUseID),
   ).at(-1)
   if (running) return {
     state: 'running',
@@ -219,10 +283,65 @@ export function getObservedNativeImplementationAudit(input: {
   const latest = observations.filter(
     (item): item is NativeImplementationAuditEvidence => item.kind === 'result',
   ).at(-1)
-  if (!latest) return { state: 'missing' }
+  if (!latest) {
+    const invalid = observations.filter(
+      (item): item is NativeImplementationAuditInvalidResult =>
+        item.kind === 'invalid-result',
+    ).at(-1)
+    if (invalid) return {
+      state: 'invalid',
+      toolUseID: invalid.toolUseID,
+      reason: invalid.reason,
+      createdAt: invalid.createdAt,
+    }
+    const interrupted = observations.filter(
+      (item): item is NativeImplementationAuditInterruption =>
+        item.kind === 'interruption',
+    ).at(-1)
+    if (interrupted) return {
+      state: 'interrupted',
+      toolUseID: interrupted.toolUseID,
+      reason: interrupted.reason,
+      createdAt: interrupted.createdAt,
+    }
+    return { state: 'missing' }
+  }
   return latest.workspaceDigest === workspaceDigest
     ? { state: 'current', evidence: latest }
     : { state: 'stale', evidence: latest }
+}
+
+function appendInvalidResult(
+  input: { dataRoot: string; sessionId: string; createdAt: Date },
+  toolUseID: string,
+  reason: string,
+): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (observations.some(item =>
+    item.kind === 'invalid-result' && item.toolUseID === toolUseID
+  )) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 3,
+    kind: 'invalid-result',
+    sessionId: input.sessionId,
+    toolUseID,
+    auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
+    reason,
+    createdAt: input.createdAt.toISOString(),
+  })
+}
+
+function isClosed(
+  observations: NativeImplementationAuditObservation[],
+  toolUseID: string,
+): boolean {
+  return observations.some(item =>
+    item.toolUseID === toolUseID &&
+    (item.kind === 'terminal' ||
+      item.kind === 'result' ||
+      item.kind === 'interruption' ||
+      item.kind === 'invalid-result')
+  )
 }
 
 export function recordNativeImplementationAuditReportForTest(input: {

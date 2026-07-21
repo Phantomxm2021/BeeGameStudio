@@ -173,8 +173,50 @@ describe('native Resource Library evidence', () => {
       workspacePath: '/workspace',
     })).toMatchObject({
       actions: ['import_elements'],
+      failedActions: ['import_elements'],
       successfulImportCount: 1,
       failedImportCount: 1,
+    })
+  })
+
+  test('clears only the failed import ids that a later retry actually imports', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    const observeImport = (toolUseID: string, data: Record<string, unknown>, createdAt: string) =>
+      observeNativeResourceLibraryToolEvent({
+        dataRoot,
+        sessionId: 'session-a',
+        workspacePath: '/workspace',
+        eventType: 'tool.completed',
+        payload: {
+          toolName: 'ResourceLibrary',
+          toolUseID,
+          input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }, { import_id: 'asset-b' }] },
+          output: JSON.stringify({ data }),
+        },
+        createdAt: new Date(createdAt),
+      })
+    observeImport('partial-import', {
+      imported_count: 1,
+      failed_count: 1,
+      imported: [{ import_id: 'asset-a' }],
+      failures: [{ import_ids: ['asset-b'] }],
+    }, '2026-07-19T00:00:00.000Z')
+    observeImport('retry-import', {
+      imported_count: 1,
+      failed_count: 0,
+      imported: [{ import_id: 'asset-b' }],
+      failures: [],
+    }, '2026-07-19T00:01:00.000Z')
+
+    expect(getObservedNativeResourceLibraryEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+    })).toMatchObject({
+      actions: ['import_elements'],
+      failedActions: [],
+      successfulImportCount: 2,
+      failedImportCount: 0,
     })
   })
 

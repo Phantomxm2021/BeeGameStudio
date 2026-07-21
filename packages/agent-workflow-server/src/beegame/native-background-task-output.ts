@@ -39,10 +39,25 @@ export function parseNativeBackgroundTaskLaunch(
     if (separator < 0) continue
     const field = rawLine.slice(0, separator).trim()
     const value = rawLine.slice(separator + 1).trim()
-    if (field === 'agentId') taskId = value
+    // Claude Code may append a human-readable explanation after the opaque id,
+    // for example `agentId: abc123 (internal ID - do not mention ...)`. Only
+    // the first non-whitespace token is the native task identity. Keeping the
+    // annotation creates a second, impossible task that can never match the
+    // later task_started/task_notification SDK events.
+    if (field === 'agentId') taskId = firstToken(value)
     else if (field === 'output_file') outputFile = value
   }
   return taskId && outputFile ? { taskId, outputFile } : undefined
+}
+
+function firstToken(value: string): string {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code === 9 || code === 10 || code === 13 || code === 32) {
+      return value.slice(0, index)
+    }
+  }
+  return value
 }
 
 /**
