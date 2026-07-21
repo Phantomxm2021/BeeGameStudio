@@ -28,6 +28,9 @@ COPY packages/agent-workflow/package.json ./packages/agent-workflow/package.json
 COPY packages/audio-capture-napi/package.json ./packages/audio-capture-napi/package.json
 COPY packages/beegame-billing-core/package.json ./packages/beegame-billing-core/package.json
 COPY packages/beegame-billing-server/package.json ./packages/beegame-billing-server/package.json
+COPY packages/beegame-resource-core/package.json ./packages/beegame-resource-core/package.json
+COPY packages/beegame-resource-server/package.json ./packages/beegame-resource-server/package.json
+COPY packages/beegame-security-core/package.json ./packages/beegame-security-core/package.json
 COPY packages/beegame-skills-core/package.json ./packages/beegame-skills-core/package.json
 COPY packages/beegame-skills-server/package.json ./packages/beegame-skills-server/package.json
 COPY packages/builtin-tools/package.json ./packages/builtin-tools/package.json
