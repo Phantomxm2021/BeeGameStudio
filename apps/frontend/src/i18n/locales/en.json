@@ -22,7 +22,13 @@
         "notes": "Notes",
         "presentation": "Presentation",
         "type": "Type",
+        "resourceLibrary": "Resource Library usage",
         "selectPlaceholder": "Choose"
+      },
+      "resourceLibraryUsage": {
+        "optional": "Use when helpful",
+        "preferred": "Prefer Resource Library",
+        "required": "Require Resource Library"
       },
       "actions": {
         "chooseAgain": "Choose again",
@@ -680,6 +686,10 @@
       "useGdd": "Use GDD value",
       "useImage": "Use image value",
       "useCustom": "Use custom value",
+      "resourceLibrary": "Resource Library usage",
+      "resourcePreferred": "Prefer Resource Library",
+      "resourceOptional": "Use Resource Library when helpful",
+      "resourceRequired": "Require Resource Library",
       "retry": "Retry analysis",
       "preparing": "Preparing build…",
       "confirm": "Confirm and build"

@@ -22,7 +22,13 @@
         "notes": "补充说明",
         "presentation": "表现",
         "type": "类型",
+        "resourceLibrary": "资源库使用方式",
         "selectPlaceholder": "请选择"
+      },
+      "resourceLibraryUsage": {
+        "optional": "按需使用",
+        "preferred": "优先使用",
+        "required": "必须使用"
       },
       "actions": {
         "chooseAgain": "重新选择",
@@ -680,6 +686,10 @@
       "useGdd": "使用 GDD 内容",
       "useImage": "使用图片推断",
       "useCustom": "使用自定义内容",
+      "resourceLibrary": "资源库使用方式",
+      "resourcePreferred": "优先使用资源库",
+      "resourceOptional": "适合时使用资源库",
+      "resourceRequired": "必须使用资源库",
       "retry": "重新分析",
       "preparing": "准备构建中…",
       "confirm": "确认并构建"

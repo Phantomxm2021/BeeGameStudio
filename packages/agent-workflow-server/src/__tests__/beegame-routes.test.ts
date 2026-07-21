@@ -1934,7 +1934,7 @@ describe('beegame session routes', () => {
           brief: {
             idea: 'A confirmed product brief',
             option: { id: 'selected-option', title: 'Selected option' },
-            settings: { dimension: '3D' },
+            settings: { dimension: '3D', resourceLibraryUsage: 'preferred' },
           },
         }),
       })
@@ -2505,10 +2505,11 @@ describe('beegame session routes', () => {
           }),
         },
       )
-      expect(withoutResourcePreference.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 3)
-      const secondSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
-      expect(secondSubmitted).toContain('"resource_library_usage": "preferred"')
+      expect(withoutResourcePreference.status).toBe(400)
+      expect(await withoutResourcePreference.json()).toEqual({
+        error: 'Confirmed brief must explicitly select resourceLibraryUsage',
+      })
+      expect(fake.runtimes[0]?.submits).toHaveLength(2)
 
       const explicitlyOptional = await app.request(
         `/api/beegame-sessions/${session.id}/confirmed-brief`,
@@ -2526,8 +2527,8 @@ describe('beegame session routes', () => {
         },
       )
       expect(explicitlyOptional.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 4)
-      const thirdSubmitted = String(fake.runtimes[0]?.submits[3]?.prompt ?? '')
+      await waitFor(() => fake.runtimes[0]?.submits.length === 3)
+      const thirdSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
       expect(thirdSubmitted).toContain('"resource_library_usage": "optional"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -6678,7 +6679,9 @@ describe('beegame session routes', () => {
 
       expect(assetsRes.status).toBe(400)
       expect(await assetsRes.json()).toEqual(expect.objectContaining({
-        error: 'Request failed',
+        error: 'Invalid asset manifest',
+        code: 'invalid_asset_manifest',
+        issues: expect.any(Array),
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })

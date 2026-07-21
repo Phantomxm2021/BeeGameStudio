@@ -217,7 +217,7 @@ export type BeeGameIntakeSettings = {
   inputs: string[];
   scope: string;
   notes?: string;
-  resourceLibraryUsage?: 'optional' | 'preferred' | 'required';
+  resourceLibraryUsage: 'optional' | 'preferred' | 'required';
 };
 
 export type BeeGameBuildBrief = {
@@ -349,13 +349,7 @@ export const beeGameAdapter = {
     const title = getBriefDisplayTitle(data);
     const folderName = getBriefFolderName(data, title);
     const project = createLocalProject(title);
-    const language = normalizeBeeGameLanguage(data.language, [
-      data.idea,
-      data.option.title,
-      data.option.pitch,
-      data.option.gameplay,
-      data.settings.notes ?? '',
-    ].join('\n'));
+    const language = normalizeBeeGameLanguage(data.language ?? getCurrentUiLanguage());
     const bootstrap = await postJson<{
       project: Project;
       session: BeeGameSession;
@@ -420,7 +414,7 @@ export const beeGameAdapter = {
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
-    const language = resolveProjectSessionLanguage(data.project_id, data.content);
+    const language = resolveProjectSessionLanguage(data.project_id);
     await sendBeeGameInput(session.id, data.content, {
       clientMessageId: data.client_message_id,
       supersedesMessageId: data.supersedes_message_id,
@@ -438,7 +432,7 @@ export const beeGameAdapter = {
   async continueTask(data: { project_id: string; task_id?: string }): Promise<ContinueTaskResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
-    const language = resolveProjectSessionLanguage(data.project_id, '');
+    const language = resolveProjectSessionLanguage(data.project_id);
     await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/continue`, {
       language,
     });
@@ -456,7 +450,7 @@ export const beeGameAdapter = {
     kind: 'build_error_repair' | 'deployment_failure_repair';
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
-    const language = resolveProjectSessionLanguage(data.project_id, '');
+    const language = resolveProjectSessionLanguage(data.project_id);
     await postJson(`/api/beegame-sessions/${encodeURIComponent(handle.session.id)}/action`, {
       kind: data.kind,
       language,
@@ -1832,7 +1826,7 @@ function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption
   };
 }
 
-function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): BeeGameLanguage {
+function normalizeBeeGameLanguage(language: string | undefined): BeeGameLanguage {
   const normalized = String(language || '').trim();
   if (normalized === 'zh-TW' || normalized === 'zh-HK') return 'zh-TW';
   if (normalized === 'zh' || normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh';
@@ -1844,26 +1838,17 @@ function normalizeBeeGameLanguage(language: string | undefined, fallbackText: st
   if (normalized === 'it' || normalized.startsWith('it-')) return 'it';
   if (normalized === 'pt' || normalized.startsWith('pt-')) return 'pt';
   if (normalized === 'en' || normalized.startsWith('en-')) return 'en';
-  return containsCjk(fallbackText) ? 'zh' : 'en';
+  return 'zh';
 }
 
 function getCurrentUiLanguage(): BeeGameLanguage {
   const language = String(localStorage.getItem('i18nextLng') || 'zh').trim();
-  return normalizeBeeGameLanguage(language, '');
+  return normalizeBeeGameLanguage(language);
 }
 
-function resolveProjectSessionLanguage(
-  projectId: string,
-  fallbackText: string,
-): BeeGameLanguage {
+function resolveProjectSessionLanguage(projectId: string): BeeGameLanguage {
   return getBinding(projectId)?.language ??
-    (fallbackText
-      ? normalizeBeeGameLanguage(undefined, fallbackText)
-      : normalizeBeeGameLanguage(getCurrentUiLanguage(), ''));
-}
-
-function containsCjk(text: string): boolean {
-  return /[\u3400-\u9fff\uf900-\ufaff]/.test(text);
+    normalizeBeeGameLanguage(getCurrentUiLanguage());
 }
 
 function resolveSentDisplayText(sessionId: string, transportText: string): string {
@@ -2122,12 +2107,10 @@ const BEEGAME_INTAKE_JOB_MAX_RETRY_INTERVAL_MS = 10_000;
 const BEEGAME_INTAKE_JOB_RECOVERABLE_STATUSES = new Set([408, 429, 502, 503, 504]);
 
 function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdeaIntakeRequest {
-  const language = data.language
-    ? normalizeBeeGameLanguage(data.language, data.idea)
-    : undefined;
+  const language = normalizeBeeGameLanguage(data.language ?? getCurrentUiLanguage());
   return {
     idea: data.idea,
-    ...(language ? { language } : {}),
+    language,
     clientRequestId: data.clientRequestId ?? createClientRequestId(),
   };
 }

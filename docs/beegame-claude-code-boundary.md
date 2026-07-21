@@ -43,8 +43,19 @@ BeeGame may transmit only user-authorized intent:
 - Diagnostics attached to an explicit user action such as “repair build” or
   “repair deployment”.
 - The user's selected response, document and player-visible language.
+- The native delivery Skill entrypoint when the user explicitly starts BeeGame's
+  complete-game delivery workflow. Selecting that product workflow authorizes
+  loading its delivery contract; it does not authorize BeeGame to choose the
+  Skill's tools, subagents, implementation plan or repair sequence.
 
 These prompts must not prescribe Claude Code's internal workflow.
+
+The complete-game delivery entrypoint is not an administrator feature default
+or an inferred Agent choice. It is the native workflow the user selected by
+confirming a full game build. BeeGame may expose and name that entrypoint in the
+submitted prompt, just as a user can invoke a Skill in Claude Code TUI. After
+the entrypoint is loaded, Claude Code exclusively owns planning, Skill/tool and
+subagent selection, validation timing, repair and completion.
 
 Enabling a capability in administrator settings only makes that capability
 available. It must not silently become a project preference, an Agent choice,

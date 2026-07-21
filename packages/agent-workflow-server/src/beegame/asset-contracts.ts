@@ -178,6 +178,15 @@ export type BeeGameAssetUploadResult = {
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 export const CURRENT_ASSET_MANIFEST_VERSION = 5
 
+export class BeeGameAssetManifestError extends Error {
+  readonly code = 'invalid_asset_manifest'
+
+  constructor(readonly issues: string[]) {
+    super(`Invalid canonical asset manifest: ${issues.join(' ')}`)
+    this.name = 'BeeGameAssetManifestError'
+  }
+}
+
 /**
  * The single authoring example exposed to Claude Code. It intentionally
  * describes responsibilities, imported inventory, and target-native
@@ -238,8 +247,13 @@ export async function readBeeGameAssetManifest(
   if (!existsSync(manifestPath)) {
     return { version: CURRENT_ASSET_MANIFEST_VERSION, requirements: [] }
   }
-  const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  return reconcileAssetContractFiles(root, normalizeBeeGameAssetManifest(parsed))
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  } catch {
+    throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
+  }
+  return reconcileAssetContractFiles(root, parseCanonicalBeeGameAssetManifest(parsed))
 }
 
 export async function uploadBeeGameAsset(
@@ -596,6 +610,267 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
     imports: explicitImports,
     compositions: normalizeAssetCompositions(record.compositions),
   }
+}
+
+/**
+ * Parses the current authoring contract without repairing or dropping data.
+ * Runtime callers must use this parser. The normalizer remains available only
+ * for explicit offline migration and non-authoritative historical snapshots.
+ */
+export function parseCanonicalBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
+  const issues = canonicalManifestShapeIssues(value)
+  if (issues.length) {
+    throw new BeeGameAssetManifestError(issues)
+  }
+  return value as BeeGameAssetManifest
+}
+
+function canonicalManifestShapeIssues(value: unknown): string[] {
+  if (!objectValue(value)) return ['root must be an object.']
+  const record = value as Record<string, unknown>
+  const issues: string[] = []
+  if (record.version !== CURRENT_ASSET_MANIFEST_VERSION) {
+    issues.push(`version must be ${CURRENT_ASSET_MANIFEST_VERSION}.`)
+  }
+  if (!objectValue(record.project_target)) issues.push('project_target must be an object.')
+  if (!Array.isArray(record.requirements)) issues.push('requirements must be an array.')
+  if (!Array.isArray(record.imports)) issues.push('imports must be an array.')
+  if (record.compositions !== undefined && !Array.isArray(record.compositions)) {
+    issues.push('compositions must be an array when present.')
+  }
+  if (issues.length) return issues
+
+  try {
+    assertNoLegacyManifestFields(record)
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : 'legacy fields require explicit offline migration.')
+  }
+  validateCanonicalProjectTarget(record.project_target as Record<string, unknown>, issues)
+  ;(record.requirements as unknown[]).forEach((entry, index) => {
+    validateCanonicalRequirement(entry, `requirements[${index}]`, issues)
+  })
+  ;(record.imports as unknown[]).forEach((entry, index) => {
+    validateCanonicalImport(entry, `imports[${index}]`, issues)
+  })
+  ;((record.compositions as unknown[] | undefined) ?? []).forEach((entry, index) => {
+    validateCanonicalComposition(entry, `compositions[${index}]`, issues)
+  })
+  return issues
+}
+
+function validateCanonicalProjectTarget(record: Record<string, unknown>, issues: string[]): void {
+  validateOptionalString(record.platform, 'project_target.platform', issues)
+  validateOptionalString(record.runtime, 'project_target.runtime', issues)
+  validateOptionalString(record.mcp_server, 'project_target.mcp_server', issues)
+  validateOptionalString(record.runtime_asset_root, 'project_target.runtime_asset_root', issues)
+  validateOptionalEnum(record.integration_mode, ['filesystem', 'mcp', 'manual'], 'project_target.integration_mode', issues)
+  validateOptionalEnum(record.resource_library_usage, RESOURCE_LIBRARY_USAGE, 'project_target.resource_library_usage', issues)
+  validateStringArray(record.asset_format_capabilities, 'project_target.asset_format_capabilities', issues, true, true)
+}
+
+function validateCanonicalRequirement(value: unknown, path: string, issues: string[]): void {
+  const record = objectValue(value)
+  if (!record) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  validateCanonicalRequirementId(record.id, `${path}.id`, issues)
+  validateOptionalString(record.name, `${path}.name`, issues)
+  validateOptionalString(record.purpose, `${path}.purpose`, issues)
+  if (record.required !== undefined && typeof record.required !== 'boolean') issues.push(`${path}.required must be a boolean.`)
+  validateOptionalEnum(record.status, ['planned', 'satisfied', 'blocked'], `${path}.status`, issues)
+  if (record.resource_requirement !== undefined) {
+    const requirement = objectValue(record.resource_requirement)
+    if (!requirement) issues.push(`${path}.resource_requirement must be an object.`)
+    else validateCanonicalResourceRequirement(requirement, `${path}.resource_requirement`, issues)
+  }
+  if (record.satisfied_by !== undefined) {
+    const satisfiedBy = objectValue(record.satisfied_by)
+    if (!satisfiedBy) issues.push(`${path}.satisfied_by must be an object.`)
+    else {
+      validateStringArray(satisfiedBy.import_ids, `${path}.satisfied_by.import_ids`, issues)
+      validateStringArray(satisfiedBy.composition_ids, `${path}.satisfied_by.composition_ids`, issues)
+      validateStringArray(satisfiedBy.project_references, `${path}.satisfied_by.project_references`, issues)
+    }
+  }
+}
+
+function validateCanonicalResourceRequirement(record: Record<string, unknown>, path: string, issues: string[]): void {
+  validateOptionalEnum(record.category, RESOURCE_CATEGORIES, `${path}.category`, issues)
+  validateOptionalEnum(record.dimension, ['2D', '3D', 'agnostic'], `${path}.dimension`, issues)
+  validateOptionalString(record.purpose, `${path}.purpose`, issues)
+  validateStringArray(record.accepted_formats, `${path}.accepted_formats`, issues)
+  validateStringArray(record.styles, `${path}.styles`, issues)
+  validateStringArray(record.game_types, `${path}.game_types`, issues)
+  validateEnumArray(record.tags, RESOURCE_USAGE_TAGS, `${path}.tags`, issues)
+  validateEnumArray(record.asset_kinds, RESOURCE_ASSET_KINDS, `${path}.asset_kinds`, issues)
+  validateEnumArray(record.capabilities, RESOURCE_CAPABILITIES, `${path}.capabilities`, issues)
+  validateObjectArray(record.subresources, `${path}.subresources`, issues, (entry, itemPath) => {
+    validateOptionalEnum(entry.kind, RESOURCE_EMBEDDED_COMPONENT_KINDS, `${itemPath}.kind`, issues, true)
+    validateOptionalString(entry.role, `${itemPath}.role`, issues)
+    validateOptionalString(entry.skeleton_signature, `${itemPath}.skeleton_signature`, issues)
+  })
+  validateObjectArray(record.relations, `${path}.relations`, issues, (entry, itemPath) => {
+    validateOptionalEnum(entry.kind, RESOURCE_RELATION_KINDS, `${itemPath}.kind`, issues, true)
+    validateOptionalString(entry.target_element_id, `${itemPath}.target_element_id`, issues)
+    validateOptionalString(entry.role, `${itemPath}.role`, issues)
+  })
+}
+
+function validateCanonicalImport(value: unknown, path: string, issues: string[]): void {
+  const record = objectValue(value)
+  if (!record) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  validateRequiredString(record.id, `${path}.id`, issues)
+  validateOptionalEnum(record.status, ['available', 'referenced', 'failed'], `${path}.status`, issues, true)
+  validateRequiredString(record.root_path, `${path}.root_path`, issues)
+  validateRequiredString(record.selected_at, `${path}.selected_at`, issues)
+  validateStringArray(record.local_files, `${path}.local_files`, issues, true, true)
+  validateStringArray(record.selection_reason, `${path}.selection_reason`, issues, true)
+  validateOptionalString(record.asset_kind, `${path}.asset_kind`, issues)
+  validateStringArray(record.capabilities, `${path}.capabilities`, issues)
+  validateOptionalString(record.error, `${path}.error`, issues)
+  const source = objectValue(record.source)
+  if (!source) issues.push(`${path}.source must be an object.`)
+  else {
+    validateOptionalEnum(source.type, ['resource-library', 'user-upload', 'project-authored'], `${path}.source.type`, issues, true)
+    for (const field of ['pack_id', 'pack_version', 'element_id', 'element_path']) {
+      validateOptionalString(source[field], `${path}.source.${field}`, issues)
+    }
+    if (source.type === 'resource-library') {
+      validateRequiredString(source.pack_id, `${path}.source.pack_id`, issues)
+      validateRequiredString(source.pack_version, `${path}.source.pack_version`, issues)
+      validateRequiredString(source.element_id, `${path}.source.element_id`, issues)
+      validateRequiredString(source.element_path, `${path}.source.element_path`, issues)
+    }
+  }
+  validateObjectArray(record.dependencies, `${path}.dependencies`, issues, (entry, itemPath) => {
+    for (const field of ['key', 'parent_key', 'element_id', 'element_path', 'reference_path', 'local_path']) {
+      validateRequiredString(entry[field], `${itemPath}.${field}`, issues)
+    }
+    validateOptionalString(entry.kind, `${itemPath}.kind`, issues)
+  })
+  if (record.usage_evidence !== undefined) {
+    const evidence = objectValue(record.usage_evidence)
+    if (!evidence) issues.push(`${path}.usage_evidence must be an object.`)
+    else {
+      validateStringArray(evidence.references, `${path}.usage_evidence.references`, issues)
+      validateStringArray(evidence.runtime_event_ids, `${path}.usage_evidence.runtime_event_ids`, issues)
+    }
+  }
+  if (record.content_profile !== undefined && !objectValue(record.content_profile)) issues.push(`${path}.content_profile must be an object.`)
+  if (record.technical_facts !== undefined && !isPrimitiveValueRecord(record.technical_facts)) {
+    issues.push(`${path}.technical_facts must contain only finite string, number, or boolean values.`)
+  }
+}
+
+function validateCanonicalComposition(value: unknown, path: string, issues: string[]): void {
+  const record = objectValue(value)
+  if (!record) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  validateRequiredString(record.id, `${path}.id`, issues)
+  validateOptionalEnum(record.kind, RESOURCE_COMPOSITION_KINDS, `${path}.kind`, issues, true)
+  validateOptionalEnum(record.assembly_mode, ['direct', 'composed'], `${path}.assembly_mode`, issues)
+  validateOptionalEnum(record.status, ['planned', 'assembled', 'integrated', 'failed'], `${path}.status`, issues)
+  if (record.required !== undefined && typeof record.required !== 'boolean') issues.push(`${path}.required must be a boolean.`)
+  validateObjectArray(record.members, `${path}.members`, issues, (entry, itemPath) => {
+    const references = ['import_id', 'requirement_id', 'composition_id'].filter(field => typeof entry[field] === 'string' && Boolean(String(entry[field]).trim()))
+    if (!references.length) issues.push(`${itemPath} must identify an import, requirement, or composition.`)
+    for (const field of ['import_id', 'requirement_id', 'composition_id']) validateOptionalString(entry[field], `${itemPath}.${field}`, issues)
+    validateRequiredString(entry.role, `${itemPath}.role`, issues)
+    if (entry.required !== undefined && typeof entry.required !== 'boolean') issues.push(`${itemPath}.required must be a boolean.`)
+  }, true)
+  for (const field of ['recipe', 'integration_evidence'] as const) {
+    if (record[field] !== undefined && !objectValue(record[field])) issues.push(`${path}.${field} must be an object.`)
+  }
+  const recipe = objectValue(record.recipe)
+  if (recipe) {
+    validateOptionalString(recipe.path, `${path}.recipe.path`, issues)
+    validateOptionalString(recipe.notes, `${path}.recipe.notes`, issues)
+  }
+  const evidence = objectValue(record.integration_evidence)
+  if (evidence) {
+    validateStringArray(evidence.references, `${path}.integration_evidence.references`, issues)
+    validateStringArray(evidence.runtime_event_ids, `${path}.integration_evidence.runtime_event_ids`, issues)
+  }
+}
+
+function validateCanonicalRequirementId(value: unknown, path: string, issues: string[]): void {
+  validateRequiredString(value, path, issues)
+  if (typeof value === 'string' && value === value.trim() && normalizeImportId(value) !== value) {
+    issues.push(`${path} contains characters that are not allowed in a canonical requirement id.`)
+  }
+}
+
+function validateRequiredString(value: unknown, path: string, issues: string[]): void {
+  if (typeof value !== 'string' || !value.trim() || value !== value.trim()) issues.push(`${path} must be a trimmed non-empty string.`)
+}
+
+function validateOptionalString(value: unknown, path: string, issues: string[]): void {
+  if (value !== undefined && (typeof value !== 'string' || !value.trim() || value !== value.trim())) issues.push(`${path} must be a trimmed non-empty string when present.`)
+}
+
+function validateOptionalEnum(
+  value: unknown,
+  allowed: readonly string[],
+  path: string,
+  issues: string[],
+  required = false,
+): void {
+  if (value === undefined && !required) return
+  if (typeof value !== 'string' || !allowed.includes(value)) issues.push(`${path} must be one of ${allowed.join(', ')}.`)
+}
+
+function validateStringArray(
+  value: unknown,
+  path: string,
+  issues: string[],
+  required = false,
+  nonEmpty = false,
+): void {
+  if (value === undefined && !required) return
+  if (!Array.isArray(value) || (nonEmpty && value.length === 0) || value.some(entry => typeof entry !== 'string' || !entry.trim() || entry !== entry.trim())) {
+    issues.push(`${path} must be an array of non-empty strings.`)
+  }
+}
+
+function isPrimitiveValueRecord(value: unknown): boolean {
+  const record = objectValue(value)
+  return Boolean(record) && Object.values(record!).every(entry =>
+    typeof entry === 'string' ||
+    typeof entry === 'boolean' ||
+    (typeof entry === 'number' && Number.isFinite(entry)),
+  )
+}
+
+function validateEnumArray(value: unknown, allowed: readonly string[], path: string, issues: string[]): void {
+  if (value === undefined) return
+  if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string' || !allowed.includes(entry))) {
+    issues.push(`${path} must contain only ${allowed.join(', ')}.`)
+  }
+}
+
+function validateObjectArray(
+  value: unknown,
+  path: string,
+  issues: string[],
+  validate: (entry: Record<string, unknown>, path: string) => void,
+  required = false,
+): void {
+  if (value === undefined && !required) return
+  if (!Array.isArray(value)) {
+    issues.push(`${path} must be an array.`)
+    return
+  }
+  value.forEach((entry, index) => {
+    const record = objectValue(entry)
+    if (!record) issues.push(`${path}[${index}] must be an object.`)
+    else validate(record, `${path}[${index}]`)
+  })
 }
 
 function assertNoLegacyManifestFields(record: Record<string, unknown>): void {

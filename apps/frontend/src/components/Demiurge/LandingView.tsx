@@ -78,8 +78,10 @@ type IntakeCopy = {
         notes: string;
         presentation: string;
         type: string;
+        resourceLibrary: string;
         selectPlaceholder: string;
     };
+    resourceLibraryUsage: Record<BeeGameIntakeSettings['resourceLibraryUsage'], string>;
     actions: {
         chooseAgain: string;
         confirmBrief: string;
@@ -183,7 +185,13 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         notes: translate('fields.notes'),
         presentation: translate('fields.presentation'),
         type: translate('fields.type'),
+        resourceLibrary: translate('fields.resourceLibrary'),
         selectPlaceholder: translate('fields.selectPlaceholder'),
+    },
+    resourceLibraryUsage: {
+        optional: translate('resourceLibraryUsage.optional'),
+        preferred: translate('resourceLibraryUsage.preferred'),
+        required: translate('resourceLibraryUsage.required'),
     },
     actions: {
         chooseAgain: translate('actions.chooseAgain'),
@@ -307,6 +315,7 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
         .filter(Boolean),
     scope: option.scope || 'Prototype',
     notes: '',
+    resourceLibraryUsage: 'preferred',
 });
 
 const optionsWithCurrentValue = (options: string[], _value: string): string[] => {
@@ -334,7 +343,8 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
         settings.dimension.trim() &&
         settings.genre.trim() &&
         settings.visualStyle.trim() &&
-        settings.inputs.length > 0,
+        settings.inputs.length > 0 &&
+        ['optional', 'preferred', 'required'].includes(settings.resourceLibraryUsage),
     );
 }
 
@@ -342,6 +352,7 @@ function buildAttachmentBrief(
     analysis: AttachmentBuildAnalysis,
     idea: string,
     language: Language,
+    resourceLibraryUsage: BeeGameIntakeSettings['resourceLibraryUsage'],
 ): BeeGameBuildBrief {
     const title = idea.trim() || 'Uploaded game';
     const option = {
@@ -381,7 +392,7 @@ function buildAttachmentBrief(
             genre: '',
             inputs: [],
             scope: option.scope,
-            resourceLibraryUsage: 'preferred',
+            resourceLibraryUsage,
         },
         language,
         documentLanguage: language,
@@ -666,6 +677,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [attachmentBuildPhase, setAttachmentBuildPhase] = useState<AttachmentBuildPhase>('idle');
     const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
     const [attachmentBuildConflictSelections, setAttachmentBuildConflictSelections] = useState<Record<string, 'gdd' | 'image' | 'custom'>>({});
+    const [attachmentResourceLibraryUsage, setAttachmentResourceLibraryUsage] = useState<BeeGameIntakeSettings['resourceLibraryUsage']>('preferred');
     const [isAttachmentBuildSubmitting, setIsAttachmentBuildSubmitting] = useState(false);
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
@@ -1015,7 +1027,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIntakeError(`请先确认冲突字段：${unresolvedConflict.field}`);
             return;
         }
-        const brief = buildAttachmentBrief(attachmentBuildAnalysis, projectName.trim(), lang);
+        const brief = buildAttachmentBrief(attachmentBuildAnalysis, projectName.trim(), lang, attachmentResourceLibraryUsage);
         setIsAttachmentBuildSubmitting(true);
         setIsPreparing(true);
         setIntakeError('');
@@ -1300,7 +1312,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             settings: {
                 ...settings,
                 engine: normalizeEngine(settings.engine),
-                resourceLibraryUsage: settings.resourceLibraryUsage ?? 'preferred',
+                resourceLibraryUsage: settings.resourceLibraryUsage,
             },
             title: selectedOption.title,
             language: lang,
@@ -1809,6 +1821,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 onSelectConflict={(field, choice) => setAttachmentBuildConflictSelections(current => ({ ...current, [field]: choice }))}
                                 onRetry={() => void runAttachmentBuildAnalysis()}
                                 onConfirm={handleConfirmAttachmentBuild}
+                                resourceLibraryUsage={attachmentResourceLibraryUsage}
+                                onResourceLibraryUsageChange={setAttachmentResourceLibraryUsage}
                             />
                         ) : (
                             <div data-testid="attachment-build-analysis" className="type-callout text-zinc-300">
@@ -1888,6 +1902,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         {optionsWithCurrentValue(productionSettingOptions.styles, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
+                                <label className="type-callout text-zinc-300">
+                                    {intakeText.fields.resourceLibrary}
+                                    <select aria-label={intakeText.fields.resourceLibrary} value={settings.resourceLibraryUsage || ''} onChange={(event) => updateSettings({ resourceLibraryUsage: event.target.value as BeeGameIntakeSettings['resourceLibraryUsage'] })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
+                                        {(['preferred', 'optional', 'required'] as const).map(value => <option key={value} value={value}>{intakeText.resourceLibraryUsage[value]}</option>)}
+                                    </select>
+                                </label>
                                 <div ref={inputMenuRef} className="type-callout relative text-zinc-300">
                                     {intakeText.fields.inputs}
                                     <button
@@ -1935,6 +1956,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.type}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.genre)}</dd></div>
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.style}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.visualStyle)}</dd></div>
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.inputs}</dt><dd className="type-callout mt-1 text-white">{localizedInputs(settings.inputs)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.resourceLibrary}</dt><dd className="type-callout mt-1 text-white">{intakeText.resourceLibraryUsage[settings.resourceLibraryUsage]}</dd></div>
                             </dl>
                             {settings.notes ? <p className="type-footnote mt-4 rounded-2xl bg-white/5 p-3 text-zinc-300">{settings.notes}</p> : null}
                             <div className="mt-5 flex flex-wrap justify-end gap-3">

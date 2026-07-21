@@ -829,10 +829,14 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
         fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
         fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
+        const resourceLibrarySelect = screen.getByRole('combobox', { name: '资源库使用方式' });
+        expect(resourceLibrarySelect).toHaveValue('preferred');
+        fireEvent.change(resourceLibrarySelect, { target: { value: 'optional' } });
         fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
         fireEvent.click(screen.getByRole('option', { name: '键鼠' }));
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+        expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('按需使用');
         unmount();
         renderLanding();
 

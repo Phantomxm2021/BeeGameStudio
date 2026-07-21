@@ -21,7 +21,14 @@
         "inputs": "輸入方式",
         "notes": "補充說明",
         "presentation": "表現",
-        "type": "類型"
+        "type": "類型",
+        "resourceLibrary": "資源庫使用方式",
+        "selectPlaceholder": "請選擇"
+      },
+      "resourceLibraryUsage": {
+        "optional": "按需使用",
+        "preferred": "優先使用",
+        "required": "必須使用"
       },
       "actions": {
         "chooseAgain": "重新選擇",

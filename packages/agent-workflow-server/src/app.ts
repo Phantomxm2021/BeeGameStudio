@@ -58,6 +58,7 @@ import {
   type NativeDeliveryEvidenceSummary,
 } from './beegame/native-delivery-state'
 import {
+  BeeGameAssetManifestError,
   readBeeGameAssetManifest,
   toCanonicalBeeGameAssetManifest,
   uploadBeeGameAsset,
@@ -1267,14 +1268,9 @@ export function createAgentWorkflowApp(
         beeGameSessions.metadata(session.id),
       )
 
-      const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
-        brief,
-        'preferred',
-      )
       const confirmedBriefPrompt = buildConfirmedBriefPrompt(
         brief,
         language,
-        resourceLibraryUsage,
       )
       void beeGameSessions.sendWithDisplay(
         session.id,
@@ -2468,6 +2464,21 @@ function tracedRouteError(
   status: 400 | 404 | 500 | 501 = 400,
   publicError = 'Request failed',
 ): Response {
+  if (error instanceof BeeGameAssetManifestError) {
+    const traceId = randomUUID()
+    console.warn('[BeeGame] asset manifest rejected', {
+      traceId,
+      route,
+      cause: error.name,
+      issues: error.issues,
+    })
+    return c.json({
+      error: 'Invalid asset manifest',
+      code: error.code,
+      issues: error.issues,
+      traceId,
+    }, 400)
+  }
   return tracedRouteResponse(route, error, status, publicError, response => c.json(response, status))
 }
 
@@ -4747,14 +4758,9 @@ function registerBeeGameSessionRoutes(
       if (!idea) return c.json({ error: 'Missing field: brief.idea' }, 400)
       const languageValue = body.language ?? brief.language
       const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
-      const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
-        brief,
-        'preferred',
-      )
       const prompt = buildConfirmedBriefPrompt(
         brief,
         language,
-        resourceLibraryUsage,
       )
       return c.json(await beeGameSessions.sendWithDisplay(c.req.param('id'), prompt, {
         displayText: idea,
@@ -5260,7 +5266,6 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
 function buildConfirmedBriefPrompt(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
-  defaultResourceLibraryUsage: ResourceLibraryUsage = 'preferred',
 ): string {
   const documentLanguage = resolveConfirmedBriefLanguage(
     brief.documentLanguage ?? brief.document_language,
@@ -5276,7 +5281,6 @@ function buildConfirmedBriefPrompt(
   )
   const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
     brief,
-    defaultResourceLibraryUsage,
   )
   const confirmedBrief = JSON.stringify({
     kind: 'confirmed_build_brief',
@@ -5326,17 +5330,16 @@ function extractConfirmedBriefContext(prompt: string): string {
 
 function resolveConfirmedResourceLibraryUsage(
   brief: JsonObject,
-  fallback: ResourceLibraryUsage,
 ): ResourceLibraryUsage {
   const settings = isObject(brief.settings) ? brief.settings : undefined
   const value = settings?.resourceLibraryUsage ??
     settings?.resource_library_usage ??
     brief.resourceLibraryUsage ??
     brief.resource_library_usage
-  return typeof value === 'string' &&
-      (RESOURCE_LIBRARY_USAGE as readonly string[]).includes(value)
-    ? value as ResourceLibraryUsage
-    : fallback
+  if (typeof value !== 'string' || !(RESOURCE_LIBRARY_USAGE as readonly string[]).includes(value)) {
+    throw new Error('Confirmed brief must explicitly select resourceLibraryUsage')
+  }
+  return value as ResourceLibraryUsage
 }
 
 function resolveConfirmedBriefLanguage(

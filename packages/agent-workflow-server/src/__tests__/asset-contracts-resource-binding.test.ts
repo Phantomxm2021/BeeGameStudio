@@ -6,6 +6,7 @@ import {
   effectiveAssetFormats,
   importBeeGameLibraryResourceInWorkspace,
   normalizeBeeGameAssetManifest,
+  parseCanonicalBeeGameAssetManifest,
   readBeeGameAssetManifest,
   uploadBeeGameAsset,
 } from '../beegame/asset-contracts'
@@ -61,6 +62,28 @@ describe('BeeGame canonical resource contract', () => {
     )
   })
 
+  test('rejects malformed current manifests instead of silently dropping entries', () => {
+    expect(() => parseCanonicalBeeGameAssetManifest({
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [{ id: 'valid' }, { status: 'planned' }],
+      imports: [{ id: 'broken' }],
+      compositions: [],
+    })).toThrow('requirements[1].id must be a trimmed non-empty string')
+  })
+
+  test('reports invalid manifest JSON without rewriting the project file', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-invalid-manifest-'))
+    const manifestPath = join(workspace, 'assets/asset-manifest.json')
+    try {
+      await Bun.write(manifestPath, '{invalid')
+      await expect(readBeeGameAssetManifest(workspace)).rejects.toThrow('manifest must contain valid JSON')
+      expect(await readFile(manifestPath, 'utf8')).toBe('{invalid')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('records a user upload as an import instead of creating a Pack binding on the requirement', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-user-import-'))
     try {
@@ -86,6 +109,7 @@ describe('BeeGame canonical resource contract', () => {
     try {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
         version: 5,
+        project_target: { asset_format_capabilities: ['glb'] },
         requirements: [],
         imports: [{ id: 'item', source: { type: 'user-upload' }, status: 'available', root_path: 'assets/models/item.glb', local_files: ['assets/models/item.glb'], selected_at: '2026-07-21T00:00:00.000Z', selection_reason: ['user upload'] }],
         compositions: [],

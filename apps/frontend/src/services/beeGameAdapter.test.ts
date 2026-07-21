@@ -542,8 +542,8 @@ describe('beeGameAdapter prompt rules', () => {
       firstPlayableValidation: 'LLM validation',
       riskComplexity: 'LLM complexity',
     }));
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; clientRequestId?: string };
-    expect(requestBody).toEqual({ idea: 'LLM generated idea', clientRequestId: expect.any(String) });
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
+    expect(requestBody).toEqual({ idea: 'LLM generated idea', language: 'zh', clientRequestId: expect.any(String) });
   });
 
   it('normalizes snake_case intake setting fields before the UI builds production settings', async () => {
@@ -604,6 +604,27 @@ describe('beeGameAdapter prompt rules', () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
     expect(requestBody).toEqual({ idea: 'Créer un jeu exemple', language: 'fr', clientRequestId: expect.any(String) });
+  });
+
+  it('uses the explicit UI language instead of inferring language from idea text', async () => {
+    localStorage.setItem('i18nextLng', 'ja');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({
+          maturity: 'directional',
+          needsClarification: false,
+          detectedConstraints: [],
+          recommendedNextStep: 'choose_direction',
+          options: makeLlmOptions(makeLlmOption()),
+        })
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.runIdeaIntake({ idea: '制作一个中文游戏' });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { language?: string };
+    expect(requestBody.language).toBe('ja');
   });
 
   it('rejects structured clarification responses without intake options', async () => {

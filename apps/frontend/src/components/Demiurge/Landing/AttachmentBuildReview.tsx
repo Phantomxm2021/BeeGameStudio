@@ -1,6 +1,7 @@
 import type { AttachmentBuildAnalysis } from '../../../services/attachmentBuild';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
+import type { BeeGameIntakeSettings } from '../../../services/beeGameAdapter';
 
 type ConflictChoice = 'gdd' | 'image' | 'custom';
 
@@ -11,6 +12,8 @@ export function AttachmentBuildReview({
     onSelectConflict,
     onRetry,
     onConfirm,
+    resourceLibraryUsage,
+    onResourceLibraryUsageChange,
     lang,
 }: {
     analysis: AttachmentBuildAnalysis;
@@ -19,6 +22,8 @@ export function AttachmentBuildReview({
     onSelectConflict: (field: string, choice: ConflictChoice) => void;
     onRetry: () => void;
     onConfirm: () => void;
+    resourceLibraryUsage: BeeGameIntakeSettings['resourceLibraryUsage'];
+    onResourceLibraryUsageChange: (value: BeeGameIntakeSettings['resourceLibraryUsage']) => void;
     lang?: Language;
 }) {
     const text = useBeeGameText(lang || 'en');
@@ -70,6 +75,20 @@ export function AttachmentBuildReview({
                     ))}
                 </section>
             ) : null}
+            <label className="type-callout block text-zinc-300">
+                {copy.resourceLibrary || 'Resource Library'}
+                <select
+                    aria-label={copy.resourceLibrary || 'Resource Library'}
+                    value={resourceLibraryUsage}
+                    onChange={event => onResourceLibraryUsageChange(event.target.value as BeeGameIntakeSettings['resourceLibraryUsage'])}
+                    disabled={isSubmitting}
+                    className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
+                >
+                    <option value="preferred">{copy.resourcePreferred || 'Prefer Resource Library'}</option>
+                    <option value="optional">{copy.resourceOptional || 'Use when helpful'}</option>
+                    <option value="required">{copy.resourceRequired || 'Require Resource Library'}</option>
+                </select>
+            </label>
             <div className="flex justify-end gap-3">
                 <button type="button" disabled={isSubmitting} onClick={onRetry} className="secondary-pill type-button px-4 py-2">{copy.retry || 'Retry analysis'}</button>
                 <button type="button" disabled={isSubmitting} onClick={onConfirm} className="primary-pill type-button px-4 py-2">{isSubmitting ? (copy.preparing || 'Preparing build…') : (copy.confirm || 'Confirm and build')}</button>

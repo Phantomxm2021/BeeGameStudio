@@ -25,6 +25,8 @@ describe('AttachmentBuildReview', () => {
                 onSelectConflict={vi.fn()}
                 onRetry={vi.fn()}
                 onConfirm={vi.fn()}
+                resourceLibraryUsage="preferred"
+                onResourceLibraryUsageChange={vi.fn()}
             />
         );
 
@@ -41,6 +43,7 @@ describe('AttachmentBuildReview', () => {
         const onSelectConflict = vi.fn();
         const onRetry = vi.fn();
         const onConfirm = vi.fn();
+        const onResourceLibraryUsageChange = vi.fn();
         render(
             <AttachmentBuildReview
                 analysis={analysis}
@@ -49,16 +52,20 @@ describe('AttachmentBuildReview', () => {
                 onSelectConflict={onSelectConflict}
                 onRetry={onRetry}
                 onConfirm={onConfirm}
+                resourceLibraryUsage="preferred"
+                onResourceLibraryUsageChange={onResourceLibraryUsageChange}
             />
         );
 
         fireEvent.change(screen.getByLabelText('Confirmed GDD'), { target: { value: '# Edited GDD' } });
         fireEvent.click(screen.getByRole('button', { name: 'Use GDD value' }));
+        fireEvent.change(screen.getByRole('combobox', { name: 'Resource Library usage' }), { target: { value: 'required' } });
         fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }));
         fireEvent.click(screen.getByRole('button', { name: 'Confirm and build' }));
 
         expect(onChangeDraft).toHaveBeenCalledWith('# Edited GDD');
         expect(onSelectConflict).toHaveBeenCalledWith('style', 'gdd');
+        expect(onResourceLibraryUsageChange).toHaveBeenCalledWith('required');
         expect(onRetry).toHaveBeenCalledTimes(1);
         expect(onConfirm).toHaveBeenCalledTimes(1);
     });
