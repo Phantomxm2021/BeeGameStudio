@@ -8,6 +8,13 @@ BILLING_ENV_FILE="${BEEGAME_BILLING_ENV_FILE:-$ROOT_DIR/docker/.env.billing}"
 ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.production.example"
 BILLING_ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.billing.example"
 
+# Building every BeeGame service concurrently is fast on a workstation but can
+# exhaust small production hosts before Bun finishes resolving the workspace.
+# Prefer a reliable single build by default; operators with more capacity can
+# opt back into parallel builds without changing this script.
+COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-${BEEGAME_DOCKER_BUILD_PARALLELISM:-1}}"
+export COMPOSE_PARALLEL_LIMIT
+
 command="${1:-up}"
 if [ "$#" -gt 0 ]; then
   shift
@@ -168,6 +175,7 @@ case "$command" in
   up)
     require_docker
     validate_env_files
+    echo "Docker build parallelism: $COMPOSE_PARALLEL_LIMIT"
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build "$@"
     ;;
   down)

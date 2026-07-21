@@ -20,11 +20,13 @@ describe('Docker dependency registry', () => {
     expect(frontendDockerfile).not.toContain('COPY packages ./packages')
   })
 
-  test('pins runtime Docker Bun install to the Aliyun npm mirror with conservative network concurrency', () => {
-    const runtimeDockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.runtime'), 'utf8')
-    const expectedInstall = 'bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=8 --no-progress'
+  test('keeps service Docker Bun installs configurable with a low-concurrency default', () => {
+    for (const name of ['runtime', 'billing', 'skills']) {
+      const dockerfile = readFileSync(join(repoRoot, `docker/Dockerfile.${name}`), 'utf8')
 
-    expect(runtimeDockerfile).toContain(expectedInstall)
+      expect(dockerfile).toContain('ARG BUN_INSTALL_NETWORK_CONCURRENCY=2')
+      expect(dockerfile).toContain('bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress')
+    }
   })
 
   test("keeps runtime source copies after dependency install for Docker cache reuse", () => {

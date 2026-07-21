@@ -46,7 +46,8 @@ COPY packages/workflow-engine/package.json ./packages/workflow-engine/package.js
 
 ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
-RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=8 --no-progress
+ARG BUN_INSTALL_NETWORK_CONCURRENCY=2
+RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress
 
 COPY packages ./packages
 COPY scripts ./scripts

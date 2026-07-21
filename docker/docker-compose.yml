@@ -3,6 +3,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.skills
+      args:
+        BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
       - ./.env.production
     environment:
@@ -26,6 +28,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.billing
+      args:
+        BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
       - ./.env.billing
     environment:
@@ -46,6 +50,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.runtime
+      args:
+        BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
       - ./.env.production
     environment:
