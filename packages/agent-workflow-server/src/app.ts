@@ -1761,14 +1761,6 @@ export function createAgentWorkflowApp(
         const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
         return c.json(toCanonicalBeeGameAssetManifest(manifest))
       } catch (err) {
-        if (sessionRef.live) {
-          const manifest = await dashboardRepository.loadAssetManifest(
-            c.req.raw,
-            user,
-            beeGameSessions.metadata(sessionRef.sessionId),
-          )
-          if (manifest) return c.json(toCanonicalBeeGameAssetManifest(manifest))
-        }
         return tracedRouteError(c, 'project.assets.list', err)
       }
     } catch (err) {
@@ -2246,12 +2238,6 @@ export function createAgentWorkflowApp(
           metadata,
           manifest,
         ),
-      loadAssetManifest: (request, metadata) =>
-        dashboardRepository.loadAssetManifest(
-          request,
-          getCurrentUser(request),
-          metadata,
-        ),
       uploadAssetFile: (request, metadata, file) =>
         dashboardRepository.uploadAssetFile(
           request,
@@ -2326,12 +2312,6 @@ export function createAgentWorkflowApp(
           getCurrentUser(request),
           metadata,
           manifest,
-        ),
-      loadAssetManifest: (request, metadata) =>
-        dashboardRepository.loadAssetManifest(
-          request,
-          getCurrentUser(request),
-          metadata,
         ),
       uploadAssetFile: (request, metadata, file) =>
         dashboardRepository.uploadAssetFile(
@@ -4026,10 +4006,6 @@ function registerBeeGameSessionRoutes(
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
       manifest: BeeGameAssetManifest,
     ) => Promise<BeeGameAssetManifest | undefined>
-    loadAssetManifest: (
-      request: Request,
-      metadata: ReturnType<BeeGameSessionManager['metadata']>,
-    ) => Promise<BeeGameAssetManifest | undefined>
     uploadAssetFile: (
       request: Request,
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
@@ -4389,26 +4365,8 @@ function registerBeeGameSessionRoutes(
         c.req.query('workspacePath'),
       )
       const manifest = await readBeeGameAssetManifest(workspacePath)
-      if (!manifest.requirements.length) {
-        const storedManifest = await options.loadAssetManifest(
-          c.req.raw,
-          beeGameSessions.metadata(c.req.param('id')),
-        )
-        if (storedManifest?.requirements.length) {
-          return c.json(toCanonicalBeeGameAssetManifest(storedManifest))
-        }
-      }
       return c.json(toCanonicalBeeGameAssetManifest(manifest))
     } catch (err) {
-      try {
-        const manifest = await options.loadAssetManifest(
-          c.req.raw,
-          beeGameSessions.metadata(c.req.param('id')),
-        )
-        if (manifest) return c.json(toCanonicalBeeGameAssetManifest(manifest))
-      } catch (fallbackErr) {
-        return tracedRouteError(c, 'beegame-session.assets.list', fallbackErr)
-      }
       return tracedRouteError(c, 'beegame-session.assets.list', err)
     }
   })

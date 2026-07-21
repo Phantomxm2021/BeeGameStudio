@@ -56,7 +56,7 @@ export const AssetsPanel = memo(({
                 <div className="min-w-0">
                     <div className="type-caption-1 text-orange-300">{text.title}</div>
                     <div className="type-body-sm mt-1 truncate text-zinc-300">
-                        {manifest?.project_target?.runtime || manifest?.project_target?.platform || manifest?.project_target?.engine || manifest?.project_target?.kind || 'Project'} · {formatMode(manifest?.project_target?.integration_mode, text)}
+                        {manifest?.project_target?.runtime || manifest?.project_target?.platform || 'Project'} · {formatMode(manifest?.project_target?.integration_mode, text)}
                     </div>
                     <div className="type-caption-2 mt-2 text-zinc-500">
                         {imports.length} {text.libraryBinding} · {compositions.length} {text.compositions}

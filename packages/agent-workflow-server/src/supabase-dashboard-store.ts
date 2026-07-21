@@ -1223,16 +1223,6 @@ export class SupabaseDashboardStore {
     return normalizeAssetManifest(row.manifest)
   }
 
-  async loadAssetManifest(
-    ownerId: string,
-    projectId: string,
-  ): Promise<BeeGameAssetManifest | undefined> {
-    const rows = await this.rest<SupabaseAssetRow[]>(
-      `/rest/v1/beegame_assets?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&select=manifest&limit=1`,
-    )
-    return rows[0] ? normalizeAssetManifest(rows[0].manifest) : undefined
-  }
-
   async uploadAssetFile(input: {
     ownerId: string
     projectId: string

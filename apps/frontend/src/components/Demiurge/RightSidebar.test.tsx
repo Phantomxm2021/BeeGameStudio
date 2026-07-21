@@ -436,30 +436,36 @@ describe('RightSidebar tabs', () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
         vi.mocked(api.getProjectAssets).mockResolvedValue({
-            version: 1,
-            project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
+            version: 5,
+            project_target: { platform: 'web', runtime: 'react', integration_mode: 'filesystem', runtime_asset_root: 'client/public/assets' },
             requirements: [{
                 id: 'bgm_game',
                 name: 'Game BGM',
-                type: 'audio',
                 purpose: 'Game background music',
-                status: 'uploaded',
-                uploaded_files: ['client/public/audio/bgm/game.mp3'],
+                status: 'planned',
+                resource_requirement: { asset_kinds: ['audio-clip'], accepted_formats: ['mp3'] },
+                satisfied_by: { import_ids: ['upload.bgm_game'] },
             }],
+            imports: [{ id: 'upload.bgm_game', source: { type: 'user-upload' }, status: 'available', root_path: 'client/public/assets/uploads/bgm_game/game.mp3', local_files: ['client/public/assets/uploads/bgm_game/game.mp3'], selected_at: '2026-07-22T00:00:00.000Z', selection_reason: ['user-provided-for-requirement'] }],
+            compositions: [],
         });
         vi.mocked(api.uploadProjectAsset).mockResolvedValue({
             manifest: {
-                version: 1,
-                project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
+                version: 5,
+                project_target: { platform: 'web', runtime: 'react', integration_mode: 'filesystem', runtime_asset_root: 'client/public/assets' },
                 requirements: [{
                     id: 'bgm_game',
                     name: 'Game BGM',
-                    type: 'audio',
                     purpose: 'Game background music',
-                    status: 'uploaded',
-                    uploaded_files: ['client/public/audio/bgm/game.mp3'],
+                    status: 'planned',
+                    resource_requirement: { asset_kinds: ['audio-clip'], accepted_formats: ['mp3'] },
+                    satisfied_by: { import_ids: ['upload.bgm_game'] },
                 }],
+                imports: [{ id: 'upload.bgm_game', source: { type: 'user-upload' }, status: 'available', root_path: 'client/public/assets/uploads/bgm_game/game.mp3', local_files: ['client/public/assets/uploads/bgm_game/game.mp3'], selected_at: '2026-07-22T00:00:00.000Z', selection_reason: ['user-provided-for-requirement'] }],
+                compositions: [],
             },
+            requirement: { id: 'bgm_game', name: 'Game BGM', purpose: 'Game background music', status: 'planned', satisfied_by: { import_ids: ['upload.bgm_game'] } },
+            path: 'client/public/assets/uploads/bgm_game/game.mp3',
             message: 'Integrate uploaded asset',
         });
 
@@ -526,13 +532,25 @@ describe('RightSidebar tabs', () => {
         vi.useFakeTimers();
         vi.mocked(api.getProjectAssets)
             .mockResolvedValueOnce({
-                version: 1,
+                version: 5,
+                project_target: {
+                    runtime_asset_root: 'public/game-assets',
+                },
                 requirements: [{
                     id: 'bgm_game',
                     name: 'Game BGM',
-                    type: 'audio',
                     purpose: 'Game background music',
-                    status: 'uploaded',
+                    status: 'planned',
+                    satisfied_by: { import_ids: ['bgm_upload'] },
+                }],
+                imports: [{
+                    id: 'bgm_upload',
+                    source: { type: 'user-upload' },
+                    status: 'available',
+                    root_path: 'public/game-assets/uploads/bgm_game/theme.ogg',
+                    local_files: ['public/game-assets/uploads/bgm_game/theme.ogg'],
+                    selected_at: '2026-07-22T00:00:00.000Z',
+                    selection_reason: ['User uploaded theme.ogg'],
                 }],
             })
             .mockRejectedValueOnce(new Error('Session not found'));
@@ -577,13 +595,12 @@ describe('RightSidebar tabs', () => {
         vi.mocked(api.getProjectAssets).mockImplementation(async (projectId: string) => {
             if (projectId === 'proj_1') {
                 return {
-                    version: 1,
+                    version: 5,
                     requirements: [{
                         id: 'bgm_game',
                         name: 'Game BGM',
-                        type: 'audio',
                         purpose: 'Game background music',
-                        status: 'uploaded',
+                        status: 'planned',
                     }],
                 };
             }

@@ -988,29 +988,34 @@ describe('SupabaseDashboardStore', () => {
       }),
     ])
     await expect(store.upsertAssetManifest(ownerId, 'project_1', {
-      version: 1,
-      project_target: { integration_mode: 'filesystem' },
+      version: 5,
+      project_target: { integration_mode: 'filesystem', runtime_asset_root: 'public/assets', asset_format_capabilities: ['png'] },
       requirements: [{
         id: 'main_logo',
         name: 'Main logo',
-        type: 'image_2d',
-        status: 'uploaded',
-        uploaded_files: ['public/assets/logo.png'],
+        status: 'planned',
+        resource_requirement: { asset_kinds: ['image'], accepted_formats: ['png'] },
+        satisfied_by: { import_ids: ['upload.main_logo'] },
       }],
+      imports: [{
+        id: 'upload.main_logo',
+        source: { type: 'user-upload' },
+        status: 'available',
+        root_path: 'public/assets/uploads/main_logo/logo.png',
+        local_files: ['public/assets/uploads/main_logo/logo.png'],
+        selected_at: '2026-07-22T00:00:00.000Z',
+        selection_reason: ['user-provided-for-requirement'],
+      }],
+      compositions: [],
     })).resolves.toEqual(expect.objectContaining({
-      version: 1,
+      version: 5,
       requirements: [
         expect.objectContaining({
           id: 'main_logo',
-          uploaded_files: ['public/assets/logo.png'],
+          status: 'planned',
         }),
       ],
     }))
-    expect(await store.loadAssetManifest(ownerId, 'project_1')).toEqual(
-      expect.objectContaining({
-        requirements: [expect.objectContaining({ id: 'main_logo' })],
-      }),
-    )
     await expect(store.upsertPreviewSnapshot(ownerId, 'project_1', {
       sessionId: 'session_1',
       workspacePath: '/tmp/project-one',

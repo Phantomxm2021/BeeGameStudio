@@ -5242,13 +5242,13 @@ describe('beegame session routes', () => {
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
+            runtime_asset_root: 'public/assets',
           },
           requirements: [{
             id: 'title_logo',
             name: 'Title logo',
-            type: 'image_2d',
-            accepted_formats: ['png'],
-            target: { path: 'public/assets/title-logo.png' },
+            status: 'planned',
+            resource_requirement: { asset_kinds: ['image'], accepted_formats: ['png'] },
           }],
           imports: [],
           compositions: [],
@@ -5269,7 +5269,7 @@ describe('beegame session routes', () => {
       const upload = await uploadRes.json()
       expect(uploadRes.status).toBe(200)
       expect(upload).toEqual(expect.objectContaining({
-        path: 'public/assets/title-logo.png',
+        path: 'public/assets/uploads/title_logo/title-logo.png',
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -5410,13 +5410,14 @@ describe('beegame session routes', () => {
             platform: 'web',
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
+            runtime_asset_root: 'public/assets',
           },
           requirements: [{
             id: 'hero_background',
             name: 'Hero background',
-            type: 'image_2d',
             purpose: 'Landing screen background',
-            target: { path: 'public/assets/hero-background.png' },
+            status: 'planned',
+            resource_requirement: { asset_kinds: ['image'], accepted_formats: ['png'] },
           }],
           imports: [],
           compositions: [],
@@ -6588,18 +6589,10 @@ describe('beegame session routes', () => {
           requirements: [{
             id: 'player_model',
             name: 'Player model',
-            type: 'model_3d',
             purpose: 'Playable character',
             required: true,
-            accepted_formats: ['glb', 'fbx'],
-            target: {
-              integration_notes: 'Replace the placeholder character model.',
-            },
-            integration_provider: {
-              type: 'mcp',
-              server: 'engine-mcp',
-              capabilities: ['import_asset', 'replace_prefab_mesh'],
-            },
+            status: 'planned',
+            resource_requirement: { asset_kinds: ['model'], accepted_formats: ['glb', 'fbx'] },
           }],
           imports: [],
           compositions: [],
@@ -6754,12 +6747,13 @@ describe('beegame session routes', () => {
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
+            runtime_asset_root: 'public/assets',
           },
           requirements: [{
             id: 'main_logo',
             name: 'Main logo',
-            status: 'uploaded',
-            uploaded_files: ['public/assets/logo.png'],
+            status: 'planned',
+            resource_requirement: { asset_kinds: ['image'], accepted_formats: ['png'] },
           }],
           imports: [],
           compositions: [],
@@ -7004,12 +6998,13 @@ describe('beegame session routes', () => {
           project_target: {
             integration_mode: 'filesystem',
             asset_format_capabilities: ['png'],
+            runtime_asset_root: 'public/assets',
           },
           requirements: [{
             id: 'main_logo',
             name: 'Main logo',
-            accepted_formats: ['png'],
-            target: { path: 'public/assets/logo.png' },
+            status: 'planned',
+            resource_requirement: { asset_kinds: ['image'], accepted_formats: ['png'] },
           }],
           imports: [],
           compositions: [],

@@ -66,13 +66,13 @@ describe('BeeGame canonical resource contract', () => {
     try {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
         version: 5,
-        project_target: { asset_format_capabilities: ['png'] },
+        project_target: { asset_format_capabilities: ['png'], runtime_asset_root: 'public/assets' },
         requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'] } }],
         imports: [], compositions: [],
       }))
       const result = await uploadBeeGameAsset(workspace, 'title-art', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'title.png'))
       expect(result.manifest.imports).toEqual([expect.objectContaining({ id: 'upload.title-art', source: { type: 'user-upload' }, status: 'available' })])
-      expect(result.requirement.resource_binding).toBeUndefined()
+      expect(result.requirement).not.toHaveProperty('resource_binding')
       const persisted = JSON.parse(await readFile(join(workspace, 'assets/asset-manifest.json'), 'utf8'))
       expect(persisted).toEqual(expect.objectContaining({ version: 5, imports: [expect.objectContaining({ id: 'upload.title-art' })] }))
       expect(persisted.requirements[0].satisfied_by.import_ids).toEqual(['upload.title-art'])

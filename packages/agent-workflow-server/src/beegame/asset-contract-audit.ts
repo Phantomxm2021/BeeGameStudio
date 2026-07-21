@@ -19,7 +19,7 @@ export type AssetIntegrationStage =
   | 'referenced'
   | 'failed'
 
-export type AssetSlotAudit = {
+export type AssetRequirementAudit = {
   id: string
   required: boolean
   deliveryMode: string
@@ -33,7 +33,7 @@ export type AssetContractAudit = {
   present: boolean
   valid: boolean
   manifestPath: string
-  slots: AssetSlotAudit[]
+  requirements: AssetRequirementAudit[]
   imports?: AssetImportAudit[]
   compositions: AssetCompositionAudit[]
   issues: string[]
@@ -51,7 +51,7 @@ export type AssetCompositionAudit = {
   id: string
   kind: string
   status: string
-  memberSlotIds: string[]
+  memberImportIds: string[]
   issues: string[]
 }
 
@@ -59,19 +59,19 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const workspace = resolve(workspacePath)
   const manifestPath = resolve(workspace, 'assets', 'asset-manifest.json')
   if (!existsSync(manifestPath)) {
-    return { present: false, valid: true, manifestPath, slots: [], compositions: [], issues: [] }
+    return { present: false, valid: true, manifestPath, requirements: [], compositions: [], issues: [] }
   }
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
     if (!isRecord(manifest)) {
-      return { present: true, valid: false, manifestPath, slots: [], compositions: [], issues: ['Manifest root must be a JSON object.'] }
+      return { present: true, valid: false, manifestPath, requirements: [], compositions: [], issues: ['Manifest root must be a JSON object.'] }
     }
     if (!Array.isArray(manifest.requirements)) {
       return {
         present: true,
         valid: false,
         manifestPath,
-        slots: [],
+        requirements: [],
         imports: [],
         compositions: [],
         issues: [
@@ -85,7 +85,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
       present: true,
       valid: false,
       manifestPath,
-      slots: [],
+      requirements: [],
       compositions: [],
       issues: [`Manifest could not be parsed: ${error instanceof Error ? error.message : String(error)}`],
     }
@@ -98,15 +98,20 @@ function auditCanonicalAssetContract(
   manifestPath: string,
 ): AssetContractAudit {
   const issues: string[] = []
+  const legacyRootFields = ['slots', 'confirmedResourceLibraryUsage', 'asset_contract'].filter(field => manifest[field] !== undefined)
+  if (legacyRootFields.length) issues.push(`Legacy manifest root fields are not accepted: ${legacyRootFields.join(', ')}.`)
   if (manifest.version !== CURRENT_ASSET_MANIFEST_VERSION) {
     issues.push(`version must be ${CURRENT_ASSET_MANIFEST_VERSION}; received ${JSON.stringify(manifest.version)}.`)
   }
   if (!isRecord(manifest.project_target)) issues.push(`project_target must be an object; received ${jsonType(manifest.project_target)}.`)
   if (!Array.isArray(manifest.imports)) issues.push(`imports must be an array; received ${jsonType(manifest.imports)}.`)
   if (manifest.compositions !== undefined && !Array.isArray(manifest.compositions)) issues.push(`compositions must be an array; received ${jsonType(manifest.compositions)}.`)
-  if (issues.length) return { present: true, valid: false, manifestPath, slots: [], imports: [], compositions: [], issues }
+  if (issues.length) return { present: true, valid: false, manifestPath, requirements: [], imports: [], compositions: [], issues }
 
   const target = manifest.project_target as Record<string, unknown>
+  const legacyTargetFields = ['kind', 'engine', 'supported_asset_formats', 'resource_sourcing_policy']
+    .filter(field => target[field] !== undefined)
+  if (legacyTargetFields.length) issues.push(`Legacy project_target fields are not accepted: ${legacyTargetFields.join(', ')}.`)
   if (!Array.isArray(target.asset_format_capabilities) || !stringArray(target.asset_format_capabilities).length) {
     issues.push(`project_target.asset_format_capabilities must be a non-empty array of strings; received ${jsonType(target.asset_format_capabilities)}.`)
   }
@@ -185,16 +190,26 @@ function auditCanonicalAssetContract(
     }
   }
 
-  return { present: true, valid: issues.length === 0, manifestPath, slots: requirements, imports, compositions, issues }
+  return { present: true, valid: issues.length === 0, manifestPath, requirements, imports, compositions, issues }
 }
 
-function auditCanonicalRequirement(value: unknown, index: number, workspace: string, capabilities: ReadonlySet<string>, ids: Set<string>): AssetSlotAudit {
+function auditCanonicalRequirement(value: unknown, index: number, workspace: string, capabilities: ReadonlySet<string>, ids: Set<string>): AssetRequirementAudit {
   if (!isRecord(value)) return { id: `requirement-${index}`, required: true, deliveryMode: 'requirement', stage: 'failed', issues: ['Requirement must be an object.'], files: [], runtimeEventIds: [] }
   const id = normalizedString(value.id) || `requirement-${index}`
   const issues: string[] = []
   if (!normalizedString(value.id)) issues.push('Stable id is required.')
   if (ids.has(id)) issues.push('Stable id is duplicated.')
   ids.add(id)
+  const legacyFields = [
+    'slot_id', 'type', 'description', 'placeholder', 'placeholder_status',
+    'accepted_formats', 'recommended_specs', 'target', 'target_path',
+    'integration_provider', 'uploaded_files', 'uploaded_urls',
+    'resource_binding', 'integration_evidence', 'integration_error',
+    'replacement', 'updated_at',
+  ].filter(field => value[field] !== undefined)
+  if (legacyFields.length) {
+    issues.push(`Legacy slot fields are not accepted in a canonical requirement: ${legacyFields.join(', ')}.`)
+  }
   if (value.resource_requirement !== undefined && !isRecord(value.resource_requirement)) issues.push('resource_requirement must be an object when present.')
   else if (isRecord(value.resource_requirement)) auditResourceExplorationRequirement(value.resource_requirement, capabilities, issues)
   if (!['planned', 'satisfied', 'blocked'].includes(normalizedString(value.status) || 'planned')) issues.push('status must be planned, satisfied, or blocked.')
@@ -273,7 +288,7 @@ function auditCanonicalComposition(
   imports: ReadonlyMap<string, AssetImportAudit>,
   ids: Set<string>,
 ): AssetCompositionAudit {
-  if (!isRecord(value)) return { id: `composition-${index}`, kind: '', status: 'failed', memberSlotIds: [], issues: ['Composition must be an object.'] }
+  if (!isRecord(value)) return { id: `composition-${index}`, kind: '', status: 'failed', memberImportIds: [], issues: ['Composition must be an object.'] }
   const id = normalizedString(value.id) || `composition-${index}`
   const kind = normalizedString(value.kind)
   const status = normalizedString(value.status) || 'planned'
@@ -314,7 +329,7 @@ function auditCanonicalComposition(
   const runtimeEventIds = stringArray(evidence?.runtime_event_ids)
   for (const reference of evidenceReferences) if (!isWorkspaceRelativePath(workspace, reference) || !existsSync(resolve(workspace, reference))) issues.push(`Integration reference does not exist in the project: ${reference}`)
   if (status === 'integrated' && !evidenceReferences.length && !runtimeEventIds.length) issues.push('An integrated composition must include integration_evidence.')
-  return { id, kind, status, memberSlotIds: memberIds, issues }
+  return { id, kind, status, memberImportIds: memberIds, issues }
 }
 
 function compositionCycles(graph: ReadonlyMap<string, string[]>): string[][] {

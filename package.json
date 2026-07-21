@@ -80,6 +80,7 @@
     "saas:preflight": "bun run scripts/check-beegame-saas-preflight.ts",
     "supabase:bootstrap-owner": "bun run scripts/bootstrap-beegame-owner.ts",
     "supabase:smoke": "bun run scripts/smoke-beegame-supabase.ts",
+    "migrate:asset-contract": "bun run scripts/migrate-beegame-asset-contract.ts",
     "typecheck": "tsc --noEmit",
     "precheck": "bun run typecheck && bun run check:fix && bun test",
     "rcs": "bun run scripts/rcs.ts"

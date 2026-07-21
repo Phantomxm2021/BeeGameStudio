@@ -48,10 +48,10 @@ describe('AssetsPanel', () => {
         expect(screen.getByText('Playable space')).toBeInTheDocument();
     });
 
-    it('keeps engine integration metadata at project level instead of binding a requirement to a Pack element', () => {
+    it('keeps target integration metadata at project level instead of binding a requirement to a Pack element', () => {
         render(<AssetsPanel manifest={{
             version: 5,
-            project_target: { kind: 'game_engine', engine: 'custom-engine', integration_mode: 'mcp', mcp_server: 'engine-mcp' },
+            project_target: { platform: 'native', runtime: 'custom-engine', integration_mode: 'mcp', mcp_server: 'engine-mcp' },
             requirements: [{ id: 'player-character', name: 'Player character', purpose: 'Playable character', required: true }],
         }} isLoading={false} />);
 

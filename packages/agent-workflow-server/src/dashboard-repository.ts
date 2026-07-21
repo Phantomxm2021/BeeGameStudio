@@ -415,16 +415,6 @@ export class DashboardRepository {
     )
   }
 
-  async loadAssetManifest(
-    request: Request,
-    user: BeeGameUserContext,
-    metadata: BeeGameSessionInternalMetadata | undefined,
-  ): Promise<BeeGameAssetManifest | undefined> {
-    const supabase = this.supabaseForRequest(request)
-    if (!supabase || !metadata?.projectId) return undefined
-    return supabase.loadAssetManifest(user.id, metadata.projectId)
-  }
-
   async uploadAssetFile(
     request: Request,
     user: BeeGameUserContext,

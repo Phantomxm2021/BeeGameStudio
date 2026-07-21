@@ -60,7 +60,7 @@ describe('project resource application', () => {
     ])
     expect(result.manifest.imports?.map(entry => entry.id)).toEqual(['tower-a', 'tower-b'])
     expect(result.manifest.imports?.[0]?.technical_facts).toEqual({ boundsSizeY: 4, hasNormals: true })
-    expect(result.manifest.requirements[0]?.resource_binding).toBeUndefined()
+    expect(result.manifest.requirements[0]).not.toHaveProperty('resource_binding')
   })
 
   test('fails an import batch once with actionable target-capability diagnostics before resolving selections', async () => {

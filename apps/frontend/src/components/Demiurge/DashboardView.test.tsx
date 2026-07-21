@@ -98,7 +98,7 @@ let mockedProjectStatus: ProjectBaselineStatusPayload = {
     phase: 'DESIGN_IN_PROGRESS',
     blocked: true,
     approval_required: true,
-    project_target: { kind: 'web', engine: 'Web' },
+    project_target: { platform: 'web', runtime: 'Web' },
     baseline: {
         artifact_id: 'art_1',
     },
@@ -304,7 +304,7 @@ describe('DashboardView runtime loading', () => {
             phase: 'DESIGN_IN_PROGRESS',
             blocked: true,
             approval_required: true,
-            project_target: { kind: 'web', engine: 'Web' },
+            project_target: { platform: 'web', runtime: 'Web' },
             baseline: {
                 artifact_id: 'art_1',
             },
@@ -624,7 +624,7 @@ describe('DashboardView runtime loading', () => {
     it('uses deployment permission and project target without a frontend delivery state machine', async () => {
         mockedProjectStatus = {
             ...mockedProjectStatus,
-            project_target: { kind: 'native', engine: 'custom-engine' },
+            project_target: { platform: 'native', runtime: 'custom-engine' },
         };
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);

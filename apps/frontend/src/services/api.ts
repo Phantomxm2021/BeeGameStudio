@@ -313,9 +313,6 @@ export interface BeeGameAssetManifestPayload {
   project_target?: {
     platform?: string;
     runtime?: string;
-    /** Legacy aliases remain readable for historical manifests. */
-    kind?: string;
-    engine?: string;
     integration_mode?: BeeGameAssetIntegrationMode;
     mcp_server?: string;
     asset_format_capabilities?: string[];

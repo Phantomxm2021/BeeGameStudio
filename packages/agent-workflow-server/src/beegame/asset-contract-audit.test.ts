@@ -32,7 +32,7 @@ describe('asset contract audit', () => {
 
     const audit = auditAssetContract(workspace)
     expect(audit.valid).toBe(false)
-    expect(audit.slots).toEqual([])
+    expect(audit.requirements).toEqual([])
     expect(audit.issues).toEqual([
       'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
     ])
