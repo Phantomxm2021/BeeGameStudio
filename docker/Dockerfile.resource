@@ -1,0 +1,66 @@
+FROM oven/bun:1.3-alpine
+
+RUN apk add --no-cache \
+    bash \
+    curl \
+    findutils \
+    git \
+    nodejs \
+    npm \
+    ripgrep
+
+WORKDIR /app
+
+COPY package.json bun.lock bunfig.toml tsconfig.json tsconfig.base.json ./
+COPY scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs ./scripts/
+COPY apps/frontend/package.json ./apps/frontend/package.json
+COPY packages/@ant/claude-for-chrome-mcp/package.json ./packages/@ant/claude-for-chrome-mcp/package.json
+COPY packages/@ant/computer-use-input/package.json ./packages/@ant/computer-use-input/package.json
+COPY packages/@ant/computer-use-mcp/package.json ./packages/@ant/computer-use-mcp/package.json
+COPY packages/@ant/computer-use-swift/package.json ./packages/@ant/computer-use-swift/package.json
+COPY packages/@ant/ink/package.json ./packages/@ant/ink/package.json
+COPY packages/@ant/model-provider/package.json ./packages/@ant/model-provider/package.json
+COPY packages/acp-link/package.json ./packages/acp-link/package.json
+COPY packages/agent-tools/package.json ./packages/agent-tools/package.json
+COPY packages/agent-workflow-server/package.json ./packages/agent-workflow-server/package.json
+COPY packages/agent-workflow/package.json ./packages/agent-workflow/package.json
+COPY packages/audio-capture-napi/package.json ./packages/audio-capture-napi/package.json
+COPY packages/beegame-billing-core/package.json ./packages/beegame-billing-core/package.json
+COPY packages/beegame-billing-server/package.json ./packages/beegame-billing-server/package.json
+COPY packages/beegame-resource-core/package.json ./packages/beegame-resource-core/package.json
+COPY packages/beegame-resource-server/package.json ./packages/beegame-resource-server/package.json
+COPY packages/beegame-security-core/package.json ./packages/beegame-security-core/package.json
+COPY packages/beegame-skills-core/package.json ./packages/beegame-skills-core/package.json
+COPY packages/beegame-skills-server/package.json ./packages/beegame-skills-server/package.json
+COPY packages/builtin-tools/package.json ./packages/builtin-tools/package.json
+COPY packages/cloud-artifacts/package.json ./packages/cloud-artifacts/package.json
+COPY packages/color-diff-napi/package.json ./packages/color-diff-napi/package.json
+COPY packages/image-processor-napi/package.json ./packages/image-processor-napi/package.json
+COPY packages/mcp-client/package.json ./packages/mcp-client/package.json
+COPY packages/modifiers-napi/package.json ./packages/modifiers-napi/package.json
+COPY packages/remote-control-server/package.json ./packages/remote-control-server/package.json
+COPY packages/url-handler-napi/package.json ./packages/url-handler-napi/package.json
+COPY packages/weixin/package.json ./packages/weixin/package.json
+COPY packages/workflow-engine/package.json ./packages/workflow-engine/package.json
+
+ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
+
+ARG BUN_INSTALL_NETWORK_CONCURRENCY=2
+RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress
+
+COPY packages ./packages
+COPY scripts ./scripts
+COPY src ./src
+COPY vendor ./vendor
+
+RUN mkdir -p /srv/beegame/resources && chown -R bun:bun /srv/beegame /app
+
+USER bun
+
+ENV NODE_ENV=production
+ENV BEEGAME_RESOURCE_HOST=0.0.0.0
+ENV BEEGAME_RESOURCE_PORT=62177
+
+EXPOSE 62177
+
+CMD ["bun", "packages/beegame-resource-server/src/index.ts"]

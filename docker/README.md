@@ -1,7 +1,7 @@
 # BeeGame Docker Deployment
 
-This stack runs BeeGame as a static frontend, a local runtime host, a dedicated
-billing backend, and a dedicated user skills backend.
+This stack runs BeeGame as a static frontend, a local runtime host, and
+dedicated billing, resource-library, and user-skills backends.
 
 ## Services
 
@@ -14,6 +14,8 @@ billing backend, and a dedicated user skills backend.
 - `beegame-skills`: user-private BeeGame skill package backend. Users upload
   zip packages here; the runtime host only materializes enabled skills before a
   new BeeGame runtime turn starts.
+- `beegame-resources`: resource Pack administration, processing, catalog
+  exploration, and signed project-integration URLs.
 
 ## Prepare
 
@@ -21,9 +23,11 @@ billing backend, and a dedicated user skills backend.
 npm run docker:init
 ```
 
-This creates `docker/.env.production` and `docker/.env.billing` from the
-examples when they are missing, generates `BEEGAME_SKILLS_SERVICE_TOKEN`, and
-sets the same `BEEGAME_CREDIT_CONTROL_TOKEN` in both env files.
+This creates `docker/.env.production`, `docker/.env.billing`, and
+`docker/.env.resource` from the examples when they are missing. It generates
+the internal Skills and Resource service tokens, creates the runtime secret
+encryption key, and sets the same `BEEGAME_CREDIT_CONTROL_TOKEN` in the runtime
+and billing env files.
 
 Fill the Supabase and public runtime URLs in `docker/.env.production`.
 
@@ -32,6 +36,11 @@ Fill Stripe, Supabase anon, and Supabase service-role values in
 signed-in user's Bearer token on Credit Store requests, and uses the
 service-role key only for provider credit grants after Stripe webhook
 verification.
+
+Fill Supabase URL, anon key, and service-role values in
+`docker/.env.resource`. Keeping these in a separate file prevents resource
+Storage/database credentials from entering the browser image or Claude runtime
+container.
 
 `BEEGAME_CREDIT_CONTROL_TOKEN` must match in both files. The runtime host uses
 it only for internal reserve, settle, and refund requests to `beegame-billing`;
@@ -54,6 +63,10 @@ return `401 Unauthorized`.
 `http://127.0.0.1:62176/health` is public. User skill routes under
 `/api/user-skills/*` require the signed-in user Authorization header. Internal
 enabled-skill reads can require `BEEGAME_SKILLS_SERVICE_TOKEN` when configured.
+
+`http://127.0.0.1:62177/health` is public. Resource management routes require a
+signed-in resource administrator; runtime catalog exploration uses the
+dedicated `BEEGAME_RESOURCE_SERVICE_TOKEN` on the internal Compose network.
 
 ## Local Billing Backend
 
@@ -119,6 +132,7 @@ Default local ports:
 - Runtime host: `http://127.0.0.1:62174`
 - Billing backend: `http://127.0.0.1:62175`
 - Skills backend: `http://127.0.0.1:62176`
+- Resource backend: `http://127.0.0.1:62177`
 
 ## Billing Flow
 
@@ -182,8 +196,10 @@ After `docker compose` is healthy:
    settle credits through the billing backend.
 7. Open Settings -> Skills, import a valid skill zip, toggle it on, then start a
    new BeeGame runtime turn and confirm the runtime host materializes it.
-8. Restart `beegame-runtime`, `beegame-billing`, and `beegame-skills`, then
-   confirm Credit Store, credit balance, and imported skills still work.
+8. Create or inspect a resource Pack and confirm the runtime can explore the
+   published catalog.
+9. Restart all services, then confirm Credit Store, resource Packs, credit
+   balance, and imported skills still work.
 
 ## Reverse Proxy
 
@@ -196,6 +212,7 @@ balancer:
 - `https://skills.your-domain.com` -> skills backend port `62176` only if you
   intentionally expose it directly; the default frontend path goes through
   runtime host proxy routes.
+- `https://resources.your-domain.com` -> resource backend port `62177`.
 
 The runtime domain must support WebSocket upgrades.
 The billing domain does not need WebSocket upgrades. Configure Stripe webhooks

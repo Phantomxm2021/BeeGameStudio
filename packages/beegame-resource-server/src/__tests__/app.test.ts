@@ -16,6 +16,13 @@ const repository = createInMemoryResourceRepository({
 })
 
 describe('resource service app', () => {
+  test('exposes health without requiring an authenticated resource administrator', async () => {
+    const app = createBeeGameResourceServerApp({ repository })
+    const response = await app.fetch(new Request('http://resource.test/health'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'ok' })
+  })
+
   test('allows browser cross-origin requests and preflight checks', async () => {
     const app = createBeeGameResourceServerApp({
       repository,

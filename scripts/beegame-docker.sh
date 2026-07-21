@@ -5,8 +5,10 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 COMPOSE_FILE="${BEEGAME_DOCKER_COMPOSE_FILE:-$ROOT_DIR/docker/docker-compose.yml}"
 ENV_FILE="${BEEGAME_DOCKER_ENV_FILE:-$ROOT_DIR/docker/.env.production}"
 BILLING_ENV_FILE="${BEEGAME_BILLING_ENV_FILE:-$ROOT_DIR/docker/.env.billing}"
+RESOURCE_ENV_FILE="${BEEGAME_RESOURCE_ENV_FILE:-$ROOT_DIR/docker/.env.resource}"
 ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.production.example"
 BILLING_ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.billing.example"
+RESOURCE_ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.resource.example"
 
 # Building every BeeGame service concurrently is fast on a workstation but can
 # exhaust small production hosts before Bun finishes resolving the workspace.
@@ -54,6 +56,19 @@ generate_secret() {
   exit 1
 }
 
+generate_encryption_key() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 32 | tr -d '\n'
+    return
+  fi
+  if command -v head >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
+    head -c 32 /dev/urandom | base64 | tr -d '\n'
+    return
+  fi
+  echo "Unable to generate an encryption key; install openssl or base64" >&2
+  exit 1
+}
+
 set_env_value() {
   key="$1"
   value="$2"
@@ -82,6 +97,11 @@ ensure_env_files() {
   fi
   if [ ! -f "$BILLING_ENV_FILE" ]; then
     echo "Missing $BILLING_ENV_FILE" >&2
+    echo "Create it with: $0 init" >&2
+    exit 1
+  fi
+  if [ ! -f "$RESOURCE_ENV_FILE" ]; then
+    echo "Missing $RESOURCE_ENV_FILE" >&2
     echo "Create it with: $0 init" >&2
     exit 1
   fi
@@ -115,6 +135,41 @@ validate_env_files() {
     echo "  $BILLING_ENV_FILE" >&2
     exit 1
   fi
+
+  resource_token="$(read_env_value BEEGAME_RESOURCE_SERVICE_TOKEN "$ENV_FILE")"
+  if is_unset_or_placeholder "$resource_token"; then
+    echo "BEEGAME_RESOURCE_SERVICE_TOKEN is not configured in $ENV_FILE" >&2
+    echo "Run $0 init, or set it to a high-entropy runtime/resource token." >&2
+    exit 1
+  fi
+
+  encryption_key="$(read_env_value BEEGAME_CONFIG_ENCRYPTION_KEY "$ENV_FILE")"
+  if is_unset_or_placeholder "$encryption_key"; then
+    echo "BEEGAME_CONFIG_ENCRYPTION_KEY is not configured in $ENV_FILE" >&2
+    echo "Run $0 init to generate a base64-encoded 32-byte key." >&2
+    exit 1
+  fi
+
+  resource_service_role="$(read_env_value BEEGAME_SUPABASE_SERVICE_ROLE_KEY "$RESOURCE_ENV_FILE")"
+  if is_unset_or_placeholder "$resource_service_role"; then
+    echo "BEEGAME_SUPABASE_SERVICE_ROLE_KEY is not configured in $RESOURCE_ENV_FILE" >&2
+    echo "Set the server-only Supabase service-role key before starting." >&2
+    exit 1
+  fi
+
+  resource_url="$(read_env_value BEEGAME_SUPABASE_URL "$RESOURCE_ENV_FILE")"
+  resource_anon_key="$(read_env_value BEEGAME_SUPABASE_ANON_KEY "$RESOURCE_ENV_FILE")"
+  if is_unset_or_placeholder "$resource_url" || is_unset_or_placeholder "$resource_anon_key"; then
+    echo "BEEGAME_SUPABASE_URL and BEEGAME_SUPABASE_ANON_KEY must be configured in $RESOURCE_ENV_FILE" >&2
+    exit 1
+  fi
+
+  resource_public_url="$(read_env_value VITE_RESOURCE_API_BASE_URL "$ENV_FILE")"
+  if is_unset_or_placeholder "$resource_public_url"; then
+    echo "VITE_RESOURCE_API_BASE_URL is not configured in $ENV_FILE" >&2
+    echo "Set it to the browser-accessible HTTPS origin of beegame-resources." >&2
+    exit 1
+  fi
 }
 
 require_docker() {
@@ -138,12 +193,41 @@ init_env_files() {
   else
     echo "Exists  $BILLING_ENV_FILE"
   fi
+  if [ ! -f "$RESOURCE_ENV_FILE" ]; then
+    cp "$RESOURCE_ENV_EXAMPLE_FILE" "$RESOURCE_ENV_FILE"
+    echo "Created $RESOURCE_ENV_FILE"
+  else
+    echo "Exists  $RESOURCE_ENV_FILE"
+  fi
+
+  for key in BEEGAME_SUPABASE_URL BEEGAME_SUPABASE_ANON_KEY BEEGAME_SUPABASE_SERVICE_ROLE_KEY; do
+    resource_value="$(read_env_value "$key" "$RESOURCE_ENV_FILE")"
+    billing_value="$(read_env_value "$key" "$BILLING_ENV_FILE")"
+    if is_unset_or_placeholder "$resource_value" && ! is_unset_or_placeholder "$billing_value"; then
+      set_env_value "$key" "$billing_value" "$RESOURCE_ENV_FILE"
+      echo "Copied $key into $RESOURCE_ENV_FILE"
+    fi
+  done
 
   skills_token="$(read_env_value BEEGAME_SKILLS_SERVICE_TOKEN "$ENV_FILE")"
   if is_unset_or_placeholder "$skills_token"; then
     skills_token="$(generate_secret)"
     set_env_value BEEGAME_SKILLS_SERVICE_TOKEN "$skills_token" "$ENV_FILE"
     echo "Generated BEEGAME_SKILLS_SERVICE_TOKEN in $ENV_FILE"
+  fi
+
+  resource_token="$(read_env_value BEEGAME_RESOURCE_SERVICE_TOKEN "$ENV_FILE")"
+  if is_unset_or_placeholder "$resource_token"; then
+    resource_token="$(generate_secret)"
+    set_env_value BEEGAME_RESOURCE_SERVICE_TOKEN "$resource_token" "$ENV_FILE"
+    echo "Generated BEEGAME_RESOURCE_SERVICE_TOKEN in $ENV_FILE"
+  fi
+
+  encryption_key="$(read_env_value BEEGAME_CONFIG_ENCRYPTION_KEY "$ENV_FILE")"
+  if is_unset_or_placeholder "$encryption_key"; then
+    encryption_key="$(generate_encryption_key)"
+    set_env_value BEEGAME_CONFIG_ENCRYPTION_KEY "$encryption_key" "$ENV_FILE"
+    echo "Generated BEEGAME_CONFIG_ENCRYPTION_KEY in $ENV_FILE"
   fi
 
   runtime_credit_token="$(read_env_value BEEGAME_CREDIT_CONTROL_TOKEN "$ENV_FILE")"

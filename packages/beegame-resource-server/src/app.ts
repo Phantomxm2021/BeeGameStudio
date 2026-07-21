@@ -73,6 +73,9 @@ export function createBeeGameResourceServerApp(
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
+      if (request.method === 'GET' && pathname === '/health') {
+        return corsResponse(Response.json({ status: 'ok' }), options.corsOrigin)
+      }
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
           '/api/resource-catalog/packs',

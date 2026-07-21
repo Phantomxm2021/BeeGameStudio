@@ -46,6 +46,28 @@ services:
       retries: 5
       start_period: 20s
 
+  beegame-resources:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.resource
+      args:
+        BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
+    env_file:
+      - ./.env.resource
+    environment:
+      BEEGAME_RESOURCE_HOST: 0.0.0.0
+      BEEGAME_RESOURCE_PORT: 62177
+      BEEGAME_RESOURCE_SERVICE_TOKEN: ${BEEGAME_RESOURCE_SERVICE_TOKEN:-}
+    ports:
+      - "${BEEGAME_RESOURCE_PUBLIC_PORT:-62177}:62177"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62177/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   beegame-runtime:
     build:
       context: ..
@@ -64,6 +86,8 @@ services:
       BEEGAME_BILLING_API_BASE_URL: http://beegame-billing:62175
       BEEGAME_SKILLS_API_BASE_URL: http://beegame-skills:62176
       BEEGAME_SKILLS_SERVICE_TOKEN: ${BEEGAME_SKILLS_SERVICE_TOKEN:-}
+      BEEGAME_RESOURCE_SERVER_URL: http://beegame-resources:62177
+      BEEGAME_RESOURCE_SERVICE_TOKEN: ${BEEGAME_RESOURCE_SERVICE_TOKEN:-}
     ports:
       - "62174:62174"
     volumes:
@@ -73,6 +97,8 @@ services:
       beegame-billing:
         condition: service_healthy
       beegame-skills:
+        condition: service_healthy
+      beegame-resources:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -91,6 +117,7 @@ services:
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
         VITE_WS_BASE_URL: ${VITE_WS_BASE_URL}
+        VITE_RESOURCE_API_BASE_URL: ${VITE_RESOURCE_API_BASE_URL}
     ports:
       - "${BEEGAME_FRONTEND_PORT:-18080}:80"
     depends_on:
