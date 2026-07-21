@@ -88,6 +88,33 @@ describe('native Resource Library evidence', () => {
     })
   })
 
+  test('keeps a native failed import call as persistent failed evidence', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observeNativeResourceLibraryToolEvent({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+      eventType: 'tool.failed',
+      payload: {
+        toolName: 'ResourceLibrary',
+        toolUseID: 'tool-import',
+        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }] },
+      },
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+    })
+
+    expect(getObservedNativeResourceLibraryEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: '/workspace',
+    })).toMatchObject({
+      state: 'current',
+      actions: [],
+      failedActions: ['import_elements'],
+      successfulImportCount: 0,
+    })
+  })
+
   test('records only the artifacts actually copied by a partial import', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
     observeNativeResourceLibraryToolEvent({

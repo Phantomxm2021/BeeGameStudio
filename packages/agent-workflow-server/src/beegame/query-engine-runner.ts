@@ -584,6 +584,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const deliveryContractTool = createNativeDeliveryContractTool({
       buildTool: definition => call(toolModule, 'buildTool', definition),
       workspacePath: this.input.cwd,
+      getConfirmedBriefContext: () => this.currentSubmitInput?.confirmedBriefContext,
     })
     const resourceTool = this.input.resourceSelectionConfig
       ? createNativeResourceLibraryTool({

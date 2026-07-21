@@ -21,6 +21,7 @@ type BuildTool = (definition: Record<string, unknown>) => unknown
 export function createNativeDeliveryContractTool(options: {
   buildTool: BuildTool
   workspacePath: string
+  getConfirmedBriefContext?: () => string | undefined
 }): unknown {
   return options.buildTool({
     name: 'ProjectDeliveryContract',
@@ -39,9 +40,13 @@ export function createNativeDeliveryContractTool(options: {
       return { behavior: 'allow', updatedInput: input }
     },
     async call() {
+      const confirmedBrief = parseConfirmedBrief(
+        options.getConfirmedBriefContext?.(),
+      )
       return {
         data: {
           ...auditDocumentReadiness(options.workspacePath),
+          confirmed_brief: confirmedBrief,
           canonical_contract: {
             required_documents: REQUIRED_PROJECT_DOCUMENTS,
             checklist_task_shape: '- [ ] <stable-id> <observable action, expected result, and evidence>',
@@ -75,4 +80,16 @@ export function createNativeDeliveryContractTool(options: {
       return { tool_use_id: toolUseID, type: 'tool_result', content: JSON.stringify(output) }
     },
   })
+}
+
+function parseConfirmedBrief(value?: string): unknown {
+  if (!value?.trim()) return null
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null
+  } catch {
+    return null
+  }
 }

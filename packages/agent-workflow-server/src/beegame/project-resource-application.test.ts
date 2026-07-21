@@ -63,6 +63,39 @@ describe('project resource application', () => {
     expect(result.manifest.requirements[0]?.resource_binding).toBeUndefined()
   })
 
+  test('fails an import batch once with actionable target-capability diagnostics before resolving selections', async () => {
+    workspace = await createWorkspace()
+    const manifest = await readBeeGameAssetManifest(workspace)
+    manifest.project_target = {
+      ...manifest.project_target,
+      asset_format_capabilities: [],
+    }
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify(manifest),
+    )
+    let resolutionCalls = 0
+    const application = new ProjectResourceApplication(client({
+      resolveSelections: async () => {
+        resolutionCalls += 1
+        return []
+      },
+    }))
+
+    const result = await application.importExplicitSelections(workspace, [
+      { importId: 'first-root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'first-root', destinationPath: 'assets/library/first', selectionReason: ['Selected root'] },
+      { importId: 'second-root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'second-root', destinationPath: 'assets/library/second', selectionReason: ['Selected root'] },
+    ])
+
+    expect(resolutionCalls).toBe(0)
+    expect(result.results).toHaveLength(2)
+    expect(result.results.every(item =>
+      item.status === 'failed' &&
+      item.error?.includes('asset_format_capabilities')
+    )).toBe(true)
+    expect(result.manifest.imports).toEqual([])
+  })
+
   test('does not add an import or leave a root file when dependency download fails', async () => {
     workspace = await createWorkspace()
     const application = new ProjectResourceApplication(client({

@@ -134,6 +134,22 @@ export class ProjectResourceApplication {
     workspacePath: string,
     selections: Array<{ importId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath: string; selectionReason: string[] }>,
   ): Promise<ProjectResourceImportBatchResult> {
+    const manifestBeforeImport = await readBeeGameAssetManifest(workspacePath)
+    const targetFormats = manifestBeforeImport.project_target?.asset_format_capabilities
+      ?.filter(format => typeof format === 'string' && format.trim()) ?? []
+    if (targetFormats.length === 0) {
+      return {
+        manifest: manifestBeforeImport,
+        results: selections.map(selection => ({
+          importId: selection.importId,
+          status: 'failed' as const,
+          packId: selection.packId,
+          packVersion: selection.expectedPackVersion,
+          elementId: selection.elementId,
+          error: 'Target runtime project_target.asset_format_capabilities must be recorded in assets/asset-manifest.json before Resource Library import',
+        })),
+      }
+    }
     const resolved = await this.client.resolveSelections(selections.map(selection => ({
       importId: selection.importId,
       packId: selection.packId,

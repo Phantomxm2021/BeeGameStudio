@@ -18,6 +18,7 @@ import {
   recordNativeValidatorToolCapabilitiesForTest,
 } from './native-tool-provenance'
 import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
+import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 
 const TEST_SESSION_ID = 'native-acceptance-test-session'
 
@@ -138,6 +139,36 @@ describe('native delivery acceptance gate', () => {
       allowed: false,
       outcome: 'rejected',
       issues: ['The asset manifest resource_library_usage (optional) does not preserve the confirmed brief policy (preferred).'],
+    })
+  })
+
+  test('does not let a Reviewer and manifest jointly replace the user-confirmed resource policy', async () => {
+    workspace = await createWorkspace()
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'optional',
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    }))
+    recordReadyDocumentReview(workspace, 'optional')
+    recordConfirmedBriefEvidence({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      confirmedBriefContext: JSON.stringify({
+        kind: 'confirmed_build_brief',
+        resource_library_usage: 'preferred',
+      }),
+      createdAt: new Date(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The native Document Reviewer resource policy (optional) does not preserve the user-confirmed policy (preferred).'],
     })
   })
 

@@ -2451,6 +2451,9 @@ describe('beegame session routes', () => {
       expect(confirmed.status).toBe(200)
       await waitFor(() => fake.runtimes[0]?.submits.length === 1)
       const submitted = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
+      expect(String(fake.runtimes[0]?.submits[0]?.confirmedBriefContext ?? '')).toContain(
+        '"resource_library_usage": "preferred"',
+      )
       expect(submitted).toContain('"kind": "confirmed_build_brief"')
       expect(submitted).toContain('"confirmed_gdd": "# Approved design"')
       expect(submitted).toContain('Build and deliver the confirmed game project below.')
@@ -2473,6 +2476,21 @@ describe('beegame session routes', () => {
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
 
+      const followUp = await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Continue repairing the current project.' }),
+      })
+      expect(followUp.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 2)
+      const followUpSubmitted = String(fake.runtimes[0]?.submits[1]?.prompt ?? '')
+      expect(String(fake.runtimes[0]?.submits[1]?.confirmedBriefContext ?? '')).toContain(
+        '"resource_library_usage": "preferred"',
+      )
+      expect(followUpSubmitted).toContain('Session-confirmed brief (immutable user-confirmed context):')
+      expect(followUpSubmitted).toContain('"resource_library_usage": "preferred"')
+      expect(followUpSubmitted).toContain('Current user request:\nContinue repairing the current project.')
+
       const withoutResourcePreference = await app.request(
         `/api/beegame-sessions/${session.id}/confirmed-brief`,
         {
@@ -2488,8 +2506,8 @@ describe('beegame session routes', () => {
         },
       )
       expect(withoutResourcePreference.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 2)
-      const secondSubmitted = String(fake.runtimes[0]?.submits[1]?.prompt ?? '')
+      await waitFor(() => fake.runtimes[0]?.submits.length === 3)
+      const secondSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
       expect(secondSubmitted).toContain('"resource_library_usage": "preferred"')
 
       const explicitlyOptional = await app.request(
@@ -2508,8 +2526,8 @@ describe('beegame session routes', () => {
         },
       )
       expect(explicitlyOptional.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 3)
-      const thirdSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
+      await waitFor(() => fake.runtimes[0]?.submits.length === 4)
+      const thirdSubmitted = String(fake.runtimes[0]?.submits[3]?.prompt ?? '')
       expect(thirdSubmitted).toContain('"resource_library_usage": "optional"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -8889,6 +8907,10 @@ describe('beegame session routes', () => {
       })
       await firstManager.sendWithDisplay(firstSession.id, 'Start the approved project.', {
         displayKind: 'confirmed_brief',
+        confirmedBriefContext: JSON.stringify({
+          kind: 'confirmed_build_brief',
+          resource_library_usage: 'preferred',
+        }),
       })
       await waitFor(() => firstManager.events(firstSession.id).some(
         event => event.type === 'turn.completed',
@@ -8936,6 +8958,12 @@ describe('beegame session routes', () => {
             turnId: `beegame-turn-${resumedSession.id}-2`,
           }),
         ]),
+      )
+      expect(String(restartedFake.runtimes[0]?.submits[0]?.prompt ?? '')).toContain(
+        '"resource_library_usage":"preferred"',
+      )
+      expect(String(restartedFake.runtimes[0]?.submits[0]?.confirmedBriefContext ?? '')).toContain(
+        '"resource_library_usage":"preferred"',
       )
     } finally {
       await rm(workspace, { recursive: true, force: true })

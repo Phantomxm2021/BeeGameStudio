@@ -66,7 +66,9 @@ export function observeNativeResourceLibraryToolEvent(input: {
       outcome: completion.outcome,
       ...(completion.importedCount !== undefined ? { importedCount: completion.importedCount } : {}),
       ...(completion.failedCount !== undefined ? { failedCount: completion.failedCount } : {}),
-    } : {}),
+    } : input.eventType === 'tool.failed'
+      ? { outcome: 'failed' as const }
+      : {}),
     createdAt: input.createdAt.toISOString(),
   })
 }
@@ -82,7 +84,9 @@ export function getObservedNativeResourceLibraryEvidence(input: {
   workspacePath: string
 }): NativeResourceLibraryEvidenceState {
   const observations = readObservations(input.dataRoot, input.sessionId)
-    .filter(observation => observation.phase === 'completed')
+    .filter(observation =>
+      observation.phase === 'completed' || observation.phase === 'failed'
+    )
   if (observations.length === 0) return { state: 'missing' }
   const currentDigest = digestResourceContext(input.workspacePath)
   const current = observations.filter(

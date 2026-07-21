@@ -1266,17 +1266,19 @@ export function createAgentWorkflowApp(
         brief,
         'preferred',
       )
+      const confirmedBriefPrompt = buildConfirmedBriefPrompt(
+        brief,
+        language,
+        resourceLibraryUsage,
+      )
       void beeGameSessions.sendWithDisplay(
         session.id,
-        buildConfirmedBriefPrompt(
-          brief,
-          language,
-          resourceLibraryUsage,
-        ),
+        confirmedBriefPrompt,
         {
           displayText: idea,
           displayKind: 'confirmed_brief',
           taskType: 'full_build',
+          confirmedBriefContext: extractConfirmedBriefContext(confirmedBriefPrompt),
           ...(language ? { language } : {}),
           ...(getRequestAuthToken(c.req.raw) ? { authToken: getRequestAuthToken(c.req.raw) } : {}),
         },
@@ -4795,6 +4797,7 @@ function registerBeeGameSessionRoutes(
         displayText: idea,
         displayKind: 'confirmed_brief',
         taskType: 'full_build',
+        confirmedBriefContext: extractConfirmedBriefContext(prompt),
         ...(language ? { language } : {}),
         ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
       }))
@@ -4810,7 +4813,9 @@ function registerBeeGameSessionRoutes(
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const body = await readOptionalJson(c.req.raw)
-      const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
+      const language = isBeeGameSessionLanguage(body.language)
+        ? body.language
+        : beeGameSessions.language(c.req.param('id')) ?? 'en'
       return c.json(await beeGameSessions.sendWithDisplay(
         c.req.param('id'),
         getServerOwnedContinuePrompt(language),
@@ -4833,7 +4838,9 @@ function registerBeeGameSessionRoutes(
     try {
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const kind = typeof body.kind === 'string' ? body.kind : ''
-      const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
+      const language = isBeeGameSessionLanguage(body.language)
+        ? body.language
+        : beeGameSessions.language(c.req.param('id')) ?? 'en'
       if (kind === 'build_error_repair') {
         const session = beeGameSessions.get(c.req.param('id'))
         if (!session) return c.json({ error: 'Session not found' }, 404)
@@ -5342,6 +5349,15 @@ function buildConfirmedBriefPrompt(
     'Confirmed brief:',
     confirmedBrief,
   ].join('\n')
+}
+
+function extractConfirmedBriefContext(prompt: string): string {
+  const marker = '\nConfirmed brief:\n'
+  const markerIndex = prompt.lastIndexOf(marker)
+  if (markerIndex < 0) throw new Error('Confirmed brief prompt is missing canonical context')
+  const context = prompt.slice(markerIndex + marker.length).trim()
+  if (!context) throw new Error('Confirmed brief prompt has empty canonical context')
+  return context
 }
 
 function resolveConfirmedResourceLibraryUsage(

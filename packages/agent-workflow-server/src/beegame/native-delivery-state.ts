@@ -6,6 +6,7 @@ import { getObservedNativeImplementationAudit } from './native-implementation-au
 import { auditDocumentReadiness } from './document-readiness-audit'
 import { getObservedNativeResourceLibraryEvidence } from './native-resource-library-evidence'
 import { auditAssetContract } from './asset-contract-audit'
+import { getConfirmedBriefEvidence } from './confirmed-brief-evidence'
 
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
@@ -165,12 +166,26 @@ export function getNativeDeliveryState(input: {
     }
   }
 
-  const resourcePolicy = readResourceLibraryPolicy(input.workspacePath)
-  if (resourcePolicy !== review.evidence.confirmedResourceLibraryUsage) {
+  const confirmedBrief = getConfirmedBriefEvidence(input)
+  const confirmedResourcePolicy = confirmedBrief?.resourceLibraryUsage ??
+    review.evidence.confirmedResourceLibraryUsage
+  if (
+    confirmedBrief &&
+    review.evidence.confirmedResourceLibraryUsage !== confirmedResourcePolicy
+  ) {
     return {
       status: 'failed',
       reason: 'document_review_needs_revision',
-      summary: `The asset manifest resource_library_usage (${resourcePolicy ?? 'missing'}) does not preserve the confirmed brief policy (${review.evidence.confirmedResourceLibraryUsage}).`,
+      summary: `The native Document Reviewer resource policy (${review.evidence.confirmedResourceLibraryUsage}) does not preserve the user-confirmed policy (${confirmedResourcePolicy}).`,
+      observedAt: review.evidence.createdAt,
+    }
+  }
+  const resourcePolicy = readResourceLibraryPolicy(input.workspacePath)
+  if (resourcePolicy !== confirmedResourcePolicy) {
+    return {
+      status: 'failed',
+      reason: 'document_review_needs_revision',
+      summary: `The asset manifest resource_library_usage (${resourcePolicy ?? 'missing'}) does not preserve the confirmed brief policy (${confirmedResourcePolicy}).`,
       observedAt: review.evidence.createdAt,
     }
   }

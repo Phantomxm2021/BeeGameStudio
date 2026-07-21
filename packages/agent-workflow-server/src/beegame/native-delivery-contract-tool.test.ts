@@ -18,6 +18,11 @@ describe('native project delivery contract tool', () => {
     let definition: Record<string, unknown> | undefined
     createNativeDeliveryContractTool({
       workspacePath: workspace,
+      getConfirmedBriefContext: () => JSON.stringify({
+        kind: 'confirmed_build_brief',
+        resource_library_usage: 'preferred',
+        document_language: 'zh',
+      }),
       buildTool(value) {
         definition = value
         return value
@@ -27,12 +32,18 @@ describe('native project delivery contract tool', () => {
     const call = definition?.call as (() => Promise<{ data: {
       valid: boolean
       issues: string[]
+      confirmed_brief: Record<string, unknown>
       canonical_contract: Record<string, unknown>
     } }>) | undefined
     expect(call).toBeDefined()
     const result = await call!()
     expect(result.data.valid).toBe(false)
     expect(result.data.issues.join(' ')).toContain('requirements must be an array')
+    expect(result.data.confirmed_brief).toEqual(expect.objectContaining({
+      kind: 'confirmed_build_brief',
+      resource_library_usage: 'preferred',
+      document_language: 'zh',
+    }))
     expect(result.data.canonical_contract).toHaveProperty('asset_manifest_example.requirements')
     expect(result.data.canonical_contract).toHaveProperty('asset_manifest_example.imports')
     expect(result.data.canonical_contract).toHaveProperty('asset_manifest_example.compositions')
