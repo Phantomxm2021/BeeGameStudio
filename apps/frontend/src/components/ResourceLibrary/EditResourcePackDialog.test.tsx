@@ -10,6 +10,16 @@ const pack: ResourcePackSummary = {
 }
 
 describe('EditResourcePackDialog', () => {
+  test('reuses the create dialog layout and typography', () => {
+    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={vi.fn()} />)
+
+    expect(screen.getByTestId('edit-pack-dialog')).toHaveClass('max-w-[640px]', 'max-h-[calc(100dvh-48px)]')
+    expect(screen.getByTestId('resource-pack-content')).toHaveClass('overflow-y-auto')
+    expect(screen.getByRole('heading', { name: '编辑 Pack' })).toHaveClass('type-modal-title')
+    expect(screen.getByLabelText('名称')).toHaveClass('h-11', 'rounded-xl')
+    expect(screen.getByRole('button', { name: '保存 Pack' })).toHaveClass('h-11', 'type-button')
+  })
+
   test('uploads a selected cover before saving Pack metadata', async () => {
     const user = userEvent.setup()
     const calls: string[] = []
