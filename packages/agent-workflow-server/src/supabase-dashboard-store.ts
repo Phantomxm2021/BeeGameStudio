@@ -41,7 +41,7 @@ import type {
 } from './audit-events-store'
 import type { BeeGameSecretMigrationMetadata } from './local-data-migration'
 import {
-  normalizeBeeGameAssetManifest,
+  parseCanonicalBeeGameAssetManifest,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
@@ -2091,11 +2091,7 @@ function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {
 }
 
 function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
-  try {
-    return normalizeBeeGameAssetManifest(value)
-  } catch {
-    return { version: 5, requirements: [] }
-  }
+  return parseCanonicalBeeGameAssetManifest(value)
 }
 
 function previewSnapshotToMetadata(

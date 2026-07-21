@@ -43,18 +43,6 @@ export interface Project {
 }
 
 /**
- * Create project request interface
- * Data required to create a new project
- */
-export interface CreateProjectRequest {
-  /** Name of the new project */
-  name: string;
-  
-  /** Root path for the project files (optional) */
-  root_path?: string;
-}
-
-/**
  * Update project request interface
  * Data that can be updated for an existing project
  */

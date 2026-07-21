@@ -8,9 +8,9 @@ export type ConfirmedBriefEvidence = {
   sessionId: string
   contextDigest: string
   resourceLibraryUsage: ResourceLibraryUsage
-  documentLanguage?: string
-  gameUserVisibleLanguage?: string
-  agentResponseLanguage?: string
+  documentLanguage: string
+  gameUserVisibleLanguage: string
+  agentResponseLanguage: string
   createdAt: string
 }
 
@@ -32,9 +32,9 @@ export function recordConfirmedBriefEvidence(input: {
       .update(input.confirmedBriefContext.trim())
       .digest('hex'),
     resourceLibraryUsage: brief.resourceLibraryUsage,
-    ...(brief.documentLanguage ? { documentLanguage: brief.documentLanguage } : {}),
-    ...(brief.gameUserVisibleLanguage ? { gameUserVisibleLanguage: brief.gameUserVisibleLanguage } : {}),
-    ...(brief.agentResponseLanguage ? { agentResponseLanguage: brief.agentResponseLanguage } : {}),
+    documentLanguage: brief.documentLanguage,
+    gameUserVisibleLanguage: brief.gameUserVisibleLanguage,
+    agentResponseLanguage: brief.agentResponseLanguage,
     createdAt: input.createdAt.toISOString(),
   }
   const path = evidencePath(input.dataRoot, input.sessionId)
@@ -61,15 +61,25 @@ export function getConfirmedBriefEvidence(input: {
     const resourceLibraryUsage = parseResourceLibraryUsage(value.resourceLibraryUsage)
     const contextDigest = stringValue(value.contextDigest)
     const createdAt = stringValue(value.createdAt)
-    if (!resourceLibraryUsage || !contextDigest || !createdAt) return undefined
+    const documentLanguage = stringValue(value.documentLanguage)
+    const gameUserVisibleLanguage = stringValue(value.gameUserVisibleLanguage)
+    const agentResponseLanguage = stringValue(value.agentResponseLanguage)
+    if (
+      !resourceLibraryUsage ||
+      !contextDigest ||
+      !createdAt ||
+      !documentLanguage ||
+      !gameUserVisibleLanguage ||
+      !agentResponseLanguage
+    ) return undefined
     return {
       version: 1,
       sessionId: input.sessionId,
       contextDigest,
       resourceLibraryUsage,
-      ...(stringValue(value.documentLanguage) ? { documentLanguage: stringValue(value.documentLanguage) } : {}),
-      ...(stringValue(value.gameUserVisibleLanguage) ? { gameUserVisibleLanguage: stringValue(value.gameUserVisibleLanguage) } : {}),
-      ...(stringValue(value.agentResponseLanguage) ? { agentResponseLanguage: stringValue(value.agentResponseLanguage) } : {}),
+      documentLanguage,
+      gameUserVisibleLanguage,
+      agentResponseLanguage,
       createdAt,
     }
   } catch {
@@ -79,9 +89,9 @@ export function getConfirmedBriefEvidence(input: {
 
 function parseConfirmedBrief(value: string): {
   resourceLibraryUsage: ResourceLibraryUsage
-  documentLanguage?: string
-  gameUserVisibleLanguage?: string
-  agentResponseLanguage?: string
+  documentLanguage: string
+  gameUserVisibleLanguage: string
+  agentResponseLanguage: string
 } {
   let parsed: unknown
   try {
@@ -96,11 +106,17 @@ function parseConfirmedBrief(value: string): {
   if (!resourceLibraryUsage) {
     throw new Error('Confirmed brief context has an invalid resource_library_usage')
   }
+  const documentLanguage = stringValue(parsed.document_language)
+  const gameUserVisibleLanguage = stringValue(parsed.game_user_visible_language)
+  const agentResponseLanguage = stringValue(parsed.agent_response_language)
+  if (!documentLanguage || !gameUserVisibleLanguage || !agentResponseLanguage) {
+    throw new Error('Confirmed brief context must contain explicit response, document, and player-visible languages')
+  }
   return {
     resourceLibraryUsage,
-    ...(stringValue(parsed.document_language) ? { documentLanguage: stringValue(parsed.document_language) } : {}),
-    ...(stringValue(parsed.game_user_visible_language) ? { gameUserVisibleLanguage: stringValue(parsed.game_user_visible_language) } : {}),
-    ...(stringValue(parsed.agent_response_language) ? { agentResponseLanguage: stringValue(parsed.agent_response_language) } : {}),
+    documentLanguage,
+    gameUserVisibleLanguage,
+    agentResponseLanguage,
   }
 }
 

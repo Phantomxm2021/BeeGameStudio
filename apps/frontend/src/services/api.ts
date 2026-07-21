@@ -924,16 +924,6 @@ export const api = {
       ? beeGameAdapter.getProjects()
       : apiClient.get('/api/projects'),
 
-  /**
-   * 创建新项目
-   * @param data - 包含项目名称和可选的根路径
-   * @returns 返回创建的项目对象
-   */
-  createProject: (data: { name: string; root_path?: string }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.createProject(data)
-      : apiClient.post('/api/projects', data),
-
   bootstrapProjectFromBrief: (data: Parameters<typeof beeGameAdapter.bootstrapProjectFromBrief>[0]) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.bootstrapProjectFromBrief(data)

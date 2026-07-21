@@ -55,6 +55,29 @@ describe('SupabaseDashboardStore', () => {
     expect(calls).toBe(1)
   })
 
+  test('does not disguise an invalid persisted asset manifest as an empty contract', async () => {
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+      fetchImpl: (async () => Response.json([{
+        id: 'project_1',
+        owner_id: 'owner-user',
+        project_id: 'project_1',
+        manifest: { version: 5, requirements: [] },
+        updated_at: '2026-07-22T00:00:00.000Z',
+      }])) as unknown as typeof fetch,
+    })
+
+    await expect(store.upsertAssetManifest('owner-user', 'project_1', {
+      version: 5,
+      project_target: { asset_format_capabilities: ['png'] },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    })).rejects.toThrow('project_target must be an object')
+  })
+
   test('persists deployment records through Supabase REST', async () => {
     const ownerId = '00000000-0000-0000-0000-000000000001'
     const calls: Array<{ url: string; method: string; body?: unknown }> = []

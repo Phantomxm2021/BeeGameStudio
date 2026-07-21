@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { Project, CreateProjectRequest, StartProjectResult, UpdateProjectRequest } from '../types/project';
+import type { Project, StartProjectResult, UpdateProjectRequest } from '../types/project';
 import {
   api,
   normalizeProjectBaselineStatusPayload,
@@ -170,13 +170,6 @@ interface ProjectState {
   clearActiveProject: () => void;
 
   bootstrapProjectFromBrief: (data: BeeGameBuildBrief) => Promise<StartProjectResult>;
-
-  /**
-   * Create a new project
-   * Adds the new project to the list and sets it as active
-   * Requirements: 3.2, 3.3
-   */
-  createProject: (data: CreateProjectRequest) => Promise<Project>;
 
   /**
    * Update an existing project
@@ -377,7 +370,6 @@ export const useProjectStore = create<ProjectState>()(
           set({ isLoading: true });
           const result = (await api.bootstrapProjectFromBrief(data)) as unknown as {
             project: Project & { project_id?: string };
-            pipeline?: { pipeline_id?: string; status?: string };
             task_id: string;
             status: string;
           };
@@ -429,36 +421,6 @@ export const useProjectStore = create<ProjectState>()(
           return { status: 'started', projectId: newProjectId };
         } catch (error) {
           console.error('Failed to bootstrap project from brief:', error);
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      createProject: async (data) => {
-        try {
-          set({ isLoading: true });
-          const project = normalizeProjectTimestamp((await api.createProject(data)) as unknown as Project);
-
-          // Add new project to list and set as active
-          set((state) => ({
-            projects: [...state.projects, project],
-            activeProjectId: project.id,
-            isLoading: false
-          }));
-
-          // Clear messages for the new project
-          useChatStore.getState().clearMessages();
-
-          // Show success toast
-          // Requirements: 12.4
-          const { showToastSuccess } = get();
-          if (showToastSuccess) {
-            showToastSuccess(`项目 "${data.name}" 创建成功`);
-          }
-
-          return project;
-        } catch (error) {
-          console.error('Failed to create project:', error);
           set({ isLoading: false });
           throw error;
         }

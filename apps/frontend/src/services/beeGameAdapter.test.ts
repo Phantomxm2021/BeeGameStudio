@@ -67,7 +67,6 @@ const bootstrapResponse = (
     },
     task_id: options.sessionId,
     status: 'starting',
-    pipeline: { pipeline_id: options.sessionId, status: 'starting' },
   }, 202);
 };
 
@@ -863,7 +862,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'LLM Project',
       root_path: '/tmp/beegame-projects',
     });
@@ -930,7 +929,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'sample-web-game',
       root_path: '/tmp/beegame-projects/sample-web-game',
     });
@@ -1297,7 +1296,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'refresh-game',
       root_path: '/tmp/beegame-projects/refresh-game',
     });
@@ -1357,7 +1356,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'sample-web-game',
       root_path: '/tmp/beegame-projects/sample-web-game',
     });
@@ -1407,7 +1406,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'sample-web-game',
       root_path: '/tmp/beegame-projects/sample-web-game',
     });
@@ -1456,7 +1455,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'sample-web-game',
       root_path: '/tmp/beegame-projects/sample-web-game',
     });
@@ -1502,7 +1501,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'preview-game',
       root_path: '/tmp/beegame-projects/preview-game',
     });
@@ -1670,7 +1669,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'sample-web-game',
       root_path: '/tmp/beegame-projects/sample-web-game',
     });
@@ -1724,7 +1723,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const project = await beeGameAdapter.createProject({
+    const project = await beeGameAdapter.registerProjectMetadata({
       name: 'Mode From LLM',
       root_path: '/tmp/beegame-projects/mode-from-llm',
     });
@@ -1770,7 +1769,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const project = await beeGameAdapter.createProject({
+    const project = await beeGameAdapter.registerProjectMetadata({
       name: 'Model Sync Game',
       root_path: '/tmp/beegame-projects/model-sync-game',
     });
@@ -1863,7 +1862,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.createProject({
+    await beeGameAdapter.registerProjectMetadata({
       name: 'display-game',
       root_path: '/tmp/beegame-projects/display-game',
     });

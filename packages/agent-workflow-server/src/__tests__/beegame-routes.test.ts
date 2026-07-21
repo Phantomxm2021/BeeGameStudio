@@ -41,7 +41,6 @@ import {
 import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
 import { getObservedNativeDocumentReview } from '../beegame/native-document-review-evidence'
 import { recordNativeImplementationAuditReportForTest } from '../beegame/native-implementation-audit-evidence'
-import type { ProjectResourceSelectionClient } from '../beegame/project-resource-application'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -2381,7 +2380,6 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
       currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
-      resourceSelectionClient: createEmptyResourceSelectionClient(),
       resourceSelectionRuntimeConfig: {
         baseUrl: 'https://resources.runtime.test',
         serviceToken: 'resource-service-secret',
@@ -2487,9 +2485,7 @@ describe('beegame session routes', () => {
       expect(String(fake.runtimes[0]?.submits[1]?.confirmedBriefContext ?? '')).toContain(
         '"resource_library_usage": "preferred"',
       )
-      expect(followUpSubmitted).toContain('Session-confirmed brief (immutable user-confirmed context):')
-      expect(followUpSubmitted).toContain('"resource_library_usage": "preferred"')
-      expect(followUpSubmitted).toContain('Current user request:\nContinue repairing the current project.')
+      expect(followUpSubmitted).toBe('Continue repairing the current project.')
 
       const withoutResourcePreference = await app.request(
         `/api/beegame-sessions/${session.id}/confirmed-brief`,
@@ -2508,6 +2504,26 @@ describe('beegame session routes', () => {
       expect(withoutResourcePreference.status).toBe(400)
       expect(await withoutResourcePreference.json()).toEqual({
         error: 'Confirmed brief must explicitly select resourceLibraryUsage',
+      })
+      expect(fake.runtimes[0]?.submits).toHaveLength(2)
+
+      const withoutLanguagePolicy = await app.request(
+        `/api/beegame-sessions/${session.id}/confirmed-brief`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            brief: {
+              idea: 'A confirmed project without a language policy',
+              option: { id: 'language-missing', title: 'Missing language' },
+              settings: { resourceLibraryUsage: 'optional' },
+            },
+          }),
+        },
+      )
+      expect(withoutLanguagePolicy.status).toBe(400)
+      expect(await withoutLanguagePolicy.json()).toEqual({
+        error: 'Confirmed brief must explicitly select documentLanguage',
       })
       expect(fake.runtimes[0]?.submits).toHaveLength(2)
 
@@ -2530,6 +2546,9 @@ describe('beegame session routes', () => {
       await waitFor(() => fake.runtimes[0]?.submits.length === 3)
       const thirdSubmitted = String(fake.runtimes[0]?.submits[2]?.prompt ?? '')
       expect(thirdSubmitted).toContain('"resource_library_usage": "optional"')
+      expect(thirdSubmitted).toContain('"document_language": "zh"')
+      expect(thirdSubmitted).toContain('"game_user_visible_language": "zh"')
+      expect(thirdSubmitted).toContain('"agent_response_language": "zh"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3223,7 +3242,6 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
       currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
-      resourceSelectionClient: createEmptyResourceSelectionClient(),
       resourceSelectionRuntimeConfig: {
         baseUrl: 'https://resources.runtime.test',
         serviceToken: 'resource-service-secret',
@@ -8925,6 +8943,9 @@ describe('beegame session routes', () => {
         confirmedBriefContext: JSON.stringify({
           kind: 'confirmed_build_brief',
           resource_library_usage: 'preferred',
+          document_language: 'en',
+          game_user_visible_language: 'en',
+          agent_response_language: 'en',
         }),
       })
       await waitFor(() => firstManager.events(firstSession.id).some(
@@ -8974,8 +8995,8 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
-      expect(String(restartedFake.runtimes[0]?.submits[0]?.prompt ?? '')).toContain(
-        '"resource_library_usage":"preferred"',
+      expect(String(restartedFake.runtimes[0]?.submits[0]?.prompt ?? '')).toBe(
+        'Continue the same project.',
       )
       expect(String(restartedFake.runtimes[0]?.submits[0]?.confirmedBriefContext ?? '')).toContain(
         '"resource_library_usage":"preferred"',
@@ -9146,19 +9167,6 @@ function nativeContractCapabilityMessages(
       },
     },
   ]
-}
-
-function createEmptyResourceSelectionClient(): ProjectResourceSelectionClient {
-  return {
-    browsePacks: async () => ({ items: [], total: 0, facets: emptyResourceCatalogFacets() }),
-    browsePackElements: async () => ({ items: [], total: 0, facets: emptyResourceCatalogFacets() }),
-    inspectPack: async packId => ({ pack: { id: packId }, folders: [], elements: [] }),
-    resolveSelections: async () => [],
-  }
-}
-
-function emptyResourceCatalogFacets() {
-  return { dimensions: [], primaryCategories: [], categories: [], styles: [], gameTypes: [], packTags: [], usageTags: [], assetKinds: [], capabilities: [], formats: [] }
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {

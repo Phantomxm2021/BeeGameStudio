@@ -1301,8 +1301,13 @@ function formatsAgree(declaredFormat: string, detectedFormat: string): boolean {
 
 async function writeAssetManifest(root: string, manifest: BeeGameAssetManifest): Promise<void> {
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  const canonical = toCanonicalBeeGameAssetManifest(manifest)
+  // Runtime writes must never create a file that the strict runtime reader
+  // rejects on its next read. Missing-file/draft snapshots are useful to UI
+  // callers, but they are not a persistable canonical contract.
+  parseCanonicalBeeGameAssetManifest(canonical)
   await mkdir(resolve(manifestPath, '..'), { recursive: true })
-  await writeFile(manifestPath, `${JSON.stringify(toCanonicalBeeGameAssetManifest(manifest), null, 2)}\n`, 'utf8')
+  await writeFile(manifestPath, `${JSON.stringify(canonical, null, 2)}\n`, 'utf8')
 }
 
 export function toCanonicalBeeGameAssetManifest(manifest: BeeGameAssetManifest): Record<string, unknown> {

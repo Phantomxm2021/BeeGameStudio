@@ -9,6 +9,7 @@ import {
   parseCanonicalBeeGameAssetManifest,
   readBeeGameAssetManifest,
   uploadBeeGameAsset,
+  writeBeeGameAssetManifest,
 } from '../beegame/asset-contracts'
 
 describe('BeeGame canonical resource contract', () => {
@@ -79,6 +80,20 @@ describe('BeeGame canonical resource contract', () => {
       await Bun.write(manifestPath, '{invalid')
       await expect(readBeeGameAssetManifest(workspace)).rejects.toThrow('manifest must contain valid JSON')
       expect(await readFile(manifestPath, 'utf8')).toBe('{invalid')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses to persist a draft snapshot that is not a canonical manifest', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-invalid-manifest-write-'))
+    const manifestPath = join(workspace, 'assets/asset-manifest.json')
+    try {
+      await expect(writeBeeGameAssetManifest(workspace, {
+        version: 5,
+        requirements: [],
+      })).rejects.toThrow('project_target must be an object')
+      await expect(Bun.file(manifestPath).exists()).resolves.toBe(false)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

@@ -51,23 +51,22 @@ function MyComponent() {
 
 ```tsx
 import { useToast } from './hooks/useToast';
-import { api } from './services/api';
 
 function ProjectManager() {
   const { toasts, showSuccess, showError, dismissToast } = useToast();
   
-  const createProject = async (name: string) => {
+  const runProjectAction = async () => {
     try {
-      await api.createProject({ name });
-      showSuccess('项目创建成功');
+      await performProjectAction();
+      showSuccess('操作成功');
     } catch (error) {
-      showError('创建项目失败，请稍后重试');
+      showError('操作失败，请稍后重试');
     }
   };
   
   return (
     <div>
-      <button onClick={() => createProject('New Project')}>
+      <button onClick={runProjectAction}>
         创建项目
       </button>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

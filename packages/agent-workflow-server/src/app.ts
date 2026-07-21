@@ -64,10 +64,6 @@ import {
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
-import {
-  ProjectResourceApplication,
-  type ProjectResourceSelectionClient,
-} from './beegame/project-resource-application'
 import type { ResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -276,7 +272,6 @@ export type AgentWorkflowAppOptions = {
   skillsConfig?: BeeGameSkillsConfig | false
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
-  resourceSelectionClient?: ProjectResourceSelectionClient
   resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
   registerCleanup?: (cleanup: () => void) => void
 }
@@ -299,9 +294,6 @@ export function createAgentWorkflowApp(
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
-  const projectResources = options.resourceSelectionClient
-    ? new ProjectResourceApplication(options.resourceSelectionClient)
-    : undefined
   app.onError((error, c) => {
     if (isPrivilegedConfigurationPath(c.req.path)) {
       return privilegedRouteError(c, c.req.path, error)
@@ -1298,7 +1290,6 @@ export function createAgentWorkflowApp(
         ),
         task_id: session.id,
         status: 'starting',
-        pipeline: { pipeline_id: session.id, status: 'starting' },
       }, 202)
     } catch (err) {
       if (err instanceof ProjectQuotaExceededError) {
@@ -5267,26 +5258,19 @@ function buildConfirmedBriefPrompt(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
 ): string {
-  const documentLanguage = resolveConfirmedBriefLanguage(
-    brief.documentLanguage ?? brief.document_language,
-    language,
-  )
-  const gameUserVisibleLanguage = resolveConfirmedBriefLanguage(
-    brief.gameUserVisibleLanguage ?? brief.game_user_visible_language,
-    language,
-  )
-  const agentResponseLanguage = resolveConfirmedBriefLanguage(
-    brief.agentResponseLanguage ?? brief.agent_response_language,
-    language,
-  )
+  const {
+    documentLanguage,
+    gameUserVisibleLanguage,
+    agentResponseLanguage,
+  } = resolveCanonicalConfirmedLanguages(brief, language)
   const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
     brief,
   )
   const confirmedBrief = JSON.stringify({
     kind: 'confirmed_build_brief',
-    document_language: documentLanguage ?? null,
-    game_user_visible_language: gameUserVisibleLanguage ?? null,
-    agent_response_language: agentResponseLanguage ?? null,
+    document_language: documentLanguage,
+    game_user_visible_language: gameUserVisibleLanguage,
+    agent_response_language: agentResponseLanguage,
     idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
     selected_option: toCanonicalConfirmedOption(brief.option),
     settings: isObject(brief.settings) ? brief.settings : null,
@@ -5299,15 +5283,9 @@ function buildConfirmedBriefPrompt(
     'Build and deliver the confirmed game project below.',
     'Before planning or modifying project files, use the native beegame-game-delivery Skill and follow its new-project or existing-project contract as applicable.',
     '',
-    documentLanguage
-      ? `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`
-      : 'Write project documentation in the language used by the confirmed user brief.',
-    gameUserVisibleLanguage
-      ? `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`
-      : 'Write player-visible game text in the language used by the confirmed user brief.',
-    agentResponseLanguage
-      ? `Respond to the user in ${getDocumentLanguageName(agentResponseLanguage)}.`
-      : 'Respond to the user in the explicitly selected session language.',
+    `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`,
+    `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`,
+    `Respond to the user in ${getDocumentLanguageName(agentResponseLanguage)}.`,
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another. New projects require an implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
@@ -5342,11 +5320,46 @@ function resolveConfirmedResourceLibraryUsage(
   return value as ResourceLibraryUsage
 }
 
+function resolveCanonicalConfirmedLanguages(
+  brief: JsonObject,
+  selectedLanguage?: BeeGameSessionLanguage,
+): {
+  documentLanguage: BeeGameSessionLanguage
+  gameUserVisibleLanguage: BeeGameSessionLanguage
+  agentResponseLanguage: BeeGameSessionLanguage
+} {
+  return {
+    documentLanguage: resolveConfirmedBriefLanguage(
+      brief.documentLanguage ?? brief.document_language,
+      selectedLanguage,
+      'documentLanguage',
+    ),
+    gameUserVisibleLanguage: resolveConfirmedBriefLanguage(
+      brief.gameUserVisibleLanguage ?? brief.game_user_visible_language,
+      selectedLanguage,
+      'gameUserVisibleLanguage',
+    ),
+    agentResponseLanguage: resolveConfirmedBriefLanguage(
+      brief.agentResponseLanguage ?? brief.agent_response_language,
+      selectedLanguage,
+      'agentResponseLanguage',
+    ),
+  }
+}
+
 function resolveConfirmedBriefLanguage(
   value: unknown,
-  fallback?: BeeGameSessionLanguage,
-): BeeGameSessionLanguage | undefined {
-  return isBeeGameSessionLanguage(value) ? value : fallback
+  fallback: BeeGameSessionLanguage | undefined,
+  field: string,
+): BeeGameSessionLanguage {
+  if (value !== undefined && value !== null) {
+    if (!isBeeGameSessionLanguage(value)) {
+      throw new Error(`Confirmed brief has an invalid ${field}`)
+    }
+    return value
+  }
+  if (fallback) return fallback
+  throw new Error(`Confirmed brief must explicitly select ${field}`)
 }
 
 function toCanonicalConfirmedOption(value: unknown): JsonObject | null {

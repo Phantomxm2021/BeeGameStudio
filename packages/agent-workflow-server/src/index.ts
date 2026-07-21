@@ -1,6 +1,5 @@
 import { createAgentWorkflowApp } from './app'
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
-import { createResourceSelectionClient } from './beegame/resource-selection-client'
 import { resolveResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
 
 export { createAgentWorkflowApp }
@@ -21,7 +20,6 @@ if (import.meta.main) {
       modelConfigStore: {},
       ...(resourceSelectionConfig
         ? {
-            resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig),
             resourceSelectionRuntimeConfig: resourceSelectionConfig,
           }
         : {}),

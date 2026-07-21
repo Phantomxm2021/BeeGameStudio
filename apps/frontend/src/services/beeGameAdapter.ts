@@ -224,10 +224,10 @@ export type BeeGameBuildBrief = {
   idea: string;
   option: BeeGameIntakeOption;
   settings: BeeGameIntakeSettings;
-  language?: BeeGameLanguage | string;
-  documentLanguage?: BeeGameLanguage | string;
-  gameUserVisibleLanguage?: BeeGameLanguage | string;
-  agentResponseLanguage?: BeeGameLanguage | string;
+  language: BeeGameLanguage | string;
+  documentLanguage: BeeGameLanguage | string;
+  gameUserVisibleLanguage: BeeGameLanguage | string;
+  agentResponseLanguage: BeeGameLanguage | string;
   root_path?: string;
   title?: string;
   confirmedGdd?: string;
@@ -301,7 +301,7 @@ export const beeGameAdapter = {
     }
   },
 
-  async createProject(data: { name: string; root_path?: string }): Promise<Project> {
+  async registerProjectMetadata(data: { name: string; root_path?: string }): Promise<Project> {
     const project = createLocalProject(data.name, data.root_path);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
@@ -344,7 +344,6 @@ export const beeGameAdapter = {
     project: Project;
     task_id: string;
     status: string;
-    pipeline: { pipeline_id: string; status: string };
   }> {
     const title = getBriefDisplayTitle(data);
     const folderName = getBriefFolderName(data, title);
@@ -356,7 +355,6 @@ export const beeGameAdapter = {
       binding: ProjectSessionBinding;
       task_id: string;
       status: string;
-      pipeline: { pipeline_id: string; status: string };
     }>('/api/projects/bootstrap', {
       project,
       projectName: folderName,
@@ -370,7 +368,6 @@ export const beeGameAdapter = {
       project: syncedProject,
       task_id: bootstrap.task_id,
       status: bootstrap.status,
-      pipeline: bootstrap.pipeline,
     };
   },
 

@@ -50,4 +50,19 @@ describe('confirmed brief evidence', () => {
       createdAt: new Date(),
     })).toThrow('invalid kind')
   })
+
+  test('rejects canonical-looking evidence when any explicit language policy is missing', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'confirmed-brief-'))
+    expect(() => recordConfirmedBriefEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      confirmedBriefContext: JSON.stringify({
+        kind: 'confirmed_build_brief',
+        resource_library_usage: 'preferred',
+        document_language: 'zh',
+        game_user_visible_language: 'zh',
+      }),
+      createdAt: new Date(),
+    })).toThrow('explicit response, document, and player-visible languages')
+  })
 })
