@@ -23,7 +23,7 @@ function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Contex
 }
 
 function ContextMenuItem({ className, inset, variant = 'default', ...props }: ContextMenuPrimitive.ContextMenuItemProps & { inset?: boolean; variant?: 'default' | 'destructive' }) {
-  return <ContextMenuPrimitive.Item data-inset={inset} data-variant={variant} className={cn('flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none focus:bg-accent focus:text-accent-foreground data-[inset]:pl-8 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive', className)} {...props} />
+  return <ContextMenuPrimitive.Item data-inset={inset} data-variant={variant} className={cn('flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none focus:bg-accent focus:text-accent-foreground data-[inset]:pl-8 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:stroke-[1.75]', className)} {...props} />
 }
 
 function ContextMenuCheckboxItem({ className, children, checked, ...props }: ContextMenuPrimitive.ContextMenuCheckboxItemProps) {

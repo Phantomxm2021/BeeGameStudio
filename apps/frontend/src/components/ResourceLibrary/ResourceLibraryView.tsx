@@ -45,6 +45,7 @@ type ResourceLibraryViewProps = {
 };
 
 type UploadDestination = { category: string; folderPath: string };
+type ResourceUploadEntry = { file: File; destination: UploadDestination };
 type FailedElementUpload = { file: File; destination: UploadDestination; message: string; taskId?: string };
 type ElementUploadStatus = {
   done: number;
@@ -57,6 +58,14 @@ type ElementUploadStatus = {
 };
 
 const uploadRetryDelaysMs = [500, 1_250] as const;
+const directoryInputAttributes = { webkitdirectory: '', directory: '' } as Record<string, string>;
+
+function browserRelativePathParts(file: File): string[] {
+  const relativePath = String((file as File & { webkitRelativePath?: string }).webkitRelativePath ?? '').trim();
+  if (!relativePath) return [];
+  const parts = relativePath.split('\\').join('/').split('/').filter((part) => part && part !== '.');
+  return parts.some((part) => part === '..') ? [] : parts;
+}
 
 function isRetryableUploadError(error: unknown): boolean {
   // A retry must never turn validation, permissions, or incompatible-file errors
@@ -383,6 +392,15 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     await uploadQueuedElements(elementUpload.failed.map(({ file, destination }) => ({ file, destination })));
   };
 
+  const dismissFailedUploads = () => {
+    const taskIds = elementUpload?.failed.flatMap((upload) => upload.taskId ? [upload.taskId] : []) ?? [];
+    setElementUpload(null);
+    setError('');
+    cancelUploadRef.current = false;
+    activeUploadAbortRef.current = null;
+    void Promise.all(taskIds.map((taskId) => removeResourceUploadTask(taskId)));
+  };
+
   useEffect(() => {
     if (!selectedPack) return;
     let disposed = false;
@@ -443,10 +461,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onUpdatePackDefaults={async (elementDefaults) => { const saved = await apiClient.updatePack(selectedPack.id, { elementDefaults }); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); }}
         onArchivePack={async () => { try { setArchiveImpact(await beeGameApi.getResourcePackImpact(selectedPack.id)); } catch (cause) { setError(cause instanceof Error ? cause.message : '无法读取引用项目'); } }}
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
+        onAddFileEntries={uploadQueuedElements}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
         onRetryFailedUploads={() => void retryFailedUploads()}
         onCancelUploads={() => { cancelUploadRef.current = true; activeUploadAbortRef.current?.abort(); }}
+        onDismissUploads={dismissFailedUploads}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
@@ -583,12 +603,14 @@ function PackBrowser({
   onUpdatePackDefaults,
   onArchivePack,
   onAddFiles,
+  onAddFileEntries,
   onDropFiles,
   folders,
   onCreateFolder,
   uploadStatus,
   onRetryFailedUploads,
   onCancelUploads,
+  onDismissUploads,
   onPublish,
   onUpdateElement,
   onRefreshWorkspace,
@@ -608,6 +630,7 @@ function PackBrowser({
   onUpdatePackDefaults: (defaults: NonNullable<ResourcePackSummary['elementDefaults']>) => Promise<void>;
   onArchivePack: () => Promise<void>;
   onAddFiles: (files: File[], destination: UploadDestination) => void;
+  onAddFileEntries: (entries: ResourceUploadEntry[]) => Promise<void>;
   onDropFiles: (files: File[], destination: UploadDestination) => void;
   folders: ResourceFolder[];
   onCreateFolder: (name: string) => Promise<void>;
@@ -616,6 +639,7 @@ function PackBrowser({
   uploadStatus: ElementUploadStatus | null;
   onRetryFailedUploads: () => void;
   onCancelUploads: () => void;
+  onDismissUploads: () => void;
   onPublish: () => Promise<void>;
 }) {
   const { showSuccess } = useToastContext();
@@ -623,6 +647,8 @@ function PackBrowser({
   const explorerTree = useMemo(() => buildExplorerTree(pack, folders, elements, (category) => categoryLabels[category] || category), [elements, folders, pack]);
   const explorerHostRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const directoryUploadTargetRef = useRef<{ destination: UploadDestination; parentFolderId?: string } | undefined>(undefined);
   const [explorerHeight, setExplorerHeight] = useState(0);
   const [uploadDestination, setUploadDestination] = useState<UploadDestination>({ category: categories[0] || 'environment', folderPath: categories[0] || 'environment' });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -790,7 +816,9 @@ function PackBrowser({
     if (changed) await onUpdateElement(selectedElement.id, { capabilities, contentProfile, specs: { ...selectedElement.specs, ...nextMetrics, materialTextureBindings: encodedBindings } });
   }, [onUpdateElement, selectedElement]);
   const startFolderUpload = (node: { id: string; name: string; folder?: ResourceFolder }) => {
-    const category = node.folder ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment') : node.id.replace(/^category:/, '');
+    const category = node.folder
+      ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment')
+      : (node.id.startsWith('category:') ? node.id.slice('category:'.length) : categories[0] || 'environment');
     setUploadDestination({ category, folderPath: node.folder?.path || category });
     fileInputRef.current?.click();
   };
@@ -822,7 +850,55 @@ function PackBrowser({
     try { setInspectionJob(await apiClient.startProcessingJob(pack.id, pending.map(element => element.id))); }
     catch (cause) { setMoveError(cause instanceof Error ? cause.message : String(cause)); }
   };
-  const contextLabels = isZh ? { upload: '上传文件', rename: '重命名', inspect: '重新分析', inspectAll: '分析未处理文件', defaults: '默认元素用途', delete: '删除', newFolder: '新建文件夹' } : { upload: 'Upload files', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', defaults: 'Default element usage', delete: 'Delete', newFolder: 'New folder' };
+  const destinationForNode = (node: { id: string; folder?: ResourceFolder }): UploadDestination => {
+    const category = node.folder
+      ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment')
+      : (node.id.startsWith('category:') ? node.id.slice('category:'.length) : categories[0] || 'environment');
+    return { category, folderPath: node.folder?.path || category };
+  };
+  const startFolderDirectoryUpload = (node: { id: string; folder?: ResourceFolder }) => {
+    const destination = destinationForNode(node);
+    setUploadDestination(destination);
+    directoryUploadTargetRef.current = { destination, ...(node.folder ? { parentFolderId: node.folder.id } : {}) };
+    folderInputRef.current?.click();
+  };
+  const uploadDirectorySelection = async (files: File[]) => {
+    if (!files.length) return;
+    const selected = files.map((file) => ({ file, parts: browserRelativePathParts(file) }));
+    if (selected.some(({ parts }) => parts.length < 2)) {
+      setMoveError(isZh ? '无法读取所选文件夹的相对路径，请重新选择整个文件夹。' : 'The selected directory did not expose relative file paths. Please select the whole folder again.');
+      return;
+    }
+    setMoveError('');
+    const uploadTarget = directoryUploadTargetRef.current ?? { destination: uploadDestination };
+    const parentFolderId = uploadTarget.parentFolderId || '';
+    const knownFolders = new Map(folders.map((folder) => [folder.path.split('\\').join('/'), folder]));
+    let createdFolder = false;
+    const entries: ResourceUploadEntry[] = [];
+    try {
+      for (const { file, parts } of selected) {
+        let parent = parentFolderId ? folders.find((folder) => folder.id === parentFolderId) : undefined;
+        let currentPath = parent?.path.split('\\').join('/') || '';
+        for (const segment of parts.slice(0, -1)) {
+          const desiredPath = currentPath ? `${currentPath}/${segment}` : segment;
+          let folder = knownFolders.get(desiredPath);
+          if (!folder) {
+            folder = await apiClient.createFolder(pack.id, { name: segment, ...(parent ? { parentId: parent.id } : {}) });
+            knownFolders.set(folder.path.split('\\').join('/'), folder);
+            createdFolder = true;
+          }
+          parent = folder;
+          currentPath = folder.path.split('\\').join('/');
+        }
+        entries.push({ file, destination: { category: uploadTarget.destination.category, folderPath: currentPath || uploadTarget.destination.folderPath } });
+      }
+      if (createdFolder) await onRefreshWorkspace();
+      await onAddFileEntries(entries);
+    } catch (cause) {
+      setMoveError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const contextLabels = isZh ? { upload: '上传文件', uploadFolder: '上传文件夹', rename: '重命名', inspect: '重新分析', inspectAll: '分析未处理文件', defaults: '默认元素用途', delete: '删除', newFolder: '新建文件夹' } : { upload: 'Upload files', uploadFolder: 'Upload folder', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', defaults: 'Default element usage', delete: 'Delete', newFolder: 'New folder' };
   return (
     <section className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
       <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#2d2e34] bg-[#17181d] px-[18px]">
@@ -852,8 +928,9 @@ function PackBrowser({
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2c2d33] bg-[#15161b]">
-          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => { setSelectedElementIds(items.map(item => item.id)); if (items.length !== 1) onClearElement(); }} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onConfigureDefaults={(node) => setDefaultsTarget(node?.folder ? { kind: 'folder', folder: node.folder } : { kind: 'pack' })} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onInspectElement={(element) => { setMoveError(''); void apiClient.inspectElement(pack.id, element.id).then(async updated => { await onRefreshWorkspace(); if (selectedElement?.id === updated.id) onElement(updated); }).catch(cause => setMoveError(cause instanceof Error ? cause.message : String(cause))); }} onInspectAll={() => { void inspectUnprocessedElements(); }} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => { setSelectedElementIds(items.map(item => item.id)); if (items.length !== 1) onClearElement(); }} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onUploadFolderToFolder={startFolderDirectoryUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onConfigureDefaults={(node) => setDefaultsTarget(node?.folder ? { kind: 'folder', folder: node.folder } : { kind: 'pack' })} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onInspectElement={(element) => { setMoveError(''); void apiClient.inspectElement(pack.id, element.id).then(async updated => { await onRefreshWorkspace(); if (selectedElement?.id === updated.id) onElement(updated); }).catch(cause => setMoveError(cause instanceof Error ? cause.message : String(cause))); }} onInspectAll={() => { void inspectUnprocessedElements(); }} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
           <input ref={fileInputRef} aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
+          <input ref={folderInputRef} aria-label="选择要添加的文件夹" type="file" multiple {...directoryInputAttributes} className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; void uploadDirectorySelection(files); }} />
         </aside>
         <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c]" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
           {error || moveError ? (
@@ -882,7 +959,7 @@ function PackBrowser({
           </div>
         </main>
       </div>
-      {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} onCancel={onCancelUploads} /> : null}
+      {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} onCancel={onCancelUploads} onDismiss={onDismissUploads} /> : null}
       {inspectionJob ? <InspectionProgressCover isZh={isZh} job={inspectionJob} elements={elements} onClose={() => setInspectionJob(null)} onCancel={async () => setInspectionJob(await apiClient.cancelProcessingJob(pack.id, inspectionJob.id))} onRetry={async () => setInspectionJob(await apiClient.retryProcessingJob(pack.id, inspectionJob.id))} /> : null}
       {defaultsTarget ? <ElementDefaultsDialog isZh={isZh} targetName={defaultsTarget.kind === 'pack' ? pack.name : defaultsTarget.folder.name} initialTags={defaultsTarget.kind === 'pack' ? pack.elementDefaults?.usageTags : defaultsTarget.folder.elementDefaults?.usageTags} onClose={() => setDefaultsTarget(null)} onSave={async (usageTags) => { if (defaultsTarget.kind === 'pack') await onUpdatePackDefaults({ usageTags }); else await apiClient.updateFolder(pack.id, defaultsTarget.folder.id, { elementDefaults: { usageTags } }); await onRefreshWorkspace(); setDefaultsTarget(null); }} /> : null}
       {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
@@ -905,15 +982,15 @@ function InspectionProgressCover({ isZh, job, elements, onClose, onCancel, onRet
   return <div role="status" aria-live="polite" aria-label={isZh ? '正在分析资源' : 'Analyzing resources'} className="fixed inset-0 z-[100] grid place-items-center bg-black/55 p-5 backdrop-blur-sm"><div className="flex w-full max-w-md flex-col items-center text-center"><span aria-hidden="true" className={`h-12 w-12 rounded-full border-2 border-white/15 ${job.status === 'failed' ? 'border-t-red-300' : 'border-t-orange-200'} ${active ? 'animate-spin' : ''}`} /><p className="type-headline mt-4 text-zinc-50">{percent}%</p><p className="type-caption-2 mt-2 text-zinc-400">{done} / {job.totalItems}{job.failedItems ? ` · ${job.failedItems} ${isZh ? '失败' : 'failed'}` : ''}</p>{job.failures?.length ? <div className="mt-4 max-h-48 w-full space-y-2 overflow-y-auto rounded-2xl border border-red-300/15 bg-red-300/[0.04] p-3 text-left">{job.failures.map(failure => <div key={failure.elementId} className="min-w-0"><p className="type-footnote truncate text-zinc-200">{names.get(failure.elementId) || failure.elementId}</p><p className="type-caption-2 mt-0.5 break-words text-red-200/75">{failure.error}</p></div>)}</div> : null}<div className="mt-5 flex gap-3">{active ? <button type="button" onClick={() => void onCancel()} className="secondary-pill type-button px-4 py-2">{isZh ? '取消' : 'Cancel'}</button> : null}{job.status === 'failed' ? <button type="button" onClick={() => void onRetry()} className="primary-pill type-button px-4 py-2">{isZh ? '重试失败项' : 'Retry failed'}</button> : null}{!active ? <button type="button" onClick={onClose} className="secondary-pill type-button px-4 py-2">{isZh ? '完成' : 'Done'}</button> : null}</div></div></div>;
 }
 
-function UploadProgressCover({ status, onRetryFailed, onCancel }: { status: ElementUploadStatus; onRetryFailed: () => void; onCancel: () => void }) {
+function UploadProgressCover({ status, onRetryFailed, onCancel, onDismiss }: { status: ElementUploadStatus; onRetryFailed: () => void; onCancel: () => void; onDismiss: () => void }) {
   const percent = status.total ? Math.min(100, Math.round(status.done / status.total * 100)) : 0;
   const bytePercent = status.bytesTotal ? Math.min(100, Math.round((status.bytesDone || 0) / status.bytesTotal * 100)) : undefined;
   return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-black/55 backdrop-blur-sm">
     <div className="flex flex-col items-center text-center">
-      <span aria-hidden="true" className={`h-12 w-12 animate-spin rounded-full border-2 border-white/15 border-t-orange-200 ${status.phase === 'failed' ? 'border-t-red-300' : status.phase === 'complete' ? 'border-t-emerald-300' : ''}`} />
+      <span aria-hidden="true" className={`h-12 w-12 rounded-full border-2 border-white/15 border-t-orange-200 ${status.phase === 'uploading' ? 'animate-spin' : ''} ${status.phase === 'failed' ? 'border-t-red-300' : status.phase === 'complete' ? 'border-t-emerald-300' : ''}`} />
       <p className="type-headline mt-4 text-zinc-50">{percent}%</p>
       {status.phase === 'uploading' && status.activeFileName ? <p className="type-caption-2 mt-2 max-w-72 truncate text-zinc-400">{status.activeFileName}{bytePercent !== undefined ? ` · ${bytePercent}%` : ''}</p> : null}
-      {status.phase === 'failed' || status.phase === 'cancelled' ? <button type="button" onClick={onRetryFailed} className="secondary-pill type-button mt-5 px-4 py-2 text-red-100">{status.phase === 'cancelled' ? '继续上传' : '重试失败文件'}</button> : null}
+      {status.phase === 'failed' || status.phase === 'cancelled' ? <div className="mt-5 flex items-center gap-3"><button type="button" onClick={onDismiss} className="secondary-pill type-button px-4 py-2 text-zinc-300">{status.phase === 'cancelled' ? '结束上传' : '关闭'}</button><button type="button" onClick={onRetryFailed} className="secondary-pill type-button px-4 py-2 text-red-100">{status.phase === 'cancelled' ? '继续上传' : '重试失败文件'}</button></div> : null}
       {status.phase === 'uploading' ? <button type="button" onClick={onCancel} className="type-caption-2 mt-5 text-zinc-400 hover:text-white">取消剩余上传</button> : null}
     </div>
   </div>;

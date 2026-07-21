@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { ReactElement } from 'react'
@@ -147,6 +147,38 @@ describe('ResourceLibraryView workspace', () => {
     await user.click(screen.getByRole('button', { name: '重试失败文件' }))
     await waitFor(() => expect(addElement).toHaveBeenCalledTimes(2))
     expect(await screen.findByRole('status', { name: '正在上传资源' })).toHaveTextContent('100%')
+  })
+
+  test('dismisses the upload overlay after a failed upload', async () => {
+    const user = userEvent.setup()
+    const addElement = vi.fn().mockRejectedValue(new ResourceLibraryApiError('Unsupported file', 400, 'invalid_file'))
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, addElement }} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+
+    await user.upload(
+      screen.getByLabelText('选择要添加的文件'),
+      new File(['asset'], 'broken.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByRole('button', { name: '关闭' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+
+    await waitFor(() => expect(screen.queryByRole('status', { name: '正在上传资源' })).not.toBeInTheDocument())
+  })
+
+  test('never leaks the internal root node id into an uploaded file path', async () => {
+    const user = userEvent.setup()
+    const uploaded = { ...element, id: 'element-root-upload', name: 'crate.png', path: 'models/crate.png' }
+    const addElement = vi.fn(async () => uploaded)
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, addElement }} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+
+    fireEvent.contextMenu(screen.getByRole('tree', { name: 'Pack files' }))
+    await user.click(screen.getByText(/^(上传文件|Upload files)$/))
+    const file = new File(['asset'], 'crate.png', { type: 'image/png' })
+    await user.upload(screen.getByLabelText('选择要添加的文件'), file)
+
+    await waitFor(() => expect(addElement).toHaveBeenCalledWith(pack.id, file, 'models', 'models', expect.any(Object)))
   })
 
   test('shows structured publish blockers and can locate the affected element', async () => {

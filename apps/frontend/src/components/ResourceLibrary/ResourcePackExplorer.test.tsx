@@ -77,14 +77,16 @@ describe('ResourcePackExplorer', () => {
   test('offers capability-based context actions for empty space and persisted folders', () => {
     const onCreateFolder = vi.fn()
     const onUpload = vi.fn()
+    const onUploadFolder = vi.fn()
     const onRenameFolder = vi.fn()
     const onDeleteFolder = vi.fn()
     const onInspectAll = vi.fn()
     const persistedTree: ExplorerNode = { ...tree, children: [{ ...tree.children![0], folder: { id: 'models', packId: 'pack-1', name: 'Models', path: 'Models' } }] }
-    render(<ResourcePackExplorer tree={persistedTree} onElement={vi.fn()} onCreateFolder={onCreateFolder} onUploadToFolder={onUpload} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onInspectAll={onInspectAll} labels={{ newFolder: 'New folder', upload: 'Upload files', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete' }} />)
+    render(<ResourcePackExplorer tree={persistedTree} onElement={vi.fn()} onCreateFolder={onCreateFolder} onUploadToFolder={onUpload} onUploadFolderToFolder={onUploadFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onInspectAll={onInspectAll} labels={{ newFolder: 'New folder', upload: 'Upload files', uploadFolder: 'Upload folder', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete' }} />)
     fireEvent.contextMenu(screen.getByRole('tree'))
     expect(screen.getByText('New folder')).toBeInTheDocument()
     expect(screen.getByText('Upload files')).toBeInTheDocument()
+    expect(screen.getByText('Upload folder')).toBeInTheDocument()
     expect(screen.getByText('Inspect unprocessed files')).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.contextMenu(screen.getByRole('treeitem', { name: 'Models' }))
