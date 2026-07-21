@@ -6,6 +6,7 @@ services:
       target: skills
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
+        BUN_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}
     env_file:
       - ./.env.production
     environment:
@@ -32,6 +33,7 @@ services:
       target: billing
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
+        BUN_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}
     env_file:
       - ./.env.billing
     environment:
@@ -55,6 +57,7 @@ services:
       target: resources
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
+        BUN_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}
     env_file:
       - ./.env.resource
     environment:
@@ -78,6 +81,7 @@ services:
       target: runtime
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
+        BUN_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}
     env_file:
       - ./.env.production
     environment:
@@ -117,6 +121,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
       args:
+        NPM_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}

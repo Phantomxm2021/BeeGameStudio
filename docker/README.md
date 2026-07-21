@@ -131,6 +131,18 @@ and build without Compose-level parallelism:
 COMPOSE_PARALLEL_LIMIT=1 ./scripts/beegame-docker.sh up
 ```
 
+The launcher uses the same configurable package registry for frontend npm and
+backend Bun installs. The default is `https://registry.npmmirror.com/`. Override
+it for one build without editing a Dockerfile or env file:
+
+```bash
+sudo ./scripts/beegame-docker.sh up --registry https://registry.npmjs.org/
+```
+
+For a persistent override, set `BEEGAME_PACKAGE_REGISTRY` in
+`docker/.env.production`. npm replaces registry hosts recorded in the lockfile,
+and retries transient downloads with bounded backoff.
+
 If the host previously attempted builds with the legacy per-service
 Dockerfiles, old BuildKit layers can still occupy `/var/lib/docker` or
 `/var/lib/containerd`. After confirming that no other in-progress image build

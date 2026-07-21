@@ -16,6 +16,10 @@ describe('Docker dependency registry', () => {
 
     expect(frontendDockerfile).toContain('COPY apps/frontend/package.json apps/frontend/package-lock.json ./')
     expect(frontendDockerfile).toContain('npm ci --workspaces=false --no-audit --no-fund')
+    expect(frontendDockerfile).toContain('ARG NPM_INSTALL_REGISTRY=https://registry.npmmirror.com/')
+    expect(frontendDockerfile).toContain('--registry=${NPM_INSTALL_REGISTRY}')
+    expect(frontendDockerfile).toContain('--replace-registry-host=always')
+    expect(frontendDockerfile).toContain('--fetch-retries=5')
     expect(frontendDockerfile).not.toContain('bun install --frozen-lockfile')
     expect(frontendDockerfile).not.toContain('COPY packages ./packages')
   })
@@ -24,8 +28,9 @@ describe('Docker dependency registry', () => {
     const dockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.backend'), 'utf8')
 
     expect(dockerfile).toContain('ARG BUN_INSTALL_NETWORK_CONCURRENCY=2')
+    expect(dockerfile).toContain('ARG BUN_INSTALL_REGISTRY=https://registry.npmmirror.com/')
     expect(dockerfile).toContain('--mount=type=cache,target=/root/.bun/install/cache')
-    expect(dockerfile).toContain('bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress')
+    expect(dockerfile).toContain('bun install --frozen-lockfile --registry=${BUN_INSTALL_REGISTRY} --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress')
     expect(dockerfile.match(/bun install --frozen-lockfile/g)).toHaveLength(1)
     expect(dockerfile).toContain('FROM backend-source AS runtime')
     expect(dockerfile).toContain('FROM oven/bun:1.3-alpine AS billing')
@@ -50,5 +55,18 @@ describe('Docker dependency registry', () => {
     for (const target of ['runtime', 'billing', 'skills', 'resources']) {
       expect(compose).toContain(`target: ${target}`)
     }
+  })
+
+  test('lets the Docker launcher apply one custom registry to npm and Bun builds', () => {
+    const launcher = readFileSync(join(repoRoot, 'scripts/beegame-docker.sh'), 'utf8')
+    const compose = readFileSync(join(repoRoot, 'docker/docker-compose.yml'), 'utf8')
+
+    expect(launcher).toContain('package_registry="${BEEGAME_PACKAGE_REGISTRY:-}"')
+    expect(launcher).toContain("package_registry=\"$(sed -n 's/^BEEGAME_PACKAGE_REGISTRY=//p' \"$ENV_FILE\" | tail -n 1)\"")
+    expect(launcher).toContain('package_registry="${package_registry:-https://registry.npmmirror.com/}"')
+    expect(launcher).toContain('--registry=*)')
+    expect(launcher).toContain('export BEEGAME_PACKAGE_REGISTRY="$package_registry"')
+    expect(compose.match(/BUN_INSTALL_REGISTRY: \$\{BEEGAME_PACKAGE_REGISTRY:-https:\/\/registry\.npmmirror\.com\/\}/g)).toHaveLength(4)
+    expect(compose).toContain('NPM_INSTALL_REGISTRY: ${BEEGAME_PACKAGE_REGISTRY:-https://registry.npmmirror.com/}')
   })
 })

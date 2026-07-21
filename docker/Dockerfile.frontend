@@ -5,8 +5,15 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY apps/frontend/package.json apps/frontend/package-lock.json ./
+ARG NPM_INSTALL_REGISTRY=https://registry.npmmirror.com/
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --workspaces=false --no-audit --no-fund
+    npm ci --workspaces=false --no-audit --no-fund \
+      --registry=${NPM_INSTALL_REGISTRY} \
+      --replace-registry-host=always \
+      --fetch-retries=5 \
+      --fetch-retry-mintimeout=10000 \
+      --fetch-retry-maxtimeout=60000 \
+      --fetch-timeout=300000
 
 COPY apps/frontend ./
 

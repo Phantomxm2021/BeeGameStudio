@@ -17,10 +17,50 @@ RESOURCE_ENV_EXAMPLE_FILE="$ROOT_DIR/docker/.env.resource.example"
 COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-${BEEGAME_DOCKER_BUILD_PARALLELISM:-1}}"
 export COMPOSE_PARALLEL_LIMIT
 
-command="${1:-up}"
-if [ "$#" -gt 0 ]; then
+command="up"
+if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ]; then
+  command="$1"
   shift
 fi
+
+package_registry="${BEEGAME_PACKAGE_REGISTRY:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --registry)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        echo "--registry requires an HTTP(S) package registry URL" >&2
+        exit 2
+      fi
+      package_registry="$2"
+      shift 2
+      ;;
+    --registry=*)
+      package_registry="${1#--registry=}"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ -z "$package_registry" ] && [ -f "$ENV_FILE" ]; then
+  package_registry="$(sed -n 's/^BEEGAME_PACKAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1)"
+fi
+package_registry="${package_registry:-https://registry.npmmirror.com/}"
+
+case "$package_registry" in
+  http://*|https://*) ;;
+  *)
+    echo "Package registry must use an HTTP(S) URL: $package_registry" >&2
+    exit 2
+    ;;
+esac
+export BEEGAME_PACKAGE_REGISTRY="$package_registry"
 
 read_env_value() {
   key="$1"
@@ -260,6 +300,7 @@ case "$command" in
     require_docker
     validate_env_files
     echo "Docker build parallelism: $COMPOSE_PARALLEL_LIMIT"
+    echo "Docker package registry: $BEEGAME_PACKAGE_REGISTRY"
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build "$@"
     ;;
   down)
@@ -288,7 +329,7 @@ case "$command" in
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config "$@"
     ;;
   *)
-    echo "Usage: $0 [init|up|down|restart|logs|ps|status|config] [docker compose args...]" >&2
+    echo "Usage: $0 [init|up|down|restart|logs|ps|status|config] [--registry URL] [docker compose args...]" >&2
     exit 2
     ;;
 esac
