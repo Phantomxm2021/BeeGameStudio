@@ -41,6 +41,64 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
+  test('does not accept asset runtime evidence without exact current import and composition coverage', async () => {
+    workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'library', 'module.bin'), 'asset')
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: { asset_format_capabilities: ['bin'] },
+      requirements: [],
+      imports: [{
+        id: 'world-module',
+        source: { type: 'project-authored' },
+        status: 'referenced',
+        root_path: 'assets/library/module.bin',
+        local_files: ['assets/library/module.bin'],
+        selected_at: 'now',
+        selection_reason: ['approved composition'],
+        usage_evidence: { references: ['game.ts'] },
+      }],
+      compositions: [{
+        id: 'world-scene',
+        kind: 'scene',
+        status: 'integrated',
+        members: [{ import_id: 'world-module', role: 'environment' }],
+        recipe: { path: 'game.ts' },
+        integration_evidence: { references: ['game.ts'] },
+      }],
+    }))
+    recordReadyDocumentReview(workspace)
+    recordPassedImplementationAudit(workspace)
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: passingReport(),
+    })
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: {
+        ...passingReport(),
+        validatedImportIds: ['world-module'],
+        validatedCompositionIds: ['world-scene'],
+      },
+    })
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('current')
+  })
+
   test('does not accept a preferred Resource Library policy without observed Pack exploration', async () => {
     workspace = await createWorkspace()
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
@@ -203,6 +261,66 @@ describe('native delivery acceptance gate', () => {
       allowed: false,
       outcome: 'rejected',
       issues: ['assets/asset-manifest.json: preferred Resource Library usage has no imported resource artifacts in the current manifest. Resource Library: unresolved failed native actions for the current resource context: import_elements.'],
+    })
+  })
+
+  test('does not accept copied resources whose declared responsibilities and compositions remain planned', async () => {
+    workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'library', 'module.glb'), 'glTF')
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        resource_library_usage: 'preferred',
+      },
+      requirements: [{
+        id: 'world-module',
+        required: false,
+        status: 'planned',
+        resource_requirement: { accepted_formats: ['glb'] },
+      }],
+      imports: [{
+        id: 'module',
+        source: {
+          type: 'resource-library',
+          pack_id: 'pack',
+          pack_version: '1',
+          element_id: 'module',
+          element_path: 'module.glb',
+        },
+        status: 'available',
+        root_path: 'assets/library/module.glb',
+        local_files: ['assets/library/module.glb'],
+        selection_reason: ['Selected for the approved world composition'],
+      }],
+      compositions: [{
+        id: 'world',
+        kind: 'scene',
+        status: 'planned',
+        members: [{ import_id: 'module', role: 'world-module' }],
+      }],
+    }))
+    recordReadyDocumentReview(workspace, 'preferred')
+    observeNativeResourceLibraryToolEvent({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'ResourceLibrary',
+        toolUseID: 'planned-import',
+        input: { action: 'browse_packs' },
+        output: JSON.stringify({ data: { items: [{ id: 'pack' }], total: 1 } }),
+      },
+      createdAt: new Date(),
+    })
+    record(workspace, 'passed', 'A copied file is not runtime integration.')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: [expect.stringContaining('resource requirements are still planned')],
     })
   })
 
@@ -666,7 +784,7 @@ describe('native delivery acceptance gate', () => {
     })).toEqual({ state: 'missing' })
   })
 
-  test('accepts a completed native TaskOutput linked to the observed background Validator', async () => {
+  test('does not treat actively polled TaskOutput as background Validator evidence', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'task-output-validator-tool'
@@ -722,7 +840,7 @@ describe('native delivery acceptance gate', () => {
       dataRoot,
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
-    }).state).toBe('current')
+    }).state).toBe('running')
   })
 
   test('does not recover an unfinished background Validator output', async () => {
@@ -1318,6 +1436,8 @@ function passingReport(summary = 'Observed every documented player path.'): obje
     status: 'passed',
     summary,
     validatedChecklistIds: ['PATH-001'],
+    validatedImportIds: [],
+    validatedCompositionIds: [],
     evidence: [
       { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
       { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build completed successfully.' },

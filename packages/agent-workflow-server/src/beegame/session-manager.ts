@@ -193,7 +193,13 @@ export type BeeGameRuntimeSnapshot = {
   turnDiagnostics?: {
     turnId: string
     agentCalls: number
+    reviewerCalls: number
+    auditorCalls: number
+    validatorCalls: number
+    deliveryContractCalls: number
+    skillCalls: number
     taskOutputCalls: number
+    failedToolCalls: number
     usage: {
       prompt_tokens: number
       completion_tokens: number
@@ -971,6 +977,18 @@ export class BeeGameSessionManager {
     }
     this.sessions.delete(sessionId)
     return { deleted: true, deletedArtifactPaths }
+  }
+
+  dispose(): void {
+    for (const record of this.sessions.values()) {
+      record.abortController?.abort()
+      disposeRunner(record.runner)
+      record.runner = null
+      this.resolveAllPendingPermissions(record, {
+        behavior: 'deny',
+        message: 'BeeGame server stopped before permission was resolved',
+      })
+    }
   }
 
   async readArtifact(sessionId: string, path: string): Promise<BeeGameArtifact> {
@@ -2658,10 +2676,25 @@ function deriveLatestTurnDiagnostics(
     event.type === 'tool.started' &&
     getDashboardPayloadString(event.payload, 'toolName') === toolName
   )).length
+  const countAgent = (agentType: string) => turnEvents.filter(event => {
+    if (
+      event.type !== 'tool.started' ||
+      getDashboardPayloadString(event.payload, 'toolName') !== 'Agent' ||
+      !isRuntimeRecord(event.payload)
+    ) return false
+    const input = isRuntimeRecord(event.payload.input) ? event.payload.input : undefined
+    return input?.subagent_type === agentType
+  }).length
   return {
     turnId,
     agentCalls: countTool('Agent'),
+    reviewerCalls: countAgent('beegame-document-reviewer'),
+    auditorCalls: countAgent('beegame-implementation-auditor'),
+    validatorCalls: countAgent('beegame-acceptance-validator'),
+    deliveryContractCalls: countTool('ProjectDeliveryContract'),
+    skillCalls: countTool('Skill'),
     taskOutputCalls: countTool('TaskOutput'),
+    failedToolCalls: turnEvents.filter(event => event.type === 'tool.failed').length,
     usage,
     roleTokens: deriveObservedRoleTokens(turnEvents, usage),
   }
@@ -2979,7 +3012,13 @@ function normalizeTurnDiagnostics(
     turnDiagnostics: {
       turnId: String(value.turnId || ''),
       agentCalls: Number(value.agentCalls ?? 0),
+      reviewerCalls: Number(value.reviewerCalls ?? 0),
+      auditorCalls: Number(value.auditorCalls ?? 0),
+      validatorCalls: Number(value.validatorCalls ?? 0),
+      deliveryContractCalls: Number(value.deliveryContractCalls ?? 0),
+      skillCalls: Number(value.skillCalls ?? 0),
       taskOutputCalls: Number(value.taskOutputCalls ?? 0),
+      failedToolCalls: Number(value.failedToolCalls ?? 0),
       usage: {
         prompt_tokens: Number(usage.prompt_tokens ?? 0),
         completion_tokens: Number(usage.completion_tokens ?? 0),

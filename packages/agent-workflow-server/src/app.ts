@@ -277,6 +277,7 @@ export type AgentWorkflowAppOptions = {
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
   resourceSelectionClient?: ProjectResourceSelectionClient
   resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
+  registerCleanup?: (cleanup: () => void) => void
 }
 
 export const ROUTE_PERMISSION = {
@@ -438,6 +439,10 @@ export function createAgentWorkflowApp(
     options.previewReadinessProbe,
     process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
   )
+  options.registerCleanup?.(() => {
+    beeGamePreviews.dispose()
+    beeGameSessions.dispose()
+  })
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
@@ -4986,6 +4991,7 @@ function registerBeeGameSessionRoutes(
     if (!sessionMetadata) return c.json({ error: 'Session not found' }, 404)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
     try {
+      beeGamePreviews.stop(c.req.param('id'), sessionMetadata.workspacePath)
       const result = await beeGameSessions.delete(c.req.param('id'), {
         deleteArtifacts,
       })

@@ -20,7 +20,6 @@ import {
 import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import {
   parseNativeBackgroundTaskLaunch,
-  parseNativeCompletedTaskOutput,
 } from './native-background-task-output'
 import {
   parseNativeTerminalTaskNotification,
@@ -123,14 +122,6 @@ export function observeNativeDocumentReviewToolEvent(input: {
     return
   }
 
-  if (input.eventType === 'tool.completed') {
-    const taskOutput = parseNativeCompletedTaskOutput(input.payload)
-    if (taskOutput) {
-      observeLinkedTaskOutput(input, taskOutput)
-      return
-    }
-  }
-
   if (stringValue(input.payload.toolName) !== 'Agent') return
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
   if (stringValue(toolInput.subagent_type) !== DOCUMENT_REVIEWER_AGENT_TYPE)
@@ -139,6 +130,16 @@ export function observeNativeDocumentReviewToolEvent(input: {
   if (!toolUseID) return
 
   if (input.eventType === 'tool.started') {
+    const documentsDigest = digestProjectDocuments(input.workspacePath)
+    const observations = readObservations(input.dataRoot, input.sessionId)
+    const duplicateActiveReview = observations.some(observation =>
+      observation.kind === 'dispatch' &&
+      observation.documentsDigest === documentsDigest &&
+      !observations.some(terminal =>
+        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
+      )
+    )
+    if (duplicateActiveReview) return
     appendObservation(input.dataRoot, input.sessionId, {
       version: 2,
       kind: 'dispatch',
@@ -146,7 +147,7 @@ export function observeNativeDocumentReviewToolEvent(input: {
       ...(input.turnId ? { turnId: input.turnId } : {}),
       toolUseID,
       reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
-      documentsDigest: digestProjectDocuments(input.workspacePath),
+      documentsDigest,
       createdAt: input.createdAt.toISOString(),
     })
     return
@@ -191,47 +192,6 @@ export function observeNativeDocumentReviewToolEvent(input: {
     agentToolUseID: toolUseID,
   })) return
   appendResult(input, toolUseID, dispatch.documentsDigest, report)
-}
-
-function observeLinkedTaskOutput(
-  input: {
-    dataRoot: string
-    sessionId: string
-    workspacePath: string
-    turnId?: string
-    createdAt: Date
-  },
-  taskOutput: {
-    taskId: string
-    status: 'completed' | 'failed' | 'stopped' | 'killed'
-    result?: string
-  },
-): void {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const backgroundTask = observations.findLast(observation =>
-    observation.kind === 'background-task' &&
-    observation.taskId === taskOutput.taskId
-  )
-  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
-  if (observations.some(observation =>
-    observation.kind === 'result' &&
-    observation.toolUseID === backgroundTask.toolUseID
-  )) return
-  const dispatch = observations.findLast(observation =>
-    observation.kind === 'dispatch' &&
-    observation.toolUseID === backgroundTask.toolUseID
-  )
-  if (!dispatch || dispatch.kind !== 'dispatch') return
-  appendTerminal(input, dispatch.toolUseID, taskOutput.status)
-  if (taskOutput.status !== 'completed' || !taskOutput.result) return
-  const report = parseReport(taskOutput.result, input.workspacePath, true)
-  if (!report) return
-  if (!hasCompletedNativeDeliveryContract({
-    dataRoot: input.dataRoot,
-    sessionId: input.sessionId,
-    agentToolUseID: dispatch.toolUseID,
-  })) return
-  appendResult(input, dispatch.toolUseID, dispatch.documentsDigest, report)
 }
 
 export function getObservedNativeDocumentReview(input: {

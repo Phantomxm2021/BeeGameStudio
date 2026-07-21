@@ -279,7 +279,7 @@ describe('native document review evidence', () => {
     expect(current(workspace).state).toBe('current')
   })
 
-  test('accepts a completed native TaskOutput linked to the observed background reviewer', async () => {
+  test('does not treat actively polled TaskOutput as background reviewer evidence', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'task-output-review'
@@ -306,7 +306,7 @@ describe('native document review evidence', () => {
       },
     })
 
-    expect(current(workspace).state).toBe('current')
+    expect(current(workspace).state).toBe('running')
   })
 
   test('uses the native terminal result when SDK metadata omits output_file', async () => {

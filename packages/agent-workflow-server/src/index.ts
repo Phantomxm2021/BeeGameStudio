@@ -12,10 +12,12 @@ let activeServer: ReturnType<typeof Bun.serve> | null = null
 if (import.meta.main) {
   validateSecretStorageAtStartup()
   const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
+  const cleanupHandlers: Array<() => void> = []
   activeServer = Bun.serve({
     hostname: host,
     port,
     fetch: createAgentWorkflowApp({
+      registerCleanup: cleanup => cleanupHandlers.push(cleanup),
       modelConfigStore: {},
       ...(resourceSelectionConfig
         ? {
@@ -28,4 +30,14 @@ if (import.meta.main) {
   console.log(
     `Agent workflow server listening on http://${host}:${activeServer.port}`,
   )
+  let shuttingDown = false
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      if (shuttingDown) return
+      shuttingDown = true
+      for (const cleanup of cleanupHandlers) cleanup()
+      activeServer?.stop(true)
+      process.exit(signal === 'SIGINT' ? 130 : 143)
+    })
+  }
 }

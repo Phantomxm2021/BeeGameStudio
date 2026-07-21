@@ -233,6 +233,14 @@ export class BeeGamePreviewManager {
     return { ...record.snapshot }
   }
 
+  dispose(): void {
+    for (const record of this.records.values()) {
+      for (const process of record.processes ?? []) process.kill()
+      delete record.processes
+    }
+    this.records.clear()
+  }
+
   internalUrl(sessionId: string): string | undefined {
     const record = this.records.get(sessionId)
     if (!record || record.snapshot.status !== 'running') return undefined

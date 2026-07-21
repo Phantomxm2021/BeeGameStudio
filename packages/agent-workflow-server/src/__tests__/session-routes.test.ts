@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +11,14 @@ import { encryptSecret } from '../security/secret-crypto'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
+
+beforeEach(async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'beegame-session-routes-default-'))
+  temporaryDirectories.push(directory)
+  process.env.AGENT_WORKFLOW_DATA_DIR = directory
+})
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory =>
@@ -20,6 +27,8 @@ afterEach(async () => {
   else process.env.BEEGAME_HTTPONLY_SESSIONS = originalFlag
   if (originalKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalKey
+  if (originalDataDir === undefined) delete process.env.AGENT_WORKFLOW_DATA_DIR
+  else process.env.AGENT_WORKFLOW_DATA_DIR = originalDataDir
 })
 
 function createApp(

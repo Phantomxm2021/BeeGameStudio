@@ -18,6 +18,7 @@ export type NativeDeliveryStateReason =
   | 'resource_exploration_missing'
   | 'resource_exploration_stale'
   | 'resource_import_missing'
+  | 'resource_integration_incomplete'
   | 'implementation_audit_out_of_order'
   | 'acceptance_missing'
   | 'acceptance_running'
@@ -228,6 +229,14 @@ export function getNativeDeliveryState(input: {
         status: 'failed',
         reason: 'resource_import_missing',
         summary: resourceReadiness.issues.join(' '),
+        observedAt: resourceEvidence.observedAt,
+      }
+    }
+    if (!resourceReadiness.integrationReady) {
+      return {
+        status: 'failed',
+        reason: 'resource_integration_incomplete',
+        summary: resourceReadiness.integrationIssues.join(' '),
         observedAt: resourceEvidence.observedAt,
       }
     }

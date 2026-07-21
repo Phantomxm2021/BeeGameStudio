@@ -142,7 +142,7 @@ trusted backend or Docker service.
 
 The dedicated backend entrypoint is
 `packages/beegame-billing-server/src/index.ts`. Docker deployments should run
-the `beegame-billing` service from `docker/Dockerfile.billing` and keep its
+the `beegame-billing` target from `docker/Dockerfile.backend` and keep its
 secret environment in `docker/.env.billing`.
 
 The dedicated billing package must not depend on the runtime host package.

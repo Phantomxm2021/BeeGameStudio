@@ -45,10 +45,12 @@ const { resolveResourceSelectionRuntimeConfig } = await import(
 
 const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
 const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
+const cleanupHandlers: Array<() => void> = []
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,
   fetch: createAgentWorkflowApp({
+    registerCleanup: cleanup => cleanupHandlers.push(cleanup),
     modelConfigStore: {},
     defaultWorkspacePath: process.env.AGENT_WORKFLOW_WORKSPACE_PATH
       ? resolve(process.env.AGENT_WORKFLOW_WORKSPACE_PATH)
@@ -61,6 +63,19 @@ const server = Bun.serve({
       : {}),
   }).fetch,
 })
+
+let shuttingDown = false
+function shutdown(signal: 'SIGINT' | 'SIGTERM'): void {
+  if (shuttingDown) return
+  shuttingDown = true
+  for (const cleanup of cleanupHandlers) cleanup()
+  server.stop(true)
+  process.exit(signal === 'SIGINT' ? 130 : 143)
+}
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => shutdown(signal))
+}
 
 console.log(
   `Agent workflow server listening on http://127.0.0.1:${server.port}`,

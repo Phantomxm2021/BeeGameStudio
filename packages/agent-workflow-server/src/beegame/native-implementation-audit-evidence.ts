@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { auditAssetContract } from './asset-contract-audit'
 import { IMPLEMENTATION_AUDITOR_AGENT_TYPE } from './delivery-validation-agents'
 import { readAcceptanceChecklistIds } from './document-readiness-audit'
 import { digestWorkspace } from './native-acceptance-evidence'
 import {
   parseNativeBackgroundTaskLaunch,
-  parseNativeCompletedTaskOutput,
 } from './native-background-task-output'
 import {
   parseNativeTerminalTaskNotification,
@@ -29,12 +29,14 @@ type NativeImplementationAuditReport = {
   status: NativeImplementationAuditStatus
   summary: string
   auditedChecklistIds: string[]
+  auditedImportIds: string[]
+  auditedCompositionIds: string[]
   evidence: NativeImplementationAuditFact[]
   findings: NativeImplementationAuditFact[]
 }
 
 type NativeImplementationAuditDispatch = {
-  version: 2
+  version: 3
   kind: 'dispatch'
   sessionId: string
   turnId?: string
@@ -45,7 +47,7 @@ type NativeImplementationAuditDispatch = {
 }
 
 type NativeImplementationAuditBackgroundTask = {
-  version: 2
+  version: 3
   kind: 'background-task'
   sessionId: string
   turnId?: string
@@ -57,7 +59,7 @@ type NativeImplementationAuditBackgroundTask = {
 }
 
 type NativeImplementationAuditTerminal = {
-  version: 2
+  version: 3
   kind: 'terminal'
   sessionId: string
   turnId?: string
@@ -68,7 +70,7 @@ type NativeImplementationAuditTerminal = {
 }
 
 export type NativeImplementationAuditEvidence = {
-  version: 2
+  version: 3
   kind: 'result'
   sessionId: string
   turnId?: string
@@ -77,6 +79,8 @@ export type NativeImplementationAuditEvidence = {
   status: NativeImplementationAuditStatus
   summary: string
   auditedChecklistIds: string[]
+  auditedImportIds: string[]
+  auditedCompositionIds: string[]
   evidence: NativeImplementationAuditFact[]
   findings: NativeImplementationAuditFact[]
   reportDigest: string
@@ -109,13 +113,6 @@ export function observeNativeImplementationAuditToolEvent(input: {
     observeBackgroundStart(input as typeof input & { payload: Record<string, unknown> })
     return
   }
-  if (input.eventType === 'tool.completed') {
-    const taskOutput = parseNativeCompletedTaskOutput(input.payload)
-    if (taskOutput) {
-      observeLinkedTaskOutput(input, taskOutput)
-      return
-    }
-  }
   if (stringValue(input.payload.toolName) !== 'Agent') return
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
   if (stringValue(toolInput.subagent_type) !== IMPLEMENTATION_AUDITOR_AGENT_TYPE) return
@@ -123,14 +120,24 @@ export function observeNativeImplementationAuditToolEvent(input: {
   if (!toolUseID) return
 
   if (input.eventType === 'tool.started') {
+    const workspaceDigest = digestWorkspace(input.workspacePath)
+    const observations = readObservations(input.dataRoot, input.sessionId)
+    const duplicateActiveAudit = observations.some(observation =>
+      observation.kind === 'dispatch' &&
+      observation.workspaceDigest === workspaceDigest &&
+      !observations.some(terminal =>
+        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
+      )
+    )
+    if (duplicateActiveAudit) return
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 2,
+      version: 3,
       kind: 'dispatch',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
       toolUseID,
       auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
-      workspaceDigest: digestWorkspace(input.workspacePath),
+      workspaceDigest,
       createdAt: input.createdAt.toISOString(),
     })
     return
@@ -267,40 +274,6 @@ function observeBackgroundStart(input: {
   if (dispatch) appendBackgroundTask(input, dispatch, taskId)
 }
 
-function observeLinkedTaskOutput(
-  input: {
-    dataRoot: string
-    sessionId: string
-    workspacePath: string
-    turnId?: string
-    createdAt: Date
-  },
-  output: {
-    taskId: string
-    status: 'completed' | 'failed' | 'stopped' | 'killed'
-    result?: string
-  },
-): void {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const background = observations.findLast(item =>
-    item.kind === 'background-task' && item.taskId === output.taskId
-  )
-  if (!background || background.kind !== 'background-task') return
-  if (observations.some(item =>
-    item.kind === 'result' && item.toolUseID === background.toolUseID
-  )) return
-  const dispatch = findDispatch(input.dataRoot, input.sessionId, background.toolUseID)
-  if (!dispatch) return
-  appendTerminal(input, dispatch.toolUseID, output.status)
-  if (output.status !== 'completed' || !output.result) return
-  const report = parseReport(output.result, input.workspacePath, true)
-  if (report && hasCompletedNativeDeliveryContract({
-    dataRoot: input.dataRoot,
-    sessionId: input.sessionId,
-    agentToolUseID: dispatch.toolUseID,
-  })) appendResult(input, dispatch, report)
-}
-
 function appendBackgroundTask(
   input: { dataRoot: string; sessionId: string; turnId?: string; createdAt: Date },
   dispatch: NativeImplementationAuditDispatch,
@@ -313,7 +286,7 @@ function appendBackgroundTask(
     item.toolUseID === dispatch.toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 2,
+    version: 3,
     kind: 'background-task',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -335,7 +308,7 @@ function appendTerminal(
     item.kind === 'terminal' && item.toolUseID === toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 2,
+    version: 3,
     kind: 'terminal',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -356,7 +329,7 @@ function appendResult(
     item.kind === 'result' && item.toolUseID === dispatch.toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 2,
+    version: 3,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -365,6 +338,8 @@ function appendResult(
     status: report.status,
     summary: report.summary,
     auditedChecklistIds: report.auditedChecklistIds,
+    auditedImportIds: report.auditedImportIds,
+    auditedCompositionIds: report.auditedCompositionIds,
     evidence: report.evidence,
     findings: report.findings,
     reportDigest: createHash('sha256').update(stableJson(report)).digest('hex'),
@@ -403,15 +378,28 @@ function parseReport(
   const evidence = value.evidence.flatMap(parseFact)
   const findings = value.findings.flatMap(parseFact)
   const auditedChecklistIds = uniqueStrings(value.auditedChecklistIds)
+  const auditedImportIds = uniqueStrings(value.auditedImportIds)
+  const auditedCompositionIds = uniqueStrings(value.auditedCompositionIds)
   if (evidence.length !== value.evidence.length || findings.length !== value.findings.length) return
   if (status === 'passed' && (evidence.length === 0 || findings.length > 0)) return
   if (status === 'passed' && !sameIdentifiers(auditedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return
+  const assetContract = auditAssetContract(workspacePath)
+  if (status === 'passed' && !sameIdentifiers(
+    auditedImportIds,
+    assetContract.imports?.map(item => item.id) ?? [],
+  )) return
+  if (status === 'passed' && !sameIdentifiers(
+    auditedCompositionIds,
+    assetContract.compositions.map(item => item.id),
+  )) return
   if (status !== 'passed' && findings.length === 0) return
   return {
     auditorId: IMPLEMENTATION_AUDITOR_AGENT_TYPE,
     status,
     summary,
     auditedChecklistIds,
+    auditedImportIds,
+    auditedCompositionIds,
     evidence,
     findings,
   }
@@ -470,7 +458,7 @@ function readObservations(
     if (!line.trim()) return []
     try {
       const value = JSON.parse(line) as NativeImplementationAuditObservation
-      return value.version === 2 &&
+      return value.version === 3 &&
         value.sessionId === sessionId &&
         value.auditorId === IMPLEMENTATION_AUDITOR_AGENT_TYPE
         ? [value]

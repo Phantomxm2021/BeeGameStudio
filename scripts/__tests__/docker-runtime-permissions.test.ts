@@ -10,11 +10,15 @@ function readRepoFile(path: string): string {
 
 describe('Docker runtime permissions', () => {
   test('runtime entrypoint repairs mounted project directory permissions before dropping privileges', () => {
-    const dockerfile = readRepoFile('docker/Dockerfile.runtime')
+    const dockerfile = readRepoFile('docker/Dockerfile.backend')
     const entrypoint = readRepoFile('docker/runtime-entrypoint.sh')
+    const runtimeTarget = dockerfile.slice(
+      dockerfile.indexOf('FROM backend-source AS runtime'),
+      dockerfile.indexOf('FROM oven/bun:1.3-alpine AS billing'),
+    )
 
     expect(dockerfile).toContain('su-exec')
-    expect(dockerfile).not.toContain('\nUSER bun\n')
+    expect(runtimeTarget).not.toContain('\nUSER bun\n')
     expect(entrypoint).toContain('runtime_user="${BEEGAME_RUNTIME_USER:-bun}"')
     expect(entrypoint).toContain('runtime_group="${BEEGAME_RUNTIME_GROUP:-bun}"')
     expect(entrypoint).toContain('chown -R "$runtime_user:$runtime_group"')

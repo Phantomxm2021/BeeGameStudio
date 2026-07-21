@@ -7,11 +7,11 @@ import {
   readdirSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { auditAssetContract } from './asset-contract-audit'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
 import { readAcceptanceChecklistIds } from './document-readiness-audit'
 import {
   parseNativeBackgroundTaskLaunch,
-  parseNativeCompletedTaskOutput,
 } from './native-background-task-output'
 import {
   parseNativeTerminalTaskNotification,
@@ -48,12 +48,14 @@ type NativeAcceptanceReport = {
   status: NativeAcceptanceResult
   summary: string
   validatedChecklistIds: string[]
+  validatedImportIds: string[]
+  validatedCompositionIds: string[]
   evidence: NativeAcceptanceReportEvidence[]
   findings: NativeAcceptanceReportFinding[]
 }
 
 type NativeAcceptanceDispatch = {
-  version: 4
+  version: 5
   kind: 'dispatch'
   sessionId: string
   turnId?: string
@@ -64,7 +66,7 @@ type NativeAcceptanceDispatch = {
 }
 
 type NativeAcceptanceBackgroundTask = {
-  version: 4
+  version: 5
   kind: 'background-task'
   sessionId: string
   turnId?: string
@@ -76,7 +78,7 @@ type NativeAcceptanceBackgroundTask = {
 }
 
 type NativeAcceptanceTerminal = {
-  version: 4
+  version: 5
   kind: 'terminal'
   sessionId: string
   turnId?: string
@@ -87,7 +89,7 @@ type NativeAcceptanceTerminal = {
 }
 
 export type NativeAcceptanceEvidence = {
-  version: 4
+  version: 5
   kind: 'result'
   sessionId: string
   turnId?: string
@@ -96,6 +98,8 @@ export type NativeAcceptanceEvidence = {
   status: NativeAcceptanceResult
   summary: string
   validatedChecklistIds: string[]
+  validatedImportIds: string[]
+  validatedCompositionIds: string[]
   reportDigest: string
   workspaceDigest: string
   startedAt: string
@@ -141,14 +145,6 @@ export function observeNativeAcceptanceToolEvent(input: {
     return
   }
 
-  if (input.eventType === 'tool.completed') {
-    const taskOutput = parseNativeCompletedTaskOutput(input.payload)
-    if (taskOutput) {
-      observeLinkedTaskOutput(input, taskOutput)
-      return
-    }
-  }
-
   const toolName = stringValue(input.payload.toolName)
   if (toolName !== 'Agent') return
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
@@ -158,14 +154,24 @@ export function observeNativeAcceptanceToolEvent(input: {
   if (!toolUseID) return
 
   if (input.eventType === 'tool.started') {
+    const workspaceDigest = digestWorkspace(input.workspacePath)
+    const observations = readObservations(input.dataRoot, input.sessionId)
+    const duplicateActiveValidation = observations.some(observation =>
+      observation.kind === 'dispatch' &&
+      observation.workspaceDigest === workspaceDigest &&
+      !observations.some(terminal =>
+        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
+      )
+    )
+    if (duplicateActiveValidation) return
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 4,
+      version: 5,
       kind: 'dispatch',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
       toolUseID,
       validatorId,
-      workspaceDigest: digestWorkspace(input.workspacePath),
+      workspaceDigest,
       createdAt: input.createdAt.toISOString(),
     })
     return
@@ -190,7 +196,7 @@ export function observeNativeAcceptanceToolEvent(input: {
       observation.toolUseID === toolUseID
     )) {
       appendObservation(input.dataRoot, input.sessionId, {
-        version: 4,
+        version: 5,
         kind: 'background-task',
         sessionId: input.sessionId,
         ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -219,7 +225,7 @@ export function observeNativeAcceptanceToolEvent(input: {
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 4,
+    version: 5,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -228,68 +234,8 @@ export function observeNativeAcceptanceToolEvent(input: {
     status: report.status,
     summary: report.summary,
     validatedChecklistIds: report.validatedChecklistIds,
-    reportDigest: digestJson(report),
-    workspaceDigest: dispatch.workspaceDigest,
-    startedAt: dispatch.createdAt,
-    evidence: report.evidence,
-    findings: report.findings,
-    createdAt: input.createdAt.toISOString(),
-  })
-}
-
-function observeLinkedTaskOutput(
-  input: {
-    dataRoot: string
-    sessionId: string
-    workspacePath: string
-    turnId?: string
-    createdAt: Date
-  },
-  taskOutput: {
-    taskId: string
-    status: 'completed' | 'failed' | 'stopped' | 'killed'
-    result?: string
-  },
-): void {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const backgroundTask = observations.findLast(observation =>
-    observation.kind === 'background-task' &&
-    observation.taskId === taskOutput.taskId
-  )
-  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
-  if (observations.some(observation =>
-    observation.kind === 'result' &&
-    observation.toolUseID === backgroundTask.toolUseID
-  )) return
-  const dispatch = observations.findLast(observation =>
-    observation.kind === 'dispatch' &&
-    observation.toolUseID === backgroundTask.toolUseID
-  )
-  if (!dispatch || dispatch.kind !== 'dispatch') return
-  appendTerminal(input, dispatch.toolUseID, taskOutput.status)
-  if (taskOutput.status !== 'completed' || !taskOutput.result) return
-  const report = parseNativeAcceptanceReport(
-    taskOutput.result,
-    dispatch.validatorId,
-    input.workspacePath,
-    true,
-    {
-      dataRoot: input.dataRoot,
-      sessionId: input.sessionId,
-      validatorToolUseID: dispatch.toolUseID,
-    },
-  )
-  if (!report) return
-  appendObservation(input.dataRoot, input.sessionId, {
-    version: 4,
-    kind: 'result',
-    sessionId: input.sessionId,
-    ...(input.turnId ? { turnId: input.turnId } : {}),
-    toolUseID: dispatch.toolUseID,
-    validatorId: dispatch.validatorId,
-    status: report.status,
-    summary: report.summary,
-    validatedChecklistIds: report.validatedChecklistIds,
+    validatedImportIds: report.validatedImportIds,
+    validatedCompositionIds: report.validatedCompositionIds,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
     startedAt: dispatch.createdAt,
@@ -325,7 +271,7 @@ function observeNativeBackgroundAcceptanceEvent(input: {
     )
     if (!dispatch || dispatch.kind !== 'dispatch') return
     appendObservation(input.dataRoot, input.sessionId, {
-      version: 4,
+      version: 5,
       kind: 'background-task',
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -376,7 +322,7 @@ export function observeNativeAcceptanceTaskNotification(input: {
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 4,
+    version: 5,
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -385,6 +331,8 @@ export function observeNativeAcceptanceTaskNotification(input: {
     status: report.status,
     summary: report.summary,
     validatedChecklistIds: report.validatedChecklistIds,
+    validatedImportIds: report.validatedImportIds,
+    validatedCompositionIds: report.validatedCompositionIds,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
     startedAt: dispatch.createdAt,
@@ -403,7 +351,7 @@ function appendTerminal(
     observation.kind === 'terminal' && observation.toolUseID === toolUseID
   )) return
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 4,
+    version: 5,
     kind: 'terminal',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -541,6 +489,8 @@ function parseNativeAcceptanceReport(
   const evidence = report.evidence.flatMap(parseReportEvidence)
   const findings = report.findings.flatMap(parseReportFinding)
   const validatedChecklistIds = uniqueStrings(report.validatedChecklistIds)
+  const validatedImportIds = uniqueStrings(report.validatedImportIds)
+  const validatedCompositionIds = uniqueStrings(report.validatedCompositionIds)
   if (evidence.length !== report.evidence.length || findings.length !== report.findings.length) {
     return undefined
   }
@@ -557,6 +507,15 @@ function parseNativeAcceptanceReport(
       return undefined
     }
     if (!sameIdentifiers(validatedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return undefined
+    const assetContract = auditAssetContract(workspacePath)
+    if (!sameIdentifiers(
+      validatedImportIds,
+      assetContract.imports?.map(item => item.id) ?? [],
+    )) return undefined
+    if (!sameIdentifiers(
+      validatedCompositionIds,
+      assetContract.compositions.map(item => item.id),
+    )) return undefined
     // A source read or a model-authored label is not execution evidence.
     // Build/test require an actually completed executable tool, Skill evidence
     // requires an observed native Skill call, and runtime evidence requires a
@@ -569,7 +528,16 @@ function parseNativeAcceptanceReport(
       return undefined
     }
   }
-  return { validatorId, status, summary, validatedChecklistIds, evidence, findings }
+  return {
+    validatorId,
+    status,
+    summary,
+    validatedChecklistIds,
+    validatedImportIds,
+    validatedCompositionIds,
+    evidence,
+    findings,
+  }
 }
 
 function uniqueStrings(value: unknown): string[] {
@@ -621,7 +589,7 @@ function readObservations(
       if (!line.trim()) return []
       try {
         const observation = JSON.parse(line) as NativeAcceptanceObservation
-        return observation.version === 4 && observation.sessionId === sessionId &&
+        return observation.version === 5 && observation.sessionId === sessionId &&
           observation.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
           (
             observation.kind === 'dispatch' ||

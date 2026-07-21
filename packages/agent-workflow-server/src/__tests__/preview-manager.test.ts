@@ -56,4 +56,29 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
     expect(captured.command).toContain('--base')
     expect(captured.command).toContain('/previews/generic-session/')
   })
+
+  test('stops every owned preview process when the server lifecycle is disposed', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'generic-vite-preview-dispose-'))
+    workspaces.push(workspace)
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({
+      scripts: { dev: 'vite' },
+      devDependencies: { vite: '^8.0.0' },
+    }))
+    let killed = 0
+    const manager = new BeeGamePreviewManager(
+      () => ({
+        kill: () => { killed += 1 },
+        exited: new Promise(() => {}),
+      }),
+      63100,
+      async () => 63100,
+      async () => true,
+    )
+
+    await manager.start({ sessionId: 'generic-dispose-session', workspacePath: workspace })
+    manager.dispose()
+
+    expect(killed).toBe(1)
+    expect(manager.status('generic-dispose-session', workspace).status).toBe('idle')
+  })
 })

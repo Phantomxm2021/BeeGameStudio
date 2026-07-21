@@ -1,4 +1,6 @@
-FROM oven/bun:1.3-alpine
+# syntax=docker/dockerfile:1.7
+
+FROM oven/bun:1.3-alpine AS backend-dependencies
 
 RUN apk add --no-cache \
     bash \
@@ -47,13 +49,27 @@ COPY packages/workflow-engine/package.json ./packages/workflow-engine/package.js
 ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
 ARG BUN_INSTALL_NETWORK_CONCURRENCY=2
-RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress
+
+FROM backend-dependencies AS backend-source
 
 COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
 COPY src ./src
 COPY vendor ./vendor
+
+FROM backend-source AS backend-bundles
+
+RUN mkdir -p /out/resource-node-modules && \
+    bun build packages/beegame-billing-server/src/index.ts --target=bun --minify --outfile=/out/beegame-billing.js && \
+    bun build packages/beegame-skills-server/src/index.ts --target=bun --minify --outfile=/out/beegame-skills.js && \
+    bun build packages/beegame-resource-server/src/index.ts --target=bun --minify --outfile=/out/beegame-resources.js && \
+    cp -R "$(readlink -f packages/beegame-resource-server/node_modules/assimpjs)" /out/resource-node-modules/assimpjs
+
+FROM backend-source AS runtime
+
 COPY .beegame /opt/beegame/default-config
 COPY docker/runtime-entrypoint.sh /usr/local/bin/beegame-runtime-entrypoint.sh
 
@@ -71,3 +87,52 @@ EXPOSE 62174
 
 ENTRYPOINT ["beegame-runtime-entrypoint.sh"]
 CMD ["bun", "packages/agent-workflow-server/src/index.ts"]
+
+FROM oven/bun:1.3-alpine AS billing
+
+WORKDIR /app
+COPY --from=backend-bundles /out/beegame-billing.js ./server.js
+RUN mkdir -p /srv/beegame/billing /home/bun/.beegame && \
+    chown -R bun:bun /srv/beegame /home/bun/.beegame /app
+USER bun
+
+ENV NODE_ENV=production
+ENV BEEGAME_BILLING_MODE=server
+ENV BEEGAME_BILLING_HOST=0.0.0.0
+ENV BEEGAME_BILLING_PORT=62175
+ENV BEEGAME_CONFIG_DIR=/home/bun/.beegame
+
+EXPOSE 62175
+CMD ["bun", "server.js"]
+
+FROM oven/bun:1.3-alpine AS skills
+
+WORKDIR /app
+COPY --from=backend-bundles /out/beegame-skills.js ./server.js
+RUN mkdir -p /srv/beegame/skills /home/bun/.beegame && chown -R bun:bun /srv/beegame /home/bun/.beegame /app
+USER bun
+
+ENV NODE_ENV=production
+ENV BEEGAME_SKILLS_HOST=0.0.0.0
+ENV BEEGAME_SKILLS_PORT=62176
+ENV BEEGAME_SKILLS_DATA_DIR=/srv/beegame/skills
+
+EXPOSE 62176
+CMD ["bun", "server.js"]
+
+FROM oven/bun:1.3-alpine AS resources
+
+WORKDIR /app
+COPY --from=backend-bundles /out/beegame-resources.js ./server.js
+COPY --from=backend-bundles /out/resource-node-modules ./node_modules
+COPY packages/beegame-resource-server/src/model-processor-worker.ts ./model-processor-worker.ts
+COPY packages/beegame-resource-server/src/resource-dependency-bindings.ts ./resource-dependency-bindings.ts
+RUN mkdir -p /srv/beegame/resources && chown -R bun:bun /srv/beegame /app
+USER bun
+
+ENV NODE_ENV=production
+ENV BEEGAME_RESOURCE_HOST=0.0.0.0
+ENV BEEGAME_RESOURCE_PORT=62177
+
+EXPOSE 62177
+CMD ["bun", "server.js"]

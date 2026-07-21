@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { z } from 'zod/v4'
 import {
   RESOURCE_ASSET_KINDS,
@@ -9,7 +10,12 @@ import {
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
 import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
-import { auditDocumentReadiness, REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
+import {
+  auditDocumentReadiness,
+  readAcceptanceChecklistIds,
+  REQUIRED_PROJECT_DOCUMENTS,
+} from './document-readiness-audit'
+import { auditAssetContract } from './asset-contract-audit'
 import { CANONICAL_ASSET_MANIFEST_EXAMPLE } from './asset-contracts'
 import type { NativeResourceLibraryEvidenceState } from './native-resource-library-evidence'
 import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
@@ -31,7 +37,9 @@ export function createNativeDeliveryContractTool(options: {
     name: 'ProjectDeliveryContract',
     alwaysLoad: true,
     maxResultSizeChars: 20_000,
-    inputSchema: z.object({ action: z.literal('inspect') }),
+    inputSchema: z.object({
+      action: z.enum(['inspect', 'describe_schema']).default('inspect'),
+    }),
     isConcurrencySafe: () => true,
     isReadOnly: () => true,
     async description() {
@@ -40,14 +48,19 @@ export function createNativeDeliveryContractTool(options: {
     async prompt() {
       return 'Use this read-only capability before native document review and before a delivery claim. Treat returned diagnostics as deployment facts. BeeGame does not interpret game semantics, edit the project, select resources, or control Claude Code.'
     },
-    async checkPermissions(input: { action: 'inspect' }) {
+    async checkPermissions(input: { action: 'inspect' | 'describe_schema' }) {
       return { behavior: 'allow', updatedInput: input }
     },
-    async call() {
+    async call(input: { action?: 'inspect' | 'describe_schema' } = {}) {
+      const canonicalContract = getCanonicalContract()
+      if (input.action === 'describe_schema') {
+        return { data: { canonical_contract: canonicalContract } }
+      }
       const confirmedBrief = parseConfirmedBrief(
         options.getConfirmedBriefContext?.(),
       )
       const documentReadiness = auditDocumentReadiness(options.workspacePath)
+      const assetContract = auditAssetContract(options.workspacePath)
       const confirmedPolicy = confirmedResourcePolicy(confirmedBrief)
       const resourceReadiness = auditResourceDeliveryReadiness({
         workspacePath: options.workspacePath,
@@ -56,35 +69,31 @@ export function createNativeDeliveryContractTool(options: {
           ? { resourceEvidence: options.getResourceLibraryEvidence() }
           : {}),
       })
+      const documentPlanReady = documentReadiness.valid && resourceReadiness.valid
+      const {
+        valid: resourcePlanReady,
+        ...resourceContractFacts
+      } = resourceReadiness
       return {
         data: {
-          valid: documentReadiness.valid && resourceReadiness.valid,
+          contractShapeValid: documentReadiness.valid,
+          documentPlanReady,
+          resourceIntegrationReady: resourceReadiness.integrationReady,
           issues: [...documentReadiness.issues, ...resourceReadiness.issues],
+          integration_issues: resourceReadiness.integrationIssues,
           confirmed_brief: confirmedBrief,
-          resource_contract: resourceReadiness,
-          canonical_contract: {
-            required_documents: REQUIRED_PROJECT_DOCUMENTS,
-            checklist_task_shape: '- [ ] <stable-id> <observable action, expected result, and evidence>',
-            asset_manifest_example: CANONICAL_ASSET_MANIFEST_EXAMPLE,
-            asset_manifest_rules: {
-              inventory_field: 'imports',
-              responsibility_field: 'requirements',
-              target_native_assembly_field: 'compositions',
-              legacy_slots_accepted: false,
-              asset_format_capabilities_semantics: 'Actual file extensions that the selected target runtime can consume; implementation libraries, render techniques, and platform names are invalid.',
-            },
-            resource_library_usage_allowed_values: [
-              ...RESOURCE_LIBRARY_USAGE,
-            ],
-            asset_manifest_vocabularies: {
-              dimensions: RESOURCE_DIMENSIONS,
-              categories: RESOURCE_CATEGORIES,
-              usage_tags: RESOURCE_USAGE_TAGS,
-              asset_kinds: RESOURCE_ASSET_KINDS,
-              capabilities: RESOURCE_CAPABILITIES,
-              composition_kinds: RESOURCE_COMPOSITION_KINDS,
-            },
+          resource_contract: {
+            resourcePlanReady,
+            ...resourceContractFacts,
           },
+          current_coverage: {
+            required_document_paths: [...REQUIRED_PROJECT_DOCUMENTS],
+            checklist_ids: readAcceptanceChecklistIds(options.workspacePath),
+            import_ids: assetContract.imports?.map(item => item.id) ?? [],
+            composition_ids: assetContract.compositions.map(item => item.id),
+          },
+          canonical_contract_digest: digestJson(canonicalContract),
+          schema_action: 'Use action describe_schema only when the canonical shape or vocabulary is needed.',
         },
       }
     },
@@ -95,6 +104,49 @@ export function createNativeDeliveryContractTool(options: {
       return { tool_use_id: toolUseID, type: 'tool_result', content: JSON.stringify(output) }
     },
   })
+}
+
+function getCanonicalContract(): Record<string, unknown> {
+  return {
+    required_documents: REQUIRED_PROJECT_DOCUMENTS,
+    checklist_task_shape: '- [ ] <stable-id> <observable action, expected result, and evidence>',
+    asset_manifest_example: CANONICAL_ASSET_MANIFEST_EXAMPLE,
+    asset_manifest_rules: {
+      inventory_field: 'imports',
+      responsibility_field: 'requirements',
+      target_native_assembly_field: 'compositions',
+      legacy_slots_accepted: false,
+      asset_format_capabilities_semantics: 'Actual file extensions that the selected target runtime can consume; implementation libraries, render techniques, and platform names are invalid.',
+      stage_semantics: {
+        document_plan_ready: 'Documents and the resource plan are structurally ready for independent document review. This is not implementation or delivery completion.',
+        resource_integration_ready: 'Every declared resource responsibility and composition has reached a terminal integration state suitable for implementation audit.',
+      },
+    },
+    resource_library_usage_allowed_values: [...RESOURCE_LIBRARY_USAGE],
+    asset_manifest_vocabularies: {
+      dimensions: RESOURCE_DIMENSIONS,
+      categories: RESOURCE_CATEGORIES,
+      usage_tags: RESOURCE_USAGE_TAGS,
+      asset_kinds: RESOURCE_ASSET_KINDS,
+      capabilities: RESOURCE_CAPABILITIES,
+      composition_kinds: RESOURCE_COMPOSITION_KINDS,
+    },
+  }
+}
+
+function digestJson(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('hex')
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map(key =>
+      `${JSON.stringify(key)}:${stableJson(record[key])}`
+    ).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
 }
 
 function confirmedResourcePolicy(value: unknown): ResourceLibraryUsage | undefined {

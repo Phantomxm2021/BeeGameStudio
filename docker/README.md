@@ -117,6 +117,33 @@ Equivalent command:
 docker compose -f docker/docker-compose.yml --env-file docker/.env.production up -d --build
 ```
 
+The four Bun backend services share one dependency-install stage in
+`docker/Dockerfile.backend`. Only `beegame-runtime` keeps the full workspace and
+dependency tree. Billing, Skills, and Resource Library are emitted as compact
+runtime bundles, so Compose does not export four duplicate `node_modules`
+layers. Bun and npm download caches use BuildKit cache mounts and are not copied
+into the final images.
+
+On a small host, keep `BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY=2` (the default)
+and build without Compose-level parallelism:
+
+```bash
+COMPOSE_PARALLEL_LIMIT=1 ./scripts/beegame-docker.sh up
+```
+
+If the host previously attempted builds with the legacy per-service
+Dockerfiles, old BuildKit layers can still occupy `/var/lib/docker` or
+`/var/lib/containerd`. After confirming that no other in-progress image build
+needs those caches, reclaim build cache and unreferenced images once:
+
+```bash
+docker builder prune -af
+docker image prune -af
+```
+
+Do not prune named volumes: `beegame-config` and `beegame-skills` contain
+persistent application data.
+
 Useful wrappers:
 
 ```bash

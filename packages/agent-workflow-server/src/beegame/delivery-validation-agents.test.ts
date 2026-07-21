@@ -47,6 +47,8 @@ describe('native delivery agents', () => {
       expect(validator).toContain('A keyboard shortcut is not evidence for a documented mouse or touch interaction')
       expect(validator).toContain('direct state mutation')
       expect(validator).toContain('verify the rendered result and interaction')
+      expect(validator).toContain('validatedImportIds')
+      expect(validator).toContain('validatedCompositionIds')
       expect(validator).toContain('do not narrow the validation scope')
       expect(validator).toContain('A targeted regression check cannot be returned as project-wide passed acceptance')
       expect(validator).not.toContain('At the beginning of this validation pass')
@@ -86,6 +88,8 @@ describe('native delivery agents', () => {
       expect(auditor).toContain('"status":"passed|failed|blocked"')
       expect(auditor).toContain('never narrow the audit')
       expect(auditor).toContain('A targeted recheck is not evidence for a project-wide passed result')
+      expect(auditor).toContain('auditedImportIds')
+      expect(auditor).toContain('auditedCompositionIds')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

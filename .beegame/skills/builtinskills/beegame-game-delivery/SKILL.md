@@ -93,6 +93,15 @@ terminal result. A completed tool call with zero imported artifacts is a failed
 import, not resource evidence. Do not start the Acceptance Validator until the
 current Implementation Auditor has returned `passed`.
 
+`ProjectDeliveryContract.documentPlanReady` means only that the document and
+resource-plan structures are ready for independent document review. It never
+means that resources are integrated, implementation is complete, the game is
+playable, or delivery is accepted. Before starting the Implementation Auditor,
+require `resourceIntegrationReady: true` and handle every `integration_issues`
+entry. Do not make the contract look complete by changing adopted
+responsibilities to optional, leaving them `planned`, or removing confirmed
+scope.
+
 If an import reports missing target format capabilities, repair
 `project_target.asset_format_capabilities` with the actual file extensions the
 selected target can consume before retrying the same stable import ids. Do not
@@ -115,12 +124,26 @@ languages, current document paths, current revision and deterministic contract
 diagnostics. Do not prime an independent Agent with statements such as a fix is
 already correct, all tests pass, or a finding must not be reported.
 
+Do not use the Document Reviewer as an iterative document author or targeted
+linter. Before the first review, reconcile the complete document set, stable
+IDs, resource plan and acceptance coverage yourself with the applicable native
+Skills. After a `NEEDS_REVISION` result, repair every reported finding and
+repeat a complete neutral review of the new full document revision. Never ask a
+Reviewer to confirm only previous fixes, and never simplify confirmed product
+scope merely to reduce review findings.
+
 Reviewer, Auditor and Validator passes are project-wide for the current
 revision. A changed-file list or earlier finding list may focus attention but
 must not reduce the independent Agent's complete approved scope or checklist
 coverage. Continue inspecting after the first defect so one pass reports all
 material findings it can establish rather than revealing one avoidable defect
 per repair cycle.
+
+For background Reviewer, Auditor and Validator calls, wait for Claude Code's
+native terminal task notification. Do not actively poll them with `TaskOutput`,
+read their temporary output files, or use `SendMessage` to manufacture a
+terminal result. A native foreground Agent result remains valid; this rule only
+prevents wasteful polling of work that Claude Code already owns.
 
 Scaffolding that is mechanically required to host documentation is allowed,
 but do not begin authored gameplay implementation before the documentation
@@ -198,8 +221,11 @@ results:
 
 The Auditor and Validator terminal objects must enumerate every stable id from
 the current gameplay checklist in `auditedChecklistIds` and
-`validatedChecklistIds`. A test count or generic runtime summary cannot replace
-per-checklist coverage.
+`validatedChecklistIds`. They must also enumerate every current canonical
+resource import and composition in their respective audited/validated coverage
+arrays. A test count, generic runtime summary, copied file, import-id marker,
+comment, or logging-only registry cannot replace per-checklist and actual asset
+coverage.
 
 Inspect `ProjectDeliveryContract` again before the final claim. A native Agent
 summary cannot override a failed deterministic contract diagnostic. Runtime,

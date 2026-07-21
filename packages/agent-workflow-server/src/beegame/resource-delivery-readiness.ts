@@ -4,12 +4,23 @@ import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-cor
 import type { NativeResourceLibraryEvidenceState } from './native-resource-library-evidence'
 
 export type ResourceDeliveryReadiness = {
+  /** The resource plan is structurally usable for document review. */
   valid: boolean
   issues: string[]
+  /** Runtime integration is complete enough for implementation audit. */
+  integrationReady: boolean
+  integrationIssues: string[]
   confirmedPolicy?: ResourceLibraryUsage
   manifestPolicy?: ResourceLibraryUsage
   targetFormats: string[]
   importCount: number
+  referencedImportCount: number
+  requirementCount: number
+  pendingRequirementCount: number
+  blockedRequiredRequirementCount: number
+  compositionCount: number
+  pendingCompositionCount: number
+  integratedCompositionCount: number
   resourceEvidenceState: NativeResourceLibraryEvidenceState['state']
   failedActions: string[]
 }
@@ -33,6 +44,24 @@ export function auditResourceDeliveryReadiness(input: {
   const importCount = Array.isArray(manifest?.imports)
     ? manifest.imports.length
     : 0
+  const imports = Array.isArray(manifest?.imports)
+    ? manifest.imports.filter(isRecord)
+    : []
+  const requirements = Array.isArray(manifest?.requirements)
+    ? manifest.requirements.filter(isRecord)
+    : []
+  const compositions = Array.isArray(manifest?.compositions)
+    ? manifest.compositions.filter(isRecord)
+    : []
+  const referencedImportCount = imports.filter(item => item.status === 'referenced').length
+  const pendingRequirementCount = requirements.filter(item => item.status === 'planned').length
+  const blockedRequiredRequirementCount = requirements.filter(item =>
+    item.status === 'blocked' && item.required !== false
+  ).length
+  const pendingCompositionCount = compositions.filter(item =>
+    item.status === 'planned' || item.status === 'assembled'
+  ).length
+  const integratedCompositionCount = compositions.filter(item => item.status === 'integrated').length
   const resourceEvidence = input.resourceEvidence ?? {
     state: 'missing' as const,
   }
@@ -64,15 +93,51 @@ export function auditResourceDeliveryReadiness(input: {
     }
   }
 
+  const integrationIssues: string[] = []
+  if (pendingRequirementCount > 0) {
+    integrationIssues.push(
+      `assets/asset-manifest.json: ${pendingRequirementCount} resource requirements are still planned. Before implementation audit, each declared responsibility must be satisfied or explicitly blocked.`,
+    )
+  }
+  if (blockedRequiredRequirementCount > 0) {
+    integrationIssues.push(
+      `assets/asset-manifest.json: ${blockedRequiredRequirementCount} required resource requirements are blocked.`,
+    )
+  }
+  if (pendingCompositionCount > 0) {
+    integrationIssues.push(
+      `assets/asset-manifest.json: ${pendingCompositionCount} target-native compositions are not integrated.`,
+    )
+  }
+  if (
+    (effectivePolicy === 'preferred' || effectivePolicy === 'required') &&
+    importCount > 0 &&
+    referencedImportCount === 0 &&
+    integratedCompositionCount === 0
+  ) {
+    integrationIssues.push(
+      'assets/asset-manifest.json: Resource Library files were copied, but no import or composition has target-runtime integration evidence.',
+    )
+  }
+
   return {
     valid: issues.length === 0,
     issues,
+    integrationReady: issues.length === 0 && integrationIssues.length === 0,
+    integrationIssues,
     ...(input.confirmedPolicy
       ? { confirmedPolicy: input.confirmedPolicy }
       : {}),
     ...(manifestPolicy ? { manifestPolicy } : {}),
     targetFormats,
     importCount,
+    referencedImportCount,
+    requirementCount: requirements.length,
+    pendingRequirementCount,
+    blockedRequiredRequirementCount,
+    compositionCount: compositions.length,
+    pendingCompositionCount,
+    integratedCompositionCount,
     resourceEvidenceState: resourceEvidence.state,
     failedActions,
   }

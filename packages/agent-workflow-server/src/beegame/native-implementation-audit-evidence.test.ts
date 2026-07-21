@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -179,6 +179,65 @@ describe('native implementation audit evidence', () => {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
+
+  test('requires a passing Auditor to cover every current import and composition id', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-auditor-assets-'))
+    const dataRoot = `${workspace}-runtime`
+    try {
+      await writeFile(join(workspace, 'game.ts'), 'export const playable = true\n')
+      await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'library', 'module.bin'), 'asset')
+      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 5,
+        project_target: { asset_format_capabilities: ['bin'] },
+        requirements: [],
+        imports: [{
+          id: 'world-module',
+          source: { type: 'project-authored' },
+          status: 'referenced',
+          root_path: 'assets/library/module.bin',
+          local_files: ['assets/library/module.bin'],
+          selected_at: 'now',
+          selection_reason: ['approved composition'],
+          usage_evidence: { references: ['game.ts'] },
+        }],
+        compositions: [{
+          id: 'world-scene',
+          kind: 'scene',
+          status: 'integrated',
+          members: [{ import_id: 'world-module', role: 'environment' }],
+          recipe: { path: 'game.ts' },
+          integration_evidence: { references: ['game.ts'] },
+        }],
+      }))
+      recordNativeImplementationAuditReportForTest({
+        dataRoot,
+        sessionId: SESSION_ID,
+        workspacePath: workspace,
+        report: passedReport(),
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      })).toEqual({ state: 'missing' })
+
+      recordNativeImplementationAuditReportForTest({
+        dataRoot,
+        sessionId: SESSION_ID,
+        workspacePath: workspace,
+        report: {
+          ...passedReport(),
+          auditedImportIds: ['world-module'],
+          auditedCompositionIds: ['world-scene'],
+        },
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      }).state).toBe('current')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
 })
 
 function passedReport(): object {
@@ -186,6 +245,8 @@ function passedReport(): object {
     auditorId: 'beegame-implementation-auditor',
     status: 'passed',
     summary: 'The implementation and asset references agree with the approved contract.',
+    auditedImportIds: [],
+    auditedCompositionIds: [],
     evidence: [{ source: 'game.ts', detail: 'The documented implementation symbol exists.' }],
     findings: [],
   }

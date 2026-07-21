@@ -2,7 +2,8 @@ services:
   beegame-skills:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.skills
+      dockerfile: docker/Dockerfile.backend
+      target: skills
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
@@ -27,7 +28,8 @@ services:
   beegame-billing:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.billing
+      dockerfile: docker/Dockerfile.backend
+      target: billing
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
@@ -49,7 +51,8 @@ services:
   beegame-resources:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.resource
+      dockerfile: docker/Dockerfile.backend
+      target: resources
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:
@@ -71,7 +74,8 @@ services:
   beegame-runtime:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.runtime
+      dockerfile: docker/Dockerfile.backend
+      target: runtime
       args:
         BUN_INSTALL_NETWORK_CONCURRENCY: ${BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY:-2}
     env_file:

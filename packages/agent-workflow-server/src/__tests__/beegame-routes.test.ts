@@ -2703,7 +2703,13 @@ describe('beegame session routes', () => {
         },
         turnDiagnostics: expect.objectContaining({
           agentCalls: 2,
+          reviewerCalls: 1,
+          auditorCalls: 1,
+          validatorCalls: 0,
+          deliveryContractCalls: 0,
+          skillCalls: 0,
           taskOutputCalls: 1,
+          failedToolCalls: 0,
           usage: {
             prompt_tokens: 30_000,
             completion_tokens: 4_000,
