@@ -141,6 +141,11 @@ Document Reviewer 使用新的只读 Claude Code 上下文：
 - 不修改项目，不发明第二份产品需求。
 - 返回唯一终态：`READY`、`NEEDS_REVISION` 或 `BLOCKED`。
 
+Reviewer 的终态只有在其原生 Agent 调用树内实际完成
+`ProjectDeliveryContract`，并在结构化结果中精确列出当前完整必需文档与
+验收清单 ID 时才构成项目级证据。只复查某个旧 finding 的定向结果不能被提升为
+整个项目的 `READY`。
+
 文档发生实质修改后，旧 Reviewer 结果立即过期。主 Agent 必须在需要继续实施时自行启动新的 Reviewer。
 
 ### 4.3 Resource / Art Subagent
@@ -178,6 +183,8 @@ Implementation Auditor 是独立只读 Agent，负责静态与结构化交付审
 - 文档当前范围内承诺但实现缺失的内容必须判为失败；只有文档明确标记为可选或未来范围的内容可以是非阻塞观察。
 
 Auditor 不操作游戏，不代替 Acceptance Validator，也不修改项目。
+Auditor 的终态同样必须来自完成了 `ProjectDeliveryContract` 的原生 Agent 调用树；
+主 Agent 的转述、旧报告或没有读取当前合同的结构化文本均不构成审计证据。
 
 ### 4.6 Acceptance Validator
 
@@ -260,8 +267,11 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 
 `preferred` 和 `required` 的“已探索”必须来自当前 Art Direction、Asset Plan
 与项目目标上下文中的原生 ResourceLibrary Pack 浏览记录，不能由文档中的一句
-“已评估”代替。`required` 还必须存在真实导入记录。该校验只核验调用事实，
-不会替 Agent 选择 Pack 或元素。
+“已评估”代替。两种策略都必须存在当前 Manifest 中可追溯的真实导入记录；
+`required` 表达用户的硬性要求，`preferred` 表达产品默认的丰富美术交付目标，
+二者都不能用“浏览过但导入为零”冒充资源阶段完成。任何尚未由后续成功重试解决的
+资源操作失败也会保持为阻塞事实。该校验只核验调用、Manifest 和文件事实，
+不会替 Agent 选择 Pack、元素或组装方式。
 
 ### 6.3 导入和组装
 
@@ -328,11 +338,15 @@ BeeGame 调度或推进这些 Agent。
 项目只有同时满足以下条件才可被描述为已交付：
 
 - 当前确认简报和语言合同可追溯。
-- 当前文档 revision 获得独立 Document Reviewer 的 READY。
+- 当前文档 revision 获得独立 Document Reviewer 的 READY，且该 Reviewer 已在自己的
+  原生调用树中读取 `ProjectDeliveryContract` 并覆盖完整文档和清单范围。
 - 确认范围中的需求和玩家路径存在可观察证据要求。
-- 资源合同有效，所需资源在目标运行时中真实引用和加载。
-- Implementation Auditor 没有阻塞性矛盾或虚假实现证据。
-- 当前 workspace revision 获得独立 Acceptance Validator 的 passed。
+- 资源合同有效；`preferred`/`required` 策略具有真实导入且不存在未解决失败，所需资源
+  在目标运行时中真实引用和加载。
+- Implementation Auditor 没有阻塞性矛盾或虚假实现证据，且已在自己的原生调用树中
+  读取当前 `ProjectDeliveryContract`。
+- 当前 workspace revision 获得独立 Acceptance Validator 的 passed，且 Validator 已在
+  自己的原生调用树中读取合同并产生所需原生运行证据。
 - Validator 之后没有修改影响交付的文件。
 - 构建、预览和部署使用的内容与验收 revision 一致。
 

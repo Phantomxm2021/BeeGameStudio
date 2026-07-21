@@ -8,6 +8,7 @@ import {
   observeNativeImplementationAuditToolEvent,
   recordNativeImplementationAuditReportForTest,
 } from './native-implementation-audit-evidence'
+import { recordNativeDeliveryContractForTest } from './native-tool-provenance'
 
 const SESSION_ID = 'native-implementation-audit-session'
 
@@ -59,6 +60,11 @@ describe('native implementation audit evidence', () => {
         eventType: 'tool.started',
         payload: auditorPayload(toolUseID),
         createdAt: new Date(),
+      })
+      recordNativeDeliveryContractForTest({
+        dataRoot,
+        sessionId: SESSION_ID,
+        agentToolUseID: toolUseID,
       })
       observeNativeImplementationAuditToolEvent({
         dataRoot,
@@ -143,6 +149,31 @@ describe('native implementation audit evidence', () => {
         sessionId: SESSION_ID,
         workspacePath: workspace,
       }).state).toBe('missing')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not accept an Auditor result when the Auditor never read the native contract', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-auditor-no-contract-'))
+    const dataRoot = `${workspace}-runtime`
+    try {
+      await writeFile(join(workspace, 'game.ts'), 'export const playable = true\n')
+      const payload = auditorPayload('auditor-without-contract')
+      observeNativeImplementationAuditToolEvent({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+        eventType: 'tool.started', payload, createdAt: new Date(),
+      })
+      observeNativeImplementationAuditToolEvent({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+        eventType: 'tool.completed',
+        payload: { ...payload, output: JSON.stringify(passedReport()) },
+        createdAt: new Date(),
+      })
+      expect(getObservedNativeImplementationAudit({
+        dataRoot, sessionId: SESSION_ID, workspacePath: workspace,
+      })).toEqual({ state: 'missing' })
     } finally {
       await rm(workspace, { recursive: true, force: true })
       await rm(dataRoot, { recursive: true, force: true })

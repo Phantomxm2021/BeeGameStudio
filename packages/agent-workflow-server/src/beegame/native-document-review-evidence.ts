@@ -8,7 +8,15 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DOCUMENT_REVIEWER_AGENT_TYPE } from './delivery-validation-agents'
-import { auditDocumentReadiness } from './document-readiness-audit'
+import {
+  auditDocumentReadiness,
+  readAcceptanceChecklistIds,
+  REQUIRED_PROJECT_DOCUMENTS,
+} from './document-readiness-audit'
+import {
+  hasCompletedNativeDeliveryContract,
+  recordNativeDeliveryContractForTest,
+} from './native-tool-provenance'
 import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -31,6 +39,8 @@ type NativeDocumentReviewReport = {
   verdict: NativeDocumentReviewVerdict
   summary: string
   confirmedResourceLibraryUsage: ResourceLibraryUsage
+  reviewedDocumentPaths: string[]
+  reviewedChecklistIds: string[]
   findings: NativeDocumentReviewFinding[]
 }
 
@@ -78,6 +88,8 @@ export type NativeDocumentReviewEvidence = {
   verdict: NativeDocumentReviewVerdict
   summary: string
   confirmedResourceLibraryUsage: ResourceLibraryUsage
+  reviewedDocumentPaths: string[]
+  reviewedChecklistIds: string[]
   findings: NativeDocumentReviewFinding[]
   reportDigest: string
   documentsDigest: string
@@ -171,8 +183,13 @@ export function observeNativeDocumentReviewToolEvent(input: {
     return
   }
   appendTerminal(input, toolUseID, 'completed')
-  const report = parseReport(output, Boolean(nativeResult))
+  const report = parseReport(output, input.workspacePath, Boolean(nativeResult))
   if (!report) return
+  if (!hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: toolUseID,
+  })) return
   appendResult(input, toolUseID, dispatch.documentsDigest, report)
 }
 
@@ -207,8 +224,13 @@ function observeLinkedTaskOutput(
   if (!dispatch || dispatch.kind !== 'dispatch') return
   appendTerminal(input, dispatch.toolUseID, taskOutput.status)
   if (taskOutput.status !== 'completed' || !taskOutput.result) return
-  const report = parseReport(taskOutput.result, true)
+  const report = parseReport(taskOutput.result, input.workspacePath, true)
   if (!report) return
+  if (!hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: dispatch.toolUseID,
+  })) return
   appendResult(input, dispatch.toolUseID, dispatch.documentsDigest, report)
 }
 
@@ -274,8 +296,13 @@ export function observeNativeDocumentReviewTaskNotification(input: {
   if (!dispatch || dispatch.kind !== 'dispatch') return
   appendTerminal(input, terminal.toolUseId, terminal.status)
   if (terminal.status !== 'completed' || !terminal.result) return
-  const report = parseReport(terminal.result, true)
+  const report = parseReport(terminal.result, input.workspacePath, true)
   if (!report) return
+  if (!hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: dispatch.toolUseID,
+  })) return
   appendResult(input, terminal.toolUseId, dispatch.documentsDigest, report)
 }
 
@@ -317,10 +344,22 @@ export function recordNativeDocumentReviewForTest(input: {
     payload: basePayload,
     createdAt: new Date(),
   })
+  recordNativeDeliveryContractForTest({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: toolUseID,
+  })
+  const report = isRecord(input.report)
+    ? {
+        ...input.report,
+        reviewedDocumentPaths: input.report.reviewedDocumentPaths ?? [...REQUIRED_PROJECT_DOCUMENTS],
+        reviewedChecklistIds: input.report.reviewedChecklistIds ?? readAcceptanceChecklistIds(input.workspacePath),
+      }
+    : input.report
   observeNativeDocumentReviewToolEvent({
     ...input,
     eventType: 'tool.completed',
-    payload: { ...basePayload, output: JSON.stringify(input.report) },
+    payload: { ...basePayload, output: JSON.stringify(report) },
     createdAt: new Date(),
   })
 }
@@ -481,6 +520,8 @@ function appendResult(
         reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
         verdict: 'NEEDS_REVISION',
         confirmedResourceLibraryUsage: report.confirmedResourceLibraryUsage,
+        reviewedDocumentPaths: report.reviewedDocumentPaths,
+        reviewedChecklistIds: report.reviewedChecklistIds,
         summary: [
           'Deterministic project-contract checks rejected the Reviewer READY result.',
           ...deterministicIssues,
@@ -501,6 +542,8 @@ function appendResult(
     verdict: effectiveReport.verdict,
     summary: effectiveReport.summary,
     confirmedResourceLibraryUsage: effectiveReport.confirmedResourceLibraryUsage,
+    reviewedDocumentPaths: effectiveReport.reviewedDocumentPaths,
+    reviewedChecklistIds: effectiveReport.reviewedChecklistIds,
     findings: effectiveReport.findings,
     reportDigest: digestJson(effectiveReport),
     documentsDigest,
@@ -511,6 +554,7 @@ function appendResult(
 
 function parseReport(
   text: string,
+  workspacePath: string,
   allowNativePreface = false,
 ): NativeDocumentReviewReport | undefined {
   const report = parseTerminalJsonObject(text, allowNativePreface)
@@ -530,6 +574,8 @@ function parseReport(
   }
   const summary = stringValue(report.summary)
   const confirmedResourceLibraryUsage = stringValue(report.confirmedResourceLibraryUsage)
+  const reviewedDocumentPaths = uniqueStrings(report.reviewedDocumentPaths)
+  const reviewedChecklistIds = uniqueStrings(report.reviewedChecklistIds)
   if (
     !summary ||
     !Array.isArray(report.findings) ||
@@ -537,6 +583,8 @@ function parseReport(
   ) return undefined
   const findings = report.findings.flatMap(parseFinding)
   if (findings.length !== report.findings.length) return undefined
+  if (!sameIdentifiers(reviewedDocumentPaths, [...REQUIRED_PROJECT_DOCUMENTS])) return undefined
+  if (!sameIdentifiers(reviewedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return undefined
   if (verdict === 'READY' && findings.length > 0) return undefined
   if (verdict !== 'READY' && findings.length === 0) return undefined
   return {
@@ -544,8 +592,19 @@ function parseReport(
     verdict,
     summary,
     confirmedResourceLibraryUsage,
+    reviewedDocumentPaths,
+    reviewedChecklistIds,
     findings,
   }
+}
+
+function uniqueStrings(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) return []
+  return [...new Set(value.map(item => (item as string).trim()))]
+}
+
+function sameIdentifiers(actual: string[], expected: string[]): boolean {
+  return actual.length === expected.length && expected.every(identifier => actual.includes(identifier))
 }
 
 function parseFinding(value: unknown): NativeDocumentReviewFinding[] {

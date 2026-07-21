@@ -9,6 +9,7 @@ import {
   recordNativeDocumentReviewForTest,
 } from './native-document-review-evidence'
 import { REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
+import { recordNativeDeliveryContractForTest } from './native-tool-provenance'
 
 const SESSION_ID = 'native-document-review-test-session'
 
@@ -39,6 +40,39 @@ describe('native document review evidence', () => {
       output: `READY ${JSON.stringify(readyReport())}`,
     })
 
+    expect(current(workspace)).toEqual({ state: 'missing' })
+  })
+
+  test('does not accept a complete Reviewer result when the Reviewer never read the native contract', async () => {
+    workspace = await createWorkspace()
+    const payload = reviewerPayload('review-without-contract')
+    for (const [eventType, eventPayload] of [
+      ['tool.started', payload],
+      ['tool.completed', { ...payload, output: JSON.stringify(readyReport()) }],
+    ] as const) {
+      observeNativeDocumentReviewToolEvent({
+        dataRoot: dataRootFor(workspace),
+        sessionId: SESSION_ID,
+        workspacePath: workspace,
+        eventType,
+        payload: eventPayload,
+        createdAt: new Date(),
+      })
+    }
+    expect(current(workspace)).toEqual({ state: 'missing' })
+  })
+
+  test('does not accept a targeted re-review as project-wide READY', async () => {
+    workspace = await createWorkspace()
+    const payload = reviewerPayload('targeted-review')
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: JSON.stringify({
+        ...readyReport(),
+        reviewedDocumentPaths: [REQUIRED_PROJECT_DOCUMENTS[0]],
+      }),
+    })
     expect(current(workspace)).toEqual({ state: 'missing' })
   })
 
@@ -437,11 +471,19 @@ async function createWorkspace(): Promise<string> {
 }
 
 function recordReady(workspace: string): void {
+  const {
+    reviewedDocumentPaths: _reviewedDocumentPaths,
+    reviewedChecklistIds: _reviewedChecklistIds,
+    ...report
+  } = readyReport() as ReturnType<typeof readyReport> & {
+    reviewedDocumentPaths: string[]
+    reviewedChecklistIds: string[]
+  }
   recordNativeDocumentReviewForTest({
     dataRoot: dataRootFor(workspace),
     sessionId: SESSION_ID,
     workspacePath: workspace,
-    report: readyReport(),
+    report,
   })
 }
 
@@ -451,6 +493,8 @@ function readyReport(): object {
     verdict: 'READY',
     summary: 'The current documents are complete and internally consistent.',
     confirmedResourceLibraryUsage: 'preferred',
+    reviewedDocumentPaths: [...REQUIRED_PROJECT_DOCUMENTS],
+    reviewedChecklistIds: ['PATH-001'],
     findings: [],
   }
 }
@@ -476,6 +520,17 @@ function observe(
     payload,
     createdAt: new Date(),
   })
+  if (
+    eventType === 'tool.started' &&
+    payload.toolName === 'Agent' &&
+    typeof payload.toolUseID === 'string'
+  ) {
+    recordNativeDeliveryContractForTest({
+      dataRoot: dataRootFor(workspacePath),
+      sessionId: SESSION_ID,
+      agentToolUseID: payload.toolUseID,
+    })
+  }
 }
 
 function notify(

@@ -4490,6 +4490,16 @@ describe('beegame session routes', () => {
       verdict: 'READY',
       summary: 'The current documents are complete and internally consistent.',
       confirmedResourceLibraryUsage: 'optional',
+      reviewedDocumentPaths: [
+        'docs/GDD.md',
+        'docs/TECHNICAL_DESIGN.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+        'docs/ASSET_PLAN.md',
+        'docs/acceptance/gameplay-checklist.md',
+      ],
+      reviewedChecklistIds: ['REQ-001', 'PATH-001'],
       findings: [],
     }
     const fake = createFakeRunner([
@@ -4507,6 +4517,7 @@ describe('beegame session routes', () => {
           }],
         },
       },
+      ...nativeContractCapabilityMessages('tool_native_document_review'),
       {
         type: 'user',
         message: {
@@ -9081,7 +9092,7 @@ function passingNativeAcceptanceEvidence() {
 function nativeValidatorCapabilityMessages(
   parentToolUseID: string,
 ): DashboardSDKMessage[] {
-  return ['Bash', 'Skill', 'ExecuteExtraTool'].flatMap((name, index) => {
+  return ['ProjectDeliveryContract', 'Bash', 'Skill', 'ExecuteExtraTool'].flatMap((name, index) => {
     const toolUseID = `${parentToolUseID}-evidence-${index}`
     return [
       {
@@ -9109,6 +9120,28 @@ function nativeValidatorCapabilityMessages(
       },
     ]
   })
+}
+
+function nativeContractCapabilityMessages(
+  parentToolUseID: string,
+): DashboardSDKMessage[] {
+  const toolUseID = `${parentToolUseID}-delivery-contract`
+  return [
+    {
+      type: 'assistant',
+      parent_tool_use_id: parentToolUseID,
+      message: {
+        content: [{ type: 'tool_use', id: toolUseID, name: 'ProjectDeliveryContract', input: {} }],
+      },
+    },
+    {
+      type: 'user',
+      parent_tool_use_id: parentToolUseID,
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: toolUseID, content: 'completed' }],
+      },
+    },
+  ]
 }
 
 function createEmptyResourceSelectionClient(): ProjectResourceSelectionClient {

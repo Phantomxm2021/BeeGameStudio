@@ -115,6 +115,35 @@ describe('native Resource Library evidence', () => {
     })
   })
 
+  test('clears an unresolved action failure after a later native retry succeeds', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observeNativeResourceLibraryToolEvent({
+      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
+      eventType: 'tool.failed',
+      payload: { toolName: 'ResourceLibrary', toolUseID: 'failed-import', input: { action: 'import_elements' } },
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+    })
+    observeNativeResourceLibraryToolEvent({
+      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'ResourceLibrary', toolUseID: 'successful-import',
+        input: { action: 'import_elements' },
+        output: JSON.stringify({ data: {
+          result: 'imported', requested_count: 1, imported_count: 1, failed_count: 0,
+          imported: [{ import_id: 'asset-a', local_files: ['assets/library/a.glb'] }], failures: [],
+        } }),
+      },
+      createdAt: new Date('2026-07-19T00:01:00.000Z'),
+    })
+
+    expect(getObservedNativeResourceLibraryEvidence({
+      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
+    })).toMatchObject({
+      state: 'current', actions: ['import_elements'], failedActions: [], successfulImportCount: 1,
+    })
+  })
+
   test('records only the artifacts actually copied by a partial import', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
     observeNativeResourceLibraryToolEvent({

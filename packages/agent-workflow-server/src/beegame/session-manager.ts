@@ -230,6 +230,8 @@ export type DeleteBeeGameSessionResult = {
 
 export type BeeGameSessionRunnerStartInput = {
   sessionId: string
+  /** Platform evidence root exposed only through read-only contract facts. */
+  deliveryEvidenceDataRoot?: string
   resumeSessionId?: string
   cwd: string
   env: Record<string, string>
@@ -1040,6 +1042,7 @@ export class BeeGameSessionManager {
       const approvedOutboundTargets = await this.resolveRuntimeOutboundTargets(env)
       const runner = record.runner ?? await this.runner.start({
         sessionId: record.session.id,
+        deliveryEvidenceDataRoot: this.dashboardDataRoot,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
         env,

@@ -544,6 +544,9 @@ function parseNativeAcceptanceReport(
   if (evidence.length !== report.evidence.length || findings.length !== report.findings.length) {
     return undefined
   }
+  if (!provenance) return undefined
+  const capabilities = getNativeValidatorToolCapabilities(provenance)
+  if (!capabilities.contract) return undefined
 
   if (status === 'passed') {
     if (evidence.some(item => item.result !== 'passed')) {
@@ -553,9 +556,7 @@ function parseNativeAcceptanceReport(
     if ([...REQUIRED_PASSING_EVIDENCE].some(kind => !kinds.has(kind))) {
       return undefined
     }
-    if (!provenance) return undefined
     if (!sameIdentifiers(validatedChecklistIds, readAcceptanceChecklistIds(workspacePath))) return undefined
-    const capabilities = getNativeValidatorToolCapabilities(provenance)
     // A source read or a model-authored label is not execution evidence.
     // Build/test require an actually completed executable tool, Skill evidence
     // requires an observed native Skill call, and runtime evidence requires a

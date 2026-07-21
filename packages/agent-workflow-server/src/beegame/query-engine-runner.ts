@@ -30,6 +30,7 @@ import {
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
 import { createNativeDeliveryContractTool } from './native-delivery-contract-tool'
 import { createResourceSelectionClient } from './resource-selection-client'
+import { getObservedNativeResourceLibraryEvidence } from './native-resource-library-evidence'
 
 export { parseNativeTerminalTaskNotification } from './native-task-notification'
 
@@ -585,6 +586,16 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       buildTool: definition => call(toolModule, 'buildTool', definition),
       workspacePath: this.input.cwd,
       getConfirmedBriefContext: () => this.currentSubmitInput?.confirmedBriefContext,
+      ...(this.input.deliveryEvidenceDataRoot
+        ? {
+            getResourceLibraryEvidence: () =>
+              getObservedNativeResourceLibraryEvidence({
+                dataRoot: this.input.deliveryEvidenceDataRoot!,
+                sessionId: this.input.sessionId,
+                workspacePath: this.input.cwd,
+              }),
+          }
+        : {}),
     })
     const resourceTool = this.input.resourceSelectionConfig
       ? createNativeResourceLibraryTool({

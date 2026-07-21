@@ -12,6 +12,10 @@ import {
   parseNativeTerminalTaskNotification,
   type BeeGameNativeTaskNotification,
 } from './native-task-notification'
+import {
+  hasCompletedNativeDeliveryContract,
+  recordNativeDeliveryContractForTest,
+} from './native-tool-provenance'
 
 export type NativeImplementationAuditStatus = 'passed' | 'failed' | 'blocked'
 
@@ -143,7 +147,11 @@ export function observeNativeImplementationAuditToolEvent(input: {
   }
   appendTerminal(input, toolUseID, 'completed')
   const report = parseReport(output, input.workspacePath, Boolean(nativeResult))
-  if (report) appendResult(input, dispatch, report)
+  if (report && hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: dispatch.toolUseID,
+  })) appendResult(input, dispatch, report)
 }
 
 /** Passively persists a native terminal background notification. */
@@ -166,7 +174,11 @@ export function observeNativeImplementationAuditTaskNotification(input: {
   appendTerminal(input, terminal.toolUseId, terminal.status)
   if (terminal.status !== 'completed' || !terminal.result) return
   const report = parseReport(terminal.result, input.workspacePath, true)
-  if (report) appendResult(input, dispatch, report)
+  if (report && hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: dispatch.toolUseID,
+  })) appendResult(input, dispatch, report)
 }
 
 export function getObservedNativeImplementationAudit(input: {
@@ -224,6 +236,11 @@ export function recordNativeImplementationAuditReportForTest(input: {
     payload,
     createdAt: new Date(),
   })
+  recordNativeDeliveryContractForTest({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: toolUseID,
+  })
   observeNativeImplementationAuditToolEvent({
     ...input,
     eventType: 'tool.completed',
@@ -277,7 +294,11 @@ function observeLinkedTaskOutput(
   appendTerminal(input, dispatch.toolUseID, output.status)
   if (output.status !== 'completed' || !output.result) return
   const report = parseReport(output.result, input.workspacePath, true)
-  if (report) appendResult(input, dispatch, report)
+  if (report && hasCompletedNativeDeliveryContract({
+    dataRoot: input.dataRoot,
+    sessionId: input.sessionId,
+    agentToolUseID: dispatch.toolUseID,
+  })) appendResult(input, dispatch, report)
 }
 
 function appendBackgroundTask(

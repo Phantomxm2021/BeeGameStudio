@@ -7,6 +7,7 @@ import { auditDocumentReadiness } from './document-readiness-audit'
 import { getObservedNativeResourceLibraryEvidence } from './native-resource-library-evidence'
 import { auditAssetContract } from './asset-contract-audit'
 import { getConfirmedBriefEvidence } from './confirmed-brief-evidence'
+import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
@@ -217,6 +218,19 @@ export function getNativeDeliveryState(input: {
       }
     }
     resourceObservedAt = resourceEvidence.observedAt
+    const resourceReadiness = auditResourceDeliveryReadiness({
+      workspacePath: input.workspacePath,
+      confirmedPolicy: confirmedResourcePolicy,
+      resourceEvidence,
+    })
+    if (!resourceReadiness.valid) {
+      return {
+        status: 'failed',
+        reason: 'resource_import_missing',
+        summary: resourceReadiness.issues.join(' '),
+        observedAt: resourceEvidence.observedAt,
+      }
+    }
     const hasUsableImport = hasUsableResourceLibraryImport(input.workspacePath)
     if (
       resourceEvidence.failedActions.includes('import_elements') &&
@@ -229,14 +243,11 @@ export function getNativeDeliveryState(input: {
         observedAt: resourceEvidence.observedAt,
       }
     }
-    if (
-      resourcePolicy === 'required' &&
-      !hasUsableImport
-    ) {
+    if (!hasUsableImport) {
       return {
         status: 'failed',
         reason: 'resource_import_missing',
-        summary: 'The required Resource Library policy has no usable imported project file.',
+        summary: `The ${resourcePolicy} Resource Library policy has no usable imported project file.`,
         observedAt: resourceEvidence.observedAt,
       }
     }

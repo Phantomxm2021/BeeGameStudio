@@ -33,12 +33,14 @@ describe('native project delivery contract tool', () => {
       valid: boolean
       issues: string[]
       confirmed_brief: Record<string, unknown>
+      resource_contract: { valid: boolean; confirmedPolicy?: string; importCount: number }
       canonical_contract: Record<string, unknown>
     } }>) | undefined
     expect(call).toBeDefined()
     const result = await call!()
     expect(result.data.valid).toBe(false)
     expect(result.data.issues.join(' ')).toContain('requirements must be an array')
+    expect(result.data.issues.join(' ')).toContain('preferred Resource Library usage has no imported resource artifacts')
     expect(result.data.confirmed_brief).toEqual(expect.objectContaining({
       kind: 'confirmed_build_brief',
       resource_library_usage: 'preferred',
@@ -48,5 +50,10 @@ describe('native project delivery contract tool', () => {
     expect(result.data.canonical_contract).toHaveProperty('asset_manifest_example.imports')
     expect(result.data.canonical_contract).toHaveProperty('asset_manifest_example.compositions')
     expect(result.data.canonical_contract).not.toHaveProperty('asset_manifest_example.slots')
+    expect(result.data.resource_contract).toMatchObject({
+      valid: false,
+      confirmedPolicy: 'preferred',
+      importCount: 0,
+    })
   })
 })

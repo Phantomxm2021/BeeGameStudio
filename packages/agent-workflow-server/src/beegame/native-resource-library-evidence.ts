@@ -94,10 +94,15 @@ export function getObservedNativeResourceLibraryEvidence(input: {
   )
   const selected = current.length ? current : observations
   const succeeded = selected.filter(observation => observation.outcome !== 'failed')
+  const latestByAction = new Map<string, ResourceLibraryObservation>()
+  for (const observation of selected) latestByAction.set(observation.action, observation)
+  const unresolvedFailures = [...latestByAction.values()].filter(
+    observation => observation.outcome === 'failed',
+  )
   return {
     state: current.length ? 'current' : 'stale',
     actions: [...new Set(succeeded.map(observation => observation.action))],
-    failedActions: [...new Set(selected.filter(observation => observation.outcome === 'failed').map(observation => observation.action))],
+    failedActions: [...new Set(unresolvedFailures.map(observation => observation.action))],
     successfulImportCount: selected.reduce((total, observation) => total + (observation.importedCount ?? 0), 0),
     failedImportCount: selected.reduce((total, observation) => total + (observation.failedCount ?? 0), 0),
     observedAt: selected.at(-1)!.createdAt,

@@ -18,6 +18,7 @@ describe('native tool provenance', () => {
     root = await mkdtemp(join(tmpdir(), 'native-tool-provenance-'))
     const base = { dataRoot: root, sessionId: 'session-a', createdAt: new Date() }
     for (const [toolUseID, toolName, phase] of [
+      ['contract-a', 'ProjectDeliveryContract', 'tool.completed'],
       ['read-a', 'Read', 'tool.completed'],
       ['bash-a', 'Bash', 'tool.completed'],
       ['skill-a', 'Skill', 'tool.completed'],
@@ -42,7 +43,7 @@ describe('native tool provenance', () => {
       dataRoot: root,
       sessionId: 'session-a',
       validatorToolUseID: 'validator-agent',
-    })).toEqual({ executable: true, runtime: true, skill: true })
+    })).toEqual({ contract: true, executable: true, runtime: true, skill: true })
   })
 
   test('does not treat source reads or a failed runtime tool as runtime evidence', async () => {
@@ -65,6 +66,6 @@ describe('native tool provenance', () => {
       dataRoot: root,
       sessionId: 'session-a',
       validatorToolUseID: 'validator-agent',
-    })).toEqual({ executable: false, runtime: false, skill: true })
+    })).toEqual({ contract: false, executable: false, runtime: false, skill: true })
   })
 })

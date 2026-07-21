@@ -8,8 +8,11 @@ import {
   RESOURCE_LIBRARY_USAGE,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
+import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import { auditDocumentReadiness, REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
 import { CANONICAL_ASSET_MANIFEST_EXAMPLE } from './asset-contracts'
+import type { NativeResourceLibraryEvidenceState } from './native-resource-library-evidence'
+import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 
@@ -22,6 +25,7 @@ export function createNativeDeliveryContractTool(options: {
   buildTool: BuildTool
   workspacePath: string
   getConfirmedBriefContext?: () => string | undefined
+  getResourceLibraryEvidence?: () => NativeResourceLibraryEvidenceState
 }): unknown {
   return options.buildTool({
     name: 'ProjectDeliveryContract',
@@ -43,10 +47,21 @@ export function createNativeDeliveryContractTool(options: {
       const confirmedBrief = parseConfirmedBrief(
         options.getConfirmedBriefContext?.(),
       )
+      const documentReadiness = auditDocumentReadiness(options.workspacePath)
+      const confirmedPolicy = confirmedResourcePolicy(confirmedBrief)
+      const resourceReadiness = auditResourceDeliveryReadiness({
+        workspacePath: options.workspacePath,
+        ...(confirmedPolicy ? { confirmedPolicy } : {}),
+        ...(options.getResourceLibraryEvidence
+          ? { resourceEvidence: options.getResourceLibraryEvidence() }
+          : {}),
+      })
       return {
         data: {
-          ...auditDocumentReadiness(options.workspacePath),
+          valid: documentReadiness.valid && resourceReadiness.valid,
+          issues: [...documentReadiness.issues, ...resourceReadiness.issues],
           confirmed_brief: confirmedBrief,
+          resource_contract: resourceReadiness,
           canonical_contract: {
             required_documents: REQUIRED_PROJECT_DOCUMENTS,
             checklist_task_shape: '- [ ] <stable-id> <observable action, expected result, and evidence>',
@@ -80,6 +95,14 @@ export function createNativeDeliveryContractTool(options: {
       return { tool_use_id: toolUseID, type: 'tool_result', content: JSON.stringify(output) }
     },
   })
+}
+
+function confirmedResourcePolicy(value: unknown): ResourceLibraryUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const policy = (value as Record<string, unknown>).resource_library_usage
+  return policy === 'optional' || policy === 'preferred' || policy === 'required'
+    ? policy
+    : undefined
 }
 
 function parseConfirmedBrief(value?: string): unknown {

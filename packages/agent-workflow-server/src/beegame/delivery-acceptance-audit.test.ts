@@ -80,9 +80,9 @@ describe('native delivery acceptance gate', () => {
     record(workspace, 'passed', 'The current revision was audited and validated after Pack exploration.')
 
     expect(evaluate(workspace)).toEqual({
-      allowed: true,
-      outcome: 'passed',
-      issues: [],
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['assets/asset-manifest.json: preferred Resource Library usage has no imported resource artifacts in the current manifest.'],
     })
   })
 
@@ -117,7 +117,7 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace)).toEqual({
       allowed: false,
       outcome: 'rejected',
-      issues: ['The Resource Library import completed without producing a usable project file.'],
+      issues: ['assets/asset-manifest.json: required Resource Library usage has no imported resource artifacts in the current manifest. Resource Library: unresolved failed native actions for the current resource context: import_elements.'],
     })
   })
 
@@ -202,7 +202,7 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace)).toEqual({
       allowed: false,
       outcome: 'rejected',
-      issues: ['The Resource Library import completed without producing a usable project file.'],
+      issues: ['assets/asset-manifest.json: preferred Resource Library usage has no imported resource artifacts in the current manifest. Resource Library: unresolved failed native actions for the current resource context: import_elements.'],
     })
   })
 

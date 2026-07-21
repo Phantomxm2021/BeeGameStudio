@@ -13,7 +13,10 @@ Agent runtime or workflow coordinator.
 - Forward permission decisions and native background-task notifications.
 - Provide platform capabilities such as Resource Library, preview and
   deployment without deciding how Claude Code uses them.
-- Record native Reviewer or Validator terminal evidence for deployment policy.
+- Record qualified native Reviewer, Auditor and Validator terminal evidence for
+  deployment policy. Qualification may verify that the native Agent read the
+  current deterministic contract and returned complete structured coverage; it
+  must not decide what the Agent does next.
 - Mark an unterminated turn as interrupted after a process or service restart.
 
 ## Prohibited BeeGame responsibilities

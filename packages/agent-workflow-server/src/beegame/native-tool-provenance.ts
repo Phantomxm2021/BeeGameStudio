@@ -52,6 +52,7 @@ export function observeNativeToolProvenance(input: {
 }
 
 export type NativeValidatorToolCapabilities = {
+  contract: boolean
   executable: boolean
   runtime: boolean
   skill: boolean
@@ -69,6 +70,9 @@ export function getNativeValidatorToolCapabilities(input: {
     observation.phase === 'completed' && descendants.has(observation.toolUseID)
   )
   return {
+    contract: completed.some(observation =>
+      observation.toolName === 'ProjectDeliveryContract'
+    ),
     executable: completed.some(observation => isExecutableTool(observation.toolName)),
     runtime: completed.some(observation => isRuntimeObservationTool(observation.toolName)),
     skill: completed.some(observation => observation.toolName === 'Skill'),
@@ -81,7 +85,12 @@ export function recordNativeValidatorToolCapabilitiesForTest(input: {
   sessionId: string
   validatorToolUseID: string
 }): void {
-  for (const [index, toolName] of ['Bash', 'Skill', 'ExecuteExtraTool'].entries()) {
+  for (const [index, toolName] of [
+    'ProjectDeliveryContract',
+    'Bash',
+    'Skill',
+    'ExecuteExtraTool',
+  ].entries()) {
     const toolUseID = `${input.validatorToolUseID}-evidence-${index}`
     for (const eventType of ['tool.started', 'tool.completed']) {
       observeNativeToolProvenance({
@@ -96,6 +105,43 @@ export function recordNativeValidatorToolCapabilitiesForTest(input: {
         createdAt: new Date(),
       })
     }
+  }
+}
+
+/** Returns whether one native Agent actually completed its contract read. */
+export function hasCompletedNativeDeliveryContract(input: {
+  dataRoot: string
+  sessionId: string
+  agentToolUseID: string
+}): boolean {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const descendants = descendantToolUseIDs(observations, input.agentToolUseID)
+  return observations.some(observation =>
+    observation.phase === 'completed' &&
+    observation.toolName === 'ProjectDeliveryContract' &&
+    descendants.has(observation.toolUseID)
+  )
+}
+
+/** Adds only the native descendant fact needed by evidence unit tests. */
+export function recordNativeDeliveryContractForTest(input: {
+  dataRoot: string
+  sessionId: string
+  agentToolUseID: string
+}): void {
+  const toolUseID = `${input.agentToolUseID}-delivery-contract`
+  for (const eventType of ['tool.started', 'tool.completed']) {
+    observeNativeToolProvenance({
+      dataRoot: input.dataRoot,
+      sessionId: input.sessionId,
+      eventType,
+      payload: {
+        toolUseID,
+        parentToolUseID: input.agentToolUseID,
+        toolName: 'ProjectDeliveryContract',
+      },
+      createdAt: new Date(),
+    })
   }
 }
 
