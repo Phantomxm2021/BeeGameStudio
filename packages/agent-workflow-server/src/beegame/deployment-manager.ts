@@ -34,6 +34,7 @@ export type BeeGameDeploymentRecord = {
   outputDir?: string
   artifactPath?: string
   artifactHash?: string
+  manifestStorageObjectId?: string
   message?: string
   createdAt: string
   updatedAt: string
@@ -92,6 +93,7 @@ export type BeeGameDeploymentPublisher = {
   }): Promise<{
     url: string
     artifactPath?: string
+    manifestStorageObjectId?: string
     message?: string
   }>
 }
@@ -343,6 +345,9 @@ export class BeeGameDeploymentManager {
         artifactHash,
         url: published?.url ?? this.publicUrl(id),
         artifactPath: published?.artifactPath ?? artifactPath,
+        ...(published?.manifestStorageObjectId
+          ? { manifestStorageObjectId: published.manifestStorageObjectId }
+          : {}),
         message: published?.message ?? 'Static deployment published',
         updatedAt: deployedAt,
         deployedAt,

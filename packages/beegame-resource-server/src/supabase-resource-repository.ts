@@ -15,12 +15,14 @@ type SupabaseResourceRepositoryOptions = {
   serviceRoleKey: string
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
   storageBucket?: string
+  getStorageObjectUrl?: (storageObjectId: string, packId: string) => Promise<string | undefined>
 }
 
 type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath'> & {
   game_types: string[]
   primary_category: ResourcePack['primaryCategory']
   cover_path?: string | null
+  cover_storage_object_id?: string | null
   styles?: string[] | null
   element_count?: number
   description?: string | null
@@ -124,7 +126,16 @@ export function createSupabaseResourceRepository(
     const body = await response.json() as { signedURL?: string }
     return body.signedURL ? normalizeSupabaseSignedObjectUrl(options.baseUrl, body.signedURL) : ''
   }
-  const toPack = async (row: PackRow, elementCount = row.element_count ?? 0): Promise<PackSummary> => ({
+  const resolveCoverPath = async (row: PackRow): Promise<string | undefined> => {
+    if (row.cover_storage_object_id && options.getStorageObjectUrl) {
+      const storageObjectUrl = await options.getStorageObjectUrl(row.cover_storage_object_id, row.id)
+      if (storageObjectUrl) return storageObjectUrl
+    }
+    return row.cover_path ? signPath(packCoverStoragePath(row.id, row.cover_path)) : undefined
+  }
+  const toPack = async (row: PackRow, elementCount = row.element_count ?? 0): Promise<PackSummary> => {
+    const coverPath = await resolveCoverPath(row)
+    return {
     id: row.id,
     name: row.name,
     style: normalizePackStyles(row.styles, row.style).join(' / '),
@@ -144,9 +155,10 @@ export function createSupabaseResourceRepository(
     ...(row.compatible_engines?.length ? { compatibleEngines: row.compatible_engines } : {}),
     ...(row.deprecated_at ? { deprecatedAt: row.deprecated_at } : {}),
     ...(row.element_defaults ? { elementDefaults: row.element_defaults } : {}),
-    ...(row.cover_path ? { coverPath: await signPath(packCoverStoragePath(row.id, row.cover_path)) } : {}),
+    ...(coverPath ? { coverPath } : {}),
     elementCount,
-  })
+    }
+  }
   const toElement = (row: ElementRow): ResourceElement => ({
     id: row.id,
     packId: row.pack_id,

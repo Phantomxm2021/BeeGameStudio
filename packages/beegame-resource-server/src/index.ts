@@ -2,10 +2,12 @@ import { createInMemoryResourceRepository, type PackSummary, type ResourceElemen
 import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
+import { createR2StorageDriver, resolveProjectStorageConfiguration } from '@bee-game-studio/beegame-storage-core'
 import { contentProfileFromInspection, inspectUploadedResource } from './resource-inspection'
 import { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
 import { createSubprocessModelProcessor } from './model-processing'
 import { externalReferencesFromInspection, reconcileResourceDependencySpecs, resolveResourceDependencyBindings } from './resource-dependency-bindings'
+import { createR2ResourceStorage, type R2ResourceStorage } from './r2-resource-storage'
 
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
@@ -19,20 +21,26 @@ if (import.meta.main) {
   const { host, port } = resolveBeeGameResourceListenOptions()
   const baseUrl = process.env.BEEGAME_SUPABASE_URL
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+  const projectStorage = resolveProjectStorageConfiguration(process.env)
+  const r2ResourceStorage = projectStorage.provider === 'r2'
+    ? baseUrl && serviceRoleKey
+      ? createR2ResourceStorage({ baseUrl, serviceRoleKey, bucket: projectStorage.buckets['resource-private'], driver: createR2StorageDriver(projectStorage.r2) })
+      : (() => { throw new Error('R2 Resource Storage requires Supabase metadata configuration') })()
+    : undefined
   const modelProcessor = process.env.BEEGAME_RESOURCE_MODEL_PROCESSOR_ENABLED === '0' ? undefined : createSubprocessModelProcessor()
-  const inspectResourceElement = baseUrl && serviceRoleKey ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor }) : undefined
+  const inspectResourceElement = baseUrl && serviceRoleKey ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor, r2Storage: r2ResourceStorage }) : undefined
   const resourceProcessing = baseUrl && serviceRoleKey && inspectResourceElement
     ? createSupabaseResourceProcessingHandlers({ baseUrl, serviceRoleKey, inspectElement: inspectResourceElement })
     : undefined
   const app = createBeeGameResourceServerApp({
-    repository: createConfiguredResourceRepository(),
+    repository: createConfiguredResourceRepository(process.env, r2ResourceStorage),
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
     ...(baseUrl && serviceRoleKey ? { canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey }) } : {}),
-    ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
-    ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
+    ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) : {}),
+    ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) : {}),
     ...(inspectResourceElement ? { inspectResourceElement } : {}),
     ...(resourceProcessing ? { resourceProcessing } : {}),
-    ...(baseUrl && serviceRoleKey ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey }) } : {}),
+    ...(baseUrl && serviceRoleKey ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) } : {}),
     ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
       const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
@@ -43,16 +51,24 @@ if (import.meta.main) {
       const path = `${storagePackId}/${relativePath}`
       const storageUrl = `${baseUrl.replace(/\/+$/, '')}/storage/v1/object/beegame-resource-packs/${path.split('/').map(encodeURIComponent).join('/')}`
       const headers = { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'true' }
-      const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
-      if (!uploaded.ok) throw new Error('Element storage upload failed')
+      const r2Object = r2ResourceStorage ? await r2ResourceStorage.upload({ packId: storagePackId, logicalPath: relativePath, file, objectKind: 'resource_element' }) : undefined
+      if (!r2Object) {
+        const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
+        if (!uploaded.ok) throw new Error('Element storage upload failed')
+      }
       const row = buildElementUploadRow(storagePackId, category, file, `${storagePackId}-${crypto.randomUUID()}`, relativePath, filename)
+      if (r2Object) row.storage_object_id = r2Object.storageObjectId
       const inspection = await inspectUploadedResource(file)
       row.specs = { ...(row.specs as Record<string, unknown>), ...inspection }
       const contentProfile = contentProfileFromInspection(inspection)
       row.content_profile = contentProfile
       row.capabilities = capabilitiesFromContentProfile(contentProfile)
       const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
-      if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
+      if (!saved.ok) {
+        if (r2Object) await r2ResourceStorage?.delete(r2Object.storageObjectId, storagePackId)
+        else await fetch(storageUrl, { method: 'DELETE', headers })
+        throw new Error('Element metadata persistence failed')
+      }
       return toResourceElement((await saved.json() as Array<Record<string, unknown>>)[0])
     } : undefined,
   })
@@ -95,13 +111,14 @@ export function createSupabaseResourceReinspectionHandler(options: SupabaseAutho
     if (!current) return undefined
     const relativePath = safeRelativeStoragePath(String(current.path || ''), 'Resource element path')
     const objectPath = `${safeStorageComponent(packId, 'Pack id')}/${relativePath}`
-    const object = await fetchImpl(`${baseUrl}/storage/v1/object/${storageBucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, { headers })
-    if (!object.ok) throw new Error(`Resource inspection download failed (${object.status})`)
+    const r2File = typeof current.storage_object_id === 'string' ? await options.r2Storage?.getFile(current.storage_object_id, packId) : undefined
+    const object = r2File ? undefined : await fetchImpl(`${baseUrl}/storage/v1/object/${storageBucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, { headers })
+    if (!r2File && !object?.ok) throw new Error(`Resource inspection download failed (${object?.status ?? 404})`)
     const currentSpecs = current.specs && typeof current.specs === 'object' && !Array.isArray(current.specs)
       ? current.specs as ResourceElement['specs']
       : {}
-    const mimeType = object.headers.get('content-type') || (typeof currentSpecs.mimeType === 'string' ? currentSpecs.mimeType : 'application/octet-stream')
-    const file = new File([await object.arrayBuffer()], String(current.name || relativePath.split('/').pop() || elementId), { type: mimeType })
+    const mimeType = r2File?.type || object?.headers.get('content-type') || (typeof currentSpecs.mimeType === 'string' ? currentSpecs.mimeType : 'application/octet-stream')
+    const file = r2File ?? new File([await object!.arrayBuffer()], String(current.name || relativePath.split('/').pop() || elementId), { type: mimeType })
     const inspection = await inspectUploadedResource(file, { modelProcessor: options.modelProcessor })
     const references = [...new Set([
       ...externalReferencesFromInspection(inspection.externalReferences),
@@ -154,7 +171,7 @@ export function createSupabaseResourceReinspectionHandler(options: SupabaseAutho
   }
 }
 
-type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string; modelProcessor?: import('./model-processing').ResourceModelProcessor }
+type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string; modelProcessor?: import('./model-processing').ResourceModelProcessor; r2Storage?: R2ResourceStorage }
 
 export function createSupabaseResourceAuditWriter(options: { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation }) {
   const fetchImpl = options.fetchImpl ?? fetch
@@ -207,6 +224,11 @@ export function createSupabaseResourceStorageInspector(options: SupabaseLifecycl
     for (const element of elements) if (typeof element.path === 'string' && isSafeRelativeStoragePath(element.path)) expected.add(element.path)
 
     const actual = new Set<string>()
+    if (options.r2Storage) {
+      for (const object of await options.r2Storage.listPackObjects(packId)) {
+        if (object.status === 'ready' && object.logicalPath) actual.add(object.logicalPath)
+      }
+    }
     const prefix = `${safePackId}/`
     const visited = new Set<string>()
     const listPrefix = async (currentPrefix: string): Promise<void> => {
@@ -267,7 +289,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     if (allowMissing && failure.objectMissing) return false
     throw new Error(`Resource storage deletion failed (${response.status})${failure.detail}`)
   }
-  type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string }
+  type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string; storage_object_id?: string | null }
   type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string; element_defaults?: ResourceFolder['elementDefaults'] | null }
   const updateElement = async (packId: string, elementId: string, body: Record<string, unknown>) => {
     const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
@@ -276,13 +298,20 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     const oldPath = safeRelativeStoragePath(current.path, 'Resource element path')
     const nextPath = Object.hasOwn(row, 'path') ? safeRelativeStoragePath(String(row.path), 'Resource element path') : oldPath
     let moved = false
-    if (nextPath !== oldPath) { await moveObject(storagePath(packId, oldPath), storagePath(packId, nextPath)); moved = true }
+    if (nextPath !== oldPath) {
+      if (typeof current.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.updateLogicalPath(current.storage_object_id, packId, nextPath)
+      else await moveObject(storagePath(packId, oldPath), storagePath(packId, nextPath))
+      moved = true
+    }
     try {
       const saved = (await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, row))[0]
       if (!saved) throw new ResourceLifecycleNotFoundError('Resource element not found')
       return toResourceElement(saved)
     } catch (error) {
-      if (moved) await moveObject(storagePath(packId, nextPath), storagePath(packId, oldPath)).catch(() => undefined)
+      if (moved) {
+        if (typeof current.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.updateLogicalPath(current.storage_object_id, packId, oldPath).catch(() => undefined)
+        else await moveObject(storagePath(packId, nextPath), storagePath(packId, oldPath)).catch(() => undefined)
+      }
       throw error
     }
   }
@@ -291,7 +320,8 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     deleteResourceElement: async (packId: string, elementId: string) => {
       const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
       if (!current) return false
-      await deleteObject(storagePath(packId, current.path), true)
+      if (typeof current.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.delete(current.storage_object_id, packId)
+      else await deleteObject(storagePath(packId, current.path), true)
       return (await deleteRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`)).length > 0
     },
     updateResourceFolder: async (packId: string, folderId: string, body: Record<string, unknown>) => {
@@ -309,11 +339,19 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       const elements = (await getRows<ElementRow>('beegame_resource_elements', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)).filter((item) => item.path === oldPath || item.path.startsWith(`${oldPath}/`))
       const moves = elements.map((item) => ({ from: item.path, to: replacePath(item.path) }))
       try {
-        for (const move of moves) await moveObject(storagePath(packId, move.from), storagePath(packId, move.to))
+        for (const move of moves) {
+          const element = elements.find(item => item.path === move.from)
+          if (typeof element?.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.updateLogicalPath(element.storage_object_id, packId, move.to)
+          else await moveObject(storagePath(packId, move.from), storagePath(packId, move.to))
+        }
         for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name, element_defaults: elementDefaults } : {}), path: replacePath(item.path) })
         for (const item of elements) await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { path: replacePath(item.path) })
       } catch (error) {
-        for (const move of [...moves].reverse()) await moveObject(storagePath(packId, move.to), storagePath(packId, move.from)).catch(() => undefined)
+        for (const move of [...moves].reverse()) {
+          const element = elements.find(item => item.path === move.from)
+          if (typeof element?.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.updateLogicalPath(element.storage_object_id, packId, move.from).catch(() => undefined)
+          else await moveObject(storagePath(packId, move.to), storagePath(packId, move.from)).catch(() => undefined)
+        }
         throw error
       }
       return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath, ...(elementDefaults && typeof elementDefaults === 'object' ? { elementDefaults: elementDefaults as ResourceFolder['elementDefaults'] } : {}) }
@@ -326,7 +364,8 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       const folderPrefix = `${folder.path}/`
       const containedElements = elements.filter((item) => item.path === folder.path || item.path.startsWith(folderPrefix))
       for (const element of containedElements) {
-        await deleteObject(storagePath(packId, element.path), true)
+        if (typeof element.storage_object_id === 'string' && options.r2Storage) await options.r2Storage.delete(element.storage_object_id, packId)
+        else await deleteObject(storagePath(packId, element.path), true)
       }
       for (const element of containedElements) {
         await deleteRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(element.id)}&pack_id=eq.${encodeURIComponent(packId)}`)
@@ -346,7 +385,7 @@ async function loadResourceSupabaseEnv(): Promise<void> {
     if (!(await file.exists())) continue
     const text = await file.text()
     for (const line of text.split(/\r?\n/)) {
-      const match = line.match(/^\s*(BEEGAME_SUPABASE_(?:URL|SERVICE_ROLE_KEY|ANON_KEY))\s*=\s*(.*)\s*$/)
+      const match = line.match(/^\s*(BEEGAME_(?:SUPABASE_(?:URL|SERVICE_ROLE_KEY|ANON_KEY)|PROJECT_STORAGE_PROVIDER|R2_(?:ACCOUNT_ID|ENDPOINT|ACCESS_KEY_ID|SECRET_ACCESS_KEY|PROJECT_BUCKET|RESOURCE_BUCKET|DELIVERY_BUCKET|LOG_BUCKET)))\s*=\s*(.*)\s*$/)
       if (match?.[1] && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '')
     }
   }
@@ -354,11 +393,16 @@ async function loadResourceSupabaseEnv(): Promise<void> {
 
 function createConfiguredResourceRepository(
   env: NodeJS.ProcessEnv = process.env,
+  r2Storage?: R2ResourceStorage,
 ) {
   const baseUrl = env.BEEGAME_SUPABASE_URL?.trim()
   const serviceRoleKey = env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY?.trim()
   if (baseUrl && serviceRoleKey) {
-    return createSupabaseResourceRepository({ baseUrl, serviceRoleKey })
+    return createSupabaseResourceRepository({
+      baseUrl,
+      serviceRoleKey,
+      ...(r2Storage ? { getStorageObjectUrl: (storageObjectId: string, packId: string) => r2Storage.createDownloadUrl(storageObjectId, packId) } : {}),
+    })
   }
   if (env.BEEGAME_RESOURCE_REPOSITORY === 'memory' || env.NODE_ENV !== 'production') {
     return createInMemoryResourceRepository({ packs: [], elements: [] })
@@ -469,7 +513,7 @@ function previewDescriptor(kind: string, path: string): { kind: 'image' | 'model
 }
 
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-type SupabaseLifecycleOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string }
+type SupabaseLifecycleOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string; r2Storage?: R2ResourceStorage }
 
 export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecycleOptions) {
   const fetchImpl = options.fetchImpl ?? fetch
@@ -494,6 +538,10 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   }
   const toClientPack = async (packId: string, row: Record<string, unknown>): Promise<PackSummary> => {
     const pack = toResourcePack(row)
+    if (typeof row.cover_storage_object_id === 'string' && options.r2Storage) {
+      const coverPath = await options.r2Storage.createDownloadUrl(row.cover_storage_object_id, packId)
+      return coverPath ? { ...pack, coverPath } : pack
+    }
     if (typeof row.cover_path !== 'string') return pack
     const storagePackId = safeStorageComponent(packId, 'Pack id')
     const coverPath = safeRelativeStoragePath(row.cover_path, 'Resource Pack cover path')
@@ -510,6 +558,9 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       return toClientPack(packId, savedRow)
     },
     deleteResourcePack: async (packId: string) => {
+      if (options.r2Storage) {
+        for (const object of await options.r2Storage.listPackObjects(packId)) await options.r2Storage.delete(object.id, packId)
+      }
       const prefix = safePrefix(packId)
       const pageSize = 1000
       const visitedPrefixes = new Set<string>()
@@ -554,29 +605,49 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       const form = await request.formData(); const file = form.get('file')
       if (!(file instanceof File)) throw new Error('Cover file is required')
       const storagePackId = safeStorageComponent(packId, 'Pack id')
-      const current = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path`, { headers })
+      const current = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path,cover_storage_object_id`, { headers })
       if (!current.ok) throw new Error(`Resource Pack lookup failed (${current.status})`)
-      const currentRow = (await current.json() as Array<{ cover_path?: string | null }>)[0]
+      const currentRow = (await current.json() as Array<{ cover_path?: string | null; cover_storage_object_id?: string | null }>)[0]
       if (!currentRow) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
       const previous = currentRow.cover_path
       const coverPath = `cover/${crypto.randomUUID()}-${sanitizeStorageBasename(file.name)}`
       const storagePath = `${storagePackId}/${coverPath}`
-      const uploaded = await fetchImpl(objectUrl(storagePath), { method: 'POST', headers: { ...headers, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'false' }, body: await file.arrayBuffer() })
-      if (!uploaded.ok) throw new Error(`Cover storage upload failed (${uploaded.status})`)
+      const r2Object = options.r2Storage ? await options.r2Storage.upload({ packId: storagePackId, logicalPath: coverPath, file, objectKind: 'resource_preview' }) : undefined
+      if (!r2Object) {
+        const uploaded = await fetchImpl(objectUrl(storagePath), { method: 'POST', headers: { ...headers, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'false' }, body: await file.arrayBuffer() })
+        if (!uploaded.ok) throw new Error(`Cover storage upload failed (${uploaded.status})`)
+      }
       let signedCoverUrl: string
-      try { signedCoverUrl = await signObject(storagePath) } catch (error) { await deleteObject(storagePath); throw error }
-      const saved = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify({ cover_path: coverPath }) })
-      if (!saved.ok) { await deleteObject(storagePath); throw new Error(`Resource Pack cover update failed (${saved.status})`) }
-      if (typeof previous === 'string' && isSafeRelativeStoragePath(previous)) await deleteObject(`${storagePackId}/${previous}`)
+      try {
+        const r2CoverUrl = r2Object ? await options.r2Storage!.createDownloadUrl(r2Object.storageObjectId, storagePackId) : undefined
+        if (r2Object && !r2CoverUrl) throw new Error('R2 cover URL signing returned no URL')
+        signedCoverUrl = r2CoverUrl ?? await signObject(storagePath)
+      } catch (error) {
+        if (r2Object) await options.r2Storage?.delete(r2Object.storageObjectId, storagePackId)
+        else await deleteObject(storagePath)
+        throw error
+      }
+      const saved = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify({ cover_path: coverPath, cover_storage_object_id: r2Object?.storageObjectId ?? null }) })
+      if (!saved.ok) {
+        if (r2Object) await options.r2Storage?.delete(r2Object.storageObjectId, storagePackId)
+        else await deleteObject(storagePath)
+        throw new Error(`Resource Pack cover update failed (${saved.status})`)
+      }
+      if (typeof currentRow.cover_storage_object_id === 'string' && options.r2Storage) await options.r2Storage.delete(currentRow.cover_storage_object_id, storagePackId)
+      else if (typeof previous === 'string' && isSafeRelativeStoragePath(previous)) await deleteObject(`${storagePackId}/${previous}`)
       const row = (await saved.json() as Array<Record<string, unknown>>)[0]
       if (!row) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
       return { ...toResourcePack(row), coverPath: signedCoverUrl }
     },
     getElementResourceUrl: async (packId: string, elementId: string) => {
-      const lookup = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=pack_id,path`, { headers })
+      const lookup = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=pack_id,path,storage_object_id`, { headers })
       if (!lookup.ok) throw new Error(`Resource element lookup failed (${lookup.status})`)
-      const element = (await lookup.json() as Array<{ pack_id?: string; path?: string }>)[0]
+      const element = (await lookup.json() as Array<{ pack_id?: string; path?: string; storage_object_id?: string | null }>)[0]
       if (!element?.pack_id || !element.path || element.pack_id !== packId) throw new Error('Resource element not found in Pack')
+      if (typeof element.storage_object_id === 'string' && options.r2Storage) {
+        const url = await options.r2Storage.createDownloadUrl(element.storage_object_id, packId)
+        if (url) return url
+      }
       const storagePackId = safeStorageComponent(packId, 'Pack id')
       const relativePath = safeRelativeStoragePath(element.path, 'Resource element path')
       return signObject(`${storagePackId}/${relativePath}`)

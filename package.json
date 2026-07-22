@@ -80,6 +80,11 @@
     "saas:preflight": "bun run scripts/check-beegame-saas-preflight.ts",
     "supabase:bootstrap-owner": "bun run scripts/bootstrap-beegame-owner.ts",
     "supabase:smoke": "bun run scripts/smoke-beegame-supabase.ts",
+    "r2:bootstrap": "bun run scripts/bootstrap-beegame-r2.ts",
+    "r2:smoke": "bun run scripts/smoke-beegame-r2.ts",
+    "r2:migrate:resources": "bun run scripts/migrate-beegame-resource-storage-to-r2.ts",
+    "r2:rekey:resources": "bun run scripts/rekey-beegame-r2-resource-storage.ts",
+    "r2:reconcile": "bun run scripts/reconcile-beegame-r2-storage.ts",
     "migrate:asset-contract": "bun run scripts/migrate-beegame-asset-contract.ts",
     "typecheck": "tsc --noEmit",
     "precheck": "bun run typecheck && bun run check:fix && bun test",
@@ -87,8 +92,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.19.0",
-    "@claude-code-best/mcp-chrome-bridge": "^3.0.1", 
-    "highlight.js": "^11.11.1", 
+    "@claude-code-best/mcp-chrome-bridge": "^3.0.1",
+    "highlight.js": "^11.11.1",
     "ws": "^8.20.0"
   },
   "devDependencies": {

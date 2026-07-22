@@ -1,5 +1,19 @@
 # BeeGame 存储分域与 Cloudflare R2 迁移方案
 
+> 状态：2026-07-22 架构审计后修订。本文描述目标架构与渐进迁移边界；不能把现有 `cloud-artifacts` 临时 HTML Worker 当作正式项目存储实现。
+
+## 0. 审计结论
+
+总体方向成立，但原方案在开始实现前必须补齐以下约束：
+
+- R2 是对象存储，不是 Claude Code 的工作目录。Agent 活动工作区继续使用每用户、每 Session 隔离的本地卷或持久卷；R2 只保存上传对象、不可变快照、资源、构建与交付产物。
+- Resource Library 的“文件夹路径”是可编辑的逻辑路径，R2 `object_key` 是不可变物理定位。重命名或移动文件不能默认复制 R2 对象。
+- 现有业务表已经保存 `supabase://...`、Storage URL 或相对路径。迁移必须先增加可空的 `storage_object_id`，并保留 Legacy Locator 读取；不能要求一次性回填后才能上线。
+- R2 预签名 URL 只能在 S3 API 域名使用，不能使用自定义域名。正式发布读取应通过发布 Worker/自定义域名，私有上传与下载则走 S3 预签名 URL。
+- 部署必须先完整上传和校验不可变版本，再以数据库状态切换为可见；不能逐文件覆盖一个正在被用户访问的发布目录。
+- Multipart ETag 不能当作文件 SHA-256。Checksum 必须记录算法和值，大小、对象存在性和内容校验分别处理。
+- 当前 `packages/cloud-artifacts` 是公开、短期、单 HTML 的临时产物服务，鉴权和生命周期均不满足多租户游戏项目要求，保持独立且不进入本次正式存储链路。
+
 ## 1. 目标
 
 BeeGame 不对 Supabase Storage 进行全量迁移，而是根据文件所属业务域拆分存储：
@@ -59,7 +73,7 @@ Cloudflare R2 是项目域的新存储边界，不是 Supabase 账户媒体存�
 
 以下文件统一存放在 Cloudflare R2：
 
-- 游戏项目源代码
+- 游戏项目源代码的不可变快照与导出归档（不包含 Agent 正在编辑的活动工作区）
 - 用户上传的游戏资源
 - 图片、音频、模型和动画
 - Sprite、Sprite Sheet、Sprite Atlas
@@ -74,13 +88,16 @@ Cloudflare R2 是项目域的新存储边界，不是 Supabase 账户媒体存�
 - 项目历史版本和快照
 - Resource Library Pack、元素、依赖和预览文件
 
-建议初期使用以下 Bucket：
+建议初期使用以下逻辑 Bucket 角色。物理 Bucket 名由环境配置决定，不写死在业务代码中：
 
 | Bucket | 内容 |
 |---|---|
-| `beegame-project-data` | 项目代码、项目资源、资源库文件和快照 |
-| `beegame-deliveries` | 构建产物、部署版本、ZIP、截图和录屏 |
-| `beegame-logs` | 构建日志、Agent 日志和诊断文件 |
+| `project-private` | 项目上传、项目资源、不可变源码快照和导出归档 |
+| `resource-private` | Resource Library Pack、元素、依赖和预览源文件 |
+| `delivery` | 构建产物、不可变部署版本、ZIP、截图和录屏 |
+| `log-private` | 构建日志、Agent 日志和诊断文件 |
+
+生产环境优先为不同逻辑角色使用独立物理 Bucket 和独立 API Token，避免 Resource Library 服务获得项目快照或日志的跨域权限。开发环境可以把多个逻辑角色映射到同一 R2 Bucket，但对象前缀和服务凭证边界仍必须保留。
 
 后续可根据规模拆分为：
 
@@ -94,17 +111,18 @@ Cloudflare R2 是项目域的新存储边界，不是 Supabase 账户媒体存�
 
 ## 4. R2 对象路径规范
 
-公共存储层只规范正式发布版本的对象路径：
+公共存储层规范正式发布版本与 Resource Library Pack 的对象路径：
 
 ```text
-deployments/{deploymentId}/...
+deployments/{deploymentId}/files/...
+deployments/{deploymentId}/manifest.json
+packs/{packId}/objects/{storageObjectId}/payload
 ```
 
-除部署版本外，本方案不规定以下内容在 R2 中的对象路径：
+除部署版本和 Resource Library Pack 外，本方案不规定以下内容在 R2 中的对象路径：
 
 - 游戏项目源代码
 - 项目资源
-- Resource Library Pack 与元素
 - AI 生成资源
 - 构建中间产物
 - 项目导出 ZIP
@@ -112,7 +130,16 @@ deployments/{deploymentId}/...
 - 日志
 - 历史版本和快照
 
-这些对象的 Key 由各自业务服务管理，Storage Router 只根据数据库中的 `bucket` 和 `object_key` 执行存储操作，不推断、不重写、不统一其目录结构。
+这些对象的 Key 由各自业务服务在创建对象记录时生成，客户端不能提交完整 Bucket 或 Key。Storage Router 只根据数据库中的 `bucket_role`、`bucket` 和 `object_key` 执行存储操作，不根据文件名推断、不在读取时重写。
+
+Resource Library 使用单一资源 Bucket，并以 Pack 前缀做物理分区；不为每个 Pack 创建 Bucket。`packId` 和 `storageObjectId` 都由服务端提供，用户文件名与可编辑文件夹路径不会进入物理 Key。这样可以按 Pack 前缀执行巡检、归档和生命周期治理，同时避免逻辑文件夹重命名触发对象复制。
+
+对象 Key 与用户可见路径必须分离：
+
+- `object_key`：服务端生成的不可变物理定位，推荐包含不可猜测对象 ID。
+- `logical_path`：项目或 Pack 内可重命名、移动的逻辑路径。
+- 重命名或移动默认只修改 `logical_path` 和业务元数据。
+- 只有发布组装、跨 Bucket 迁移或显式复制才创建新 `object_key`。
 
 部署路径规则：
 
@@ -133,16 +160,21 @@ owner_user_id
 project_id
 pack_id
 provider
+bucket_role
 bucket
 object_key
+logical_path
 original_filename
 mime_type
 byte_size
-checksum
+checksum_algorithm
+checksum_value
+etag
 object_kind
 version_id
 status
 visibility
+metadata
 created_at
 updated_at
 deleted_at
@@ -151,11 +183,20 @@ deleted_at
 枚举建议：
 
 ```text
-scope_type: user | studio | platform | project | pack
+scope_type: user | studio | platform | project | pack | deployment | session
 provider: supabase | r2
-status: pending | ready | failed | deleted
+status: pending | uploading | verifying | ready | failed | deleted
 visibility: private | project | organization | public
 ```
+
+数据库约束：
+
+- `(provider, bucket, object_key)` 对未删除记录唯一。
+- `byte_size >= 0`，Checksum 必须同时包含算法和值。
+- 项目、Pack、部署和 Session Scope 必须具有相应归属外键或可验证引用。
+- `ready` 对象才允许签发下载 URL 或进入构建、发布和资源选择。
+- 业务表以可空 `storage_object_id` 逐步接入；迁移期仍可读取 Legacy Locator。
+- `storage_objects` 保存定位和事实，不取代 Pack、元素、部署等业务表。
 
 项目域的新业务代码只保存 `storage_object_id`，不能长期保存：
 
@@ -180,13 +221,17 @@ Storage Router
 
 ```ts
 createUploadIntent()
+createMultipartUploadIntent()
 completeUpload()
+abortUpload()
 createDownloadUrl()
 copyObject()
 deleteObject()
-listObjects()
+headObject()
 verifyObject()
 ```
+
+业务接口使用 `storageObjectId`，不向客户端暴露任意 `listObjects(bucket, prefix)` 能力。对象列举仅供迁移、对账和管理员治理任务使用。
 
 新增项目域路由必须依据明确的业务字段：
 
@@ -211,10 +256,10 @@ route({
 1. 客户端向 BeeGame 申请上传任务。
 2. BeeGame 验证项目权限、文件类型和用户配额。
 3. 创建 `pending` 状态的对象记录。
-4. 服务端生成 R2 预签名 URL 或 Multipart Upload 凭据。
+4. 服务端生成绑定到单一 Bucket、Key、方法和 Content-Type 的 R2 预签名 URL；大文件由服务端建立 Multipart Upload 并逐 Part 签名。
 5. 客户端直接上传至 R2。
 6. 客户端通知服务端上传完成。
-7. 服务端校验对象大小、Checksum 和存在性。
+7. 服务端通过 HEAD 校验对象存在性、大小和约定元数据；内容 Checksum 由可信上传端提交并由后台验证任务复核。
 8. 将对象状态更新为 `ready`。
 
 大型文件上传应支持：
@@ -227,6 +272,14 @@ route({
 - 刷新后恢复
 - Checksum 校验
 - 并发上传限制
+
+补充约束：
+
+- R2 当前不支持 S3 HTML Form `POST` 预签名上传，浏览器直传使用预签名 `PUT`。
+- 预签名 URL 是 Bearer 凭证，必须短时有效且不得写入日志、Manifest 或数据库长期字段。
+- 浏览器直传必须配置精确 Origin、方法和 Header 的 R2 CORS，不能使用无边界 `*`。
+- Upload Intent 必须包含服务端生成的对象 ID、幂等键、过期时间、期望大小和允许的 Content-Type。
+- 完成回调重复提交必须幂等；超时任务和 Multipart 残片由生命周期任务清理。
 
 ## 8. 下载与发布
 
@@ -252,7 +305,16 @@ deployments/{deploymentId}/...
 ./assets/audio/fire.wav
 ```
 
-最终游戏不能依赖临时签名 URL。发布版本可通过 Cloudflare CDN、自定义域名或 BeeGame 发布域名对外提供访问。
+最终游戏不能依赖临时签名 URL。发布版本通过专用发布 Worker 和 BeeGame 自定义域名对外提供访问；`r2.dev` 只用于开发验证。发布 Worker 负责入口文档、SPA fallback、Content-Type、安全响应头和缓存策略。
+
+发布原子性：
+
+1. 为服务端生成的高熵 `deploymentId` 创建 `publishing` 记录。
+2. 上传到新的不可变 `deployments/{deploymentId}/files/...`。
+3. 生成并校验包含路径、大小和 Checksum 的 `manifest.json`。
+4. 所有文件就绪后，将数据库部署记录一次性切换为 `succeeded`。
+5. 只有 `succeeded` 版本能被发布 Worker 解析；失败版本不可见且可安全清理。
+6. 已发布对象不覆盖。更新游戏必须创建新的 `deploymentId`。
 
 ### 8.3 Resource Library
 
@@ -301,12 +363,14 @@ Agent 探索资源时只返回：
 
 旧项目对象首次被访问时：
 
-1. 从 Supabase Storage 读取。
-2. 后台复制到 R2。
+1. 通过 Legacy Locator 从 Supabase Storage 读取。
+2. 创建新的 R2 `storage_objects` 记录并后台复制。
 3. 校验文件大小和 Checksum。
-4. 更新 `storage_objects.provider`。
+4. 在业务表中原子切换 `storage_object_id`，旧定位保留为迁移审计事实。
 5. 后续访问改为 R2。
 6. 经过安全观察期后删除 Supabase Storage 副本。
+
+不得原地修改同一条对象记录的 `provider/bucket/object_key` 来表示复制过程，否则失败时会丢失可信源定位。
 
 ### 第四阶段：批量迁移冷数据
 
@@ -323,11 +387,12 @@ Agent 探索资源时只返回：
 ## 10. 迁移状态机
 
 ```text
-supabase_only
-→ copying_to_r2
-→ r2_verified
-→ r2_primary
-→ supabase_source_deleted
+queued
+→ copying
+→ verifying
+→ ready_to_cutover
+→ cutover_complete
+→ source_deleted
 ```
 
 失败状态：
@@ -335,6 +400,7 @@ supabase_only
 ```text
 copy_failed
 verification_failed
+cutover_failed
 delete_source_failed
 ```
 
@@ -380,7 +446,7 @@ R2 操作流程：
 | Resource Library 服务 | 操作数据库授权的 Pack 对象 |
 | 日志服务 | 写入数据库授权的日志对象 |
 
-任何服务都不应持有无边界的跨 Bucket 用户级管理权限。
+任何服务都不应持有无边界的跨 Bucket 用户级管理权限。S3 API Token 只存在于服务端秘密管理中；浏览器只获得单对象、单操作、短时授权。
 
 ## 12. 生命周期管理
 
@@ -397,9 +463,26 @@ R2 操作流程：
 
 ## 13. 实施顺序
 
+### 当前实现检查点（2026-07-22）
+
+- 已实现 provider-neutral R2 Driver、业务 Scope 路由和 fail-closed 配置。
+- 已建立 `storage_objects`、上传意图和迁移任务的数据库基础与 RLS 加固。
+- Resource Library 新文件和封面可写入 R2；旧 Supabase 对象保持双读。
+- 项目资源的持久化副本可写入 R2；Claude Code 活动工作区仍保持隔离文件系统。
+- Web 部署以不可变 `deploymentId` 上传全部文件，逐对象校验后最后写入部署 Manifest。
+- 已提供 Resource Library 预演/执行迁移、Pack 物理分区重排和 R2 正向一致性巡检；迁移读取使用显式分页，不受 Supabase REST 默认 1000 行限制。
+- Resource Library R2 对象按 `packs/{packId}/objects/{storageObjectId}/payload` 分区，用户文件夹继续由 `logical_path` 管理；2026-07-22 的历史迁移与旧平铺键重排队列均已归零，2,591 个登记对象通过全量存在性、大小和 Checksum 元数据检查，另有 100 个对象通过下载内容 SHA 抽检。
+- 已提供幂等 `bun run r2:bootstrap`：自动采用平台 Bucket 默认名、检查并创建缺失 Bucket；该命令只在部署初始化时使用 Cloudflare 管理 Token，运行时服务不持有此权限。
+- `r2:bootstrap` 会为项目、资源与交付 Bucket 配置受限浏览器 CORS；本地 Studio Origin 自动加入，生产 Origin 复用 `BEEGAME_API_CORS_ORIGINS`，额外 Origin 可通过 `BEEGAME_R2_CORS_ORIGINS` 配置。私有对象仍必须使用短期签名 URL。
+- 历史 Resource Pack 缺失 Owner 时迁移会 fail-closed；只有唯一工作区 Owner 可被确定性回填，并写入资源审计事件。
+- 尚未完成浏览器直传 Upload Intent、Multipart 恢复、项目快照/导出、完整日志迁移和 R2 反向孤儿扫描。
+
 ### P0：建立存储边界
 
+- 修订并冻结本文中的业务域、活动工作区和 Legacy Locator 边界。
+- 建立 provider-neutral Storage Core；业务服务依赖接口，不直接拼接 Supabase 或 R2 URL。
 - 建立 `storage_objects` 表。
+- 建立 Upload Intent、审计记录与幂等状态转换。
 - 实现项目域 Storage Router。
 - 明确业务 Scope 路由规则。
 - 新项目域上传全部进入 R2。
@@ -407,6 +490,7 @@ R2 操作流程：
 - 保持账户域、组织域和平台域现有 Supabase Bucket、Key、Policy 与接口完全不变。
 - 实现身份、项目权限和签名 URL。
 - 禁止新增的 R2 项目域业务代码直接拼接永久 Storage URL。
+- 活动 Claude Code 工作区仍使用隔离文件系统；只在明确快照/导出时写入 R2。
 
 ### P1：打通项目完整链路
 
@@ -417,6 +501,7 @@ R2 操作流程：
 - 项目导出 ZIP 写入 R2。
 - 支持 Multipart、重试、进度和刷新恢复。
 - 发布游戏使用相对资源路径。
+- 部署使用不可变对象集、部署 Manifest 和数据库原子切换。
 
 ### P2：渐进迁移和治理
 
@@ -444,6 +529,10 @@ R2 操作流程：
 - 删除项目不会删除用户头像等账户媒体。
 - Supabase Storage 停止接收新项目文件后，项目仍能正常构建。
 - 数据库、Supabase Storage 和 R2 可以进行一致性巡检。
+- Pack 内重命名或移动元素不会复制 R2 对象，且预览、依赖和 Agent 导入仍可正常解析。
+- R2 配置缺失时服务启动明确失败或保持旧链路，不允许部分写入后静默回退到另一 Provider。
+- 同一个 Upload Intent 重试不会生成重复业务对象；失败完成回调不会把对象标记为 `ready`。
+- 部署上传中途失败时，旧发布版本继续可用，新版本不可见。
 
 ## 15. 最终架构
 
@@ -460,7 +549,7 @@ Supabase
 └── 账户级、平台级小型媒体
 
 Cloudflare R2
-├── 项目源代码
+├── 项目源代码的不可变快照与导出归档
 ├── 游戏资源
 ├── Resource Library
 ├── AI 生成资源

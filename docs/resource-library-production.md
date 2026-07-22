@@ -15,6 +15,16 @@ Apply these migrations to the target Supabase project, in order:
 5. `docs/beegame-resource-ownership-rls-migration.sql`
 6. `docs/beegame-resource-governance-migration.sql`
 
+For an existing database that was created before the R2 storage foundation,
+also apply:
+
+7. `docs/beegame-storage-r2-foundation-migration.sql`
+8. `docs/beegame-storage-r2-rls-hardening-migration.sql`
+
+The latest `beegame-supabase-schema.sql` already contains the foundation for a
+new installation. The hardening migration is intentionally separate so an
+existing installation can replace the earlier broad insert/update policies.
+
 The ownership and governance migrations create Pack ownership, RLS policies,
 and the server-only audit table. Do not expose the Supabase service-role key to
 the browser or workflow runtime.
@@ -28,6 +38,48 @@ token:
 BEEGAME_SUPABASE_URL=https://<project>.supabase.co
 BEEGAME_SUPABASE_SERVICE_ROLE_KEY=<server-only-secret>
 BEEGAME_RESOURCE_SERVICE_TOKEN=<random-server-to-server-secret>
+```
+
+To opt new Pack files into R2, add the server-only R2 variables documented in
+`.env.example` and set `BEEGAME_PROJECT_STORAGE_PROVIDER=r2`. Existing Pack
+rows remain readable from Supabase Storage until they are migrated.
+
+Preview the legacy Resource Library migration before making changes:
+
+```bash
+bun run r2:migrate:resources
+```
+
+After reviewing the list, apply the copy-and-cutover pass:
+
+```bash
+bun run r2:migrate:resources --apply
+```
+
+The command verifies each R2 object before updating the Pack or element row;
+it does not delete the Supabase source object. Run `bun run r2:reconcile`
+periodically, and add `--apply` only when invalid R2 metadata should be marked
+failed.
+
+Resource objects share one private Bucket but are physically partitioned as
+`packs/{packId}/objects/{storageObjectId}/payload`. Pack folders and filenames
+remain in `logical_path`; renaming an authoring folder does not copy R2 data.
+Installations that previously wrote flat `objects/{storageObjectId}/payload`
+keys can preview and apply the verified rekey pass with:
+
+```bash
+bun run r2:rekey:resources
+bun run r2:rekey:resources --apply
+```
+
+Both migration commands are resumable and leave incomplete work in the next
+plan. Reconciliation reads every Supabase REST page, supports bounded request
+timeouts, and can restore a missing migrated object from its checksum-verified
+Supabase source without deleting that source:
+
+```bash
+bun run r2:reconcile --deep-limit=100 --request-timeout-ms=60000
+bun run r2:reconcile --repair-missing --deep-limit=100 --request-timeout-ms=60000
 ```
 
 The workflow service must use the resource service URL and the *same* selection

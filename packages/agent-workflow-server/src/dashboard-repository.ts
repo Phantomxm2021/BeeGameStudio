@@ -101,6 +101,7 @@ import type {
   BeeGameBillingCreditPackInput,
   BeeGameBillingEventInput,
 } from '@bee-game-studio/beegame-billing-core/billing-ports'
+import type { ProjectAssetStorage } from './r2-project-asset-storage'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
@@ -117,6 +118,7 @@ export type DashboardRepositoryOptions = {
    */
   getAuthToken?: (request: Request) => string | undefined
   modelConfigStore?: ModelConfigStoreOptions | false
+  projectAssetStorage?: ProjectAssetStorage
 }
 
 export type BeeGameProjectLifecycleOverview = {
@@ -421,6 +423,16 @@ export class DashboardRepository {
     metadata: BeeGameSessionInternalMetadata | undefined,
     file: File,
   ): Promise<string | undefined> {
+    if (this.options.projectAssetStorage && metadata?.projectId) {
+      const authToken = this.options.getAuthToken?.(request) ?? getBearerToken(request)
+      if (!authToken) throw new Error('Project asset storage requires authentication')
+      return this.options.projectAssetStorage.uploadAssetFile({
+        ownerId: user.id,
+        projectId: metadata.projectId,
+        authToken,
+        file,
+      })
+    }
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId) return undefined
     const uploadBody = file.slice(0, file.size, file.type || 'application/octet-stream')
@@ -439,6 +451,17 @@ export class DashboardRepository {
     metadata: BeeGameSessionInternalMetadata | undefined,
     storageUri: string | undefined,
   ): Promise<void> {
+    if (this.options.projectAssetStorage && metadata?.projectId && storageUri) {
+      const authToken = this.options.getAuthToken?.(request) ?? getBearerToken(request)
+      if (!authToken) throw new Error('Project asset storage requires authentication')
+      await this.options.projectAssetStorage.deleteAssetFile({
+        ownerId: user.id,
+        projectId: metadata.projectId,
+        authToken,
+        storageUri,
+      })
+      return
+    }
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId || !storageUri) return
     await supabase.deleteAssetFile(user.id, metadata.projectId, storageUri)

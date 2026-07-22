@@ -53,6 +53,38 @@ describe('Supabase resource repository', () => {
     expect(signedRequest).not.toContain('/pack-1/pack-1/')
   })
 
+  test('prefers an R2 Pack cover without requesting a legacy Supabase signature', async () => {
+    const requests: string[] = []
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
+      getStorageObjectUrl: async (storageObjectId, packId) => `https://r2.test/${packId}/${storageObjectId}`,
+      fetchImpl: async request => {
+        const url = request instanceof Request ? request.url : String(request)
+        requests.push(url)
+        if (url.includes('beegame_resource_elements')) return Response.json([])
+        return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'legacy.png', cover_storage_object_id: 'object-1', element_count: 0 }])
+      },
+    })
+
+    await expect(repository.listPacks()).resolves.toEqual([expect.objectContaining({ coverPath: 'https://r2.test/pack-1/object-1' })])
+    expect(requests.some(url => url.includes('/storage/v1/object/sign/'))).toBe(false)
+  })
+
+  test('falls back to a legacy cover while an R2 cover is unavailable', async () => {
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
+      getStorageObjectUrl: async () => undefined,
+      fetchImpl: async request => {
+        const url = request instanceof Request ? request.url : String(request)
+        if (url.includes('beegame_resource_elements')) return Response.json([])
+        if (url.includes('beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'legacy.png', cover_storage_object_id: 'object-not-ready', element_count: 0 }])
+        return Response.json({ signedURL: '/object/sign/beegame-resource-packs/pack-1/legacy.png?token=legacy' })
+      },
+    })
+
+    await expect(repository.listPacks()).resolves.toEqual([expect.objectContaining({ coverPath: 'https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/legacy.png?token=legacy' })])
+  })
+
   test('filters elements by Pack and category using encoded query values', async () => {
     const requests: Request[] = []
     const repository = createSupabaseResourceRepository({

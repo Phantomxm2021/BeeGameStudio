@@ -306,6 +306,7 @@ type SupabaseDeploymentRow = {
   output_dir: string | null
   artifact_path: string | null
   artifact_hash: string | null
+  manifest_storage_object_id: string | null
   message: string | null
   created_at: string
   updated_at: string
@@ -1334,6 +1335,7 @@ export class SupabaseDashboardStore {
         output_dir: record.outputDir ?? null,
         artifact_path: record.artifactPath ?? null,
         artifact_hash: record.artifactHash ?? null,
+        manifest_storage_object_id: record.manifestStorageObjectId ?? null,
         message: record.message ?? null,
         created_at: record.createdAt,
         updated_at: record.updatedAt,
@@ -2151,6 +2153,7 @@ function rowToDeploymentRecord(row: SupabaseDeploymentRow): BeeGameDeploymentRec
     ...(row.output_dir ? { outputDir: row.output_dir } : {}),
     ...(row.artifact_path ? { artifactPath: row.artifact_path } : {}),
     ...(row.artifact_hash ? { artifactHash: row.artifact_hash } : {}),
+    ...(row.manifest_storage_object_id ? { manifestStorageObjectId: row.manifest_storage_object_id } : {}),
     ...(row.message ? { message: row.message } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

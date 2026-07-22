@@ -52,6 +52,7 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
+import { createR2DeploymentPublisherFromEnv } from './beegame/r2-deployment-publisher'
 import {
   getNativeDeliveryEvidenceSummary,
   getNativeDeliveryState,
@@ -74,6 +75,7 @@ import {
 import {
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
+import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
 import {
   syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from './runtime-settings-store'
@@ -396,6 +398,7 @@ export function createAgentWorkflowApp(
   const skillsConfig = options.skillsConfig === false
     ? null
     : options.skillsConfig ?? resolveBeeGameSkillsConfig()
+  const projectAssetStorage = createR2ProjectAssetStorageFromEnv()
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
@@ -406,6 +409,7 @@ export function createAgentWorkflowApp(
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
     modelConfigStore,
+    ...(projectAssetStorage ? { projectAssetStorage } : {}),
   })
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
   const intakeRuntimeId = randomUUID()
@@ -455,6 +459,7 @@ export function createAgentWorkflowApp(
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
     publisher: options.deploymentPublisher ??
+      createR2DeploymentPublisherFromEnv() ??
       createSupabaseStorageDeploymentPublisherFromEnv(),
     publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
     requireAcceptedDelivery: true,
