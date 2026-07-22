@@ -83,6 +83,13 @@
     "revisionRequired": "修正が必要",
     "clarificationDescription": "確認事項に回答するか、現在のブリーフをどう進めるか選択してください。",
     "aiProcessing": "AI が処理中...",
+    "attachmentBuild": {
+      "input": "入力", "completeness": "完全性", "confirmedGdd": "確認済み GDD",
+      "confirmedFacts": "確認済みの事実", "inferredDesign": "推定デザイン", "missingInformation": "不足情報",
+      "conflicts": "解決が必要な競合", "useGdd": "GDD の値を使用", "useImage": "画像の値を使用", "useCustom": "カスタム値を使用",
+      "resourceLibrary": "リソースライブラリの利用", "resourcePreferred": "リソースライブラリを優先", "resourceOptional": "必要に応じて使用", "resourceRequired": "リソースライブラリを必須にする",
+      "retry": "再分析", "preparing": "ビルドを準備中…", "confirm": "確認してビルド"
+    },
     "settingsGeneral": "一般",
     "settingsModel": "モデル",
     "closeSettings": "設定を閉じる",

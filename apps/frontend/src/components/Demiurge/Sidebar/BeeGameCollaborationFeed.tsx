@@ -23,6 +23,8 @@ type BeeGameCollaborationFeedProps = {
     onEditMessage?: (message: ChatDisplayMessage) => void;
 };
 
+const RUNTIME_ACTIVITY_MESSAGE_TIMESTAMP = 0;
+
 type ToolFeedMessage = ChatDisplayMessage & {
     tool?: string;
     toolName?: string;
@@ -290,7 +292,7 @@ export const BeeGameCollaborationFeed = memo(({
                             id: 'beegame-runtime-activity',
                             sender: 'system',
                             content: text.thinkingActive,
-                            timestamp: Date.now(),
+                            timestamp: RUNTIME_ACTIVITY_MESSAGE_TIMESTAMP,
                             type: 'thought',
                             taskKind: 'assistant_thinking',
                         }}
@@ -370,7 +372,6 @@ function UserMessageCard({
                     content={message.content}
                     isUser
                     messageId={message.id}
-                    variant="beegame"
                     lang={lang}
                 />
                 {onEdit ? (
@@ -429,7 +430,6 @@ function AgentResponseBlock({
                 content={message.content}
                 isUser={false}
                 messageId={message.id}
-                variant="beegame"
                 lang={lang}
             />
         </section>

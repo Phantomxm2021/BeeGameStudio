@@ -63,7 +63,7 @@ describe('project resource application', () => {
     expect(result.manifest.requirements[0]).not.toHaveProperty('resource_binding')
   })
 
-  test('fails an import batch once with actionable target-capability diagnostics before resolving selections', async () => {
+  test('rejects a structurally invalid target capability contract before resolving selections', async () => {
     workspace = await createWorkspace()
     const manifest = await readBeeGameAssetManifest(workspace)
     manifest.project_target = {
@@ -82,18 +82,12 @@ describe('project resource application', () => {
       },
     }))
 
-    const result = await application.importExplicitSelections(workspace, [
+    await expect(application.importExplicitSelections(workspace, [
       { importId: 'first-root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'first-root', destinationPath: 'assets/library/first', selectionReason: ['Selected root'] },
       { importId: 'second-root', packId: 'kit', expectedPackVersion: '1.0.0', elementId: 'second-root', destinationPath: 'assets/library/second', selectionReason: ['Selected root'] },
-    ])
+    ])).rejects.toThrow('project_target.asset_format_capabilities must be an array of non-empty strings')
 
     expect(resolutionCalls).toBe(0)
-    expect(result.results).toHaveLength(2)
-    expect(result.results.every(item =>
-      item.status === 'failed' &&
-      item.error?.includes('asset_format_capabilities')
-    )).toBe(true)
-    expect(result.manifest.imports).toEqual([])
   })
 
   test('does not add an import or leave a root file when dependency download fails', async () => {
@@ -214,7 +208,7 @@ describe('project resource application', () => {
     expect(refreshed.unresolvedImportIds).toEqual([])
     expect(refreshed.manifest.imports?.[0]).toEqual(expect.objectContaining({
       status: 'referenced',
-      usage_evidence: { references: ['src/scene.ts'], runtime_event_ids: [] },
+      usage_evidence: { references: ['src/scene.ts'] },
       technical_facts: { boundsSizeY: 7, hasNormals: true },
       content_profile: { packaging: 'self-contained' },
     }))

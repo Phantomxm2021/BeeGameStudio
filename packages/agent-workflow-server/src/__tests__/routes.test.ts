@@ -162,6 +162,36 @@ describe('agent workflow server routes', () => {
     },
   ]
 
+  const requestBeeGameIntake = async (
+    targetApp: ReturnType<typeof createAgentWorkflowApp>,
+    init: RequestInit,
+  ): Promise<Response> => {
+    const createdResponse = await targetApp.request('/api/beegame-intake/jobs', init)
+    if (createdResponse.status !== 202) return createdResponse
+
+    const created = await createdResponse.json() as { jobId: string }
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await targetApp.request(`/api/beegame-intake/jobs/${created.jobId}`, {
+        headers: init.headers,
+      })
+      if (!response.ok) return response
+      const job = await response.json() as {
+        status: 'running' | 'completed' | 'failed'
+        result?: unknown
+        error?: string
+        errorStatus?: number
+      }
+      if (job.status === 'completed') return Response.json(job.result)
+      if (job.status === 'failed') {
+        return Response.json({ error: job.error || 'Intake job failed' }, {
+          status: job.errorStatus ?? 400,
+        })
+      }
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    return Response.json({ error: 'Intake job did not reach a terminal state' }, { status: 504 })
+  }
+
   test('creates and lists masked model configs for the current user', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
@@ -2692,7 +2722,7 @@ describe('agent workflow server routes', () => {
   test('rejects BeeGame intake before reserving credits when no model config exists', async () => {
     const ledgerBeforeRes = await app.request('/api/credits/ledger')
     const ledgerBefore = await ledgerBeforeRes.json()
-    const res = await app.request('/api/beegame-intake/options', {
+    const res = await requestBeeGameIntake(app, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
@@ -2800,7 +2830,7 @@ describe('agent workflow server routes', () => {
     try {
       const ledgerBeforeRes = await app.request('/api/credits/ledger')
       const ledgerBefore = await ledgerBeforeRes.json()
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
@@ -2933,7 +2963,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'Anthropic-compatible idea', language: 'zh' }),
@@ -3013,7 +3043,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
@@ -3087,7 +3117,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'A concrete game request.' }),
@@ -3202,6 +3232,16 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('does not expose the removed synchronous BeeGame intake route', async () => {
+    const response = await app.request('/api/beegame-intake/options', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ idea: 'A game idea' }),
+    })
+
+    expect(response.status).toBe(404)
+  })
+
   test('refunds BeeGame intake credits and explains provider authentication failures', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
@@ -3225,7 +3265,7 @@ describe('agent workflow server routes', () => {
     try {
       const ledgerBeforeRes = await app.request('/api/credits/ledger')
       const ledgerBefore = await ledgerBeforeRes.json()
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
@@ -3371,7 +3411,7 @@ describe('agent workflow server routes', () => {
           }
         },
       })
-      const res = await supabaseApp.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(supabaseApp, {
         method: 'POST',
         headers: {
           authorization: 'Bearer user-token',
@@ -3445,7 +3485,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'idea requiring clarification' }),
@@ -3495,7 +3535,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'concrete game idea' }),
@@ -3570,7 +3610,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'broad game idea' }),
@@ -3626,7 +3666,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -3697,7 +3737,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea', thinkingMode: 'disabled' }),
@@ -3736,7 +3776,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'Generate selectable game directions' }),
@@ -3779,7 +3819,7 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'Generate selectable game directions' }),
@@ -3842,7 +3882,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -3903,7 +3943,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -3961,7 +4001,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -4010,7 +4050,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -4066,7 +4106,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -4124,7 +4164,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options', {
+      const res = await requestBeeGameIntake(app, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -4209,7 +4249,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('routes image attachment analysis through the job endpoint', async () => {
+  test('analyzes image attachments through the bounded attachment endpoint', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -4243,7 +4283,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const createJobRes = await app.request('/api/beegame-intake/attachment-jobs', {
+      const result = await app.request('/api/beegame-intake/analyze-attachments', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -4251,17 +4291,8 @@ describe('agent workflow server routes', () => {
           attachments: [{ type: 'image', mediaType: 'image/png', filename: 'concept.png', data: 'iVBORw0KGgo=' }],
         }),
       })
-      expect(createJobRes.status).toBe(202)
-      const job = await createJobRes.json()
-      let result: Response | undefined
-      for (let attempt = 0; attempt < 10; attempt += 1) {
-        result = await app.request(`/api/beegame-intake/attachment-jobs/${job.jobId}`)
-        const body = await result.clone().json()
-        if (body.status === 'completed' || body.status === 'failed') break
-        await new Promise(resolve => setTimeout(resolve, 5))
-      }
-      expect(result?.status).toBe(200)
-      expect((await result!.json()).result.sourceType).toBe('image')
+      expect(result.status).toBe(200)
+      expect((await result.json()).sourceType).toBe('image')
     } finally {
       globalThis.fetch = originalFetch
     }

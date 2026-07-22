@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Info, MonitorPlay, Play, RefreshCw, Rocket, Square, X } from 'lucide-react';
 import { BsStars } from 'react-icons/bs';
 import type { Language } from './AgentsConfig';
@@ -6,7 +6,6 @@ import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../ui/button';
 import { ButtonGroup } from '../ui/button-group';
 import { SettingsMenu } from './Landing/SettingsMenu';
-import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
 import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from '../ResourceLibrary/resourceLibraryRoute';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
@@ -17,6 +16,11 @@ import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { clearSupabaseSession } from '../../services/supabaseAuthApi';
 import { buildApiUrl } from '../../services/apiClient';
+
+const ResourceLibraryPage = lazy(async () => {
+    const module = await import('../ResourceLibrary/ResourceLibraryView');
+    return { default: module.ResourceLibraryPage };
+});
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
@@ -619,7 +623,11 @@ export function BeeGameLivePreviewPage({
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
             />
-            {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} /> : null}
+            {isResourceLibraryOpen ? (
+                <Suspense fallback={<div className="grid min-h-screen place-items-center bg-black"><span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" /></div>}>
+                    <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} />
+                </Suspense>
+            ) : null}
             <ProjectHistoryModal
                 isOpen={isHistoryOpen}
                 lang={lang}

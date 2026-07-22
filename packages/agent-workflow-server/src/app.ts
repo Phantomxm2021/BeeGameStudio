@@ -164,8 +164,15 @@ import { validateSecretStorageAtStartup } from './security/secret-crypto'
 import {
   BeeGameUploadPolicyError,
   MAX_BEEGAME_REQUEST_BYTES,
+  MAX_BEEGAME_PROJECT_ASSET_BYTES,
+  MAX_BEEGAME_PROJECT_ASSET_REQUEST_BYTES,
   validateBeeGameAttachments,
 } from './security/upload-policy'
+import {
+  deleteBeeGameIntakeJob,
+  loadBeeGameIntakeJob,
+  saveBeeGameIntakeJob,
+} from './beegame/intake-job-store'
 
 type JsonObject = Record<string, unknown>
 
@@ -239,18 +246,11 @@ const BEEGAME_INTAKE_SETTING_VALUES = {
 
 type BeeGameIntakeJob = {
   ownerId: string
+  runtimeId: string
   status: 'running' | 'completed' | 'failed'
   result?: BeeGameIntakeAnalysis
   error?: string
-  createdAt: number
-  updatedAt: number
-}
-
-type BeeGameAttachmentBuildJob = {
-  ownerId: string
-  status: 'running' | 'completed' | 'failed'
-  result?: AttachmentBuildAnalysis
-  error?: string
+  errorStatus?: number
   createdAt: number
   updatedAt: number
 }
@@ -408,7 +408,22 @@ export function createAgentWorkflowApp(
     modelConfigStore,
   })
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
-  const attachmentBuildJobs = new Map<string, BeeGameAttachmentBuildJob>()
+  const intakeRuntimeId = randomUUID()
+  const persistIntakeJobSafely = async (
+    dataRoot: string,
+    jobId: string,
+    job: BeeGameIntakeJob,
+  ): Promise<void> => {
+    try {
+      await saveBeeGameIntakeJob(dataRoot, jobId, job)
+    } catch (error) {
+      console.warn('[BeeGame] Failed to persist intake job state:', {
+        jobId,
+        status: job.status,
+        cause: toErrorMessage(error),
+      })
+    }
+  }
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -921,12 +936,13 @@ export function createAgentWorkflowApp(
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
       dataDir: dashboardDataRoot,
     })
+    const refreshedIdleRunners = beeGameSessions.refreshIdleRunners()
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'runtime_settings.updated',
       targetType: 'runtime_settings',
       targetId: user.id,
-      metadata: saved,
+      metadata: { ...saved, refreshedIdleRunners },
     })
     return c.json(saved)
   })
@@ -1327,7 +1343,7 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.get('/api/projects/:id/sessions/latest', async c => {
+  app.get('/api/projects/:id/events', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
@@ -1339,18 +1355,184 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const latest = await getLatestProjectSessionMetadata({
+      const sessionRef = await resolveBeeGameProjectSessionReference({
         request: c.req.raw,
         user,
         project,
         defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
         dashboardRepository,
       })
-      return latest
-        ? c.json(latest)
-        : c.json({ error: 'Session not found' }, 404)
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      if (sessionRef.live) {
+        beeGameSessions.updateAuthToken(
+          sessionRef.sessionId,
+          getRequestAuthToken(c.req.raw),
+        )
+      }
+      const after = parsePositiveInteger(c.req.query('after')) ?? 0
+      const events = await getProjectRuntimeEvents({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        dashboardDataRoot,
+        beeGameSessions,
+      })
+      return c.json({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        events: events.filter(event => event.id > after),
+        recoveredFromTranscript: !sessionRef.live,
+      })
     } catch (err) {
-      return tracedRouteError(c, 'project.session.latest', err)
+      return tracedRouteError(c, 'project.events', err, 404)
+    }
+  })
+
+  app.get('/api/projects/:id/transcript', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      const events = await getProjectRuntimeEvents({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        dashboardDataRoot,
+        beeGameSessions,
+      })
+      const visibleEvents = compactTranscriptForChatHistory(events)
+      const pagination = {
+        limit: parseTranscriptPageLimit(c.req.query('limit')),
+        beforeId: parsePositiveInteger(c.req.query('before')),
+      }
+      return c.json({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        ...paginateTranscriptEvents(visibleEvents, pagination),
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.transcript', err, 404)
+    }
+  })
+
+  app.get('/api/projects/:id/artifacts', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const path = c.req.query('path')
+    if (!path) return c.json({ error: 'Missing query: path' }, 400)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      return c.json(await readBeeGameProjectArtifact(sessionRef.workspacePath, path))
+    } catch (err) {
+      const message = toErrorMessage(err)
+      return tracedRouteError(
+        c,
+        'project.artifacts',
+        err,
+        message === 'Artifact path must stay inside the session workspace' ? 400 : 404,
+      )
+    }
+  })
+
+  app.get('/api/projects/:id/artifact-index', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      return c.json({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        artifacts: await discoverBeeGameProjectArtifacts(sessionRef.workspacePath),
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.artifact-index', err, 404)
+    }
+  })
+
+  app.get('/api/projects/:id/package', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.projectExport)
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      const projectPackage = await beeGameSessions.createProjectPackage(
+        sessionRef.sessionId,
+        sessionRef.workspacePath,
+      )
+      const body = projectPackage.data.buffer.slice(
+        projectPackage.data.byteOffset,
+        projectPackage.data.byteOffset + projectPackage.data.byteLength,
+      ) as ArrayBuffer
+      return new Response(new Blob([body], { type: projectPackage.contentType }), {
+        headers: {
+          'content-type': projectPackage.contentType,
+          'content-disposition': `attachment; filename="${projectPackage.filename.replace(/"/g, '')}"`,
+        },
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.package', err, 404)
     }
   })
 
@@ -1377,6 +1559,47 @@ export function createAgentWorkflowApp(
       return c.json(ensured)
     } catch (err) {
       return tracedRouteError(c, 'project.session.ensure', err)
+    }
+  })
+
+  app.post('/api/projects/:id/stop', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.cancel')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      if (!sessionRef.live) {
+        return c.json({
+          id: sessionRef.sessionId,
+          cwd: sessionRef.workspacePath,
+          status: 'stopped',
+          turnStatus: 'idle',
+        })
+      }
+      const session = beeGameSessions.stop(sessionRef.sessionId)
+      await dashboardRepository.upsertSessionMetadata(
+        c.req.raw,
+        user,
+        beeGameSessions.metadata(session.id),
+      )
+      return c.json(session)
+    } catch (err) {
+      return tracedRouteError(c, 'project.stop', err, 404)
     }
   })
 
@@ -1737,16 +1960,25 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) {
-        if (!project.root_path) return c.json({ version: 5, requirements: [], imports: [], compositions: [] })
+        if (!project.root_path) return c.json({ contract_state: 'missing', version: 5, requirements: [], imports: [], compositions: [] })
         const workspacePath = await resolveSessionWorkspacePath(
           project.root_path,
           options.defaultWorkspacePath,
         )
-        return c.json(toCanonicalBeeGameAssetManifest(await readBeeGameAssetManifest(workspacePath)))
+        const contractState = await stat(join(workspacePath, 'assets', 'asset-manifest.json'))
+          .then(() => 'ready' as const)
+          .catch(() => 'missing' as const)
+        return c.json({
+          contract_state: contractState,
+          ...toCanonicalBeeGameAssetManifest(await readBeeGameAssetManifest(workspacePath)),
+        })
       }
       try {
+        const contractState = await stat(join(sessionRef.workspacePath, 'assets', 'asset-manifest.json'))
+          .then(() => 'ready' as const)
+          .catch(() => 'missing' as const)
         const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
-        return c.json(toCanonicalBeeGameAssetManifest(manifest))
+        return c.json({ contract_state: contractState, ...toCanonicalBeeGameAssetManifest(manifest) })
       } catch (err) {
         return tracedRouteError(c, 'project.assets.list', err)
       }
@@ -1759,12 +1991,10 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
-    const form = await c.req.raw.formData()
-    const file = form.get('file')
-    if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
+      const file = await readProjectAssetUpload(c.req.raw)
       const ensured = await ensureBeeGameProjectSession({
         request: c.req.raw,
         user,
@@ -1778,18 +2008,34 @@ export function createAgentWorkflowApp(
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
-      await dashboardRepository.uploadAssetFile(
-        c.req.raw,
-        user,
-        sessionMetadata,
-        file,
-      )
       const result = await uploadBeeGameAsset(
         ensured.binding.workspacePath,
         c.req.param('requirementId'),
         file,
+        {
+          persist: async manifest => {
+            const storageUri = await dashboardRepository.uploadAssetFile(
+              c.req.raw,
+              user,
+              sessionMetadata,
+              file,
+            )
+            try {
+              await dashboardRepository.upsertAssetManifest(c.req.raw, user, sessionMetadata, manifest)
+            } catch (error) {
+              try {
+                await dashboardRepository.deleteAssetFile(c.req.raw, user, sessionMetadata, storageUri)
+              } catch (cleanupError) {
+                console.warn('[BeeGame] Failed to clean up an uncommitted asset upload:', {
+                  projectId: project.id,
+                  cause: toErrorMessage(cleanupError),
+                })
+              }
+              throw error
+            }
+          },
+        },
       )
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, sessionMetadata, result.manifest)
       return c.json({
         ...result,
         manifest: toCanonicalBeeGameAssetManifest(result.manifest),
@@ -1800,7 +2046,11 @@ export function createAgentWorkflowApp(
         c,
         'project.assets.upload',
         err,
-        message.startsWith('Asset requirement not found') ? 404 : 400,
+        err instanceof RequestBodyLimitError
+          ? 413
+          : message.startsWith('Asset requirement not found')
+            ? 404
+            : 400,
       )
     }
   })
@@ -1818,6 +2068,16 @@ export function createAgentWorkflowApp(
       // workspace-wide administrative grant must not prevent a creator from
       // removing their own project.
       if (!project) return c.json({ deleted: false })
+      const liveSession = findLiveProjectSession(
+        beeGameSessions,
+        user.id,
+        project.id,
+      )
+      if (liveSession) {
+        beeGamePreviews.stop(liveSession.id, liveSession.cwd)
+        previewCapabilities.revokeSession(liveSession.id)
+        await beeGameSessions.delete(liveSession.id, { deleteArtifacts: false })
+      }
       const deleted = await dashboardRepository.deleteProject(
         c.req.raw,
         user,
@@ -2021,25 +2281,6 @@ export function createAgentWorkflowApp(
     }
   }
 
-  app.post('/api/beegame-intake/options', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.create')
-    if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    if (body.thinkingMode !== undefined) {
-      return c.json({ error: 'Intake model behavior is server-owned' }, 400)
-    }
-    const error = requireFields(body, ['idea'])
-    if (error) return c.json({ error }, 400)
-    try {
-      const intake = await runBeeGameIntake(c.req.raw, user, body)
-      return c.json({ ...intake })
-    } catch (err) {
-      if (err instanceof HttpError) return c.json(err.body, err.status)
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
-  })
-
   app.post('/api/beegame-intake/analyze-attachments', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
@@ -2059,47 +2300,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/beegame-intake/attachment-jobs', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.create')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
-      if (body.thinkingMode !== undefined) {
-        return c.json({ error: 'Intake model behavior is server-owned' }, 400)
-      }
-      const attachments = validateBeeGameAttachments(body.attachments)
-      const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
-      const now = Date.now()
-      attachmentBuildJobs.set(jobId, { ownerId: user.id, status: 'running', createdAt: now, updatedAt: now })
-      setTimeout(() => attachmentBuildJobs.delete(jobId), 30 * 60 * 1000)
-      void runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
-      .then(result => {
-        const job = attachmentBuildJobs.get(jobId)
-        if (!job) return
-        attachmentBuildJobs.set(jobId, { ...job, status: 'completed', result, updatedAt: Date.now() })
-      })
-      .catch(err => {
-        const job = attachmentBuildJobs.get(jobId)
-        if (!job) return
-        attachmentBuildJobs.set(jobId, { ...job, status: 'failed', error: toErrorMessage(err), updatedAt: Date.now() })
-      })
-      return c.json({ jobId, status: 'running' }, 202)
-    } catch (err) {
-      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse(err)
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
-  })
-
-  app.get('/api/beegame-intake/attachment-jobs/:jobId', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const job = attachmentBuildJobs.get(c.req.param('jobId'))
-    if (!job || job.ownerId !== user.id) return c.json({ error: 'Attachment analysis job not found' }, 404)
-    if (job.status === 'completed') return c.json({ status: job.status, result: job.result })
-    if (job.status === 'failed') return c.json({ status: job.status, error: job.error || 'Attachment analysis failed' })
-    return c.json({ status: job.status })
-  })
-
   app.post('/api/beegame-intake/jobs', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
@@ -2116,11 +2316,17 @@ export function createAgentWorkflowApp(
     const now = Date.now()
     intakeJobs.set(jobId, {
       ownerId: user.id,
+      runtimeId: intakeRuntimeId,
       status: 'running',
       createdAt: now,
       updatedAt: now,
     })
-    setTimeout(() => intakeJobs.delete(jobId), 30 * 60 * 1000)
+    const jobDataRoot = getCurrentUserDataRoot(request)
+    await saveBeeGameIntakeJob(jobDataRoot, jobId, intakeJobs.get(jobId)!)
+    setTimeout(() => {
+      intakeJobs.delete(jobId)
+      void deleteBeeGameIntakeJob(jobDataRoot, jobId)
+    }, 30 * 60 * 1000)
 
     void (async () => {
       try {
@@ -2133,6 +2339,7 @@ export function createAgentWorkflowApp(
           result,
           updatedAt: Date.now(),
         })
+        await persistIntakeJobSafely(jobDataRoot, jobId, intakeJobs.get(jobId)!)
       } catch (err) {
         const job = intakeJobs.get(jobId)
         if (!job) return
@@ -2140,8 +2347,10 @@ export function createAgentWorkflowApp(
           ...job,
           status: 'failed',
           error: err instanceof HttpError ? getHttpErrorMessage(err.body) : toErrorMessage(err),
+          errorStatus: err instanceof HttpError ? err.status : 400,
           updatedAt: Date.now(),
         })
+        await persistIntakeJobSafely(jobDataRoot, jobId, intakeJobs.get(jobId)!)
       }
     })()
 
@@ -2150,13 +2359,27 @@ export function createAgentWorkflowApp(
 
   app.get('/api/beegame-intake/jobs/:jobId', async c => {
     const user = getCurrentUser(c.req.raw)
-    const job = intakeJobs.get(c.req.param('jobId'))
+    const jobId = c.req.param('jobId')
+    let job = intakeJobs.get(jobId) ?? await loadBeeGameIntakeJob(getCurrentUserDataRoot(c.req.raw), jobId) as BeeGameIntakeJob | undefined
     if (!job || job.ownerId !== user.id) return c.json({ error: 'Intake job not found' }, 404)
+    if (job.status === 'running' && job.runtimeId !== intakeRuntimeId) {
+      job = {
+        ...job,
+        status: 'failed',
+        error: 'Idea intake was interrupted by a service restart. Retry the intake request.',
+        updatedAt: Date.now(),
+      }
+      await persistIntakeJobSafely(getCurrentUserDataRoot(c.req.raw), jobId, job)
+    }
     if (job.status === 'completed') {
       return c.json({ status: job.status, result: job.result })
     }
     if (job.status === 'failed') {
-      return c.json({ status: job.status, error: job.error || 'Intake job failed' })
+      return c.json({
+        status: job.status,
+        error: job.error || 'Intake job failed',
+        errorStatus: job.errorStatus ?? 400,
+      })
     }
     return c.json({ status: job.status })
   })
@@ -2169,12 +2392,6 @@ export function createAgentWorkflowApp(
     beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
-      isResourceLibraryEnabled: async request =>
-        Boolean(options.resourceSelectionRuntimeConfig) &&
-        (await dashboardRepository.loadRuntimeSettings(
-          request,
-          getCurrentUser(request),
-        )).resourceLibraryEnabled !== false,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
       getAuthToken: getRequestAuthToken,
@@ -2218,20 +2435,6 @@ export function createAgentWorkflowApp(
           getCurrentUser(request),
           record,
         ),
-      persistAssetManifest: (request, metadata, manifest) =>
-        dashboardRepository.upsertAssetManifest(
-          request,
-          getCurrentUser(request),
-          metadata,
-          manifest,
-        ),
-      uploadAssetFile: (request, metadata, file) =>
-        dashboardRepository.uploadAssetFile(
-          request,
-          getCurrentUser(request),
-          metadata,
-          file,
-        ),
       modelConfigExists: (request, user, id) =>
         dashboardRepository.modelConfigExists(request, user, id),
       listModelConfigs: (request, user) =>
@@ -2256,12 +2459,6 @@ export function createAgentWorkflowApp(
     undefined,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
-      isResourceLibraryEnabled: async request =>
-        Boolean(options.resourceSelectionRuntimeConfig) &&
-        (await dashboardRepository.loadRuntimeSettings(
-          request,
-          getCurrentUser(request),
-        )).resourceLibraryEnabled !== false,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
       getAuthToken: getRequestAuthToken,
@@ -2293,20 +2490,6 @@ export function createAgentWorkflowApp(
       issuePreviewUrl: (url, sessionId, userId) =>
         previewCapabilities.issueUrl(url, sessionId, userId),
       revokePreviewCapability: sessionId => previewCapabilities.revokeSession(sessionId),
-      persistAssetManifest: (request, metadata, manifest) =>
-        dashboardRepository.upsertAssetManifest(
-          request,
-          getCurrentUser(request),
-          metadata,
-          manifest,
-        ),
-      uploadAssetFile: (request, metadata, file) =>
-        dashboardRepository.uploadAssetFile(
-          request,
-          getCurrentUser(request),
-          metadata,
-          file,
-        ),
       modelConfigExists: (request, user, id) =>
         dashboardRepository.modelConfigExists(request, user, id),
       listModelConfigs: (request, user) =>
@@ -2325,6 +2508,23 @@ export function createAgentWorkflowApp(
   )
 
   return app
+}
+
+async function readProjectAssetUpload(request: Request): Promise<File> {
+  const bytes = await readRequestBytes(request, MAX_BEEGAME_PROJECT_ASSET_REQUEST_BYTES)
+  const boundedRequest = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bytes,
+  })
+  const form = await boundedRequest.formData()
+  const file = form.get('file')
+  if (!(file instanceof File)) throw new Error('Missing form file')
+  if (file.size === 0) throw new Error('Asset file is empty')
+  if (file.size > MAX_BEEGAME_PROJECT_ASSET_BYTES) {
+    throw new RequestBodyLimitError(MAX_BEEGAME_PROJECT_ASSET_BYTES)
+  }
+  return file
 }
 
 async function discoverBeeGameProjectArtifacts(
@@ -2452,7 +2652,7 @@ function tracedRouteError(
   c: Context,
   route: string,
   error: unknown,
-  status: 400 | 404 | 500 | 501 = 400,
+  status: 400 | 404 | 413 | 500 | 501 = 400,
   publicError = 'Request failed',
 ): Response {
   if (error instanceof BeeGameAssetManifestError) {
@@ -2476,7 +2676,7 @@ function tracedRouteError(
 function tracedRouteResponse(
   route: string,
   error: unknown,
-  status: 400 | 404 | 500 | 501,
+  status: 400 | 404 | 413 | 500 | 501,
   publicError = 'Request failed',
   createResponse: (body: { error: string; traceId: string }) => Response = body =>
     Response.json(body, { status }),
@@ -3961,7 +4161,6 @@ function registerBeeGameSessionRoutes(
   beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
-    isResourceLibraryEnabled: (request: Request) => Promise<boolean>
     assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getAuthToken: (request: Request) => string | undefined
@@ -4003,16 +4202,6 @@ function registerBeeGameSessionRoutes(
       request: Request,
       record: BeeGameDeploymentRecord,
     ) => Promise<BeeGameDeploymentRecord | undefined>
-    persistAssetManifest: (
-      request: Request,
-      metadata: ReturnType<BeeGameSessionManager['metadata']>,
-      manifest: BeeGameAssetManifest,
-    ) => Promise<BeeGameAssetManifest | undefined>
-    uploadAssetFile: (
-      request: Request,
-      metadata: ReturnType<BeeGameSessionManager['metadata']>,
-      file: File,
-    ) => Promise<string | undefined>
     modelConfigExists: (
       request: Request,
       user: BeeGameUserContext,
@@ -4352,66 +4541,6 @@ function registerBeeGameSessionRoutes(
         400,
         ['Session not found', 'Workspace path must stay inside the current user workspace'],
       )
-    }
-  })
-
-  app.get(`${basePath}/:id/assets`, async c => {
-    const forbidden = check(c.req.raw, 'project.read')
-    if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
-    try {
-      const workspacePath = await getSessionWorkspacePath(
-        c.req.raw,
-        c.req.param('id'),
-        c.req.query('workspacePath'),
-      )
-      const manifest = await readBeeGameAssetManifest(workspacePath)
-      return c.json(toCanonicalBeeGameAssetManifest(manifest))
-    } catch (err) {
-      return tracedRouteError(c, 'beegame-session.assets.list', err)
-    }
-  })
-
-  app.post(`${basePath}/:id/assets/:requirementId/upload`, async c => {
-    const forbidden = check(c.req.raw, ROUTE_PERMISSION.assetIntegration)
-    if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const activeSession = beeGameSessions.get(c.req.param('id'))
-    if (!activeSession) return c.json({ error: 'Session not found' }, 404)
-    try {
-      assertProjectWorkspaceMutationIdle(activeSession)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 409)
-    }
-    const form = await c.req.raw.formData()
-    const file = form.get('file')
-    if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
-    try {
-      const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
-      const workspacePath = await getSessionWorkspacePath(
-        c.req.raw,
-        c.req.param('id'),
-        c.req.query('workspacePath'),
-      )
-      await options.uploadAssetFile(
-        c.req.raw,
-        sessionMetadata,
-        file,
-      )
-      const result = await uploadBeeGameAsset(
-        workspacePath,
-        c.req.param('requirementId'),
-        file,
-      )
-      await options.persistAssetManifest(c.req.raw, sessionMetadata, result.manifest)
-      return c.json({
-        ...result,
-        manifest: toCanonicalBeeGameAssetManifest(result.manifest),
-      })
-    } catch (err) {
-      return tracedRouteError(c, 'beegame-session.assets.upload', err)
     }
   })
 
@@ -5563,20 +5692,37 @@ function isBeeGameSessionLanguage(
 }
 
 function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string {
-  if (language === 'zh') return '继续任务'
-  if (language === 'zh-TW') return '繼續任務'
-  if (language === 'ja') return 'タスクを続けてください'
-  if (language === 'ko') return '작업을 계속해 주세요'
-  return 'Continue the task.'
+  return {
+    en: 'Continue the task.',
+    zh: '继续任务',
+    'zh-TW': '繼續任務',
+    ja: 'タスクを続けてください',
+    ko: '작업을 계속해 주세요',
+    fr: 'Continuez la tâche.',
+    de: 'Setze die Aufgabe fort.',
+    es: 'Continúa con la tarea.',
+    it: 'Continua il lavoro.',
+    pt: 'Continue a tarefa.',
+  }[language]
 }
 
 function getServerOwnedProjectActionLabel(
   kind: 'build_error_repair' | 'deployment_failure_repair',
   language: BeeGameSessionLanguage,
 ): string {
-  const isChinese = language === 'zh' || language === 'zh-TW'
-  if (kind === 'deployment_failure_repair') return isChinese ? '修复发布验收' : 'Repair deployment acceptance'
-  return isChinese ? '修复构建错误' : 'Repair build errors'
+  const labels = {
+    en: ['Repair build errors', 'Repair deployment acceptance'],
+    zh: ['修复构建错误', '修复发布验收'],
+    'zh-TW': ['修復建構錯誤', '修復發佈驗收'],
+    ja: ['ビルドエラーを修正', 'デプロイ検証を修正'],
+    ko: ['빌드 오류 수정', '배포 검증 수정'],
+    fr: ['Corriger les erreurs de build', 'Corriger la validation du déploiement'],
+    de: ['Build-Fehler beheben', 'Bereitstellungsprüfung beheben'],
+    es: ['Corregir errores de compilación', 'Corregir la validación del despliegue'],
+    it: ['Correggi gli errori di build', 'Correggi la convalida della distribuzione'],
+    pt: ['Corrigir erros de build', 'Corrigir a validação da implantação'],
+  } satisfies Record<BeeGameSessionLanguage, [string, string]>
+  return labels[language][kind === 'deployment_failure_repair' ? 1 : 0]
 }
 
 export function uploadPolicyResponse(error: BeeGameUploadPolicyError, traceId: string = randomUUID()): Response {

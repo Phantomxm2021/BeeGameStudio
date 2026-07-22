@@ -83,6 +83,13 @@
     "revisionRequired": "Überarbeitung erforderlich",
     "clarificationDescription": "Beantworte die Rückfrage oder wähle, wie mit dem Brief fortgefahren wird.",
     "aiProcessing": "KI verarbeitet...",
+    "attachmentBuild": {
+      "input": "Eingabe", "completeness": "Vollständigkeit", "confirmedGdd": "Bestätigtes GDD",
+      "confirmedFacts": "Bestätigte Fakten", "inferredDesign": "Abgeleitetes Design", "missingInformation": "Fehlende Informationen",
+      "conflicts": "Zu lösende Konflikte", "useGdd": "GDD-Wert verwenden", "useImage": "Bildwert verwenden", "useCustom": "Eigenen Wert verwenden",
+      "resourceLibrary": "Ressourcenbibliothek", "resourcePreferred": "Bibliothek bevorzugen", "resourceOptional": "Bei Bedarf verwenden", "resourceRequired": "Bibliothek voraussetzen",
+      "retry": "Analyse wiederholen", "preparing": "Build wird vorbereitet…", "confirm": "Bestätigen und bauen"
+    },
     "settingsGeneral": "Allgemein",
     "settingsModel": "Modell",
     "closeSettings": "Einstellungen schließen",

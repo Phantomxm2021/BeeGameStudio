@@ -1109,7 +1109,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByTestId('beegame-tool-status-icon')).not.toBeInTheDocument();
     });
 
-    it('keeps the legacy message rendering path outside BeeGame mode', () => {
+    it('uses the canonical BeeGame message rendering path without a mode switch', () => {
         renderChatPanel({
             actionReview: undefined,
             pendingReviews: [],
@@ -1117,15 +1117,14 @@ describe('ChatPanel approval bar', () => {
                 {
                     id: 'm_agent',
                     sender: 'beegame',
-                    content: 'Legacy chat message',
+                    content: 'Canonical chat message',
                     timestamp: 2,
                 },
             ],
         });
 
-        expect(screen.queryByTestId('beegame-collaboration-feed')).not.toBeInTheDocument();
-        expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
-        expect(screen.getByText('Legacy chat message')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-feed-group-m_agent')).toBeInTheDocument();
+        expect(screen.getByText('Canonical chat message')).toBeInTheDocument();
     });
 
     it('restores the normal composer after approval state idles and the pending review is removed', () => {
@@ -1153,7 +1152,7 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByPlaceholderText(/AI is processing/i)).toBeDisabled();
-        expect(screen.getByRole('button')).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
     });
 
     it('does not show stale approval actions after the project has failed', () => {

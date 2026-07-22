@@ -1258,6 +1258,19 @@ export class SupabaseDashboardStore {
     return `supabase://${this.assetBucket}/${objectPath}`
   }
 
+  async deleteAssetFile(ownerId: string, projectId: string, storageUri: string): Promise<void> {
+    const parsed = parseSupabaseStorageUri(storageUri)
+    if (!parsed || parsed.bucket !== this.assetBucket) return
+    const ownedPrefix = [
+      'projects',
+      safeStoragePathSegment(ownerId),
+      safeStoragePathSegment(projectId),
+      '',
+    ].join('/')
+    if (!parsed.path.startsWith(ownedPrefix)) return
+    await this.deleteStoragePrefixes(parsed.bucket, [parsed.path])
+  }
+
   async upsertPreviewSnapshot(
     ownerId: string,
     projectId: string,

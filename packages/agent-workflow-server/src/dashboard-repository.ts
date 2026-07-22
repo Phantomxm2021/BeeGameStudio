@@ -433,6 +433,17 @@ export class DashboardRepository {
     })
   }
 
+  async deleteAssetFile(
+    request: Request,
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+    storageUri: string | undefined,
+  ): Promise<void> {
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId || !storageUri) return
+    await supabase.deleteAssetFile(user.id, metadata.projectId, storageUri)
+  }
+
   async listMcpServers(
     request: Request,
     user: BeeGameUserContext,

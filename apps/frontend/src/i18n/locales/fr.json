@@ -83,6 +83,13 @@
     "revisionRequired": "Révision requise",
     "clarificationDescription": "Répondez à la clarification ou choisissez comment poursuivre le brief.",
     "aiProcessing": "IA en cours de traitement...",
+    "attachmentBuild": {
+      "input": "Entrée", "completeness": "Complétude", "confirmedGdd": "GDD confirmé",
+      "confirmedFacts": "Faits confirmés", "inferredDesign": "Conception déduite", "missingInformation": "Informations manquantes",
+      "conflicts": "Conflits à résoudre", "useGdd": "Utiliser le GDD", "useImage": "Utiliser l’image", "useCustom": "Utiliser une valeur personnalisée",
+      "resourceLibrary": "Utilisation de la bibliothèque", "resourcePreferred": "Privilégier la bibliothèque", "resourceOptional": "Utiliser si utile", "resourceRequired": "Bibliothèque obligatoire",
+      "retry": "Relancer l’analyse", "preparing": "Préparation du build…", "confirm": "Confirmer et construire"
+    },
     "settingsGeneral": "Général",
     "settingsModel": "Modèle",
     "closeSettings": "Fermer les paramètres",

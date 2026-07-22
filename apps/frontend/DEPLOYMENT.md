@@ -33,7 +33,6 @@ Frontend:
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 VITE_API_BASE_URL=https://runtime.your-domain.com
-VITE_WS_BASE_URL=wss://runtime.your-domain.com
 ```
 
 Runtime host:
@@ -80,7 +79,6 @@ Fill these required values:
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 VITE_API_BASE_URL=https://runtime.your-domain.com
-VITE_WS_BASE_URL=wss://runtime.your-domain.com
 
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key

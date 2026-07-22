@@ -292,7 +292,7 @@ async function createWorkspace(): Promise<string> {
     requirements: [{
       id: 'ground',
       status: 'planned',
-      resource_requirement: { accepted_formats: ['glb'], tags: ['ground'] },
+      resource_requirement: { accepted_formats: ['glb'], tags: ['terrain'] },
     }],
     imports: [],
     compositions: [],

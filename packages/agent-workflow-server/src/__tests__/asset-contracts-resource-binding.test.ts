@@ -119,6 +119,30 @@ describe('BeeGame canonical resource contract', () => {
     }
   })
 
+  test('rolls back the project file and manifest when external persistence fails', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-user-import-rollback-'))
+    const manifestPath = join(workspace, 'assets/asset-manifest.json')
+    const original = JSON.stringify({
+      version: 5,
+      project_target: { asset_format_capabilities: ['png'], runtime_asset_root: 'public/assets' },
+      requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'] } }],
+      imports: [], compositions: [],
+    })
+    try {
+      await Bun.write(manifestPath, original)
+      await expect(uploadBeeGameAsset(
+        workspace,
+        'title-art',
+        new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'title.png'),
+        { persist: async () => { throw new Error('persistence unavailable') } },
+      )).rejects.toThrow('persistence unavailable')
+      expect(await readFile(manifestPath, 'utf8')).toBe(original)
+      await expect(Bun.file(join(workspace, 'public/assets/uploads/title-art/title.png')).exists()).resolves.toBe(false)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('marks a canonical import failed when its recorded project file no longer exists', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-missing-import-'))
     try {

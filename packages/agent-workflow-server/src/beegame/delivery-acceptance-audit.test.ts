@@ -245,6 +245,9 @@ describe('native delivery acceptance gate', () => {
       confirmedBriefContext: JSON.stringify({
         kind: 'confirmed_build_brief',
         resource_library_usage: 'preferred',
+        document_language: 'zh-CN',
+        game_user_visible_language: 'zh-CN',
+        agent_response_language: 'zh-CN',
       }),
       createdAt: new Date(),
     })

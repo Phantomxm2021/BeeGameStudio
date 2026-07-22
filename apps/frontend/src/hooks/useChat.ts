@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWebSocket } from './useWebSocket';
 import { useChatStore } from '../store/chatStore';
 import { useProjectStore } from '../store/projectStore';
-import { useSystemStore, type ProjectTask } from '../store/systemStore';
+import { useSystemStore } from '../store/systemStore';
 import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ChatAttachmentPayload, type ReviewBindingPayload } from '../services/api';
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api';
 import type { WebSocketMessage } from '../types/message';
@@ -22,7 +22,6 @@ import type { WebSocketState } from './useWebSocket';
 import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
-import { isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
 import {
   getCreditQuote,
   type BeeGameCreditQuote,
@@ -30,8 +29,6 @@ import {
 } from '../services/creditsApi';
 
 const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'resuming']);
 
 function getErrorDisplayMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
@@ -43,12 +40,6 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
     return message || fallback;
   }
   return fallback;
-}
-
-function findActiveTask(tasks: ProjectTask[]): ProjectTask | undefined {
-  return tasks.find(task => [task.lifecycle_status, task.task_status, task.status].some(status => (
-    typeof status === 'string' && ACTIVE_TASK_STATUSES.has(status)
-  )));
 }
 
 function isProjectStatusRunning(status: unknown): boolean {
@@ -74,7 +65,7 @@ export interface UseChatOptions {
   onTaskComplete?: () => void;
 
   /** Callback when ANY task event occurs (usage, status, tool, etc.) (optional) */
-  onTaskEvent?: (type: string, data?: any) => void;
+  onTaskEvent?: (type: string, data?: unknown) => void;
 
   /** Toast notification callbacks (optional) */
 
@@ -222,7 +213,7 @@ export const useChat = ({
   const projectStatus = useProjectStore((state) => state.projectStatus);
   const removePendingReview = useProjectStore((state) => state.removePendingReview);
   const upsertPendingReview = useProjectStore((state) => state.upsertPendingReview);
-  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadPhases, loadAgents, loadTokenUsage, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
+  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadPhases, loadTokenUsage, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
   const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews);
 
   useEffect(() => {
@@ -327,7 +318,6 @@ export const useChat = ({
    */
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     const refs = latestRefs.current;
-    console.log('[useChat] Received message:', message.type, 'sender:', message.sender, 'content length:', message.content?.length);
 
     switch (message.type) {
       case 'token':
@@ -429,7 +419,6 @@ export const useChat = ({
           }
           // Trigger event for UI refresh
           refs.onTaskEvent?.(message.status === 'idle' ? 'status_idle' : 'status_finished', message);
-          console.log(`[useChat] Task ${message.status}`);
 
           // Final refresh to clear "working" status of agents
           refreshAgents().catch(err => console.error('[useChat] Status refresh failed:', err));
@@ -439,7 +428,6 @@ export const useChat = ({
             setCurrentSender(message.sender);
           }
           refs.onTaskEvent?.('status_running', message);
-          console.log(`[useChat] Task ${message.status} started`);
         } else if (message.status === 'paused' || message.status === 'failed') {
           setIsLoading(false);
           if (message.content) {
@@ -479,20 +467,6 @@ export const useChat = ({
           message: message.content || '审批已通过，系统正在继续执行。',
         }));
         refs.onTaskEvent?.('plan_approved', message);
-        console.log('[useChat] Plan approved for project:', message.project_id);
-        break;
-
-      case 'phase_update':
-      case 'pipeline_update':
-        // Telemetry phase update
-        if (!message.project_id || message.project_id === refs.projectId) {
-          // Use refs to avoid re-creating this callback when projectId changes
-          refs.loadPhases(refs.projectId).catch(err => console.error('[useChat] Phase refresh failed:', err));
-          refs.loadTasks(refs.projectId).catch(err => console.error('[useChat] Task refresh failed:', err));
-          refs.refreshProjectVisibility().catch(err => console.error('[useChat] Status visibility refresh failed:', err));
-          refs.onTaskEvent?.('phase_update', message);
-          console.log('[useChat] Pipeline phase updated:', message.current_phase || message.stage);
-        }
         break;
 
       case 'human_gate':
@@ -527,7 +501,6 @@ export const useChat = ({
           refs.loadActivities().catch(err => console.error('[useChat] Artifact refresh failed:', err));
           refs.refreshProjectVisibility().catch(err => console.error('[useChat] Artifact visibility refresh failed:', err));
           refs.onTaskEvent?.('artifact_created', message);
-          console.log('[useChat] New artifact detected via WebSocket');
         }
         break;
 
@@ -548,7 +521,6 @@ export const useChat = ({
         });
         refs.refreshProjectVisibility().catch(err => console.error('[useChat] Context visibility refresh failed:', err));
         refs.onTaskEvent?.('context_update', message);
-        console.debug('[useChat] Context update:', context);
         break;
       }
 
@@ -610,7 +582,6 @@ export const useChat = ({
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_start', message);
-          console.log('[useChat] Tool started:', message.tool);
         }
         break;
 
@@ -644,7 +615,6 @@ export const useChat = ({
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_end', message);
-          console.log('[useChat] Tool completed:', message.tool);
         }
         break;
 
@@ -653,11 +623,7 @@ export const useChat = ({
         // Requirements: 4.3
         if (message.usage) {
           updateTokenUsage(message.usage, refs.projectId, message.task_id);
-          if (!isBeeGameAdapterEnabled()) {
-            refs.loadTokenUsage(refs.projectId).catch(err => console.error('[useChat] Token usage refresh failed:', err));
-          }
           refs.onTaskEvent?.('usage', message.usage);
-          console.log('[useChat] Token usage updated:', message.usage);
         }
 
         break;
@@ -682,7 +648,6 @@ export const useChat = ({
         // Peer-to-peer routing event
         if (message.data) {
           updateLastP2PRoute(message.data);
-          console.log('[useChat] P2P route detected:', message.data);
         }
         break;
 
@@ -703,16 +668,12 @@ export const useChat = ({
           errorDetails: message.error || message.message || message.code
         });
 
-        console.log('[useChat] Task paused due to error:', message.error);
         break;
 
       case 'project_renamed':
         // Project renamed (AI auto-naming)
         if (message.project_id && message.name) {
-          import('../store/projectStore').then(({ useProjectStore }) => {
-            useProjectStore.getState().renameProjectLocally(message.project_id!, message.name!);
-          });
-          console.log('[useChat] Project renamed:', message.project_id, '->', message.name);
+          useProjectStore.getState().renameProjectLocally(message.project_id, message.name);
         }
         break;
 
@@ -729,17 +690,9 @@ export const useChat = ({
   const syncAfterReconnect = useCallback(async () => {
     if (!projectId) return;
 
-    console.log('[useChat] Synchronizing state after reconnection...');
     setIsSyncing(true);
 
     try {
-      const isBeeGame = isBeeGameAdapterEnabled();
-      if (!isBeeGame) {
-        await loadPhases(projectId);
-        await loadTokenUsage(projectId);
-        await loadAgents();
-      }
-
       // BeeGame has one server-owned runtime-state snapshot. Do not fan a
       // reconnect out into legacy phase, token, agent and task probes.
       await refreshProjectVisibility();
@@ -748,17 +701,6 @@ export const useChat = ({
         setCurrentTaskId(currentTaskId || projectId);
         setIsLoading(true);
         setCanContinue(false);
-      }
-
-      if (!isBeeGame) {
-        await loadTasks(projectId);
-        const activeTask = findActiveTask(useSystemStore.getState().tasks);
-        if (activeTask) {
-          setCurrentTaskId(activeTask.id);
-          setIsLoading(true);
-          setCanContinue(false);
-        }
-        await loadActivities();
       }
 
       // Sync chat history only after the authoritative runtime state.
@@ -772,13 +714,12 @@ export const useChat = ({
         }
       }
 
-      console.log('[useChat] Synchronization complete');
     } catch (error) {
       console.error('[useChat] Failed to synchronize state:', error);
     } finally {
       setIsSyncing(false);
     }
-  }, [projectId, currentTaskId, loadTasks, loadActivities, loadHistory, loadPhases, loadAgents, loadTokenUsage, setIsSyncing, waitingApproval, emitWaitingApprovalBlock]);
+  }, [projectId, currentTaskId, loadHistory, setIsSyncing, refreshProjectVisibility]);
 
 
 
@@ -796,7 +737,6 @@ export const useChat = ({
    * Handle WebSocket close
    */
   const handleWebSocketClose = useCallback(() => {
-    console.log('[useChat] WebSocket closed');
     // A transport disconnect does not mean the server-owned Claude Code turn
     // stopped. Keep the runtime lock until the authoritative runtime snapshot
     // or a terminal status event says otherwise.
@@ -835,7 +775,6 @@ export const useChat = ({
   const confirmTaskCredits = useCallback(async (
     taskType: BeeGameCreditTaskType,
   ): Promise<boolean> => {
-    if (!isBeeGameAdapterEnabled()) return true;
     const quote = await getCreditQuote(taskType);
     if (!quote.canStart) {
       showToastError?.(`Credit 不足。本次请求需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
@@ -884,7 +823,6 @@ export const useChat = ({
         type: 'text',
       });
 
-      console.log('[useChat] Sending message:', content);
 
       // Send message to backend via REST API
       const response = await api.sendMessage({
@@ -897,7 +835,6 @@ export const useChat = ({
       }) as SendMessageResponse;
 
       setCurrentTaskId(response.task_id);
-      console.log('[useChat] Message sent, task ID:', response.task_id);
       void syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to send message:', error);
@@ -935,7 +872,6 @@ export const useChat = ({
         reconnect();
       }
 
-      console.log('[useChat] Continuing task');
 
       // Send continue request to backend
       const response = await api.continueTask({
@@ -944,7 +880,6 @@ export const useChat = ({
       }) as ContinueTaskResponse;
 
       setCurrentTaskId(response.resume_task_id);
-      console.log('[useChat] Task continued, task ID:', response.resume_task_id);
       void syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to continue task:', error);
@@ -971,7 +906,7 @@ export const useChat = ({
    */
   const stopTask = useCallback(async () => {
     if (isStoppingRef.current) return;
-    const stopTargetId = currentTaskId || (isBeeGameAdapterEnabled() ? projectId : '');
+    const stopTargetId = currentTaskId || projectId;
     if (!stopTargetId) {
       console.warn('[useChat] No task to stop');
       return;
@@ -980,7 +915,6 @@ export const useChat = ({
     try {
       isStoppingRef.current = true;
       setIsStopping(true);
-      console.log('[useChat] Stopping task:', stopTargetId);
 
       // Send stop request to backend
       await api.stopTask({ task_id: stopTargetId, project_id: projectId });
@@ -1000,7 +934,6 @@ export const useChat = ({
         taskKind: 'task_stopped',
       });
 
-      console.log('[useChat] Task stopped');
     } catch (error) {
       console.error('[useChat] Failed to stop task:', error);
 
@@ -1032,7 +965,6 @@ export const useChat = ({
   ) => {
     const reviewSnapshot = pendingReviews.find((item) => String(item?.gate_id || '').trim() === String(review.gate_id || '').trim());
     try {
-      console.log('[useChat] Approving plan for project:', projectId);
       const binding = review.binding ?? review;
       const submittedMessage =
         action === 'approve'
@@ -1072,7 +1004,6 @@ export const useChat = ({
         message: '',
       });
       onTaskEvent?.('plan_submitted', { gate_id: review.gate_id, action });
-      console.log('[useChat] Approval request sent');
     } catch (error) {
       console.error('[useChat] Failed to approve plan:', error);
       if (reviewSnapshot) {
@@ -1090,21 +1021,19 @@ export const useChat = ({
 
       onError?.(error as Error);
     }
-  }, [projectId, addMessage, onError, onTaskEvent, pendingReviews, refreshProjectVisibility, removePendingReview, upsertPendingReview]);
+  }, [onError, onTaskEvent, pendingReviews, projectId, refreshProjectVisibility, removePendingReview, showToastError, showToastSuccess, upsertPendingReview]);
 
   /**
    * Upload and optionally auto-approve a manifest CSV
    */
   const uploadManifestCsv = useCallback(async (gateId: string, csvContent: string, autoApprove: boolean = false) => {
     try {
-      console.log('[useChat] Uploading manifest CSV for gate:', gateId);
       await api.uploadManifestCsv({
         project_id: projectId,
         gate_id: gateId,
         csv_content: csvContent,
         auto_approve: autoApprove
       });
-      console.log('[useChat] Manifest CSV uploaded');
       showToastSuccess?.(autoApprove
         ? '资源清单已上传并提交确认，系统正在校验资源并继续执行。'
         : '资源清单已上传，请确认后继续。');
@@ -1114,14 +1043,13 @@ export const useChat = ({
       showToastError?.('上传资源清单失败，请重试');
       onError?.(error as Error);
     }
-  }, [projectId, addMessage, onError]);
+  }, [onError, onTaskEvent, projectId, showToastError, showToastSuccess]);
 
   /**
    * Approve a manifest gate
    */
   const approveManifest = useCallback(async (review: ReviewBindingPayload & { gate_id: string; binding?: ReviewBindingPayload }, feedback?: string) => {
     try {
-      console.log('[useChat] Approving manifest for gate:', review.gate_id);
       const binding = review.binding ?? review;
       const normalized = normalizeReviewBindingPayload({
         project_id: projectId,
@@ -1135,7 +1063,6 @@ export const useChat = ({
         feedback
       });
       const result = await api.approveManifest(normalized) as unknown as { validation_status?: string };
-      console.log('[useChat] Manifest approved');
       const validationStatus = String(result?.validation_status || 'VALIDATING');
       const content = validationStatus === 'VALIDATING'
         ? '资源清单已确认，系统正在校验资源并继续执行。'
@@ -1148,20 +1075,18 @@ export const useChat = ({
       showToastError?.('审批资源清单失败，请重试');
       onError?.(error as Error);
     }
-  }, [projectId, addMessage, onError, refreshProjectVisibility]);
+  }, [onError, onTaskEvent, projectId, refreshProjectVisibility, showToastError, showToastSuccess]);
 
   /**
    * Revise a manifest gate
    */
   const reviseManifest = useCallback(async (gateId: string, feedback: string) => {
     try {
-      console.log('[useChat] Requesting revision for manifest gate:', gateId);
       await api.reviseManifest({
         project_id: projectId,
         gate_id: gateId,
         feedback
       });
-      console.log('[useChat] Manifest revision requested');
       showToastSuccess?.('已提交资源清单修订请求，系统会重新生成并等待你再次确认。');
       await refreshProjectVisibility();
       onTaskEvent?.('manifest_revise_requested');
@@ -1170,7 +1095,7 @@ export const useChat = ({
       showToastError?.('驳回资源清单失败，请重试');
       onError?.(error as Error);
     }
-  }, [projectId, addMessage, onError, onTaskEvent, refreshProjectVisibility]);
+  }, [onError, onTaskEvent, projectId, refreshProjectVisibility, showToastError, showToastSuccess]);
 
   return {
     sendMessage,

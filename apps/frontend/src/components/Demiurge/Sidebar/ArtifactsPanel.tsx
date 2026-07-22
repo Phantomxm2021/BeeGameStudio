@@ -6,10 +6,18 @@ import { Skeleton } from '../../ui/skeleton';
 import type { DocumentProgressItem } from '../../../utils/documentProgress';
 import { normalizeDocumentPath } from '../../../utils/documentProgress';
 
+interface ArtifactListItem {
+    artifact_id?: string;
+    id?: string;
+    name?: string;
+    path?: string;
+    artifact_type?: string;
+    package_download?: boolean;
+}
+
 interface ArtifactsPanelProps {
-    artifacts: any[];
+    artifacts: ArtifactListItem[];
     isLoading: boolean;
-    reviewStatuses: Record<string, any>;
     onPreview: (id: string, name: string) => void;
     onDownload: (id: string, name: string) => void;
     canExportProject?: boolean;
@@ -144,10 +152,10 @@ export const ArtifactsPanel = memo(({
                         {additionalArtifacts.map((art) => {
                             const type = art.artifact_type || 'Document';
                             const artifactId = String(art.artifact_id || art.id || '').trim();
-                            const reviewKey = artifactId || art.id;
                             const isProjectPackage = Boolean(art.package_download);
                             const Icon = isProjectPackage ? FileArchive : FileText;
                             const artifactName = art.name || `${type} Doc`;
+                            const reviewKey = artifactId || art.path || artifactName;
 
                             return (
                                 <tr

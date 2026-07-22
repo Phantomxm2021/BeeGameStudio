@@ -101,7 +101,6 @@ vi.mock('../services/api', () => ({
 }));
 
 vi.mock('../services/beeGameAdapter', () => ({
-  isBeeGameAdapterEnabled: () => true,
 }));
 
 vi.mock('../services/creditsApi', () => ({
@@ -574,6 +573,7 @@ describe('useChat clarification gate handling', () => {
   });
 
   it('surfaces backend send failures in chat and toast', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const showToastError = vi.fn();
     const onError = vi.fn();
     vi.mocked(api.sendMessage).mockRejectedValue(new Error('Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。'));
@@ -592,9 +592,12 @@ describe('useChat clarification gate handling', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
     }));
+    expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to send message:', expect.any(Error));
+    errorLog.mockRestore();
   });
 
   it('resynchronizes after reconnect without replaying a failed mutating request', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.mocked(api.sendMessage).mockRejectedValueOnce(new TypeError('Failed to fetch'));
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
@@ -614,6 +617,8 @@ describe('useChat clarification gate handling', () => {
 
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+    expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to send message:', expect.any(TypeError));
+    errorLog.mockRestore();
   });
 
   it('surfaces runtime error events as toast notifications', () => {
@@ -712,6 +717,7 @@ describe('useChat clarification gate handling', () => {
   });
 
   it('restores the pending review when approve submission fails', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const review = {
       gate_id: 'gate_approval',
       artifact_id: 'art_1',
@@ -728,5 +734,7 @@ describe('useChat clarification gate handling', () => {
     expect(projectStoreState.removePendingReview).not.toHaveBeenCalled();
     expect(projectStoreState.upsertPendingReview).toHaveBeenCalledWith(review);
     expect(result.current.approvalState.phase).toBe('failed');
+    expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to approve plan:', expect.any(Error));
+    errorLog.mockRestore();
   });
 });

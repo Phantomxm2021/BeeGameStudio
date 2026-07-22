@@ -100,6 +100,7 @@ describe('MarkdownErrorBoundary', () => {
   });
 
   it('should have a retry button that can be clicked', () => {
+    const infoLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     render(
       <MarkdownErrorBoundary messageId="test-6" rawContent="# Test">
         <ThrowError shouldThrow={true} />
@@ -115,6 +116,8 @@ describe('MarkdownErrorBoundary', () => {
     
     // Verify button is clickable (doesn't throw)
     expect(() => fireEvent.click(retryButton)).not.toThrow();
+    expect(infoLog).toHaveBeenCalled();
+    infoLog.mockRestore();
   });
 
   it('should use custom fallback when provided', () => {

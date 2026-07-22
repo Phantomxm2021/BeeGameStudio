@@ -83,6 +83,13 @@
     "revisionRequired": "Revisione richiesta",
     "clarificationDescription": "Rispondi al chiarimento o scegli come procedere con il brief corrente.",
     "aiProcessing": "AI in elaborazione...",
+    "attachmentBuild": {
+      "input": "Input", "completeness": "Completezza", "confirmedGdd": "GDD confermato",
+      "confirmedFacts": "Fatti confermati", "inferredDesign": "Design dedotto", "missingInformation": "Informazioni mancanti",
+      "conflicts": "Conflitti da risolvere", "useGdd": "Usa valore GDD", "useImage": "Usa valore immagine", "useCustom": "Usa valore personalizzato",
+      "resourceLibrary": "Uso della libreria", "resourcePreferred": "Preferisci la libreria", "resourceOptional": "Usa quando utile", "resourceRequired": "Richiedi la libreria",
+      "retry": "Ripeti analisi", "preparing": "Preparazione build…", "confirm": "Conferma e crea"
+    },
     "settingsGeneral": "Generale",
     "settingsModel": "Modello",
     "closeSettings": "Chiudi impostazioni",

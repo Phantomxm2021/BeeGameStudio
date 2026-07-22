@@ -246,7 +246,7 @@ export const useSystemStore = create<SystemState>()(
       loadAgents: async () => {
         try {
           set({ isLoading: true });
-          const agents = (await api.getAgents({ headers: { 'Hide-Error-Toast': 'true' } })) as unknown as Agent[];
+          const agents = (await api.getAgents()) as unknown as Agent[];
           set({ agents, isLoading: false });
         } catch (error) {
           console.error('Failed to load agents:', error);
@@ -270,7 +270,7 @@ export const useSystemStore = create<SystemState>()(
       loadPhases: async (projectId: string) => {
         if (!projectId) return;
         try {
-          const phases = (await api.getWorkflowPhases(projectId, { headers: { 'Hide-Error-Toast': 'true' } })) as unknown as PhaseInfo;
+          const phases = (await api.getWorkflowPhases(projectId)) as unknown as PhaseInfo;
           set({ phaseInfo: phases });
         } catch (error) {
           console.error('Failed to load telemetry phases:', error);
@@ -280,7 +280,7 @@ export const useSystemStore = create<SystemState>()(
       loadTasks: async (projectId: string) => {
         if (!projectId) return;
         try {
-          const tasks = (await api.getTasks(projectId, { headers: { 'Hide-Error-Toast': 'true' } })) as unknown as ProjectTask[];
+          const tasks = (await api.getTasks()) as unknown as ProjectTask[];
           set({ tasks });
         } catch (error) {
           console.error('Failed to load project tasks:', error);
@@ -290,7 +290,7 @@ export const useSystemStore = create<SystemState>()(
       loadTokenUsage: async (projectId: string) => {
         if (!projectId) return;
         try {
-          const usage = (await api.getProjectTokenUsage(projectId, { headers: { 'Hide-Error-Toast': 'true' } })) as unknown as TokenUsage;
+          const usage = (await api.getProjectTokenUsage(projectId)) as unknown as TokenUsage;
           get().updateTokenUsage(usage, projectId);
         } catch (error) {
           if (!isAuthenticationServiceUnavailable(error)) {

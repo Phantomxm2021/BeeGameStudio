@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     buildUnauthorizedMessage,
-    normalizeArtifactReviewResponse,
     normalizeApprovePlanPayload,
     normalizeInboundReviewBindingPayload,
     normalizePendingUserReviewsResponse,
@@ -119,28 +118,6 @@ describe('normalizeInboundReviewBindingPayload', () => {
 
         expect(payload.workspace_ref).toBe('/tmp/workspace/specs/GDD.md');
         expect(payload.workspace_path).toBe('/tmp/workspace/specs/GDD.md');
-    });
-});
-
-describe('normalizeArtifactReviewResponse', () => {
-    it('preserves artifact_id and verdicts from the backend review payload', () => {
-        const payload = normalizeArtifactReviewResponse({
-            artifact_id: ' art_1 ',
-            verdicts: [
-                {
-                    reviewer_id: ' logos ',
-                    verdict: ' approved ',
-                },
-            ],
-        });
-
-        expect(payload.artifact_id).toBe('art_1');
-        expect(payload.verdicts).toEqual([
-            {
-                reviewer_id: 'logos',
-                verdict: 'approved',
-            },
-        ]);
     });
 });
 

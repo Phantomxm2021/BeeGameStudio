@@ -6,7 +6,7 @@ import apiClient, {
   resolveAuthToken,
   setToastErrorCallback,
 } from './apiClient';
-import { beeGameAdapter, isBeeGameAdapterEnabled } from './beeGameAdapter';
+import { beeGameAdapter } from './beeGameAdapter';
 import {
   getCurrentUser as getBeeGameCurrentUser,
   type BeeGameCurrentUser,
@@ -55,20 +55,7 @@ export interface ReviewBindingRef {
   truth_source?: string;
 }
 
-export interface ReviewBindingPayload extends ReviewBindingRef {}
-
-export interface ArtifactReviewVerdictPayload {
-  reviewer_id?: string;
-  verdict?: string;
-}
-
-export interface ArtifactReviewResponse {
-  artifact_id: string;
-  verdicts: ArtifactReviewVerdictPayload[];
-  votes?: ArtifactReviewVerdictPayload[];
-  assigned_reviewers?: string[];
-  outcome?: string;
-}
+export type ReviewBindingPayload = ReviewBindingRef;
 
 export type ReviewDecisionStatus = 'running' | 'approved' | 'revision_required' | 'escalated' | 'awaiting_user';
 export type ReviewScopeCode = 'full_review' | 'restricted_review';
@@ -309,6 +296,7 @@ export interface BeeGameAssetImportPayload {
 }
 
 export interface BeeGameAssetManifestPayload {
+  contract_state?: 'missing' | 'ready';
   version: number;
   project_target?: {
     platform?: string;
@@ -682,24 +670,6 @@ const normalizeReviewBindingMetadata = <T extends ReviewBindingPayload>(payload:
   };
 };
 
-export const normalizeArtifactReviewResponse = (
-  payload?: ArtifactReviewResponse | null,
-): ArtifactReviewResponse => {
-  const verdicts = Array.isArray(payload?.verdicts)
-    ? payload!.verdicts.map((item) => ({
-        reviewer_id: String(item?.reviewer_id ?? '').trim(),
-        verdict: String(item?.verdict ?? '').trim(),
-      }))
-    : [];
-  return {
-    artifact_id: String(payload?.artifact_id ?? '').trim(),
-    verdicts,
-    votes: verdicts,
-    assigned_reviewers: verdicts.map((item) => item.reviewer_id).filter(Boolean),
-    outcome: String(payload?.outcome ?? '').trim(),
-  };
-};
-
 export const normalizeReviewBindingPayload = <T extends ReviewBindingPayload>(payload: T): T => {
   return normalizeReviewBindingMetadata(payload);
 };
@@ -860,58 +830,37 @@ export const api = {
     client_message_id?: string;
     supersedes_message_id?: string;
     attachments?: ChatAttachmentPayload[];
-  }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.sendMessage(data)
-      : apiClient.post('/api/chat/message', data) as Promise<SendMessageResponse>,
+  }) => beeGameAdapter.sendMessage(data),
 
   /**
    * 继续执行暂停的任务
    * @param data - 包含项目 ID 和可选的任务 ID
    * @returns 返回任务 ID 和状态
    */
-  continueTask: (data: { project_id: string; task_id?: string }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.continueTask(data)
-      : apiClient.post('/api/chat/continue', data) as Promise<ContinueTaskResponse>,
+  continueTask: (data: { project_id: string; task_id?: string }) => beeGameAdapter.continueTask(data),
 
   requestProjectAction: (data: {
     project_id: string;
     kind: 'build_error_repair' | 'deployment_failure_repair';
-  }) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.requestProjectAction(data);
-    throw new Error('Structured project actions are only available for BeeGame projects');
-  },
+  }) => beeGameAdapter.requestProjectAction(data),
 
   /**
    * 停止当前执行的任务
    * @param data - 包含任务 ID
    * @returns 返回操作状态
    */
-  stopTask: (data: { task_id: string; project_id?: string }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.stopTask(data)
-      : apiClient.post('/api/chat/stop', data) as Promise<StopTaskResponse>,
+  stopTask: (data: { task_id: string; project_id?: string }) => beeGameAdapter.stopTask(data),
 
   /**
    * 获取项目的聊天历史记录
    * @param projectId - 项目 ID
    * @returns 返回消息列表
    */
-  getChatHistory: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getChatHistory(projectId)
-      : apiClient.get(`/api/chat/history?project_id=${encodeURIComponent(projectId)}`),
+  getChatHistory: (projectId: string) => beeGameAdapter.getChatHistory(projectId),
 
-  getOlderChatHistory: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getOlderChatHistory(projectId)
-      : Promise.resolve({ messages: [], hasMore: false }),
+  getOlderChatHistory: (projectId: string) => beeGameAdapter.getOlderChatHistory(projectId),
 
-  getChatHistoryPaginationState: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getChatHistoryPaginationState(projectId)
-      : { initialized: true, hasMore: false },
+  getChatHistoryPaginationState: (projectId: string) => beeGameAdapter.getChatHistoryPaginationState(projectId),
 
   // ==================== 项目管理 API ====================
 
@@ -919,36 +868,17 @@ export const api = {
    * 获取所有项目列表
    * @returns 返回项目列表
    */
-  getProjects: () =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getProjects()
-      : apiClient.get('/api/projects'),
+  getProjects: () => beeGameAdapter.getProjects(),
 
   bootstrapProjectFromBrief: (data: Parameters<typeof beeGameAdapter.bootstrapProjectFromBrief>[0]) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.bootstrapProjectFromBrief(data)
-      : apiClient.post('/api/projects/bootstrap-from-brief', data, {
-        headers: {
-          'Hide-Error-Toast': 'true',
-        },
-      }),
-
-  /**
-   * Run BeeGame idea intake without creating a project.
-   * Used by the landing page clarification flow.
-   */
-  analyzeIdeaIntake: (data: { idea: string; clarification?: Record<string, string>; language?: string }) =>
-    apiClient.post('/api/idea-intake/analyze', data) as Promise<IdeaIntakeAnalysisPayload>,
+    beeGameAdapter.bootstrapProjectFromBrief(data),
 
   /**
    * 打开项目并通知后端初始化环境
    * @param projectId - 项目 ID
    * @returns 返回操作结果
    */
-  openProject: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.openProject(projectId)
-      : apiClient.post(`/api/projects/${encodeURIComponent(projectId)}/open`),
+  openProject: (projectId: string) => beeGameAdapter.openProject(projectId),
 
   /**
    * 更新项目信息
@@ -956,36 +886,18 @@ export const api = {
    * @param data - 包含要更新的字段（名称和/或根路径）
    * @returns 返回更新后的项目对象
    */
-  updateProject: (projectId: string, data: { name?: string }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.updateProject(projectId, data)
-      : apiClient.patch(`/api/projects/${encodeURIComponent(projectId)}`, data),
+  updateProject: (projectId: string, data: { name?: string }) => beeGameAdapter.updateProject(projectId, data),
 
   /**
    * 获取项目当前状态与项目级 baseline 元数据
    * @param projectId - 项目 ID
    */
   getProjectStatus: async (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? normalizeProjectBaselineStatusPayload(await beeGameAdapter.getProjectStatus(projectId))
-      : normalizeProjectBaselineStatusPayload(
-        (await apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/status`)) as ProjectBaselineStatusPayload | OperatorVisibilityPayload
-      ),
+    normalizeProjectBaselineStatusPayload(await beeGameAdapter.getProjectStatus(projectId)),
 
   /** Read the project runtime snapshot once and derive all dashboard views. */
-  getProjectRuntimeState: async (projectId: string): Promise<ProjectRuntimeStatePayload> => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.getProjectRuntimeState(projectId);
-    }
-    const [status, reviews] = await Promise.all([
-      apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/status`) as Promise<ProjectBaselineStatusPayload | OperatorVisibilityPayload>,
-      apiClient.get(`/api/pending-user-reviews?project_id=${encodeURIComponent(projectId)}`) as Promise<PendingUserReviewsResponse>,
-    ]);
-    return {
-      status: normalizeProjectBaselineStatusPayload(status),
-      pendingReviews: normalizePendingUserReviewsResponse(reviews).items,
-    };
-  },
+  getProjectRuntimeState: (projectId: string): Promise<ProjectRuntimeStatePayload> =>
+    beeGameAdapter.getProjectRuntimeState(projectId),
 
   getProjectReviewStatus: async (projectId: string) =>
     normalizeReviewStatusPayload(
@@ -998,10 +910,7 @@ export const api = {
    * @param projectId - 项目 ID
    * @returns 返回操作状态
    */
-  deleteProject: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.deleteProject(projectId)
-      : apiClient.delete(`/api/projects/${encodeURIComponent(projectId)}`),
+  deleteProject: (projectId: string) => beeGameAdapter.deleteProject(projectId),
 
   // ==================== 系统状态 API ====================
 
@@ -1011,71 +920,43 @@ export const api = {
    * 获取系统状态信息
    * @returns 返回系统状态对象（运行时间、Unity 连接状态、活跃 Agent 数量、项目进度）
    */
-  getStatus: () =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getStatus()
-      : apiClient.get('/api/status'),
+  getStatus: () => beeGameAdapter.getStatus(),
 
-  getSystemReadiness: () =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getSystemReadiness()
-      : apiClient.get('/api/system/readiness'),
+  getSystemReadiness: () => beeGameAdapter.getSystemReadiness(),
 
   /**
    * 获取所有 Agent 的状态信息
    * @returns 返回 Agent 列表（包含 ID、状态、当前任务）
    */
-  getAgents: (config?: AxiosRequestConfig) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getAgents()
-      : apiClient.get('/api/agents', config),
+  getAgents: () => beeGameAdapter.getAgents(),
 
   /**
    * 获取活动记录列表
    * @returns 返回活动记录列表（工件类型、名称、作者、时间戳）
    */
-  getActivity: () =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getActivity()
-      : apiClient.get('/api/activity'),
+  getActivity: () => beeGameAdapter.getActivity(),
 
   /**
    * 获取所有项目列表 (简明版)
    * @returns 返回精简版项目列表
    */
-  getProjectsList: () =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getProjects()
-      : apiClient.get('/api/projects/list'),
+  getProjectsList: () => beeGameAdapter.getProjects(),
 
   // ==================== Team OS / Telemetry API ====================
-
-  /**
-   * 获取项目的团队流图 Mermaid
-   * @param projectId - 项目 ID
-   */
-  getWorkflowGraph: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? Promise.resolve('')
-      : apiClient.get(`/api/telemetry/graph/${encodeURIComponent(projectId)}`),
 
   /**
    * 获取项目的阶段历史与当前阶段
    * @param projectId - 项目 ID
    */
-  getWorkflowPhases: (projectId: string, config?: AxiosRequestConfig) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getWorkflowPhases(projectId)
-      : apiClient.get(`/api/telemetry/phases/${encodeURIComponent(projectId)}`, config),
+  getWorkflowPhases: (projectId: string) =>
+    beeGameAdapter.getWorkflowPhases(projectId),
 
   /**
    * 获取项目累计 token 使用量
    * @param projectId - 项目 ID
    */
-  getProjectTokenUsage: (projectId: string, config?: AxiosRequestConfig) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getTokenUsage(projectId)
-      : apiClient.get(`/api/telemetry/token-usage/${encodeURIComponent(projectId)}`, config),
+  getProjectTokenUsage: (projectId: string) =>
+    beeGameAdapter.getTokenUsage(projectId),
 
   // ==================== Artifacts API ====================
 
@@ -1083,10 +964,7 @@ export const api = {
    * 获取项目的交付物列表
    * @param projectId - 项目 ID
    */
-  getArtifacts: (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getArtifacts(projectId)
-      : apiClient.get(`/api/artifacts?project_id=${encodeURIComponent(projectId)}`),
+  getArtifacts: (projectId: string) => beeGameAdapter.getArtifacts(projectId),
 
   /**
    * 获取 Team OS 可认领任务及自治生命周期字段
@@ -1114,91 +992,31 @@ export const api = {
    * 获取交付物原始文本内容
    * @param artifactId - 交付物 ID
    */
-  getArtifactContent: async (artifactId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.getArtifactContent(artifactId);
-    }
-    const res = await apiClient.get(`/api/artifacts/${encodeURIComponent(artifactId)}/download`, {
-      responseType: 'text',
-      headers: { 'Accept': 'text/plain, text/markdown, */*' }
-    });
-    return res as unknown as string;
-  },
+  getArtifactContent: (artifactId: string) => beeGameAdapter.getArtifactContent(artifactId),
 
-  downloadProjectPackage: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.downloadProjectPackage(projectId);
-    }
-    throw new Error('Project package download is only available for BeeGame projects');
-  },
+  downloadProjectPackage: (projectId: string) => beeGameAdapter.downloadProjectPackage(projectId),
 
-  getProjectPreview: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.getProjectPreview(projectId);
-    }
-    throw new Error('Project preview is only available for BeeGame projects');
-  },
+  getProjectPreview: (projectId: string) => beeGameAdapter.getProjectPreview(projectId),
 
-  startProjectPreview: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.startProjectPreview(projectId);
-    }
-    throw new Error('Project preview is only available for BeeGame projects');
-  },
+  startProjectPreview: (projectId: string) => beeGameAdapter.startProjectPreview(projectId),
 
-  restartProjectPreview: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.restartProjectPreview(projectId);
-    }
-    throw new Error('Project preview is only available for BeeGame projects');
-  },
+  restartProjectPreview: (projectId: string) => beeGameAdapter.restartProjectPreview(projectId),
 
-  stopProjectPreview: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.stopProjectPreview(projectId);
-    }
-    throw new Error('Project preview is only available for BeeGame projects');
-  },
+  stopProjectPreview: (projectId: string) => beeGameAdapter.stopProjectPreview(projectId),
 
-  deployProject: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.deployProject(projectId);
-    }
-    throw new Error('Project deployment is only available for BeeGame projects');
-  },
+  deployProject: (projectId: string) => beeGameAdapter.deployProject(projectId),
 
-  listProjectDeployments: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.listProjectDeployments(projectId);
-    }
-    throw new Error('Project deployment is only available for BeeGame projects');
-  },
+  listProjectDeployments: (projectId: string) => beeGameAdapter.listProjectDeployments(projectId),
 
-  rollbackProjectDeployment: (projectId: string, deploymentId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.rollbackProjectDeployment(projectId, deploymentId);
-    }
-    throw new Error('Project deployment rollback is only available for BeeGame projects');
-  },
+  rollbackProjectDeployment: (projectId: string, deploymentId: string) =>
+    beeGameAdapter.rollbackProjectDeployment(projectId, deploymentId),
 
-  getProjectAssets: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.getProjectAssets(projectId);
-    }
-    throw new Error('Project assets are only available for BeeGame projects');
-  },
+  getProjectAssets: (projectId: string) => beeGameAdapter.getProjectAssets(projectId),
 
-  uploadProjectAsset: (projectId: string, requirementId: string, file: File) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.uploadProjectAsset(projectId, requirementId, file);
-    }
-    throw new Error('Project asset upload is only available for BeeGame projects');
-  },
+  uploadProjectAsset: (projectId: string, requirementId: string, file: File) =>
+    beeGameAdapter.uploadProjectAsset(projectId, requirementId, file),
 
-  getResourcePackImpact: (packId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.getResourcePackImpact(packId);
-    throw new Error('Resource Pack impact analysis is only available for BeeGame projects');
-  },
+  getResourcePackImpact: (packId: string) => beeGameAdapter.getResourcePackImpact(packId),
 
   // ==================== Tasks & Review API ====================
 
@@ -1206,32 +1024,13 @@ export const api = {
    * 获取项目的所有任务列表
    * @param projectId - 项目 ID
    */
-  getTasks: (projectId: string, config?: AxiosRequestConfig) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getTasks()
-      : apiClient.get(`/api/tasks?project_id=${encodeURIComponent(projectId)}`, config),
+  getTasks: () => beeGameAdapter.getTasks(),
 
   /**
    * 审批通过计划
    * @param data - 包含项目 ID 和用户反馈
    */
-  approvePlan: (data: ApprovePlanPayload) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.approvePlan(normalizeApprovePlanPayload(data))
-      : apiClient.post('/api/approve-plan', normalizeApprovePlanPayload(data)),
-
-  /**
-   * 获取交付物的评审状态
-   * @param artifactId - 交付物 ID
-   */
-  getArtifactReviewStatus: async (artifactId: string, config?: AxiosRequestConfig) => {
-    if (isBeeGameAdapterEnabled()) {
-      throw new Error('Artifact review is not part of the BeeGame runtime contract');
-    }
-    return normalizeArtifactReviewResponse(
-      (await apiClient.get(`/api/artifacts/${encodeURIComponent(artifactId)}/review`, config)) as ArtifactReviewResponse
-    );
-  },
+  approvePlan: (data: ApprovePlanPayload) => beeGameAdapter.approvePlan(normalizeApprovePlanPayload(data)),
 
   // ==================== Manifest (Resource List) API ====================
 
@@ -1261,11 +1060,7 @@ export const api = {
    * @param projectId - 项目 ID
    */
   getPendingUserReviews: async (projectId: string) =>
-    isBeeGameAdapterEnabled()
-      ? normalizePendingUserReviewsResponse(await beeGameAdapter.getPendingUserReviews(projectId)) as PendingUserReviewsResponse
-      : normalizePendingUserReviewsResponse(
-        (await apiClient.get(`/api/pending-user-reviews?project_id=${encodeURIComponent(projectId)}`)) as PendingUserReviewsResponse
-      ) as PendingUserReviewsResponse,
+    normalizePendingUserReviewsResponse(await beeGameAdapter.getPendingUserReviews(projectId)) as PendingUserReviewsResponse,
 
   getVerificationStatus: async (projectId: string, gateId?: string, bundleId?: string) =>
     normalizeVerificationSummaryPayload(

@@ -4,7 +4,7 @@
  * Root component for the BeeGame frontend.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import { useProjectStore } from './store/projectStore';
 import { useSystemStore } from './store/systemStore';
@@ -18,7 +18,7 @@ import {
 } from './services/apiClient';
 import { normalizeChatHistory } from './utils/chatHistory';
 import type { StartProjectResult } from './types/project';
-import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from './services/beeGameAdapter';
+import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
   initializeSupabaseSession,
   isHttpOnlySessionsEnabled,
@@ -26,9 +26,13 @@ import {
 
 // New Demiurge Views
 import { LandingView } from './components/Demiurge/LandingView';
-import { DashboardView } from './components/Demiurge/DashboardView';
 import type { Language } from './components/Demiurge/AgentsConfig';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
+
+const DashboardView = lazy(async () => {
+  const module = await import('./components/Demiurge/DashboardView');
+  return { default: module.DashboardView };
+});
 
 function App() {
   const {
@@ -40,9 +44,6 @@ function App() {
     clearActiveProject,
   } = useProjectStore();
   const {
-    loadStatus,
-    loadAgents,
-    loadActivities,
     loadCurrentUser,
     authenticationStatus,
     setAuthenticationStatus,
@@ -137,16 +138,12 @@ function App() {
     }
     if (loadedProtectedDataUserRef.current === currentUser.id) return;
     loadedProtectedDataUserRef.current = currentUser.id;
-    const initialLoads: Array<Promise<unknown>> = [loadProjects()];
-    if (!isBeeGameAdapterEnabled()) {
-      initialLoads.push(loadStatus(), loadAgents(), loadActivities());
-    }
-    Promise.all(initialLoads).catch((error) => {
+    loadProjects().catch((error) => {
       loadedProtectedDataUserRef.current = null;
       console.error('Failed to load authenticated app data:', error);
       showError(error instanceof Error ? error.message : '登录数据加载失败');
     });
-  }, [authenticationStatus, currentUser?.id, loadProjects, loadStatus, loadAgents, loadActivities, showError]);
+  }, [authenticationStatus, currentUser?.id, loadProjects, showError]);
 
   // Load chat history when active project changes
   useEffect(() => {
@@ -185,10 +182,7 @@ function App() {
       if (brief) {
         return await bootstrapProjectFromBrief(brief);
       }
-      if (isBeeGameAdapterEnabled()) {
-        throw new Error('A confirmed production brief is required before project construction can start.');
-      }
-      throw new Error('This project runtime does not support starting without a confirmed production brief.');
+      throw new Error('A confirmed production brief is required before project construction can start.');
     } catch (error) {
       console.error('Failed to start project:', error);
       showError(error instanceof Error ? error.message : '项目启动失败，请检查后端服务');
@@ -217,13 +211,15 @@ function App() {
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
       {authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute ? (
-        <DashboardView
-          projectId={activeProjectId}
-          projectName={activeProject.name || 'Untitled Project'}
-          lang={lang}
-          onSetLang={setLang}
-          onBack={clearActiveProject}
-        />
+        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-black"><span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" /></div>}>
+          <DashboardView
+            projectId={activeProjectId}
+            projectName={activeProject.name || 'Untitled Project'}
+            lang={lang}
+            onSetLang={setLang}
+            onBack={clearActiveProject}
+          />
+        </Suspense>
       ) : (
         /* Otherwise, render the Landing View */
         <LandingView

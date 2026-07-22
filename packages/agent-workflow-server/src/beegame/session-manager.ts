@@ -1014,6 +1014,21 @@ export class BeeGameSessionManager {
     }
   }
 
+  /**
+   * Runtime feature changes apply by rebuilding only idle native runners.
+   * Active Claude Code turns are never interrupted or rescheduled by BeeGame.
+   */
+  refreshIdleRunners(): number {
+    let refreshed = 0
+    for (const record of this.sessions.values()) {
+      if (record.session.turnStatus !== 'idle' || !record.runner) continue
+      disposeRunner(record.runner)
+      record.runner = null
+      refreshed += 1
+    }
+    return refreshed
+  }
+
   private interruptUnfinishedNativeEvidence(
     record: SessionRecord,
     reason: 'session_recovered' | 'session_stopped',

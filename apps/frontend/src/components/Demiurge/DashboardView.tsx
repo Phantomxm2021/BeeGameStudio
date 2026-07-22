@@ -9,17 +9,12 @@ import { useToast } from '../../hooks/useToast';
 import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
 import type { Language } from './AgentsConfig';
 
-import { TopBar } from './TopBar';
-import { SideMenu } from './SideMenu';
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
-import type { ProjectTask } from '../../store/systemStore';
 import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingUserReviewItem } from '../../services/api';
 import { api } from '../../services/api';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
-import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
-import { isBeeGameAdapterEnabled } from '../../services/beeGameAdapter';
 import {
     getCreditBalance,
     getCreditSummary,
@@ -45,14 +40,6 @@ const getWorkspaceFolderName = (rootPath?: string): string => {
     const normalized = String(rootPath || '').replaceAll('\\', '/');
     const parts = normalized.split('/').filter(Boolean);
     return parts[parts.length - 1] || '';
-};
-
-const fallbackPhaseLabel = (phaseName: string): string => {
-    return phaseName
-        .split('_')
-        .filter(Boolean)
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
 };
 
 const upsertDeploymentHistory = (
@@ -104,7 +91,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const activeCreditProjectRef = useRef(projectId);
     activeCreditProjectRef.current = projectId;
     const previousBeeGameStatusRef = useRef<string | null>(null);
-    const isBeeGameMode = isBeeGameAdapterEnabled();
     const { i18n } = useTranslation('beegame');
     const translateBeeGame = useMemo(
         () => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'),
@@ -114,15 +100,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     // Zustand State
     const {
         tokenUsage,
-        phaseInfo,
-        loadPhases,
-        loadTokenUsage,
-        loadAgents,
-        tasks,
-        loadTasks,
         isSyncing,
         isDark,
-        toggleTheme,
         hasPermission,
         currentUser,
         authenticationStatus,
@@ -146,7 +125,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }, []);
 
     const refreshCredits = useCallback((): Promise<void> => {
-        if (!isBeeGameMode) return Promise.resolve();
         if (creditRefreshPromiseRef.current?.projectId === projectId) {
             return creditRefreshPromiseRef.current.promise;
         }
@@ -173,10 +151,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         });
         creditRefreshPromiseRef.current = { projectId, promise: request };
         return request;
-    }, [isBeeGameMode, projectId]);
+    }, [projectId]);
 
     const refreshDeploymentHistory = useCallback(async (): Promise<BeeGameDeploymentPayload[]> => {
-        if (!isBeeGameMode) return [];
         try {
             const deployments = await api.listProjectDeployments(projectId);
             setDeploymentHistory(deployments);
@@ -185,12 +162,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             console.error('Failed to load deployment history:', error);
             return [];
         }
-    }, [isBeeGameMode, projectId]);
+    }, [projectId]);
 
     // Custom Hook for WebSocket & REST
     const {
-        sendMessage, stopTask, continueTask, approvePlan,
-        uploadManifestCsv, approveManifest, approvalState,
+        sendMessage, stopTask, approvePlan,
+        approvalState,
         isLoading, isStopping, canContinue, wsState
     } = useChat({
         projectId,
@@ -222,15 +199,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 // Debounce refresh to prevent storms during rapid event bursts
                 if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
                 refreshTimerRef.current = setTimeout(() => {
-                    console.log(`[DashboardView] Debounced data refresh triggered by event: ${type}`);
-                    if (!isBeeGameMode) {
-                        loadTokenUsage(projectId).catch(console.error);
-                    }
-                    if (!isBeeGameMode) {
-                        loadPhases(projectId);
-                        loadTasks(projectId).catch(console.error);
-                        loadAgents().catch(console.error);
-                    }
                     if (authenticationStatus === 'authenticated') {
                         loadProjectRuntimeState(projectId).catch((error) => {
                             logDashboardReadError('Failed to refresh project runtime state:', error);
@@ -253,10 +221,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     // Local derived state mapped from backend
     const isOffline = wsState === 'failed' || wsState === 'disconnected';
 
-    const canonicalTaskStatus = (task: Pick<ProjectTask, 'task_status' | 'lifecycle_status'>): string => {
-        return String(task.lifecycle_status || task.task_status || '').toLowerCase();
-    };
-
     const hasPendingPlanReview = pendingReviews.some((review: PendingUserReviewItem) => {
         const reviewType = String(review?.type || '');
         return reviewType !== 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
@@ -273,7 +237,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         () => projects.find((project) => project.id === projectId),
         [projectId, projects],
     );
-    const isProjectStarting = isBeeGameMode && (
+    const isProjectStarting = (
         String(projectStatus?.phase || '').toLowerCase() === 'starting' ||
         (
             !projectStatus &&
@@ -288,7 +252,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
     const isProjectInteractionLocked = isOpeningProject
         || isSyncing
-        || (isBeeGameMode && !hasCurrentRuntimeSnapshot);
+        || !hasCurrentRuntimeSnapshot;
     const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked;
     const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
     const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
@@ -299,13 +263,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
     ).trim();
 
-    const hasUnfinishedTasks = useMemo(() => {
-        if (isBeeGameMode) return false;
-        return tasks.some((t) => {
-            const status = canonicalTaskStatus(t);
-            return status !== 'released' && status !== 'failed' && status !== 'invalidated' && status !== 'expired';
-        });
-    }, [isBeeGameMode, tasks]);
     const isPipelineActive = useMemo(() => {
         const nextAction = String(projectStatus?.next_action || '').toLowerCase();
         const phase = String(projectStatus?.phase || '').toLowerCase();
@@ -319,18 +276,16 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
     // Derived state machine based on Requirements: 4.2
     const currentStatus = useMemo(() => {
-        if (isBeeGameMode) {
-            const phase = String(projectStatus?.phase || '').toLowerCase();
-            const acceptance = projectStatus?.acceptance?.status;
-            if (isOffline) return 'offline';
-            if (!hasCurrentRuntimeSnapshot) return 'starting';
-            if (phase === 'starting' || isProjectStarting) return 'starting';
-            if (phase === 'running') return 'running';
-            if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
-            if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
-            if (phase === 'finished') return 'finished';
-            if (phase === 'paused' || phase === 'failed') return 'paused';
-        }
+        const phase = String(projectStatus?.phase || '').toLowerCase();
+        const acceptance = projectStatus?.acceptance?.status;
+        if (isOffline) return 'offline';
+        if (!hasCurrentRuntimeSnapshot) return 'starting';
+        if (phase === 'starting' || isProjectStarting) return 'starting';
+        if (phase === 'running') return 'running';
+        if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
+        if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
+        if (phase === 'finished') return 'finished';
+        if (phase === 'paused' || phase === 'failed') return 'paused';
         return deriveDashboardStatus({
             isOffline,
             isLoading,
@@ -338,7 +293,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
             messages: displayMessages,
         });
-    }, [isBeeGameMode, projectStatus?.phase, projectStatus?.acceptance?.status, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
+    }, [projectStatus?.phase, projectStatus?.acceptance?.status, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
 
     const refreshPreviewStatus = async () => {
         await loadProjectRuntimeState(projectId);
@@ -417,21 +372,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     };
 
     const runProjectSync = useCallback(async () => {
-        const initialLoads: Array<Promise<unknown>> = [loadProjectRuntimeState(projectId)];
-        if (!isBeeGameMode) {
-            initialLoads.push(
-                loadPhases(projectId),
-                loadAgents(),
-                loadTasks(projectId),
-            );
-        }
         const results = await withProjectSyncTimeout(
-            Promise.allSettled(initialLoads),
+            Promise.allSettled([loadProjectRuntimeState(projectId)]),
             translateBeeGame('livePreview.syncTimeoutMessage'),
         );
         const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
         if (failedResult) throw failedResult.reason;
-    }, [isBeeGameMode, loadAgents, loadPhases, loadProjectRuntimeState, loadTasks, projectId, translateBeeGame]);
+    }, [loadProjectRuntimeState, projectId, translateBeeGame]);
 
     // Poll live runtime state. BeeGame mode deliberately avoids legacy workflow phase/task telemetry.
     useEffect(() => {
@@ -440,18 +387,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         runProjectSync().catch((error) => {
             showWarning(getErrorMessage(error, translateBeeGame('livePreview.syncFailedMessage')));
         });
-        if (!isBeeGameMode) loadTokenUsage(projectId).catch(console.error);
-
         const poll = () => {
             if (document.hidden) return;
-            
-            if (currentStatus === 'running' || hasUnfinishedTasks || isPipelineActive) {
-                if (!isBeeGameMode) {
-                    loadTokenUsage(projectId).catch(console.error);
-                    loadPhases(projectId);
-                    loadAgents().catch(console.error);
-                    loadTasks(projectId).catch(console.error);
-                }
+
+            if (currentStatus === 'running' || isPipelineActive) {
                 loadProjectRuntimeState(projectId).catch((error) => {
                     logDashboardReadError('Failed to poll project runtime state:', error);
                 });
@@ -460,12 +399,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
         // Setup polling every 10 seconds while project is active
         const interval = setInterval(poll, 10000);
-        const tokenInterval = !isBeeGameMode ? setInterval(() => {
-            if (document.hidden) return;
-            if (currentStatus === 'running' || hasUnfinishedTasks || isPipelineActive) {
-                loadTokenUsage(projectId).catch(console.error);
-            }
-        }, 2000) : undefined;
 
         // Add visibility change listener to trigger immediate poll when returning to tab
         const handleVisibilityChange = () => {
@@ -477,10 +410,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
         return () => {
             clearInterval(interval);
-            if (tokenInterval) clearInterval(tokenInterval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [projectId, authenticationStatus, isBeeGameMode, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadProjectRuntimeState, currentStatus, hasUnfinishedTasks, isPipelineActive, runProjectSync, showWarning, translateBeeGame]);
+    }, [projectId, authenticationStatus, loadProjectRuntimeState, currentStatus, isPipelineActive, runProjectSync, showWarning, translateBeeGame]);
 
     useEffect(() => {
         if (!isOpeningProject && !isSyncing) return undefined;
@@ -492,29 +424,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
     // BeeGame follows the live runtime turn, not the legacy multi-stage workflow.
     const progressPercent = useMemo(() => {
-        if (isBeeGameMode) {
-            if (currentStatus === 'running' || currentStatus === 'waiting_approval') return 50;
-            return 0;
-        }
-        return deriveGlobalWorkflowProgress({
-            phaseInfo,
-            currentStatus,
-            messages,
-        });
-    }, [isBeeGameMode, currentStatus, phaseInfo, messages]);
+        if (currentStatus === 'running' || currentStatus === 'waiting_approval') return 50;
+        return 0;
+    }, [currentStatus]);
 
     const phaseLabel = useMemo(() => {
-        if (isBeeGameMode) {
-            return translateBeeGame(`dashboard.turn.${currentStatus}`, {
-                defaultValue: translateBeeGame('dashboard.turn.idle'),
-            });
-        }
-        const phaseName = String(phaseInfo?.phase_name || savedRuntimeSnapshot?.phase_name || '').trim();
-        if (!phaseName) return translateBeeGame('dashboard.phase.idea_intake');
-        return translateBeeGame(`dashboard.phase.${phaseName}`, {
-            defaultValue: fallbackPhaseLabel(phaseName),
+        return translateBeeGame(`dashboard.turn.${currentStatus}`, {
+            defaultValue: translateBeeGame('dashboard.turn.idle'),
         });
-    }, [currentStatus, isBeeGameMode, phaseInfo?.phase_name, savedRuntimeSnapshot?.phase_name, translateBeeGame]);
+    }, [currentStatus, translateBeeGame]);
 
     const displayProjectName = useMemo(() => {
         return getWorkspaceFolderName(activeProject?.root_path) || projectName;
@@ -557,7 +475,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }, [projectId, projectStatus?.context?.token_budget, savedRuntimeSnapshot?.usage, tokenUsage]);
 
     useEffect(() => {
-        if (!isBeeGameMode) return;
         const previousStatus = previousBeeGameStatusRef.current;
         previousBeeGameStatusRef.current = currentStatus;
         const wasWorking = previousStatus === 'running' || previousStatus === 'waiting_approval';
@@ -565,71 +482,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         if (wasWorking && isSettled && projectStatus?.build_report?.build_url) {
             setPreviewRefreshNonce(value => value + 1);
         }
-    }, [currentStatus, isBeeGameMode, projectStatus?.build_report?.build_url]);
-
-    // Logging Token Usage and Progress
-    useEffect(() => {
-        const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-        console.log(`[DashboardView] Project: ${projectId} | Token Usage:`, projectTokenUsage);
-        console.log(`[DashboardView] Project Progress: ${progressPercent.toFixed(2)}% (Status: ${currentStatus})`);
-    }, [projectId, tokenUsage, progressPercent, currentStatus]);
-
-    const handleToggleStatus = async () => {
-        if (currentStatus === 'running') {
-            await stopTask();
-        } else if (
-            (currentStatus as string) === 'stopped' ||
-            currentStatus === 'paused' ||
-            (currentStatus as string) === 'failed' ||
-            ((currentStatus === 'finished' || currentStatus === 'idle') && hasUnfinishedTasks)
-        ) {
-            await continueTask();
-        } else if (currentStatus === 'waiting_approval') {
-            showError(waitingApproval.message || translateBeeGame('dashboard.approvalWaiting'));
-            return;
-        } else {
-            await continueTask();
-        }
-    };
-
-    const handleRename = async (newName: string) => {
-        await useProjectStore.getState().updateProject(projectId, { name: newName });
-    };
-
-    const handleNewProject = () => {
-        useProjectStore.getState().setActiveProject('');
-    };
+    }, [currentStatus, projectStatus?.build_report?.build_url]);
 
     return (
         <div className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}>
-            {!isBeeGameMode ? (
-                <TopBar
-                    projectName={displayProjectName}
-                    lang={lang}
-                    status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
-                    progress={progressPercent}
-                    tokens={displayedTokenUsage.totalTokens}
-                    isSyncing={isSyncing}
-                    onRename={handleRename}
-                />
-            ) : null}
-
-            {!isBeeGameMode ? (
-                <SideMenu
-                    status={currentStatus === 'offline'
-                        ? 'stopped'
-                        : currentStatus === 'starting'
-                            ? 'running'
-                            : currentStatus}
-                    lang={lang}
-                    isDark={isDark}
-                    onToggleStatus={handleToggleStatus}
-                    onSetLang={onSetLang}
-                    onToggleTheme={toggleTheme}
-                    onNewProject={handleNewProject}
-                />
-            ) : null}
-
             <BeeGameLivePreviewPage
                 lang={lang}
                 projectName={displayProjectName}
@@ -707,14 +563,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 approvalState={approvalState}
                 pendingReviews={reviewDisplayModels}
                 projectStatus={projectRuntimeDisplay}
-                onUploadManifestCsv={!isBeeGameMode ? uploadManifestCsv : undefined}
-                onApproveManifest={!isBeeGameMode ? approveManifest : undefined}
                 waitingApproval={waitingApproval}
                 canSendMessage={canSendMessage}
                 canApproveTool={canApproveTool}
                 canUploadAssets={canUploadAssets}
                 canExportProject={canExportProject}
-                variant={isBeeGameMode ? 'beegame' : 'legacy'}
                 currentUserDisplayName={currentUser?.displayName}
                 currentUserEmail={currentUser?.email}
                 currentUserAvatarUrl={currentUser?.avatarUrl}

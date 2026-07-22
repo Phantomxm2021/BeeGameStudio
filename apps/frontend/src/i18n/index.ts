@@ -39,6 +39,7 @@ void i18n
     interpolation: {
       escapeValue: false,
     },
+    showSupportNotice: false,
     returnObjects: true,
   })
 

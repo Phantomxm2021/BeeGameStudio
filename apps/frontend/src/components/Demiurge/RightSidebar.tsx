@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type ReviewBindingPayload } from '../../services/api';
@@ -65,7 +64,6 @@ interface RightSidebarProps {
     canApproveTool?: boolean;
     canUploadAssets?: boolean;
     canExportProject?: boolean;
-    variant?: 'legacy' | 'beegame';
     currentUserDisplayName?: string;
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
@@ -91,18 +89,15 @@ export function RightSidebar({
     canApproveTool = true,
     canUploadAssets = true,
     canExportProject = true,
-    variant = 'legacy',
     currentUserDisplayName,
     currentUserEmail,
     currentUserAvatarUrl,
 }: RightSidebarProps) {
 
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
-    const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
-    const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
@@ -119,7 +114,6 @@ export function RightSidebar({
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const lastMessageCountRef = useRef(messages.length);
 
     const t = useCommonText(lang);
     const uiText = useBeeGameText(lang);
@@ -127,16 +121,16 @@ export function RightSidebar({
     useEffect(() => {
         setHasOlderHistory(false);
         setIsLoadingOlderHistory(false);
-    }, [projectId, variant]);
+    }, [projectId]);
 
     useEffect(() => {
-        if (variant !== 'beegame' || messages.length === 0) return;
+        if (messages.length === 0) return;
         const pagination = api.getChatHistoryPaginationState(projectId);
         if (pagination.initialized) setHasOlderHistory(pagination.hasMore);
-    }, [messages, projectId, variant]);
+    }, [messages, projectId]);
 
     const handleLoadOlderHistory = useCallback(async () => {
-        if (variant !== 'beegame' || isLoadingOlderHistory || !hasOlderHistory || messages.length === 0) return;
+        if (isLoadingOlderHistory || !hasOlderHistory || messages.length === 0) return;
         const viewport = scrollContainerRef.current;
         const previousHeight = viewport?.scrollHeight ?? 0;
         const previousTop = viewport?.scrollTop ?? 0;
@@ -156,7 +150,7 @@ export function RightSidebar({
         } finally {
             setIsLoadingOlderHistory(false);
         }
-    }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId, variant]);
+    }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId]);
     const isComposerLocked = isLoading || isRuntimeBusy;
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const documentProgress = useMemo(
@@ -287,31 +281,15 @@ export function RightSidebar({
     useEffect(() => {
         const textarea = textareaRef.current;
         if (textarea) {
-            const minComposerHeight = variant === 'beegame' ? 56 : 52;
+            const minComposerHeight = 56;
             textarea.style.height = 'auto';
             const scrollHeight = textarea.scrollHeight;
             textarea.style.height = Math.min(Math.max(scrollHeight, minComposerHeight), 160) + 'px';
         }
-    }, [chatInput, variant]);
+    }, [chatInput]);
 
-    // Auto-scroll to bottom logic
-    useEffect(() => {
-        if (variant !== 'beegame' && activeTab === 'chat' && scrollContainerRef.current) {
-            const isNewMessage = messages.length > lastMessageCountRef.current;
-            // Use smooth scroll only for new incoming messages, 
-            // use instant 'auto' when switching tabs to avoid "scrolling down" visual artifact.
-            const behavior = isNewMessage ? 'smooth' : 'auto';
-            
-            scrollContainerRef.current.scrollTo?.({
-                top: scrollContainerRef.current.scrollHeight,
-                behavior
-            });
-            
-            lastMessageCountRef.current = messages.length;
-        }
-    }, [messages, activeTab, variant]);
-
-    // Load artifacts and review statuses
+    // Load project artifacts. Native Reviewer evidence is part of project
+    // runtime state; there is no second per-artifact review transport.
     useEffect(() => {
         if (activeTab === 'artifacts') {
             const fetchData = async () => {
@@ -320,30 +298,6 @@ export function RightSidebar({
                     const fetchedArtifacts = (await api.getArtifacts(projectId)) as unknown as any[];
                     setArtifacts(fetchedArtifacts);
                     setIsArtifactsLoading(false);
-
-                    const pendingArtifacts = variant === 'beegame'
-                        ? []
-                        : fetchedArtifacts.filter(a => a.status === 'active');
-                    const newStatuses: Record<string, any> = {};
-                    for (const art of pendingArtifacts) {
-                        const artifactId = String(art.artifact_id || art.id || '').trim();
-                        if (!artifactId) continue;
-                        try {
-                            const review = (await api.getArtifactReviewStatus(artifactId)) as any;
-                            const normalizedArtifactId = String(review?.artifact_id || artifactId).trim();
-                            if (normalizedArtifactId) {
-                                newStatuses[normalizedArtifactId] = review;
-                            }
-                        } catch (e) {
-                            const status = typeof e === 'object' && e && 'status' in e ? (e as { status?: number }).status : undefined;
-                            if (status === 404) {
-                                console.warn(`Artifact review not found for ${artifactId}`);
-                                continue;
-                            }
-                            console.error(`Failed to load artifact review for ${artifactId}:`, e);
-                        }
-                    }
-                    setReviewStatuses(newStatuses);
                 } catch (err) {
                     console.error('Failed to load artifacts/reviews:', err);
                     setIsArtifactsLoading(false);
@@ -351,7 +305,7 @@ export function RightSidebar({
             };
             void fetchData();
         }
-    }, [activeTab, projectId, variant, documentEventRevision]);
+    }, [activeTab, projectId, documentEventRevision]);
 
     useEffect(() => {
         if (activeTab === 'assets') {
@@ -371,41 +325,27 @@ export function RightSidebar({
         }
     }, [activeTab, projectId]);
 
-    const dockClassName = variant === 'beegame'
-        ? 'absolute right-4 top-24 bottom-4 w-[420px] z-40 pointer-events-auto'
-        : 'absolute right-12 top-28 bottom-12 w-[440px] z-40 pointer-events-auto';
-    const panelClassName = variant === 'beegame'
-        ? 'h-full flex flex-col bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] overflow-hidden'
-        : 'h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200 dark:border-zinc-800 rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden';
-    const headerClassName = variant === 'beegame'
-        ? 'flex h-14 items-center justify-between border-b border-zinc-800 px-4'
-        : 'flex items-center justify-between px-8 pt-8 pb-4';
-    const tabButtonClassName = (isActive: boolean) => variant === 'beegame'
-        ? `type-button relative pb-3 transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`
-        : `type-caption-1 transition-all relative pb-2 ${isActive
-            ? 'text-zinc-900 dark:text-zinc-100'
-            : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
-        }`;
+    const dockClassName = 'absolute right-4 top-24 bottom-4 w-[420px] z-40 pointer-events-auto';
+    const panelClassName = 'h-full flex flex-col bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] overflow-hidden';
+    const headerClassName = 'flex h-14 items-center justify-between border-b border-zinc-800 px-4';
+    const tabButtonClassName = (isActive: boolean) => `type-button relative pb-3 transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`;
     const tabLabel = (tab: 'chat' | 'artifacts' | 'assets') => {
-        if (variant !== 'beegame') return tab === 'chat' ? t.chat : t.artifacts;
         if (tab === 'chat') return uiText.collabFlow;
         if (tab === 'assets') return t.assets;
         return uiText.deliverables;
     };
-    const sidebarTabs = variant === 'beegame'
-        ? (['chat', 'artifacts', 'assets'] as const)
-        : (['chat', 'artifacts'] as const);
+    const sidebarTabs = ['chat', 'artifacts', 'assets'] as const;
 
     return (
         <>
             <div
-                className={`${dockClassName} transition-[opacity,transform] duration-200 ${isChatMinimized ? 'translate-y-[840px] opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}
+                className={dockClassName}
             >
                 <div className={panelClassName}>
                     
                     {/* Header Tabs */}
                     <div className={headerClassName}>
-                        <div className={variant === 'beegame' ? 'flex items-center gap-6' : 'flex space-x-6'}>
+                        <div className="flex items-center gap-6">
                             {sidebarTabs.map(tab => (
                             <button
                                 key={tab}
@@ -413,30 +353,20 @@ export function RightSidebar({
                                 className={tabButtonClassName(activeTab === tab)}
                             >
                                 {tabLabel(tab)}
-                                {variant === 'beegame' && tab === 'artifacts' ? (
+                                {tab === 'artifacts' ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">
                                             {documentProgress.filter(item => item.status === 'ready').length}/{documentProgress.length}
                                         </span>
                                     ) : null}
-                                    {variant === 'beegame' && tab === 'assets' && assetManifest?.requirements.length ? (
+                                    {tab === 'assets' && assetManifest?.requirements.length ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.requirements.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
-                                        <div className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
+                                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300" />
                                     )}
                                 </button>
                             ))}
                         </div>
-	                        {variant !== 'beegame' ? (
-	                            <button
-	                                type="button"
-	                                aria-label="最小化聊天"
-	                                onClick={() => setIsChatMinimized(true)}
-	                                className="glass-icon-button h-10 w-10 text-zinc-900 dark:text-zinc-100"
-	                            >
-	                                <Minus className="w-5 h-5" />
-	                            </button>
-	                        ) : null}
                     </div>
 
                     {/* Content Area */}
@@ -478,7 +408,6 @@ export function RightSidebar({
                                 waitingApproval={waitingApproval}
                                 projectStatus={projectStatus}
                                 canSendMessage={canSendMessage}
-                                variant={variant}
                                 lang={lang}
                                 currentUserDisplayName={currentUserDisplayName}
                                 currentUserEmail={currentUserEmail}
@@ -491,11 +420,10 @@ export function RightSidebar({
                             <ArtifactsPanel 
                                 artifacts={artifacts}
                                 isLoading={isArtifactsLoading}
-                                reviewStatuses={reviewStatuses}
                                 onPreview={handlePreviewArtifact}
                                 onDownload={handleDownloadArtifact}
                                 canExportProject={canExportProject}
-                                documentProgress={variant === 'beegame' ? documentProgress : undefined}
+                                documentProgress={documentProgress}
                                 lang={lang}
                             />
                         ) : (
@@ -511,34 +439,6 @@ export function RightSidebar({
                     </div>
                 </div>
             </div>
-
-            {variant !== 'beegame' && isChatMinimized && (
-                    <button
-                        onClick={() => setIsChatMinimized(false)}
-                        className="glass-panel absolute bottom-12 right-12 z-50 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[2.2rem] text-white transition-all hover:scale-105 active:scale-95 dark:text-zinc-100"
-                    >
-                        {/* Dynamic Background Glow when streaming */}
-                        {isLoading && (
-                            <div
-                                className="absolute inset-0 bg-gradient-to-tr from-blue-500/20 via-purple-500/20 to-pink-500/20 blur-xl animate-pulse"
-                            />
-                        )}
-
-                        <div className="relative">
-                            <MessageSquare className="w-7 h-7 transition-transform duration-500 group-hover:scale-110 group-active:scale-90" />
-                            
-                            {/* Activity Indicator Pulse */}
-                            {isLoading && (
-                                <div
-	                                    className="absolute -top-1 -right-1 w-3 h-3 animate-ping rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.65)] dark:border-zinc-100"
-                                />
-                            )}
-                        </div>
-
-                        {/* Subtle Border Light Leak */}
-                        <div className="absolute inset-0 rounded-[2.2rem] border border-white/10 dark:border-black/5 pointer-events-none" />
-                    </button>
-                )}
 
             <ArtifactPreviewModal 
                 isOpen={isPreviewOpen}

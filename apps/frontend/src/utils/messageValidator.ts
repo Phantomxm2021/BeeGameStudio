@@ -81,7 +81,6 @@ export class MessageValidator {
     'tool_start',
     'tool_end',
     'usage',
-    'pipeline_update',
     'human_gate',
     'artifact_created',
     'context_update',
@@ -89,7 +88,6 @@ export class MessageValidator {
     'error_paused',
     'plan_approved',
     'p2p_route',
-    'phase_update',
     'project_renamed'
   ];
 

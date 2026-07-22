@@ -559,6 +559,13 @@
     "revisionRequired": "需要修訂",
     "clarificationDescription": "回答澄清問題，或選擇如何繼續目前簡報。",
     "aiProcessing": "AI 正在處理...",
+    "attachmentBuild": {
+      "input": "輸入來源", "completeness": "完整度", "confirmedGdd": "確認後的 GDD",
+      "confirmedFacts": "已確認內容", "inferredDesign": "推斷設計", "missingInformation": "缺少資訊",
+      "conflicts": "待解決衝突", "useGdd": "使用 GDD 內容", "useImage": "使用圖片推斷", "useCustom": "使用自訂內容",
+      "resourceLibrary": "資源庫使用方式", "resourcePreferred": "優先使用資源庫", "resourceOptional": "適合時使用資源庫", "resourceRequired": "必須使用資源庫",
+      "retry": "重新分析", "preparing": "準備建構中…", "confirm": "確認並建構"
+    },
     "innerThought": "內部思考",
     "contextUpdate": "上下文更新",
     "useContext": "使用上下文",

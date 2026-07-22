@@ -243,6 +243,13 @@ vi.mock('../../services/currentUserApi', () => ({
     deleteCurrentUser: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
+vi.mock('../../services/userSkillsApi', () => ({
+    listUserSkills: vi.fn(() => Promise.resolve([])),
+    importUserSkillPackage: vi.fn(),
+    setUserSkillEnabled: vi.fn(),
+    deleteUserSkill: vi.fn(),
+}));
+
 vi.mock('../../services/supabaseAuthApi', () => ({
     clearSupabaseSession: vi.fn(),
     getSupabaseAccessToken: vi.fn(() => ''),
@@ -254,7 +261,6 @@ vi.mock('../../services/supabaseAuthApi', () => ({
 }));
 
 vi.mock('../../services/beeGameAdapter', () => ({
-    isBeeGameAdapterEnabled: vi.fn(() => true),
     getBeeGameWorkspaceSettings: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
     resetBeeGameWorkspaceRoot: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
     setBeeGameWorkspaceRoot: vi.fn((workspacePath: string) => ({ workspacePath, isDefault: false })),
@@ -272,10 +278,6 @@ vi.mock('./SideMenu', () => ({
         capturedSideMenuProps = props;
         return <div data-testid="side-menu" />;
     },
-}));
-
-vi.mock('./CanvasView', () => ({
-    CanvasView: () => <div data-testid="canvas-view" />,
 }));
 
 vi.mock('./RightSidebar', () => ({
@@ -684,7 +686,7 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-shell-top-nav')).toBeInTheDocument();
         expect(screen.queryByTestId('beegame-shell-side-nav')).not.toBeInTheDocument();
-        expect(capturedRightSidebarProps?.variant).toBe('beegame');
+        expect(capturedRightSidebarProps).not.toHaveProperty('variant');
     });
 
     it('groups live preview controls in a shadcn button group and removes the bottom runtime strip', async () => {
@@ -774,7 +776,7 @@ describe('DashboardView runtime loading', () => {
         await user.click(screen.getByRole('button', { name: '用户菜单' }));
 
         expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[140]');
-        expect(capturedRightSidebarProps?.variant).toBe('beegame');
+        expect(capturedRightSidebarProps).not.toHaveProperty('variant');
     });
 
     it('renders the built game URL inside the BeeGame live preview frame', async () => {
@@ -876,6 +878,8 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
+        await act(async () => Promise.resolve());
+
         const playButton = screen.getByRole('button', { name: '播放预览' });
         expect(playButton).toBeEnabled();
         await user.click(playButton);
@@ -893,6 +897,8 @@ describe('DashboardView runtime loading', () => {
         };
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await act(async () => Promise.resolve());
 
         const playButton = screen.getByRole('button', { name: '播放预览' });
         expect(playButton).toBeDisabled();

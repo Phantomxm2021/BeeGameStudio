@@ -1,12 +1,11 @@
 import { memo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { useTranslation } from 'react-i18next';
 import { Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Upload } from 'lucide-react';
 import type { BeeGameAssetImportPayload, BeeGameAssetManifestPayload, BeeGameAssetRequirementPayload } from '../../../services/api';
 import type { ProjectBaselineStatusPayload } from '../../../services/api';
 import type { Language } from '../AgentsConfig';
-import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
+import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
 
 interface AssetsPanelProps {
@@ -33,12 +32,14 @@ export const AssetsPanel = memo(({
     acceptance,
     lang = 'en',
 }: AssetsPanelProps) => {
-    const { i18n } = useTranslation('beegame');
-    const text = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame').assets as AssetsPanelText;
+    const text = useBeeGameText(lang).assets as AssetsPanelText;
     const requirements = manifest?.requirements ?? [];
     const imports = manifest?.imports ?? [];
     const compositions = manifest?.compositions ?? [];
-    const hasContract = requirements.length > 0 || imports.length > 0 || compositions.length > 0;
+    const hasContract = manifest?.contract_state === 'ready'
+        || requirements.length > 0
+        || imports.length > 0
+        || compositions.length > 0;
 
     if (isLoading && !hasContract) return <AssetsPanelSkeleton text={text} />;
     if (!hasContract) {
@@ -154,11 +155,10 @@ function AssetSection({ title, subdued = false, children }: { title: string; sub
 }
 
 function ImportCard({ resourceImport, text }: { resourceImport: BeeGameAssetImportPayload; text: AssetsPanelText }) {
-    const Icon = iconForType(resourceImport.asset_kind);
     return (
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="relative rounded-2xl border border-white/[0.08] bg-zinc-950/45 p-3.5 pr-14">
             <div className="flex min-w-0 items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-orange-300"><Icon className="h-4 w-4" /></div>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-orange-300"><AssetKindIcon type={resourceImport.asset_kind} /></div>
                 <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -243,12 +243,36 @@ function AssetsPanelSkeleton({ text }: { text: AssetsPanelText }) {
 }
 
 function shortIdentifier(value: string): string { return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value; }
-function iconForType(type?: string) {
-    const value = (type || '').toLowerCase();
-    if (value.includes('model') || value.includes('3d') || value.includes('scene')) return Cuboid;
-    if (value.includes('audio') || value.includes('music') || value.includes('voice')) return Music;
-    if (value.includes('data') || value.includes('localization')) return FileJson;
-    if (value.includes('image') || value.includes('sprite') || value.includes('texture') || value.includes('atlas')) return Image;
-    return Box;
+function AssetKindIcon({ type }: { type?: string }) {
+    switch (type) {
+        case 'mesh':
+        case 'model':
+        case 'scene':
+        case 'rig':
+        case 'animation-clip':
+        case 'animation-library':
+            return <Cuboid className="h-4 w-4" />;
+        case 'audio-clip':
+        case 'audio-cue':
+        case 'audio-bank':
+        case 'music':
+        case 'ambience':
+        case 'voice':
+            return <Music className="h-4 w-4" />;
+        case 'data':
+        case 'input-profile':
+            return <FileJson className="h-4 w-4" />;
+        case 'image':
+        case 'texture':
+        case 'sprite':
+        case 'sprite-sheet':
+        case 'sprite-atlas':
+        case 'frame-animation':
+        case 'tileset':
+        case 'tilemap':
+            return <Image className="h-4 w-4" />;
+        default:
+            return <Box className="h-4 w-4" />;
+    }
 }
 function formatMode(mode: string | undefined, text: AssetsPanelText): string { return mode === 'mcp' ? text.mcp : mode === 'manual' ? text.manual : text.filesystem; }

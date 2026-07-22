@@ -40,7 +40,6 @@ Optional:
 
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:62175
-VITE_WS_BASE_URL=ws://127.0.0.1:62175
 ```
 
 `VITE_API_AUTH_TOKEN` is reserved for dev/offline diagnostics. Production builds ignore it unless `VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN=1` is explicitly set.

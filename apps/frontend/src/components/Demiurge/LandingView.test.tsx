@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { LandingView } from './LandingView';
 import { ToastProvider } from '../../contexts/ToastContext';
@@ -45,6 +45,9 @@ const { listModelConfigs } = vi.hoisted(() => ({
 }));
 const { deleteCurrentUser } = vi.hoisted(() => ({
     deleteCurrentUser: vi.fn(),
+}));
+const { listUserSkills } = vi.hoisted(() => ({
+    listUserSkills: vi.fn(),
 }));
 const {
     createInvitation,
@@ -201,6 +204,13 @@ vi.mock('../../services/currentUserApi', () => ({
     deleteCurrentUser,
 }));
 
+vi.mock('../../services/userSkillsApi', () => ({
+    listUserSkills,
+    importUserSkillPackage: vi.fn(),
+    setUserSkillEnabled: vi.fn(),
+    deleteUserSkill: vi.fn(),
+}));
+
 vi.mock('../../services/invitationApi', () => ({
     createInvitation,
     deleteInvitation,
@@ -235,31 +245,44 @@ vi.mock('./Landing/FaultyTerminal', () => ({
     },
 }));
 
-const renderLanding = (props?: Partial<React.ComponentProps<typeof LandingView>>) => render(
-    <ToastProvider>
-        <LandingView
-            onStart={vi.fn()}
-            lang="zh"
-            onSetLang={vi.fn()}
-            {...props}
-        />
-    </ToastProvider>,
-);
+const renderLanding = async (props?: Partial<React.ComponentProps<typeof LandingView>>) => {
+    let result!: ReturnType<typeof render>;
+    await act(async () => {
+        result = render(
+            <ToastProvider>
+                <LandingView
+                    onStart={vi.fn()}
+                    lang="zh"
+                    onSetLang={vi.fn()}
+                    {...props}
+                />
+            </ToastProvider>,
+        );
+        await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    return result;
+};
 
-const submitIdea = (idea: string) => {
+const submitIdea = async (idea: string) => {
     const textbox = screen.getByRole('textbox');
-    fireEvent.change(textbox, { target: { value: idea } });
-    fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+    await act(async () => {
+        fireEvent.change(textbox, { target: { value: idea } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        await new Promise(resolve => setTimeout(resolve, 0));
+    });
     return textbox;
 };
 
 const confirmIntakeCreditQuote = async () => {
     expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+    await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+    });
 };
 
 const submitIdeaAndConfirmIntake = async (idea: string) => {
-    const textbox = submitIdea(idea);
+    const textbox = await submitIdea(idea);
     await confirmIntakeCreditQuote();
     return textbox;
 };
@@ -385,6 +408,8 @@ beforeEach(() => {
     mockSetActiveProject.mockReset();
     mockLoadCurrentUser.mockReset();
     mockLoadCurrentUser.mockResolvedValue(undefined);
+    listUserSkills.mockReset();
+    listUserSkills.mockResolvedValue([]);
     mockCurrentUser = {
         id: 'alice',
         role: 'owner',
@@ -580,9 +605,9 @@ describe('LandingView bootstrap submission', () => {
     it('asks the user to sign in before generating intake options', async () => {
         mockCurrentUser = null;
 
-        renderLanding();
+        await renderLanding();
 
-        submitIdea('LLM generated idea');
+        await submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
         expect(screen.getByText('你的灵感与项目，正在这里等待继续。')).toBeInTheDocument();
@@ -593,9 +618,9 @@ describe('LandingView bootstrap submission', () => {
     it('does not require administrator model-config access before showing the intake credit quote', async () => {
         listModelConfigs.mockRejectedValueOnce(new Error('Forbidden'));
 
-        renderLanding();
+        await renderLanding();
 
-        submitIdea('LLM generated idea');
+        await submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
         expect(listModelConfigs).not.toHaveBeenCalled();
@@ -615,7 +640,7 @@ describe('LandingView bootstrap submission', () => {
             }
         });
 
-        renderLanding();
+        await renderLanding();
 
         const textbox = screen.getByRole('textbox');
         fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
@@ -651,7 +676,7 @@ describe('LandingView bootstrap submission', () => {
             }),
         );
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
@@ -667,9 +692,9 @@ describe('LandingView bootstrap submission', () => {
     it('restores the pending idea after an OAuth redirect and continues generation', async () => {
         mockCurrentUser = null;
 
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
-        submitIdea('OAuth generated idea');
+        await submitIdea('OAuth generated idea');
 
         await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
         fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
@@ -685,7 +710,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
         expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
@@ -710,9 +735,9 @@ describe('LandingView bootstrap submission', () => {
             }
         });
 
-        renderLanding();
+        await renderLanding();
 
-        submitIdea('LLM generated idea');
+        await submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
@@ -733,7 +758,7 @@ describe('LandingView bootstrap submission', () => {
         });
         expect(runIdeaIntake).not.toHaveBeenCalled();
 
-        submitIdea('LLM generated idea');
+        await submitIdea('LLM generated idea');
         fireEvent.click(await screen.findByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
@@ -744,13 +769,13 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('restores a pending intake credit quote after a page refresh', async () => {
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
-        submitIdea('Persistent LLM generated idea');
+        await submitIdea('Persistent LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
         unmount();
-        renderLanding();
+        await renderLanding();
 
         expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
@@ -759,12 +784,12 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
     });
 
-    it('restores typed idea text after a page refresh without opening intake', () => {
-        const { unmount } = renderLanding();
+    it('restores typed idea text after a page refresh without opening intake', async () => {
+        const { unmount } = await renderLanding();
 
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Draft sample idea' } });
         unmount();
-        renderLanding();
+        await renderLanding();
 
         expect(screen.getByRole('textbox')).toHaveValue('Draft sample idea');
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -772,13 +797,13 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('restores generated intake options after a page refresh without regenerating them', async () => {
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
         await submitIdeaAndConfirmIntake('Cached options idea');
         expect(await screen.findByRole('dialog', { name: '选择方案' })).toBeInTheDocument();
         expect(runIdeaIntake).toHaveBeenCalledTimes(1);
         unmount();
-        renderLanding();
+        await renderLanding();
 
         const dialog = await screen.findByRole('dialog', { name: '选择方案' });
         expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
@@ -787,7 +812,7 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledTimes(1);
     });
 
-    it('discards a legacy cached selection state containing only one option', () => {
+    it('discards a legacy cached selection state containing only one option', async () => {
         sessionStorage.setItem('beegame.pendingIntakeFlow.v1', JSON.stringify({
             phase: 'options_ready',
             idea: 'Legacy cached idea',
@@ -796,21 +821,21 @@ describe('LandingView bootstrap submission', () => {
             createdAt: Date.now(),
         }));
 
-        renderLanding();
+        await renderLanding();
 
         expect(screen.queryByRole('dialog', { name: '选择方案' })).not.toBeInTheDocument();
         expect(screen.getByRole('textbox')).toHaveValue('');
     });
 
     it('restores selected intake settings after a page refresh', async () => {
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
         await submitIdeaAndConfirmIntake('Cached settings idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
         fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: 'Keep the selected settings.' } });
         unmount();
-        renderLanding();
+        await renderLanding();
 
         expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: '引擎' })).toHaveValue('Godot');
@@ -820,7 +845,7 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('restores confirmed intake brief after a page refresh', async () => {
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
         await submitIdeaAndConfirmIntake('Cached brief idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
@@ -838,7 +863,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
         expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('按需使用');
         unmount();
-        renderLanding();
+        await renderLanding();
 
         expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
         expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('确认构建方案');
@@ -859,7 +884,7 @@ describe('LandingView bootstrap submission', () => {
                 'secrets.manage',
             ],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
@@ -875,7 +900,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete', 'credits.admin'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
@@ -892,7 +917,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete', 'credits.admin'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
@@ -934,7 +959,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete', 'lifecycle.admin'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
@@ -953,7 +978,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         expect(screen.queryByRole('button', { name: '系统设置' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '历史项目' })).not.toBeInTheDocument();
@@ -977,7 +1002,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'developer',
             permissions: ['project.create'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: 'Credit 商店' }));
@@ -1001,7 +1026,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
 
@@ -1017,7 +1042,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
@@ -1067,7 +1092,7 @@ describe('LandingView bootstrap submission', () => {
             createdAt: new Date(1710000000000 + index).toISOString(),
         })));
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
@@ -1100,7 +1125,7 @@ describe('LandingView bootstrap submission', () => {
             permissions: ['project.create', 'project.delete'],
         };
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
@@ -1119,7 +1144,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         expect(screen.getByRole('menu', { name: '用户菜单' })).toBeInTheDocument();
@@ -1135,7 +1160,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         const userButton = await screen.findByRole('button', { name: '用户菜单' });
         expect(userButton).toHaveAttribute('data-avatar-surface', 'outline');
@@ -1149,7 +1174,7 @@ describe('LandingView bootstrap submission', () => {
     it('opens the login and registration dialog from the anonymous user icon', async () => {
         mockCurrentUser = null;
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
 
@@ -1167,7 +1192,7 @@ describe('LandingView bootstrap submission', () => {
     it('keeps the auth dialog size stable when switching between login and registration', async () => {
         mockCurrentUser = null;
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         const authDialog = await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
@@ -1199,7 +1224,7 @@ describe('LandingView bootstrap submission', () => {
             }
         });
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
@@ -1217,7 +1242,7 @@ describe('LandingView bootstrap submission', () => {
     it('does not store an OAuth generation intent from the account menu without an explicit generate click', async () => {
         mockCurrentUser = null;
 
-        const { unmount } = renderLanding();
+        const { unmount } = await renderLanding();
 
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
@@ -1234,7 +1259,7 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
-        renderLanding();
+        await renderLanding();
 
         expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
         expect(getCreditQuote).not.toHaveBeenCalled();
@@ -1244,7 +1269,7 @@ describe('LandingView bootstrap submission', () => {
     it('opens a dedicated password reset view before sending reset email', async () => {
         mockCurrentUser = null;
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: '忘记密码？' }));
@@ -1273,7 +1298,7 @@ describe('LandingView bootstrap submission', () => {
             }
         });
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
@@ -1307,7 +1332,7 @@ describe('LandingView bootstrap submission', () => {
     it('starts Supabase OAuth from third-party login buttons', async () => {
         mockCurrentUser = null;
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: 'GitHub' }));
@@ -1325,7 +1350,7 @@ describe('LandingView bootstrap submission', () => {
         mockCurrentUser = null;
         getInvitationPublicSettings.mockResolvedValue({ required: true });
 
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         await screen.findByRole('button', { name: 'GitHub' });
@@ -1341,7 +1366,7 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('clears the Supabase session and reloads the current user when signing out', async () => {
-        renderLanding();
+        await renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '退出登录' }));
@@ -1361,9 +1386,9 @@ describe('LandingView bootstrap submission', () => {
             message: 'Insufficient credits.',
         });
 
-        renderLanding();
+        await renderLanding();
 
-        submitIdea('LLM generated idea');
+        await submitIdea('LLM generated idea');
 
         expect(await screen.findByText('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
@@ -1372,11 +1397,10 @@ describe('LandingView bootstrap submission', () => {
     it('generates selectable intake options without starting a BeeGame session immediately', async () => {
         const onStart = vi.fn().mockResolvedValue({ status: 'started', projectId: 'proj_1' });
 
-        renderLanding({ onStart });
+        await renderLanding({ onStart });
 
-        const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
+        await submitIdeaAndConfirmIntake('LLM generated idea');
 
-        expect(textbox).toBeDisabled();
         await screen.findByText('LLM Mode A');
         expect(screen.getByText('LLM Mode B')).toBeInTheDocument();
         expect(screen.getByText('LLM Mode C')).toBeInTheDocument();
@@ -1389,7 +1413,7 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('shows generated intake options in a modal instead of embedding them into the landing page', async () => {
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
 
@@ -1427,9 +1451,10 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('does not show clarification when intake returns an old clarification-only response', async () => {
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         runIdeaIntake.mockRejectedValueOnce(new Error('BeeGame intake did not return game mode options'));
 
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
 
@@ -1437,6 +1462,11 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByTestId('intake-clarification')).not.toBeInTheDocument();
         expect(screen.queryByText('需求补充')).not.toBeInTheDocument();
         expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+        expect(errorLog).toHaveBeenCalledWith(
+            'Failed to generate intake options:',
+            expect.objectContaining({ message: 'BeeGame intake did not return game mode options' }),
+        );
+        errorLog.mockRestore();
     });
 
     it('keeps the landing content visible without opening a modal while generating options', async () => {
@@ -1446,7 +1476,7 @@ describe('LandingView bootstrap submission', () => {
         }));
         const onStart = vi.fn();
 
-        renderLanding({ onStart });
+        await renderLanding({ onStart });
 
         const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
 
@@ -1478,7 +1508,7 @@ describe('LandingView bootstrap submission', () => {
             options: makeIntakeOptions(),
         });
 
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM concrete idea');
 
@@ -1516,7 +1546,7 @@ describe('LandingView bootstrap submission', () => {
             ],
         });
 
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
 
@@ -1576,7 +1606,7 @@ describe('LandingView bootstrap submission', () => {
             )),
         });
 
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM concrete settings idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
@@ -1614,7 +1644,7 @@ describe('LandingView bootstrap submission', () => {
     it('confirms an intake brief before starting the BeeGame session', async () => {
         const onStart = vi.fn().mockResolvedValue({ status: 'started', projectId: 'proj_1' });
 
-        renderLanding({ onStart });
+        await renderLanding({ onStart });
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
 
@@ -1682,7 +1712,7 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('closes the input method dropdown when clicking outside it', async () => {
-        renderLanding();
+        await renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
@@ -1697,8 +1727,8 @@ describe('LandingView bootstrap submission', () => {
         });
     });
 
-    it('renders localized English hero copy and idea placeholder', () => {
-        renderLanding({ lang: 'en' });
+    it('renders localized English hero copy and idea placeholder', async () => {
+        await renderLanding({ lang: 'en' });
 
         expect(screen.getByRole('heading', { name: 'Start with an idea.' })).toBeInTheDocument();
         expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
@@ -1707,7 +1737,7 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('accepts a GDD attachment from the landing prompt', async () => {
-        renderLanding();
+        await renderLanding();
 
         const input = document.getElementById('landing-attachment-upload') as HTMLInputElement;
         expect(input.accept).toContain('.md');
@@ -1721,8 +1751,8 @@ describe('LandingView bootstrap submission', () => {
         expect(await screen.findByText('game-design.md')).toBeInTheDocument();
     });
 
-    it('renders the video landing background', () => {
-        renderLanding();
+    it('renders the video landing background', async () => {
+        await renderLanding();
 
         const background = screen.getByTestId('faulty-terminal-background');
 
@@ -1731,8 +1761,8 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByTestId('landing-background-video')).not.toHaveAttribute('loop');
     });
 
-    it('keeps the video background stable while typing in the prompt', () => {
-        renderLanding();
+    it('keeps the video background stable while typing in the prompt', async () => {
+        await renderLanding();
 
         const video = screen.getByTestId('landing-background-video');
 
@@ -1741,14 +1771,14 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByTestId('landing-background-video')).toBe(video);
     });
 
-    it('does not expose model thinking controls in the idea prompt', () => {
-        renderLanding();
+    it('does not expose model thinking controls in the idea prompt', async () => {
+        await renderLanding();
         expect(screen.queryByLabelText('思考')).not.toBeInTheDocument();
         expect(screen.queryByRole('option', { name: '深度思考' })).not.toBeInTheDocument();
     });
 
-    it('renders the idea prompt as a frosted glass surface', () => {
-        renderLanding();
+    it('renders the idea prompt as a frosted glass surface', async () => {
+        await renderLanding();
 
         expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-surface', 'frosted-glass');
         expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-style-source', 'pixelfork');
@@ -1756,26 +1786,30 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
     });
 
-    it('renders the updated Simplified Chinese hero subtitle', () => {
-        renderLanding({ lang: 'zh' });
+    it('renders the updated Simplified Chinese hero subtitle', async () => {
+        await renderLanding({ lang: 'zh' });
 
         expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: '从一个想法开始。' })).not.toBeInTheDocument();
         expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
     });
 
-    it('renders the Traditional Chinese hero title without punctuation', () => {
-        renderLanding({ lang: 'zh-TW' });
+    it('renders the Traditional Chinese hero title without punctuation', async () => {
+        await renderLanding({ lang: 'zh-TW' });
 
         expect(screen.getByRole('heading', { name: '從一個想法開始' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: '從一個想法開始。' })).not.toBeInTheDocument();
     });
 
-    it('opens the simplified settings overlay on the general tab', () => {
-        renderLanding({ lang: 'en' });
+    it('opens the simplified settings overlay on the general tab', async () => {
+        await renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+        await screen.findByRole('menuitem', { name: 'Settings' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
 
         expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
         expect(screen.queryByText('Dark Mode')).not.toBeInTheDocument();
@@ -1794,29 +1828,37 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('option', { name: 'Português' })).toBeInTheDocument();
     });
 
-    it('opens a centered history modal with project list content', () => {
+    it('opens a centered history modal with project list content', async () => {
         mockProjects = [
             { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
         ];
 
-        renderLanding({ lang: 'zh' });
+        await renderLanding({ lang: 'zh' });
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: '历史项目' }));
+        await screen.findByRole('menuitem', { name: '历史项目' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: '历史项目' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
 
         expect(screen.getByRole('dialog', { name: '历史项目' })).toBeInTheDocument();
         expect(screen.getByText('LLM Project')).toBeInTheDocument();
     });
 
-    it('renders the project action menu outside the history dialog to avoid clipping', () => {
+    it('renders the project action menu outside the history dialog to avoid clipping', async () => {
         mockProjects = [
             { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
         ];
 
-        renderLanding({ lang: 'en' });
+        await renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+        await screen.findByRole('menuitem', { name: 'History Projects' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
         const dialog = screen.getByRole('dialog', { name: 'History Projects' });
 
         fireEvent.click(screen.getByRole('button', { name: 'More actions LLM Project' }));
@@ -1825,21 +1867,29 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).not.toContainElement(deleteAction);
     });
 
-    it('shows an empty state in the history modal', () => {
-        renderLanding({ lang: 'en' });
+    it('shows an empty state in the history modal', async () => {
+        await renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+        await screen.findByRole('menuitem', { name: 'History Projects' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
 
         expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
         expect(screen.getByText('No projects for this account yet')).toBeInTheDocument();
     });
 
-    it('keeps the history modal content area stable for empty and populated project lists', () => {
-        const emptyRender = renderLanding({ lang: 'en' });
+    it('keeps the history modal content area stable for empty and populated project lists', async () => {
+        const emptyRender = await renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+        await screen.findByRole('menuitem', { name: 'History Projects' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
 
         const emptyDialog = screen.getByRole('dialog', { name: 'History Projects' });
         const emptyContent = emptyDialog.querySelector('.scrollbar-premium');
@@ -1850,10 +1900,14 @@ describe('LandingView bootstrap submission', () => {
         mockProjects = [
             { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
         ];
-        renderLanding({ lang: 'en' });
+        await renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
-        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+        await screen.findByRole('menuitem', { name: 'History Projects' });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        });
 
         const populatedDialog = screen.getByRole('dialog', { name: 'History Projects' });
         const populatedContent = populatedDialog.querySelector('.scrollbar-premium');

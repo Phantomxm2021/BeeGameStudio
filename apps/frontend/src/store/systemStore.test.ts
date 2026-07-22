@@ -14,7 +14,7 @@ vi.mock('../services/api', () => ({
 
 vi.mock('zustand/middleware', () => ({
   createJSONStorage: vi.fn(),
-  persist: (initializer: any) => initializer,
+  persist: <T,>(initializer: T) => initializer,
 }));
 
 import { useSystemStore } from './systemStore';
@@ -126,6 +126,7 @@ describe('systemStore token usage', () => {
   });
 
   it('clears current user when loading permissions fails', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     useSystemStore.setState({
       currentUser: {
         id: 'old-user',
@@ -139,6 +140,8 @@ describe('systemStore token usage', () => {
 
     expect(useSystemStore.getState().currentUser).toBeNull();
     expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
+    expect(errorLog).toHaveBeenCalledWith('Failed to load current user:', expect.any(Error));
+    errorLog.mockRestore();
   });
 
   it('treats current-user 401 as a signed-out state without logging an error', async () => {

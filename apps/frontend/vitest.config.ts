@@ -13,6 +13,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    // Node 25 exposes experimental process-level Web Storage. Tests use
+    // jsdom's isolated implementation, so disable the process-level copy in
+    // workers instead of letting Node probe an unset --localstorage-file.
+    execArgv: ['--no-experimental-webstorage'],
     setupFiles: './src/test/setup.ts',
     server: {
       deps: {

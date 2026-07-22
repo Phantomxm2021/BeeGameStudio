@@ -1534,7 +1534,31 @@ describe('beegame session routes', () => {
         { headers: ownerBHeaders },
       )).status).toBe(404)
       expect((await app.request(
-        `/api/beegame-sessions/${session.id}/assets?workspacePath=${encodeURIComponent(workspace)}`,
+        '/api/projects/owner-a-project/events',
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/transcript',
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/artifact-index',
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/artifacts?path=assets%2Fasset-manifest.json',
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/package',
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/stop',
+        { method: 'POST', headers: ownerBJsonHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        '/api/projects/owner-a-project/assets',
         { headers: ownerBHeaders },
       )).status).toBe(404)
       expect((await app.request(
@@ -4942,15 +4966,9 @@ describe('beegame session routes', () => {
         body: JSON.stringify({ text: 'Build the project.' }),
       })
 
-      const latestSessionRes = await app.request(
+      expect((await app.request(
         `/api/projects/${projectId}/sessions/latest`,
-      )
-      expect(latestSessionRes.status).toBe(200)
-      const latestSession = await latestSessionRes.json()
-      expect(latestSession.id).toBe(ensured.session.id)
-      expect(latestSession.projectId).toBe(projectId)
-      expect(latestSession.workspacePath).toBe(await realpath(workspace))
-      expect(latestSession.transcriptPath.endsWith('.jsonl')).toBe(true)
+      )).status).toBe(404)
 
       await waitFor(async () => {
         const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
@@ -4982,6 +5000,85 @@ describe('beegame session routes', () => {
         token_budget: expect.objectContaining({
           status: 'tracking',
         }),
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('serves events, transcript, artifacts, package and stop through project-scoped routes', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      await mkdir(join(workspace, 'docs'), { recursive: true })
+      await writeFile(join(workspace, 'docs', 'GDD.md'), '# Project GDD\n')
+      const projectId = 'project_scoped_transport'
+      expect((await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Project-scoped transport',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })).status).toBe(200)
+      const ensureRes = await app.request(`/api/projects/${projectId}/session/ensure`, {
+        method: 'POST',
+      })
+      expect(ensureRes.status).toBe(200)
+      const ensured = await ensureRes.json()
+
+      const eventsRes = await app.request(`/api/projects/${projectId}/events?after=0`)
+      const events = await eventsRes.json()
+      expect(eventsRes.status).toBe(200)
+      expect(events).toEqual(expect.objectContaining({
+        sessionId: ensured.session.id,
+        workspacePath: await realpath(workspace),
+        events: expect.any(Array),
+        recoveredFromTranscript: false,
+      }))
+
+      const transcriptRes = await app.request(`/api/projects/${projectId}/transcript?limit=20`)
+      const transcript = await transcriptRes.json()
+      expect(transcriptRes.status).toBe(200)
+      expect(transcript).toEqual(expect.objectContaining({
+        sessionId: ensured.session.id,
+        events: expect.any(Array),
+        page: expect.objectContaining({ hasMore: false }),
+      }))
+
+      const indexRes = await app.request(`/api/projects/${projectId}/artifact-index`)
+      expect(indexRes.status).toBe(200)
+      expect(await indexRes.json()).toEqual(expect.objectContaining({
+        sessionId: ensured.session.id,
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({ path: 'docs/GDD.md' }),
+        ]),
+      }))
+
+      const artifactRes = await app.request(
+        `/api/projects/${projectId}/artifacts?path=${encodeURIComponent('docs/GDD.md')}`,
+      )
+      expect(artifactRes.status).toBe(200)
+      expect(await artifactRes.json()).toEqual({
+        path: 'docs/GDD.md',
+        content: '# Project GDD\n',
+      })
+
+      const packageRes = await app.request(`/api/projects/${projectId}/package`)
+      expect(packageRes.status).toBe(200)
+      expect(packageRes.headers.get('content-type')).toBe('application/zip')
+
+      const stopRes = await app.request(`/api/projects/${projectId}/stop`, { method: 'POST' })
+      expect(stopRes.status).toBe(200)
+      expect(await stopRes.json()).toEqual(expect.objectContaining({
+        id: ensured.session.id,
+        status: 'stopped',
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -6572,10 +6669,11 @@ describe('beegame session routes', () => {
       ]))
 
       const assetsRes = await app.request(
-        `/api/beegame-sessions/${ensured.session.id}/assets`,
+        '/api/projects/project-owned-restored/assets',
       )
       expect(assetsRes.status).toBe(200)
       expect(await assetsRes.json()).toEqual({
+        contract_state: 'missing',
         version: 5,
         requirements: [],
         imports: [],
@@ -6618,8 +6716,18 @@ describe('beegame session routes', () => {
         }),
       )
 
-      const session = await startTestSession(app, workspace)
-      const res = await app.request(`/api/beegame-sessions/${session.id}/assets`)
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_platform_neutral_assets',
+          name: 'Platform Neutral Assets',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const res = await app.request('/api/projects/project_platform_neutral_assets/assets')
 
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual(expect.objectContaining({
@@ -6721,6 +6829,18 @@ describe('beegame session routes', () => {
         if (requestUrl.includes('/rest/v1/beegame_model_configs')) {
           return Response.json([createSupabaseModelConfigFixture()])
         }
+        if (requestUrl.includes('/rest/v1/beegame_projects')) {
+          return Response.json([{
+            id: 'project_asset_metadata',
+            owner_id: '00000000-0000-0000-0000-000000000001',
+            workspace_id: 'default',
+            name: 'Asset Metadata Project',
+            root_path: workspace,
+            runtime_snapshot: {},
+            created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
+          }])
+        }
         if (requestUrl.includes('/rest/v1/beegame_sessions')) {
           if (init?.method === 'POST') return Response.json([JSON.parse(String(init.body))])
           return Response.json([])
@@ -6747,22 +6867,9 @@ describe('beegame session routes', () => {
           role: 'owner',
         },
       })
-      const sessionRes = await app.request('/api/beegame-sessions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: 'Bearer user-token',
-        },
-        body: JSON.stringify({
-          workspacePath: workspace,
-          projectId: 'project_asset_metadata',
-        }),
-      })
-      const session = await sessionRes.json()
-      const sessionWorkspace = session.cwd as string
-      await mkdir(join(sessionWorkspace, 'assets'), { recursive: true })
+      await mkdir(join(workspace, 'assets'), { recursive: true })
       await writeFile(
-        join(sessionWorkspace, 'assets', 'asset-manifest.json'),
+        join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
           version: 5,
           project_target: {
@@ -6782,7 +6889,7 @@ describe('beegame session routes', () => {
       )
 
       const assetsRes = await app.request(
-        `/api/beegame-sessions/${session.id}/assets?workspacePath=${encodeURIComponent(workspace)}`,
+        '/api/projects/project_asset_metadata/assets',
         { headers: { authorization: 'Bearer user-token' } },
       )
 
@@ -6807,7 +6914,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('rejects legacy asset listing without verified session metadata', async () => {
+  test('does not expose the removed session asset listing alias', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-legacy-'))
     const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner })
     try {
@@ -6854,13 +6961,12 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/beegame_assets_legacy/assets?workspacePath=${encodeURIComponent(workspace)}`,
       )
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'Session not found' })
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
 
-  test('rejects legacy resource asset listing without verified session metadata', async () => {
+  test('does not expose the removed session resource listing alias', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-resources-'))
     const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner })
     try {
@@ -6902,13 +7008,12 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/beegame_assets_resources/assets?workspacePath=${encodeURIComponent(workspace)}`,
       )
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'Session not found' })
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
 
-  test('rejects legacy asset upload without verified session metadata', async () => {
+  test('does not expose the removed session asset upload alias', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-upload-'))
     const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner })
     try {
@@ -6937,7 +7042,6 @@ describe('beegame session routes', () => {
         { method: 'POST', body: form },
       )
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'Session not found' })
       await expect(stat(join(workspace, 'public', 'assets', 'logo.png'))).rejects.toThrow()
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -6961,6 +7065,18 @@ describe('beegame session routes', () => {
         const requestUrl = String(input)
         if (requestUrl.includes('/rest/v1/beegame_model_configs')) {
           return Response.json([createSupabaseModelConfigFixture()])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_projects')) {
+          return Response.json([{
+            id: 'project_asset_storage',
+            owner_id: '00000000-0000-0000-0000-000000000002',
+            workspace_id: 'default',
+            name: 'Asset Storage Project',
+            root_path: workspace,
+            runtime_snapshot: {},
+            created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
+          }])
         }
         if (requestUrl.includes('/storage/v1/object/beegame-assets/')) {
           storageUploads.push({
@@ -6998,22 +7114,9 @@ describe('beegame session routes', () => {
           role: 'owner',
         },
       })
-      const sessionRes = await app.request('/api/beegame-sessions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: 'Bearer user-token',
-        },
-        body: JSON.stringify({
-          workspacePath: workspace,
-          projectId: 'project_asset_storage',
-        }),
-      })
-      const session = await sessionRes.json()
-      const sessionWorkspace = session.cwd as string
-      await mkdir(join(sessionWorkspace, 'assets'), { recursive: true })
+      await mkdir(join(workspace, 'assets'), { recursive: true })
       await writeFile(
-        join(sessionWorkspace, 'assets', 'asset-manifest.json'),
+        join(workspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
           version: 5,
           project_target: {
@@ -7035,7 +7138,7 @@ describe('beegame session routes', () => {
       form.set('file', new File(['logo-bytes'], 'logo.png', { type: 'image/png' }))
 
       const res = await app.request(
-        `/api/beegame-sessions/${session.id}/assets/main_logo/upload?workspacePath=${encodeURIComponent(workspace)}`,
+        '/api/projects/project_asset_storage/assets/main_logo/upload',
         {
           method: 'POST',
           headers: { authorization: 'Bearer user-token' },
@@ -7043,7 +7146,7 @@ describe('beegame session routes', () => {
         },
       )
       const payload = await res.json()
-      const manifest = JSON.parse(await readFile(join(sessionWorkspace, 'assets', 'asset-manifest.json'), 'utf8'))
+      const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
 
       expect(res.status).toBe(200)
       expect(storageUploads).toEqual([

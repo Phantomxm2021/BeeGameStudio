@@ -1,7 +1,6 @@
 import { memo, useMemo } from 'react';
-import { FileText, MessageSquare, AlertCircle, Send, Square, X } from 'lucide-react';
+import { FileText, AlertCircle, Send, Square, X } from 'lucide-react';
 import { FaPaperclip } from 'react-icons/fa6';
-import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import {
     MessageScroller,
@@ -64,7 +63,6 @@ interface ChatPanelProps {
     projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
-    variant?: 'legacy' | 'beegame';
     lang?: Language;
     currentUserDisplayName?: string;
     currentUserEmail?: string;
@@ -262,7 +260,6 @@ export const ChatPanel = memo(({
     projectStatus,
     isComposerLocked = false,
     canSendMessage = true,
-    variant = 'legacy',
     lang = 'en',
     currentUserDisplayName,
     currentUserEmail,
@@ -320,7 +317,6 @@ export const ChatPanel = memo(({
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
     const canSubmitComposer = Boolean(chatInput.trim() || attachments.length > 0);
-    const isBeeGameVariant = variant === 'beegame';
     const messageOutlineItems = useMemo(
         () => messages
             .filter((message) => message.sender === 'user')
@@ -336,23 +332,11 @@ export const ChatPanel = memo(({
         if (nextAttachments.length > 0) onAddAttachments(nextAttachments);
     };
 
-    const panelClassName = isBeeGameVariant
-        ? 'flex h-full flex-col bg-transparent'
-        : 'flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl';
-    const legacyScrollClassName = 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
-    const composerShellClassName = isBeeGameVariant
-        ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
-        : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
-    const normalComposerClassName = isBeeGameVariant
-        ? 'glass-control group flex min-h-[60px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl'
-        : 'relative group';
-    const textareaClassName = isBeeGameVariant
-        ? 'type-input scrollbar-hide w-full bg-transparent px-5 py-3 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[56px] max-h-[150px] resize-none overflow-y-auto outline-none'
-        : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
-    const textareaInsetClassName = isBeeGameVariant ? '' : 'pl-14';
-    const sendButtonClassName = isBeeGameVariant
-        ? 'primary-pill flex h-8 w-8 shrink-0 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
-        : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
+    const panelClassName = 'flex h-full flex-col bg-transparent';
+    const composerShellClassName = 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl';
+    const normalComposerClassName = 'glass-control group flex min-h-[60px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl';
+    const textareaClassName = 'type-input scrollbar-hide w-full bg-transparent px-5 py-3 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[56px] max-h-[150px] resize-none overflow-y-auto outline-none';
+    const sendButtonClassName = 'primary-pill flex h-8 w-8 shrink-0 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35';
     const effectiveComposerPlaceholder = activeBeeGamePermissionReview
         ? text.permissionPendingPlaceholder
         : isComposerLocked || isLoading
@@ -360,8 +344,8 @@ export const ChatPanel = memo(({
             : composerPlaceholder;
 
     return (
-        <div className={panelClassName} data-testid={isBeeGameVariant ? 'beegame-chat-panel' : undefined}>
-            {isBeeGameVariant ? (
+        <div className={panelClassName} data-testid="beegame-chat-panel">
+            {
                 <MessageScrollerProvider
                     autoScroll
                 >
@@ -471,89 +455,7 @@ export const ChatPanel = memo(({
                         <MessageScrollerButton />
                     </MessageScroller>
                 </MessageScrollerProvider>
-            ) : (
-                <div
-                    ref={scrollContainerRef}
-                    className={legacyScrollClassName}
-                >
-                    {messages.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20">
-                            <div className="animate-pulse">
-                                <MessageSquare className="w-16 h-16 text-zinc-400" />
-                            </div>
-                            <p className="type-callout">{text.noMessages}</p>
-                        </div>
-                    ) : (
-                        messages.map((m) => (
-                            <MessageItem
-                                key={m.id}
-                                m={m}
-                                onPreviewArtifact={onPreviewArtifact}
-                                variant={variant}
-                                lang={lang}
-                            />
-                        ))
-                    )}
-
-                    {pendingReviews.map((review: ReviewDisplayModel) => {
-                        const isManifestReview = review?.type === 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
-                        if (!isManifestReview) return null;
-
-                        return (
-	                            <div
-	                                key={review.gate_id}
-	                                className="glass-control w-full space-y-4 rounded-3xl border border-white/15 bg-black/25 p-6 backdrop-blur-2xl"
-                            >
-                                <div className="flex items-start space-x-3">
-	                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-zinc-300" />
-                                    <div className="flex-1 min-w-0">
-	                                        <div className="type-caption-1 mb-1 text-zinc-100">{text.actionRequired}</div>
-	                                        <div className="type-callout mb-2 text-zinc-200 opacity-80">
-                                            {text.resourceManifestDescription}
-                                        </div>
-                                        <div className="flex space-x-3 mt-4">
-                                            <button
-                                                onClick={() => onApproveManifest && onApproveManifest(toApprovalPayload(review))}
-                                                disabled={isLoading}
-	                                                className="type-button flex flex-1 items-center justify-center space-x-2 rounded-xl bg-white py-2 text-zinc-950 shadow-sm transition-colors hover:bg-zinc-200 disabled:opacity-50"
-                                            >
-                                                <span>{text.skip}</span>
-                                            </button>
-
-                                            <div className="flex-1">
-                                                <input
-                                                    type="file"
-                                                    accept=".csv"
-                                                    onChange={(e) => {
-                                                        const file = e.target.files?.[0];
-                                                        if (file && onUploadManifestCsv) {
-                                                            const reader = new FileReader();
-                                                            reader.onload = (e) => {
-                                                                const content = e.target?.result as string;
-                                                                onUploadManifestCsv(review.gate_id, content, true);
-                                                            };
-                                                            reader.readAsText(file);
-                                                        }
-                                                    }}
-                                                    className="hidden"
-                                                    id={`upload-csv-${review.gate_id}`}
-                                                />
-                                                <label
-                                                    htmlFor={`upload-csv-${review.gate_id}`}
-                                                    className={`type-button w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
-                                                >
-                                                    <span>{text.upload}</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
+            }
             <div className={composerShellClassName}>
                 {editingMessageId ? (
                     <div
@@ -615,9 +517,7 @@ export const ChatPanel = memo(({
                                         : 'revision'
                             }
                             approvalState={approvalState}
-                            layout="bottom-bar"
-                            variant={isBeeGameVariant ? 'beegame' : 'legacy'}
-                            className={isBeeGameVariant ? 'glass-control rounded-3xl px-3 py-3 text-zinc-100 backdrop-blur-2xl' : undefined}
+                            className="glass-control rounded-3xl px-3 py-3 text-zinc-100 backdrop-blur-2xl"
                             actions={[
                                 ...(activeComposerReview.type === 'INTENT_CLARIFICATION'
                                     ? [{
@@ -655,11 +555,11 @@ export const ChatPanel = memo(({
                         />
                     </div>
                 ) : (
-                    <div className={normalComposerClassName} data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
+                    <div className={normalComposerClassName} data-testid="beegame-chat-composer">
                         {attachments.length > 0 ? (
                             <div
-                                className={isBeeGameVariant ? 'flex gap-3 overflow-x-auto px-4 pt-4 pb-2' : 'mb-3 flex gap-2 overflow-x-auto'}
-                                data-testid={isBeeGameVariant ? 'beegame-chat-attachments' : undefined}
+                                className="flex gap-3 overflow-x-auto px-4 pt-4 pb-2"
+                                data-testid="beegame-chat-attachments"
                             >
                                 {attachments.map((attachment, index) => (
                                     <div
@@ -690,8 +590,7 @@ export const ChatPanel = memo(({
                                 ))}
                             </div>
                         ) : null}
-                        {isBeeGameVariant ? (
-                            <>
+                        <>
                                 <input
                                     id="beegame-chat-attachment-upload"
                                     type="file"
@@ -707,7 +606,7 @@ export const ChatPanel = memo(({
                                 />
                                 <textarea
                                     ref={textareaRef}
-                                    className={`${textareaClassName} ${textareaInsetClassName}`}
+                                    className={textareaClassName}
                                     placeholder={effectiveComposerPlaceholder}
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
@@ -751,62 +650,7 @@ export const ChatPanel = memo(({
                                         </button>
                                     </div>
                                 </div>
-                            </>
-                        ) : (
-                            <div className="relative flex items-end">
-                                <input
-                                    id="beegame-chat-attachment-upload"
-                                    type="file"
-                                    accept={CHAT_ATTACHMENT_ACCEPT}
-                                    multiple
-                                    className="hidden"
-                                    onChange={(event) => {
-                                        const files = Array.from(event.target.files || []);
-                                        event.target.value = '';
-                                        void handleImageFiles(files);
-                                    }}
-                                    disabled={isComposerDisabled}
-                                />
-                                <label
-                                    htmlFor="beegame-chat-attachment-upload"
-                                    aria-label={attachFileLabel}
-                                    title={attachFileLabel}
-                                    className={`absolute bottom-3.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
-                                >
-                                    <FaPaperclip className="h-4 w-4" />
-                                </label>
-                                <textarea
-                                    ref={textareaRef}
-                                    className={`${textareaClassName} ${textareaInsetClassName}`}
-                                    placeholder={effectiveComposerPlaceholder}
-                                    value={chatInput}
-                                    onChange={(e) => onChatInputChange(e.target.value)}
-                                    onPaste={(e) => {
-                                        const files = clipboardDataToAttachmentFiles(e.clipboardData);
-                                        if (files.length === 0) return;
-                                        e.preventDefault();
-                                        void handleImageFiles(files);
-                                    }}
-                                    onCompositionStart={() => setIsComposing(true)}
-                                    onCompositionEnd={() => setIsComposing(false)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-                                            e.preventDefault();
-                                            if (!isComposerDisabled) onSend();
-                                        }
-                                    }}
-                                    disabled={isComposerDisabled}
-                                />
-                                        <button
-                                            onClick={isLoading ? () => void onStop?.() : onSend}
-                                            aria-label={isLoading ? (isStopping ? 'Stopping task' : 'Stop task') : 'Send message'}
-                                            disabled={isLoading ? !onStop || isStopping : !canSubmitComposer || isComposerDisabled}
-                                            className={sendButtonClassName}
-                                        >
-                                            {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 -ml-0.5" />}
-                                        </button>
-                            </div>
-                        )}
+                        </>
                     </div>
                 )}
             </div>

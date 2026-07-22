@@ -175,6 +175,10 @@ export type BeeGameAssetUploadResult = {
   message: string
 }
 
+export type BeeGameAssetUploadOptions = {
+  persist?: (manifest: BeeGameAssetManifest) => Promise<void>
+}
+
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 export const CURRENT_ASSET_MANIFEST_VERSION = 5
 
@@ -260,6 +264,7 @@ export async function uploadBeeGameAsset(
   workspacePath: string,
   requirementId: string,
   file: File,
+  options: BeeGameAssetUploadOptions = {},
 ): Promise<BeeGameAssetUploadResult> {
   const root = normalizeWorkspacePath(workspacePath)
   const manifest = await readBeeGameAssetManifest(root)
@@ -269,9 +274,7 @@ export async function uploadBeeGameAsset(
   const requirement = manifest.requirements[requirementIndex]!
   assertAssetFormatAllowed(file.name, requirement, manifest.project_target)
   const targetPath = resolveUploadTarget(root, requirement, file.name, manifest.project_target)
-  await mkdir(resolve(targetPath, '..'), { recursive: true })
   const bytes = new Uint8Array(await file.arrayBuffer())
-  await writeFile(targetPath, bytes)
   const relativePath = normalizeRelativePath(root, targetPath)
   const importId = `upload.${normalizeImportId(requirement.id)}`
   const resourceImport: BeeGameResourceImport = {
@@ -293,7 +296,17 @@ export async function uploadBeeGameAsset(
   }
   manifest.requirements[requirementIndex] = updatedRequirement
   manifest.imports = [...(manifest.imports ?? []).filter(entry => entry.id !== importId), resourceImport]
-  await writeAssetManifest(root, manifest)
+  const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  const rollback = await commitResourceWrites([
+    { targetPath, bytes },
+    { targetPath: manifestPath, bytes: new TextEncoder().encode(serializeAssetManifest(manifest)) },
+  ])
+  try {
+    await options.persist?.(manifest)
+  } catch (error) {
+    await rollback()
+    throw error
+  }
   return {
     manifest,
     requirement: updatedRequirement,
@@ -1301,13 +1314,18 @@ function formatsAgree(declaredFormat: string, detectedFormat: string): boolean {
 
 async function writeAssetManifest(root: string, manifest: BeeGameAssetManifest): Promise<void> {
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  const serialized = serializeAssetManifest(manifest)
+  await mkdir(resolve(manifestPath, '..'), { recursive: true })
+  await writeFile(manifestPath, serialized, 'utf8')
+}
+
+function serializeAssetManifest(manifest: BeeGameAssetManifest): string {
   const canonical = toCanonicalBeeGameAssetManifest(manifest)
   // Runtime writes must never create a file that the strict runtime reader
   // rejects on its next read. Missing-file/draft snapshots are useful to UI
   // callers, but they are not a persistable canonical contract.
   parseCanonicalBeeGameAssetManifest(canonical)
-  await mkdir(resolve(manifestPath, '..'), { recursive: true })
-  await writeFile(manifestPath, `${JSON.stringify(canonical, null, 2)}\n`, 'utf8')
+  return `${JSON.stringify(canonical, null, 2)}\n`
 }
 
 export function toCanonicalBeeGameAssetManifest(manifest: BeeGameAssetManifest): Record<string, unknown> {

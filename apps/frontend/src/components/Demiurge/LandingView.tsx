@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, LoaderCircle, X } from 'lucide-react';
@@ -15,7 +15,6 @@ import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
-import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
 import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from '../ResourceLibrary/resourceLibraryRoute';
 import { CONFIGURED_PRODUCTION_SETTING_OPTIONS, type ProductionSettingOptions } from '../../config/productionSettingOptions';
 import type { StartProjectResult } from '../../types/project';
@@ -25,6 +24,7 @@ import {
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
+
 import {
     getCreditBalance,
     getCreditQuote,
@@ -44,6 +44,11 @@ import {
 import { getInvitationPublicSettings } from '../../services/invitationApi';
 import type { ChatAttachmentPayload } from '../../services/api';
 import type { AttachmentBuildAnalysis } from '../../services/attachmentBuild';
+
+const ResourceLibraryPage = lazy(async () => {
+    const module = await import('../ResourceLibrary/ResourceLibraryView');
+    return { default: module.ResourceLibraryPage };
+});
 
 type IntakePhase =
     | 'idle'
@@ -318,17 +323,9 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
     resourceLibraryUsage: 'preferred',
 });
 
-const optionsWithCurrentValue = (options: string[], _value: string): string[] => {
-    return options;
-};
-
 const renderSelectPlaceholder = (label: string) => (
     <option value="" disabled hidden>{label}</option>
 );
-
-function buildProductionSettingOptions(_options: BeeGameIntakeOption[]): ProductionSettingOptions {
-    return CONFIGURED_PRODUCTION_SETTING_OPTIONS;
-}
 
 function pickConfiguredProductionValue(value: string | undefined, options: string[]): string {
     const normalized = value?.trim();
@@ -713,7 +710,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const inputMenuDropdownRef = useRef<HTMLDivElement | null>(null);
     const [inputMenuPosition, setInputMenuPosition] = useState<InputMenuPosition | null>(null);
     useEffect(() => {
-        void i18n.changeLanguage(normalizeI18nLanguage(lang));
+        const targetLanguage = normalizeI18nLanguage(lang);
+        if (i18n.resolvedLanguage !== targetLanguage) {
+            void i18n.changeLanguage(targetLanguage);
+        }
     }, [i18n, lang]);
 
     useEffect(() => {
@@ -771,10 +771,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const localizedInputs = (inputs: string[]): string => inputs.length > 0
         ? inputs.map(localizedOptionLabel).join(' / ')
         : intakeText.fields.selectPlaceholder;
-    const productionSettingOptions = useMemo(
-        () => buildProductionSettingOptions(intakeOptions),
-        [intakeOptions],
-    );
+    const productionSettingOptions: ProductionSettingOptions = CONFIGURED_PRODUCTION_SETTING_OPTIONS;
     const shouldShowIntakeModal = (
         intakePhase !== 'idle' &&
         intakePhase !== 'generating_options' &&
@@ -1437,7 +1434,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onSetLang={onSetLang}
                 />
 
-                {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} /> : null}
+                {isResourceLibraryOpen ? (
+                    <Suspense fallback={<div className="grid min-h-screen place-items-center bg-black"><span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" /></div>}>
+                        <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} />
+                    </Suspense>
+                ) : null}
 
                 <ProjectHistoryModal
                     isOpen={isHistoryOpen}
@@ -1871,35 +1872,35 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     {intakeText.fields.platform}
                                     <select aria-label={intakeText.fields.platform} value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
                                         {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                                        {optionsWithCurrentValue(productionSettingOptions.platforms, settings.platform).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        {productionSettingOptions.platforms.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-callout text-zinc-300">
                                     {intakeText.fields.engine}
                                     <select aria-label={intakeText.fields.engine} value={normalizeEngine(settings.engine)} onChange={(event) => updateSettings({ engine: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
                                         {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                                        {optionsWithCurrentValue(productionSettingOptions.engines, settings.engine || '').map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        {productionSettingOptions.engines.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-callout text-zinc-300">
                                     {intakeText.fields.dimension}
                                     <select aria-label={intakeText.fields.dimension} value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
                                         {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                                        {optionsWithCurrentValue(productionSettingOptions.dimensions, settings.dimension).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        {productionSettingOptions.dimensions.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-callout text-zinc-300">
                                     {intakeText.fields.genre}
                                     <select aria-label={intakeText.fields.genre} value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
                                         {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                                        {optionsWithCurrentValue(productionSettingOptions.genres, settings.genre).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        {productionSettingOptions.genres.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-callout text-zinc-300">
                                     {intakeText.fields.style}
                                     <select aria-label={intakeText.fields.style} value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
                                         {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                                        {optionsWithCurrentValue(productionSettingOptions.styles, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        {productionSettingOptions.styles.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-callout text-zinc-300">
@@ -1991,7 +1992,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             className="input-surface glass-panel fixed z-[220] overflow-hidden rounded-3xl p-1.5 text-zinc-100 backdrop-blur-2xl"
                         >
                             <div className="relative z-10">
-                                {optionsWithCurrentValue(productionSettingOptions.inputs, '').map((input) => {
+                                {productionSettingOptions.inputs.map((input) => {
                                     const active = settings.inputs.includes(input);
                                     return (
                                         <button

@@ -141,13 +141,11 @@ export type WebSocketMessageType =
   | 'tool_start'    // Tool invocation started
   | 'tool_end'      // Tool invocation completed
   | 'usage'         // Token usage statistics
-  | 'pipeline_update' // Pipeline stage update
   | 'human_gate'    // Human approval gate open
   | 'error'         // Runtime error event
   | 'p2p_route'     // Peer-to-peer routing event
   | 'error_paused'  // Error occurred, task paused
   | 'plan_approved' // Plan approval event
-  | 'phase_update'   // Telemetry phase update
   | 'artifact_created' // Real-time artifact created event
   | 'context_update' // Context bundle visibility event
   | 'project_renamed' // Project renamed event (AI auto-naming)
@@ -247,14 +245,8 @@ export interface WebSocketMessage {
   /** Structured status enum (optional, used for status type) */
   status?: 'queued' | 'running' | 'resuming' | 'paused' | 'idle' | 'finished' | 'failed' | 'stopped';
 
-  /** Pipeline stage value (optional, used for pipeline_update type) */
-  stage?: string;
-
   /** Human gate name (optional, used for human_gate type) */
   gate?: string;
-
-  /** Progress ratio (optional, used for pipeline_update type) */
-  progress?: number;
 
   /** Project name (optional, used for project_renamed type) */
   name?: string;
@@ -264,9 +256,6 @@ export interface WebSocketMessage {
 
   /** Agent id (optional, used for artifact/context events) */
   agent?: string;
-
-  /** Current workflow phase (optional, used for phase_update type) */
-  current_phase?: number | string;
 
   /** Runtime context evidence (optional, used for context_update type) */
   context?: RuntimeContextEvidence;

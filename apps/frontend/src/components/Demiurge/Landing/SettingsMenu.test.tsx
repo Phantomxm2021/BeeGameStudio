@@ -366,6 +366,7 @@ describe('SettingsMenu model settings', () => {
 
     it('renders the settings panel as a centered modal overlay', async () => {
         renderSettings();
+        await waitFor(() => expect(listModelConfigs).toHaveBeenCalled());
 
         const dialog = screen.getByRole('dialog', { name: '系统设置' });
         expect(dialog.className).toContain('items-center');

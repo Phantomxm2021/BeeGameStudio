@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { ResourceElement } from '../../services/resourceLibraryApi'
-import { ModelPreview, type ModelMetrics } from './ModelPreview'
+import type { ModelMetrics } from './ModelPreview'
 import type { MaterialTextureBindings } from './materialTextureBindings'
+
+const ModelPreview = lazy(async () => {
+  const module = await import('./ModelPreview')
+  return { default: module.ModelPreview }
+})
 
 export type PreviewRenderer = 'image' | 'audio' | 'video' | 'font' | 'pdf' | 'text' | 'document-card' | 'model'
 
@@ -68,7 +73,13 @@ export function ResourcePreview({ element, url, onMetrics, materialTextureBindin
   if (renderer === 'font') return <FontPreview url={url} element={element} onPreviewError={onPreviewError} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
   if (renderer === 'text') return <SafeTextPreview url={url} onPreviewError={onPreviewError} />
-  if (renderer === 'model') return <ModelPreview url={url} sourcePath={element.path} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} externalResourceUrls={externalResourceUrls} externalReferences={externalReferences} />
+  if (renderer === 'model') {
+    return (
+      <Suspense fallback={<div className="grid h-full w-full place-items-center"><span className="size-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" /></div>}>
+        <ModelPreview url={url} sourcePath={element.path} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} externalResourceUrls={externalResourceUrls} externalReferences={externalReferences} />
+      </Suspense>
+    )
+  }
   return <DocumentCard element={element} url={url} />
 }
 

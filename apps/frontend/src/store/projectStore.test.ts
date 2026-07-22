@@ -148,10 +148,16 @@ describe('projectStore pending review normalization', () => {
     });
 
     it('keeps current status and shows a toast when project status loading fails', async () => {
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const showToastError = vi.fn();
         useProjectStore.setState({
             showToastError,
-            projectStatus: { project_id: 'proj_1', next_action: 'running' } as any,
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+                next_action: 'running',
+            },
         });
         getProjectStatus.mockRejectedValue(new Error('database unavailable'));
 
@@ -159,6 +165,8 @@ describe('projectStore pending review normalization', () => {
 
         expect(useProjectStore.getState().projectStatus?.next_action).toBe('running');
         expect(showToastError).toHaveBeenCalledWith(expect.stringContaining('后端状态不可用'));
+        expect(errorLog).toHaveBeenCalledWith('Failed to load project status for project proj_1:', expect.any(Error));
+        errorLog.mockRestore();
     });
 
     it('updates project status and pending reviews from one runtime snapshot', async () => {
@@ -519,8 +527,8 @@ describe('projectStore pending review normalization', () => {
     it('removes and restores pending reviews by gate id', () => {
         useProjectStore.setState({
             pendingReviews: [
-                { gate_id: 'gate_1', artifact_id: 'art_1' } as any,
-                { gate_id: 'gate_2', artifact_id: 'art_2' } as any,
+                { gate_id: 'gate_1', artifact_id: 'art_1' },
+                { gate_id: 'gate_2', artifact_id: 'art_2' },
             ],
         });
 
@@ -530,7 +538,7 @@ describe('projectStore pending review normalization', () => {
             expect.objectContaining({ gate_id: 'gate_2' }),
         ]);
 
-        useProjectStore.getState().upsertPendingReview({ gate_id: 'gate_1', artifact_id: 'art_1' } as any);
+        useProjectStore.getState().upsertPendingReview({ gate_id: 'gate_1', artifact_id: 'art_1' });
 
         expect(useProjectStore.getState().pendingReviews).toEqual([
             expect.objectContaining({ gate_id: 'gate_1' }),

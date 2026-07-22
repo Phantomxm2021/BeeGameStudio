@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
@@ -41,7 +41,7 @@ describe('RightSidebar tabs', () => {
         vi.useRealTimers();
     });
 
-    it('shows only collaboration and artifacts tabs', () => {
+    it('shows the canonical collaboration, deliverables, and assets tabs', () => {
         render(
             <RightSidebar
                 projectId="proj_1"
@@ -60,8 +60,9 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        expect(screen.getByRole('button', { name: '团队协作' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '交付产物' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '协作流' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^交付物/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '资源' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '运行时' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '任务看板' })).not.toBeInTheDocument();
     });
@@ -92,7 +93,7 @@ describe('RightSidebar tabs', () => {
         const input = screen.getByPlaceholderText(/AI 正在处理/i);
         expect(input).toBeDisabled();
 
-        await user.click(screen.getByRole('button', { name: '团队协作' }));
+        await user.click(screen.getByRole('button', { name: '协作流' }));
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
@@ -115,7 +116,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -147,7 +147,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -174,7 +173,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -213,7 +211,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -252,7 +249,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -283,7 +279,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -327,7 +322,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -365,7 +359,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -410,7 +403,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -484,7 +476,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -519,7 +510,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -529,6 +519,7 @@ describe('RightSidebar tabs', () => {
     });
 
     it('keeps the existing asset contract visible when a refresh request fails', async () => {
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         vi.useFakeTimers();
         vi.mocked(api.getProjectAssets)
             .mockResolvedValueOnce({
@@ -570,7 +561,6 @@ describe('RightSidebar tabs', () => {
                     message: '',
                     placeholder: 'Type...',
                 }}
-                variant="beegame"
             />
         );
 
@@ -587,6 +577,8 @@ describe('RightSidebar tabs', () => {
 
         expect(screen.getByText('Game BGM')).toBeInTheDocument();
         expect(screen.queryByText(/还没有资源合同/)).not.toBeInTheDocument();
+        expect(errorLog).toHaveBeenCalledWith('Failed to load project assets:', expect.any(Error));
+        errorLog.mockRestore();
         vi.useRealTimers();
     });
 

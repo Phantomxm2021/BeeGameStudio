@@ -83,6 +83,13 @@
     "revisionRequired": "수정 필요",
     "clarificationDescription": "확인 질문에 답하거나 현재 브리프를 어떻게 진행할지 선택하세요.",
     "aiProcessing": "AI 처리 중...",
+    "attachmentBuild": {
+      "input": "입력", "completeness": "완성도", "confirmedGdd": "확정된 GDD",
+      "confirmedFacts": "확정된 사실", "inferredDesign": "추론된 디자인", "missingInformation": "누락된 정보",
+      "conflicts": "해결할 충돌", "useGdd": "GDD 값 사용", "useImage": "이미지 값 사용", "useCustom": "사용자 지정 값 사용",
+      "resourceLibrary": "리소스 라이브러리 사용", "resourcePreferred": "리소스 라이브러리 우선", "resourceOptional": "필요할 때 사용", "resourceRequired": "리소스 라이브러리 필수",
+      "retry": "다시 분석", "preparing": "빌드 준비 중…", "confirm": "확인 후 빌드"
+    },
     "settingsGeneral": "일반",
     "settingsModel": "모델",
     "closeSettings": "설정 닫기",

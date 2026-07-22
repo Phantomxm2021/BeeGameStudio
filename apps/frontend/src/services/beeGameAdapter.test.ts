@@ -40,6 +40,19 @@ const makeLlmOptions = (first: Record<string, unknown> = makeLlmOption()) => [
   makeLlmOption({ id: 'mode_from_llm_3', title: 'Mode From LLM 3' }),
 ];
 
+const createCompletedIntakeJobFetch = (result: Record<string, unknown>) => vi.fn(
+  async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
+      return jsonResponse({ jobId: 'intake_job_test', status: 'running' }, 202);
+    }
+    if (path === '/api/beegame-intake/jobs/intake_job_test') {
+      return jsonResponse({ status: 'completed', result });
+    }
+    return jsonResponse({ error: 'not found' }, 404);
+  },
+);
+
 const bootstrapResponse = (
   init: RequestInit | undefined,
   options: { sessionId: string; workspacePath: string },
@@ -86,6 +99,53 @@ const seedBoundProject = (sessionId: string, workspacePath: string) => {
     workspacePath,
     language: 'en',
   }]));
+  const upstream = globalThis.fetch.bind(globalThis);
+  const projectRoot = `/api/projects/${encodeURIComponent(project.id)}`;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === `${projectRoot}/stop`) {
+      return upstream(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/stop`, init);
+    }
+    if (path === `${projectRoot}/package`) {
+      return upstream(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/package?workspacePath=${encodeURIComponent(workspacePath)}`, init);
+    }
+    if (path.startsWith(`${projectRoot}/events`)) {
+      const query = new URLSearchParams(path.split('?')[1] || '');
+      const response = await upstream(
+        `/api/beegame-sessions/${encodeURIComponent(sessionId)}/events?after=${encodeURIComponent(query.get('after') || '0')}`,
+        init,
+      );
+      if (!response.ok) return response;
+      return jsonResponse({
+        sessionId,
+        workspacePath,
+        events: await response.json(),
+        recoveredFromTranscript: false,
+      });
+    }
+    if (path.startsWith(`${projectRoot}/transcript`)) {
+      const query = new URLSearchParams(path.split('?')[1] || '');
+      const base = `/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`;
+      const paged = `${base}&limit=${encodeURIComponent(query.get('limit') || '300')}${query.get('before') ? `&before=${encodeURIComponent(query.get('before')!)}` : ''}`;
+      let response = await upstream(paged, init);
+      if (response.status === 404) response = await upstream(base, init);
+      if (!response.ok) return response;
+      const payload = await response.json();
+      const page = Array.isArray(payload)
+        ? { events: payload, page: { hasMore: false, nextBeforeId: null } }
+        : payload;
+      return jsonResponse({ sessionId, workspacePath, ...page });
+    }
+    if (path === `${projectRoot}/artifact-index`) {
+      const response = await upstream(
+        `/api/beegame-sessions/${encodeURIComponent(sessionId)}/artifact-index?workspacePath=${encodeURIComponent(workspacePath)}`,
+        init,
+      );
+      if (!response.ok) return response;
+      return jsonResponse({ sessionId, workspacePath, artifacts: await response.json() });
+    }
+    return upstream(input, init);
+  });
   return { project };
 };
 
@@ -178,7 +238,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('removes bindings for projects no longer returned by the account project list', async () => {
+  it('removes the obsolete browser session-binding cache when projects load', async () => {
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
       { projectId: 'project_removed', sessionId: 'beegame_removed', workspacePath: '/tmp/removed' },
@@ -189,12 +249,10 @@ describe('beeGameAdapter prompt rules', () => {
 
     await beeGameAdapter.getProjects();
 
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
-      { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
-    ]);
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
-  it('does not erase recoverable bindings on a transient empty project response', async () => {
+  it('does not retain obsolete bindings during a transient empty project response', async () => {
     const binding = {
       projectId: 'project_recoverable',
       sessionId: 'beegame_recoverable',
@@ -205,19 +263,12 @@ describe('beeGameAdapter prompt rules', () => {
 
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
 
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([binding]);
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
-  it('stops a BeeGame session by resolving the current project binding', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_local',
-        sessionId: 'beegame_session_1',
-        workspacePath: '/tmp/beegame-projects/local',
-      },
-    ]));
+  it('stops the current project without resolving a browser session binding', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === '/api/beegame-sessions/beegame_session_1/stop' && init?.method === 'POST') {
+      if (String(input) === '/api/projects/project_local/stop' && init?.method === 'POST') {
         return jsonResponse({ id: 'beegame_session_1', status: 'stopped' });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -233,12 +284,12 @@ describe('beeGameAdapter prompt rules', () => {
     }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/beegame-sessions/beegame_session_1/stop',
+      '/api/projects/project_local/stop',
       expect.objectContaining({ method: 'POST' }),
     );
   });
 
-  it('migrates existing local projects into the BeeGame metadata API when the remote list is empty', async () => {
+  it('does not migrate browser-local project metadata into the canonical project repository', async () => {
     localStorage.setItem('beegame-adapter-projects', JSON.stringify([
       {
         id: 'project_local',
@@ -258,29 +309,20 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
-      {
-        id: 'project_local',
-        name: 'Local Only',
-        root_path: '/tmp/beegame-projects/local-only',
-        created_at: 1700000000000,
-      },
-    ]);
-    expect(fetchMock).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/projects', expect.objectContaining({
       method: 'POST',
     }));
   });
 
-  it('falls back to local project storage when the BeeGame metadata API is unavailable', async () => {
+  it('does not fall back to browser-local project storage when the project API is unavailable', async () => {
     localStorage.setItem('beegame-adapter-projects', JSON.stringify([
       { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
     ]));
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
-      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
-    ]);
+    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
   });
 
   it('does not fall back to local project storage for authenticated cloud sessions', async () => {
@@ -315,7 +357,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
   });
 
-  it('scopes cloud project cache to the authenticated user', async () => {
+  it('does not create a second browser-owned cloud project cache', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',
       expiresAt: Date.now() + 60_000,
@@ -336,9 +378,7 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
 
     expect(localStorage.getItem('beegame-adapter-projects')).toBeNull();
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-projects:user_cloud') || '[]')).toEqual([
-      { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
-    ]);
+    expect(localStorage.getItem('beegame-adapter-projects:user_cloud')).toBeNull();
   });
 
   it('does not synthesize local game mode options when LLM intake fails', async () => {
@@ -350,10 +390,8 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
-      .rejects.toThrow('intake unavailable');
-    expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/options', expect.objectContaining({
-      method: 'POST',
-    }));
+      .rejects.toThrow('not found');
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/beegame-intake/options', expect.anything());
   });
 
   it('uses backend error message text when intake returns a structured failure', async () => {
@@ -509,17 +547,13 @@ describe('beeGameAdapter prompt rules', () => {
       firstPlayableValidation: 'LLM validation',
       riskComplexity: 'LLM complexity',
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({
-          maturity: 'directional',
-          needsClarification: false,
-          detectedConstraints: ['LLM constraint'],
-          recommendedNextStep: 'choose_direction',
-          options: makeLlmOptions(llmOption),
-        })
-    ));
+    const fetchMock = createCompletedIntakeJobFetch({
+      maturity: 'directional',
+      needsClarification: false,
+      detectedConstraints: ['LLM constraint'],
+      recommendedNextStep: 'choose_direction',
+      options: makeLlmOptions(llmOption),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
@@ -559,17 +593,13 @@ describe('beeGameAdapter prompt rules', () => {
       recommended_style: 'Realistic',
       recommended_inputs: ['Keyboard/mouse', 'Gamepad'],
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({
-          maturity: 'directional',
-          needsClarification: false,
-          detectedConstraints: [],
-          recommendedNextStep: 'choose_direction',
-          options: makeLlmOptions(llmOption),
-        })
-    ));
+    const fetchMock = createCompletedIntakeJobFetch({
+      maturity: 'directional',
+      needsClarification: false,
+      detectedConstraints: [],
+      recommendedNextStep: 'choose_direction',
+      options: makeLlmOptions(llmOption),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
@@ -586,17 +616,13 @@ describe('beeGameAdapter prompt rules', () => {
 
   it('passes the selected language to BeeGame intake', async () => {
     const llmOption = makeLlmOption();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({
-          maturity: 'directional',
-          needsClarification: false,
-          detectedConstraints: [],
-          recommendedNextStep: 'choose_direction',
-          options: makeLlmOptions(llmOption),
-        })
-    ));
+    const fetchMock = createCompletedIntakeJobFetch({
+      maturity: 'directional',
+      needsClarification: false,
+      detectedConstraints: [],
+      recommendedNextStep: 'choose_direction',
+      options: makeLlmOptions(llmOption),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.runIdeaIntake({ idea: 'Créer un jeu exemple', language: 'fr-FR' });
@@ -607,17 +633,13 @@ describe('beeGameAdapter prompt rules', () => {
 
   it('uses the explicit UI language instead of inferring language from idea text', async () => {
     localStorage.setItem('i18nextLng', 'ja');
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({
-          maturity: 'directional',
-          needsClarification: false,
-          detectedConstraints: [],
-          recommendedNextStep: 'choose_direction',
-          options: makeLlmOptions(makeLlmOption()),
-        })
-    ));
+    const fetchMock = createCompletedIntakeJobFetch({
+      maturity: 'directional',
+      needsClarification: false,
+      detectedConstraints: [],
+      recommendedNextStep: 'choose_direction',
+      options: makeLlmOptions(makeLlmOption()),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.runIdeaIntake({ idea: '制作一个中文游戏' });
@@ -627,26 +649,22 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('rejects structured clarification responses without intake options', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({
-          maturity: 'vague',
-          needsClarification: true,
-          clarification: {
-            prompt: 'Which direction should BeeGame use?',
-            options: [
-              { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
-              { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
-            ],
-            freeformLabel: 'Add detail',
-          },
-          clarificationQuestions: [],
-          detectedConstraints: [],
-          recommendedNextStep: 'clarify',
-          options: [],
-        })
-    ));
+    const fetchMock = createCompletedIntakeJobFetch({
+      maturity: 'vague',
+      needsClarification: true,
+      clarification: {
+        prompt: 'Which direction should BeeGame use?',
+        options: [
+          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+        ],
+        freeformLabel: 'Add detail',
+      },
+      clarificationQuestions: [],
+      detectedConstraints: [],
+      recommendedNextStep: 'clarify',
+      options: [],
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' })).rejects.toThrow(
@@ -862,11 +880,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'LLM Project',
-      root_path: '/tmp/beegame-projects',
-    });
-    const legacyProject = (await beeGameAdapter.getProjects())[0];
+    const { project: legacyProject } = seedBoundProject('beegame_legacy', '/tmp/beegame-projects');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: legacyProject.id,
       sessionId: 'beegame_legacy',
@@ -884,17 +898,9 @@ describe('beeGameAdapter prompt rules', () => {
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
       String(path) === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST'
     ));
-    const bindings = JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]') as Array<{
-      sessionId?: string;
-      workspacePath?: string;
-    }>;
-
     expect(ensureCall).toBeTruthy();
     expect(inputCall).toBeTruthy();
-    expect(bindings[0]).toEqual(expect.objectContaining({
-      sessionId: 'beegame_migrated',
-      workspacePath: '/tmp/beegame-projects/llm-project',
-    }));
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
   it('loads chat history from a persisted transcript after the backend restarts', async () => {
@@ -929,11 +935,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'sample-web-game',
-      root_path: '/tmp/beegame-projects/sample-web-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
@@ -959,7 +961,6 @@ describe('beeGameAdapter prompt rules', () => {
 
   it('loads compact chat history from newest to oldest with a stable cursor', async () => {
     const workspacePath = '/tmp/beegame-projects/paged-game';
-    const { project } = seedBoundProject('beegame_paged', workspacePath);
     const pageRequest = `/api/beegame-sessions/beegame_paged/transcript?workspacePath=${encodeURIComponent(workspacePath)}&limit=300`;
     const olderRequest = `${pageRequest}&before=501`;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1003,6 +1004,7 @@ describe('beeGameAdapter prompt rules', () => {
       return jsonResponse({ error: 'not found' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
+    const { project } = seedBoundProject('beegame_paged', workspacePath);
 
     const latest = await beeGameAdapter.getChatHistory(project.id) as Array<{ content: string }>;
     expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
@@ -1028,7 +1030,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('restores a cloud project binding from session metadata when local binding is missing', async () => {
+  it('loads cloud project history through the project-scoped transcript endpoint', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',
       expiresAt: Date.now() + 60_000,
@@ -1036,19 +1038,11 @@ describe('beeGameAdapter prompt rules', () => {
     }));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/projects/project_cloud/sessions/latest') {
+      if (path === '/api/projects/project_cloud/transcript?limit=300') {
         return jsonResponse({
-          id: 'beegame_cloud_restore',
-          projectId: 'project_cloud',
+          sessionId: 'beegame_cloud_restore',
           workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
-          status: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_cloud_restore/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fusers%2Fuser-cloud%2Fcloud-game') {
-        return jsonResponse([
-          {
+          events: [{
             id: 1,
             sessionId: 'beegame_cloud_restore',
             turnId: 'turn-1',
@@ -1056,8 +1050,9 @@ describe('beeGameAdapter prompt rules', () => {
             text: 'Cloud transcript restored.',
             payload: { type: 'assistant.message' },
             createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
+          }],
+          page: { hasMore: false, nextBeforeId: null },
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -1072,16 +1067,10 @@ describe('beeGameAdapter prompt rules', () => {
       }),
     ]));
     expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings:user_cloud') || '[]')).toEqual([
-      {
-        projectId: 'project_cloud',
-        sessionId: 'beegame_cloud_restore',
-        workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
-      },
-    ]);
+    expect(localStorage.getItem('beegame-adapter-bindings:user_cloud')).toBeNull();
   });
 
-  it('restores a cookie-authenticated project binding without a browser-readable token', async () => {
+  it('loads a cookie-authenticated project transcript without a browser-readable token', async () => {
     vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
     const workspacePath = '/tmp/beegame-projects/users/cookie-user/cookie-game';
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1093,26 +1082,21 @@ describe('beeGameAdapter prompt rules', () => {
           user: { id: 'cookie-user' },
         });
       }
-      if (path === '/api/projects/project_cookie/sessions/latest') {
+      if (path === '/api/projects/project_cookie/transcript?limit=300') {
         return jsonResponse({
-          id: 'beegame_cookie_restore',
-          projectId: 'project_cookie',
-          workspacePath,
-          status: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === `/api/beegame-sessions/beegame_cookie_restore/transcript?workspacePath=${encodeURIComponent(workspacePath)}`) {
-        return jsonResponse([{
-          id: 1,
           sessionId: 'beegame_cookie_restore',
-          turnId: 'turn-1',
-          type: 'assistant.message',
-          text: 'Cookie transcript restored.',
-          payload: { type: 'assistant.message' },
-          createdAt: '2026-06-21T00:00:02.000Z',
-        }]);
+          workspacePath,
+          events: [{
+            id: 1,
+            sessionId: 'beegame_cookie_restore',
+            turnId: 'turn-1',
+            type: 'assistant.message',
+            text: 'Cookie transcript restored.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          }],
+          page: { hasMore: false, nextBeforeId: null },
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -1128,14 +1112,10 @@ describe('beeGameAdapter prompt rules', () => {
       }),
     ]));
     expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings:cookie-user') || '[]')).toEqual([{
-      projectId: 'project_cookie',
-      sessionId: 'beegame_cookie_restore',
-      workspacePath,
-    }]);
+    expect(localStorage.getItem('beegame-adapter-bindings:cookie-user')).toBeNull();
   });
 
-  it('uses project root_path instead of stale cloud session workspace when restoring migrated projects', async () => {
+  it('uses the server-owned project transcript workspace instead of browser metadata', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',
       expiresAt: Date.now() + 60_000,
@@ -1151,19 +1131,11 @@ describe('beeGameAdapter prompt rules', () => {
     ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/projects/project_cloud_migrated/sessions/latest') {
+      if (path === '/api/projects/project_cloud_migrated/transcript?limit=300') {
         return jsonResponse({
-          id: 'beegame_cloud_migrated',
-          projectId: 'project_cloud_migrated',
+          sessionId: 'beegame_cloud_migrated',
           workspacePath: '/tmp/beegame-projects/users/user-cloud/project_cloud_migrated',
-          status: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_cloud_migrated/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fcloud-migrated') {
-        return jsonResponse([
-          {
+          events: [{
             id: 1,
             sessionId: 'beegame_cloud_migrated',
             turnId: 'turn-1',
@@ -1171,8 +1143,9 @@ describe('beeGameAdapter prompt rules', () => {
             text: 'Migrated project transcript restored.',
             payload: { type: 'assistant.message' },
             createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
+          }],
+          page: { hasMore: false, nextBeforeId: null },
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -1186,21 +1159,12 @@ describe('beeGameAdapter prompt rules', () => {
         content: 'Migrated project transcript restored.',
       }),
     ]));
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings:user_cloud') || '[]')).toEqual([
-      {
-        projectId: 'project_cloud_migrated',
-        sessionId: 'beegame_cloud_migrated',
-        workspacePath: '/tmp/beegame-projects/cloud-migrated',
-      },
-    ]);
+    expect(localStorage.getItem('beegame-adapter-bindings:user_cloud')).toBeNull();
   });
 
-  it('infers the original BeeGame session from migrated project ids when local binding is missing', async () => {
+  it('does not infer session identity from a project id or browser-local project record', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/projects/project_beegame_legacy/sessions/latest') {
-        return jsonResponse({ error: 'not found' }, 404);
-      }
       if (path === '/api/beegame-sessions/beegame_legacy/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Flegacy-game') {
         return jsonResponse([
           {
@@ -1235,23 +1199,8 @@ describe('beeGameAdapter prompt rules', () => {
 
     const history = await beeGameAdapter.getChatHistory('project_beegame_legacy');
 
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'user',
-        content: 'Existing user request.',
-      }),
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Existing project history.',
-      }),
-    ]));
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
-      {
-        projectId: 'project_beegame_legacy',
-        sessionId: 'beegame_legacy',
-        workspacePath: '/tmp/beegame-projects/legacy-game',
-      },
-    ]);
+    expect(history).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([]);
   });
 
   it('prefers persisted transcript history over incomplete runtime events after refresh', async () => {
@@ -1296,11 +1245,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'refresh-game',
-      root_path: '/tmp/beegame-projects/refresh-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_refresh', '/tmp/beegame-projects/refresh-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_refresh',
@@ -1356,11 +1301,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'sample-web-game',
-      root_path: '/tmp/beegame-projects/sample-web-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
@@ -1406,11 +1347,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'sample-web-game',
-      root_path: '/tmp/beegame-projects/sample-web-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
@@ -1455,11 +1392,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'sample-web-game',
-      root_path: '/tmp/beegame-projects/sample-web-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_stopped', '/tmp/beegame-projects/sample-web-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_stopped',
@@ -1501,11 +1434,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'preview-game',
-      root_path: '/tmp/beegame-projects/preview-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_preview', '/tmp/beegame-projects/preview-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_preview',
@@ -1649,6 +1578,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
         return jsonResponse(projectEnsureResponse(
           path.split('/')[3],
@@ -1669,11 +1599,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'sample-web-game',
-      root_path: '/tmp/beegame-projects/sample-web-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_stopped', '/tmp/beegame-projects/sample-web-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_stopped',
@@ -1723,10 +1649,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const project = await beeGameAdapter.registerProjectMetadata({
-      name: 'Mode From LLM',
-      root_path: '/tmp/beegame-projects/mode-from-llm',
-    });
+    const { project } = seedBoundProject('beegame_paused', '/tmp/beegame-projects/mode-from-llm');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_paused',
@@ -1769,10 +1692,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const project = await beeGameAdapter.registerProjectMetadata({
-      name: 'Model Sync Game',
-      root_path: '/tmp/beegame-projects/model-sync-game',
-    });
+    const { project } = seedBoundProject('beegame_model_old', '/tmp/beegame-projects/model-sync-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_model_old',
@@ -1862,11 +1782,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.registerProjectMetadata({
-      name: 'display-game',
-      root_path: '/tmp/beegame-projects/display-game',
-    });
-    const project = (await beeGameAdapter.getProjects())[0];
+    const { project } = seedBoundProject('beegame_display', '/tmp/beegame-projects/display-game');
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_display',
@@ -1933,6 +1849,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
         return jsonResponse(projectEnsureResponse(
           path.split('/')[3],
@@ -2001,6 +1918,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps repeated tool calls as distinct chat messages', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
@@ -2585,13 +2503,6 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('maps BeeGame thinking events to one redacted start/end lifecycle', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_thinking',
-        sessionId: 'beegame_thinking',
-        workspacePath: '/tmp/beegame-projects/thinking',
-      },
-    ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === '/api/beegame-sessions/beegame_thinking/events?after=0') {
@@ -2605,7 +2516,8 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const polled = await beeGameAdapter.pollMessages('project_thinking', 0);
+    const { project } = seedBoundProject('beegame_thinking', '/tmp/beegame-projects/thinking');
+    const polled = await beeGameAdapter.pollMessages(project.id, 0);
 
     expect(polled.messages).toHaveLength(2);
     expect(polled.messages[0]).toEqual(expect.objectContaining({
@@ -3107,9 +3019,10 @@ describe('beeGameAdapter prompt rules', () => {
     expect(status.approval_required).toBe(true);
   });
 
-  it('deletes the backing BeeGame session artifacts when deleting a project', async () => {
+  it('delegates project and runtime cleanup to the project-scoped delete endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
@@ -3145,15 +3058,17 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.deleteProject(result.project.id);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/beegame-sessions/beegame_delete?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects',
+      `/api/projects/${encodeURIComponent(result.project.id)}`,
       expect.objectContaining({ method: 'DELETE' }),
     );
+    expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/beegame-sessions/'))).toBe(false);
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
   });
 
   it('treats an already-missing BeeGame session workspace as deleted locally', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
@@ -3217,6 +3132,7 @@ describe('beeGameAdapter prompt rules', () => {
     ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
       if (
         path === '/api/beegame-sessions/beegame_legacy_path?deleteArtifacts=1&workspacePath=%2Fapp%2FProjects%2Flegacy-path' &&
         init?.method === 'DELETE'
@@ -3232,17 +3148,10 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(beeGameAdapter.deleteProject('project_legacy_path')).resolves.toEqual({ ok: true });
 
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBe('[]');
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
   it('lists only docs markdown files plus an on-demand project package artifact', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_docs',
-        sessionId: 'beegame_docs',
-        workspacePath: '/tmp/beegame-projects/sample-game',
-      },
-    ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/beegame-sessions/beegame_docs/events?after=0') {
         return jsonResponse([
@@ -3256,7 +3165,8 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const artifacts = await beeGameAdapter.getArtifacts('project_docs');
+    const { project } = seedBoundProject('beegame_docs', '/tmp/beegame-projects/sample-game');
+    const artifacts = await beeGameAdapter.getArtifacts(project.id);
 
     expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual([
       'docs/GDD.md',
@@ -3269,13 +3179,6 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('lists docs markdown artifacts when tool events use absolute workspace paths', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_absolute_docs',
-        sessionId: 'beegame_absolute_docs',
-        workspacePath: '/tmp/beegame-projects/absolute-docs',
-      },
-    ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/beegame-sessions/beegame_absolute_docs/events?after=0') {
         return jsonResponse([
@@ -3287,23 +3190,17 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const artifacts = await beeGameAdapter.getArtifacts('project_absolute_docs');
+    const { project } = seedBoundProject('beegame_absolute_docs', '/tmp/beegame-projects/absolute-docs');
+    const artifacts = await beeGameAdapter.getArtifacts(project.id);
 
     expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual(['docs/GDD.md']);
   });
 
   it('lists discovered docs but hides internal transcripts from deliverables', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_restored_docs',
-        sessionId: 'beegame_restored_docs',
-        workspacePath: '/tmp/beegame-projects/restored-docs',
-      },
-    ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === '/api/beegame-sessions/beegame_restored_docs/events?after=0') {
-        return jsonResponse({ error: 'Session not found' }, 404);
+        return jsonResponse([]);
       }
       if (url === '/api/beegame-sessions/beegame_restored_docs/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Frestored-docs') {
         return jsonResponse([]);
@@ -3328,7 +3225,8 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const artifacts = await beeGameAdapter.getArtifacts('project_restored_docs');
+    const { project } = seedBoundProject('beegame_restored_docs', '/tmp/beegame-projects/restored-docs');
+    const artifacts = await beeGameAdapter.getArtifacts(project.id);
 
     expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual([
       'docs/GDD.md',
@@ -3337,16 +3235,9 @@ describe('beeGameAdapter prompt rules', () => {
     expect(artifacts.map(artifact => artifact.name)).not.toContain('restored-docs__12345678.jsonl');
   });
 
-  it('downloads the project package through the bound BeeGame session', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_zip',
-        sessionId: 'beegame_zip',
-        workspacePath: '/tmp/beegame-projects/zip-game',
-      },
-    ]));
+  it('downloads the project package through the project-scoped endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/beegame-sessions/beegame_zip/package?workspacePath=%2Ftmp%2Fbeegame-projects%2Fzip-game') {
+      if (String(input) === '/api/projects/project_zip/package') {
         return new Response('PK zip', {
           headers: {
             'content-type': 'application/zip',
@@ -3365,17 +3256,10 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('does not create a runtime session when a read-only package download fails', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_zip_retry',
-        sessionId: 'beegame_zip_retry',
-        workspacePath: '/tmp/beegame-projects/zip-retry',
-      },
-    ]));
     let packageAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_zip_retry/package?workspacePath=%2Ftmp%2Fbeegame-projects%2Fzip-retry') {
+      if (path === '/api/projects/project_zip_retry/package') {
         packageAttempts += 1;
         return jsonResponse({ error: 'Session not found' }, 404);
       }
@@ -3495,25 +3379,18 @@ describe('beeGameAdapter prompt rules', () => {
     expect(upload.path).toBe('public/assets/title-logo.png');
   });
 
-  it('falls back to transcript when event polling sees a missing BeeGame session', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_poll_retry',
-        sessionId: 'beegame_poll_retry',
-        workspacePath: '/tmp/beegame-projects/poll-retry',
-      },
-    ]));
+  it('accepts transcript recovery from the project-scoped event endpoint', async () => {
     let eventsAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_poll_retry/events?after=0') {
+      if (path === '/api/projects/project_poll_retry/events?after=0') {
         eventsAttempts += 1;
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/beegame-sessions/beegame_poll_retry/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fpoll-retry') {
-        return jsonResponse([
-          turnStartedEvent(1, 'beegame_poll_retry', 'turn-1'),
-        ]);
+        return jsonResponse({
+          sessionId: 'beegame_poll_retry',
+          workspacePath: '/tmp/beegame-projects/poll-retry',
+          events: [turnStartedEvent(1, 'beegame_poll_retry', 'turn-1')],
+          recoveredFromTranscript: true,
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -3528,23 +3405,23 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
-  it('does not replay a persisted terminal failure as a live dashboard error', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: 'project_failed_history',
-      sessionId: 'beegame_failed_history',
-      workspacePath: '/tmp/beegame-projects/failed-history',
-    }]));
+  it('does not replay a recovered terminal failure as a live dashboard error', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_failed_history/events?after=0') {
-        return jsonResponse([{
-          id: 7,
+      if (path === '/api/projects/project_failed_history/events?after=0') {
+        return jsonResponse({
           sessionId: 'beegame_failed_history',
-          turnId: 'turn-1',
-          type: 'turn.failed',
-          text: 'Historical runtime failure',
-          createdAt: '2026-07-12T00:00:00.000Z',
-        }]);
+          workspacePath: '/tmp/beegame-projects/failed-history',
+          events: [{
+            id: 7,
+            sessionId: 'beegame_failed_history',
+            turnId: 'turn-1',
+            type: 'turn.failed',
+            text: 'Historical runtime failure',
+            createdAt: '2026-07-12T00:00:00.000Z',
+          }],
+          recoveredFromTranscript: true,
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     }));
