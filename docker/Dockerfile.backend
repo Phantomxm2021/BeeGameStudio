@@ -83,6 +83,7 @@ ENV AGENT_WORKFLOW_HOST=0.0.0.0
 ENV AGENT_WORKFLOW_PORT=62174
 ENV BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 ENV BEEGAME_CONFIG_DIR=/home/bun/.beegame
+ENV BEEGAME_BUILTIN_SKILLS_DIR=/opt/beegame/default-config/skills/builtinskills
 
 EXPOSE 62174
 
