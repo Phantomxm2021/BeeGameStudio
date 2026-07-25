@@ -96,7 +96,7 @@ export function UserAccountMenu({
                 aria-expanded={currentUserId ? isUserMenuOpen : undefined}
                 data-avatar-surface="outline"
                 onClick={handleUserButtonClick}
-                className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-[border-color,background-color,transform] duration-150 hover:scale-105 hover:border-amber-300/50 hover:bg-white/5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isActive || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''}`}
+                className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-[border-color,background-color,transform] duration-150 hover:scale-105 hover:border-white/50 hover:bg-white/5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isActive || isUserMenuOpen ? 'border-emerald-300/60 bg-white/5' : ''}`}
             >
                 {currentUserId ? (
                     currentUserAvatarUrl && !avatarFailed ? (
