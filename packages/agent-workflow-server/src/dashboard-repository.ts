@@ -14,14 +14,10 @@ import {
   type BeeGameAuditEvent,
 } from './audit-events-store'
 import {
-  expireStaleCreditReservations,
   getCreditBalance,
   grantCredits,
   listCreditAuditLedger,
   listCreditLedger,
-  refundCreditReservation,
-  reserveCredits,
-  settleCreditReservation,
   summarizeCreditLedger,
   type CreditAuditLedger,
   type CreditGrant,
@@ -29,10 +25,13 @@ import {
   type CreditBalance,
   type CreditLedgerEntry,
   type CreditLedgerSummary,
-  type CreditReservation,
-  type CreditSettlement,
-  type StaleCreditReservationExpiry,
 } from './credit-store'
+import {
+  listShadowUsageEvents,
+  recordShadowUsage,
+  type RecordShadowUsageInput,
+  type RecordShadowUsageResult,
+} from './usage-billing-shadow'
 import {
   deleteMcpServer,
   listMcpServers,
@@ -40,9 +39,7 @@ import {
   type McpServerConfig,
   type McpServerInput,
 } from './mcp-servers-store'
-import {
-  fetchEnabledUserSkills,
-} from '@bee-game-studio/beegame-skills-core/client'
+import { fetchEnabledUserSkills } from '@bee-game-studio/beegame-skills-core/client'
 import {
   resolveBeeGameSkillsConfig,
   type BeeGameSkillsConfig,
@@ -57,12 +54,10 @@ import {
   getBeeGameProjectDatabasePath,
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
-import type {
-  BeeGameAssetManifest,
-} from './beegame/asset-contracts'
+import type { BeeGameAssetManifest } from './beegame/asset-contracts'
 import type {
   BeeGameSessionInternalMetadata,
-  BeeGameSessionCreditBackend,
+  BeeGameSessionUsageBillingBackend,
 } from './beegame/session-manager'
 import type { BeeGameDeploymentRecord } from './beegame/deployment-manager'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
@@ -95,20 +90,28 @@ import {
   type WebToolsConfig,
 } from './web-tools-store'
 import { getUserDashboardDataRoot } from './local-runtime-service'
-import type { BeeGameCreditControlClient } from '@bee-game-studio/beegame-billing-core/credit-control-client'
+import type { BeeGameUsageBillingClient } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import type { BeeGameUsageBillingMode } from '@bee-game-studio/beegame-billing-core/billing-config'
 import type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
   BeeGameBillingEventInput,
 } from '@bee-game-studio/beegame-billing-core/billing-ports'
+import type { BeeGameUsageBillingEvent } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import type { ProjectAssetStorage } from './r2-project-asset-storage'
+import {
+  reconcileCreditLedgers,
+  type CreditReconciliationReport,
+} from './credit-reconciliation'
+import { debitLocalRealtimeUsage } from './realtime-usage-wallet'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
   supabasePaymentProviderStore?: SupabaseDashboardStore
   supabaseRuntimeEnvClient?: SupabaseRuntimeEnvClient
-  remoteCreditControl?: BeeGameCreditControlClient
+  remoteUsageBilling?: BeeGameUsageBillingClient
+  usageBillingMode?: BeeGameUsageBillingMode
   skillsConfig?: BeeGameSkillsConfig | false
   getUserDataRoot: (request?: Request) => string
   /**
@@ -119,6 +122,18 @@ export type DashboardRepositoryOptions = {
   getAuthToken?: (request: Request) => string | undefined
   modelConfigStore?: ModelConfigStoreOptions | false
   projectAssetStorage?: ProjectAssetStorage
+}
+
+function filterUsageEvents(
+  events: BeeGameUsageBillingEvent[],
+  filters: { from?: Date; to?: Date },
+): BeeGameUsageBillingEvent[] {
+  return events.filter(event => {
+    const createdAt = new Date(event.createdAt)
+    if (filters.from && createdAt < filters.from) return false
+    if (filters.to && createdAt > filters.to) return false
+    return true
+  })
 }
 
 export type BeeGameProjectLifecycleOverview = {
@@ -166,23 +181,7 @@ export type BeeGameProjectLifecycleRetentionRun = {
   logRecordsSkipped: number
 }
 
-type CreditReserveInput = Omit<Parameters<typeof reserveCredits>[1], 'dataDir'>
-type CreditSettleInput = Omit<
-  Parameters<typeof settleCreditReservation>[1],
-  'dataDir'
->
-type CreditRefundInput = Omit<
-  Parameters<typeof refundCreditReservation>[1],
-  'dataDir'
->
-type StaleCreditReservationExpiryInput = Omit<
-  Parameters<typeof expireStaleCreditReservations>[1],
-  'dataDir'
->
-type CreditGrantInput = Omit<
-  Parameters<typeof grantCredits>[1],
-  'dataDir'
->
+type CreditGrantInput = Omit<Parameters<typeof grantCredits>[1], 'dataDir'>
 export type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
@@ -229,7 +228,10 @@ export class ProjectQuotaExceededError extends Error {
 export class DashboardRepository {
   private readonly warnedSkillSyncFailures = new Set<string>()
   readonly supabaseStore?: SupabaseDashboardStore
-  private readonly projectStores = new Map<string, BeeGameProjectMetadataStore>()
+  private readonly projectStores = new Map<
+    string,
+    BeeGameProjectMetadataStore
+  >()
 
   constructor(private readonly options: DashboardRepositoryOptions) {
     this.supabaseStore = options.supabaseStore
@@ -316,7 +318,10 @@ export class DashboardRepository {
     const projects = await this.listProjects(request, user)
     for (const project of projects) {
       if (!project.root_path) continue
-      if (await normalizeWorkspaceIdentity(project.root_path) === normalizedWorkspace) {
+      if (
+        (await normalizeWorkspaceIdentity(project.root_path)) ===
+        normalizedWorkspace
+      ) {
         return true
       }
     }
@@ -353,8 +358,9 @@ export class DashboardRepository {
   ): Promise<BeeGameSessionMetadata[]> {
     const supabase = this.supabaseForRequest(request)
     if (!supabase) return []
-    return (await supabase.listSessions(user.id))
-      .filter(session => session.projectId === projectId)
+    return (await supabase.listSessions(user.id)).filter(
+      session => session.projectId === projectId,
+    )
   }
 
   async upsertSessionMetadata(
@@ -370,7 +376,9 @@ export class DashboardRepository {
       workspacePath: metadata.workspacePath,
       status: metadata.status,
       transcriptPath: metadata.transcriptPath,
-      ...(metadata.modelConfigId ? { modelConfigId: metadata.modelConfigId } : {}),
+      ...(metadata.modelConfigId
+        ? { modelConfigId: metadata.modelConfigId }
+        : {}),
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt,
     })
@@ -395,11 +403,7 @@ export class DashboardRepository {
   ): Promise<void> {
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId) return
-    await supabase.upsertPreviewSnapshot(
-      user.id,
-      metadata.projectId,
-      snapshot,
-    )
+    await supabase.upsertPreviewSnapshot(user.id, metadata.projectId, snapshot)
   }
 
   async upsertAssetManifest(
@@ -410,11 +414,7 @@ export class DashboardRepository {
   ): Promise<BeeGameAssetManifest | undefined> {
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId) return undefined
-    return supabase.upsertAssetManifest(
-      user.id,
-      metadata.projectId,
-      manifest,
-    )
+    return supabase.upsertAssetManifest(user.id, metadata.projectId, manifest)
   }
 
   async uploadAssetFile(
@@ -424,8 +424,10 @@ export class DashboardRepository {
     file: File,
   ): Promise<string | undefined> {
     if (this.options.projectAssetStorage && metadata?.projectId) {
-      const authToken = this.options.getAuthToken?.(request) ?? getBearerToken(request)
-      if (!authToken) throw new Error('Project asset storage requires authentication')
+      const authToken =
+        this.options.getAuthToken?.(request) ?? getBearerToken(request)
+      if (!authToken)
+        throw new Error('Project asset storage requires authentication')
       return this.options.projectAssetStorage.uploadAssetFile({
         ownerId: user.id,
         projectId: metadata.projectId,
@@ -435,7 +437,11 @@ export class DashboardRepository {
     }
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId) return undefined
-    const uploadBody = file.slice(0, file.size, file.type || 'application/octet-stream')
+    const uploadBody = file.slice(
+      0,
+      file.size,
+      file.type || 'application/octet-stream',
+    )
     return supabase.uploadAssetFile({
       ownerId: user.id,
       projectId: metadata.projectId,
@@ -452,8 +458,10 @@ export class DashboardRepository {
     storageUri: string | undefined,
   ): Promise<void> {
     if (this.options.projectAssetStorage && metadata?.projectId && storageUri) {
-      const authToken = this.options.getAuthToken?.(request) ?? getBearerToken(request)
-      if (!authToken) throw new Error('Project asset storage requires authentication')
+      const authToken =
+        this.options.getAuthToken?.(request) ?? getBearerToken(request)
+      if (!authToken)
+        throw new Error('Project asset storage requires authentication')
       await this.options.projectAssetStorage.deleteAssetFile({
         ownerId: user.id,
         projectId: metadata.projectId,
@@ -571,7 +579,11 @@ export class DashboardRepository {
     input: CreateModelConfigInput,
   ) {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.createModelConfig(this.getManageModelConfigOwnerId(user), input)
+    if (supabase)
+      return supabase.createModelConfig(
+        this.getManageModelConfigOwnerId(user),
+        input,
+      )
     const created = createModelConfig(user.id, input)
     this.persistLocalModelConfigs()
     return created
@@ -585,7 +597,11 @@ export class DashboardRepository {
   ) {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      return supabase.updateModelConfig(this.getManageModelConfigOwnerId(user), id, input)
+      return supabase.updateModelConfig(
+        this.getManageModelConfigOwnerId(user),
+        id,
+        input,
+      )
     }
     const updated = updateModelConfig(id, input)
     if (updated) this.persistLocalModelConfigs()
@@ -598,7 +614,11 @@ export class DashboardRepository {
     id: string,
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.deleteModelConfig(this.getManageModelConfigOwnerId(user), id)
+    if (supabase)
+      return supabase.deleteModelConfig(
+        this.getManageModelConfigOwnerId(user),
+        id,
+      )
     const deleted = deleteModelConfig(id)
     if (!deleted) return false
     this.persistLocalModelConfigs()
@@ -648,6 +668,152 @@ export class DashboardRepository {
         })
   }
 
+  async listShadowUsageEvents(
+    request: Request,
+    user: BeeGameUserContext,
+    filters: { projectId?: string; from?: Date; to?: Date } = {},
+  ): Promise<BeeGameUsageBillingEvent[]> {
+    const supabase = this.supabaseForRequest(request)
+    if (supabase)
+      return supabase
+        .listShadowUsageEvents(getCreditOwnerId(user), filters.projectId)
+        .then(events => filterUsageEvents(events, filters))
+    return filterUsageEvents(
+      listShadowUsageEvents(this.options.getUserDataRoot(request), {
+        userId: user.id,
+        ...(filters.projectId ? { projectId: filters.projectId } : {}),
+      }),
+      filters,
+    )
+  }
+
+  async recordShadowUsage(
+    request: Request,
+    user: BeeGameUserContext,
+    input: Omit<RecordShadowUsageInput, 'dataDir' | 'userId'>,
+  ): Promise<RecordShadowUsageResult> {
+    const remoteInput = {
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      projectId: input.projectId,
+      usage: input.usage,
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.metadata,
+      pricingVersion: input.pricingVersion,
+      usageSource: input.usageSource,
+    }
+    const supabase = this.supabaseForRequest(request)
+    if (this.options.remoteUsageBilling)
+      return this.options.remoteUsageBilling.recordShadowUsage(
+        user.id,
+        remoteInput,
+      )
+    if (supabase) return supabase.recordShadowUsage(user.id, remoteInput)
+    return recordShadowUsage({
+      ...input,
+      dataDir: this.options.getUserDataRoot(request),
+      userId: user.id,
+    })
+  }
+
+  async debitRealTimeUsage(
+    request: Request,
+    user: BeeGameUserContext,
+    input: Omit<RecordShadowUsageInput, 'dataDir' | 'userId'>,
+  ): Promise<RecordShadowUsageResult> {
+    const debitInput = {
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      projectId: input.projectId,
+      usage: input.usage,
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.metadata,
+      pricingVersion: input.pricingVersion,
+      usageSource: input.usageSource,
+    }
+    const supabase = this.supabaseForRequest(request)
+    if (this.options.remoteUsageBilling)
+      return this.options.remoteUsageBilling.debitRealTimeUsage(
+        user.id,
+        debitInput,
+      )
+    if (supabase) return supabase.debitRealTimeUsage(user.id, debitInput)
+    const shadow = recordShadowUsage({
+      ...input,
+      dataDir: this.options.getUserDataRoot(request),
+      userId: user.id,
+    })
+    return debitLocalRealtimeUsage({
+      dataDir: this.options.getUserDataRoot(request),
+      userId: user.id,
+      idempotencyKey: input.idempotencyKey,
+      shadow,
+    })
+  }
+
+  async summarizeShadowUsage(
+    request: Request,
+    user: BeeGameUserContext,
+    filters: { projectId?: string; from?: Date; to?: Date } = {},
+  ): Promise<{
+    eventsCount: number
+    promptTokens: number
+    completionTokens: number
+    cacheReadTokens: number
+    cacheCreationTokens: number
+    totalTokens: number
+    weightedTokens: number
+    shadowCreditsMicro: number
+  }> {
+    const events = await this.listShadowUsageEvents(request, user, filters)
+    return events.reduce(
+      (summary, event) => ({
+        eventsCount: summary.eventsCount + 1,
+        promptTokens: summary.promptTokens + event.delta.prompt_tokens,
+        completionTokens:
+          summary.completionTokens + event.delta.completion_tokens,
+        cacheReadTokens:
+          summary.cacheReadTokens + event.delta.cache_read_tokens,
+        cacheCreationTokens:
+          summary.cacheCreationTokens + event.delta.cache_creation_tokens,
+        totalTokens: summary.totalTokens + event.delta.total_tokens,
+        weightedTokens: summary.weightedTokens + event.weightedTokensDelta,
+        shadowCreditsMicro:
+          summary.shadowCreditsMicro + event.shadowCreditsMicro,
+      }),
+      {
+        eventsCount: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 0,
+        weightedTokens: 0,
+        shadowCreditsMicro: 0,
+      },
+    )
+  }
+
+  async reconcileCreditLedgers(
+    request: Request,
+    user: BeeGameUserContext,
+    filters: { projectId?: string; from?: Date; to?: Date } = {},
+  ): Promise<CreditReconciliationReport> {
+    const [shadowEvents, legacyEntries] = await Promise.all([
+      this.listShadowUsageEvents(request, user, filters),
+      this.listCreditLedger(request, user),
+    ])
+    const scopedLegacyEntries = legacyEntries.filter(entry => {
+      if (filters.projectId && entry.projectId !== filters.projectId)
+        return false
+      const createdAt = new Date(entry.createdAt)
+      if (filters.from && createdAt < filters.from) return false
+      if (filters.to && createdAt > filters.to) return false
+      return true
+    })
+    return reconcileCreditLedgers(shadowEvents, scopedLegacyEntries)
+  }
+
   async listCreditAuditLedger(
     request: Request,
     _user: BeeGameUserContext,
@@ -662,196 +828,6 @@ export class DashboardRepository {
         })
   }
 
-  async reserveCredits(
-    request: Request,
-    user: BeeGameUserContext,
-    input: CreditReserveInput,
-  ): Promise<CreditReservation> {
-    const creditOwnerId = getCreditOwnerId(user)
-    if (this.options.remoteCreditControl) {
-      return this.options.remoteCreditControl.reserveCredits(creditOwnerId, input)
-    }
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.reserveCredits(creditOwnerId, input)
-      : reserveCredits(creditOwnerId, {
-          ...input,
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
-  async settleCreditReservation(
-    request: Request,
-    user: BeeGameUserContext,
-    input: CreditSettleInput,
-  ): Promise<ReturnType<typeof settleCreditReservation>> {
-    const creditOwnerId = getCreditOwnerId(user)
-    if (this.options.remoteCreditControl) {
-      return this.options.remoteCreditControl.settleCreditReservation(creditOwnerId, input)
-    }
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.settleCreditReservation(creditOwnerId, input)
-      : settleCreditReservation(creditOwnerId, {
-          ...input,
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
-  async refundCreditReservation(
-    request: Request,
-    user: BeeGameUserContext,
-    input: CreditRefundInput,
-  ): Promise<ReturnType<typeof refundCreditReservation>> {
-    const creditOwnerId = getCreditOwnerId(user)
-    if (this.options.remoteCreditControl) {
-      return this.options.remoteCreditControl.refundCreditReservation(creditOwnerId, input)
-    }
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.refundCreditReservation(creditOwnerId, input)
-      : refundCreditReservation(creditOwnerId, {
-          ...input,
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
-  async expireStaleCreditReservations(
-    request: Request,
-    user: BeeGameUserContext,
-    input: StaleCreditReservationExpiryInput,
-  ): Promise<StaleCreditReservationExpiry> {
-    const creditOwnerId = getCreditOwnerId(user)
-    if (this.options.remoteCreditControl) {
-      return this.options.remoteCreditControl.expireStaleCreditReservations(creditOwnerId, input)
-    }
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.expireStaleCreditReservations(creditOwnerId, input)
-      : expireStaleCreditReservations(creditOwnerId, {
-          ...input,
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
-  async reserveCreditsForUser(
-    userId: string,
-    input: CreditReserveInput,
-  ): Promise<CreditReservation> {
-    return this.options.supabasePaymentProviderStore
-      ? this.options.supabasePaymentProviderStore.reserveCredits(userId, input)
-      : reserveCredits(userId, {
-          ...input,
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-        })
-  }
-
-  async getCreditBalanceForUser(userId: string): Promise<CreditBalance> {
-    return this.options.supabasePaymentProviderStore
-      ? this.options.supabasePaymentProviderStore.getCreditBalance(userId)
-      : getCreditBalance(userId, {
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-        })
-  }
-
-  async findCreditReservationByIdempotencyKeyForUser(
-    userId: string,
-    idempotencyKey: string,
-  ): Promise<CreditReservation | undefined> {
-    const key = idempotencyKey.trim()
-    if (!key) return undefined
-    const entries = await this.listCreditLedgerEntriesForUser(userId, {
-      userId,
-      kind: 'reserve',
-    })
-    const reservation = entries.find(entry => (
-      entry.kind === 'reserve' &&
-      entry.metadata.idempotencyKey === key &&
-      entry.reservationId
-    ))
-    if (!reservation?.reservationId) return undefined
-    return {
-      id: reservation.reservationId,
-      reservedCredits: reservation.credits,
-      balance: await this.getCreditBalanceForUser(userId),
-    }
-  }
-
-  async getCreditSettlementForUser(
-    userId: string,
-    reservationId: string,
-  ): Promise<CreditSettlement | undefined> {
-    const normalizedReservationId = reservationId.trim()
-    if (!normalizedReservationId) return undefined
-    const entries = await this.listCreditLedgerEntriesForUser(userId, {
-      userId,
-      reservationId: normalizedReservationId,
-    })
-    const reservation = entries.find(entry => entry.kind === 'reserve')
-    if (!reservation) return undefined
-    const completed = entries.filter(entry => entry.kind === 'settle' || entry.kind === 'refund')
-    if (!completed.length) return undefined
-    return {
-      reservationId: normalizedReservationId,
-      reservedCredits: reservation.credits,
-      settledCredits: completed
-        .filter(entry => entry.kind === 'settle')
-        .reduce((sum, entry) => sum + entry.credits, 0),
-      refundedCredits: completed
-        .filter(entry => entry.kind === 'refund')
-        .reduce((sum, entry) => sum + entry.credits, 0),
-      balance: await this.getCreditBalanceForUser(userId),
-    }
-  }
-
-  async settleCreditReservationForUser(
-    userId: string,
-    input: CreditSettleInput,
-  ): Promise<ReturnType<typeof settleCreditReservation>> {
-    return this.options.supabasePaymentProviderStore
-      ? this.options.supabasePaymentProviderStore.settleCreditReservation(userId, input)
-      : settleCreditReservation(userId, {
-          ...input,
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-        })
-  }
-
-  async refundCreditReservationForUser(
-    userId: string,
-    input: CreditRefundInput,
-  ): Promise<ReturnType<typeof refundCreditReservation>> {
-    return this.options.supabasePaymentProviderStore
-      ? this.options.supabasePaymentProviderStore.refundCreditReservation(userId, input)
-      : refundCreditReservation(userId, {
-          ...input,
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-        })
-  }
-
-  async expireStaleCreditReservationsForUser(
-    userId: string,
-    input: StaleCreditReservationExpiryInput,
-  ): Promise<StaleCreditReservationExpiry> {
-    return this.options.supabasePaymentProviderStore
-      ? this.options.supabasePaymentProviderStore.expireStaleCreditReservations(userId, input)
-      : expireStaleCreditReservations(userId, {
-          ...input,
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-        })
-  }
-
-  private async listCreditLedgerEntriesForUser(
-    userId: string,
-    filters: CreditLedgerFilters,
-  ): Promise<CreditLedgerEntry[]> {
-    return this.options.supabasePaymentProviderStore
-      ? (await this.options.supabasePaymentProviderStore.listCreditAuditLedger(filters)).entries
-      : listCreditAuditLedger({
-          dashboardDataRoot: this.options.dashboardDataRoot,
-          filters: { ...filters, userId },
-        }).entries
-  }
-
   async grantCredits(
     request: Request,
     targetUserId: string,
@@ -862,7 +838,10 @@ export class DashboardRepository {
       ? supabase.grantCredits(targetUserId, input)
       : grantCredits(targetUserId, {
           ...input,
-          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId),
+          dataDir: getUserDashboardDataRoot(
+            this.options.dashboardDataRoot,
+            targetUserId,
+          ),
         })
   }
 
@@ -874,7 +853,9 @@ export class DashboardRepository {
     const metadata = input.metadata ?? {}
     const paymentProviderStore = this.options.supabasePaymentProviderStore
     if (this.supabaseStore && !paymentProviderStore) {
-      throw new Error('Supabase service role key is required for payment provider credit grants')
+      throw new Error(
+        'Supabase service role key is required for payment provider credit grants',
+      )
     }
     return paymentProviderStore
       ? paymentProviderStore.grantPaymentProviderCredits(targetUserId, input)
@@ -898,7 +879,9 @@ export class DashboardRepository {
   ): Promise<BeeGameBillingCreditPack> {
     const store = this.options.supabasePaymentProviderStore
     if (!store) {
-      throw new Error('Supabase service role key is required for billing credit pack management')
+      throw new Error(
+        'Supabase service role key is required for billing credit pack management',
+      )
     }
     return store.upsertBillingCreditPack(input)
   }
@@ -923,16 +906,22 @@ export class DashboardRepository {
     targetUserId: string,
     input: CreditGrantInput,
   ): CreditGrant {
-    const dataDir = getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId)
+    const dataDir = getUserDashboardDataRoot(
+      this.options.dashboardDataRoot,
+      targetUserId,
+    )
     const provider = metadataString(input.metadata, 'provider')
-    const providerReference = metadataString(input.metadata, 'providerReference')
+    const providerReference = metadataString(
+      input.metadata,
+      'providerReference',
+    )
     if (provider && providerReference) {
-      const existing = listCreditLedger(targetUserId, { dataDir })
-        .some(entry => (
+      const existing = listCreditLedger(targetUserId, { dataDir }).some(
+        entry =>
           entry.kind === 'grant' &&
           entry.metadata.provider === provider &&
-          entry.metadata.providerReference === providerReference
-        ))
+          entry.metadata.providerReference === providerReference,
+      )
       if (existing) {
         return {
           grantedCredits: 0,
@@ -947,38 +936,77 @@ export class DashboardRepository {
     })
   }
 
-  createSessionCreditBackend(): BeeGameSessionCreditBackend {
-    if (this.options.remoteCreditControl) {
+  createSessionUsageBillingBackend(): BeeGameSessionUsageBillingBackend {
+    if (this.options.remoteUsageBilling) {
       return {
-        reserveCredits: (userId, input) =>
-          this.options.remoteCreditControl!.reserveCredits(userId, input),
-        settleCreditReservation: (userId, input) =>
-          this.options.remoteCreditControl!.settleCreditReservation(userId, input),
-        refundCreditReservation: (userId, input) =>
-          this.options.remoteCreditControl!.refundCreditReservation(userId, input),
+        recordShadowUsage: (userId, input) =>
+          this.options.remoteUsageBilling!.recordShadowUsage(userId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            projectId: input.projectId,
+            usage: input.usage,
+            idempotencyKey: input.idempotencyKey,
+            metadata: input.metadata,
+            pricingVersion: 'weighted-v1',
+            usageSource: 'runtime_snapshot',
+          }),
+        debitRealtimeUsage: (userId, input) =>
+          this.options.remoteUsageBilling!.debitRealTimeUsage(userId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            projectId: input.projectId,
+            usage: input.usage,
+            idempotencyKey: input.idempotencyKey,
+            metadata: input.metadata,
+            pricingVersion: 'weighted-v1',
+            usageSource: 'runtime_snapshot',
+          }),
       }
     }
     if (this.hasSupabaseProductionStore()) {
       return {
-        reserveCredits: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken)
-            .reserveCredits(userId, input),
-        settleCreditReservation: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken)
-            .settleCreditReservation(userId, input),
-        refundCreditReservation: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken)
-            .refundCreditReservation(userId, input),
+        recordShadowUsage: (userId, input) =>
+          this.supabaseForAuthToken(input.authToken).recordShadowUsage(userId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            projectId: input.projectId,
+            usage: input.usage,
+            idempotencyKey: input.idempotencyKey,
+            metadata: input.metadata,
+            pricingVersion: 'weighted-v1',
+            usageSource: 'runtime_snapshot',
+          }),
+        debitRealtimeUsage: (userId, input) =>
+          this.supabaseForAuthToken(input.authToken).debitRealTimeUsage(
+            userId,
+            {
+              sessionId: input.sessionId,
+              turnId: input.turnId,
+              projectId: input.projectId,
+              usage: input.usage,
+              idempotencyKey: input.idempotencyKey,
+              metadata: input.metadata,
+              pricingVersion: 'weighted-v1',
+              usageSource: 'runtime_snapshot',
+            },
+          ),
       }
     }
-    // Dev/offline mode only. SaaS deployments should provide a Supabase store,
-    // so credit mutations run through authenticated RPC under RLS.
     return {
-      reserveCredits: (userId, input) => reserveCredits(userId, input),
-      settleCreditReservation: (userId, input) =>
-        settleCreditReservation(userId, input),
-      refundCreditReservation: (userId, input) =>
-        refundCreditReservation(userId, input),
+      recordShadowUsage: (userId, input) =>
+        recordShadowUsage({
+          ...input,
+          userId,
+        }),
+      debitRealtimeUsage: async (userId, input) => {
+        const shadow = await recordShadowUsage({ ...input, userId })
+        return debitLocalRealtimeUsage({
+          dataDir: input.dataDir,
+          userId,
+          idempotencyKey: input.idempotencyKey,
+          shadow,
+        })
+      },
     }
   }
 
@@ -1054,8 +1082,9 @@ export class DashboardRepository {
         ...(modelConfigId ? { modelConfigId } : {}),
       })
       const modelEnv = modelConfigId
-        ? await this.supabaseForAuthToken(authToken)
-            .loadRlsVisibleModelRuntimeEnv(modelConfigId)
+        ? await this.supabaseForAuthToken(
+            authToken,
+          ).loadRlsVisibleModelRuntimeEnv(modelConfigId)
         : {}
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
@@ -1093,10 +1122,7 @@ export class DashboardRepository {
     }
     const config = this.options.skillsConfig ?? resolveBeeGameSkillsConfig()
     try {
-      const skills = await fetchEnabledUserSkills(
-        config,
-        userId,
-      )
+      const skills = await fetchEnabledUserSkills(config, userId)
       materializeUserSkills(skills, { dataDir })
       this.warnedSkillSyncFailures.delete(userId)
     } catch (err) {
@@ -1108,7 +1134,10 @@ export class DashboardRepository {
       materializeUserSkills([], { dataDir })
       if (!this.warnedSkillSyncFailures.has(userId)) {
         this.warnedSkillSyncFailures.add(userId)
-        console.warn('[BeeGame] User skills are temporarily unavailable; continuing without user skills:', err)
+        console.warn(
+          '[BeeGame] User skills are temporarily unavailable; continuing without user skills:',
+          err,
+        )
       }
     }
   }
@@ -1129,8 +1158,8 @@ export class DashboardRepository {
     })
     syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
     return mapRuntimeSettingsToEnv(settings, {
-        dataDir,
-      })
+      dataDir,
+    })
   }
 
   private syncRuntimeSettingsFromRuntimeEnv(
@@ -1183,24 +1212,33 @@ export class DashboardRepository {
     }
   }
 
-  private supabaseForRequest(request?: Request): SupabaseDashboardStore | undefined {
+  private supabaseForRequest(
+    request?: Request,
+  ): SupabaseDashboardStore | undefined {
     if (!this.supabaseStore) return undefined
     return this.supabaseStore.withAuthToken(
-      this.requireAuthToken(request
-        ? this.options.getAuthToken?.(request) ?? getBearerToken(request)
-        : undefined),
+      this.requireAuthToken(
+        request
+          ? (this.options.getAuthToken?.(request) ?? getBearerToken(request))
+          : undefined,
+      ),
     )
   }
 
-  private supabaseForAuthToken(authToken: string | undefined): SupabaseDashboardStore {
-    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
+  private supabaseForAuthToken(
+    authToken: string | undefined,
+  ): SupabaseDashboardStore {
+    if (!this.supabaseStore)
+      throw new Error('Supabase repository is not configured')
     return this.supabaseStore.withAuthToken(this.requireAuthToken(authToken))
   }
 
   private requireAuthToken(authToken: string | undefined): string {
     const trimmed = authToken?.trim()
     if (!trimmed) {
-      throw new Error('Supabase user token is required for local runtime storage')
+      throw new Error(
+        'Supabase user token is required for local runtime storage',
+      )
     }
     return trimmed
   }
@@ -1212,7 +1250,9 @@ export class DashboardRepository {
   private getReadModelConfigOwnerId(
     user: BeeGameUserContext,
   ): string | undefined {
-    return user.modelConfigOwnerId ?? (user.role === 'owner' ? user.id : undefined)
+    return (
+      user.modelConfigOwnerId ?? (user.role === 'owner' ? user.id : undefined)
+    )
   }
 }
 
@@ -1242,7 +1282,9 @@ function toProjectLifecycleProject(
       hasWorkspacePath: Boolean(project.root_path),
       hasRuntimeSnapshot: Boolean(snapshot),
       ...(snapshot?.phase_name ? { phaseName: snapshot.phase_name } : {}),
-      ...(typeof snapshot?.updated_at === 'number' ? { updatedAt: snapshot.updated_at } : {}),
+      ...(typeof snapshot?.updated_at === 'number'
+        ? { updatedAt: snapshot.updated_at }
+        : {}),
     },
   }
 }
@@ -1251,17 +1293,20 @@ function toProjectLifecycleDeletion(
   event: BeeGameAuditEvent,
 ): BeeGameProjectLifecycleDeletion {
   const metadata = event.metadata ?? {}
-  const deletedWorkspacePath = typeof metadata.deletedWorkspacePath === 'string'
-    ? metadata.deletedWorkspacePath
-    : undefined
-  const cleanupOutcome = typeof metadata.cleanupOutcome === 'string'
-    ? metadata.cleanupOutcome
-    : deletedWorkspacePath
-      ? 'workspace_deleted'
-      : 'metadata_deleted'
-  const storageCleanupOutcome = typeof metadata.storageCleanupOutcome === 'string'
-    ? metadata.storageCleanupOutcome
-    : undefined
+  const deletedWorkspacePath =
+    typeof metadata.deletedWorkspacePath === 'string'
+      ? metadata.deletedWorkspacePath
+      : undefined
+  const cleanupOutcome =
+    typeof metadata.cleanupOutcome === 'string'
+      ? metadata.cleanupOutcome
+      : deletedWorkspacePath
+        ? 'workspace_deleted'
+        : 'metadata_deleted'
+  const storageCleanupOutcome =
+    typeof metadata.storageCleanupOutcome === 'string'
+      ? metadata.storageCleanupOutcome
+      : undefined
   return {
     projectId: event.targetId,
     deletedAt: event.createdAt,
@@ -1278,9 +1323,15 @@ function toProjectLifecycleRetentionRun(
   return {
     dryRun: metadata.dryRun === true,
     ranAt: event.createdAt,
-    deploymentRecordsDeleted: numberFromMetadata(metadata.deploymentRecordsDeleted),
-    deploymentRecordsRetained: numberFromMetadata(metadata.deploymentRecordsRetained),
-    deploymentRecordsPlannedForDeletion: numberFromMetadata(metadata.deploymentRecordsPlannedForDeletion),
+    deploymentRecordsDeleted: numberFromMetadata(
+      metadata.deploymentRecordsDeleted,
+    ),
+    deploymentRecordsRetained: numberFromMetadata(
+      metadata.deploymentRecordsRetained,
+    ),
+    deploymentRecordsPlannedForDeletion: numberFromMetadata(
+      metadata.deploymentRecordsPlannedForDeletion,
+    ),
     previewRecordsSkipped: numberFromMetadata(metadata.previewRecordsSkipped),
     logRecordsSkipped: numberFromMetadata(metadata.logRecordsSkipped),
   }
@@ -1290,11 +1341,13 @@ function numberFromMetadata(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function safeParseJsonObject(value: string): Record<string, unknown> | undefined {
+function safeParseJsonObject(
+  value: string,
+): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(value) as unknown
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : undefined
   } catch {
     return undefined
@@ -1309,7 +1362,9 @@ function metadataString(
   return typeof value === 'string' ? value.trim() : ''
 }
 
-async function normalizeWorkspaceIdentity(workspacePath: string): Promise<string> {
+async function normalizeWorkspaceIdentity(
+  workspacePath: string,
+): Promise<string> {
   const resolved = resolve(workspacePath)
   try {
     return await realpath(resolved)

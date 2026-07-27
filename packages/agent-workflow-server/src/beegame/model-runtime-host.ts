@@ -36,8 +36,24 @@ export type BeeGameModelGenerateInput = {
   querySource: string
 }
 
+export type BeeGameModelUsage = {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  total_tokens: number
+}
+
+export type BeeGameModelGeneration = {
+  content: string
+  usage?: BeeGameModelUsage
+}
+
 export type BeeGameModelRuntimeHost = {
   generate(input: BeeGameModelGenerateInput): Promise<string>
+  generateWithUsage?: (
+    input: BeeGameModelGenerateInput,
+  ) => Promise<BeeGameModelGeneration>
 }
 
 type SerializedApprovedTarget = {
@@ -56,7 +72,12 @@ export type ModelRuntimeWorkerRequest = {
 }
 
 export type ModelRuntimeWorkerResponse =
-  | { type: 'model.result'; requestId: string; content: string }
+  | {
+      type: 'model.result'
+      requestId: string
+      content: string
+      usage?: BeeGameModelUsage
+    }
   | { type: 'model.error'; requestId: string; message: string }
 
 const WORKER_PATH = fileURLToPath(
@@ -73,53 +94,60 @@ const RUNTIME_PROVIDER_URL_KEYS = [
 export function createProcessIsolatedModelRuntimeHost(options: {
   outboundTargetPolicyOptions: OutboundTargetPolicyOptions
   resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
-  runWorker?: (input: ModelRuntimeWorkerRequest['input']) => Promise<string>
+  runWorker?: (
+    input: ModelRuntimeWorkerRequest['input'],
+  ) => Promise<string | BeeGameModelGeneration>
 }): BeeGameModelRuntimeHost {
   const resolveOutboundTarget =
     options.resolveOutboundTarget ?? resolveApprovedOutboundTarget
   const executeWorker = options.runWorker ?? runWorker
 
-  return {
-    async generate(input) {
-      const approvedOutboundTargets: Record<string, ApprovedOutboundTarget> = {}
-      for (const key of RUNTIME_PROVIDER_URL_KEYS) {
-        const value = input.runtimeEnv[key]
-        if (!value) continue
-        const target = await resolveOutboundTarget(
-          value,
-          options.outboundTargetPolicyOptions,
-        )
-        if (!target) throw new Error('Outbound URL is not permitted')
-        approvedOutboundTargets[key] = target
-      }
-      if (Object.keys(approvedOutboundTargets).length === 0) {
-        throw new Error('The selected model config has no runtime endpoint')
-      }
+  const generateWithUsage = async (
+    input: BeeGameModelGenerateInput,
+  ): Promise<BeeGameModelGeneration> => {
+    const approvedOutboundTargets: Record<string, ApprovedOutboundTarget> = {}
+    for (const key of RUNTIME_PROVIDER_URL_KEYS) {
+      const value = input.runtimeEnv[key]
+      if (!value) continue
+      const target = await resolveOutboundTarget(
+        value,
+        options.outboundTargetPolicyOptions,
+      )
+      if (!target) throw new Error('Outbound URL is not permitted')
+      approvedOutboundTargets[key] = target
+    }
+    if (Object.keys(approvedOutboundTargets).length === 0) {
+      throw new Error('The selected model config has no runtime endpoint')
+    }
 
-      return executeWorker({
-        ...input,
-        approvedOutboundTargets: Object.fromEntries(
-          Object.entries(approvedOutboundTargets).map(([key, target]) => [
-            key,
-            {
-              url: target.url.toString(),
-              addresses: [...target.addresses],
-              ...(target.trustedDevelopmentProxy
-                ? { trustedDevelopmentProxy: true as const }
-                : {}),
-            },
-          ]),
-        ),
-      })
-    },
+    const result = await executeWorker({
+      ...input,
+      approvedOutboundTargets: Object.fromEntries(
+        Object.entries(approvedOutboundTargets).map(([key, target]) => [
+          key,
+          {
+            url: target.url.toString(),
+            addresses: [...target.addresses],
+            ...(target.trustedDevelopmentProxy
+              ? { trustedDevelopmentProxy: true as const }
+              : {}),
+          },
+        ]),
+      ),
+    })
+    return typeof result === 'string' ? { content: result } : result
+  }
+  return {
+    generate: async input => (await generateWithUsage(input)).content,
+    generateWithUsage,
   }
 }
 
 async function runWorker(
   input: ModelRuntimeWorkerRequest['input'],
-): Promise<string> {
+): Promise<BeeGameModelGeneration> {
   const requestId = randomUUID()
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<BeeGameModelGeneration>((resolve, reject) => {
     let settled = false
     const child = Bun.spawn([process.execPath, WORKER_PATH], {
       env: getWorkerBaseEnvironment(),
@@ -132,8 +160,12 @@ async function runWorker(
         settled = true
         clearTimeout(timeout)
         child.kill()
-        if (message.type === 'model.result') resolve(message.content)
-        else reject(new Error(message.message))
+        if (message.type === 'model.result') {
+          resolve({
+            content: message.content,
+            ...(message.usage ? { usage: message.usage } : {}),
+          })
+        } else reject(new Error(message.message))
       },
     })
     const timeout = setTimeout(() => {

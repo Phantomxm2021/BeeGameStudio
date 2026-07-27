@@ -400,7 +400,9 @@ set styles = array(
 )
 where cardinality(styles) = 0 and btrim(style) <> '';
 
-create or replace view public.beegame_resource_pack_catalog
+drop view if exists public.beegame_resource_pack_catalog;
+
+create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as
 select
@@ -633,6 +635,98 @@ create table if not exists public.beegame_billing_credit_packs (
   updated_at timestamptz not null default now(),
   unique (provider, price_id)
 );
+
+create table if not exists public.beegame_shadow_usage_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  session_id text not null,
+  turn_id text,
+  project_id text,
+  idempotency_key text not null,
+  pricing_version text not null default 'weighted-v1',
+  usage_source text not null check (usage_source in ('runtime_snapshot', 'model_runtime_host')),
+  prompt_tokens bigint not null default 0 check (prompt_tokens >= 0),
+  completion_tokens bigint not null default 0 check (completion_tokens >= 0),
+  cache_read_tokens bigint not null default 0 check (cache_read_tokens >= 0),
+  cache_creation_tokens bigint not null default 0 check (cache_creation_tokens >= 0),
+  total_tokens bigint not null default 0 check (total_tokens >= 0),
+  prompt_tokens_delta bigint not null default 0 check (prompt_tokens_delta >= 0),
+  completion_tokens_delta bigint not null default 0 check (completion_tokens_delta >= 0),
+  cache_read_tokens_delta bigint not null default 0 check (cache_read_tokens_delta >= 0),
+  cache_creation_tokens_delta bigint not null default 0 check (cache_creation_tokens_delta >= 0),
+  total_tokens_delta bigint not null default 0 check (total_tokens_delta >= 0),
+  weighted_tokens bigint not null default 0 check (weighted_tokens >= 0),
+  weighted_tokens_delta bigint not null default 0 check (weighted_tokens_delta >= 0),
+  shadow_credits_micro bigint not null default 0 check (shadow_credits_micro >= 0),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  unique (user_id, idempotency_key)
+);
+
+create index if not exists beegame_shadow_usage_events_session_idx
+  on public.beegame_shadow_usage_events (user_id, session_id, created_at desc);
+create index if not exists beegame_shadow_usage_events_project_idx
+  on public.beegame_shadow_usage_events (user_id, project_id, created_at desc);
+
+create table if not exists public.beegame_usage_wallets (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  included_credits_micro bigint not null default 300000000 check (included_credits_micro >= 0),
+  consumed_credits_micro bigint not null default 0 check (consumed_credits_micro >= 0),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_usage_debit_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  idempotency_key text not null,
+  amount_credits_micro bigint not null check (amount_credits_micro >= 0),
+  result jsonb not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, idempotency_key)
+);
+
+create or replace function public.beegame_migrate_usage_wallet(
+  p_user_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  legacy_account public.beegame_credit_accounts%rowtype;
+  wallet_row public.beegame_usage_wallets%rowtype;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
+    raise exception 'Forbidden';
+  end if;
+  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
+  select * into legacy_account
+  from public.beegame_credit_accounts
+  where user_id = p_user_id;
+  insert into public.beegame_usage_wallets (
+    user_id, included_credits_micro, consumed_credits_micro
+  ) values (
+    p_user_id,
+    greatest(0, coalesce(legacy_account.included_credits, 300) - coalesce(legacy_account.consumed_credits, 0)) * 1000000,
+    0
+  ) on conflict (user_id) do nothing;
+  select * into wallet_row
+  from public.beegame_usage_wallets
+  where user_id = p_user_id;
+  return jsonb_build_object(
+    'user_id', wallet_row.user_id,
+    'included_credits_micro', wallet_row.included_credits_micro,
+    'consumed_credits_micro', wallet_row.consumed_credits_micro,
+    'balance_credits_micro', wallet_row.included_credits_micro - wallet_row.consumed_credits_micro
+  );
+end
+$$;
 
 create index if not exists beegame_billing_credit_packs_enabled_idx
   on public.beegame_billing_credit_packs (provider, enabled, sort_order, credits);
@@ -1503,6 +1597,237 @@ begin
   returning * into selected_config;
 
   return selected_config;
+end
+$$;
+
+create or replace function public.beegame_record_shadow_usage(
+  p_user_id uuid,
+  p_session_id text,
+  p_turn_id text default null,
+  p_project_id text default null,
+  p_idempotency_key text default null,
+  p_usage jsonb default '{}'::jsonb,
+  p_metadata jsonb default '{}'::jsonb,
+  p_pricing_version text default 'weighted-v1',
+  p_usage_source text default 'runtime_snapshot'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  previous_row public.beegame_shadow_usage_events%rowtype;
+  event_row public.beegame_shadow_usage_events%rowtype;
+  duplicate_event boolean := false;
+  reset_epoch boolean := false;
+  current_prompt bigint := greatest(0, coalesce((p_usage->>'prompt_tokens')::bigint, 0));
+  current_completion bigint := greatest(0, coalesce((p_usage->>'completion_tokens')::bigint, 0));
+  current_cache_read bigint := greatest(0, coalesce((p_usage->>'cache_read_tokens')::bigint, 0));
+  current_cache_creation bigint := greatest(0, coalesce((p_usage->>'cache_creation_tokens')::bigint, 0));
+  current_total bigint := greatest(0, coalesce((p_usage->>'total_tokens')::bigint, 0));
+  current_weighted bigint;
+  delta_prompt bigint;
+  delta_completion bigint;
+  delta_cache_read bigint;
+  delta_cache_creation bigint;
+  delta_total bigint;
+  delta_weighted bigint;
+  cumulative_prompt bigint;
+  cumulative_completion bigint;
+  cumulative_cache_read bigint;
+  cumulative_cache_creation bigint;
+  cumulative_total bigint;
+  cumulative_weighted bigint;
+  cumulative_credits bigint;
+begin
+  if p_user_id is null or nullif(trim(p_session_id), '') is null or nullif(trim(p_idempotency_key), '') is null then
+    raise exception 'User id, session id, and idempotency key are required';
+  end if;
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
+    raise exception 'Forbidden';
+  end if;
+  if p_usage_source not in ('runtime_snapshot', 'model_runtime_host') then
+    raise exception 'Invalid usage source';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':' || p_session_id));
+  select * into event_row
+  from public.beegame_shadow_usage_events
+  where user_id = p_user_id and idempotency_key = p_idempotency_key;
+
+  if event_row.id is not null then
+    duplicate_event := true;
+  else
+    select * into previous_row
+    from public.beegame_shadow_usage_events
+    where user_id = p_user_id and session_id = p_session_id
+    order by created_at desc, id desc
+    limit 1;
+
+    current_weighted := ceil((current_prompt * 100 + current_cache_read * 10 + current_cache_creation * 125 + current_completion * 500)::numeric / 100)::bigint;
+    reset_epoch := previous_row.id is null or
+      current_prompt < previous_row.prompt_tokens or
+      current_completion < previous_row.completion_tokens or
+      current_cache_read < previous_row.cache_read_tokens or
+      current_cache_creation < previous_row.cache_creation_tokens or
+      current_total < previous_row.total_tokens;
+    delta_prompt := case when reset_epoch then current_prompt else greatest(0, current_prompt - previous_row.prompt_tokens) end;
+    delta_completion := case when reset_epoch then current_completion else greatest(0, current_completion - previous_row.completion_tokens) end;
+    delta_cache_read := case when reset_epoch then current_cache_read else greatest(0, current_cache_read - previous_row.cache_read_tokens) end;
+    delta_cache_creation := case when reset_epoch then current_cache_creation else greatest(0, current_cache_creation - previous_row.cache_creation_tokens) end;
+    delta_total := case when reset_epoch then current_total else greatest(0, current_total - previous_row.total_tokens) end;
+    delta_weighted := case when reset_epoch then current_weighted else greatest(0, current_weighted - previous_row.weighted_tokens) end;
+
+    insert into public.beegame_shadow_usage_events (
+      user_id, session_id, turn_id, project_id, idempotency_key, pricing_version, usage_source,
+      prompt_tokens, completion_tokens, cache_read_tokens, cache_creation_tokens, total_tokens,
+      prompt_tokens_delta, completion_tokens_delta, cache_read_tokens_delta, cache_creation_tokens_delta,
+      total_tokens_delta, weighted_tokens, weighted_tokens_delta, shadow_credits_micro, metadata
+    ) values (
+      p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key, coalesce(nullif(trim(p_pricing_version), ''), 'weighted-v1'), p_usage_source,
+      current_prompt, current_completion, current_cache_read, current_cache_creation, current_total,
+      delta_prompt, delta_completion, delta_cache_read, delta_cache_creation,
+      delta_total, current_weighted, delta_weighted, delta_weighted * 100, coalesce(p_metadata, '{}'::jsonb)
+    ) returning * into event_row;
+  end if;
+
+  select coalesce(sum(prompt_tokens_delta), 0), coalesce(sum(completion_tokens_delta), 0),
+    coalesce(sum(cache_read_tokens_delta), 0), coalesce(sum(cache_creation_tokens_delta), 0),
+    coalesce(sum(total_tokens_delta), 0), coalesce(sum(weighted_tokens_delta), 0),
+    coalesce(sum(shadow_credits_micro), 0)
+  into cumulative_prompt, cumulative_completion, cumulative_cache_read,
+    cumulative_cache_creation, cumulative_total, cumulative_weighted, cumulative_credits
+  from public.beegame_shadow_usage_events
+  where user_id = p_user_id and session_id = p_session_id;
+
+  return jsonb_build_object(
+    'duplicate', duplicate_event,
+    'event', jsonb_build_object(
+      'id', event_row.id, 'idempotency_key', event_row.idempotency_key,
+      'user_id', event_row.user_id, 'session_id', event_row.session_id,
+      'turn_id', event_row.turn_id, 'project_id', event_row.project_id,
+      'pricing_version', event_row.pricing_version, 'usage_source', event_row.usage_source,
+      'prompt_tokens', event_row.prompt_tokens, 'completion_tokens', event_row.completion_tokens,
+      'cache_read_tokens', event_row.cache_read_tokens, 'cache_creation_tokens', event_row.cache_creation_tokens,
+      'total_tokens', event_row.total_tokens, 'prompt_tokens_delta', event_row.prompt_tokens_delta,
+      'completion_tokens_delta', event_row.completion_tokens_delta, 'cache_read_tokens_delta', event_row.cache_read_tokens_delta,
+      'cache_creation_tokens_delta', event_row.cache_creation_tokens_delta, 'total_tokens_delta', event_row.total_tokens_delta,
+      'weighted_tokens', event_row.weighted_tokens, 'weighted_tokens_delta', event_row.weighted_tokens_delta,
+      'shadow_credits_micro', event_row.shadow_credits_micro, 'created_at', event_row.created_at,
+      'metadata', event_row.metadata
+    ),
+    'cumulative_usage', jsonb_build_object(
+      'prompt_tokens', cumulative_prompt, 'completion_tokens', cumulative_completion,
+      'cache_read_tokens', cumulative_cache_read, 'cache_creation_tokens', cumulative_cache_creation,
+      'total_tokens', cumulative_total
+    ),
+    'cumulative_weighted_tokens', cumulative_weighted,
+    'shadow_credits_micro', cumulative_credits
+  );
+end
+$$;
+
+create or replace function public.beegame_debit_realtime_usage(
+  p_user_id uuid,
+  p_session_id text,
+  p_turn_id text default null,
+  p_project_id text default null,
+  p_idempotency_key text default null,
+  p_usage jsonb default '{}'::jsonb,
+  p_metadata jsonb default '{}'::jsonb,
+  p_pricing_version text default 'weighted-v1',
+  p_usage_source text default 'runtime_snapshot'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  wallet_row public.beegame_usage_wallets%rowtype;
+  debit_row public.beegame_usage_debit_events%rowtype;
+  shadow_row public.beegame_shadow_usage_events%rowtype;
+  previous_shadow_row public.beegame_shadow_usage_events%rowtype;
+  result_payload jsonb;
+  amount_micro bigint;
+  prompt_tokens bigint := greatest(0, coalesce((p_usage->>'prompt_tokens')::bigint, 0));
+  completion_tokens bigint := greatest(0, coalesce((p_usage->>'completion_tokens')::bigint, 0));
+  cache_read_tokens bigint := greatest(0, coalesce((p_usage->>'cache_read_tokens')::bigint, 0));
+  cache_creation_tokens bigint := greatest(0, coalesce((p_usage->>'cache_creation_tokens')::bigint, 0));
+  weighted_tokens bigint;
+  previous_weighted_tokens bigint := 0;
+  reset_epoch boolean := false;
+begin
+  if p_user_id is null or nullif(trim(p_session_id), '') is null or nullif(trim(p_idempotency_key), '') is null then
+    raise exception 'User id, session id, and idempotency key are required';
+  end if;
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
+    raise exception 'Forbidden';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
+  select * into debit_row
+  from public.beegame_usage_debit_events
+  where user_id = p_user_id and idempotency_key = p_idempotency_key;
+  if debit_row.id is not null then
+    return jsonb_set(debit_row.result, '{duplicate}', 'true'::jsonb);
+  end if;
+
+  select * into shadow_row
+  from public.beegame_shadow_usage_events
+  where user_id = p_user_id and idempotency_key = p_idempotency_key;
+
+  perform public.beegame_migrate_usage_wallet(p_user_id);
+  select * into wallet_row
+  from public.beegame_usage_wallets
+  where user_id = p_user_id
+  for update;
+
+  weighted_tokens := ceil((prompt_tokens * 100 + cache_read_tokens * 10 + cache_creation_tokens * 125 + completion_tokens * 500)::numeric / 100)::bigint;
+  if shadow_row.id is not null then
+    amount_micro := shadow_row.weighted_tokens_delta * 100;
+  else
+    select * into previous_shadow_row
+    from public.beegame_shadow_usage_events
+    where user_id = p_user_id and session_id = p_session_id
+    order by created_at desc, id desc
+    limit 1;
+    if previous_shadow_row.id is not null then
+      reset_epoch := prompt_tokens < previous_shadow_row.prompt_tokens or
+        completion_tokens < previous_shadow_row.completion_tokens or
+        cache_read_tokens < previous_shadow_row.cache_read_tokens or
+        cache_creation_tokens < previous_shadow_row.cache_creation_tokens or
+        coalesce((p_usage->>'total_tokens')::bigint, 0) < previous_shadow_row.total_tokens;
+      previous_weighted_tokens := previous_shadow_row.weighted_tokens;
+    end if;
+    amount_micro := case
+      when reset_epoch or previous_shadow_row.id is null then weighted_tokens * 100
+      else greatest(0, weighted_tokens - previous_weighted_tokens) * 100
+    end;
+  end if;
+  if wallet_row.included_credits_micro - wallet_row.consumed_credits_micro < amount_micro then
+    raise exception 'Insufficient realtime usage credits';
+  end if;
+
+  result_payload := public.beegame_record_shadow_usage(
+    p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key,
+    p_usage, p_metadata, p_pricing_version, p_usage_source
+  );
+  insert into public.beegame_usage_debit_events (
+    user_id, idempotency_key, amount_credits_micro, result
+  ) values (
+    p_user_id, p_idempotency_key, amount_micro, result_payload
+  );
+  update public.beegame_usage_wallets
+  set consumed_credits_micro = consumed_credits_micro + amount_micro,
+      updated_at = now()
+  where user_id = p_user_id;
+  return result_payload;
 end
 $$;
 

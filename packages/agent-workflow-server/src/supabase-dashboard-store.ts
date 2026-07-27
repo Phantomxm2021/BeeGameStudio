@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { decryptSecret, encryptSecret, isSecretEnvelope } from './security/secret-crypto'
+import type {
+  BeeGameUsageBillingEvent,
+  BeeGameUsageBillingRecordInput,
+  BeeGameUsageBillingRecordResult,
+} from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import {
+  decryptSecret,
+  encryptSecret,
+  isSecretEnvelope,
+} from './security/secret-crypto'
 import type {
   ModelConfigInput,
   ModelConfigSnapshotRecord,
@@ -18,9 +27,6 @@ import {
   type CreditLedgerEntry,
   type CreditLedgerKind,
   type CreditLedgerSummary,
-  type CreditReservation,
-  type CreditSettlement,
-  type StaleCreditReservationExpiry,
 } from './credit-store'
 import type {
   McpServerConfig,
@@ -176,24 +182,44 @@ type SupabaseCreditSummaryRow = Pick<
   'kind' | 'credits' | 'weighted_tokens'
 >
 
-type SupabaseCreditMutationRow = {
-  reservation_id: string
-  reserved_credits: number
-  settled_credits?: number
-  refunded_credits?: number
-  account: SupabaseCreditAccountRow
-}
-
-type SupabaseStaleCreditExpiryRow = {
-  expired_reservation_ids?: string[]
-  refunded_credits?: number
-  account: SupabaseCreditAccountRow
-}
-
 type SupabaseCreditGrantRow = {
   granted_credits?: number
   account: SupabaseCreditAccountRow
 }
+
+type SupabaseUsageBillingResult = {
+  duplicate?: boolean
+  event: {
+    id: string
+    idempotency_key: string
+    user_id: string
+    session_id: string
+    turn_id: string | null
+    project_id: string | null
+    pricing_version: string
+    usage_source: 'runtime_snapshot' | 'model_runtime_host'
+    prompt_tokens: number
+    completion_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
+    total_tokens: number
+    prompt_tokens_delta: number
+    completion_tokens_delta: number
+    cache_read_tokens_delta: number
+    cache_creation_tokens_delta: number
+    total_tokens_delta: number
+    weighted_tokens: number
+    weighted_tokens_delta: number
+    shadow_credits_micro: number
+    created_at: string
+    metadata: JsonObject
+  }
+  cumulative_usage: BeeGameUsageBillingRecordInput['usage']
+  cumulative_weighted_tokens: number
+  shadow_credits_micro: number
+}
+
+type SupabaseUsageBillingEventRow = SupabaseUsageBillingResult['event']
 
 export type BeeGameBillingCreditPack = {
   provider: 'stripe'
@@ -230,7 +256,10 @@ export type BeeGameBillingEvent = {
   createdAt?: string
 }
 
-export type BeeGameBillingEventInput = Omit<BeeGameBillingEvent, 'id' | 'createdAt' | 'metadata'> & {
+export type BeeGameBillingEventInput = Omit<
+  BeeGameBillingEvent,
+  'id' | 'createdAt' | 'metadata'
+> & {
   metadata?: JsonObject
 }
 
@@ -332,11 +361,12 @@ export function createSupabaseDashboardStoreFromEnv(
   return new SupabaseDashboardStore({
     url,
     anonKey,
-    assetBucket: (
-      env.BEEGAME_SUPABASE_ASSET_BUCKET ??
-      env.SUPABASE_ASSET_BUCKET ??
-      ''
-    ).trim() || undefined,
+    assetBucket:
+      (
+        env.BEEGAME_SUPABASE_ASSET_BUCKET ??
+        env.SUPABASE_ASSET_BUCKET ??
+        ''
+      ).trim() || undefined,
   })
 }
 
@@ -358,11 +388,12 @@ export function createSupabasePaymentProviderGrantStoreFromEnv(
   return new SupabaseDashboardStore({
     url,
     anonKey: serviceRoleKey,
-    assetBucket: (
-      env.BEEGAME_SUPABASE_ASSET_BUCKET ??
-      env.SUPABASE_ASSET_BUCKET ??
-      ''
-    ).trim() || undefined,
+    assetBucket:
+      (
+        env.BEEGAME_SUPABASE_ASSET_BUCKET ??
+        env.SUPABASE_ASSET_BUCKET ??
+        ''
+      ).trim() || undefined,
   })
 }
 
@@ -488,7 +519,10 @@ export class SupabaseDashboardStore {
     if (input.clearSecret) {
       patch.api_key_ciphertext = encryptSecret('', 'model-config:api-key')
     } else if (input.apiKey !== undefined && input.apiKey.trim()) {
-      patch.api_key_ciphertext = encryptSecret(input.apiKey, 'model-config:api-key')
+      patch.api_key_ciphertext = encryptSecret(
+        input.apiKey,
+        'model-config:api-key',
+      )
     }
     if (input.models !== undefined) patch.models = input.models
     if (input.isDefault === false) patch.is_default = false
@@ -512,18 +546,25 @@ export class SupabaseDashboardStore {
   }
 
   async upsertModelConfig(record: ModelConfigSnapshotRecord): Promise<void> {
-    await this.upsert('beegame_model_configs', {
-      id: record.id,
-      owner_id: record.ownerId,
-      name: record.name,
-      provider: record.provider,
-      base_url: record.baseUrl ?? null,
-      api_key_ciphertext: encryptSecret(record.apiKey, 'model-config:api-key'),
-      models: record.models,
-      is_default: record.isDefault ? false : record.isDefault,
-      created_at: record.createdAt,
-      updated_at: record.updatedAt,
-    }, 'id')
+    await this.upsert(
+      'beegame_model_configs',
+      {
+        id: record.id,
+        owner_id: record.ownerId,
+        name: record.name,
+        provider: record.provider,
+        base_url: record.baseUrl ?? null,
+        api_key_ciphertext: encryptSecret(
+          record.apiKey,
+          'model-config:api-key',
+        ),
+        models: record.models,
+        is_default: record.isDefault ? false : record.isDefault,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+      },
+      'id',
+    )
     if (record.isDefault) {
       await this.setDefaultModelConfig(record.ownerId, record.id)
     }
@@ -550,10 +591,13 @@ export class SupabaseDashboardStore {
     ownerId: string,
     id: string,
   ): Promise<SupabaseModelConfigRow> {
-    return this.rpc<SupabaseModelConfigRow>('beegame_set_default_model_config', {
-      p_user_id: ownerId,
-      p_model_config_id: id,
-    })
+    return this.rpc<SupabaseModelConfigRow>(
+      'beegame_set_default_model_config',
+      {
+        p_user_id: ownerId,
+        p_model_config_id: id,
+      },
+    )
   }
 
   async loadRuntimeSettings(ownerId: string): Promise<RuntimeSettingsConfig> {
@@ -569,11 +613,15 @@ export class SupabaseDashboardStore {
   ): Promise<RuntimeSettingsConfig> {
     const previous = await this.loadRuntimeSettings(ownerId)
     const normalized = normalizeRuntimeSettings({ ...previous, ...config })
-    await this.upsert('beegame_runtime_settings', {
-      owner_id: ownerId,
-      settings: normalized,
-      updated_at: new Date().toISOString(),
-    }, 'owner_id')
+    await this.upsert(
+      'beegame_runtime_settings',
+      {
+        owner_id: ownerId,
+        settings: normalized,
+        updated_at: new Date().toISOString(),
+      },
+      'owner_id',
+    )
     return normalized
   }
 
@@ -589,11 +637,15 @@ export class SupabaseDashboardStore {
   ): Promise<RuntimeSettingsConfig> {
     const previous = await this.loadPlatformRuntimeSettings()
     const normalized = normalizeRuntimeSettings({ ...previous, ...config })
-    await this.upsert('beegame_platform_settings', {
-      key: PLATFORM_RUNTIME_SETTINGS_KEY,
-      config: normalized,
-      updated_at: new Date().toISOString(),
-    }, 'key')
+    await this.upsert(
+      'beegame_platform_settings',
+      {
+        key: PLATFORM_RUNTIME_SETTINGS_KEY,
+        config: normalized,
+        updated_at: new Date().toISOString(),
+      },
+      'key',
+    )
     return normalized
   }
 
@@ -616,7 +668,8 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&select=*`,
     )
     for (const row of modelRows) {
-      if (!row.api_key_ciphertext || isSecretEnvelope(row.api_key_ciphertext)) continue
+      if (!row.api_key_ciphertext || isSecretEnvelope(row.api_key_ciphertext))
+        continue
       await this.rest<SupabaseModelConfigRow[]>(
         `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&id=eq.${q(row.id)}`,
         {
@@ -638,15 +691,22 @@ export class SupabaseDashboardStore {
     )
     for (const row of webRows) {
       const config = isObject(row.config) ? row.config : {}
-      const legacy = (typeof config.braveApiKey === 'string' && !isSecretEnvelope(config.braveApiKey)) ||
-        (typeof config.exaApiKey === 'string' && !isSecretEnvelope(config.exaApiKey))
+      const legacy =
+        (typeof config.braveApiKey === 'string' &&
+          !isSecretEnvelope(config.braveApiKey)) ||
+        (typeof config.exaApiKey === 'string' &&
+          !isSecretEnvelope(config.exaApiKey))
       if (!legacy) continue
       const normalized = normalizeWebTools(decryptWebTools(config))
-      await this.upsert('beegame_web_tools', {
-        owner_id: ownerId,
-        config: encryptWebTools(normalized),
-        updated_at: new Date().toISOString(),
-      }, 'owner_id')
+      await this.upsert(
+        'beegame_web_tools',
+        {
+          owner_id: ownerId,
+          config: encryptWebTools(normalized),
+          updated_at: new Date().toISOString(),
+        },
+        'owner_id',
+      )
       webTools += 1
     }
     const mcpRows = await this.rest<SupabaseMcpServerRow[]>(
@@ -657,11 +717,19 @@ export class SupabaseDashboardStore {
       const env = Array.isArray(envPayload.env) ? envPayload.env : []
       let legacy = false
       const migratedEnv = env.map(item => {
-        if (!isObject(item) || typeof item.value !== 'string' || isSecretEnvelope(item.value)) return item
+        if (
+          !isObject(item) ||
+          typeof item.value !== 'string' ||
+          isSecretEnvelope(item.value)
+        )
+          return item
         legacy = true
         return {
           ...item,
-          value: encryptSecret(decryptSecret(item.value, `mcp-server:env:${String(item.key)}`), `mcp-server:env:${String(item.key)}`),
+          value: encryptSecret(
+            decryptSecret(item.value, `mcp-server:env:${String(item.key)}`),
+            `mcp-server:env:${String(item.key)}`,
+          ),
         }
       })
       if (!legacy) continue
@@ -712,14 +780,26 @@ export class SupabaseDashboardStore {
     const normalized = normalizeWebTools({
       ...previous,
       ...config,
-      braveApiKey: resolveSecretInput(config.braveApiKey, previous.braveApiKey, config.clearSecret),
-      exaApiKey: resolveSecretInput(config.exaApiKey, previous.exaApiKey, config.clearSecret),
+      braveApiKey: resolveSecretInput(
+        config.braveApiKey,
+        previous.braveApiKey,
+        config.clearSecret,
+      ),
+      exaApiKey: resolveSecretInput(
+        config.exaApiKey,
+        previous.exaApiKey,
+        config.clearSecret,
+      ),
     })
-    await this.upsert('beegame_web_tools', {
-      owner_id: ownerId,
-      config: encryptWebTools(normalized),
-      updated_at: new Date().toISOString(),
-    }, 'owner_id')
+    await this.upsert(
+      'beegame_web_tools',
+      {
+        owner_id: ownerId,
+        config: encryptWebTools(normalized),
+        updated_at: new Date().toISOString(),
+      },
+      'owner_id',
+    )
     return toPublicWebToolsConfig(normalized)
   }
 
@@ -727,9 +807,7 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
-    return rows.map(row => toPublicMcpServerConfig(
-      rowToMcpServer(row),
-    ))
+    return rows.map(row => toPublicMcpServerConfig(rowToMcpServer(row)))
   }
 
   async upsertMcpServer(
@@ -740,31 +818,40 @@ export class SupabaseDashboardStore {
       ? await this.getMcpServer(ownerId, input.id)
       : undefined
     const normalized = normalizeMcpServerInput(input, existing)
-    await this.upsert('beegame_mcp_servers', {
-      id: normalized.id,
-      owner_id: ownerId,
-      name: normalized.name,
-      config: {
-        enabled: normalized.enabled,
-        transport: normalized.transport,
-        scope: normalized.scope,
-        command: normalized.command,
-        args: normalized.args,
-        url: normalized.url,
-        cwd: normalized.cwd,
-        autoStart: normalized.autoStart,
+    await this.upsert(
+      'beegame_mcp_servers',
+      {
+        id: normalized.id,
+        owner_id: ownerId,
+        name: normalized.name,
+        config: {
+          enabled: normalized.enabled,
+          transport: normalized.transport,
+          scope: normalized.scope,
+          command: normalized.command,
+          args: normalized.args,
+          url: normalized.url,
+          cwd: normalized.cwd,
+          autoStart: normalized.autoStart,
+        },
+        env_ciphertext: {
+          env: (normalized.env ?? []).map(item => ({
+            ...item,
+            ...(item.value !== undefined
+              ? {
+                  value: encryptSecret(
+                    item.value,
+                    `mcp-server:env:${item.key}`,
+                  ),
+                }
+              : {}),
+          })),
+        },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       },
-      env_ciphertext: {
-        env: (normalized.env ?? []).map(item => ({
-          ...item,
-          ...(item.value !== undefined
-            ? { value: encryptSecret(item.value, `mcp-server:env:${item.key}`) }
-            : {}),
-        })),
-      },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, 'id')
+      'id',
+    )
     return toPublicMcpServerConfig(normalized)
   }
 
@@ -794,24 +881,26 @@ export class SupabaseDashboardStore {
   ): Promise<BeeGameProjectMetadata> {
     const workspaceId = await this.ensureDefaultWorkspace(ownerId)
     const normalized = normalizeProject(project)
-    await this.upsert('beegame_projects', {
-      id: normalized.id,
-      owner_id: ownerId,
-      workspace_id: workspaceId,
-      name: normalized.name,
-      root_path: normalized.root_path ?? null,
-      runtime_snapshot: normalized.runtime_snapshot ?? {},
-      created_at: new Date(normalized.created_at).toISOString(),
-      updated_at: new Date().toISOString(),
-    }, 'id')
+    await this.upsert(
+      'beegame_projects',
+      {
+        id: normalized.id,
+        owner_id: ownerId,
+        workspace_id: workspaceId,
+        name: normalized.name,
+        root_path: normalized.root_path ?? null,
+        runtime_snapshot: normalized.runtime_snapshot ?? {},
+        created_at: new Date(normalized.created_at).toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      'id',
+    )
     return normalized
   }
 
   async deleteProject(ownerId: string, id: string): Promise<boolean> {
-    const deploymentStoragePrefixes = await this.listProjectDeploymentStoragePrefixes(
-      ownerId,
-      id,
-    )
+    const deploymentStoragePrefixes =
+      await this.listProjectDeploymentStoragePrefixes(ownerId, id)
     await this.deleteStoragePrefixes(this.assetBucket, [
       [
         'projects',
@@ -878,7 +967,10 @@ export class SupabaseDashboardStore {
     })
   }
 
-  async deleteProjectSessions(ownerId: string, projectId: string): Promise<boolean> {
+  async deleteProjectSessions(
+    ownerId: string,
+    projectId: string,
+  ): Promise<boolean> {
     return this.deleteWhere('beegame_sessions', {
       owner_id: ownerId,
       project_id: projectId,
@@ -889,127 +981,57 @@ export class SupabaseDashboardStore {
     return toCreditBalance(ownerId, await this.ensureCreditAccount(ownerId))
   }
 
-  async reserveCredits(
+  async recordShadowUsage(
     ownerId: string,
-    options: {
-      credits: number
-      kind?: string
-      projectId?: string
-      idempotencyKey?: string
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<CreditReservation> {
-    const credits = normalizePositiveInteger(options.credits)
-    const result = await this.rpc<SupabaseCreditMutationRow>(
-      'beegame_reserve_credits',
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    const result = await this.rpc<SupabaseUsageBillingResult>(
+      'beegame_record_shadow_usage',
       {
         p_user_id: ownerId,
-        p_credits: credits,
-        p_kind: options.kind ?? null,
-        p_project_id: options.projectId ?? null,
-        p_metadata: mergeCreditMutationMetadata(options.metadata, options.idempotencyKey),
+        p_session_id: input.sessionId,
+        p_turn_id: input.turnId ?? null,
+        p_project_id: input.projectId ?? null,
+        p_idempotency_key: input.idempotencyKey,
+        p_usage: input.usage,
+        p_metadata: input.metadata ?? {},
+        p_pricing_version: input.pricingVersion ?? 'weighted-v1',
+        p_usage_source: input.usageSource ?? 'runtime_snapshot',
       },
     )
-    const account = normalizeCreditAccountRow(ownerId, result.account)
-    return {
-      id: result.reservation_id,
-      reservedCredits: normalizePositiveInteger(result.reserved_credits),
-      balance: toCreditBalance(ownerId, account),
-    }
+    return toUsageBillingRecordResult(result)
   }
 
-  async settleCreditReservation(
+  async debitRealTimeUsage(
     ownerId: string,
-    options: {
-      reservationId: string
-      weightedTokens: number
-      projectId?: string
-      idempotencyKey?: string
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<CreditSettlement> {
-    const result = await this.rpc<SupabaseCreditMutationRow>(
-      'beegame_settle_credit_reservation',
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    const result = await this.rpc<SupabaseUsageBillingResult>(
+      'beegame_debit_realtime_usage',
       {
         p_user_id: ownerId,
-        p_reservation_id: options.reservationId,
-        p_weighted_tokens: normalizeNonNegativeInteger(options.weightedTokens),
-        p_credit_unit_weighted_tokens: CREDIT_UNIT_WEIGHTED_TOKENS,
-        p_project_id: options.projectId ?? null,
-        p_metadata: mergeCreditMutationMetadata(options.metadata, options.idempotencyKey),
+        p_session_id: input.sessionId,
+        p_turn_id: input.turnId ?? null,
+        p_project_id: input.projectId ?? null,
+        p_idempotency_key: input.idempotencyKey,
+        p_usage: input.usage,
+        p_metadata: input.metadata ?? {},
+        p_pricing_version: input.pricingVersion ?? 'weighted-v1',
+        p_usage_source: input.usageSource ?? 'runtime_snapshot',
       },
     )
-    const account = normalizeCreditAccountRow(ownerId, result.account)
-    return {
-      reservationId: result.reservation_id,
-      reservedCredits: normalizeNonNegativeInteger(result.reserved_credits),
-      settledCredits: normalizeNonNegativeInteger(result.settled_credits),
-      refundedCredits: normalizeNonNegativeInteger(result.refunded_credits),
-      balance: toCreditBalance(ownerId, account),
-    }
+    return toUsageBillingRecordResult(result)
   }
 
-  async refundCreditReservation(
+  async listShadowUsageEvents(
     ownerId: string,
-    options: {
-      reservationId: string
-      projectId?: string
-      idempotencyKey?: string
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<CreditSettlement> {
-    const result = await this.rpc<SupabaseCreditMutationRow>(
-      'beegame_refund_credit_reservation',
-      {
-        p_user_id: ownerId,
-        p_reservation_id: options.reservationId,
-        p_project_id: options.projectId ?? null,
-        p_metadata: mergeCreditMutationMetadata(
-          options.metadata ?? { reason: 'reservation_refunded' },
-          options.idempotencyKey,
-        ),
-      },
+    projectId?: string,
+  ): Promise<BeeGameUsageBillingEvent[]> {
+    const projectFilter = projectId ? `&project_id=eq.${q(projectId)}` : ''
+    const rows = await this.rest<SupabaseUsageBillingEventRow[]>(
+      `/rest/v1/beegame_shadow_usage_events?user_id=eq.${q(ownerId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
     )
-    const account = normalizeCreditAccountRow(ownerId, result.account)
-    const reservedCredits = normalizeNonNegativeInteger(result.reserved_credits)
-    return {
-      reservationId: result.reservation_id,
-      reservedCredits,
-      settledCredits: 0,
-      refundedCredits: normalizeNonNegativeInteger(
-        result.refunded_credits ?? reservedCredits,
-      ),
-      balance: toCreditBalance(ownerId, account),
-    }
-  }
-
-  async expireStaleCreditReservations(
-    ownerId: string,
-    options: {
-      olderThan: Date
-      projectId?: string
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<StaleCreditReservationExpiry> {
-    const result = await this.rpc<SupabaseStaleCreditExpiryRow>(
-      'beegame_expire_stale_credit_reservations',
-      {
-        p_user_id: ownerId,
-        p_older_than: options.olderThan.toISOString(),
-        p_project_id: options.projectId ?? null,
-        p_metadata: options.metadata ?? { reason: 'stale_reservation_expired' },
-      },
-    )
-    return {
-      expiredReservations: Array.isArray(result.expired_reservation_ids)
-        ? result.expired_reservation_ids.filter(id => typeof id === 'string')
-        : [],
-      refundedCredits: normalizeNonNegativeInteger(result.refunded_credits),
-      balance: toCreditBalance(
-        ownerId,
-        normalizeCreditAccountRow(ownerId, result.account),
-      ),
-    }
+    return rows.map(rowToUsageBillingEvent)
   }
 
   async grantCredits(
@@ -1095,23 +1117,21 @@ export class SupabaseDashboardStore {
   }
 
   async appendBillingEvent(input: BeeGameBillingEventInput): Promise<void> {
-    await this.insert<SupabaseBillingEventRow>(
-      'beegame_billing_events',
-      {
-        provider: input.provider,
-        event_type: input.eventType,
-        status: input.status,
-        user_id: trimString(input.userId) || null,
-        price_id: trimString(input.priceId) || null,
-        credits: typeof input.credits === 'number'
+    await this.insert<SupabaseBillingEventRow>('beegame_billing_events', {
+      provider: input.provider,
+      event_type: input.eventType,
+      status: input.status,
+      user_id: trimString(input.userId) || null,
+      price_id: trimString(input.priceId) || null,
+      credits:
+        typeof input.credits === 'number'
           ? normalizeNonNegativeInteger(input.credits)
           : null,
-        provider_event_id: trimString(input.providerEventId) || null,
-        checkout_session_id: trimString(input.checkoutSessionId) || null,
-        metadata: input.metadata ?? {},
-        error_message: trimString(input.errorMessage) || null,
-      },
-    )
+      provider_event_id: trimString(input.providerEventId) || null,
+      checkout_session_id: trimString(input.checkoutSessionId) || null,
+      metadata: input.metadata ?? {},
+      error_message: trimString(input.errorMessage) || null,
+    })
   }
 
   async listBillingEvents(): Promise<BeeGameBillingEvent[]> {
@@ -1132,7 +1152,9 @@ export class SupabaseDashboardStore {
     filters: CreditLedgerFilters = {},
   ): Promise<CreditAuditLedger> {
     const userFilter = filters.userId ? `&user_id=eq.${q(filters.userId)}` : ''
-    const projectFilter = filters.projectId ? `&project_id=eq.${q(filters.projectId)}` : ''
+    const projectFilter = filters.projectId
+      ? `&project_id=eq.${q(filters.projectId)}`
+      : ''
     const kindFilter = filters.kind ? `&kind=eq.${q(filters.kind)}` : ''
     const reservationFilter = filters.reservationId
       ? `&reservation_id=eq.${q(filters.reservationId)}`
@@ -1188,9 +1210,11 @@ export class SupabaseDashboardStore {
       {
         actor_id: input.actorId || ownerId,
         workspace_id: null,
-        project_id: input.targetType === 'project' && input.projectReference !== 'detached'
-          ? input.targetId
-          : null,
+        project_id:
+          input.targetType === 'project' &&
+          input.projectReference !== 'detached'
+            ? input.targetId
+            : null,
         action: input.action,
         metadata,
       },
@@ -1259,7 +1283,11 @@ export class SupabaseDashboardStore {
     return `supabase://${this.assetBucket}/${objectPath}`
   }
 
-  async deleteAssetFile(ownerId: string, projectId: string, storageUri: string): Promise<void> {
+  async deleteAssetFile(
+    ownerId: string,
+    projectId: string,
+    storageUri: string,
+  ): Promise<void> {
     const parsed = parseSupabaseStorageUri(storageUri)
     if (!parsed || parsed.bucket !== this.assetBucket) return
     const ownedPrefix = [
@@ -1381,13 +1409,10 @@ export class SupabaseDashboardStore {
     functionName: string,
     payload: JsonObject,
   ): Promise<T> {
-    return this.rest<T>(
-      `/rest/v1/rpc/${functionName}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    )
+    return this.rest<T>(`/rest/v1/rpc/${functionName}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   }
 
   private async ensureDefaultWorkspace(ownerId: string): Promise<string> {
@@ -1409,11 +1434,15 @@ export class SupabaseDashboardStore {
       'owner_id',
     )
     const workspaceId = created.id
-    await this.upsert('beegame_workspace_members', {
-      workspace_id: workspaceId,
-      user_id: ownerId,
-      role: 'owner',
-    }, 'workspace_id,user_id')
+    await this.upsert(
+      'beegame_workspace_members',
+      {
+        workspace_id: workspaceId,
+        user_id: ownerId,
+        role: 'owner',
+      },
+      'workspace_id,user_id',
+    )
     this.workspaceIds.set(ownerId, workspaceId)
     return workspaceId
   }
@@ -1441,16 +1470,13 @@ export class SupabaseDashboardStore {
     table: string,
     payload: JsonObject,
   ): Promise<T> {
-    const rows = await this.rest<T[]>(
-      `/rest/v1/${table}`,
-      {
-        method: 'POST',
-        headers: {
-          Prefer: 'return=representation',
-        },
-        body: JSON.stringify(payload),
+    const rows = await this.rest<T[]>(`/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        Prefer: 'return=representation',
       },
-    )
+      body: JSON.stringify(payload),
+    })
     if (!rows[0]) throw new Error(`Supabase ${table} insert returned no rows`)
     return rows[0]
   }
@@ -1490,8 +1516,10 @@ export class SupabaseDashboardStore {
       byBucket.set(parsed.bucket, prefixes)
     }
     return new Map(
-      Array.from(byBucket.entries())
-        .map(([bucket, prefixes]) => [bucket, Array.from(prefixes)]),
+      Array.from(byBucket.entries()).map(([bucket, prefixes]) => [
+        bucket,
+        Array.from(prefixes),
+      ]),
     )
   }
 
@@ -1499,7 +1527,9 @@ export class SupabaseDashboardStore {
     bucket: string,
     prefixes: string[],
   ): Promise<void> {
-    const uniquePrefixes = Array.from(new Set(prefixes.map(trimString).filter(Boolean)))
+    const uniquePrefixes = Array.from(
+      new Set(prefixes.map(trimString).filter(Boolean)),
+    )
     if (!uniquePrefixes.length) return
     const response = await this.fetchImpl(
       `${this.baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}`,
@@ -1521,10 +1551,7 @@ export class SupabaseDashboardStore {
     }
   }
 
-  private async rest<T>(
-    path: string,
-    init: RequestInit = {},
-  ): Promise<T> {
+  private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await this.fetchRestRequest(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -1541,7 +1568,7 @@ export class SupabaseDashboardStore {
       )
     }
     if (response.status === 204) return undefined as T
-    return await response.json() as T
+    return (await response.json()) as T
   }
 
   /**
@@ -1554,16 +1581,14 @@ export class SupabaseDashboardStore {
     init: RequestInit,
   ): Promise<Response> {
     const method = String(init.method ?? 'GET').toUpperCase()
-    const retryDelays = method === 'GET' || method === 'HEAD'
-      ? [75, 200]
-      : []
+    const retryDelays = method === 'GET' || method === 'HEAD' ? [75, 200] : []
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await this.fetchImpl(url, init)
       } catch (error) {
-        const aborted = init.signal?.aborted || (
-          error instanceof Error && error.name === 'AbortError'
-        )
+        const aborted =
+          init.signal?.aborted ||
+          (error instanceof Error && error.name === 'AbortError')
         if (aborted || attempt >= retryDelays.length) throw error
         await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]))
       }
@@ -1642,7 +1667,8 @@ function modelConfigRowToRuntimeEnv(
   const modelEnv = (values: Record<string, string | null | undefined>) =>
     Object.fromEntries(
       Object.entries(values).filter(
-        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1]),
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && Boolean(entry[1]),
       ),
     )
 
@@ -1745,7 +1771,12 @@ function encryptWebTools(config: WebToolsConfig): JsonObject {
   return {
     ...config,
     ...(config.braveApiKey !== undefined
-      ? { braveApiKey: encryptSecret(config.braveApiKey, 'web-tools:brave-api-key') }
+      ? {
+          braveApiKey: encryptSecret(
+            config.braveApiKey,
+            'web-tools:brave-api-key',
+          ),
+        }
       : {}),
     ...(config.exaApiKey !== undefined
       ? { exaApiKey: encryptSecret(config.exaApiKey, 'web-tools:exa-api-key') }
@@ -1760,7 +1791,12 @@ function decryptWebTools(value: unknown): JsonObject {
   return {
     ...value,
     ...(typeof value.braveApiKey === 'string'
-      ? { braveApiKey: decryptSecret(value.braveApiKey, 'web-tools:brave-api-key') }
+      ? {
+          braveApiKey: decryptSecret(
+            value.braveApiKey,
+            'web-tools:brave-api-key',
+          ),
+        }
       : {}),
     ...(typeof value.exaApiKey === 'string'
       ? { exaApiKey: decryptSecret(value.exaApiKey, 'web-tools:exa-api-key') }
@@ -1778,9 +1814,7 @@ function resolveSecretInput(
   return trimString(next) || previous
 }
 
-function rowToMcpServer(
-  row: SupabaseMcpServerRow,
-): McpServerConfig {
+function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
   const config = isObject(row.config) ? row.config : {}
   const envPayload = isObject(row.env_ciphertext) ? row.env_ciphertext : {}
   return normalizeMcpServerInput({
@@ -1811,24 +1845,26 @@ function normalizeMcpServerInput(
 ): McpServerConfig {
   const transport = isMcpServerTransport(input.transport)
     ? input.transport
-    : existing?.transport ?? 'stdio'
+    : (existing?.transport ?? 'stdio')
   const scope = isMcpServerScope(input.scope)
     ? input.scope
-    : existing?.scope ?? 'beegame'
+    : (existing?.scope ?? 'beegame')
   const env = normalizeMcpEnv(input.env, existing?.env)
   const base = {
     id: trimString(input.id) || existing?.id || randomUUID(),
     name: trimString(input.name) || existing?.name || 'MCP Server',
-    enabled: typeof input.enabled === 'boolean'
-      ? input.enabled
-      : existing?.enabled ?? true,
+    enabled:
+      typeof input.enabled === 'boolean'
+        ? input.enabled
+        : (existing?.enabled ?? true),
     transport,
     scope,
     cwd: trimString(input.cwd) || undefined,
     env,
-    autoStart: typeof input.autoStart === 'boolean'
-      ? input.autoStart
-      : existing?.autoStart ?? true,
+    autoStart:
+      typeof input.autoStart === 'boolean'
+        ? input.autoStart
+        : (existing?.autoStart ?? true),
   }
   if (transport === 'stdio') {
     return {
@@ -1891,7 +1927,9 @@ function normalizeEnvFromUnknown(value: unknown): McpServerEnvVar[] {
     .filter((item): item is McpServerEnvVar => item !== undefined)
 }
 
-function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetadata {
+function normalizeProject(
+  project: BeeGameProjectMetadata,
+): BeeGameProjectMetadata {
   const id = project.id.trim()
   const name = project.name.trim()
   if (!id) throw new Error('Project id is required')
@@ -1899,7 +1937,9 @@ function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetada
   return {
     id,
     name,
-    ...(project.root_path?.trim() ? { root_path: project.root_path.trim() } : {}),
+    ...(project.root_path?.trim()
+      ? { root_path: project.root_path.trim() }
+      : {}),
     created_at: Number.isFinite(project.created_at)
       ? project.created_at
       : Date.now(),
@@ -1907,9 +1947,9 @@ function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetada
   }
 }
 
-function normalizeProjectRuntimeSnapshot(
-  snapshot: unknown,
-): { runtime_snapshot?: BeeGameProjectRuntimeSnapshot } {
+function normalizeProjectRuntimeSnapshot(snapshot: unknown): {
+  runtime_snapshot?: BeeGameProjectRuntimeSnapshot
+} {
   if (!isObject(snapshot)) return {}
   const usage = isObject(snapshot.usage) ? snapshot.usage : undefined
   const normalizedUsage = usage
@@ -1917,7 +1957,10 @@ function normalizeProjectRuntimeSnapshot(
         prompt_tokens: Math.max(0, Number(usage.prompt_tokens) || 0),
         completion_tokens: Math.max(0, Number(usage.completion_tokens) || 0),
         cache_read_tokens: Math.max(0, Number(usage.cache_read_tokens) || 0),
-        cache_creation_tokens: Math.max(0, Number(usage.cache_creation_tokens) || 0),
+        cache_creation_tokens: Math.max(
+          0,
+          Number(usage.cache_creation_tokens) || 0,
+        ),
         total_tokens: Math.max(0, Number(usage.total_tokens) || 0),
       }
     : undefined
@@ -1962,20 +2005,20 @@ function normalizeSessionMetadata(
     ...(session.modelConfigId?.trim()
       ? { modelConfigId: session.modelConfigId.trim() }
       : {}),
-    createdAt: session.createdAt instanceof Date &&
+    createdAt:
+      session.createdAt instanceof Date &&
       Number.isFinite(session.createdAt.getTime())
-      ? session.createdAt
-      : new Date(),
-    updatedAt: session.updatedAt instanceof Date &&
+        ? session.createdAt
+        : new Date(),
+    updatedAt:
+      session.updatedAt instanceof Date &&
       Number.isFinite(session.updatedAt.getTime())
-      ? session.updatedAt
-      : new Date(),
+        ? session.updatedAt
+        : new Date(),
   }
 }
 
-function rowToSessionMetadata(
-  row: SupabaseSessionRow,
-): BeeGameSessionMetadata {
+function rowToSessionMetadata(row: SupabaseSessionRow): BeeGameSessionMetadata {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -2045,7 +2088,9 @@ function rowToCreditLedgerEntry(
   }
 }
 
-function rowToBillingCreditPack(row: SupabaseBillingCreditPackRow): BeeGameBillingCreditPack {
+function rowToBillingCreditPack(
+  row: SupabaseBillingCreditPackRow,
+): BeeGameBillingCreditPack {
   const displayName = trimString(row.display_name)
   return {
     provider: 'stripe',
@@ -2071,7 +2116,9 @@ function rowToBillingEvent(row: SupabaseBillingEventRow): BeeGameBillingEvent {
     status: isBillingEventStatus(row.status) ? row.status : 'failed',
     ...(userId ? { userId } : {}),
     ...(priceId ? { priceId } : {}),
-    ...(typeof row.credits === 'number' ? { credits: normalizeNonNegativeInteger(row.credits) } : {}),
+    ...(typeof row.credits === 'number'
+      ? { credits: normalizeNonNegativeInteger(row.credits) }
+      : {}),
     ...(providerEventId ? { providerEventId } : {}),
     ...(checkoutSessionId ? { checkoutSessionId } : {}),
     metadata: isObject(row.metadata) ? row.metadata : {},
@@ -2080,18 +2127,26 @@ function rowToBillingEvent(row: SupabaseBillingEventRow): BeeGameBillingEvent {
   }
 }
 
-function isBillingEventStatus(value: string): value is BeeGameBillingEvent['status'] {
-  return value === 'received' ||
+function isBillingEventStatus(
+  value: string,
+): value is BeeGameBillingEvent['status'] {
+  return (
+    value === 'received' ||
     value === 'ignored' ||
     value === 'succeeded' ||
     value === 'failed'
+  )
 }
 
 function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {
   const metadata = isObject(row.metadata) ? row.metadata : {}
   const targetType = trimString(metadata.targetType) || 'unknown'
   const targetId = trimString(metadata.targetId) || row.project_id || 'unknown'
-  const { targetType: _targetType, targetId: _targetId, ...eventMetadata } = metadata
+  const {
+    targetType: _targetType,
+    targetId: _targetId,
+    ...eventMetadata
+  } = metadata
   return {
     id: row.id,
     actorId: row.actor_id ?? '',
@@ -2131,15 +2186,25 @@ function rowToPreviewSnapshot(row: SupabasePreviewRow): BeeGamePreviewSnapshot {
     status: normalizePreviewStatus(row.status),
     url: row.url ?? '',
     ...(Number.isInteger(metadata.port) ? { port: Number(metadata.port) } : {}),
-    ...(trimString(metadata.command) ? { command: trimString(metadata.command) } : {}),
-    ...(trimString(metadata.script) ? { script: trimString(metadata.script) } : {}),
-    ...(trimString(metadata.entrypoint) ? { entrypoint: trimString(metadata.entrypoint) } : {}),
-    ...(trimString(metadata.message) ? { message: trimString(metadata.message) } : {}),
+    ...(trimString(metadata.command)
+      ? { command: trimString(metadata.command) }
+      : {}),
+    ...(trimString(metadata.script)
+      ? { script: trimString(metadata.script) }
+      : {}),
+    ...(trimString(metadata.entrypoint)
+      ? { entrypoint: trimString(metadata.entrypoint) }
+      : {}),
+    ...(trimString(metadata.message)
+      ? { message: trimString(metadata.message) }
+      : {}),
     updatedAt: trimString(metadata.updatedAt) || row.updated_at,
   }
 }
 
-function rowToDeploymentRecord(row: SupabaseDeploymentRow): BeeGameDeploymentRecord {
+function rowToDeploymentRecord(
+  row: SupabaseDeploymentRow,
+): BeeGameDeploymentRecord {
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -2153,7 +2218,9 @@ function rowToDeploymentRecord(row: SupabaseDeploymentRow): BeeGameDeploymentRec
     ...(row.output_dir ? { outputDir: row.output_dir } : {}),
     ...(row.artifact_path ? { artifactPath: row.artifact_path } : {}),
     ...(row.artifact_hash ? { artifactHash: row.artifact_hash } : {}),
-    ...(row.manifest_storage_object_id ? { manifestStorageObjectId: row.manifest_storage_object_id } : {}),
+    ...(row.manifest_storage_object_id
+      ? { manifestStorageObjectId: row.manifest_storage_object_id }
+      : {}),
     ...(row.message ? { message: row.message } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2161,7 +2228,9 @@ function rowToDeploymentRecord(row: SupabaseDeploymentRow): BeeGameDeploymentRec
   }
 }
 
-function normalizePreviewStatus(value: unknown): BeeGamePreviewSnapshot['status'] {
+function normalizePreviewStatus(
+  value: unknown,
+): BeeGamePreviewSnapshot['status'] {
   return value === 'idle' ||
     value === 'starting' ||
     value === 'running' ||
@@ -2193,13 +2262,104 @@ function sumCreditSummaryKind(
     .reduce((sum, row) => sum + normalizeNonNegativeInteger(row.credits), 0)
 }
 
-function mergeCreditMutationMetadata(
-  metadata: Record<string, unknown> | undefined,
-  idempotencyKey: string | undefined,
-): JsonObject {
+function toUsageBillingRecordResult(
+  result: SupabaseUsageBillingResult,
+): BeeGameUsageBillingRecordResult {
+  const event = result.event
   return {
-    ...(metadata ?? {}),
-    ...(idempotencyKey ? { idempotencyKey } : {}),
+    duplicate: result.duplicate === true,
+    event: {
+      id: event.id,
+      idempotencyKey: event.idempotency_key,
+      userId: event.user_id,
+      sessionId: event.session_id,
+      ...(event.turn_id ? { turnId: event.turn_id } : {}),
+      ...(event.project_id ? { projectId: event.project_id } : {}),
+      pricingVersion: event.pricing_version,
+      usageSource: event.usage_source,
+      usage: {
+        prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens),
+        completion_tokens: normalizeNonNegativeInteger(event.completion_tokens),
+        cache_read_tokens: normalizeNonNegativeInteger(event.cache_read_tokens),
+        cache_creation_tokens: normalizeNonNegativeInteger(
+          event.cache_creation_tokens,
+        ),
+        total_tokens: normalizeNonNegativeInteger(event.total_tokens),
+      },
+      delta: {
+        prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens_delta),
+        completion_tokens: normalizeNonNegativeInteger(
+          event.completion_tokens_delta,
+        ),
+        cache_read_tokens: normalizeNonNegativeInteger(
+          event.cache_read_tokens_delta,
+        ),
+        cache_creation_tokens: normalizeNonNegativeInteger(
+          event.cache_creation_tokens_delta,
+        ),
+        total_tokens: normalizeNonNegativeInteger(event.total_tokens_delta),
+      },
+      weightedTokens: normalizeNonNegativeInteger(event.weighted_tokens),
+      weightedTokensDelta: normalizeNonNegativeInteger(
+        event.weighted_tokens_delta,
+      ),
+      shadowCreditsMicro: normalizeNonNegativeInteger(
+        event.shadow_credits_micro,
+      ),
+      createdAt: event.created_at,
+      metadata: isObject(event.metadata) ? event.metadata : {},
+    },
+    cumulativeUsage: result.cumulative_usage,
+    cumulativeWeightedTokens: normalizeNonNegativeInteger(
+      result.cumulative_weighted_tokens,
+    ),
+    shadowCreditsMicro: normalizeNonNegativeInteger(
+      result.shadow_credits_micro,
+    ),
+  }
+}
+
+function rowToUsageBillingEvent(
+  event: SupabaseUsageBillingEventRow,
+): BeeGameUsageBillingEvent {
+  return {
+    id: event.id,
+    idempotencyKey: event.idempotency_key,
+    userId: event.user_id,
+    sessionId: event.session_id,
+    ...(event.turn_id ? { turnId: event.turn_id } : {}),
+    ...(event.project_id ? { projectId: event.project_id } : {}),
+    pricingVersion: event.pricing_version,
+    usageSource: event.usage_source,
+    usage: {
+      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens),
+      completion_tokens: normalizeNonNegativeInteger(event.completion_tokens),
+      cache_read_tokens: normalizeNonNegativeInteger(event.cache_read_tokens),
+      cache_creation_tokens: normalizeNonNegativeInteger(
+        event.cache_creation_tokens,
+      ),
+      total_tokens: normalizeNonNegativeInteger(event.total_tokens),
+    },
+    delta: {
+      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens_delta),
+      completion_tokens: normalizeNonNegativeInteger(
+        event.completion_tokens_delta,
+      ),
+      cache_read_tokens: normalizeNonNegativeInteger(
+        event.cache_read_tokens_delta,
+      ),
+      cache_creation_tokens: normalizeNonNegativeInteger(
+        event.cache_creation_tokens_delta,
+      ),
+      total_tokens: normalizeNonNegativeInteger(event.total_tokens_delta),
+    },
+    weightedTokens: normalizeNonNegativeInteger(event.weighted_tokens),
+    weightedTokensDelta: normalizeNonNegativeInteger(
+      event.weighted_tokens_delta,
+    ),
+    shadowCreditsMicro: normalizeNonNegativeInteger(event.shadow_credits_micro),
+    createdAt: event.created_at,
+    metadata: isObject(event.metadata) ? event.metadata : {},
   }
 }
 
@@ -2243,11 +2403,13 @@ function isMcpServerScope(value: unknown): value is McpServerScope {
 }
 
 function isWebSearchAdapter(value: unknown): value is WebSearchAdapter {
-  return value === 'tavily' ||
+  return (
+    value === 'tavily' ||
     value === 'api' ||
     value === 'bing' ||
     value === 'brave' ||
     value === 'exa'
+  )
 }
 
 function isWebFetchAdapter(value: unknown): value is WebFetchAdapter {

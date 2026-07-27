@@ -12,18 +12,10 @@ function createRepository(
   overrides: Partial<BeeGameBillingRouteRepository>,
 ): BeeGameBillingRouteRepository {
   return {
-    reserveCreditsForUser: async () => {
+    debitRealTimeUsageForUser: async () => {
       throw new Error('not used')
     },
-    findCreditReservationByIdempotencyKeyForUser: async () => undefined,
-    getCreditSettlementForUser: async () => undefined,
-    settleCreditReservationForUser: async () => {
-      throw new Error('not used')
-    },
-    refundCreditReservationForUser: async () => {
-      throw new Error('not used')
-    },
-    expireStaleCreditReservationsForUser: async () => {
+    recordShadowUsageForUser: async () => {
       throw new Error('not used')
     },
     grantPaymentProviderCredits: async () => {

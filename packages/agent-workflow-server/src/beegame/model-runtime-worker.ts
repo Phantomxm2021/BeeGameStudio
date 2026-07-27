@@ -4,6 +4,7 @@ import {
   ensureBeeGameMacroGlobals,
 } from './query-engine-runner'
 import type {
+  BeeGameModelUsage,
   ModelRuntimeWorkerRequest,
   ModelRuntimeWorkerResponse,
 } from './model-runtime-host'
@@ -64,10 +65,12 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       querySource: message.input.querySource,
     })
     const content = extractText(result)
+    const usage = extractUsage(result)
     send({
       type: 'model.result',
       requestId: message.requestId,
       content,
+      ...(usage ? { usage } : {}),
     })
   } catch (error) {
     send({
@@ -84,6 +87,37 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       else process.env[key] = value
     }
   }
+}
+
+function extractUsage(value: unknown): BeeGameModelUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const usage = (value as { usage?: unknown }).usage
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage))
+    return undefined
+  const record = usage as Record<string, unknown>
+  const input = nonNegative(record.input_tokens ?? record.prompt_tokens)
+  const output = nonNegative(record.output_tokens ?? record.completion_tokens)
+  const cacheRead = nonNegative(
+    record.cache_read_input_tokens ?? record.cache_read_tokens,
+  )
+  const cacheCreation = nonNegative(
+    record.cache_creation_input_tokens ?? record.cache_creation_tokens,
+  )
+  return {
+    input_tokens: input,
+    output_tokens: output,
+    cache_read_tokens: cacheRead,
+    cache_creation_tokens: cacheCreation,
+    total_tokens:
+      nonNegative(record.total_tokens) ||
+      input + output + cacheRead + cacheCreation,
+  }
+}
+
+function nonNegative(value: unknown): number {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0
 }
 
 type DynamicModule = Record<string, unknown>
