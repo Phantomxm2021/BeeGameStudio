@@ -390,6 +390,7 @@ function normalizeEngine(value: string | undefined): string {
 const pendingAuthIdeaStorageKey = 'beegame.pendingAuthIdea.v1';
 const pendingIdeaDraftStorageKey = 'beegame.pendingIdeaDraft.v1';
 const pendingIntakeFlowStorageKey = 'beegame.pendingIntakeFlow.v1';
+const pendingRealtimeBillingStorageKey = 'beegame.pendingRealtimeBilling.v1';
 const pendingAuthIdeaMaxAgeMs = 30 * 60 * 1000;
 const pendingIntakeFlowMaxAgeMs = 30 * 60 * 1000;
 
@@ -522,6 +523,41 @@ function clearPendingIntakeFlowState(): void {
   }
 }
 
+function readPendingRealtimeBillingIdea(): string {
+  try {
+    const raw = sessionStorage.getItem(pendingRealtimeBillingStorageKey);
+    if (!raw) return '';
+    const value = JSON.parse(raw) as unknown;
+    if (!isRecord(value) || typeof value.idea !== 'string' || typeof value.createdAt !== 'number') return '';
+    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
+      sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
+      return '';
+    }
+    return value.idea.trim();
+  } catch {
+    return '';
+  }
+}
+
+function writePendingRealtimeBillingIdea(idea: string): void {
+  try {
+    sessionStorage.setItem(
+      pendingRealtimeBillingStorageKey,
+      JSON.stringify({ idea: idea.trim(), createdAt: Date.now() }),
+    );
+  } catch {
+    // Best-effort recovery for a browser refresh.
+  }
+}
+
+function clearPendingRealtimeBillingIdea(): void {
+  try {
+    sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
+  } catch {
+    // Ignore storage failures; the in-memory flow remains authoritative.
+  }
+}
+
 function writePendingAuthIdeaState(idea: string): void {
   const normalizedIdea = idea.trim();
   if (!normalizedIdea) return;
@@ -596,6 +632,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const { t: translate, i18n } = useTranslation();
   const [restoredIntakeFlow] = useState<PendingIntakeFlowState | null>(() => readPendingIntakeFlowState());
   const [restoredIdeaDraft] = useState<PendingIdeaDraftState | null>(() => readPendingIdeaDraftState());
+  const [restoredRealtimeBillingIdea] = useState(() => readPendingRealtimeBillingIdea());
   const [projectName, setProjectName] = useState(() => restoredIntakeFlow?.idea || restoredIdeaDraft?.idea || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
@@ -639,8 +676,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
   const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
-  const [pendingRealtimeBillingIdea, setPendingRealtimeBillingIdea] = useState('');
-  const [isRealtimeBillingNoticeOpen, setIsRealtimeBillingNoticeOpen] = useState(false);
+  const [pendingRealtimeBillingIdea, setPendingRealtimeBillingIdea] = useState(restoredRealtimeBillingIdea);
+  const [isRealtimeBillingNoticeOpen, setIsRealtimeBillingNoticeOpen] = useState(Boolean(restoredRealtimeBillingIdea));
   const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
   const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
   const inputMenuRef = useRef<HTMLDivElement | null>(null);
@@ -824,6 +861,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const requestIntakeStart = (idea: string) => {
+    writePendingRealtimeBillingIdea(idea);
     setPendingRealtimeBillingIdea(idea);
     setIsRealtimeBillingNoticeOpen(true);
   };
@@ -980,12 +1018,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const handleConfirmRealtimeBilling = () => {
     const idea = pendingRealtimeBillingIdea;
+    clearPendingRealtimeBillingIdea();
     setPendingRealtimeBillingIdea('');
     setIsRealtimeBillingNoticeOpen(false);
     if (idea) void startIntake(idea);
   };
 
   const handleCancelRealtimeBilling = () => {
+    clearPendingRealtimeBillingIdea();
     setPendingRealtimeBillingIdea('');
     setIsRealtimeBillingNoticeOpen(false);
   };
@@ -1049,7 +1089,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProjectName(nextIdea);
         const canGenerate = await ensureGenerationAccess();
         if (canGenerate) {
-          await startIntake(nextIdea);
+          requestIntakeStart(nextIdea);
         }
       }
     } catch (error) {

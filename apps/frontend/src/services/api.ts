@@ -136,6 +136,10 @@ export interface ProjectBaselineStatusPayload {
   project_target?: BeeGameAssetManifestPayload['project_target'] | null;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
+  workflow?: {
+    status?: string;
+    [key: string]: unknown;
+  } | null;
 }
 
 export interface DeliveryEvidenceFactPayload {

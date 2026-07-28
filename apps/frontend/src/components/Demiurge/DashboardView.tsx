@@ -19,7 +19,6 @@ import {
   toProjectRuntimeDisplayModel,
   toReviewDisplayModels,
 } from '../../viewModels/displayModels';
-import type { WorkflowAction } from '../../viewModels/workflowDisplayModels';
 import {
   getCreditBalance,
   getCreditSummary,
@@ -365,22 +364,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     if (failedResult) throw failedResult.reason;
   }, [loadProjectRuntimeState, projectId, translateBeeGame]);
 
-  const handleWorkflowAction = useCallback(
-    async (action: WorkflowAction) => {
-      try {
-        if (action === 'resume') {
-          await api.resumeWorkflow(projectId);
-        } else {
-          await api.retryWorkflow(projectId);
-        }
-        await loadProjectRuntimeState(projectId);
-      } catch (error) {
-        showError(getErrorMessage(error, translateBeeGame('workflowCard.actionFailed')));
-      }
-    },
-    [loadProjectRuntimeState, projectId, showError, translateBeeGame],
-  );
-
   // Poll the persisted workflow snapshot as a reconnect-safe fallback.
   useEffect(() => {
     if (!projectId || authenticationStatus !== 'authenticated') return;
@@ -533,7 +516,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         approvalState={approvalState}
         pendingReviews={reviewDisplayModels}
         projectStatus={projectRuntimeDisplay}
-        onWorkflowAction={canSendMessage ? handleWorkflowAction : undefined}
         waitingApproval={waitingApproval}
         canSendMessage={canSendMessage}
         canApproveTool={canApproveTool}

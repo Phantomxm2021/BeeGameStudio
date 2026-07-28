@@ -367,8 +367,8 @@ describe('DashboardView runtime loading', () => {
     try {
       render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
       await act(async () => Promise.resolve());
-      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
-      expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(2);
+      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(1);
+      expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(1);
 
       act(() => {
         capturedUseChatOptions?.onTaskEvent('tool_start');
@@ -377,8 +377,8 @@ describe('DashboardView runtime loading', () => {
         vi.advanceTimersByTime(2_100);
       });
       await act(async () => Promise.resolve());
-      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(1);
-      expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(1);
+      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
+      expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(2);
 
       await act(async () => {
         capturedUseChatOptions?.onTaskEvent('credit_update');
@@ -1316,37 +1316,10 @@ describe('DashboardView runtime loading', () => {
     expect(capturedSideMenuProps).toBeNull();
   });
 
-  it('explains edit and continue requests use reserved credits with automatic refund settlement', async () => {
+  it('does not expose the retired client-side credit reservation quote flow', async () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-    await waitFor(() => expect(capturedUseChatOptions?.confirmCreditQuote).toEqual(expect.any(Function)));
-
-    await act(async () => {
-      void capturedUseChatOptions?.confirmCreditQuote({
-        taskType: 'edit_turn',
-        reservedCredits: 50,
-        displayName: '修改 / 继续任务',
-        description: 'User follow-up turn',
-        balanceCredits: 300,
-        canStart: true,
-        message: 'This request reserves credits.',
-      });
-    });
-
-    const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('确认本次请求');
-    expect(dialog).not.toHaveTextContent('修改 / 调试');
-    expect(dialog).not.toHaveTextContent('修改、调试或继续完善已有游戏项目。');
-    expect(dialog).not.toHaveTextContent('修改 / 继续任务');
-    expect(dialog).not.toHaveTextContent('User follow-up turn');
-    expect(dialog).toHaveClass('input-surface');
-    expect(dialog).toHaveClass('rounded-[30px]');
-    expect(screen.getByText('当前余额')).toBeInTheDocument();
-    expect(screen.getByText('300 credits')).toBeInTheDocument();
-    expect(screen.getByText('预扣')).toBeInTheDocument();
-    expect(screen.getByText('50 credits')).toBeInTheDocument();
-    expect(
-      screen.getByText('修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。'),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(capturedUseChatOptions).not.toBeNull());
+    expect(capturedUseChatOptions?.confirmCreditQuote).toBeUndefined();
   });
 });

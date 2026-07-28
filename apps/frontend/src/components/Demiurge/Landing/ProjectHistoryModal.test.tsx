@@ -120,7 +120,7 @@ describe('ProjectHistoryModal permissions', () => {
     });
   });
 
-  it('shows settled and reserved credits for each project', async () => {
+  it('shows realtime settled credits for each project without a reservation balance', async () => {
     render(
       <ProjectHistoryModal
         isOpen
@@ -131,11 +131,10 @@ describe('ProjectHistoryModal permissions', () => {
     );
 
     const settledCredits = await screen.findByText('7 credits');
-    const reservedCredits = screen.getByText('5 reserved');
     const creditRow = settledCredits.closest('.type-caption-1');
     expect(settledCredits).toBeInTheDocument();
     expect(settledCredits).toHaveClass('text-zinc-300');
-    expect(reservedCredits).toBeInTheDocument();
+    expect(screen.queryByText(/reserved/)).not.toBeInTheDocument();
     expect(creditRow).toHaveClass('text-zinc-500');
     expect(creditRow).not.toHaveClass('text-amber-200');
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');

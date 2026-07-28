@@ -199,10 +199,10 @@ export const getCreditSummary = (
     .get<BeeGameShadowUsageSummary>('/api/credits/shadow-summary', {
       ...(projectId ? { params: { projectId } } : {}),
     })
-    .then(summary => ({
-      entriesCount: summary.eventsCount,
-      settledCredits: summary.shadowCreditsMicro / 1_000_000,
-      weightedTokens: summary.weightedTokens,
+    .then(response => ({
+      entriesCount: response.data.eventsCount,
+      settledCredits: response.data.shadowCreditsMicro / 1_000_000,
+      weightedTokens: response.data.weightedTokens,
     }))
 
 export const getCreditAuditLedger = (

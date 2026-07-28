@@ -163,6 +163,10 @@ export interface ProjectRuntimeDisplayModel {
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportDisplayModel;
   document_bundle?: DocumentBundleDisplayModel;
+  workflow?: {
+    status?: string;
+    [key: string]: unknown;
+  } | null;
   diagnostic?: {
     raw?: ProjectBaselineStatusPayload | OperatorVisibilityPayload | null;
   };
@@ -438,6 +442,12 @@ export const toProjectRuntimeDisplayModel = (
       : undefined,
     build_report: normalizeBuildReportDisplay(normalizedPayload.build_report),
     document_bundle: normalizeDocumentBundleDisplay(normalizedPayload.document_bundle),
+    workflow: normalizedPayload.workflow
+      ? {
+          ...normalizedPayload.workflow,
+          status: trimString(normalizedPayload.workflow.status) || undefined,
+        }
+      : null,
     execution_evidence: Array.isArray(normalizedPayload.execution_evidence)
       ? normalizedPayload.execution_evidence.map((item) => ({
           ...item,

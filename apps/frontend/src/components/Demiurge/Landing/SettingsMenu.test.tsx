@@ -675,9 +675,9 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('信用');
 
         await waitFor(() => expect(screen.getAllByText('Credit 审计')).toHaveLength(2));
-        expect(screen.getByText('冻结未结算')).toBeInTheDocument();
-        expect(screen.getByText('0 credits')).toBeInTheDocument();
+        expect(screen.queryByText('冻结未结算')).not.toBeInTheDocument();
         expect(screen.getByText('已结算')).toBeInTheDocument();
+        expect(screen.getByText('12000')).toBeInTheDocument();
         expect(screen.getAllByText('2 credits').length).toBeGreaterThan(0);
         expect(screen.getAllByText('customer-a').length).toBeGreaterThan(0);
         expect(screen.getAllByText('project_1').length).toBeGreaterThan(0);

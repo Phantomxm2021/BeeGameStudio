@@ -270,7 +270,8 @@ const submitIdea = async (idea: string) => {
 };
 
 const confirmIntakeCreditQuote = async () => {
-  await new Promise(resolve => setTimeout(resolve, 0));
+  const dialog = await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '继续生成' }));
 };
 
 const submitIdeaAndConfirmIntake = async (idea: string) => {
@@ -597,14 +598,14 @@ describe('LandingView bootstrap submission', () => {
     expect(getCreditBalance).not.toHaveBeenCalled();
   });
 
-  it('does not require administrator model-config access before showing the intake credit quote', async () => {
+  it('does not require administrator model-config access before showing the realtime billing notice', async () => {
     listModelConfigs.mockRejectedValueOnce(new Error('Forbidden'));
 
     await renderLanding();
 
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     expect(listModelConfigs).not.toHaveBeenCalled();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
@@ -632,9 +633,9 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
     await screen.findByText('LLM Mode A');
     expect(signInWithSupabasePassword).toHaveBeenCalledWith({
@@ -691,9 +692,9 @@ describe('LandingView bootstrap submission', () => {
     };
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
     expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh' });
@@ -724,18 +725,18 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     });
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     await submitIdea('LLM generated idea');
-    fireEvent.click(await screen.findByRole('button', { name: '确认生成' }));
+    fireEvent.click(await screen.findByRole('button', { name: '继续生成' }));
 
     expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledWith({
@@ -744,17 +745,17 @@ describe('LandingView bootstrap submission', () => {
     });
   });
 
-  it('restores a pending intake credit quote after a page refresh', async () => {
+  it('restores a pending realtime billing notice after a page refresh', async () => {
     const { unmount } = await renderLanding();
 
     await submitIdea('Persistent LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     unmount();
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
     expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
@@ -1221,7 +1222,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
     await waitFor(() => expect(signInWithSupabasePassword).toHaveBeenCalled());
-    expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
@@ -1247,7 +1248,7 @@ describe('LandingView bootstrap submission', () => {
     };
     await renderLanding();
 
-    expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
@@ -1664,9 +1665,7 @@ describe('LandingView bootstrap submission', () => {
     mockLoadCurrentUser.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
 
-    expect(await screen.findByRole('button', { name: '确认构建' })).toBeInTheDocument();
     expect(mockLoadCurrentUser).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: '确认构建' }));
 
     const startingCover = await screen.findByRole('status', { name: '正在启动项目' });
     expect(startingCover).toHaveClass('fixed', 'inset-0', 'z-[300]');
