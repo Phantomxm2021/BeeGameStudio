@@ -22,6 +22,7 @@ import type { WebSocketState } from './useWebSocket';
 import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
+import { toProjectRuntimeDisplayModel } from '../viewModels/displayModels';
 import {
   getCreditQuote,
   type BeeGameCreditQuote,
@@ -40,15 +41,6 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
     return message || fallback;
   }
   return fallback;
-}
-
-function isProjectStatusRunning(status: unknown): boolean {
-  return Boolean(
-    status &&
-    typeof status === 'object' &&
-    'phase' in status &&
-    (status as { phase?: unknown }).phase === 'running'
-  );
 }
 
 /**
@@ -213,7 +205,7 @@ export const useChat = ({
   const projectStatus = useProjectStore((state) => state.projectStatus);
   const removePendingReview = useProjectStore((state) => state.removePendingReview);
   const upsertPendingReview = useProjectStore((state) => state.upsertPendingReview);
-  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadPhases, loadTokenUsage, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
+  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
   const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews);
 
   useEffect(() => {
@@ -285,10 +277,8 @@ export const useChat = ({
     showToastError,
     showToastSuccess,
     approvalState,
-    loadPhases,
     loadTasks,
     loadActivities,
-    loadTokenUsage,
     loadCurrentUser,
     refreshProjectVisibility,
   });
@@ -302,10 +292,8 @@ export const useChat = ({
     showToastError,
     showToastSuccess,
     approvalState,
-    loadPhases,
     loadTasks,
     loadActivities,
-    loadTokenUsage,
     loadCurrentUser,
     refreshProjectVisibility,
   };
@@ -697,7 +685,7 @@ export const useChat = ({
       // reconnect out into legacy phase, token, agent and task probes.
       await refreshProjectVisibility();
       const projectStatus = useProjectStore.getState().projectStatus;
-      if (isProjectStatusRunning(projectStatus)) {
+      if (toProjectRuntimeDisplayModel(projectStatus)?.workflow?.status === 'running') {
         setCurrentTaskId(currentTaskId || projectId);
         setIsLoading(true);
         setCanContinue(false);
@@ -745,8 +733,8 @@ export const useChat = ({
 
   useEffect(() => {
     if (!projectStatus || projectStatus.project_id !== projectId) return;
-    const phase = String(projectStatus.phase || '').toLowerCase();
-    if (phase === 'running' || phase === 'starting') {
+    const workflow = toProjectRuntimeDisplayModel(projectStatus)?.workflow;
+    if (workflow?.status === 'running') {
       setIsLoading(true);
       setCanContinue(false);
       setCurrentTaskId((current) => current || projectId);

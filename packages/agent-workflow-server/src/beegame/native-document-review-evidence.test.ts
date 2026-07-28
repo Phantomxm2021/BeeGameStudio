@@ -44,6 +44,23 @@ describe('native document review evidence', () => {
     expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
   })
 
+  test('rejects a terminal object that uses an unrelated worker result schema', async () => {
+    workspace = await createWorkspace()
+    const payload = reviewerPayload('wrong-terminal-schema')
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: JSON.stringify({
+        workerType: 'document-reviewer',
+        verdict: 'READY',
+        checklistIds: [],
+        findings: [],
+      }),
+    })
+
+    expect(current(workspace)).toMatchObject({ state: 'invalid', reason: 'terminal_result_invalid' })
+  })
+
   test('allows a fresh review for the same documents after session recovery', async () => {
     workspace = await createWorkspace()
     observe('tool.started', workspace, reviewerPayload('interrupted-review'))
@@ -225,6 +242,25 @@ describe('native document review evidence', () => {
         expect.objectContaining({
           source: 'deterministic project-contract audit',
           detail: expect.stringContaining('Acceptance checklist contains no task items'),
+        }),
+      ]))
+    }
+  })
+
+  test('downgrades READY when the mandatory acceptance checklist is absent', async () => {
+    workspace = await createWorkspace()
+    await rm(join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'))
+
+    recordReady(workspace)
+
+    const observation = current(workspace)
+    expect(observation.state).toBe('current')
+    if (observation.state === 'current') {
+      expect(observation.evidence.verdict).toBe('NEEDS_REVISION')
+      expect(observation.evidence.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'deterministic project-contract audit',
+          detail: 'Required project document is missing: docs/acceptance/gameplay-checklist.md',
         }),
       ]))
     }
@@ -470,7 +506,7 @@ async function createWorkspace(): Promise<string> {
     await writeFile(
       join(root, path),
       path.endsWith('gameplay-checklist.md')
-        ? '# Acceptance\n- [ ] PATH-001 Launch the game and observe the initial playable state.\n'
+        ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: initial playable state evidence: runtime\n'
         : `# ${path}\n`,
     )
   }

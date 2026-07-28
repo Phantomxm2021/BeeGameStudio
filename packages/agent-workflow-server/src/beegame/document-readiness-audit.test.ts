@@ -23,7 +23,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] PATH-001 Launch the game and observe the initial playable state.\n'
+          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: initial playable state evidence: runtime\n'
           : `# ${path}\n`,
       )
     }
@@ -50,7 +50,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] PATH-001 Launch the game.\n'
+          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: playable state evidence: runtime\n'
           : `# ${path}\n`,
       )
     }
@@ -75,7 +75,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] Launch the game.\n- [ ] `PATH-002`\n- [ ] PATH-003 Observe a result.\n- [ ] PATH-003 Observe the duplicate.\n'
+          ? '# Acceptance\n- [ ] Launch the game.\n- [ ] `PATH-002`\n- [ ] PATH-003 source: docs/GDD.md implement: Observe a result expected: result appears evidence: runtime\n- [ ] PATH-003 source: docs/GDD.md implement: Observe the duplicate expected: duplicate appears evidence: runtime\n'
           : `# ${path}\n`,
       )
     }
@@ -95,6 +95,7 @@ describe('document readiness audit', () => {
     expect(auditDocumentReadiness(workspace).issues).toEqual([
       'docs/acceptance/gameplay-checklist.md: Checklist task 1 has no stable identifier.',
       'docs/acceptance/gameplay-checklist.md: Checklist task PATH-002 has no observable task description.',
+      'docs/acceptance/gameplay-checklist.md: Checklist task PATH-003 is missing atomic fields: source, implement, expected, evidence.',
       'docs/acceptance/gameplay-checklist.md: Checklist stable identifier is duplicated: PATH-003',
     ])
   })
@@ -106,7 +107,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] [contract:item-primary] Observe the committed behavior.\n'
+          ? '# Acceptance\n- [ ] [contract:item-primary] source: docs/GDD.md implement: Observe the committed behavior expected: behavior is observable evidence: runtime\n'
           : `# ${path}\n`,
       )
     }

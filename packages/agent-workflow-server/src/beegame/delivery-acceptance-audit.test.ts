@@ -1275,7 +1275,7 @@ async function createWorkspace(): Promise<string> {
     await writeFile(
       join(root, path),
       path.endsWith('gameplay-checklist.md')
-        ? '# Acceptance\n- [ ] PATH-001 Launch and observe the playable state.\n'
+        ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch and observe the playable state expected: playable state is observed evidence: runtime\n'
         : `# Approved ${path}\n`,
     )
   }

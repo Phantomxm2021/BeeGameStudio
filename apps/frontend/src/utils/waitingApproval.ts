@@ -1,6 +1,6 @@
 import type { PendingUserReviewItem, ProjectBaselineStatusPayload } from '../services/api';
 import { localizeReviewMessage } from './reviewStatus';
-import type { ProjectRuntimeDisplayModel, ReviewDisplayModel, ReviewStatusDisplayPayload } from '../viewModels/displayModels';
+import { getWorkflowControlState, type ProjectRuntimeDisplayModel, type ReviewDisplayModel, type ReviewStatusDisplayPayload } from '../viewModels/displayModels';
 
 export type WaitingApprovalKind = 'none' | 'review' | 'asset' | 'clarification';
 
@@ -73,27 +73,24 @@ export const getWaitingApprovalState = (
     }
   }
 
-  if (projectStatus?.blocked && normalize(projectStatus.blocked_reason)) {
-    const approvalRequired = 'approval_required' in projectStatus
-      ? Boolean(projectStatus.approval_required)
-      : false;
-    if (
-      normalize(projectStatus.phase).toLowerCase() === 'paused' &&
-      !approvalRequired
-    ) {
+  const workflow = getWorkflowControlState(projectStatus as ProjectRuntimeDisplayModel | null | undefined);
+  if (workflow?.status === 'failed') {
+    if (workflow.block?.message) {
       return {
         kind: 'none',
         isWaitingStatus: false,
         isBlockingChat: false,
-        message: normalize(projectStatus.blocked_reason),
+        message: workflow.block.message,
         placeholder: '输入修复要求或继续任务...',
       };
     }
+  }
+  if (workflow?.status === 'blocked' && workflow.block?.message) {
     return {
       kind: 'review',
       isWaitingStatus: true,
       isBlockingChat: true,
-      message: normalize(projectStatus.blocked_reason),
+      message: workflow.block.message,
       placeholder: '当前 workflow 已暂停...',
     };
   }

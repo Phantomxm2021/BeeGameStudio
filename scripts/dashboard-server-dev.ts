@@ -45,7 +45,7 @@ const { resolveResourceSelectionRuntimeConfig } = await import(
 
 const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
 const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
-const cleanupHandlers: Array<() => void> = []
+const cleanupHandlers: Array<() => void | Promise<void>> = []
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,
@@ -65,16 +65,16 @@ const server = Bun.serve({
 })
 
 let shuttingDown = false
-function shutdown(signal: 'SIGINT' | 'SIGTERM'): void {
+async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
-  for (const cleanup of cleanupHandlers) cleanup()
+  for (const cleanup of cleanupHandlers) await cleanup()
   server.stop(true)
   process.exit(signal === 'SIGINT' ? 130 : 143)
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => shutdown(signal))
+  process.once(signal, () => void shutdown(signal))
 }
 
 console.log(

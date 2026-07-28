@@ -2,7 +2,7 @@
  * Project event transport.
  *
  * The public hook name is retained for component compatibility, but BeeGame
- * has one canonical transport: polling the server-persisted Claude Code event
+ * has one canonical transport: polling the server-persisted BeeGame event
  * stream. The browser must not open a second chat WebSocket or mirror native
  * events into another frontend-owned log.
  */

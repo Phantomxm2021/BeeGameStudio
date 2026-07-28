@@ -16,6 +16,7 @@ import {
   hasCompletedNativeDeliveryContract,
   recordNativeDeliveryContractForTest,
 } from './native-tool-provenance'
+import { materializeFindings, reconcileFindings, type CanonicalFinding } from './finding-lifecycle'
 
 export type NativeImplementationAuditStatus = 'passed' | 'failed' | 'blocked'
 
@@ -102,7 +103,7 @@ export type NativeImplementationAuditEvidence = {
   auditedImportIds: string[]
   auditedCompositionIds: string[]
   evidence: NativeImplementationAuditFact[]
-  findings: NativeImplementationAuditFact[]
+  findings: CanonicalFinding[]
   reportDigest: string
   workspaceDigest: string
   startedAt: string
@@ -447,6 +448,25 @@ function appendResult(
   if (observations.some(item =>
     item.kind === 'result' && item.toolUseID === dispatch.toolUseID
   )) return
+  const materializedFindings = materializeFindings({
+    stream: 'implementation-audit',
+    revision: dispatch.workspaceDigest,
+    observedAt: input.createdAt.toISOString(),
+    findings: report.findings,
+  })
+  const previousFindings = observations
+    .findLast((observation): observation is NativeImplementationAuditEvidence => observation.kind === 'result')
+    ?.findings ?? []
+  const persistedFindings = reconcileFindings({
+    previous: previousFindings.filter(finding => typeof finding.id === 'string'),
+    current: materializedFindings,
+    observedAt: input.createdAt.toISOString(),
+    revision: dispatch.workspaceDigest,
+  })
+  const persistedReport = {
+    ...report,
+    findings: persistedFindings,
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 3,
     kind: 'result',
@@ -460,8 +480,8 @@ function appendResult(
     auditedImportIds: report.auditedImportIds,
     auditedCompositionIds: report.auditedCompositionIds,
     evidence: report.evidence,
-    findings: report.findings,
-    reportDigest: createHash('sha256').update(stableJson(report)).digest('hex'),
+    findings: persistedFindings,
+    reportDigest: createHash('sha256').update(stableJson(persistedReport)).digest('hex'),
     workspaceDigest: dispatch.workspaceDigest,
     startedAt: dispatch.createdAt,
     createdAt: input.createdAt.toISOString(),

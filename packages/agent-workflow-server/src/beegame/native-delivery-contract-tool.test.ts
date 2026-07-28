@@ -128,7 +128,7 @@ describe('native project delivery contract tool', () => {
     await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
     await writeFile(
       join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
-      '- [ ] PATH-001 observable player path',
+      '- [ ] PATH-001 source: docs/GDD.md implement: observable player path expected: player path works evidence: runtime',
     )
     let definition: Record<string, unknown> | undefined
     createNativeDeliveryContractTool({

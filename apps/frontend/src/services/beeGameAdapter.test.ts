@@ -1481,17 +1481,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const status = await beeGameAdapter.getProjectStatus('project_runtime_state');
-    const phases = await beeGameAdapter.getWorkflowPhases('project_runtime_state') as { phase_name: string };
-    const usage = await beeGameAdapter.getTokenUsage('project_runtime_state');
-
     expect(status.phase).toBe('running');
-    expect(phases.phase_name).toBe('running');
-    expect(usage).toEqual({
-      status: 'tracking',
-      prompt_tokens: 10,
-      completion_tokens: 5,
-      total_tokens: 15,
-    });
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/runtime-snapshot'))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/events?after='))).toBe(false);
   });
@@ -3498,9 +3488,6 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const status = await beeGameAdapter.getProjectStatus('project_snapshot');
-    const phases = await beeGameAdapter.getWorkflowPhases('project_snapshot') as { phase_name: string };
-    const usage = await beeGameAdapter.getTokenUsage('project_snapshot');
-
     expect(status.model_config_id).toBe('llm_current');
     expect(status.context).toEqual(expect.objectContaining({
       token_budget: {
@@ -3510,13 +3497,6 @@ describe('beeGameAdapter prompt rules', () => {
         total_tokens: 150,
       },
     }));
-    expect(phases.phase_name).toBe('implementation');
-    expect(usage).toEqual({
-      status: 'tracking',
-      prompt_tokens: 120,
-      completion_tokens: 30,
-      total_tokens: 150,
-    });
   });
 
   it('prefers transcript assistant usage over stale zero runtime snapshot', async () => {
@@ -3545,9 +3525,9 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const usage = await beeGameAdapter.getTokenUsage('project_assistant_usage_snapshot');
+    const status = await beeGameAdapter.getProjectStatus('project_assistant_usage_snapshot');
 
-    expect(usage).toEqual({
+    expect(status.context?.token_budget).toEqual({
       status: 'tracking',
       prompt_tokens: 100,
       completion_tokens: 25,

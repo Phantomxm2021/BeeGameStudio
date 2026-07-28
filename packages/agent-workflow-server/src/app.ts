@@ -3525,11 +3525,23 @@ async function getBeeGameProjectRuntimeState(input: {
   const deliveryEvidence = evidenceProvenance
     ? toProjectDeliveryEvidence(getNativeDeliveryEvidenceSummary(evidenceProvenance))
     : null
+  const deliveryState = evidenceProvenance
+    ? getNativeDeliveryState(evidenceProvenance)
+    : undefined
   return {
     project_id: input.project.id,
     phase: runtime.phase,
-    blocked: pending.length > 0 || runtime.agentStatus === 'failed',
-    blocked_reason: pending[0]?.text ?? (runtime.agentStatus === 'failed' ? runtime.nextAction : null),
+    blocked: pending.length > 0 || runtime.agentStatus === 'failed' || (
+      deliveryState !== undefined &&
+      (deliveryState.status === 'failed' || deliveryState.status === 'blocked' || deliveryState.status === 'stale')
+    ),
+    blocked_reason: pending[0]?.text ?? (
+      runtime.agentStatus === 'failed'
+        ? runtime.nextAction
+        : deliveryState?.status === 'failed' || deliveryState?.status === 'blocked' || deliveryState?.status === 'stale'
+          ? deliveryState.summary
+          : null
+    ),
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
     approval_required: pending.length > 0,
@@ -3549,6 +3561,14 @@ async function getBeeGameProjectRuntimeState(input: {
     review_status: null,
     acceptance,
     delivery_evidence: deliveryEvidence,
+    workflow: toProjectWorkflowCard({
+      runId: sessionRef.sessionId,
+      events,
+      pending,
+      runtime,
+      snapshot,
+      deliveryState,
+    }),
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
@@ -3715,8 +3735,66 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     review_status: null,
     acceptance: { status: 'not_run' },
     delivery_evidence: null,
+    workflow: {
+      runId: projectId,
+      status: 'draft',
+      currentPhase: 'idle',
+    },
     model_config_id: null,
     pending_permissions: [],
+  }
+}
+
+/**
+ * Build the only workflow payload allowed across the runtime-state boundary.
+ * Raw events, agent results, verdict JSON, and diagnostic messages never enter
+ * this projection. The frontend card consumes this shape exclusively.
+ */
+function toProjectWorkflowCard(input: {
+  runId: string
+  events: BeeGameEvent[]
+  pending: BeeGameEvent[]
+  runtime: ReturnType<typeof deriveBeeGameRuntimeStatus>
+  snapshot?: BeeGameRuntimeSnapshot
+  deliveryState?: ReturnType<typeof getNativeDeliveryState>
+}): JsonObject {
+  const latestThinking = [...input.events].reverse().find(event => {
+    if (event.type !== 'assistant.thinking') return false
+    return getBeeGamePayloadString(event, 'status') !== 'ended' && Boolean(event.text.trim())
+  })
+  const deliveryStatus = input.deliveryState?.status
+  const status = input.pending.length > 0
+    ? 'blocked'
+    : input.runtime.agentStatus === 'failed'
+      ? 'failed'
+      : deliveryStatus === 'passed'
+        ? 'completed'
+        : deliveryStatus === 'blocked'
+          ? 'blocked'
+          : deliveryStatus === 'failed'
+            ? 'failed'
+            : deliveryStatus === 'stale'
+              ? 'stale'
+          : input.runtime.agentStatus === 'working' || input.runtime.agentStatus === 'starting'
+            ? 'running'
+            : input.deliveryState
+              ? 'verifying'
+              : 'draft'
+  const blockMessage = input.pending[0]?.text.trim() || (
+    input.deliveryState && input.deliveryState.status !== 'passed' && input.deliveryState.status !== 'not_run'
+      ? input.deliveryState.summary
+      : ''
+  )
+  return {
+    runId: input.runId,
+    status,
+    currentPhase: input.runtime.phase,
+    ...(latestThinking ? { thinking: latestThinking.text.trim() } : {}),
+    ...(input.runtime.activeAgents[0] ? { worker: input.runtime.activeAgents[0] } : {}),
+    ...(blockMessage
+      ? { block: { message: blockMessage, nextAction: input.runtime.nextAction } }
+      : {}),
+    ...(input.snapshot?.usage ? { usage: input.snapshot.usage } : {}),
   }
 }
 

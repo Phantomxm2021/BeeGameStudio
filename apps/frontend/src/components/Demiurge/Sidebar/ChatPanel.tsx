@@ -17,7 +17,7 @@ import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments, isSupportedChatFile } f
 import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
-import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
+import { getWorkflowControlState, type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type ReviewDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
@@ -308,7 +308,7 @@ export const ChatPanel = memo(({
     const clarificationReview = pendingReviews.find((review: ReviewDisplayModel) => review?.type === 'INTENT_CLARIFICATION' && Boolean(review?.gate_id));
     const reviewReadyForUserApproval = isReviewAwaitingUserAction(actionReview);
     const beeGamePermission = isBeeGamePermissionReview(actionReview);
-    const projectFailed = Boolean(projectStatus?.blocked && String(projectStatus?.blocked_reason || '').trim() === 'pipeline_failed');
+    const projectFailed = getWorkflowControlState(projectStatus)?.status === 'failed';
     const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || actionReview);
     const activeBeeGamePermissionReview = activeComposerReview && isBeeGamePermissionReview(activeComposerReview)
         ? activeComposerReview

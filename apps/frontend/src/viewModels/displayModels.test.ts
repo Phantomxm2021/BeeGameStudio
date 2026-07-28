@@ -72,7 +72,7 @@ describe('displayModels', () => {
     expect(display.raw).toBe(review);
   });
 
-  it('maps project status to compact runtime display model and preserves raw diagnostics', () => {
+  it('maps project status to compact runtime display model without raw diagnostics', () => {
     const status: ProjectBaselineStatusPayload = {
       project_id: 'proj_1',
       phase: 'DESIGN_IN_PROGRESS',
@@ -222,9 +222,6 @@ describe('displayModels', () => {
           failure_reason: 'syntax error',
         },
       ],
-      diagnostic: {
-        raw: status,
-      },
     });
     expect(display).not.toHaveProperty('governance');
   });
@@ -295,6 +292,38 @@ describe('displayModels', () => {
       ready_for_promotion: false,
     });
     expect(display).not.toHaveProperty('governance');
-    expect(display?.diagnostic?.raw).toHaveProperty('operator_visibility.project_id', 'proj_1');
+  });
+
+  it('projects workflow progress to thinking and never exposes raw progress message', () => {
+    const display = toProjectRuntimeDisplayModel({
+      project_id: 'proj_1',
+      phase: 'running',
+      blocked: false,
+      workflow: {
+        runId: 'run_1',
+        status: 'running',
+        currentPhase: 'DOCUMENT_REVIEW',
+        worker: 'document-reviewer',
+        thinking: '正在检查当前文档版本。',
+        lastProgress: {
+          phase: 'DOCUMENT_REVIEW',
+          worker: 'document-reviewer',
+          message: JSON.stringify({ verdict: 'READY', revision: 'internal-only' }),
+          thinking: JSON.stringify({ verdict: 'SHOULD_NOT_RENDER' }),
+        },
+      },
+    });
+
+    expect(display?.workflow).toEqual({
+      runId: 'run_1',
+      status: 'running',
+      currentPhase: 'DOCUMENT_REVIEW',
+      worker: 'document-reviewer',
+      thinking: '正在检查当前文档版本。',
+      block: undefined,
+      usage: undefined,
+    });
+    expect(JSON.stringify(display?.workflow)).not.toContain('READY');
+    expect(JSON.stringify(display?.workflow)).not.toContain('internal-only');
   });
 });

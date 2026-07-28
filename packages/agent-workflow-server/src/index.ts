@@ -11,7 +11,7 @@ let activeServer: ReturnType<typeof Bun.serve> | null = null
 if (import.meta.main) {
   validateSecretStorageAtStartup()
   const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
-  const cleanupHandlers: Array<() => void> = []
+  const cleanupHandlers: Array<() => void | Promise<void>> = []
   activeServer = Bun.serve({
     hostname: host,
     port,
@@ -33,9 +33,11 @@ if (import.meta.main) {
     process.once(signal, () => {
       if (shuttingDown) return
       shuttingDown = true
-      for (const cleanup of cleanupHandlers) cleanup()
-      activeServer?.stop(true)
-      process.exit(signal === 'SIGINT' ? 130 : 143)
+      void (async () => {
+        for (const cleanup of cleanupHandlers) await cleanup()
+        activeServer?.stop(true)
+        process.exit(signal === 'SIGINT' ? 130 : 143)
+      })()
     })
   }
 }

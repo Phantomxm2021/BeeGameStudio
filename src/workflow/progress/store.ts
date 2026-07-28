@@ -16,6 +16,8 @@ export type AgentProgress = {
   tokenCount?: number
   /** Cumulative tool-call count (live via agent_progress / final value settled by agent_done). */
   toolCount?: number
+  /** User-facing progress text only; raw agent results never enter this field. */
+  thinking?: string
 }
 
 export type RunProgress = {
@@ -34,6 +36,8 @@ export type RunProgress = {
   startedAt: number
   /** workflow description (from run_started.meta.description). */
   description?: string
+  /** Latest user-facing progress text; never populated from raw result payloads. */
+  thinking?: string
   updatedAt: number
 }
 
@@ -83,10 +87,10 @@ export function createProgressStoreFromBus(bus: ProgressBus): ProgressStore {
     // log produces no visible state change (panel has no log view): early exit to avoid pointless snapshot rebuild and React re-render
     if (event.type === 'log') return
     const runId = event.runId
-    const p = ensure(
-      runId,
-      'workflowName' in event ? event.workflowName : 'workflow',
-    )
+    const existing = byId.get(runId)
+    if (!existing && event.type !== 'run_started') return
+    const p = existing ?? ensure(runId, event.type === 'run_started' ? event.workflowName : 'workflow')
+    if (p.status === 'completed' || p.status === 'failed' || p.status === 'killed') return
     p.updatedAt = Date.now()
     switch (event.type) {
       case 'run_started':
@@ -131,6 +135,14 @@ export function createProgressStoreFromBus(bus: ProgressBus): ProgressStore {
           ap.tokenCount = event.tokenCount
           ap.toolCount = event.toolCount
         }
+        break
+      }
+      case 'agent_thinking': {
+        const thinking = event.thinking.trim()
+        if (!thinking) break
+        p.thinking = thinking
+        const ap = p.agents.find(x => x.id === event.agentId)
+        if (ap) ap.thinking = thinking
         break
       }
       case 'agent_done': {

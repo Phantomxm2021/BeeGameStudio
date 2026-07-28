@@ -25,10 +25,11 @@ import {
   parseNativeTerminalTaskNotification,
   type BeeGameNativeTaskNotification,
 } from './native-task-notification'
+import { materializeFindings, reconcileFindings, type CanonicalFinding } from './finding-lifecycle'
 
 export type NativeDocumentReviewVerdict = 'READY' | 'NEEDS_REVISION' | 'BLOCKED'
 
-type NativeDocumentReviewFinding = {
+type NativeDocumentReviewFindingInput = {
   source: string
   detail: string
 }
@@ -40,7 +41,7 @@ type NativeDocumentReviewReport = {
   confirmedResourceLibraryUsage: ResourceLibraryUsage
   reviewedDocumentPaths: string[]
   reviewedChecklistIds: string[]
-  findings: NativeDocumentReviewFinding[]
+  findings: NativeDocumentReviewFindingInput[]
 }
 
 type NativeDocumentReviewDispatch = {
@@ -109,7 +110,7 @@ export type NativeDocumentReviewEvidence = {
   confirmedResourceLibraryUsage: ResourceLibraryUsage
   reviewedDocumentPaths: string[]
   reviewedChecklistIds: string[]
-  findings: NativeDocumentReviewFinding[]
+  findings: CanonicalFinding[]
   reportDigest: string
   documentsDigest: string
   createdAt: string
@@ -580,12 +581,36 @@ function appendResult(
           'Deterministic project-contract checks rejected the Reviewer READY result.',
           ...deterministicIssues,
         ].join(' '),
-        findings: deterministicIssues.map(detail => ({
-          source: 'deterministic project-contract audit',
-          detail,
-        })),
+        findings: materializeFindings({
+          stream: 'document-review',
+          revision: documentsDigest,
+          observedAt: input.createdAt.toISOString(),
+          findings: deterministicIssues.map(detail => ({
+            source: 'deterministic project-contract audit',
+            detail,
+          })),
+        }),
       }
     : report
+  const materializedFindings = materializeFindings({
+    stream: 'document-review',
+    revision: documentsDigest,
+    observedAt: input.createdAt.toISOString(),
+    findings: effectiveReport.findings,
+  })
+  const previousFindings = readObservations(input.dataRoot, input.sessionId)
+    .findLast((observation): observation is NativeDocumentReviewEvidence => observation.kind === 'result')
+    ?.findings ?? []
+  const persistedFindings = reconcileFindings({
+    previous: previousFindings.filter(finding => typeof finding.id === 'string'),
+    current: materializedFindings,
+    observedAt: input.createdAt.toISOString(),
+    revision: documentsDigest,
+  })
+  const persistedReport = {
+    ...effectiveReport,
+    findings: persistedFindings,
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 2,
     kind: 'result',
@@ -598,8 +623,8 @@ function appendResult(
     confirmedResourceLibraryUsage: effectiveReport.confirmedResourceLibraryUsage,
     reviewedDocumentPaths: effectiveReport.reviewedDocumentPaths,
     reviewedChecklistIds: effectiveReport.reviewedChecklistIds,
-    findings: effectiveReport.findings,
-    reportDigest: digestJson(effectiveReport),
+    findings: persistedFindings,
+    reportDigest: digestJson(persistedReport),
     documentsDigest,
     createdAt: input.createdAt.toISOString(),
   })
@@ -661,7 +686,7 @@ function sameIdentifiers(actual: string[], expected: string[]): boolean {
   return actual.length === expected.length && expected.every(identifier => actual.includes(identifier))
 }
 
-function parseFinding(value: unknown): NativeDocumentReviewFinding[] {
+function parseFinding(value: unknown): NativeDocumentReviewFindingInput[] {
   if (!isRecord(value)) return []
   const source = stringValue(value.source)
   const detail = stringValue(value.detail)

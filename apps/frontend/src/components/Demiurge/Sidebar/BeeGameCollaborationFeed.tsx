@@ -5,12 +5,13 @@ import {
     LoaderCircle,
     Pencil,
 } from 'lucide-react';
-import type { ChatDisplayMessage, ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
+import { getWorkflowControlState, type ChatDisplayMessage, type ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { MessageScrollerItem } from '../../ui/message-scroller';
 import { Marker, MarkerContent, MarkerIcon } from '../../ui/marker';
+import { WorkflowCard } from '../WorkflowCard';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -222,10 +223,20 @@ export const BeeGameCollaborationFeed = memo(({
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
     const hasThinkingEntry = entries.some((entry) => entry.kind === 'thinking');
-    const showRuntimeActivity = projectStatus?.phase === 'running' && !hasThinkingEntry;
+    const workflow = getWorkflowControlState(projectStatus);
+    const workflowRunning = workflow?.status === 'running';
+    const showRuntimeActivity = workflowRunning && !hasThinkingEntry;
 
     return (
         <>
+            {workflow ? (
+                <MessageScrollerItem
+                    messageId={`beegame-workflow-${workflow.runId || 'current'}`}
+                    className="relative z-10 mb-4"
+                >
+                    <WorkflowCard workflow={workflow} />
+                </MessageScrollerItem>
+            ) : null}
             {entries.map((entry) => (
                 entry.kind === 'user' ? (
                     <MessageScrollerItem
@@ -248,7 +259,7 @@ export const BeeGameCollaborationFeed = memo(({
                         <ThinkingStatusCard
                             message={entry.message}
                             text={text}
-                            isRunning={projectStatus?.phase === 'running'}
+                            isRunning={workflowRunning}
                         />
                     </MessageScrollerItem>
                 ) : entry.kind === 'context' ? (

@@ -2490,7 +2490,7 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Treat response language, document language, and player-visible game language as separate confirmed requirements')
       expect(submitted).toContain('Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another.')
       expect(submitted).toContain('A delivery claim requires independent native document review, implementation audit, and runtime acceptance evidence for the current workspace revision.')
-      expect(submitted).toContain('Claude Code owns its plan, Skills, tools, subagents, implementation, verification, and repair decisions.')
+      expect(submitted).toContain('Bee Game Studio owns its plan, Skills, tools, subagents, implementation, verification, and repair decisions.')
       expect(submitted).not.toContain('Follow this document-led game development contract:')
       expect(submitted).not.toContain('beegame-document-reviewer')
       expect(submitted).not.toContain('beegame-acceptance-validator')
@@ -4991,6 +4991,11 @@ describe('beegame session routes', () => {
           implementation_audit: expect.objectContaining({ status: 'not_run' }),
           runtime_acceptance: expect.objectContaining({ status: 'not_run' }),
         },
+        workflow: expect.objectContaining({
+          runId: ensured.session.id,
+          status: 'blocked',
+          currentPhase: 'waiting_approval',
+        }),
         project_target: expect.objectContaining({
           platform: 'native',
           runtime: 'custom-engine',

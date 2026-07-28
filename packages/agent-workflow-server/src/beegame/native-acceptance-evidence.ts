@@ -21,6 +21,7 @@ import {
   getNativeValidatorToolCapabilities,
   recordNativeValidatorToolCapabilitiesForTest,
 } from './native-tool-provenance'
+import { materializeFindings, reconcileFindings, type CanonicalFinding } from './finding-lifecycle'
 
 type NativeAcceptanceResult = 'passed' | 'failed' | 'blocked'
 type NativeAcceptanceEvidenceKind =
@@ -124,7 +125,7 @@ export type NativeAcceptanceEvidence = {
   workspaceDigest: string
   startedAt: string
   evidence: NativeAcceptanceReportEvidence[]
-  findings: NativeAcceptanceReportFinding[]
+  findings: CanonicalFinding[]
   createdAt: string
 }
 
@@ -247,6 +248,26 @@ export function observeNativeAcceptanceToolEvent(input: {
     appendInvalidResult(input, toolUseID, 'terminal_result_invalid')
     return
   }
+  const materializedFindings = materializeFindings({
+    stream: 'runtime-acceptance',
+    revision: dispatch.workspaceDigest,
+    observedAt: input.createdAt.toISOString(),
+    findings: report.findings,
+  })
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const previousFindings = observations
+    .findLast((observation): observation is NativeAcceptanceEvidence => observation.kind === 'result')
+    ?.findings ?? []
+  const persistedFindings = reconcileFindings({
+    previous: previousFindings.filter(finding => typeof finding.id === 'string'),
+    current: materializedFindings,
+    observedAt: input.createdAt.toISOString(),
+    revision: dispatch.workspaceDigest,
+  })
+  const persistedReport = {
+    ...report,
+    findings: persistedFindings,
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 5,
     kind: 'result',
@@ -259,11 +280,11 @@ export function observeNativeAcceptanceToolEvent(input: {
     validatedChecklistIds: report.validatedChecklistIds,
     validatedImportIds: report.validatedImportIds,
     validatedCompositionIds: report.validatedCompositionIds,
-    reportDigest: digestJson(report),
+    reportDigest: digestJson(persistedReport),
     workspaceDigest: dispatch.workspaceDigest,
     startedAt: dispatch.createdAt,
     evidence: report.evidence,
-    findings: report.findings,
+    findings: persistedFindings,
     createdAt: input.createdAt.toISOString(),
   })
 }
@@ -354,6 +375,25 @@ export function observeNativeAcceptanceTaskNotification(input: {
     appendInvalidResult(input, terminal.toolUseId, 'terminal_result_invalid')
     return
   }
+  const materializedFindings = materializeFindings({
+    stream: 'runtime-acceptance',
+    revision: dispatch.workspaceDigest,
+    observedAt: input.createdAt.toISOString(),
+    findings: report.findings,
+  })
+  const previousFindings = observations
+    .findLast((observation): observation is NativeAcceptanceEvidence => observation.kind === 'result')
+    ?.findings ?? []
+  const persistedFindings = reconcileFindings({
+    previous: previousFindings.filter(finding => typeof finding.id === 'string'),
+    current: materializedFindings,
+    observedAt: input.createdAt.toISOString(),
+    revision: dispatch.workspaceDigest,
+  })
+  const persistedReport = {
+    ...report,
+    findings: persistedFindings,
+  }
   appendObservation(input.dataRoot, input.sessionId, {
     version: 5,
     kind: 'result',
@@ -366,11 +406,11 @@ export function observeNativeAcceptanceTaskNotification(input: {
     validatedChecklistIds: report.validatedChecklistIds,
     validatedImportIds: report.validatedImportIds,
     validatedCompositionIds: report.validatedCompositionIds,
-    reportDigest: digestJson(report),
+    reportDigest: digestJson(persistedReport),
     workspaceDigest: dispatch.workspaceDigest,
     startedAt: dispatch.createdAt,
     evidence: report.evidence,
-    findings: report.findings,
+    findings: persistedFindings,
     createdAt: input.createdAt.toISOString(),
   })
 }

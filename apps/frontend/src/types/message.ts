@@ -26,6 +26,29 @@ export type MessageType =
 
 export type RenderHint = 'default' | 'document' | 'artifact_card' | 'structured_json' | 'csv_table';
 
+export type WorkflowCardStatus =
+  | 'draft'
+  | 'running'
+  | 'blocked'
+  | 'verifying'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'stale';
+
+export interface WorkflowCardPayload {
+  runId: string;
+  status: WorkflowCardStatus;
+  currentPhase?: string;
+  worker?: string;
+  thinking?: string;
+  block?: {
+    message: string;
+    nextAction?: string;
+  };
+  usage?: TokenUsage;
+}
+
 export interface ModuleReadinessView {
   status: 'ready' | 'degraded' | 'blocked';
   details: Record<string, unknown>;
@@ -321,4 +344,9 @@ export interface TokenUsage {
 
   /** Total number of tokens used (prompt + completion) */
   total_tokens: number;
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  output_tokens?: number;
 }

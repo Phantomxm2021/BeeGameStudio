@@ -113,6 +113,14 @@ export type ProgressEvent =
       tokenCount: number
       toolCount: number
     }
+  | {
+      type: 'agent_thinking'
+      runId: string
+      agentId: number
+      label?: string
+      phase?: string
+      thinking: string
+    }
   | { type: 'log'; runId: string; message: string }
   | {
       type: 'run_done'

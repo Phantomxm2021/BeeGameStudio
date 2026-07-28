@@ -135,6 +135,8 @@ export interface ProjectBaselineStatusPayload {
   build_report?: BuildReportPayload | null;
   project_target?: BeeGameAssetManifestPayload['project_target'] | null;
   document_bundle?: DocumentBundleStatusPayload | null;
+  /** Untrusted backend workflow payload; normalize before it reaches display models. */
+  workflow?: unknown;
   model_config_id?: string | null;
 }
 
@@ -750,6 +752,30 @@ export const normalizeProjectBaselineStatusPayload = (
   const baseline: ReviewBindingRef | null = normalizedPayload.baseline
     ? normalizeInboundReviewBindingPayload(normalizedPayload.baseline)
     : null;
+  const legacyPhase = String(normalizedPayload.phase ?? '').trim().toLowerCase();
+  const legacyStatus = String(normalizedPayload.blocked_reason ?? '').trim().toLowerCase() === 'pipeline_failed'
+    ? 'failed'
+    : normalizedPayload.blocked
+      ? 'blocked'
+    : legacyPhase === 'starting'
+      ? 'running'
+      : legacyPhase === 'running' || legacyPhase === 'waiting_approval' || legacyPhase === 'awaiting_user'
+        ? 'running'
+        : legacyPhase === 'finished'
+          ? 'completed'
+          : legacyPhase === 'failed'
+            ? 'failed'
+            : 'draft';
+  const workflow = normalizedPayload.workflow && typeof normalizedPayload.workflow === 'object'
+    ? normalizedPayload.workflow
+    : {
+        runId: String(normalizedPayload.project_id ?? '').trim(),
+        status: legacyStatus,
+        currentPhase: String(normalizedPayload.phase ?? '').trim() || 'idle',
+        ...(normalizedPayload.blocked_reason
+          ? { block: { message: String(normalizedPayload.blocked_reason).trim() } }
+          : {}),
+      };
   return {
     project_id: String(normalizedPayload.project_id ?? '').trim(),
     phase: String(normalizedPayload.phase ?? '').trim(),
@@ -796,6 +822,7 @@ export const normalizeProjectBaselineStatusPayload = (
       ? normalizedPayload.project_target as ProjectBaselineStatusPayload['project_target']
       : null,
     document_bundle: normalizeDocumentBundleStatusPayload(normalizedPayload.document_bundle) ?? null,
+    workflow,
   };
 };
 
@@ -941,22 +968,6 @@ export const api = {
    * @returns 返回精简版项目列表
    */
   getProjectsList: () => beeGameAdapter.getProjects(),
-
-  // ==================== Team OS / Telemetry API ====================
-
-  /**
-   * 获取项目的阶段历史与当前阶段
-   * @param projectId - 项目 ID
-   */
-  getWorkflowPhases: (projectId: string) =>
-    beeGameAdapter.getWorkflowPhases(projectId),
-
-  /**
-   * 获取项目累计 token 使用量
-   * @param projectId - 项目 ID
-   */
-  getProjectTokenUsage: (projectId: string) =>
-    beeGameAdapter.getTokenUsage(projectId),
 
   // ==================== Artifacts API ====================
 

@@ -233,12 +233,14 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
     const reviewDisplayModels = useMemo(() => toReviewDisplayModels(pendingReviews), [pendingReviews]);
     const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
+    const workflowPhase = String(projectRuntimeDisplay?.workflow?.currentPhase || '').toLowerCase();
+    const workflowStatus = projectRuntimeDisplay?.workflow?.status;
     const activeProject = useMemo(
         () => projects.find((project) => project.id === projectId),
         [projectId, projects],
     );
     const isProjectStarting = (
-        String(projectStatus?.phase || '').toLowerCase() === 'starting' ||
+        workflowPhase === 'starting' ||
         (
             !projectStatus &&
             String(activeProject?.runtime_snapshot?.phase_name || '').toLowerCase() === 'starting'
@@ -263,29 +265,22 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
     ).trim();
 
-    const isPipelineActive = useMemo(() => {
-        const nextAction = String(projectStatus?.next_action || '').toLowerCase();
-        const phase = String(projectStatus?.phase || '').toLowerCase();
-        return ['pending', 'running', 'clarification_required'].includes(nextAction)
-            || phase === 'running'
-            || phase === 'waiting_approval';
-    }, [projectStatus?.next_action, projectStatus?.phase]);
+    const isPipelineActive = useMemo(() => workflowStatus === 'running' || workflowStatus === 'blocked', [workflowStatus]);
     const isProjectWorkspaceMutationLocked = isProjectInteractionLocked
         || isProjectStarting
         || isPipelineActive;
 
     // Derived state machine based on Requirements: 4.2
     const currentStatus = useMemo(() => {
-        const phase = String(projectStatus?.phase || '').toLowerCase();
         const acceptance = projectStatus?.acceptance?.status;
         if (isOffline) return 'offline';
         if (!hasCurrentRuntimeSnapshot) return 'starting';
-        if (phase === 'starting' || isProjectStarting) return 'starting';
-        if (phase === 'running') return 'running';
-        if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
+        if (workflowPhase === 'starting' || isProjectStarting) return 'starting';
+        if (workflowStatus === 'running' && (workflowPhase === 'waiting_approval' || workflowPhase === 'awaiting_user')) return 'waiting_approval';
+        if (workflowStatus === 'running') return 'running';
         if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
-        if (phase === 'finished') return 'finished';
-        if (phase === 'paused' || phase === 'failed') return 'paused';
+        if (workflowStatus === 'completed') return 'finished';
+        if (workflowStatus === 'failed' || workflowStatus === 'blocked') return 'paused';
         return deriveDashboardStatus({
             isOffline,
             isLoading,
@@ -293,7 +288,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
             messages: displayMessages,
         });
-    }, [projectStatus?.phase, projectStatus?.acceptance?.status, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
+    }, [workflowPhase, workflowStatus, projectStatus?.acceptance?.status, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
 
     const refreshPreviewStatus = async () => {
         await loadProjectRuntimeState(projectId);

@@ -10,7 +10,7 @@ import type {
   ReviewStatusPayload,
   VerificationSummaryPayload,
 } from '../services/api';
-import type { Message } from '../types/message';
+import type { Message, WorkflowCardPayload, WorkflowCardStatus } from '../types/message';
 
 export interface ChatDisplayMessage
   extends Pick<
@@ -155,6 +155,7 @@ export interface ProjectRuntimeDisplayModel {
   phase?: string;
   blocked?: boolean;
   blocked_reason?: string | null;
+  approval_required?: boolean;
   baseline?: ReviewDisplayBindingRef | null;
   next_action?: string;
   review_status?: ReviewStatusDisplayPayload | null;
@@ -163,10 +164,89 @@ export interface ProjectRuntimeDisplayModel {
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportDisplayModel;
   document_bundle?: DocumentBundleDisplayModel;
-  diagnostic?: {
-    raw?: ProjectBaselineStatusPayload | OperatorVisibilityPayload | null;
-  };
+  workflow?: WorkflowCardPayload;
 }
+
+const WORKFLOW_STATUS: Record<string, WorkflowCardStatus> = {
+  draft: 'draft',
+  starting: 'running',
+  running: 'running',
+  blocked: 'blocked',
+  verifying: 'verifying',
+  delivered: 'completed',
+  completed: 'completed',
+  failed: 'failed',
+  interrupted: 'cancelled',
+  cancelled: 'cancelled',
+  stale: 'stale',
+};
+
+/** Convert backend workflow data into the only shape the UI may render. */
+const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undefined => {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const source = payload as Record<string, unknown>;
+  const runId = trimString(source.runId ?? source.run_id);
+  const status = WORKFLOW_STATUS[trimString(source.status).toLowerCase()];
+  if (!runId || !status) return undefined;
+
+  const thinkingValue = source.thinking;
+  const thinking = typeof thinkingValue === 'string' && thinkingValue.trim()
+    ? thinkingValue.trim()
+    : undefined;
+  const block = source.block && typeof source.block === 'object'
+    ? source.block as Record<string, unknown>
+    : undefined;
+  const blockMessage = typeof block?.message === 'string' && block.message.trim()
+    ? block.message.trim()
+    : undefined;
+
+  return {
+    runId,
+    status,
+    currentPhase: trimString(source.currentPhase ?? source.current_phase) || undefined,
+    worker: trimString(source.worker) || undefined,
+    thinking,
+    block: blockMessage
+      ? {
+          message: blockMessage,
+          nextAction: trimString(block?.nextAction ?? block?.next_action) || undefined,
+        }
+      : undefined,
+    usage: source.usage && typeof source.usage === 'object'
+      ? source.usage as WorkflowCardPayload['usage']
+      : undefined,
+  };
+};
+
+const normalizeLegacyWorkflowDisplay = (payload: ProjectBaselineStatusPayload): WorkflowCardPayload => {
+  const phase = trimString(payload.phase).toLowerCase();
+  const status: WorkflowCardStatus = trimString(payload.blocked_reason).toLowerCase() === 'pipeline_failed'
+    ? 'failed'
+    : payload.blocked && phase === 'paused' && !payload.approval_required
+      ? 'failed'
+    : payload.blocked
+      ? 'blocked'
+    : phase === 'starting' || phase === 'running' || phase === 'waiting_approval' || phase === 'awaiting_user'
+      ? 'running'
+      : phase === 'finished'
+        ? 'completed'
+        : phase === 'failed'
+          ? 'failed'
+          : 'draft';
+  return {
+    runId: trimString(payload.project_id),
+    status,
+    currentPhase: trimString(payload.phase) || 'idle',
+    block: payload.blocked_reason
+      ? { message: trimString(payload.blocked_reason) }
+      : undefined,
+  };
+};
+
+export const getWorkflowControlState = (payload?: ProjectRuntimeDisplayModel | null): WorkflowCardPayload | undefined => {
+  if (!payload) return undefined;
+  return payload.workflow ?? normalizeLegacyWorkflowDisplay(payload as ProjectBaselineStatusPayload);
+};
 
 const trimString = (value: unknown): string => String(value ?? '').trim();
 
@@ -415,6 +495,7 @@ export const toProjectRuntimeDisplayModel = (
     phase: trimString(normalizedPayload.phase) || undefined,
     blocked: Boolean(normalizedPayload.blocked),
     blocked_reason: normalizedPayload.blocked_reason ?? null,
+    approval_required: Boolean(normalizedPayload.approval_required),
     baseline: normalizeBindingDisplay(normalizedPayload.baseline),
     next_action: trimString(normalizedPayload.next_action) || undefined,
     review_status: normalizeReviewStatusDisplay(normalizedPayload.review_status),
@@ -438,6 +519,7 @@ export const toProjectRuntimeDisplayModel = (
       : undefined,
     build_report: normalizeBuildReportDisplay(normalizedPayload.build_report),
     document_bundle: normalizeDocumentBundleDisplay(normalizedPayload.document_bundle),
+    workflow: normalizeWorkflowDisplay(normalizedPayload.workflow) ?? normalizeLegacyWorkflowDisplay(normalizedPayload),
     execution_evidence: Array.isArray(normalizedPayload.execution_evidence)
       ? normalizedPayload.execution_evidence.map((item) => ({
           ...item,
@@ -451,8 +533,5 @@ export const toProjectRuntimeDisplayModel = (
           failure_reason: trimString(item.failure_reason) || undefined,
         }))
       : [],
-    diagnostic: {
-      raw: payload,
-    },
   };
 };

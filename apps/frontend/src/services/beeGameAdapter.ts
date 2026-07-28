@@ -562,21 +562,6 @@ export const beeGameAdapter = {
     return [];
   },
 
-  async getWorkflowPhases(projectId: string): Promise<unknown> {
-    const status = await this.getProjectStatus(projectId);
-    const phaseName = String(status.context?.phase || status.phase || '').trim();
-    return {
-      current_phase: phaseName && phaseName !== 'idle' ? 1 : 0,
-      phase_name: phaseName === 'idle' ? '' : phaseName,
-      history: [],
-    };
-  },
-
-  async getTokenUsage(projectId: string): Promise<Record<string, unknown>> {
-    const status = await this.getProjectStatus(projectId);
-    return status.context?.token_budget ?? {};
-  },
-
   async getTasks(): Promise<unknown[]> {
     return [];
   },
@@ -930,6 +915,8 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
     task_id: message.task_id,
     timestamp: message.timestamp || Date.now(),
     type: message.type === 'agent_message' ? 'text' : message.type === 'tool_start' || message.type === 'tool_end' ? 'tool' : 'normal',
+    renderHint: message.render_hint,
+    artifactType: message.artifact_type,
     taskKind: message.task_kind,
     nextAction: message.next_action,
     requiresUserAction: message.requires_user_action,
