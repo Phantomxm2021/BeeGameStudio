@@ -46,6 +46,7 @@ export type BeeGameSessionRouteOptions = {
 
 export type BeeGameSessionAuth = {
   getAccessToken: (request: Request) => string | undefined
+  getValidAccessToken: (request: Request) => Promise<string | undefined>
 }
 
 export function registerBeeGameSessionRoutes(
@@ -107,6 +108,54 @@ export function registerBeeGameSessionRoutes(
     return id
   }
 
+  const refreshRecord = (
+    current: { id: string; record: SessionRecord },
+  ): Promise<SessionRefreshOutcome> => {
+    const pending = pendingRefreshes.get(current.id)
+    if (pending) return pending
+    const refresh = (async (): Promise<SessionRefreshOutcome> => {
+      try {
+        const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+          method: 'POST',
+          headers: {
+            apikey: supabaseAnonKey,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ refresh_token: current.record.refreshToken }),
+        })
+        if (!response.ok) {
+          if ([400, 401, 403].includes(response.status)) {
+            deleteRecord(sessionStorePath, current.id)
+            return { status: 'invalid' }
+          }
+          return { status: 'unavailable' }
+        }
+        const value = await response.json() as Record<string, unknown>
+        const accessToken = readString(value, 'access_token')
+        if (!accessToken) {
+          deleteRecord(sessionStorePath, current.id)
+          return { status: 'invalid' }
+        }
+        const refreshToken = readString(value, 'refresh_token') ?? current.record.refreshToken
+        const expiresIn = readNumber(value, 'expires_in') ?? 3600
+        const record: SessionRecord = {
+          ...current.record,
+          accessToken,
+          refreshToken,
+          expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
+        }
+        saveRecord(record, current.id)
+        return { status: 'ok', record }
+      } catch {
+        return { status: 'unavailable' }
+      }
+    })().finally(() => {
+      pendingRefreshes.delete(current.id)
+    })
+    pendingRefreshes.set(current.id, refresh)
+    return refresh
+  }
+
   app.get('/api/auth/session', c => {
     const current = getRecord(c.req.raw)
     if (!current) return c.json({ authenticated: false }, 401)
@@ -155,50 +204,7 @@ export function registerBeeGameSessionRoutes(
     if (!current || !supabaseUrl || !supabaseAnonKey) {
       return c.json({ error: 'Session unavailable' }, 401)
     }
-    let refresh = pendingRefreshes.get(current.id)
-    if (!refresh) {
-      refresh = (async (): Promise<SessionRefreshOutcome> => {
-        try {
-          const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-            method: 'POST',
-            headers: {
-              apikey: supabaseAnonKey,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({ refresh_token: current.record.refreshToken }),
-          })
-          if (!response.ok) {
-            if ([400, 401, 403].includes(response.status)) {
-              deleteRecord(sessionStorePath, current.id)
-              return { status: 'invalid' }
-            }
-            return { status: 'unavailable' }
-          }
-          const value = await response.json() as Record<string, unknown>
-          const accessToken = readString(value, 'access_token')
-          if (!accessToken) {
-            deleteRecord(sessionStorePath, current.id)
-            return { status: 'invalid' }
-          }
-          const refreshToken = readString(value, 'refresh_token') ?? current.record.refreshToken
-          const expiresIn = readNumber(value, 'expires_in') ?? 3600
-          const record: SessionRecord = {
-            ...current.record,
-            accessToken,
-            refreshToken,
-            expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
-          }
-          saveRecord(record, current.id)
-          return { status: 'ok', record }
-        } catch {
-          return { status: 'unavailable' }
-        }
-      })().finally(() => {
-        pendingRefreshes.delete(current.id)
-      })
-      pendingRefreshes.set(current.id, refresh)
-    }
-    const outcome = await refresh
+    const outcome = await refreshRecord(current)
     if (outcome.status === 'invalid') return clearSessionResponse(401)
     if (outcome.status === 'unavailable') {
       return c.json({ error: 'Session refresh temporarily unavailable' }, 503)
@@ -222,6 +228,16 @@ export function registerBeeGameSessionRoutes(
       return record && record.expiresAt > Date.now()
         ? record.accessToken
         : undefined
+    },
+    getValidAccessToken: async request => {
+      const current = getRecord(request)
+      if (!current) return undefined
+      if (current.record.expiresAt > Date.now()) {
+        return current.record.accessToken
+      }
+      if (!supabaseUrl || !supabaseAnonKey) return undefined
+      const outcome = await refreshRecord(current)
+      return outcome.status === 'ok' ? outcome.record.accessToken : undefined
     },
   }
 }

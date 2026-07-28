@@ -247,6 +247,36 @@ describe('HttpOnly session routes', () => {
     expect(await refreshResponse.json()).toMatchObject({ authenticated: true })
   })
 
+  it('refreshes an expired access token for a background workflow dispatch', async () => {
+    const storePath = await createSessionStorePath()
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString('base64')
+    const sessionId = 'background-workflow-session'
+    const record = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1,
+      sessionExpiresAt: Date.now() + 60_000,
+      user: { id: 'user-1', role: 'viewer' },
+    }
+    await Bun.write(storePath, JSON.stringify({
+      [sessionId]: encryptSecret(JSON.stringify(record), 'auth:session'),
+    }))
+    process.env.BEEGAME_HTTPONLY_SESSIONS = '1'
+    const app = new Hono()
+    const auth = registerBeeGameSessionRoutes(app, {
+      supabaseUrl: 'https://project.supabase.co',
+      supabaseAnonKey: 'anon-key',
+      fetchImpl: supabaseFetch(),
+      sessionStorePath: storePath,
+    })
+    const request = new Request('http://localhost/api/projects/project-1/workflow', {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${sessionId}` },
+    })
+
+    expect(await auth?.getValidAccessToken(request)).toBe('refreshed-access-token')
+    expect(auth?.getAccessToken(request)).toBe('refreshed-access-token')
+  })
+
   it('preserves the cookie session when the auth provider refresh is temporarily unavailable', async () => {
     let refreshUnavailable = false
     const app = createApp(async input => {

@@ -23,7 +23,7 @@ function taskTypeForWorker(
 export function createBeeGameDeliveryWorkerPort(input: {
   sessions: BeeGameSessionManager
   userId: string
-  authToken?: string
+  getAuthToken?: () => string | undefined | Promise<string | undefined>
   userDataRoot?: string
   modelConfigId?: string
   language?: BeeGameSessionLanguage
@@ -36,11 +36,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
   return {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
+      const authToken = await input.getAuthToken?.()
       const session = input.sessions.start({
         workspacePath: request.workspacePath,
         projectId: request.projectId,
         userId: input.userId,
-        ...(input.authToken ? { authToken: input.authToken } : {}),
+        ...(authToken ? { authToken } : {}),
         ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
         ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
         ...(input.language ? { language: input.language } : {}),
@@ -70,6 +71,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async submit(dispatchId, prompt) {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
+      const authToken = await input.getAuthToken?.()
+      input.sessions.updateAuthToken(sessionId, authToken)
       const confirmedBriefContext =
         input.confirmedBriefContext ??
         (await input.getConfirmedBriefContext?.())
@@ -85,7 +88,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ),
         displayKind: 'workflow_worker',
         ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
-        ...(input.authToken ? { authToken: input.authToken } : {}),
+        ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
     },

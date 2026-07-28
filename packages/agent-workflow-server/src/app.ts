@@ -426,7 +426,7 @@ export function createAgentWorkflowApp(
   const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
   const requestUserResolver = sessionAuth
     ? async (request: Request) => {
-        const accessToken = sessionAuth.getAccessToken(request)
+        const accessToken = await sessionAuth.getValidAccessToken(request)
         if (!accessToken) return baseUserResolver?.(request)
         const headers = new Headers(request.headers)
         if (!headers.has('authorization')) {
@@ -499,10 +499,10 @@ export function createAgentWorkflowApp(
     resolveOutboundTarget,
     options.resourceSelectionRuntimeConfig,
   )
-  const deliveryControllers = new Map<
-    string,
-    ReturnType<typeof createDeliveryWorkflowController>
-  >()
+  const deliveryControllers = new Map<string, {
+    controller: ReturnType<typeof createDeliveryWorkflowController>
+    authContext: { request: Request }
+  }>()
   const deliveryStartQueues = new Map<string, Promise<void>>()
   const getDeliveryController = (input: {
     request: Request
@@ -517,13 +517,17 @@ export function createAgentWorkflowApp(
     const workspaceKey = resolve(input.workspacePath)
     const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}:${input.resourceEvidenceSessionId ?? 'default'}`
     const existing = deliveryControllers.get(key)
-    if (existing) return existing
+    if (existing) {
+      existing.authContext.request = input.request
+      return existing.controller
+    }
+    const deliveryAuthContext = { request: input.request }
     const workerPort = createBeeGameDeliveryWorkerPort({
       sessions: beeGameSessions,
       userId: input.user.id,
-      ...(getRequestAuthToken(input.request)
-        ? { authToken: getRequestAuthToken(input.request) }
-        : {}),
+      getAuthToken: async () =>
+        getBearerToken(deliveryAuthContext.request) ??
+        await sessionAuth?.getValidAccessToken(deliveryAuthContext.request),
       userDataRoot: getCurrentUserDataRoot(input.request),
       ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
       ...(input.language ? { language: input.language } : {}),
@@ -594,7 +598,10 @@ export function createAgentWorkflowApp(
           }
         : {}),
     })
-    deliveryControllers.set(key, controller)
+    deliveryControllers.set(key, {
+      controller,
+      authContext: deliveryAuthContext,
+    })
     return controller
   }
   const ensureDeliveryProgress = async (input: {
