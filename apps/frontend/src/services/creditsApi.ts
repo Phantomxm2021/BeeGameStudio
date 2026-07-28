@@ -11,7 +11,6 @@ export type BeeGameCreditBalance = {
   balanceCredits: number
   includedCredits: number
   consumedCredits: number
-  reservedCredits: number
   creditUnitWeightedTokens: number
   estimates: {
     ideaIntake: BeeGameCreditEstimate
@@ -22,32 +21,12 @@ export type BeeGameCreditBalance = {
   }
 }
 
-export type BeeGameCreditTaskType =
-  | 'idea_intake'
-  | 'full_build'
-  | 'edit_turn'
-  | 'continue_turn'
-  | 'asset_integration'
-  | 'large_build'
-  | 'agent_turn'
-
-export type BeeGameCreditQuote = {
-  taskType: BeeGameCreditTaskType
-  reservedCredits: number
-  displayName: string
-  description: string
-  balanceCredits: number
-  canStart: boolean
-  message: string
-}
-
 export type BeeGameCreditLedgerEntry = {
   id: string
   userId: string
-  kind: 'estimate' | 'reserve' | 'settle' | 'grant' | 'refund'
+  kind: 'settle' | 'grant'
   credits: number
   projectId?: string
-  reservationId?: string
   weightedTokens?: number
   metadata: Record<string, unknown>
   createdAt: string
@@ -55,10 +34,7 @@ export type BeeGameCreditLedgerEntry = {
 
 export type BeeGameCreditSummary = {
   entriesCount: number
-  reservedCredits: number
   settledCredits: number
-  refundedCredits: number
-  outstandingReservedCredits: number
   weightedTokens: number
 }
 
@@ -71,7 +47,6 @@ export type BeeGameCreditAuditLedgerFilters = {
   userId?: string
   projectId?: string
   kind?: BeeGameCreditLedgerEntry['kind']
-  reservationId?: string
 }
 
 export type BeeGameCreditGrant = {
@@ -180,7 +155,6 @@ const toCreditBalance = (
     balanceCredits,
     includedCredits,
     consumedCredits,
-    reservedCredits: 0,
     creditUnitWeightedTokens: 10_000,
     estimates: {
       ideaIntake: emptyEstimate,
@@ -194,26 +168,6 @@ const toCreditBalance = (
 
 export const getCreditBalance = async (): Promise<BeeGameCreditBalance> =>
   toCreditBalance(await getUsageWallet())
-
-export const getCreditQuote = (
-  taskType: BeeGameCreditTaskType,
-): Promise<BeeGameCreditQuote> =>
-  getUsageWallet().then(wallet => {
-    const balance = toCreditBalance(wallet)
-    return {
-      taskType,
-      reservedCredits: 0,
-      displayName: 'Realtime usage billing',
-      description:
-        'Usage is debited from actual provider token usage in real time.',
-      balanceCredits: balance.balanceCredits,
-      canStart: balance.balanceCredits > 0,
-      message:
-        balance.balanceCredits > 0
-          ? 'This request will be billed by actual token usage.'
-          : 'Realtime usage balance is exhausted.',
-    }
-  })
 
 const toLedgerEntry = (
   event: BeeGameShadowUsageEvent,
@@ -245,12 +199,10 @@ export const getCreditSummary = (
     .get<BeeGameShadowUsageSummary>('/api/credits/shadow-summary', {
       ...(projectId ? { params: { projectId } } : {}),
     })
+    .then(response => response.data)
     .then(summary => ({
       entriesCount: summary.eventsCount,
-      reservedCredits: 0,
       settledCredits: summary.shadowCreditsMicro / 1_000_000,
-      refundedCredits: 0,
-      outstandingReservedCredits: 0,
       weightedTokens: summary.weightedTokens,
     }))
 
@@ -263,10 +215,7 @@ export const getCreditAuditLedger = (
       entries,
       summary: {
         entriesCount: entries.length,
-        reservedCredits: 0,
         settledCredits: entries.reduce((sum, entry) => sum + entry.credits, 0),
-        refundedCredits: 0,
-        outstandingReservedCredits: 0,
         weightedTokens: entries.reduce(
           (sum, entry) => sum + (entry.weightedTokens ?? 0),
           0,

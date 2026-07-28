@@ -50,8 +50,6 @@
       },
       "errors": {
         "missingPlatformModel": "平台尚未配置預設模型。請聯絡管理員在系統設定的平台頁配置後再生成。",
-        "insufficientCredits": "Credit 不足。本次{{taskName}}需要預扣 {{reservedCredits}} credits，你目前有 {{balanceCredits}} credits。",
-        "quoteFailed": "無法取得 credit 預估，請檢查服務後重試。",
         "projectStartFailed": "專案啟動失敗，請檢查服務後重試。",
         "authNotConfigured": "Supabase Auth 尚未配置。",
         "missingEmailPassword": "請輸入信箱和密碼。",
@@ -81,7 +79,6 @@
         "emailFallback": "信箱未公開",
         "balance": "餘額",
         "consumed": "已用",
-        "reserved": "凍結",
         "loadingCreditDetails": "正在載入記錄...",
         "viewCreditDetails": "查看 Credit 明細",
         "ledgerCount": "{{count}} 筆",
@@ -98,7 +95,7 @@
         "uploadAvatar": "上傳頭像",
         "creditUsage": "Credit 用量",
         "creditDetailsTitle": "Credit 明細",
-        "creditDetailsDescription": "按任務環節記錄預扣、結算和退回。"
+        "creditDetailsDescription": "Realtime token usage records."
       },
       "credits": {
         "task": {
@@ -112,19 +109,9 @@
           "large_build": "大型建構",
           "agent_turn": "Agent 任務"
         },
-        "title": {
-          "ideaIntake": "確認生成方案",
-          "fullBuild": "確認構建"
-        },
-        "description": "本次{{taskName}}將預扣 {{reservedCredits}} credits。任務結束後會按實際 token 和工具消耗結算，未使用部分自動退回。",
-        "refundRule": "按實際消耗結算，未用自動退回。",
-        "balance": "目前餘額",
-        "reserved": "本次預扣",
         "kind": {
           "estimate": "預估",
-          "reserve": "預扣",
           "settle": "結算",
-          "refund": "退回",
           "grant": "發放"
         }
       },
@@ -277,9 +264,7 @@
         ]
       }
     },
-    "credits": {
-      "refundRule": "按實際消耗結算，未用自動退回。"
-    }
+    "credits": {}
   },
   "settings": {
     "admin": {
@@ -638,15 +623,6 @@
         "finished": "待複核",
         "idle": "就緒"
       },
-      "creditQuote": {
-        "settlementNote": "修改、繼續任務和資源整合也會計費；實際扣費以本輪 token 和工具使用為準，未使用部分自動退回。",
-        "title": "確認本次請求",
-        "description": "本次請求將預扣 {{reservedCredits}} credits。完成後按實際消耗結算，未使用部分會自動退回。",
-        "balance": "目前餘額",
-        "reserved": "預扣",
-        "cancel": "取消",
-        "confirm": "確認並送出"
-      },
       "approvalWaiting": "目前專案正在等待核准，不能繼續執行一般訊息。"
     },
     "livePreview": {
@@ -670,7 +646,6 @@
       "cachedInputTokens": "快取輸入 Tokens",
       "outputTokens": "輸出 Tokens",
       "credits": "Credits",
-      "reserved": "預扣",
       "phase": "階段",
       "model": "模型",
       "syncing": "同步中",

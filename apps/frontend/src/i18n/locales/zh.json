@@ -54,8 +54,6 @@
       },
       "errors": {
         "missingPlatformModel": "平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。",
-        "insufficientCredits": "Credit 不足。本次{{taskName}}需要预扣 {{reservedCredits}} credits，你当前有 {{balanceCredits}} credits。",
-        "quoteFailed": "无法获取 credit 预估，请检查服务后重试。",
         "projectStartFailed": "项目启动失败，请检查服务后重试。",
         "authNotConfigured": "Supabase Auth 尚未配置。",
         "missingEmailPassword": "请输入邮箱和密码。",
@@ -86,7 +84,6 @@
         "emailFallback": "邮箱未公开",
         "balance": "余额",
         "consumed": "已用",
-        "reserved": "冻结",
         "loadingCreditDetails": "正在加载记录...",
         "viewCreditDetails": "查看 Credit 明细",
         "ledgerCount": "{{count}} 条",
@@ -103,7 +100,7 @@
         "uploadAvatar": "上传头像",
         "creditUsage": "Credit 用量",
         "creditDetailsTitle": "Credit 明细",
-        "creditDetailsDescription": "按任务环节记录预扣、结算和退回。"
+        "creditDetailsDescription": "Realtime token usage records."
       },
       "credits": {
         "task": {
@@ -117,19 +114,9 @@
           "large_build": "大型构建",
           "agent_turn": "Agent 任务"
         },
-        "title": {
-          "ideaIntake": "确认生成方案",
-          "fullBuild": "确认构建"
-        },
-        "description": "本次{{taskName}}将预扣 {{reservedCredits}} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。",
-        "refundRule": "按实际消耗结算，未用自动退回。",
-        "balance": "当前余额",
-        "reserved": "本次预扣",
         "kind": {
           "estimate": "预估",
-          "reserve": "预扣",
           "settle": "结算",
-          "refund": "退回",
           "grant": "发放"
         }
       },
@@ -282,9 +269,7 @@
         ]
       }
     },
-    "credits": {
-      "refundRule": "按实际消耗结算，未用自动退回。"
-    }
+    "credits": {}
   },
   "settings": {
     "admin": {
@@ -328,7 +313,7 @@
     "billing": {
       "tab": "信用",
       "title": "Credit 审计",
-      "description": "查看预扣、结算、退回、发放和购买相关记录。",
+      "description": "Operator ledger for realtime token usage and grants.",
       "packsTitle": "Credit 套餐",
       "packsDescription": "Credit Store 使用的 Stripe 价格映射。",
       "savePack": "保存套餐",
@@ -350,9 +335,7 @@
       "auditUnavailable": "Credit 审计不可用",
       "billingUnavailable": "Billing 审计不可用",
       "metrics": {
-        "outstandingReserved": "冻结未结算",
         "settled": "已结算",
-        "refunded": "已退回",
         "weightedTokens": "加权 tokens"
       }
     },
@@ -785,45 +768,6 @@
         "title": "正在启动项目",
         "description": "正在准备独立工作区与构建会话，很快就好。"
       },
-      "creditQuote": {
-        "settlementNote": "修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。",
-        "title": "确认本次请求",
-        "description": "本次请求将预扣 {{reservedCredits}} credits。完成后按实际消耗结算，未使用部分会自动退回。",
-        "balance": "当前余额",
-        "reserved": "预扣",
-        "cancel": "取消",
-        "confirm": "确认并发送",
-        "taskTypes": {
-          "idea_intake": {
-            "title": "方案生成",
-            "description": "根据你的游戏想法生成可选择的游戏模式。"
-          },
-          "full_build": {
-            "title": "完整构建",
-            "description": "开始一个已确认的游戏项目构建。"
-          },
-          "edit_turn": {
-            "title": "修改 / 调试",
-            "description": "修改、调试或继续完善已有游戏项目。"
-          },
-          "continue_turn": {
-            "title": "继续任务",
-            "description": "从上一次进度继续分析、修复或实现。"
-          },
-          "asset_integration": {
-            "title": "资源集成",
-            "description": "让 BeeGame 将已上传资源集成到当前项目。"
-          },
-          "large_build": {
-            "title": "大型构建",
-            "description": "处理更复杂、更长周期的游戏构建请求。"
-          },
-          "agent_turn": {
-            "title": "Agent 请求",
-            "description": "执行一次通用的 BeeGame agent 请求。"
-          }
-        }
-      },
       "approvalWaiting": "当前项目正在等待审批，不能继续执行普通消息。"
     },
     "livePreview": {
@@ -878,7 +822,6 @@
       "runtimeAcceptance": "运行验收",
       "deploymentReadiness": "部署就绪",
       "credits": "余额",
-      "reserved": "预扣",
       "phase": "阶段",
       "executionStatus": "Agent 状态",
       "model": "模型",

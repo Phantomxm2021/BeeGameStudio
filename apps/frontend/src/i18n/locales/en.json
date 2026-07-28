@@ -54,8 +54,6 @@
       },
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
-        "insufficientCredits": "Not enough credits. This {{taskName}} requires {{reservedCredits}} reserved credits; you currently have {{balanceCredits}} credits.",
-        "quoteFailed": "Unable to estimate credits. Check the service and try again.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
@@ -86,7 +84,6 @@
         "emailFallback": "Email not shared",
         "balance": "Balance",
         "consumed": "Used",
-        "reserved": "Reserved",
         "loadingCreditDetails": "Loading records...",
         "viewCreditDetails": "View credit details",
         "ledgerCount": "{{count}} entries",
@@ -103,7 +100,7 @@
         "uploadAvatar": "Upload avatar",
         "creditUsage": "Credit usage",
         "creditDetailsTitle": "Credit details",
-        "creditDetailsDescription": "Records reservations, settlements, and refunds by task stage."
+        "creditDetailsDescription": "Realtime token usage records."
       },
       "credits": {
         "task": {
@@ -117,19 +114,9 @@
           "large_build": "Large build",
           "agent_turn": "Agent task"
         },
-        "title": {
-          "ideaIntake": "Confirm idea generation",
-          "fullBuild": "Confirm build"
-        },
-        "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Charged by actual use; unused credits return.",
-        "balance": "Balance",
-        "reserved": "Reserved",
         "kind": {
           "estimate": "Estimate",
-          "reserve": "Reserve",
           "settle": "Settle",
-          "refund": "Refund",
           "grant": "Grant"
         }
       },
@@ -282,9 +269,7 @@
         ]
       }
     },
-    "credits": {
-      "refundRule": "Charged by actual use; unused credits return."
-    }
+    "credits": {}
   },
   "settings": {
     "admin": {
@@ -328,7 +313,7 @@
     "billing": {
       "tab": "Credit",
       "title": "Credit audit",
-      "description": "Operator ledger for reservations, settlements, refunds, grants, and usage.",
+      "description": "Operator ledger for realtime token usage and grants.",
       "packsTitle": "Credit packs",
       "packsDescription": "Stripe price mappings used by Credit Store.",
       "savePack": "Save pack",
@@ -350,9 +335,7 @@
       "auditUnavailable": "Credit audit unavailable",
       "billingUnavailable": "Billing audit unavailable",
       "metrics": {
-        "outstandingReserved": "Outstanding reserved",
         "settled": "Settled",
-        "refunded": "Refunded",
         "weightedTokens": "Weighted tokens"
       }
     },
@@ -785,45 +768,6 @@
         "title": "Starting your project",
         "description": "Preparing an isolated workspace and build session. This will only take a moment."
       },
-      "creditQuote": {
-        "settlementNote": "Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.",
-        "title": "Confirm request",
-        "description": "This request will reserve {{reservedCredits}} credits. It will settle against actual usage, and unused credits will be refunded.",
-        "balance": "Balance",
-        "reserved": "Reserved",
-        "cancel": "Cancel",
-        "confirm": "Confirm and send",
-        "taskTypes": {
-          "idea_intake": {
-            "title": "Game Directions",
-            "description": "Generate selectable game modes from your initial idea."
-          },
-          "full_build": {
-            "title": "Full Build",
-            "description": "Start a confirmed game project build."
-          },
-          "edit_turn": {
-            "title": "Edit / Debug",
-            "description": "Modify, debug, or continue improving an existing game project."
-          },
-          "continue_turn": {
-            "title": "Continue Task",
-            "description": "Continue analysis, fixes, or implementation from the previous progress."
-          },
-          "asset_integration": {
-            "title": "Asset Integration",
-            "description": "Ask BeeGame to integrate uploaded assets into the current project."
-          },
-          "large_build": {
-            "title": "Large Build",
-            "description": "Handle a more complex, longer-running game build request."
-          },
-          "agent_turn": {
-            "title": "Agent Request",
-            "description": "Run a general BeeGame agent request."
-          }
-        }
-      },
       "approvalWaiting": "This project is waiting for approval. Resolve the approval request before sending a normal message."
     },
     "livePreview": {
@@ -878,7 +822,6 @@
       "runtimeAcceptance": "Runtime Acceptance",
       "deploymentReadiness": "Deployment readiness",
       "credits": "Credits",
-      "reserved": "Reserved",
       "phase": "Phase",
       "executionStatus": "Agent status",
       "model": "Model",

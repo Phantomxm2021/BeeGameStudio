@@ -151,15 +151,6 @@
         "finished": "Ready for review",
         "idle": "Ready"
       },
-      "creditQuote": {
-        "settlementNote": "Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.",
-        "title": "Confirm request",
-        "description": "This request will reserve {{reservedCredits}} credits. It will settle against actual usage, and unused credits will be refunded.",
-        "balance": "Balance",
-        "reserved": "Reserved",
-        "cancel": "Cancel",
-        "confirm": "Confirm and send"
-      },
       "approvalWaiting": "This project is waiting for approval. Resolve the approval request before sending a normal message."
     },
     "livePreview": {
@@ -180,7 +171,6 @@
       "unavailable": "Unavailable",
       "tokens": "Tokens",
       "credits": "Credits",
-      "reserved": "Reserved",
       "phase": "Phase",
       "model": "Model",
       "syncing": "Syncing",
@@ -437,8 +427,6 @@
       },
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
-        "insufficientCredits": "Not enough credits. This {{taskName}} requires {{reservedCredits}} reserved credits; you currently have {{balanceCredits}} credits.",
-        "quoteFailed": "Unable to estimate credits. Check the service and try again.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
@@ -468,7 +456,6 @@
         "emailFallback": "Email not shared",
         "balance": "Balance",
         "consumed": "Used",
-        "reserved": "Reserved",
         "loadingCreditDetails": "Loading records...",
         "viewCreditDetails": "View credit details",
         "ledgerCount": "{{count}} entries",
@@ -485,7 +472,7 @@
         "uploadAvatar": "Upload avatar",
         "creditUsage": "Credit usage",
         "creditDetailsTitle": "Credit details",
-        "creditDetailsDescription": "Records reservations, settlements, and refunds by task stage."
+        "creditDetailsDescription": "Realtime token usage records."
       },
       "credits": {
         "task": {
@@ -499,19 +486,9 @@
           "large_build": "Large build",
           "agent_turn": "Agent task"
         },
-        "title": {
-          "ideaIntake": "Confirm idea generation",
-          "fullBuild": "Confirm build"
-        },
-        "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Charged by actual use; unused credits return.",
-        "balance": "Balance",
-        "reserved": "Reserved",
         "kind": {
           "estimate": "Estimate",
-          "reserve": "Reserve",
           "settle": "Settle",
-          "refund": "Refund",
           "grant": "Grant"
         }
       },
@@ -664,9 +641,7 @@
         ]
       }
     },
-    "credits": {
-      "refundRule": "Charged by actual use; unused credits return."
-    }
+    "credits": {}
   },
   "dashboard": {
     "livePreview": {
