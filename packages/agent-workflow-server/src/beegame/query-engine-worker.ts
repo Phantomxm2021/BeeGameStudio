@@ -6,10 +6,11 @@ import type {
   BeeGameSessionRuntime,
   DashboardPermissionDecision,
 } from './session-manager'
-import type {
-  QueryEngineParentMessage,
-  QueryEngineWorkerMessage,
-  SerializedQueryEngineStartInput,
+import {
+  serializeQueryEngineError,
+  type QueryEngineParentMessage,
+  type QueryEngineWorkerMessage,
+  type SerializedQueryEngineStartInput,
 } from './query-engine-worker-protocol'
 
 let runtime: BeeGameSessionRuntime | null = null
@@ -20,7 +21,7 @@ process.on('message', raw => {
   void handleMessage(raw as QueryEngineParentMessage).catch(error => {
     send({
       type: 'runtime.error',
-      message: error instanceof Error ? error.message : 'Claude runtime worker failed',
+      error: serializeQueryEngineError(error, 'Claude runtime worker failed'),
     })
   })
 })
@@ -76,7 +77,7 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
       send({
         type: 'turn.failed',
         turnId: message.turnId,
-        message: error instanceof Error ? error.message : 'Claude runtime turn failed',
+        error: serializeQueryEngineError(error, 'Claude runtime turn failed'),
       })
     } finally {
       activeTurn = null

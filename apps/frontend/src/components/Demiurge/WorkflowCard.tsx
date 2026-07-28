@@ -88,19 +88,19 @@ export function WorkflowCard({
   const completedCount = workflow.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = workflow.totalTaskCount ?? tasks.length;
   const stageTitle = stageLabel[workflow.documentStep || ''] || stageLabel[workflow.currentPhase || ''] || workflow.currentPhase || '等待阶段';
-  const startedAt = Date.parse(workflow.stageStartedAt || workflow.createdAt || '');
-  const finishedAt = Date.parse(workflow.updatedAt || '');
+  const startedAt = Date.parse(workflow.createdAt || '');
+  const finishedAt = Date.parse(workflow.completedAt || (isCompleted ? workflow.updatedAt || '' : ''));
   const elapsed = Number.isFinite(startedAt)
-    ? (isCompleted || isBlocked) && Number.isFinite(finishedAt)
+    ? isCompleted && Number.isFinite(finishedAt)
       ? finishedAt - startedAt
       : now - startedAt
     : 0;
 
   useEffect(() => {
-    if (isCompleted || isBlocked || !Number.isFinite(startedAt)) return;
+    if (isCompleted || !Number.isFinite(startedAt)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [isBlocked, isCompleted, startedAt]);
+  }, [isCompleted, startedAt]);
 
   const executionText = useMemo(() => {
     const worker = workerLabel[workflow.worker || ''] || workflow.worker || '';

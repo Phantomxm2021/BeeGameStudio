@@ -114,6 +114,31 @@ describe('delivery workflow document ordering', () => {
     })
   })
 
+  test('captures an immutable completion timestamp at delivery', () => {
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+      }),
+      phase: 'DELIVERY' as const,
+      evidence: {
+        acceptance: {
+          path: '.beegame/workflow/evidence/acceptance.json',
+          kind: 'acceptance' as const,
+          revision: 'workspace-revision-1',
+          status: 'passed' as const,
+          observedAt: new Date().toISOString(),
+        },
+      },
+    }
+
+    const completed = transitionDeliveryRun(run, { type: 'delivery_completed' })
+
+    expect(completed.status).toBe('completed')
+    expect(completed.completedAt).toBe(completed.updatedAt)
+  })
+
   test('moves an approved checklist to resource preparation before comprehensive review', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-checklist-order-'))
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
@@ -275,6 +300,56 @@ describe('delivery workflow document ordering', () => {
       documentStep: 'FOUNDATION_REVIEW',
       blockedReason: undefined,
       documentRemediation: { resolvedFindingIds: findingIds },
+    })
+  })
+
+  test('persists the current foundation review evidence before checklist drafting', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-review-'))
+    const evidencePath = '.beegame/workflow/evidence/foundation-review.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-2',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.document,
+        verdict: 'READY',
+        reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        checklistIds: [],
+        findings: [],
+        evidencePath,
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      status: 'running',
+      evidence: {
+        documentReview: {
+          path: evidencePath,
+          kind: 'document_review',
+          revision: 'document-revision-2',
+          status: 'ready',
+        },
+      },
     })
   })
 

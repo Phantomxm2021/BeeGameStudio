@@ -340,6 +340,7 @@ describe('displayModels', () => {
         completedTaskCount: 1,
         totalTaskCount: 2,
         createdAt: '2026-07-28T00:00:00.000Z',
+        completedAt: '2026-07-28T00:00:45.000Z',
         updatedAt: '2026-07-28T00:01:00.000Z',
         activeDispatch: {
           workerType: 'document-author',
@@ -364,6 +365,7 @@ describe('displayModels', () => {
       nextAction: 'retry',
       completedTaskCount: 1,
       totalTaskCount: 2,
+      completedAt: '2026-07-28T00:00:45.000Z',
       stageStartedAt: '2026-07-28T00:00:30.000Z',
       block: { message: '整改未覆盖所有 finding。' },
       tasks: [

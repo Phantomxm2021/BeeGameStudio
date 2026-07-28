@@ -248,6 +248,7 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
     completedTaskCount: Number.isFinite(Number(source.completedTaskCount)) ? Number(source.completedTaskCount) : undefined,
     totalTaskCount: Number.isFinite(Number(source.totalTaskCount)) ? Number(source.totalTaskCount) : undefined,
     createdAt: trimString(source.createdAt ?? source.created_at) || undefined,
+    completedAt: trimString(source.completedAt ?? source.completed_at) || undefined,
     updatedAt: trimString(source.updatedAt ?? source.updated_at) || undefined,
     stageStartedAt: trimString(activeDispatch?.startedAt ?? activeDispatch?.started_at) || undefined,
     nextAction: nextActionValue === 'resume' || nextActionValue === 'retry' ? nextActionValue : undefined,

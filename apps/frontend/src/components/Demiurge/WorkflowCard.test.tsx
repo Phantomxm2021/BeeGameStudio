@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowCard } from './WorkflowCard';
 
 describe('WorkflowCard', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('renders the stage, durable message, execution detail and task progress', () => {
     render(
       <WorkflowCard
@@ -86,7 +88,8 @@ describe('WorkflowCard', () => {
           status: 'completed',
           currentPhase: 'DELIVERY',
           createdAt: '2026-07-28T00:00:00.000Z',
-          updatedAt: '2026-07-28T00:01:05.000Z',
+          completedAt: '2026-07-28T00:01:05.000Z',
+          updatedAt: '2026-07-28T00:02:00.000Z',
         }}
       />,
     );
@@ -96,5 +99,25 @@ describe('WorkflowCard', () => {
     expect(card).not.toHaveClass('bg-sky-300/[0.055]');
     expect(screen.getByText('00:01:05')).toBeInTheDocument();
     expect(screen.queryByText(/本阶段/)).not.toBeInTheDocument();
+  });
+
+  it('keeps accumulating from run creation while blocked and ignores stage start', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:01:05.000Z'));
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_5',
+          status: 'blocked',
+          currentPhase: 'DOCUMENT_REVIEW',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          stageStartedAt: '2026-07-28T00:01:00.000Z',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('00:01:05')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('00:01:07')).toBeInTheDocument();
   });
 });

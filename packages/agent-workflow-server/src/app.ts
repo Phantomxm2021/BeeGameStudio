@@ -5276,6 +5276,9 @@ function workflowViewForDisplay(
     ...(typeof workflow.createdAt === 'string'
       ? { createdAt: workflow.createdAt }
       : {}),
+    ...(typeof workflow.completedAt === 'string'
+      ? { completedAt: workflow.completedAt }
+      : {}),
     ...(typeof workflow.updatedAt === 'string'
       ? { updatedAt: workflow.updatedAt }
       : {}),

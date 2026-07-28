@@ -462,7 +462,15 @@ export function transitionDeliveryRun(
       requirePhase(run, 'DELIVERY')
       if (run.evidence.acceptance?.status !== 'passed')
         fail('delivery requires passed acceptance evidence')
-      next = { ...run, status: 'completed', updatedAt: timestamp() }
+      {
+        const completedAt = timestamp()
+        next = {
+          ...run,
+          status: 'completed',
+          completedAt,
+          updatedAt: completedAt,
+        }
+      }
       break
     case 'stop':
       if (run.status === 'completed')

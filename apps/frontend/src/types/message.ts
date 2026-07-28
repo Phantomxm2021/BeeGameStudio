@@ -57,6 +57,7 @@ export interface WorkflowCardPayload {
   completedTaskCount?: number;
   totalTaskCount?: number;
   createdAt?: string;
+  completedAt?: string;
   updatedAt?: string;
   stageStartedAt?: string;
   nextAction?: 'resume' | 'retry';

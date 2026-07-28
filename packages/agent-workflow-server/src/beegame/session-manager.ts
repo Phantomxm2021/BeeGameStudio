@@ -65,6 +65,7 @@ import {
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
+import { isRetryableQueryEngineError } from './query-engine-worker-protocol'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import { createRunStore } from './delivery-workflow/run-store'
@@ -386,8 +387,18 @@ type SessionRecord = {
   /** Serializes workflow usage writes without blocking the SDK callback. */
   workflowUsageWriteTail: Promise<void>
   workflowUsageWriteError?: Error
-    /** Serializes usage billing events without blocking the SDK callback. */
+  /** Serializes usage billing events without blocking the SDK callback. */
   usageWriteTail: Promise<void>
+  usageWriteActive: boolean
+  usagePendingWrite?: {
+    turnId: string
+    sourceMessageType: string
+    usage: Usage
+    idempotencyKey: string
+  }
+  usageInFlightKey?: string
+  usageLastCommittedKey?: string
+  usageFailureReported: boolean
   resumeEventPending: boolean
 }
 
@@ -595,6 +606,8 @@ export class BeeGameSessionManager {
       workflowUsageCommitted: emptyRuntimeUsage(),
       workflowUsageWriteTail: Promise.resolve(),
       usageWriteTail: Promise.resolve(),
+      usageWriteActive: false,
+      usageFailureReported: false,
       resumeEventPending: Boolean(recoveredTranscript),
     }
     if (confirmedBriefContext) {
@@ -1205,29 +1218,47 @@ export class BeeGameSessionManager {
       )
       const approvedOutboundTargets =
         await this.resolveRuntimeOutboundTargets(env)
-      const runner =
-        record.runner ??
-        (await this.runner.start({
-          sessionId: record.session.id,
-          deliveryEvidenceDataRoot: this.dashboardDataRoot,
-          resumeSessionId: record.session.id,
-          cwd: record.session.cwd,
-          env,
-          approvedOutboundTargets,
-          ...(this.resourceSelectionConfig &&
-          env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
-          (!record.workflowWorker ||
-            record.workflowWorkerType === 'resource-preparer')
-            ? { resourceSelectionConfig: this.resourceSelectionConfig }
-            : {}),
-          ...(record.language ? { language: record.language } : {}),
-          onNativeTaskNotification: notification =>
-            this.observeNativeTaskNotification(record, notification),
-          requestPermission: request => this.requestPermission(record, request),
-        }))
-      record.runner = runner
+      let runner = record.runner
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let runtimeMessageObserved = false
+        try {
+          runner ??= await this.runner.start({
+            sessionId: record.session.id,
+            deliveryEvidenceDataRoot: this.dashboardDataRoot,
+            resumeSessionId: record.session.id,
+            cwd: record.session.cwd,
+            env,
+            approvedOutboundTargets,
+            ...(this.resourceSelectionConfig &&
+            env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
+            (!record.workflowWorker ||
+              record.workflowWorkerType === 'resource-preparer')
+              ? { resourceSelectionConfig: this.resourceSelectionConfig }
+              : {}),
+            ...(record.language ? { language: record.language } : {}),
+            onNativeTaskNotification: notification =>
+              this.observeNativeTaskNotification(record, notification),
+            requestPermission: request =>
+              this.requestPermission(record, request),
+          })
+          record.runner = runner
+          await this.submitToRunner(record, runner, prompt, signal, () => {
+            runtimeMessageObserved = true
+          })
+          break
+        } catch (error) {
+          const canRetry =
+            attempt === 0 &&
+            !signal.aborted &&
+            !runtimeMessageObserved &&
+            isRetryableQueryEngineError(error)
+          disposeRunner(runner)
+          if (record.runner === runner) record.runner = null
+          runner = null
+          if (!canRetry) throw error
+        }
+      }
       try {
-        await this.submitToRunner(record, runner, prompt, signal)
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
           const hasFinalResult = hasNativeFinalResult(record.events, turnId)
@@ -1311,6 +1342,7 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
+    onRuntimeMessage?: () => void,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
@@ -1321,6 +1353,7 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
+        onRuntimeMessage?.()
         appendProjectAgentRawLog(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -1388,72 +1421,121 @@ export class BeeGameSessionManager {
     )
       .update(JSON.stringify(usage))
       .digest('hex')}`
-    record.usageWriteTail = record.usageWriteTail
-      .then(async () => {
-        const result = await this.usageBillingBackend.recordUsage!(
-          record.userId,
-          {
-            dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-            sessionId: record.session.id,
-            turnId,
-            ...(record.projectId ? { projectId: record.projectId } : {}),
-            usage,
-            idempotencyKey,
-            metadata: {
-              sourceMessageType: message.type,
-              modelConfigId: record.session.modelConfigId,
-              workflowWorker: Boolean(record.workflowWorker),
-            },
-            ...(record.authToken ? { authToken: record.authToken } : {}),
-          },
-        )
-        if (this.usageBillingBackend.debitRealtimeUsage) {
-          const debit = await this.usageBillingBackend.debitRealtimeUsage(
-            record.userId,
-            {
-              dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-              sessionId: record.session.id,
-              turnId,
-              ...(record.projectId ? { projectId: record.projectId } : {}),
-              usage,
-              idempotencyKey,
-              metadata: {
-                sourceMessageType: message.type,
-                modelConfigId: record.session.modelConfigId,
-                workflowWorker: Boolean(record.workflowWorker),
-              },
-              ...(record.authToken ? { authToken: record.authToken } : {}),
-            },
-          )
-          if (!debit.duplicate && debit.event.weightedTokensDelta > 0) {
-            this.append(record, 'system.status', 'Realtime usage debited', {
-              type: 'billing.realtime_debited',
-              debitEventId: debit.event.id,
-              weightedTokens: debit.event.weightedTokensDelta,
-              creditsMicro: debit.event.creditsMicro,
-              pricingVersion: debit.event.pricingVersion,
-              idempotencyKey,
-            })
+    if (
+      idempotencyKey === record.usagePendingWrite?.idempotencyKey ||
+      idempotencyKey === record.usageInFlightKey ||
+      idempotencyKey === record.usageLastCommittedKey
+    )
+      return
+    // A turn emits cumulative snapshots. Keep only the newest snapshot that
+    // has not started writing instead of serializing every intermediate delta.
+    record.usagePendingWrite = {
+      turnId,
+      sourceMessageType: message.type,
+      usage,
+      idempotencyKey,
+    }
+    if (record.usageWriteActive) return
+    record.usageWriteActive = true
+    record.usageWriteTail = this.drainUsageRecords(record).finally(() => {
+      record.usageWriteActive = false
+    })
+  }
+
+  private async drainUsageRecords(record: SessionRecord): Promise<void> {
+    while (record.usagePendingWrite) {
+      const write = record.usagePendingWrite
+      record.usagePendingWrite = undefined
+      record.usageInFlightKey = write.idempotencyKey
+      let failure: unknown
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await this.writeUsageRecord(record, write)
+          failure = undefined
+          break
+        } catch (error) {
+          failure = error
+          if (attempt < 2) {
+            await new Promise(resolve =>
+              setTimeout(resolve, 100 * (attempt + 1)),
+            )
           }
         }
-        if (!result.duplicate && result.event.weightedTokensDelta > 0) {
-          this.append(record, 'system.status', 'Usage recorded', {
-            type: 'billing.usage_recorded',
-            usageEventId: result.event.id,
-            weightedTokens: result.event.weightedTokensDelta,
-            creditsMicro: result.event.creditsMicro,
-            pricingVersion: result.event.pricingVersion,
-            idempotencyKey,
-          })
-        }
-      })
-      .catch(error => {
+      }
+      record.usageInFlightKey = undefined
+      if (!failure) {
+        record.usageLastCommittedKey = write.idempotencyKey
+        record.usageFailureReported = false
+      } else if (
+        record.session.status === 'running' &&
+        !record.usageFailureReported
+      ) {
+        record.usageFailureReported = true
         this.append(record, 'system.status', 'Usage recording failed', {
           type: 'billing.usage_record_failed',
-          error: error instanceof Error ? error.message : String(error),
-          idempotencyKey,
+          error: failure instanceof Error ? failure.message : String(failure),
+          idempotencyKey: write.idempotencyKey,
         })
+      }
+    }
+  }
+
+  private async writeUsageRecord(
+    record: SessionRecord,
+    write: NonNullable<SessionRecord['usagePendingWrite']>,
+  ): Promise<void> {
+    const options = {
+      dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+      sessionId: record.session.id,
+      turnId: write.turnId,
+      ...(record.projectId ? { projectId: record.projectId } : {}),
+      usage: write.usage,
+      idempotencyKey: write.idempotencyKey,
+      metadata: {
+        sourceMessageType: write.sourceMessageType,
+        modelConfigId: record.session.modelConfigId,
+        workflowWorker: Boolean(record.workflowWorker),
+      },
+      ...(record.authToken ? { authToken: record.authToken } : {}),
+    }
+    const result = await this.usageBillingBackend.recordUsage!(
+      record.userId,
+      options,
+    )
+    if (this.usageBillingBackend.debitRealtimeUsage) {
+      const debit = await this.usageBillingBackend.debitRealtimeUsage(
+        record.userId,
+        options,
+      )
+      if (
+        record.session.status === 'running' &&
+        !debit.duplicate &&
+        debit.event.weightedTokensDelta > 0
+      ) {
+        this.append(record, 'system.status', 'Realtime usage debited', {
+          type: 'billing.realtime_debited',
+          debitEventId: debit.event.id,
+          weightedTokens: debit.event.weightedTokensDelta,
+          creditsMicro: debit.event.creditsMicro,
+          pricingVersion: debit.event.pricingVersion,
+          idempotencyKey: write.idempotencyKey,
+        })
+      }
+    }
+    if (
+      record.session.status === 'running' &&
+      !result.duplicate &&
+      result.event.weightedTokensDelta > 0
+    ) {
+      this.append(record, 'system.status', 'Usage recorded', {
+        type: 'billing.usage_recorded',
+        usageEventId: result.event.id,
+        weightedTokens: result.event.weightedTokensDelta,
+        creditsMicro: result.event.creditsMicro,
+        pricingVersion: result.event.pricingVersion,
+        idempotencyKey: write.idempotencyKey,
       })
+    }
   }
 
   private observeNativeTaskNotification(

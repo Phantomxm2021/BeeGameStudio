@@ -344,6 +344,10 @@ export async function reconcileDocumentReview(input: {
       ...input.run,
       status: 'running',
       documentStep: 'CHECKLIST_DRAFTING',
+      evidence: {
+        ...input.run.evidence,
+        documentReview: evidence,
+      },
       blockedReason: undefined,
       activeDispatch: undefined,
       documentRemediation: undefined,

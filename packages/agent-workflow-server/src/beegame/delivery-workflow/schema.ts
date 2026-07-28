@@ -267,6 +267,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     lastAnswer: z.string().min(1).optional(),
     blockedReason: z.string().min(1).optional(),
     createdAt: z.string().datetime(),
+    completedAt: z.string().datetime().optional(),
     updatedAt: z.string().datetime(),
   })
   .strict()

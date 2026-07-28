@@ -6,10 +6,11 @@ import type {
   BeeGameSessionRuntime,
   BeeGameSessionSubmitInput,
 } from './session-manager'
-import type {
-  QueryEngineParentMessage,
-  QueryEngineWorkerMessage,
-  SerializedQueryEngineStartInput,
+import {
+  QueryEngineWorkerError,
+  type QueryEngineParentMessage,
+  type QueryEngineWorkerMessage,
+  type SerializedQueryEngineStartInput,
 } from './query-engine-worker-protocol'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn>
@@ -66,7 +67,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
             initialized = true
             resolve()
           } else if (workerMessage.type === 'runtime.error') {
-            const error = new Error(workerMessage.message)
+            const error = new QueryEngineWorkerError(workerMessage.error)
             if (initialized) runtime.failActiveTurn(error)
             else reject(error)
           } else {
@@ -184,7 +185,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
       return
     }
     if (message.type === 'turn.failed' && this.activeTurn?.id === message.turnId) {
-      this.failActiveTurn(new Error(message.message))
+      this.failActiveTurn(new QueryEngineWorkerError(message.error))
     }
   }
 

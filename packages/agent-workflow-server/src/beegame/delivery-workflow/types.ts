@@ -247,6 +247,8 @@ export type DeliveryRun = {
   lastAnswer?: string
   blockedReason?: string
   createdAt: string
+  /** Immutable wall-clock endpoint captured when delivery completes. */
+  completedAt?: string
   updatedAt: string
 }
 
