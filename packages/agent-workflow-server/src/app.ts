@@ -35,7 +35,7 @@ import {
   type BeeGameModelUsage,
   type BeeGameModelRuntimeHost,
 } from './beegame/model-runtime-host'
-import { recordShadowUsage } from './usage-billing-shadow'
+import { recordUsage } from './usage-billing'
 import {
   parseAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
@@ -907,13 +907,13 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.get('/api/credits/shadow-ledger', async c => {
+  app.get('/api/usage/events', async c => {
     const user = getCurrentUser(c.req.raw)
     const projectId = c.req.query('projectId')?.trim()
     const window = parseUsageWindow(c.req.query('from'), c.req.query('to'))
     if (window.error) return c.json({ error: window.error }, 400)
     return c.json(
-      await dashboardRepository.listShadowUsageEvents(c.req.raw, user, {
+      await dashboardRepository.listUsageEvents(c.req.raw, user, {
         ...(projectId ? { projectId } : {}),
         ...(window.from ? { from: window.from } : {}),
         ...(window.to ? { to: window.to } : {}),
@@ -921,29 +921,18 @@ export function createAgentWorkflowApp(
     )
   })
 
-  app.get('/api/credits/shadow-summary', async c => {
+  app.get('/api/usage/summary', async c => {
     const user = getCurrentUser(c.req.raw)
     const projectId = c.req.query('projectId')?.trim()
     const window = parseUsageWindow(c.req.query('from'), c.req.query('to'))
     if (window.error) return c.json({ error: window.error }, 400)
     return c.json(
-      await dashboardRepository.summarizeShadowUsage(c.req.raw, user, {
+      await dashboardRepository.summarizeUsage(c.req.raw, user, {
         ...(projectId ? { projectId } : {}),
         ...(window.from ? { from: window.from } : {}),
         ...(window.to ? { to: window.to } : {}),
       }),
     )
-  })
-
-  app.get('/api/credits/usage-mode', async c => {
-    const user = getCurrentUser(c.req.raw)
-    return c.json({
-      mode: 'realtime',
-      realtimeDebitEnabled: true,
-      legacyReservationActive: false,
-      databaseMigrationRequired: false,
-      sqlDeploymentDeferred: false,
-    })
   })
 
   app.get('/api/usage-wallet', async c => {
@@ -2842,12 +2831,12 @@ export function createAgentWorkflowApp(
     const analysisWorkspace = await mkdtemp(
       join(getCurrentUserDataRoot(request), 'attachment-analysis-'),
     )
-    const recordModelUsage = createShadowModelUsageRecorder({
+    const recordModelUsage = createUsageRecorder({
       dataDir: getCurrentUserDataRoot(request),
       userId: user.id,
       sessionId: `attachment-analysis:${clientRequestId ?? randomUUID()}`,
       record: input =>
-        dashboardRepository.recordShadowUsage(request, user, input),
+        dashboardRepository.recordUsage(request, user, input),
       debit: input =>
         dashboardRepository.debitRealTimeUsage(request, user, input),
     })
@@ -2890,12 +2879,12 @@ export function createAgentWorkflowApp(
         dashboardRepository.listModelConfigs(nextRequest, requestUser),
     )
     const clientRequestId = getBeeGameClientRequestId(body)
-    const recordModelUsage = createShadowModelUsageRecorder({
+    const recordModelUsage = createUsageRecorder({
       dataDir: getCurrentUserDataRoot(request),
       userId: user.id,
       sessionId: `idea-intake:${clientRequestId ?? randomUUID()}`,
       record: input =>
-        dashboardRepository.recordShadowUsage(request, user, input),
+        dashboardRepository.recordUsage(request, user, input),
       debit: input =>
         dashboardRepository.debitRealTimeUsage(request, user, input),
     })
@@ -3694,7 +3683,7 @@ async function generateBeeGameModelWithUsage(
   return result.content
 }
 
-function createShadowModelUsageRecorder(input: {
+function createUsageRecorder(input: {
   dataDir: string
   userId: string
   sessionId: string
@@ -3736,7 +3725,7 @@ function createShadowModelUsageRecorder(input: {
       cache_creation_tokens: usage.cache_creation_tokens,
       total_tokens: usage.total_tokens,
     }
-    const idempotencyKey = `shadow:${input.sessionId}:${createHash('sha256')
+    const idempotencyKey = `usage:${input.sessionId}:${createHash('sha256')
       .update(JSON.stringify({ querySource, usage: normalizedUsage }))
       .digest('hex')}`
     const recordInput = {
@@ -3757,7 +3746,7 @@ function createShadowModelUsageRecorder(input: {
       if (input.debit) await input.debit(recordInput)
       return
     }
-    recordShadowUsage(recordInput)
+    recordUsage(recordInput)
   }
 }
 

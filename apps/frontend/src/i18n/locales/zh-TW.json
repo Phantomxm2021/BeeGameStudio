@@ -81,8 +81,6 @@
         "consumed": "已用",
         "loadingCreditDetails": "正在載入記錄...",
         "viewCreditDetails": "查看 Credit 明細",
-        "ledgerCount": "{{count}} 筆",
-        "noLedgerRecords": "暫無記錄",
         "closeCreditDetails": "關閉 Credit 明細",
         "deleteAccount": "註銷帳戶",
         "deleteConfirm": "註銷帳戶會刪除你的 BeeGame 登入帳號和雲端資料。此操作無法復原，是否繼續？",

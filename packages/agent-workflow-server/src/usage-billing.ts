@@ -2,17 +2,17 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-export const SHADOW_PRICING_VERSION = 'weighted-v1'
-export const SHADOW_CREDIT_SCALE = 1_000_000
+export const USAGE_PRICING_VERSION = 'weighted-v1'
+export const USAGE_CREDIT_SCALE = 1_000_000
 
-export const DEFAULT_SHADOW_TOKEN_WEIGHTS = {
+export const DEFAULT_USAGE_TOKEN_WEIGHTS = {
   input: 1,
   cacheRead: 0.25,
   cacheCreation: 1.25,
   output: 5,
 } as const
 
-export type ShadowUsage = {
+export type Usage = {
   prompt_tokens: number
   completion_tokens: number
   cache_read_tokens: number
@@ -20,9 +20,9 @@ export type ShadowUsage = {
   total_tokens: number
 }
 
-export type ShadowUsageDelta = ShadowUsage
+export type UsageDelta = Usage
 
-export type ShadowUsageEvent = {
+export type UsageEvent = {
   id: string
   idempotencyKey: string
   userId: string
@@ -31,43 +31,43 @@ export type ShadowUsageEvent = {
   projectId?: string
   pricingVersion: string
   usageSource: 'runtime_snapshot' | 'model_runtime_host'
-  usage: ShadowUsage
-  delta: ShadowUsageDelta
+  usage: Usage
+  delta: UsageDelta
   weightedTokens: number
   weightedTokensDelta: number
-  shadowCreditsMicro: number
+  creditsMicro: number
   createdAt: string
   metadata: Record<string, unknown>
 }
 
-export type ShadowUsageLedger = {
+export type UsageLedger = {
   version: 1
-  events: ShadowUsageEvent[]
+  events: UsageEvent[]
 }
 
-export type RecordShadowUsageInput = {
+export type RecordUsageInput = {
   dataDir: string
   userId: string
   sessionId: string
   turnId?: string
   projectId?: string
-  usage: ShadowUsage
+  usage: Usage
   idempotencyKey: string
   metadata?: Record<string, unknown>
   pricingVersion?: string
-  usageSource?: ShadowUsageEvent['usageSource']
+  usageSource?: UsageEvent['usageSource']
   now?: Date
 }
 
-export type RecordShadowUsageResult = {
-  event: ShadowUsageEvent
+export type RecordUsageResult = {
+  event: UsageEvent
   duplicate: boolean
-  cumulativeUsage: ShadowUsage
+  cumulativeUsage: Usage
   cumulativeWeightedTokens: number
-  shadowCreditsMicro: number
+  creditsMicro: number
 }
 
-export type ShadowUsageSummary = {
+export type UsageSummary = {
   eventsCount: number
   promptTokens: number
   completionTokens: number
@@ -75,37 +75,37 @@ export type ShadowUsageSummary = {
   cacheCreationTokens: number
   totalTokens: number
   weightedTokens: number
-  shadowCreditsMicro: number
+  creditsMicro: number
 }
 
-const SHADOW_STORE_FILE = 'usage-billing-shadow.json'
+const USAGE_STORE_FILE = 'usage-billing-events.json'
 
-export function calculateShadowWeightedTokens(usage: ShadowUsage): number {
+export function calculateWeightedTokens(usage: Usage): number {
   const hundredths =
     normalizeNonNegative(usage.prompt_tokens) *
-      toHundredths(DEFAULT_SHADOW_TOKEN_WEIGHTS.input) +
+      toHundredths(DEFAULT_USAGE_TOKEN_WEIGHTS.input) +
     normalizeNonNegative(usage.cache_read_tokens) *
-      toHundredths(DEFAULT_SHADOW_TOKEN_WEIGHTS.cacheRead) +
+      toHundredths(DEFAULT_USAGE_TOKEN_WEIGHTS.cacheRead) +
     normalizeNonNegative(usage.cache_creation_tokens) *
-      toHundredths(DEFAULT_SHADOW_TOKEN_WEIGHTS.cacheCreation) +
+      toHundredths(DEFAULT_USAGE_TOKEN_WEIGHTS.cacheCreation) +
     normalizeNonNegative(usage.completion_tokens) *
-      toHundredths(DEFAULT_SHADOW_TOKEN_WEIGHTS.output)
+      toHundredths(DEFAULT_USAGE_TOKEN_WEIGHTS.output)
   return Math.ceil(hundredths / 100)
 }
 
-export function calculateShadowCreditsMicro(weightedTokens: number): number {
+export function calculateCreditsMicro(weightedTokens: number): number {
   return Math.max(
     0,
     Math.round(
-      (normalizeNonNegative(weightedTokens) * SHADOW_CREDIT_SCALE) / 10_000,
+      (normalizeNonNegative(weightedTokens) * USAGE_CREDIT_SCALE) / 10_000,
     ),
   )
 }
 
-export function subtractShadowUsage(
-  current: ShadowUsage,
-  previous: ShadowUsage,
-): ShadowUsageDelta {
+export function subtractUsage(
+  current: Usage,
+  previous: Usage,
+): UsageDelta {
   return {
     prompt_tokens: Math.max(
       0,
@@ -135,10 +135,10 @@ export function subtractShadowUsage(
   }
 }
 
-export function addShadowUsage(
-  left: ShadowUsage,
-  right: ShadowUsage,
-): ShadowUsage {
+export function addUsage(
+  left: Usage,
+  right: Usage,
+): Usage {
   return {
     prompt_tokens:
       normalizeNonNegative(left.prompt_tokens) +
@@ -158,13 +158,13 @@ export function addShadowUsage(
   }
 }
 
-export function recordShadowUsage(
-  input: RecordShadowUsageInput,
-): RecordShadowUsageResult {
+export function recordUsage(
+  input: RecordUsageInput,
+): RecordUsageResult {
   const idempotencyKey = input.idempotencyKey.trim()
   if (!idempotencyKey)
-    throw new Error('Shadow usage idempotency key is required')
-  const ledger = loadShadowUsageLedger(input.dataDir)
+    throw new Error('Usage idempotency key is required')
+  const ledger = loadUsageLedger(input.dataDir)
   const existing = ledger.events.find(
     event =>
       event.userId === input.userId && event.idempotencyKey === idempotencyKey,
@@ -183,7 +183,7 @@ export function recordShadowUsage(
         input.userId,
         input.sessionId,
       ),
-      shadowCreditsMicro: sumShadowCredits(
+      creditsMicro: sumCredits(
         ledger.events,
         input.userId,
         input.sessionId,
@@ -196,33 +196,33 @@ export function recordShadowUsage(
     input.userId,
     input.sessionId,
   )
-  const usage = normalizeShadowUsage(input.usage)
-  const reset = isShadowUsageReset(usage, previousUsage)
-  const delta = reset ? usage : subtractShadowUsage(usage, previousUsage)
-  const weightedTokens = calculateShadowWeightedTokens(usage)
-  const previousWeightedTokens = calculateShadowWeightedTokens(previousUsage)
+  const usage = normalizeUsage(input.usage)
+  const reset = isUsageReset(usage, previousUsage)
+  const delta = reset ? usage : subtractUsage(usage, previousUsage)
+  const weightedTokens = calculateWeightedTokens(usage)
+  const previousWeightedTokens = calculateWeightedTokens(previousUsage)
   const weightedTokensDelta = reset
     ? weightedTokens
     : Math.max(0, weightedTokens - previousWeightedTokens)
-  const event: ShadowUsageEvent = {
+  const event: UsageEvent = {
     id: randomUUID(),
     idempotencyKey,
     userId: input.userId,
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
     ...(input.projectId ? { projectId: input.projectId } : {}),
-    pricingVersion: input.pricingVersion ?? SHADOW_PRICING_VERSION,
+    pricingVersion: input.pricingVersion ?? USAGE_PRICING_VERSION,
     usageSource: input.usageSource ?? 'runtime_snapshot',
     usage,
     delta,
     weightedTokens,
     weightedTokensDelta,
-    shadowCreditsMicro: calculateShadowCreditsMicro(weightedTokensDelta),
+    creditsMicro: calculateCreditsMicro(weightedTokensDelta),
     createdAt: (input.now ?? new Date()).toISOString(),
     metadata: input.metadata ?? {},
   }
   ledger.events.push(event)
-  saveShadowUsageLedger(input.dataDir, ledger)
+  saveUsageLedger(input.dataDir, ledger)
   return {
     event,
     duplicate: false,
@@ -236,7 +236,7 @@ export function recordShadowUsage(
       input.userId,
       input.sessionId,
     ),
-    shadowCreditsMicro: sumShadowCredits(
+    creditsMicro: sumCredits(
       ledger.events,
       input.userId,
       input.sessionId,
@@ -244,11 +244,11 @@ export function recordShadowUsage(
   }
 }
 
-export function listShadowUsageEvents(
+export function listUsageEvents(
   dataDir: string,
   filters: { userId?: string; sessionId?: string; projectId?: string } = {},
-): ShadowUsageEvent[] {
-  return loadShadowUsageLedger(dataDir).events.filter(
+): UsageEvent[] {
+  return loadUsageLedger(dataDir).events.filter(
     event =>
       (!filters.userId || event.userId === filters.userId) &&
       (!filters.sessionId || event.sessionId === filters.sessionId) &&
@@ -256,12 +256,12 @@ export function listShadowUsageEvents(
   )
 }
 
-export function summarizeShadowUsage(
-  events: ShadowUsageEvent[],
-): ShadowUsageSummary {
+export function summarizeUsage(
+  events: UsageEvent[],
+): UsageSummary {
   const usage = events.reduce(
-    (total, event) => addShadowUsage(total, event.delta),
-    emptyShadowUsage(),
+    (total, event) => addUsage(total, event.delta),
+    emptyUsage(),
   )
   return {
     eventsCount: events.length,
@@ -274,14 +274,14 @@ export function summarizeShadowUsage(
       (total, event) => total + event.weightedTokensDelta,
       0,
     ),
-    shadowCreditsMicro: events.reduce(
-      (total, event) => total + event.shadowCreditsMicro,
+    creditsMicro: events.reduce(
+      (total, event) => total + event.creditsMicro,
       0,
     ),
   }
 }
 
-function emptyShadowUsage(): ShadowUsage {
+function emptyUsage(): Usage {
   return {
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -291,7 +291,7 @@ function emptyShadowUsage(): ShadowUsage {
   }
 }
 
-function normalizeShadowUsage(usage: ShadowUsage): ShadowUsage {
+function normalizeUsage(usage: Usage): Usage {
   return {
     prompt_tokens: normalizeNonNegative(usage.prompt_tokens),
     completion_tokens: normalizeNonNegative(usage.completion_tokens),
@@ -301,9 +301,9 @@ function normalizeShadowUsage(usage: ShadowUsage): ShadowUsage {
   }
 }
 
-function isShadowUsageReset(
-  current: ShadowUsage,
-  previous: ShadowUsage,
+function isUsageReset(
+  current: Usage,
+  previous: Usage,
 ): boolean {
   return (
     current.prompt_tokens < previous.prompt_tokens ||
@@ -315,33 +315,33 @@ function isShadowUsageReset(
 }
 
 function latestUsageForSession(
-  events: ShadowUsageEvent[],
+  events: UsageEvent[],
   userId: string,
   sessionId: string,
-): ShadowUsage {
+): Usage {
   const sessionEvents = events.filter(
     event => event.userId === userId && event.sessionId === sessionId,
   )
   return sessionEvents.length
     ? sessionEvents[sessionEvents.length - 1].usage
-    : emptyShadowUsage()
+    : emptyUsage()
 }
 
 function cumulativeUsageForSession(
-  events: ShadowUsageEvent[],
+  events: UsageEvent[],
   userId: string,
   sessionId: string,
-): ShadowUsage {
+): Usage {
   return events
     .filter(event => event.userId === userId && event.sessionId === sessionId)
     .reduce(
-      (total, event) => addShadowUsage(total, event.delta),
-      emptyShadowUsage(),
+      (total, event) => addUsage(total, event.delta),
+      emptyUsage(),
     )
 }
 
 function cumulativeWeightedTokensForSession(
-  events: ShadowUsageEvent[],
+  events: UsageEvent[],
   userId: string,
   sessionId: string,
 ): number {
@@ -350,14 +350,14 @@ function cumulativeWeightedTokensForSession(
     .reduce((total, event) => total + event.weightedTokensDelta, 0)
 }
 
-function sumShadowCredits(
-  events: ShadowUsageEvent[],
+function sumCredits(
+  events: UsageEvent[],
   userId: string,
   sessionId: string,
 ): number {
   return events
     .filter(event => event.userId === userId && event.sessionId === sessionId)
-    .reduce((total, event) => total + event.shadowCreditsMicro, 0)
+    .reduce((total, event) => total + event.creditsMicro, 0)
 }
 
 function normalizeNonNegative(value: unknown): number {
@@ -369,20 +369,20 @@ function toHundredths(value: number): number {
   return Math.round(value * 100)
 }
 
-function getShadowStorePath(dataDir: string): string {
-  return join(dataDir, SHADOW_STORE_FILE)
+function getUsageStorePath(dataDir: string): string {
+  return join(dataDir, USAGE_STORE_FILE)
 }
 
-function loadShadowUsageLedger(dataDir: string): ShadowUsageLedger {
-  const path = getShadowStorePath(dataDir)
+function loadUsageLedger(dataDir: string): UsageLedger {
+  const path = getUsageStorePath(dataDir)
   try {
     const parsed = JSON.parse(
       readFileSync(path, 'utf8'),
-    ) as Partial<ShadowUsageLedger>
+    ) as Partial<UsageLedger>
     return {
       version: 1,
       events: Array.isArray(parsed.events)
-        ? parsed.events.filter(isShadowUsageEvent)
+        ? parsed.events.filter(isUsageEvent)
         : [],
     }
   } catch {
@@ -390,20 +390,20 @@ function loadShadowUsageLedger(dataDir: string): ShadowUsageLedger {
   }
 }
 
-function saveShadowUsageLedger(
+function saveUsageLedger(
   dataDir: string,
-  ledger: ShadowUsageLedger,
+  ledger: UsageLedger,
 ): void {
-  mkdirSync(dirname(getShadowStorePath(dataDir)), { recursive: true })
-  const path = getShadowStorePath(dataDir)
+  mkdirSync(dirname(getUsageStorePath(dataDir)), { recursive: true })
+  const path = getUsageStorePath(dataDir)
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   writeFileSync(temporaryPath, JSON.stringify(ledger, null, 2))
   renameSync(temporaryPath, path)
 }
 
-function isShadowUsageEvent(value: unknown): value is ShadowUsageEvent {
+function isUsageEvent(value: unknown): value is UsageEvent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const event = value as Partial<ShadowUsageEvent>
+  const event = value as Partial<UsageEvent>
   return (
     typeof event.id === 'string' &&
     typeof event.idempotencyKey === 'string' &&
@@ -411,7 +411,7 @@ function isShadowUsageEvent(value: unknown): value is ShadowUsageEvent {
     typeof event.sessionId === 'string' &&
     typeof event.pricingVersion === 'string' &&
     typeof event.weightedTokensDelta === 'number' &&
-    typeof event.shadowCreditsMicro === 'number' &&
+    typeof event.creditsMicro === 'number' &&
     typeof event.usage === 'object' &&
     typeof event.delta === 'object'
   )

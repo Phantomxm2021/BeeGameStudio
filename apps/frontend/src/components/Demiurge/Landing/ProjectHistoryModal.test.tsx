@@ -48,10 +48,7 @@ describe('ProjectHistoryModal permissions', () => {
     getCreditSummary.mockReset();
     getCreditSummary.mockResolvedValue({
       entriesCount: 3,
-      reservedCredits: 20,
-      settledCredits: 7,
-      refundedCredits: 8,
-      outstandingReservedCredits: 5,
+      consumedCredits: 7,
       weightedTokens: 70_000,
     });
   });
@@ -120,7 +117,7 @@ describe('ProjectHistoryModal permissions', () => {
     });
   });
 
-  it('shows realtime settled credits for each project without a reservation balance', async () => {
+  it('shows realtime consumed credits for each project', async () => {
     render(
       <ProjectHistoryModal
         isOpen
@@ -130,11 +127,10 @@ describe('ProjectHistoryModal permissions', () => {
       />,
     );
 
-    const settledCredits = await screen.findByText('7 credits');
-    const creditRow = settledCredits.closest('.type-caption-1');
-    expect(settledCredits).toBeInTheDocument();
-    expect(settledCredits).toHaveClass('text-zinc-300');
-    expect(screen.queryByText(/reserved/)).not.toBeInTheDocument();
+    const consumedCredits = await screen.findByText('7 credits');
+    const creditRow = consumedCredits.closest('.type-caption-1');
+    expect(consumedCredits).toBeInTheDocument();
+    expect(consumedCredits).toHaveClass('text-zinc-300');
     expect(creditRow).toHaveClass('text-zinc-500');
     expect(creditRow).not.toHaveClass('text-amber-200');
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');
@@ -206,10 +202,7 @@ describe('ProjectHistoryModal permissions', () => {
 
     resolveSummary?.({
       entriesCount: 3,
-      reservedCredits: 20,
-      settledCredits: 7,
-      refundedCredits: 8,
-      outstandingReservedCredits: 5,
+      consumedCredits: 7,
       weightedTokens: 70_000,
     });
 

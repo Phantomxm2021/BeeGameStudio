@@ -8,11 +8,7 @@ import {
   uploadSupabaseAvatarImage,
 } from '../../../services/supabaseAuthApi';
 import { deleteCurrentUser } from '../../../services/currentUserApi';
-import {
-  getCreditLedger,
-  type BeeGameCreditBalance,
-  type BeeGameCreditLedgerEntry,
-} from '../../../services/creditsApi';
+import type { BeeGameCreditBalance } from '../../../services/creditsApi';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -49,9 +45,6 @@ export function ProfileModal({
   const [profileError, setProfileError] = useState('');
   const [profileNotice, setProfileNotice] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [creditLedger, setCreditLedger] = useState<BeeGameCreditLedgerEntry[]>([]);
-  const [isCreditLedgerLoading, setIsCreditLedgerLoading] = useState(false);
-  const [isCreditLedgerExpanded, setIsCreditLedgerExpanded] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !currentUser) return;
@@ -59,12 +52,6 @@ export function ProfileModal({
     setProfileNotice('');
     setAvatarDraft(currentUser.avatarUrl || '');
     setAvatarDraftFailed(false);
-    setIsCreditLedgerExpanded(false);
-    setIsCreditLedgerLoading(true);
-    void getCreditLedger()
-      .then(entries => setCreditLedger(entries))
-      .catch(() => setCreditLedger([]))
-      .finally(() => setIsCreditLedgerLoading(false));
   }, [currentUser?.id, currentUser?.avatarUrl, isOpen]);
 
   if (!isOpen || !currentUser) return null;
@@ -215,17 +202,6 @@ export function ProfileModal({
                 <CreditMetric label={profileText.consumed} value={creditBalance.consumedCredits} />
               </div>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setIsCreditLedgerExpanded(true)}
-              disabled={isCreditLedgerLoading}
-              className="type-button mt-4 flex h-12 w-full items-center justify-between rounded-2xl border border-white/15 bg-black/15 px-4 text-left text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span>{isCreditLedgerLoading ? profileText.loadingCreditDetails : profileText.viewCreditDetails}</span>
-              <span className="type-footnote text-zinc-500">
-                {creditLedger.length > 0 ? profileText.ledgerCount(creditLedger.length) : profileText.noLedgerRecords}
-              </span>
-            </button>
           </div>
 
           <div className="mt-6 flex justify-between gap-3">
@@ -248,41 +224,6 @@ export function ProfileModal({
         </div>
       </div>
 
-      {isCreditLedgerExpanded ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={translate('intake.profile.creditDetailsTitle')}
-          data-surface="frosted-glass"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
-        >
-          <div className="input-surface glass-panel flex max-h-[78vh] w-full max-w-lg flex-col rounded-[28px] p-5 text-zinc-100">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="type-title-3 text-white">{translate('intake.profile.creditDetailsTitle')}</h2>
-                <p className="type-footnote mt-2 text-zinc-400">
-                  {translate('intake.profile.creditDetailsDescription')}
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label={profileText.closeCreditDetails}
-                onClick={() => setIsCreditLedgerExpanded(false)}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="mt-5 max-h-[52vh] space-y-2 overflow-y-auto pr-1" data-credit-ledger-scroll="true">
-              {creditLedger.length > 0 ? (
-                creditLedger.map(entry => <CreditLedgerRow key={entry.id} entry={entry} translate={translate} />)
-              ) : (
-                <div className="type-footnote text-zinc-500">{profileText.noLedgerRecords}</div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }
@@ -293,11 +234,6 @@ function getProfileText(translate: Translate) {
     emailFallback: translate('intake.profile.emailFallback'),
     balance: translate('intake.profile.balance'),
     consumed: translate('intake.profile.consumed'),
-    loadingCreditDetails: translate('intake.profile.loadingCreditDetails'),
-    viewCreditDetails: translate('intake.profile.viewCreditDetails'),
-    ledgerCount: (count: number) => translate('intake.profile.ledgerCount', { count }),
-    noLedgerRecords: translate('intake.profile.noLedgerRecords'),
-    closeCreditDetails: translate('intake.profile.closeCreditDetails'),
     deleteAccount: translate('intake.profile.deleteAccount'),
     deleteConfirm: translate('intake.profile.deleteConfirm'),
     deleteFailed: translate('intake.profile.deleteFailed'),
@@ -323,83 +259,6 @@ function CreditMetric({
       </div>
     </div>
   );
-}
-
-function CreditLedgerRow({
-  entry,
-  translate,
-  compact = false,
-}: {
-  entry: BeeGameCreditLedgerEntry;
-  translate: Translate;
-  compact?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-2xl bg-black/20 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}
-    >
-      <div className="min-w-0">
-        <div className="type-callout truncate text-zinc-200">{formatCreditLedgerTitle(entry, translate)}</div>
-        <div className="type-footnote mt-0.5 truncate text-zinc-500">{formatCreditLedgerMeta(entry)}</div>
-      </div>
-      <div className={`type-headline shrink-0 ${getCreditLedgerAmountClass(entry.kind)}`}>
-        {formatCreditLedgerAmount(entry)}
-      </div>
-    </div>
-  );
-}
-
-function formatCreditLedgerKind(kind: BeeGameCreditLedgerEntry['kind'], translate: Translate): string {
-  return translate(`intake.credits.kind.${kind}`, { defaultValue: kind });
-}
-
-function formatCreditLedgerTitle(entry: BeeGameCreditLedgerEntry, translate: Translate): string {
-  return `${formatCreditLedgerStage(entry, translate)} · ${formatCreditLedgerKind(entry.kind, translate)}`;
-}
-
-function formatCreditLedgerStage(entry: BeeGameCreditLedgerEntry, translate: Translate): string {
-  const taskType = typeof entry.metadata?.taskType === 'string' ? entry.metadata.taskType : undefined;
-  if (taskType) return formatCreditTaskType(taskType, translate);
-  const displayName = typeof entry.metadata?.displayName === 'string' ? entry.metadata.displayName.trim() : '';
-  if (displayName) return displayName;
-  return 'Credit';
-}
-
-function formatCreditTaskType(taskType: string, translate: Translate): string {
-  return translate(`intake.credits.task.${taskType}`, {
-    defaultValue: taskType.replaceAll('_', ' '),
-  });
-}
-
-function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
-  const parts = [new Date(entry.createdAt).toLocaleString()];
-  if (typeof entry.weightedTokens === 'number' && entry.weightedTokens > 0) {
-    parts.push(`${entry.weightedTokens.toLocaleString()} weighted tokens`);
-  }
-  return parts.join(' · ');
-}
-
-function formatCreditLedgerAmount(entry: BeeGameCreditLedgerEntry): string {
-  const amount = formatCreditAmount(Math.abs(entry.credits));
-  if (entry.kind === 'grant') {
-    return `+${amount}`;
-  }
-  if (entry.kind === 'settle') {
-    return `-${amount}`;
-  }
-  return formatCreditAmount(entry.credits);
-}
-
-function formatCreditAmount(value: number): string {
-  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 1,
-  });
-}
-
-function getCreditLedgerAmountClass(kind: BeeGameCreditLedgerEntry['kind']): string {
-  if (kind === 'grant') return 'text-emerald-200';
-  if (kind === 'settle') return 'text-amber-200';
-  return 'text-zinc-300';
 }
 
 const getDisplayInitial = (value: string): string => {

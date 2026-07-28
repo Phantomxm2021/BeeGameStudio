@@ -458,8 +458,6 @@
         "consumed": "Used",
         "loadingCreditDetails": "Loading records...",
         "viewCreditDetails": "View credit details",
-        "ledgerCount": "{{count}} entries",
-        "noLedgerRecords": "No records",
         "closeCreditDetails": "Close credit details",
         "deleteAccount": "Delete account",
         "deleteConfirm": "Deleting your account removes your BeeGame login account and cloud data. This cannot be undone. Continue?",

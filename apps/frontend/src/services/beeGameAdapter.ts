@@ -939,24 +939,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         { type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage,
       ];
     case 'system.status':
-      if (
-        event.payload?.type === 'credit.settled' ||
-        event.payload?.type === 'credit.refunded'
-      ) {
-        return [{
-          type: 'credit_update',
-          task_id: taskId,
-          project_id: projectId,
-          credit_event: event.payload.type,
-          balance_credits: typeof event.payload.balanceCredits === 'number'
-            ? event.payload.balanceCredits
-            : undefined,
-          credits: typeof event.payload.credits === 'number'
-            ? event.payload.credits
-            : undefined,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as WebSocketMessage];
-      }
       return [];
     case 'assistant.partial':
       return [];

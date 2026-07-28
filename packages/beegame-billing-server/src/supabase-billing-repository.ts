@@ -21,18 +21,11 @@ type SupabaseBillingConfig = {
   fetchImpl?: typeof fetch
 }
 
-type SupabaseCreditAccountRow = {
+type SupabaseUsageWalletRow = {
   user_id: string
-  plan: 'free'
-  included_credits: number
-  consumed_credits: number
-  reserved_credits: number
+  included_credits_micro: number
+  consumed_credits_micro: number
   updated_at: string
-}
-
-type SupabaseCreditGrantRow = {
-  granted_credits?: number
-  account: SupabaseCreditAccountRow
 }
 
 type SupabaseBillingCreditPackRow = {
@@ -81,7 +74,7 @@ type SupabaseUsageBillingResult = {
     total_tokens_delta: number
     weighted_tokens: number
     weighted_tokens_delta: number
-    shadow_credits_micro: number
+    credits_micro: number
     created_at: string
     metadata: JsonObject
   }
@@ -93,7 +86,7 @@ type SupabaseUsageBillingResult = {
     total_tokens: number
   }
   cumulative_weighted_tokens: number
-  shadow_credits_micro: number
+  credits_micro: number
 }
 
 export function createBeeGameSupabaseBillingRepositoryFromEnv(
@@ -120,12 +113,12 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
     this.fetchImpl = config.fetchImpl ?? fetch
   }
 
-  async recordShadowUsageForUser(
+  async recordUsageForUser(
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
     const result = await this.rpc<SupabaseUsageBillingResult>(
-      'beegame_record_shadow_usage',
+      'beegame_record_usage',
       {
         p_user_id: userId,
         p_session_id: input.sessionId,
@@ -168,7 +161,6 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
     return this.grantCreditsWithRpc(
-      'beegame_payment_provider_grant_credits',
       targetUserId,
       input,
       { source: 'payment_provider' },
@@ -181,7 +173,6 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
     return this.grantCreditsWithRpc(
-      'beegame_admin_grant_credits',
       targetUserId,
       input,
       { source: 'manual' },
@@ -252,19 +243,33 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
   }
 
   private async grantCreditsWithRpc(
-    rpcName: string,
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
-    fallbackMetadata: JsonObject,
+    _fallbackMetadata: JsonObject,
   ): Promise<BeeGameCreditGrant> {
-    const result = await this.rpc<SupabaseCreditGrantRow>(rpcName, {
-      p_target_user_id: targetUserId,
-      p_credits: normalizePositiveInteger(input.credits),
-      p_metadata: input.metadata ?? fallbackMetadata,
-    })
+    const rows = await this.rest<SupabaseUsageWalletRow[]>(
+      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(targetUserId)}&select=*&limit=1`,
+    )
+    const current = rows[0] ?? {
+      user_id: targetUserId,
+      included_credits_micro: 300_000_000,
+      consumed_credits_micro: 0,
+      updated_at: new Date().toISOString(),
+    }
+    const grantedCredits = normalizePositiveInteger(input.credits)
+    const updated = await this.upsert<SupabaseUsageWalletRow>(
+      'beegame_usage_wallets',
+      {
+        user_id: targetUserId,
+        included_credits_micro: current.included_credits_micro + grantedCredits * 1_000_000,
+        consumed_credits_micro: current.consumed_credits_micro,
+        updated_at: new Date().toISOString(),
+      },
+      'user_id',
+    )
     return {
-      grantedCredits: normalizeNonNegativeInteger(result.granted_credits),
-      balance: toCreditBalance(targetUserId, result.account),
+      grantedCredits,
+      balance: toCreditBalance(updated),
     }
   }
 
@@ -338,7 +343,7 @@ class MissingSupabaseBillingRepository
     return Promise.reject(missingSupabaseError())
   }
 
-  recordShadowUsageForUser(): Promise<BeeGameUsageBillingRecordResult> {
+  recordUsageForUser(): Promise<BeeGameUsageBillingRecordResult> {
     return Promise.reject(missingSupabaseError())
   }
 
@@ -370,26 +375,18 @@ class MissingSupabaseBillingRepository
 const DEFAULT_FREE_CREDITS = 300
 const CREDIT_UNIT_WEIGHTED_TOKENS = 10_000
 
-function toCreditBalance(
-  userId: string,
-  row: SupabaseCreditAccountRow,
-): BeeGameCreditBalance {
-  const includedCredits = normalizeNonNegativeInteger(
-    row.included_credits,
-    DEFAULT_FREE_CREDITS,
-  )
-  const consumedCredits = normalizeNonNegativeInteger(row.consumed_credits)
-  const reservedCredits = normalizeNonNegativeInteger(row.reserved_credits)
+function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
+  const includedCredits = normalizeNonNegativeInteger(row.included_credits_micro) / 1_000_000
+  const consumedCredits = normalizeNonNegativeInteger(row.consumed_credits_micro) / 1_000_000
   return {
-    userId,
+    userId: row.user_id,
     plan: 'free',
     balanceCredits: Math.max(
       0,
-      includedCredits - consumedCredits - reservedCredits,
+      includedCredits - consumedCredits,
     ),
     includedCredits,
     consumedCredits,
-    reservedCredits,
     creditUnitWeightedTokens: CREDIT_UNIT_WEIGHTED_TOKENS,
     estimates: {
       ideaIntake: { minCredits: 3, maxCredits: 3 },
@@ -482,8 +479,8 @@ function toUsageBillingRecordResult(
       weightedTokensDelta: normalizeNonNegativeInteger(
         event.weighted_tokens_delta,
       ),
-      shadowCreditsMicro: normalizeNonNegativeInteger(
-        event.shadow_credits_micro,
+      creditsMicro: normalizeNonNegativeInteger(
+        event.credits_micro,
       ),
       createdAt: event.created_at,
       metadata: isObject(event.metadata) ? event.metadata : {},
@@ -508,8 +505,8 @@ function toUsageBillingRecordResult(
     cumulativeWeightedTokens: normalizeNonNegativeInteger(
       result.cumulative_weighted_tokens,
     ),
-    shadowCreditsMicro: normalizeNonNegativeInteger(
-      result.shadow_credits_micro,
+    creditsMicro: normalizeNonNegativeInteger(
+      result.credits_micro,
     ),
   }
 }

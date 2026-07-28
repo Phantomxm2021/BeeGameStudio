@@ -20,18 +20,16 @@ const {
   createStripeCheckoutSession,
   getBillingCreditPacks,
   getBillingEvents,
-  getCreditAuditLedger,
+  getCreditSummary,
   getCreditBalance,
-  getCreditLedger,
   getStripeCreditPacks,
   upsertBillingCreditPack,
 } = vi.hoisted(() => ({
   createStripeCheckoutSession: vi.fn(),
   getBillingCreditPacks: vi.fn(),
   getBillingEvents: vi.fn(),
-  getCreditAuditLedger: vi.fn(),
+  getCreditSummary: vi.fn(),
   getCreditBalance: vi.fn(),
-  getCreditLedger: vi.fn(),
   getStripeCreditPacks: vi.fn(),
   upsertBillingCreditPack: vi.fn(),
 }));
@@ -190,9 +188,8 @@ vi.mock('../../services/creditsApi', () => ({
   createStripeCheckoutSession,
   getBillingCreditPacks,
   getBillingEvents,
-  getCreditAuditLedger,
+  getCreditSummary,
   getCreditBalance,
-  getCreditLedger,
   getStripeCreditPacks,
   upsertBillingCreditPack,
 }));
@@ -424,8 +421,6 @@ beforeEach(() => {
       complexGame: { minCredits: 600, maxCredits: 1500 },
     },
   });
-  getCreditLedger.mockReset();
-  getCreditLedger.mockResolvedValue([]);
   getStripeCreditPacks.mockReset();
   getStripeCreditPacks.mockResolvedValue({
     packs: [
@@ -440,14 +435,11 @@ beforeEach(() => {
     priceId: 'price_beegame_500',
     credits: 500,
   });
-  getCreditAuditLedger.mockReset();
-  getCreditAuditLedger.mockResolvedValue({
-    entries: [],
-    summary: {
-      entriesCount: 0,
-      settledCredits: 0,
-      weightedTokens: 0,
-    },
+  getCreditSummary.mockReset();
+  getCreditSummary.mockResolvedValue({
+    entriesCount: 0,
+    consumedCredits: 0,
+    weightedTokens: 0,
   });
   getBillingCreditPacks.mockReset();
   getBillingCreditPacks.mockResolvedValue({
@@ -889,7 +881,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '平台' }));
     fireEvent.click(screen.getByRole('tab', { name: '信用' }));
 
-    await waitFor(() => expect(getCreditAuditLedger).toHaveBeenCalledWith());
+    await waitFor(() => expect(getCreditSummary).toHaveBeenCalledWith());
     expect(screen.getAllByText('Credit 审计').length).toBeGreaterThan(0);
   });
 
@@ -1056,7 +1048,7 @@ describe('LandingView bootstrap submission', () => {
     expect(mockLoadCurrentUser).toHaveBeenCalled();
   });
 
-  it('shows only a compact credit summary and opens full ledger history in a detail dialog', async () => {
+  it('shows only the compact realtime credit summary', async () => {
     mockCurrentUser = {
       id: 'alice',
       email: 'alice@example.com',
@@ -1064,20 +1056,6 @@ describe('LandingView bootstrap submission', () => {
       role: 'owner',
       permissions: ['project.create', 'project.delete'],
     };
-    getCreditLedger.mockResolvedValue(
-      Array.from({ length: 6 }, (_, index) => ({
-        id: `ledger-${index}`,
-        userId: 'alice',
-        kind: 'settle',
-        credits: index + 1,
-        metadata: {
-          taskType: index === 0 ? 'idea_intake' : index === 1 ? 'full_build' : 'edit_turn',
-          displayName: `Task ${index + 1}`,
-        },
-        createdAt: new Date(1710000000000 + index).toISOString(),
-      })),
-    );
-
     await renderLanding();
 
     fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
@@ -1087,18 +1065,8 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByText('已用')).toBeInTheDocument();
     expect(screen.getByText('300')).toBeInTheDocument();
     expect(screen.getByText('0')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /查看 Credit 明细/ })).toBeInTheDocument();
-    expect(screen.getByText('6 条')).toBeInTheDocument();
-    expect(screen.queryByText('方案生成 · 退回')).not.toBeInTheDocument();
-    expect(screen.queryByText('+1')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /查看 Credit 明细/ }));
-
-    const details = await screen.findByRole('dialog', { name: 'Credit 明细' });
-    expect(within(details).getByText('-6')).toBeInTheDocument();
-    expect(within(details).getAllByText(/修改任务 · 结算/)).toHaveLength(4);
-    expect(within(details).getByText('Realtime token usage records.')).toBeInTheDocument();
-    expect(details.querySelector('[data-credit-ledger-scroll="true"]')).toHaveClass('max-h-[52vh]', 'overflow-y-auto');
+    expect(screen.queryByRole('button', { name: /查看 Credit 明细/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/账本|ledger|明细/i)).not.toBeInTheDocument();
   });
 
   it('confirms account deletion before clearing the signed-in session', async () => {

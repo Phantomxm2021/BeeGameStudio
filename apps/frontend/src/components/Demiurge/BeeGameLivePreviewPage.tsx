@@ -53,7 +53,7 @@ interface BeeGameLivePreviewPageProps {
   status: DashboardStatus;
   phaseLabel: string;
   credits?: {
-    settledCredits: number;
+    consumedCredits: number;
   } | null;
   accountCreditBalance?: {
     balanceCredits: number;
@@ -366,7 +366,7 @@ export function BeeGameLivePreviewPage({
                 />
                 {projectTarget ? <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} /> : null}
                 {credits ? (
-                  <ProjectHintRow label={labels.credits} value={formatCreditAmount(credits.settledCredits)} />
+                  <ProjectHintRow label={labels.credits} value={formatCreditAmount(credits.consumedCredits)} />
                 ) : null}
                 <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                 <ProjectHintRow

@@ -21,10 +21,9 @@ export type BeeGameCreditBalance = {
   }
 }
 
-export type BeeGameCreditLedgerEntry = {
+export type BeeGameUsageEvent = {
   id: string
   userId: string
-  kind: 'settle' | 'grant'
   credits: number
   projectId?: string
   weightedTokens?: number
@@ -32,21 +31,10 @@ export type BeeGameCreditLedgerEntry = {
   createdAt: string
 }
 
-export type BeeGameCreditSummary = {
+export type BeeGameUsageSummary = {
   entriesCount: number
-  settledCredits: number
+  consumedCredits: number
   weightedTokens: number
-}
-
-export type BeeGameCreditAuditLedger = {
-  entries: BeeGameCreditLedgerEntry[]
-  summary: BeeGameCreditSummary
-}
-
-export type BeeGameCreditAuditLedgerFilters = {
-  userId?: string
-  projectId?: string
-  kind?: BeeGameCreditLedgerEntry['kind']
 }
 
 export type BeeGameCreditGrant = {
@@ -119,20 +107,20 @@ export type BeeGameBillingEvents = {
   events: BeeGameBillingEvent[]
 }
 
-type BeeGameShadowUsageEvent = {
+type BeeGameUsageEventResponse = {
   id: string
   userId: string
   projectId?: string
   weightedTokensDelta: number
-  shadowCreditsMicro: number
+  creditsMicro: number
   metadata: Record<string, unknown>
   createdAt: string
 }
 
-type BeeGameShadowUsageSummary = {
+type BeeGameUsageSummaryResponse = {
   eventsCount: number
   weightedTokens: number
-  shadowCreditsMicro: number
+  creditsMicro: number
 }
 
 const getUsageWallet = async (): Promise<{
@@ -169,59 +157,41 @@ const toCreditBalance = (
 export const getCreditBalance = async (): Promise<BeeGameCreditBalance> =>
   toCreditBalance(await getUsageWallet())
 
-const toLedgerEntry = (
-  event: BeeGameShadowUsageEvent,
-): BeeGameCreditLedgerEntry => ({
+const toUsageEvent = (
+  event: BeeGameUsageEventResponse,
+): BeeGameUsageEvent => ({
   id: event.id,
   userId: event.userId,
-  kind: 'settle',
-  credits: event.shadowCreditsMicro / 1_000_000,
+  credits: event.creditsMicro / 1_000_000,
   ...(event.projectId ? { projectId: event.projectId } : {}),
   weightedTokens: event.weightedTokensDelta,
   metadata: event.metadata,
   createdAt: event.createdAt,
 })
 
-const getShadowUsageEvents = (
+const requestUsageEvents = (
   projectId?: string,
-): Promise<BeeGameShadowUsageEvent[]> =>
-  apiClient.get('/api/credits/shadow-ledger', {
+): Promise<BeeGameUsageEventResponse[]> =>
+  apiClient.get('/api/usage/events', {
     ...(projectId ? { params: { projectId } } : {}),
   })
 
-export const getCreditLedger = async (): Promise<BeeGameCreditLedgerEntry[]> =>
-  (await getShadowUsageEvents()).map(toLedgerEntry)
+export const getUsageEvents = async (): Promise<BeeGameUsageEvent[]> =>
+  (await requestUsageEvents()).map(toUsageEvent)
 
 export const getCreditSummary = (
   projectId?: string,
-): Promise<BeeGameCreditSummary> =>
+): Promise<BeeGameUsageSummary> =>
   apiClient
-    .get<BeeGameShadowUsageSummary>('/api/credits/shadow-summary', {
+    .get<BeeGameUsageSummaryResponse>('/api/usage/summary', {
       ...(projectId ? { params: { projectId } } : {}),
     })
     .then(response => ({
       entriesCount: response.data.eventsCount,
-      settledCredits: response.data.shadowCreditsMicro / 1_000_000,
+      consumedCredits: response.data.creditsMicro / 1_000_000,
       weightedTokens: response.data.weightedTokens,
     }))
 
-export const getCreditAuditLedger = (
-  filters?: BeeGameCreditAuditLedgerFilters,
-): Promise<BeeGameCreditAuditLedger> =>
-  getShadowUsageEvents(filters?.projectId).then(events => {
-    const entries = events.map(toLedgerEntry)
-    return {
-      entries,
-      summary: {
-        entriesCount: entries.length,
-        settledCredits: entries.reduce((sum, entry) => sum + entry.credits, 0),
-        weightedTokens: entries.reduce(
-          (sum, entry) => sum + (entry.weightedTokens ?? 0),
-          0,
-        ),
-      },
-    }
-  })
 
 export const grantCredits = (
   input: BeeGameCreditGrantInput,

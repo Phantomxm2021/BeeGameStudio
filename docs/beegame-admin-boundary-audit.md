@@ -30,7 +30,7 @@ permission where the product supports delegated administration.
 | Surface | UI capability | Server or data authority |
 | --- | --- | --- |
 | Audit events | `audit.read` | `GET /api/audit-events` requires `audit.read`. |
-| Credit ledger and credit packs | `credits.admin` | Credit ledger, credit packs, and manual grants require `credits.admin`; Supabase grants are additionally restricted by `beegame_admin_grant_credits()` using `beegame_is_platform_owner()`. |
+| Usage wallet and credit packs | `credits.admin` | Realtime wallet usage and credit pack administration require `credits.admin`. |
 | Project lifecycle and retention | `lifecycle.admin` | Lifecycle overview and retention operations require `lifecycle.admin`. |
 | Model configuration writes | `model_config.manage` | `POST/PATCH/DELETE /api/model-configs` require `model_config.manage`. |
 | Model configuration reads | platform owner UI | `GET /api/model-configs` is readable by authenticated runtime context so normal project flows can resolve active model settings. Mutations remain permission-gated. |

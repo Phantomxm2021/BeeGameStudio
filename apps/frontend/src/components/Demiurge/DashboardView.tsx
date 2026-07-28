@@ -23,7 +23,7 @@ import {
   getCreditBalance,
   getCreditSummary,
   type BeeGameCreditBalance,
-  type BeeGameCreditSummary,
+  type BeeGameUsageSummary,
 } from '../../services/creditsApi';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
@@ -77,7 +77,7 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack }: DashboardViewProps) {
   const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
-  const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
+  const [creditSummary, setCreditSummary] = useState<BeeGameUsageSummary | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
   const [isDeployingProject, setDeployingProject] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
@@ -143,10 +143,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     showToastSuccess: showSuccess,
     // Trigger data refreshes on significant task events
     onTaskEvent: type => {
-      if (type === 'credit_update') {
-        void refreshCredits();
-        return;
-      }
       if (type === 'usage') {
         void refreshCredits();
       }

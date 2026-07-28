@@ -6,16 +6,12 @@ Use this checklist before promoting a BeeGame deployment to production.
 
 - Apply the latest SQL migrations. Re-running the SQL must be idempotent and must not fail with `already exists` errors.
 - Confirm Row Level Security is enabled for BeeGame tables.
-- Confirm ordinary users can access only their own projects, sessions, assets, previews, model metadata, runtime settings, MCP metadata, credits, and ledger rows.
+- Confirm ordinary users can access only their own projects, sessions, assets, previews, model metadata, runtime settings, MCP metadata, usage events, usage summaries, and wallet data.
 - Confirm admin permissions come only from Supabase-controlled state:
   - `auth.users.raw_app_meta_data.beegame_role = "owner"`, or
   - a workspace membership row where the current user is `owner`.
-- Confirm credit RPCs are available:
-  - quote
-  - reserve
-  - settle
-  - refund
-  - ledger query
+- Confirm realtime usage event recording, usage summaries, wallet debit idempotency,
+  and billing audit routes are available.
 - Confirm no frontend or runtime-host environment contains a Supabase service-role key.
 
 ## Auth And OAuth
@@ -111,10 +107,8 @@ Rules:
 - Stripe webhook credit grants use the server-only Supabase service-role key
   only inside the dedicated billing backend running `BEEGAME_BILLING_MODE=server`.
 - Trusted runtime hosts in `BEEGAME_BILLING_MODE=remote` must send
-  `BEEGAME_CREDIT_CONTROL_TOKEN` to the billing backend for reserve, settle, and
-  refund mutations. User-run local clients must not receive this token; they
-  should use offline/BYO-key credits or route metered work through trusted
-  infrastructure.
+  `BEEGAME_CREDIT_CONTROL_TOKEN` to the billing backend for usage recording.
+  User-run local clients must not receive this token.
 - Never expose `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`, `BEEGAME_STRIPE_SECRET_KEY`,
   `BEEGAME_STRIPE_WEBHOOK_SECRET`, or `BEEGAME_CREDIT_CONTROL_TOKEN` to frontend
   builds, generated game runtimes, or user-run local clients.
@@ -167,7 +161,7 @@ POST https://runtime.your-domain.com/api/admin/credits/grants
 ```
 
 In `remote` mode the runtime host only checks the operator permission and proxies
-the request. The billing backend performs the ledger write.
+the request. The billing backend records the usage event and updates the wallet.
 
 The user-facing entry is the account menu `Credit Store`, not Settings.
 Settings > Platform > Credit remains an operator audit view.
@@ -229,8 +223,8 @@ Manual production smoke test:
 3. Confirm the packs match `BEEGAME_STRIPE_PRICE_CREDITS`.
 4. Buy a small test pack through Stripe Checkout.
 5. Return to BeeGame and confirm the credit balance increases.
-6. Open Settings > Platform > Credit as an audit-capable owner and confirm a
-   `grant` ledger entry with Stripe metadata.
+6. Open Settings > Platform > Credit as an audit-capable owner and confirm the
+   wallet and billing audit event reflect the grant.
 
 ## Settings Boundary
 

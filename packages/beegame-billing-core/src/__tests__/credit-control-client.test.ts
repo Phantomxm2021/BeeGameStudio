@@ -70,7 +70,7 @@ describe('remote usage billing client', () => {
     ).rejects.toThrow('Usage debit could not be completed')
   })
 
-  test('forwards real-time shadow usage events to the billing service', async () => {
+  test('forwards realtime usage events to the billing service', async () => {
     let request: Request | undefined
     const client = createRemoteUsageBillingClient(
       {
@@ -85,9 +85,9 @@ describe('remote usage billing client', () => {
       }) as typeof fetch,
     )
 
-    await client?.recordShadowUsage('user-1', {
+    await client?.recordUsage('user-1', {
       sessionId: 'session-1',
-      idempotencyKey: 'shadow-1',
+      idempotencyKey: 'usage-1',
       usage: {
         prompt_tokens: 10,
         completion_tokens: 2,
@@ -98,7 +98,7 @@ describe('remote usage billing client', () => {
     })
 
     expect(request?.url).toBe(
-      'http://127.0.0.1:62175/api/internal/usage/shadow-events',
+      'http://127.0.0.1:62175/api/internal/usage/events',
     )
     expect(request?.headers.get('x-beegame-credit-control-token')).toBe(
       'service-token',
@@ -106,7 +106,7 @@ describe('remote usage billing client', () => {
     expect(await request?.json()).toMatchObject({
       userId: 'user-1',
       sessionId: 'session-1',
-      idempotencyKey: 'shadow-1',
+      idempotencyKey: 'usage-1',
     })
   })
 })

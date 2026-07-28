@@ -27,7 +27,7 @@ const {
     updateInvitation,
     updateMcpServer,
     updateModelConfig,
-    getCreditAuditLedger,
+    getCreditSummary,
     getBillingCreditPacks,
     getBillingEvents,
     upsertBillingCreditPack,
@@ -62,7 +62,7 @@ const {
     updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
-    getCreditAuditLedger: vi.fn(),
+    getCreditSummary: vi.fn(),
     getBillingCreditPacks: vi.fn(),
     getBillingEvents: vi.fn(),
     upsertBillingCreditPack: vi.fn(),
@@ -121,7 +121,7 @@ vi.mock('../../../services/mcpServersApi', () => ({
 }));
 
 vi.mock('../../../services/creditsApi', () => ({
-    getCreditAuditLedger,
+    getCreditSummary,
     getBillingCreditPacks,
     getBillingEvents,
     upsertBillingCreditPack,
@@ -237,45 +237,16 @@ describe('SettingsMenu model settings', () => {
         createModelConfig.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
-        getCreditAuditLedger.mockReset();
+    getCreditSummary.mockReset();
         getBillingCreditPacks.mockReset();
         getBillingCreditPacks.mockResolvedValue({ packs: [] });
         getBillingEvents.mockReset();
         getBillingEvents.mockResolvedValue({ events: [] });
         upsertBillingCreditPack.mockReset();
-        getCreditAuditLedger.mockResolvedValue({
-            entries: [
-                {
-                    id: 'ledger_1',
-                    userId: 'customer-a',
-                    kind: 'reserve',
-                    credits: 5,
-                    projectId: 'project_1',
-                    reservationId: 'reservation_1',
-                    weightedTokens: 0,
-                    metadata: { taskType: 'edit_turn', phase: 'build' },
-                    createdAt: '2026-07-08T10:00:00.000Z',
-                },
-                {
-                    id: 'ledger_2',
-                    userId: 'customer-a',
-                    kind: 'settle',
-                    credits: 2,
-                    projectId: 'project_1',
-                    reservationId: 'reservation_1',
-                    weightedTokens: 12_000,
-                    metadata: { taskType: 'edit_turn', phase: 'build' },
-                    createdAt: '2026-07-08T10:01:00.000Z',
-                },
-            ],
-            summary: {
-                entriesCount: 2,
-                reservedCredits: 5,
-                settledCredits: 2,
-                refundedCredits: 3,
-                outstandingReservedCredits: 0,
-                weightedTokens: 12_000,
-            },
+        getCreditSummary.mockResolvedValue({
+            entriesCount: 2,
+            consumedCredits: 2,
+            weightedTokens: 12_000,
         });
         getProjectLifecycleOverview.mockReset();
         getProjectLifecycleOverview.mockResolvedValue({
@@ -676,15 +647,13 @@ describe('SettingsMenu model settings', () => {
 
         await waitFor(() => expect(screen.getAllByText('Credit 审计')).toHaveLength(2));
         expect(screen.queryByText('冻结未结算')).not.toBeInTheDocument();
-        expect(screen.getByText('已结算')).toBeInTheDocument();
+        expect(screen.getByText('已用')).toBeInTheDocument();
         expect(screen.getByText('12000')).toBeInTheDocument();
         expect(screen.getAllByText('2 credits').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('customer-a').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('project_1').length).toBeGreaterThan(0);
-        expect(getCreditAuditLedger).toHaveBeenCalledWith();
+        expect(getCreditSummary).toHaveBeenCalledWith();
 
         unmount();
-        getCreditAuditLedger.mockClear();
+        getCreditSummary.mockClear();
         renderSettings({
             canManageWorkspace: false,
             canManageSecrets: false,
@@ -698,7 +667,7 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '信用' })).not.toBeInTheDocument();
-        expect(getCreditAuditLedger).not.toHaveBeenCalled();
+        expect(getCreditSummary).not.toHaveBeenCalled();
     });
 
     it('shows project lifecycle controls only for lifecycle administrators', async () => {

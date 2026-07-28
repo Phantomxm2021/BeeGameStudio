@@ -14,24 +14,11 @@ import {
   type BeeGameAuditEvent,
 } from './audit-events-store'
 import {
-  getCreditBalance,
-  grantCredits,
-  listCreditAuditLedger,
-  listCreditLedger,
-  summarizeCreditLedger,
-  type CreditAuditLedger,
-  type CreditGrant,
-  type CreditLedgerFilters,
-  type CreditBalance,
-  type CreditLedgerEntry,
-  type CreditLedgerSummary,
-} from './credit-store'
-import {
-  listShadowUsageEvents,
-  recordShadowUsage,
-  type RecordShadowUsageInput,
-  type RecordShadowUsageResult,
-} from './usage-billing-shadow'
+  listUsageEvents,
+  recordUsage,
+  type RecordUsageInput,
+  type RecordUsageResult,
+} from './usage-billing'
 import {
   deleteMcpServer,
   listMcpServers,
@@ -107,6 +94,8 @@ import {
   debitLocalRealtimeUsage,
   grantLocalRealtimeCredits,
   getLocalRealtimeUsageWallet,
+  type CreditBalance,
+  type CreditGrant,
   type RealtimeUsageWallet,
 } from './realtime-usage-wallet'
 
@@ -186,7 +175,10 @@ export type BeeGameProjectLifecycleRetentionRun = {
   logRecordsSkipped: number
 }
 
-type CreditGrantInput = Omit<Parameters<typeof grantCredits>[1], 'dataDir'>
+type CreditGrantInput = {
+  credits: number
+  metadata?: Record<string, unknown>
+}
 export type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
@@ -250,13 +242,8 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<CreditBalance> {
-    const supabase = this.supabaseForRequest(request)
-    const creditOwnerId = getCreditOwnerId(user)
-    return supabase
-      ? supabase.getCreditBalance(creditOwnerId)
-      : getCreditBalance(creditOwnerId, {
-          dataDir: this.options.getUserDataRoot(request),
-        })
+    const wallet = await this.getRealtimeUsageWallet(request, user)
+    return toCreditBalance(wallet)
   }
 
   hasSupabaseStorage(): boolean {
@@ -645,35 +632,7 @@ export class DashboardRepository {
     return listModelConfigs(user.id).some(config => config.id === id)
   }
 
-  async listCreditLedger(
-    request: Request,
-    user: BeeGameUserContext,
-  ): Promise<CreditLedgerEntry[]> {
-    const supabase = this.supabaseForRequest(request)
-    const creditOwnerId = getCreditOwnerId(user)
-    return supabase
-      ? supabase.listCreditLedger(creditOwnerId)
-      : listCreditLedger(creditOwnerId, {
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
-  async summarizeCreditLedger(
-    request: Request,
-    user: BeeGameUserContext,
-    projectId?: string,
-  ): Promise<CreditLedgerSummary> {
-    const supabase = this.supabaseForRequest(request)
-    const creditOwnerId = getCreditOwnerId(user)
-    return supabase
-      ? supabase.summarizeCreditLedger(creditOwnerId, projectId)
-      : summarizeCreditLedger(creditOwnerId, {
-          dataDir: this.options.getUserDataRoot(request),
-          ...(projectId ? { projectId } : {}),
-        })
-  }
-
-  async listShadowUsageEvents(
+  async listUsageEvents(
     request: Request,
     user: BeeGameUserContext,
     filters: { projectId?: string; from?: Date; to?: Date } = {},
@@ -681,10 +640,10 @@ export class DashboardRepository {
     const supabase = this.supabaseForRequest(request)
     if (supabase)
       return supabase
-        .listShadowUsageEvents(getCreditOwnerId(user), filters.projectId)
+        .listUsageEvents(getCreditOwnerId(user), filters.projectId)
         .then(events => filterUsageEvents(events, filters))
     return filterUsageEvents(
-      listShadowUsageEvents(this.options.getUserDataRoot(request), {
+      listUsageEvents(this.options.getUserDataRoot(request), {
         userId: user.id,
         ...(filters.projectId ? { projectId: filters.projectId } : {}),
       }),
@@ -692,11 +651,11 @@ export class DashboardRepository {
     )
   }
 
-  async recordShadowUsage(
+  async recordUsage(
     request: Request,
     user: BeeGameUserContext,
-    input: Omit<RecordShadowUsageInput, 'dataDir' | 'userId'>,
-  ): Promise<RecordShadowUsageResult> {
+    input: Omit<RecordUsageInput, 'dataDir' | 'userId'>,
+  ): Promise<RecordUsageResult> {
     const remoteInput = {
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -709,12 +668,12 @@ export class DashboardRepository {
     }
     const supabase = this.supabaseForRequest(request)
     if (this.options.remoteUsageBilling)
-      return this.options.remoteUsageBilling.recordShadowUsage(
+      return this.options.remoteUsageBilling.recordUsage(
         user.id,
         remoteInput,
       )
-    if (supabase) return supabase.recordShadowUsage(user.id, remoteInput)
-    return recordShadowUsage({
+    if (supabase) return supabase.recordUsage(user.id, remoteInput)
+    return recordUsage({
       ...input,
       dataDir: this.options.getUserDataRoot(request),
       userId: user.id,
@@ -724,8 +683,8 @@ export class DashboardRepository {
   async debitRealTimeUsage(
     request: Request,
     user: BeeGameUserContext,
-    input: Omit<RecordShadowUsageInput, 'dataDir' | 'userId'>,
-  ): Promise<RecordShadowUsageResult> {
+    input: Omit<RecordUsageInput, 'dataDir' | 'userId'>,
+  ): Promise<RecordUsageResult> {
     const debitInput = {
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -743,7 +702,7 @@ export class DashboardRepository {
         debitInput,
       )
     if (supabase) return supabase.debitRealTimeUsage(user.id, debitInput)
-    const shadow = recordShadowUsage({
+    const usage = recordUsage({
       ...input,
       dataDir: this.options.getUserDataRoot(request),
       userId: user.id,
@@ -752,21 +711,21 @@ export class DashboardRepository {
       dataDir: this.options.getUserDataRoot(request),
       userId: user.id,
       idempotencyKey: input.idempotencyKey,
-      shadow,
+      usage,
     })
   }
 
-  async recordShadowUsageForUser(
+  async recordUsageForUser(
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
     if (this.options.remoteUsageBilling) {
-      return this.options.remoteUsageBilling.recordShadowUsage(userId, input)
+      return this.options.remoteUsageBilling.recordUsage(userId, input)
     }
     if (this.supabaseStore) {
-      return this.supabaseStore.recordShadowUsage(userId, input)
+      return this.supabaseStore.recordUsage(userId, input)
     }
-    return recordShadowUsage({
+    return recordUsage({
       ...input,
       userId,
       dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
@@ -783,12 +742,12 @@ export class DashboardRepository {
     if (this.supabaseStore) {
       return this.supabaseStore.debitRealTimeUsage(userId, input)
     }
-    const shadow = await this.recordShadowUsageForUser(userId, input)
+    const usage = await this.recordUsageForUser(userId, input)
     return debitLocalRealtimeUsage({
       dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
       userId,
       idempotencyKey: input.idempotencyKey,
-      shadow,
+      usage,
     })
   }
 
@@ -797,14 +756,14 @@ export class DashboardRepository {
     user: BeeGameUserContext,
   ): Promise<RealtimeUsageWallet> {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.getRealtimeUsageWallet(user.id)
+    if (supabase) return supabase.getRealtimeUsageWallet(getCreditOwnerId(user))
     return getLocalRealtimeUsageWallet({
       dataDir: this.options.getUserDataRoot(request),
       userId: user.id,
     })
   }
 
-  async summarizeShadowUsage(
+  async summarizeUsage(
     request: Request,
     user: BeeGameUserContext,
     filters: { projectId?: string; from?: Date; to?: Date } = {},
@@ -816,9 +775,9 @@ export class DashboardRepository {
     cacheCreationTokens: number
     totalTokens: number
     weightedTokens: number
-    shadowCreditsMicro: number
+    creditsMicro: number
   }> {
-    const events = await this.listShadowUsageEvents(request, user, filters)
+    const events = await this.listUsageEvents(request, user, filters)
     return events.reduce(
       (summary, event) => ({
         eventsCount: summary.eventsCount + 1,
@@ -831,8 +790,7 @@ export class DashboardRepository {
           summary.cacheCreationTokens + event.delta.cache_creation_tokens,
         totalTokens: summary.totalTokens + event.delta.total_tokens,
         weightedTokens: summary.weightedTokens + event.weightedTokensDelta,
-        shadowCreditsMicro:
-          summary.shadowCreditsMicro + event.shadowCreditsMicro,
+        creditsMicro: summary.creditsMicro + event.creditsMicro,
       }),
       {
         eventsCount: 0,
@@ -842,23 +800,9 @@ export class DashboardRepository {
         cacheCreationTokens: 0,
         totalTokens: 0,
         weightedTokens: 0,
-        shadowCreditsMicro: 0,
+        creditsMicro: 0,
       },
     )
-  }
-
-  async listCreditAuditLedger(
-    request: Request,
-    _user: BeeGameUserContext,
-    filters: CreditLedgerFilters = {},
-  ): Promise<CreditAuditLedger> {
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.listCreditAuditLedger(filters)
-      : listCreditAuditLedger({
-          dashboardDataRoot: this.options.dashboardDataRoot,
-          filters,
-        })
   }
 
   async grantCredits(
@@ -869,15 +813,8 @@ export class DashboardRepository {
     const supabase = this.supabaseForRequest(request)
     if (supabase) return supabase.grantCredits(targetUserId, input)
     const dataDir = getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId)
-    const result = grantCredits(targetUserId, { ...input, dataDir })
-    if (result.grantedCredits > 0) {
-      grantLocalRealtimeCredits({
-        dataDir,
-        userId: targetUserId,
-        credits: result.grantedCredits,
-      })
-    }
-    return result
+    const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits })
+    return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
   }
 
   async grantPaymentProviderCredits(
@@ -961,31 +898,19 @@ export class DashboardRepository {
       'providerReference',
     )
     if (provider && providerReference) {
-      const existing = listCreditLedger(targetUserId, { dataDir }).some(
-        entry =>
-          entry.kind === 'grant' &&
-          entry.metadata.provider === provider &&
-          entry.metadata.providerReference === providerReference,
-      )
-      if (existing) {
-        return {
-          grantedCredits: 0,
-          balance: getCreditBalance(targetUserId, { dataDir }),
-        }
-      }
+      const idempotencyKey = `${provider}:${providerReference}`
+      const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits, idempotencyKey })
+      return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
     }
-    return grantCredits(targetUserId, {
-      credits: input.credits,
-      metadata: input.metadata,
-      dataDir,
-    })
+    const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits })
+    return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
   }
 
   createSessionUsageBillingBackend(): BeeGameSessionUsageBillingBackend {
     if (this.options.remoteUsageBilling) {
       return {
-        recordShadowUsage: (userId, input) =>
-          this.options.remoteUsageBilling!.recordShadowUsage(userId, {
+        recordUsage: (userId, input) =>
+          this.options.remoteUsageBilling!.recordUsage(userId, {
             sessionId: input.sessionId,
             turnId: input.turnId,
             projectId: input.projectId,
@@ -1010,8 +935,8 @@ export class DashboardRepository {
     }
     if (this.hasSupabaseProductionStore()) {
       return {
-        recordShadowUsage: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken).recordShadowUsage(userId, {
+        recordUsage: (userId, input) =>
+          this.supabaseForAuthToken(input.authToken).recordUsage(userId, {
             sessionId: input.sessionId,
             turnId: input.turnId,
             projectId: input.projectId,
@@ -1038,18 +963,18 @@ export class DashboardRepository {
       }
     }
     return {
-      recordShadowUsage: (userId, input) =>
-        recordShadowUsage({
+      recordUsage: (userId, input) =>
+        recordUsage({
           ...input,
           userId,
         }),
       debitRealtimeUsage: async (userId, input) => {
-        const shadow = await recordShadowUsage({ ...input, userId })
+        const usage = await recordUsage({ ...input, userId })
         return debitLocalRealtimeUsage({
           dataDir: input.dataDir,
           userId,
           idempotencyKey: input.idempotencyKey,
-          shadow,
+          usage,
         })
       },
     }
@@ -1298,6 +1223,29 @@ export class DashboardRepository {
     return (
       user.modelConfigOwnerId ?? (user.role === 'owner' ? user.id : undefined)
     )
+  }
+}
+
+function toCreditBalance(wallet: RealtimeUsageWallet): CreditBalance {
+  const scale = 1_000_000
+  const balanceCredits = wallet.balanceCreditsMicro / scale
+  const includedCredits = wallet.includedCreditsMicro / scale
+  const consumedCredits = wallet.consumedCreditsMicro / scale
+  const emptyEstimate = { minCredits: 0, maxCredits: 0 }
+  return {
+    ...wallet,
+    plan: 'free',
+    balanceCredits,
+    includedCredits,
+    consumedCredits,
+    creditUnitWeightedTokens: 10_000,
+    estimates: {
+      ideaIntake: emptyEstimate,
+      planningDocs: emptyEstimate,
+      smallPlayableGame: emptyEstimate,
+      standardGame: emptyEstimate,
+      complexGame: emptyEstimate,
+    },
   }
 }
 

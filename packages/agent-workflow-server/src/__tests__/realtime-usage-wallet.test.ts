@@ -7,9 +7,9 @@ import {
   getLocalRealtimeUsageWallet,
   grantLocalRealtimeCredits,
 } from '../realtime-usage-wallet'
-import type { RecordShadowUsageResult } from '../usage-billing-shadow'
+import type { RecordUsageResult } from '../usage-billing'
 
-function shadowResult(amount: number): RecordShadowUsageResult {
+function usageResult(amount: number): RecordUsageResult {
   return {
     duplicate: false,
     event: {
@@ -35,7 +35,7 @@ function shadowResult(amount: number): RecordShadowUsageResult {
       },
       weightedTokens: amount,
       weightedTokensDelta: amount,
-      shadowCreditsMicro: amount,
+      creditsMicro: amount,
       createdAt: new Date().toISOString(),
       metadata: {},
     },
@@ -47,7 +47,7 @@ function shadowResult(amount: number): RecordShadowUsageResult {
       total_tokens: 2,
     },
     cumulativeWeightedTokens: amount,
-    shadowCreditsMicro: amount,
+    creditsMicro: amount,
   }
 }
 
@@ -59,13 +59,13 @@ describe('local realtime usage wallet', () => {
         dataDir,
         userId: 'user-1',
         idempotencyKey: 'usage-1',
-        shadow: shadowResult(100),
+        usage: usageResult(100),
       })
       const repeated = debitLocalRealtimeUsage({
         dataDir,
         userId: 'user-1',
         idempotencyKey: 'usage-1',
-        shadow: shadowResult(100),
+        usage: usageResult(100),
       })
       expect(first.duplicate).toBe(false)
       expect(repeated.duplicate).toBe(true)
@@ -82,7 +82,7 @@ describe('local realtime usage wallet', () => {
           dataDir,
           userId: 'user-1',
           idempotencyKey: 'usage-large',
-          shadow: shadowResult(300 * 1_000_000 + 1),
+          usage: usageResult(300 * 1_000_000 + 1),
         }),
       ).toThrow('Insufficient realtime usage credits')
     } finally {

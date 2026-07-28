@@ -121,11 +121,6 @@ type IntakeCopy = {
     emailFallback: string;
     balance: string;
     consumed: string;
-    loadingCreditDetails: string;
-    viewCreditDetails: string;
-    ledgerCount: (count: number) => string;
-    noLedgerRecords: string;
-    closeCreditDetails: string;
     deleteAccount: string;
     deleteConfirm: string;
     deleteFailed: string;
@@ -220,11 +215,6 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
     emailFallback: translate('profile.emailFallback'),
     balance: translate('profile.balance'),
     consumed: translate('profile.consumed'),
-    loadingCreditDetails: translate('profile.loadingCreditDetails'),
-    viewCreditDetails: translate('profile.viewCreditDetails'),
-    ledgerCount: count => translate('profile.ledgerCount', { count }),
-    noLedgerRecords: translate('profile.noLedgerRecords'),
-    closeCreditDetails: translate('profile.closeCreditDetails'),
     deleteAccount: translate('profile.deleteAccount'),
     deleteConfirm: translate('profile.deleteConfirm'),
     deleteFailed: translate('profile.deleteFailed'),

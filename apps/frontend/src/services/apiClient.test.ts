@@ -122,7 +122,7 @@ describe('apiClient defaults', () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await authenticatedFetch('/api/credits/ledger');
+    await authenticatedFetch('/api/usage/events');
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer supabase-session-token');
@@ -168,7 +168,7 @@ describe('apiClient defaults', () => {
       user: { id: 'user-1' },
     }));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes('/api/credits/ledger') && fetchMock.mock.calls.length === 1) {
+      if (String(input).includes('/api/usage/events') && fetchMock.mock.calls.length === 1) {
         return new Response(JSON.stringify({ message: 'expired' }), { status: 401 });
       }
       if (String(input).includes('/auth/v1/token')) {
@@ -183,7 +183,7 @@ describe('apiClient defaults', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await authenticatedFetch('/api/credits/ledger');
+    await authenticatedFetch('/api/usage/events');
 
     const replayHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
     expect(replayHeaders.get('Authorization')).toBe('Bearer fresh-token');

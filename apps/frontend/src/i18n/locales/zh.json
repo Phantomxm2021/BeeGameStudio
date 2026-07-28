@@ -84,11 +84,6 @@
         "emailFallback": "邮箱未公开",
         "balance": "余额",
         "consumed": "已用",
-        "loadingCreditDetails": "正在加载记录...",
-        "viewCreditDetails": "查看 Credit 明细",
-        "ledgerCount": "{{count}} 条",
-        "noLedgerRecords": "暂无记录",
-        "closeCreditDetails": "关闭 Credit 明细",
         "deleteAccount": "注销账户",
         "deleteConfirm": "注销账户会删除你的 BeeGame 登录账号和云端数据。此操作无法撤销，是否继续？",
         "deleteFailed": "注销账户失败，请稍后重试。",
@@ -330,7 +325,6 @@
       "edit": "编辑",
       "noPacks": "还没有配置 Credit 套餐。",
       "noEvents": "还没有 billing 事件。",
-      "noLedger": "还没有 Credit 账本记录。",
       "noReference": "无引用",
       "positiveCreditsRequired": "请输入 Stripe price id 和正数 credits。",
       "packSaved": "Credit 套餐已保存。",
@@ -338,7 +332,7 @@
       "auditUnavailable": "Credit 审计不可用",
       "billingUnavailable": "Billing 审计不可用",
       "metrics": {
-        "settled": "已结算",
+        "consumed": "已用",
         "weightedTokens": "加权 tokens"
       }
     },

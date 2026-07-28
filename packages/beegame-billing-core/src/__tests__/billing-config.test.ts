@@ -11,7 +11,7 @@ describe('billing configuration', () => {
 
   test('always uses realtime mode after the migration', () => {
     expect(
-      resolveBeeGameBillingConfig({ BEEGAME_USAGE_BILLING_MODE: 'shadow' }),
+      resolveBeeGameBillingConfig({ BEEGAME_USAGE_BILLING_MODE: 'realtime' }),
     ).toMatchObject({ usageBillingMode: 'realtime' })
     expect(
       resolveBeeGameBillingConfig({ BEEGAME_USAGE_BILLING_MODE: 'dual' }),

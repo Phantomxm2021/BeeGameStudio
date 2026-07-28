@@ -57,7 +57,6 @@ const apiMocks = vi.hoisted(() => ({
       balanceCredits: 162,
       includedCredits: 200,
       consumedCredits: 38,
-      reservedCredits: 7,
       creditUnitWeightedTokens: 1000,
       estimates: {
         ideaIntake: { minCredits: 1, maxCredits: 2 },
@@ -71,10 +70,7 @@ const apiMocks = vi.hoisted(() => ({
   getCreditSummary: vi.fn(() =>
     Promise.resolve({
       entriesCount: 3,
-      reservedCredits: 50,
-      settledCredits: 12,
-      refundedCredits: 38,
-      outstandingReservedCredits: 0,
+      consumedCredits: 12,
       weightedTokens: 120000,
     }),
   ),
@@ -244,7 +240,6 @@ vi.mock('../../services/api', () => ({
 vi.mock('../../services/creditsApi', () => ({
   getCreditBalance: apiMocks.getCreditBalance,
   getCreditSummary: apiMocks.getCreditSummary,
-  getCreditLedger: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock('../../services/currentUserApi', () => ({
@@ -380,13 +375,6 @@ describe('DashboardView runtime loading', () => {
       expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
       expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(2);
 
-      await act(async () => {
-        capturedUseChatOptions?.onTaskEvent('credit_update');
-        capturedUseChatOptions?.onTaskEvent('credit_update');
-        await Promise.resolve();
-      });
-      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(3);
-      expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
@@ -601,7 +589,7 @@ describe('DashboardView runtime loading', () => {
   it('rounds realtime project credit consumption to whole credits', async () => {
     apiMocks.getCreditSummary.mockResolvedValueOnce({
       entriesCount: 1,
-      settledCredits: 1.6,
+      consumedCredits: 1.6,
       weightedTokens: 160,
     });
 

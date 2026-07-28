@@ -12,14 +12,14 @@ export function registerBeeGameUsageControlRoutes(
   app: Hono,
   deps: Pick<BillingRouteDeps, 'billingConfig' | 'dashboardRepository'>,
 ): void {
-  registerUsageRoute(app, deps, '/api/internal/usage/shadow-events', false)
+  registerUsageRoute(app, deps, '/api/internal/usage/events', false)
   registerUsageRoute(app, deps, '/api/internal/usage/debits', true)
 }
 
 function registerUsageRoute(
   app: Hono,
   deps: Pick<BillingRouteDeps, 'billingConfig' | 'dashboardRepository'>,
-  path: '/api/internal/usage/shadow-events' | '/api/internal/usage/debits',
+  path: '/api/internal/usage/events' | '/api/internal/usage/debits',
   debit: boolean,
 ): void {
   app.post(path, async c => {
@@ -77,7 +77,7 @@ function registerUsageRoute(
             userId,
             input,
           )
-        : await deps.dashboardRepository.recordShadowUsageForUser(
+        : await deps.dashboardRepository.recordUsageForUser(
             userId,
             input,
           ),

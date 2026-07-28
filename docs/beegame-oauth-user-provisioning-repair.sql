@@ -24,7 +24,7 @@ end
 $$;
 
 -- The trigger creates the profile, account link, workspace, developer member
--- role, and credit account. Updating the JSON value to itself intentionally
+-- role. Updating the JSON value to itself intentionally
 -- invokes the existing secure trigger without granting browser clients any
 -- provisioning privilege.
 update auth.users as auth_user

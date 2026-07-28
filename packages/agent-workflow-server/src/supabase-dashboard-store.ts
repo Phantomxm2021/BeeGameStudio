@@ -16,19 +16,10 @@ import type {
   PublicModelConfig,
 } from '@bee-game-studio/agent-workflow'
 import {
-  CREDIT_UNIT_WEIGHTED_TOKENS,
-  getCreditEstimates,
-  getDefaultFreeCredits,
-  summarizeCreditLedgerEntries,
   type CreditBalance,
-  type CreditAuditLedger,
   type CreditGrant,
-  type CreditLedgerFilters,
-  type CreditLedgerEntry,
-  type CreditLedgerKind,
-  type CreditLedgerSummary,
-} from './credit-store'
-import type { RealtimeUsageWallet } from './realtime-usage-wallet'
+  type RealtimeUsageWallet,
+} from './realtime-usage-wallet'
 import type {
   McpServerConfig,
   McpServerEnvVar,
@@ -157,37 +148,6 @@ export type BeeGameSessionMetadata = {
   updatedAt: Date
 }
 
-type SupabaseCreditAccountRow = {
-  user_id: string
-  plan: 'free'
-  included_credits: number
-  consumed_credits: number
-  reserved_credits: number
-  updated_at: string
-}
-
-type SupabaseCreditLedgerRow = {
-  id: string
-  user_id: string
-  project_id: string | null
-  reservation_id: string | null
-  kind: CreditLedgerKind
-  credits: number
-  weighted_tokens: number | null
-  metadata: JsonObject
-  created_at: string
-}
-
-type SupabaseCreditSummaryRow = Pick<
-  SupabaseCreditLedgerRow,
-  'kind' | 'credits' | 'weighted_tokens'
->
-
-type SupabaseCreditGrantRow = {
-  granted_credits?: number
-  account: SupabaseCreditAccountRow
-}
-
 type SupabaseUsageBillingResult = {
   duplicate?: boolean
   event: {
@@ -211,13 +171,13 @@ type SupabaseUsageBillingResult = {
     total_tokens_delta: number
     weighted_tokens: number
     weighted_tokens_delta: number
-    shadow_credits_micro: number
+    credits_micro: number
     created_at: string
     metadata: JsonObject
   }
   cumulative_usage: BeeGameUsageBillingRecordInput['usage']
   cumulative_weighted_tokens: number
-  shadow_credits_micro: number
+  credits_micro: number
 }
 
 type SupabaseUsageBillingEventRow = SupabaseUsageBillingResult['event']
@@ -979,15 +939,15 @@ export class SupabaseDashboardStore {
   }
 
   async getCreditBalance(ownerId: string): Promise<CreditBalance> {
-    return toCreditBalance(ownerId, await this.ensureCreditAccount(ownerId))
+    return toCreditBalance(await this.getRealtimeUsageWallet(ownerId))
   }
 
-  async recordShadowUsage(
+  async recordUsage(
     ownerId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
     const result = await this.rpc<SupabaseUsageBillingResult>(
-      'beegame_record_shadow_usage',
+      'beegame_record_usage',
       {
         p_user_id: ownerId,
         p_session_id: input.sessionId,
@@ -1053,13 +1013,13 @@ export class SupabaseDashboardStore {
     }
   }
 
-  async listShadowUsageEvents(
+  async listUsageEvents(
     ownerId: string,
     projectId?: string,
   ): Promise<BeeGameUsageBillingEvent[]> {
     const projectFilter = projectId ? `&project_id=eq.${q(projectId)}` : ''
     const rows = await this.rest<SupabaseUsageBillingEventRow[]>(
-      `/rest/v1/beegame_shadow_usage_events?user_id=eq.${q(ownerId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
+      `/rest/v1/beegame_usage_events?user_id=eq.${q(ownerId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
     )
     return rows.map(rowToUsageBillingEvent)
   }
@@ -1071,22 +1031,7 @@ export class SupabaseDashboardStore {
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditGrant> {
-    const credits = normalizePositiveInteger(options.credits)
-    const result = await this.rpc<SupabaseCreditGrantRow>(
-      'beegame_admin_grant_credits',
-      {
-        p_target_user_id: ownerId,
-        p_credits: credits,
-        p_metadata: options.metadata ?? { source: 'manual' },
-      },
-    )
-    return {
-      grantedCredits: normalizeNonNegativeInteger(result.granted_credits),
-      balance: toCreditBalance(
-        ownerId,
-        normalizeCreditAccountRow(ownerId, result.account),
-      ),
-    }
+    return this.grantRealtimeCredits(ownerId, options)
   }
 
   async grantPaymentProviderCredits(
@@ -1096,21 +1041,37 @@ export class SupabaseDashboardStore {
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditGrant> {
-    const credits = normalizePositiveInteger(options.credits)
-    const result = await this.rpc<SupabaseCreditGrantRow>(
-      'beegame_payment_provider_grant_credits',
+    return this.grantRealtimeCredits(ownerId, options)
+  }
+
+  private async grantRealtimeCredits(
+    ownerId: string,
+    options: { credits: number; metadata?: Record<string, unknown> },
+  ): Promise<CreditGrant> {
+    const wallet = await this.getRealtimeUsageWallet(ownerId)
+    const grantedCredits = normalizePositiveInteger(options.credits)
+    const row = await this.upsert<{ user_id: string; included_credits_micro: number; consumed_credits_micro: number }>(
+      'beegame_usage_wallets',
       {
-        p_target_user_id: ownerId,
-        p_credits: credits,
-        p_metadata: options.metadata ?? { source: 'payment_provider' },
+        user_id: ownerId,
+        included_credits_micro:
+          wallet.includedCreditsMicro + grantedCredits * 1_000_000,
+        consumed_credits_micro: wallet.consumedCreditsMicro,
+        updated_at: new Date().toISOString(),
       },
+      'user_id',
     )
     return {
-      grantedCredits: normalizeNonNegativeInteger(result.granted_credits),
-      balance: toCreditBalance(
-        ownerId,
-        normalizeCreditAccountRow(ownerId, result.account),
-      ),
+      grantedCredits,
+      balance: toCreditBalance({
+        userId: row.user_id,
+        includedCreditsMicro: row.included_credits_micro,
+        consumedCreditsMicro: row.consumed_credits_micro,
+        balanceCreditsMicro: Math.max(
+          0,
+          row.included_credits_micro - row.consumed_credits_micro,
+        ),
+      }),
     }
   }
 
@@ -1169,61 +1130,6 @@ export class SupabaseDashboardStore {
       '/rest/v1/beegame_billing_events?select=*&order=created_at.desc&limit=200',
     )
     return rows.map(rowToBillingEvent)
-  }
-
-  async listCreditLedger(ownerId: string): Promise<CreditLedgerEntry[]> {
-    const rows = await this.rest<SupabaseCreditLedgerRow[]>(
-      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}&select=*&order=created_at.asc&limit=100`,
-    )
-    return rows.map(rowToCreditLedgerEntry)
-  }
-
-  async listCreditAuditLedger(
-    filters: CreditLedgerFilters = {},
-  ): Promise<CreditAuditLedger> {
-    const userFilter = filters.userId ? `&user_id=eq.${q(filters.userId)}` : ''
-    const projectFilter = filters.projectId
-      ? `&project_id=eq.${q(filters.projectId)}`
-      : ''
-    const kindFilter = filters.kind ? `&kind=eq.${q(filters.kind)}` : ''
-    const reservationFilter = filters.reservationId
-      ? `&reservation_id=eq.${q(filters.reservationId)}`
-      : ''
-    const rows = await this.rest<SupabaseCreditLedgerRow[]>(
-      `/rest/v1/beegame_credit_ledger?select=*&order=created_at.asc${userFilter}${projectFilter}${kindFilter}${reservationFilter}&limit=500`,
-    )
-    const entries = rows.map(rowToCreditLedgerEntry)
-    return {
-      entries,
-      summary: summarizeCreditLedgerEntries(entries),
-    }
-  }
-
-  async summarizeCreditLedger(
-    ownerId: string,
-    projectId?: string,
-  ): Promise<CreditLedgerSummary> {
-    const projectFilter = projectId ? `&project_id=eq.${q(projectId)}` : ''
-    const rows = await this.rest<SupabaseCreditSummaryRow[]>(
-      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}${projectFilter}&select=kind%2Ccredits%2Cweighted_tokens&order=created_at.asc`,
-    )
-    const reservedCredits = sumCreditSummaryKind(rows, 'reserve')
-    const settledCredits = sumCreditSummaryKind(rows, 'settle')
-    const refundedCredits = sumCreditSummaryKind(rows, 'refund')
-    return {
-      entriesCount: rows.length,
-      reservedCredits,
-      settledCredits,
-      refundedCredits,
-      outstandingReservedCredits: Math.max(
-        0,
-        reservedCredits - settledCredits - refundedCredits,
-      ),
-      weightedTokens: rows.reduce(
-        (sum, row) => sum + normalizeNonNegativeInteger(row.weighted_tokens),
-        0,
-      ),
-    }
   }
 
   async appendAuditEvent(
@@ -1412,27 +1318,6 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
     )
     return rows[0] ? rowToMcpServer(rows[0]) : undefined
-  }
-
-  private async ensureCreditAccount(
-    ownerId: string,
-  ): Promise<SupabaseCreditAccountRow> {
-    const rows = await this.rest<SupabaseCreditAccountRow[]>(
-      `/rest/v1/beegame_credit_accounts?user_id=eq.${q(ownerId)}&select=*&limit=1`,
-    )
-    if (rows[0]) return normalizeCreditAccountRow(ownerId, rows[0])
-    return this.upsert<SupabaseCreditAccountRow>(
-      'beegame_credit_accounts',
-      {
-        user_id: ownerId,
-        plan: 'free',
-        included_credits: 0,
-        consumed_credits: 0,
-        reserved_credits: 0,
-        updated_at: new Date().toISOString(),
-      },
-      'user_id',
-    )
   }
 
   private async rpc<T = JsonObject>(
@@ -2061,60 +1946,17 @@ function rowToSessionMetadata(row: SupabaseSessionRow): BeeGameSessionMetadata {
   }
 }
 
-function normalizeCreditAccountRow(
-  ownerId: string,
-  row: SupabaseCreditAccountRow,
-): SupabaseCreditAccountRow {
+function toCreditBalance(wallet: RealtimeUsageWallet): CreditBalance {
+  const includedCredits = wallet.includedCreditsMicro / 1_000_000
+  const consumedCredits = wallet.consumedCreditsMicro / 1_000_000
   return {
-    user_id: row.user_id || ownerId,
+    ...wallet,
     plan: 'free',
-    included_credits: normalizeNonNegativeInteger(
-      row.included_credits,
-      getDefaultFreeCredits(),
-    ),
-    consumed_credits: normalizeNonNegativeInteger(row.consumed_credits),
-    reserved_credits: normalizeNonNegativeInteger(row.reserved_credits),
-    updated_at: row.updated_at,
-  }
-}
-
-function toCreditBalance(
-  ownerId: string,
-  row: SupabaseCreditAccountRow,
-): CreditBalance {
-  const account = normalizeCreditAccountRow(ownerId, row)
-  return {
-    userId: ownerId,
-    plan: 'free',
-    balanceCredits: Math.max(
-      0,
-      account.included_credits -
-        account.consumed_credits -
-        account.reserved_credits,
-    ),
-    includedCredits: account.included_credits,
-    consumedCredits: account.consumed_credits,
-    reservedCredits: account.reserved_credits,
-    creditUnitWeightedTokens: CREDIT_UNIT_WEIGHTED_TOKENS,
-    estimates: getCreditEstimates(),
-  }
-}
-
-function rowToCreditLedgerEntry(
-  row: SupabaseCreditLedgerRow,
-): CreditLedgerEntry {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    kind: row.kind,
-    credits: normalizeNonNegativeInteger(row.credits),
-    ...(row.project_id ? { projectId: row.project_id } : {}),
-    ...(row.reservation_id ? { reservationId: row.reservation_id } : {}),
-    ...(typeof row.weighted_tokens === 'number'
-      ? { weightedTokens: normalizeNonNegativeInteger(row.weighted_tokens) }
-      : {}),
-    metadata: isObject(row.metadata) ? row.metadata : {},
-    createdAt: row.created_at,
+    balanceCredits: wallet.balanceCreditsMicro / 1_000_000,
+    includedCredits,
+    consumedCredits,
+    creditUnitWeightedTokens: 10_000,
+    estimates: {},
   }
 }
 
@@ -2283,15 +2125,6 @@ function normalizeDeploymentStatus(
     : 'failed'
 }
 
-function sumCreditSummaryKind(
-  rows: SupabaseCreditSummaryRow[],
-  kind: CreditLedgerKind,
-): number {
-  return rows
-    .filter(row => row.kind === kind)
-    .reduce((sum, row) => sum + normalizeNonNegativeInteger(row.credits), 0)
-}
-
 function toUsageBillingRecordResult(
   result: SupabaseUsageBillingResult,
 ): BeeGameUsageBillingRecordResult {
@@ -2333,8 +2166,8 @@ function toUsageBillingRecordResult(
       weightedTokensDelta: normalizeNonNegativeInteger(
         event.weighted_tokens_delta,
       ),
-      shadowCreditsMicro: normalizeNonNegativeInteger(
-        event.shadow_credits_micro,
+      creditsMicro: normalizeNonNegativeInteger(
+        event.credits_micro,
       ),
       createdAt: event.created_at,
       metadata: isObject(event.metadata) ? event.metadata : {},
@@ -2343,8 +2176,8 @@ function toUsageBillingRecordResult(
     cumulativeWeightedTokens: normalizeNonNegativeInteger(
       result.cumulative_weighted_tokens,
     ),
-    shadowCreditsMicro: normalizeNonNegativeInteger(
-      result.shadow_credits_micro,
+    creditsMicro: normalizeNonNegativeInteger(
+      result.credits_micro,
     ),
   }
 }
@@ -2387,7 +2220,7 @@ function rowToUsageBillingEvent(
     weightedTokensDelta: normalizeNonNegativeInteger(
       event.weighted_tokens_delta,
     ),
-    shadowCreditsMicro: normalizeNonNegativeInteger(event.shadow_credits_micro),
+    creditsMicro: normalizeNonNegativeInteger(event.credits_micro),
     createdAt: event.created_at,
     metadata: isObject(event.metadata) ? event.metadata : {},
   }

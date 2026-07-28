@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createAgentWorkflowApp } from '../app'
 
 describe('realtime billing routes', () => {
-  test('exposes realtime mode and a wallet without legacy reservation fields', async () => {
+  test('exposes the realtime usage wallet', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-realtime-routes-'))
     try {
       const app = createAgentWorkflowApp({
@@ -14,16 +14,6 @@ describe('realtime billing routes', () => {
         currentUser: { id: 'realtime-user', role: 'owner' },
         modelConfigStore: false,
         skillsConfig: false,
-      })
-
-      const modeResponse = await app.request('/api/credits/usage-mode')
-      expect(modeResponse.status).toBe(200)
-      expect(await modeResponse.json()).toEqual({
-        mode: 'realtime',
-        realtimeDebitEnabled: true,
-        legacyReservationActive: false,
-        databaseMigrationRequired: false,
-        sqlDeploymentDeferred: false,
       })
 
       const walletResponse = await app.request('/api/usage-wallet')

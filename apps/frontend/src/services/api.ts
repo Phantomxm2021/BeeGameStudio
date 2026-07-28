@@ -926,6 +926,12 @@ export const api = {
   getProjectRuntimeState: (projectId: string): Promise<ProjectRuntimeStatePayload> =>
     beeGameAdapter.getProjectRuntimeState(projectId),
 
+  getWorkflowPhases: async (projectId: string) =>
+    (await beeGameAdapter.getProjectRuntimeState(projectId)).status,
+
+  getProjectTokenUsage: async (projectId: string) =>
+    ((await beeGameAdapter.getProjectRuntimeState(projectId)).status.current_snapshot as { token_budget?: Record<string, unknown> } | null)?.token_budget ?? {},
+
   getProjectReviewStatus: async (projectId: string) =>
     normalizeReviewStatusPayload(
       ((await apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/review-status`)) as { review_status?: ReviewStatusPayload })

@@ -585,15 +585,6 @@ alter table public.beegame_deployments
 create index if not exists beegame_deployments_owner_session_idx
   on public.beegame_deployments (owner_id, session_id, created_at desc);
 
-create table if not exists public.beegame_credit_accounts (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  plan text not null default 'free',
-  included_credits integer not null default 300,
-  consumed_credits integer not null default 0,
-  reserved_credits integer not null default 0,
-  updated_at timestamptz not null default now()
-);
-
 create table if not exists public.beegame_account_links (
   user_id uuid primary key references auth.users(id) on delete cascade,
   account_id uuid not null references auth.users(id) on delete cascade,
@@ -603,24 +594,6 @@ create table if not exists public.beegame_account_links (
 
 create index if not exists beegame_account_links_email_idx
   on public.beegame_account_links (lower(email));
-
-create table if not exists public.beegame_credit_ledger (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  project_id text,
-  reservation_id text,
-  kind text not null check (kind in ('estimate', 'reserve', 'settle', 'grant', 'refund')),
-  credits integer not null,
-  weighted_tokens integer,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-
-alter table public.beegame_credit_ledger
-  drop constraint if exists beegame_credit_ledger_project_id_fkey;
-
-alter table public.beegame_credit_ledger
-  add column if not exists reservation_id text;
 
 create table if not exists public.beegame_billing_credit_packs (
   id uuid primary key default gen_random_uuid(),
@@ -636,7 +609,7 @@ create table if not exists public.beegame_billing_credit_packs (
   unique (provider, price_id)
 );
 
-create table if not exists public.beegame_shadow_usage_events (
+create table if not exists public.beegame_usage_events (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   session_id text not null,
@@ -657,16 +630,16 @@ create table if not exists public.beegame_shadow_usage_events (
   total_tokens_delta bigint not null default 0 check (total_tokens_delta >= 0),
   weighted_tokens bigint not null default 0 check (weighted_tokens >= 0),
   weighted_tokens_delta bigint not null default 0 check (weighted_tokens_delta >= 0),
-  shadow_credits_micro bigint not null default 0 check (shadow_credits_micro >= 0),
+  credits_micro bigint not null default 0 check (credits_micro >= 0),
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   unique (user_id, idempotency_key)
 );
 
-create index if not exists beegame_shadow_usage_events_session_idx
-  on public.beegame_shadow_usage_events (user_id, session_id, created_at desc);
-create index if not exists beegame_shadow_usage_events_project_idx
-  on public.beegame_shadow_usage_events (user_id, project_id, created_at desc);
+create index if not exists beegame_usage_events_session_idx
+  on public.beegame_usage_events (user_id, session_id, created_at desc);
+create index if not exists beegame_usage_events_project_idx
+  on public.beegame_usage_events (user_id, project_id, created_at desc);
 
 create table if not exists public.beegame_usage_wallets (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -684,49 +657,6 @@ create table if not exists public.beegame_usage_debit_events (
   created_at timestamptz not null default now(),
   unique (user_id, idempotency_key)
 );
-
-create or replace function public.beegame_migrate_usage_wallet(
-  p_user_id uuid
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  legacy_account public.beegame_credit_accounts%rowtype;
-  wallet_row public.beegame_usage_wallets%rowtype;
-begin
-  if p_user_id is null then
-    raise exception 'User id is required';
-  end if;
-  if coalesce(auth.role(), '') <> 'service_role' and (
-    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
-  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
-  select * into legacy_account
-  from public.beegame_credit_accounts
-  where user_id = p_user_id;
-  insert into public.beegame_usage_wallets (
-    user_id, included_credits_micro, consumed_credits_micro
-  ) values (
-    p_user_id,
-    greatest(0, coalesce(legacy_account.included_credits, 300) - coalesce(legacy_account.consumed_credits, 0)) * 1000000,
-    0
-  ) on conflict (user_id) do nothing;
-  select * into wallet_row
-  from public.beegame_usage_wallets
-  where user_id = p_user_id;
-  return jsonb_build_object(
-    'user_id', wallet_row.user_id,
-    'included_credits_micro', wallet_row.included_credits_micro,
-    'consumed_credits_micro', wallet_row.consumed_credits_micro,
-    'balance_credits_micro', wallet_row.included_credits_micro - wallet_row.consumed_credits_micro
-  );
-end
-$$;
 
 create index if not exists beegame_billing_credit_packs_enabled_idx
   on public.beegame_billing_credit_packs (provider, enabled, sort_order, credits);
@@ -1219,10 +1149,6 @@ begin
       and (claimed_user_id is null or claimed_user_id = new.id);
   end if;
 
-  insert into public.beegame_credit_accounts (user_id)
-  values (canonical_account_id)
-  on conflict (user_id) do nothing;
-
   return new;
 end
 $$;
@@ -1249,47 +1175,6 @@ on conflict (user_id) do update
 set account_id = excluded.account_id,
     email = excluded.email,
     updated_at = now();
-
-update public.beegame_credit_ledger l
-set user_id = a.account_id
-from public.beegame_account_links a
-where l.user_id = a.user_id
-  and a.account_id <> a.user_id;
-
-with grouped_credit_accounts as (
-  select
-    a.account_id as user_id,
-    max(c.included_credits) as included_credits,
-    sum(c.consumed_credits) as consumed_credits,
-    sum(c.reserved_credits) as reserved_credits
-  from public.beegame_credit_accounts c
-  join public.beegame_account_links a on a.user_id = c.user_id
-  group by a.account_id
-)
-insert into public.beegame_credit_accounts (
-  user_id,
-  included_credits,
-  consumed_credits,
-  reserved_credits,
-  updated_at
-)
-select
-  user_id,
-  included_credits,
-  consumed_credits,
-  reserved_credits,
-  now()
-from grouped_credit_accounts
-on conflict (user_id) do update
-set included_credits = excluded.included_credits,
-    consumed_credits = excluded.consumed_credits,
-    reserved_credits = excluded.reserved_credits,
-    updated_at = now();
-
-delete from public.beegame_credit_accounts c
-using public.beegame_account_links a
-where c.user_id = a.user_id
-  and a.account_id <> a.user_id;
 
 insert into public.beegame_profiles (user_id, display_name, email, avatar_url)
 select
@@ -1339,11 +1224,6 @@ set role = case
   when excluded.role = 'owner' then 'owner'
   else public.beegame_workspace_members.role
 end;
-
-insert into public.beegame_credit_accounts (user_id)
-select distinct a.account_id
-from public.beegame_account_links a
-on conflict (user_id) do nothing;
 
 update public.beegame_platform_owner_invites i
 set claimed_user_id = u.id,
@@ -1600,7 +1480,7 @@ begin
 end
 $$;
 
-create or replace function public.beegame_record_shadow_usage(
+create or replace function public.beegame_record_usage(
   p_user_id uuid,
   p_session_id text,
   p_turn_id text default null,
@@ -1617,8 +1497,8 @@ security definer
 set search_path = public
 as $$
 declare
-  previous_row public.beegame_shadow_usage_events%rowtype;
-  event_row public.beegame_shadow_usage_events%rowtype;
+  previous_row public.beegame_usage_events%rowtype;
+  event_row public.beegame_usage_events%rowtype;
   duplicate_event boolean := false;
   reset_epoch boolean := false;
   current_prompt bigint := greatest(0, coalesce((p_usage->>'prompt_tokens')::bigint, 0));
@@ -1655,14 +1535,14 @@ begin
 
   perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':' || p_session_id));
   select * into event_row
-  from public.beegame_shadow_usage_events
+  from public.beegame_usage_events
   where user_id = p_user_id and idempotency_key = p_idempotency_key;
 
   if event_row.id is not null then
     duplicate_event := true;
   else
     select * into previous_row
-    from public.beegame_shadow_usage_events
+    from public.beegame_usage_events
     where user_id = p_user_id and session_id = p_session_id
     order by created_at desc, id desc
     limit 1;
@@ -1681,11 +1561,11 @@ begin
     delta_total := case when reset_epoch then current_total else greatest(0, current_total - previous_row.total_tokens) end;
     delta_weighted := case when reset_epoch then current_weighted else greatest(0, current_weighted - previous_row.weighted_tokens) end;
 
-    insert into public.beegame_shadow_usage_events (
+    insert into public.beegame_usage_events (
       user_id, session_id, turn_id, project_id, idempotency_key, pricing_version, usage_source,
       prompt_tokens, completion_tokens, cache_read_tokens, cache_creation_tokens, total_tokens,
       prompt_tokens_delta, completion_tokens_delta, cache_read_tokens_delta, cache_creation_tokens_delta,
-      total_tokens_delta, weighted_tokens, weighted_tokens_delta, shadow_credits_micro, metadata
+      total_tokens_delta, weighted_tokens, weighted_tokens_delta, credits_micro, metadata
     ) values (
       p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key, coalesce(nullif(trim(p_pricing_version), ''), 'weighted-v1'), p_usage_source,
       current_prompt, current_completion, current_cache_read, current_cache_creation, current_total,
@@ -1697,10 +1577,10 @@ begin
   select coalesce(sum(prompt_tokens_delta), 0), coalesce(sum(completion_tokens_delta), 0),
     coalesce(sum(cache_read_tokens_delta), 0), coalesce(sum(cache_creation_tokens_delta), 0),
     coalesce(sum(total_tokens_delta), 0), coalesce(sum(weighted_tokens_delta), 0),
-    coalesce(sum(shadow_credits_micro), 0)
+    coalesce(sum(credits_micro), 0)
   into cumulative_prompt, cumulative_completion, cumulative_cache_read,
     cumulative_cache_creation, cumulative_total, cumulative_weighted, cumulative_credits
-  from public.beegame_shadow_usage_events
+  from public.beegame_usage_events
   where user_id = p_user_id and session_id = p_session_id;
 
   return jsonb_build_object(
@@ -1716,7 +1596,7 @@ begin
       'completion_tokens_delta', event_row.completion_tokens_delta, 'cache_read_tokens_delta', event_row.cache_read_tokens_delta,
       'cache_creation_tokens_delta', event_row.cache_creation_tokens_delta, 'total_tokens_delta', event_row.total_tokens_delta,
       'weighted_tokens', event_row.weighted_tokens, 'weighted_tokens_delta', event_row.weighted_tokens_delta,
-      'shadow_credits_micro', event_row.shadow_credits_micro, 'created_at', event_row.created_at,
+      'credits_micro', event_row.credits_micro, 'created_at', event_row.created_at,
       'metadata', event_row.metadata
     ),
     'cumulative_usage', jsonb_build_object(
@@ -1725,7 +1605,7 @@ begin
       'total_tokens', cumulative_total
     ),
     'cumulative_weighted_tokens', cumulative_weighted,
-    'shadow_credits_micro', cumulative_credits
+    'credits_micro', cumulative_credits
   );
 end
 $$;
@@ -1749,8 +1629,8 @@ as $$
 declare
   wallet_row public.beegame_usage_wallets%rowtype;
   debit_row public.beegame_usage_debit_events%rowtype;
-  shadow_row public.beegame_shadow_usage_events%rowtype;
-  previous_shadow_row public.beegame_shadow_usage_events%rowtype;
+  usage_row public.beegame_usage_events%rowtype;
+  previous_usage_row public.beegame_usage_events%rowtype;
   result_payload jsonb;
   amount_micro bigint;
   prompt_tokens bigint := greatest(0, coalesce((p_usage->>'prompt_tokens')::bigint, 0));
@@ -1778,35 +1658,34 @@ begin
     return jsonb_set(debit_row.result, '{duplicate}', 'true'::jsonb);
   end if;
 
-  select * into shadow_row
-  from public.beegame_shadow_usage_events
+  select * into usage_row
+  from public.beegame_usage_events
   where user_id = p_user_id and idempotency_key = p_idempotency_key;
 
-  perform public.beegame_migrate_usage_wallet(p_user_id);
   select * into wallet_row
   from public.beegame_usage_wallets
   where user_id = p_user_id
   for update;
 
   weighted_tokens := ceil((prompt_tokens * 100 + cache_read_tokens * 25 + cache_creation_tokens * 125 + completion_tokens * 500)::numeric / 100)::bigint;
-  if shadow_row.id is not null then
-    amount_micro := shadow_row.weighted_tokens_delta * 100;
+  if usage_row.id is not null then
+    amount_micro := usage_row.weighted_tokens_delta * 100;
   else
-    select * into previous_shadow_row
-    from public.beegame_shadow_usage_events
+    select * into previous_usage_row
+    from public.beegame_usage_events
     where user_id = p_user_id and session_id = p_session_id
     order by created_at desc, id desc
     limit 1;
-    if previous_shadow_row.id is not null then
-      reset_epoch := prompt_tokens < previous_shadow_row.prompt_tokens or
-        completion_tokens < previous_shadow_row.completion_tokens or
-        cache_read_tokens < previous_shadow_row.cache_read_tokens or
-        cache_creation_tokens < previous_shadow_row.cache_creation_tokens or
-        coalesce((p_usage->>'total_tokens')::bigint, 0) < previous_shadow_row.total_tokens;
-      previous_weighted_tokens := previous_shadow_row.weighted_tokens;
+    if previous_usage_row.id is not null then
+      reset_epoch := prompt_tokens < previous_usage_row.prompt_tokens or
+        completion_tokens < previous_usage_row.completion_tokens or
+        cache_read_tokens < previous_usage_row.cache_read_tokens or
+        cache_creation_tokens < previous_usage_row.cache_creation_tokens or
+        coalesce((p_usage->>'total_tokens')::bigint, 0) < previous_usage_row.total_tokens;
+      previous_weighted_tokens := previous_usage_row.weighted_tokens;
     end if;
     amount_micro := case
-      when reset_epoch or previous_shadow_row.id is null then weighted_tokens * 100
+      when reset_epoch or previous_usage_row.id is null then weighted_tokens * 100
       else greatest(0, weighted_tokens - previous_weighted_tokens) * 100
     end;
   end if;
@@ -1814,7 +1693,7 @@ begin
     raise exception 'Insufficient realtime usage credits';
   end if;
 
-  result_payload := public.beegame_record_shadow_usage(
+  result_payload := public.beegame_record_usage(
     p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key,
     p_usage, p_metadata, p_pricing_version, p_usage_source
   );
@@ -1828,598 +1707,6 @@ begin
       updated_at = now()
   where user_id = p_user_id;
   return result_payload;
-end
-$$;
-
-create or replace function public.beegame_reserve_credits(
-  p_user_id uuid,
-  p_credits integer,
-  p_kind text default null,
-  p_project_id text default null,
-  p_metadata jsonb default '{}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-  reservation_uuid uuid;
-  available_credits integer;
-begin
-  if p_user_id is null then
-    raise exception 'User id is required';
-  end if;
-  if coalesce(auth.role(), '') <> 'service_role' and (
-    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
-  if p_credits is null or p_credits <= 0 then
-    raise exception 'Credits must be positive';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_user_id)
-  on conflict (user_id) do nothing;
-
-  select *
-  into account_row
-  from public.beegame_credit_accounts
-  where user_id = p_user_id
-  for update;
-
-  available_credits :=
-    account_row.included_credits -
-    account_row.consumed_credits -
-    account_row.reserved_credits;
-
-  if available_credits < p_credits then
-    raise exception 'Insufficient credits';
-  end if;
-
-  reservation_uuid := gen_random_uuid();
-
-  update public.beegame_credit_accounts
-  set reserved_credits = reserved_credits + p_credits,
-      updated_at = now()
-  where user_id = p_user_id
-  returning * into account_row;
-
-  insert into public.beegame_credit_ledger (
-    id,
-    user_id,
-    project_id,
-    reservation_id,
-    kind,
-    credits,
-    weighted_tokens,
-    metadata
-  )
-  values (
-    reservation_uuid,
-    p_user_id,
-    p_project_id,
-    reservation_uuid::text,
-    'reserve',
-    p_credits,
-    null,
-    coalesce(p_metadata, '{}'::jsonb) ||
-      case
-        when p_kind is null or p_kind = '' then '{}'::jsonb
-        else jsonb_build_object('kind', p_kind)
-      end
-  );
-
-  return jsonb_build_object(
-    'reservation_id', reservation_uuid::text,
-    'reserved_credits', p_credits,
-    'account', to_jsonb(account_row)
-  );
-end
-$$;
-
-create or replace function public.beegame_settle_credit_reservation(
-  p_user_id uuid,
-  p_reservation_id text,
-  p_weighted_tokens integer,
-  p_credit_unit_weighted_tokens integer default 10000,
-  p_project_id text default null,
-  p_metadata jsonb default '{}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-  reservation_row public.beegame_credit_ledger%rowtype;
-  reservation_credits integer;
-  weighted_tokens integer;
-  credit_unit integer;
-  available_unreserved_credits integer;
-  settled_credits integer;
-  refunded_credits integer;
-  target_project_id text;
-begin
-  if p_user_id is null then
-    raise exception 'User id is required';
-  end if;
-  if coalesce(auth.role(), '') <> 'service_role' and (
-    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
-  if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
-    raise exception 'Reservation id is required';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_user_id)
-  on conflict (user_id) do nothing;
-
-  select *
-  into account_row
-  from public.beegame_credit_accounts
-  where user_id = p_user_id
-  for update;
-
-  select *
-  into reservation_row
-  from public.beegame_credit_ledger
-  where user_id = p_user_id
-    and reservation_id = p_reservation_id
-    and kind = 'reserve'
-  order by created_at asc
-  limit 1;
-
-  if not found then
-    raise exception 'Credit reservation not found';
-  end if;
-
-  if exists (
-    select 1
-    from public.beegame_credit_ledger
-    where user_id = p_user_id
-      and reservation_id = p_reservation_id
-      and kind in ('settle', 'refund')
-  ) then
-    raise exception 'Credit reservation already settled';
-  end if;
-
-  reservation_credits := reservation_row.credits;
-  weighted_tokens := greatest(coalesce(p_weighted_tokens, 0), 0);
-  credit_unit := greatest(coalesce(p_credit_unit_weighted_tokens, 10000), 1);
-  settled_credits := greatest(
-    1,
-    ceil(weighted_tokens::numeric / credit_unit::numeric)::integer
-  );
-  available_unreserved_credits := greatest(
-    0,
-    coalesce(account_row.included_credits, 0) -
-      coalesce(account_row.consumed_credits, 0) -
-      coalesce(account_row.reserved_credits, 0)
-  );
-  if greatest(0, settled_credits - reservation_credits) > available_unreserved_credits then
-    raise exception 'Insufficient credits to settle actual token usage';
-  end if;
-  refunded_credits := greatest(0, reservation_credits - settled_credits);
-  target_project_id := coalesce(p_project_id, reservation_row.project_id);
-
-  update public.beegame_credit_accounts
-  set consumed_credits = consumed_credits + settled_credits,
-      reserved_credits = greatest(
-        0,
-        public.beegame_credit_accounts.reserved_credits - reservation_credits
-      ),
-      updated_at = now()
-  where user_id = p_user_id
-  returning * into account_row;
-
-  insert into public.beegame_credit_ledger (
-    user_id,
-    project_id,
-    reservation_id,
-    kind,
-    credits,
-    weighted_tokens,
-    metadata
-  )
-  values (
-    p_user_id,
-    target_project_id,
-    p_reservation_id,
-    'settle',
-    settled_credits,
-    weighted_tokens,
-    coalesce(p_metadata, '{}'::jsonb)
-  );
-
-  if refunded_credits > 0 then
-    insert into public.beegame_credit_ledger (
-      user_id,
-      project_id,
-      reservation_id,
-      kind,
-      credits,
-      weighted_tokens,
-      metadata
-    )
-    values (
-      p_user_id,
-      target_project_id,
-      p_reservation_id,
-      'refund',
-      refunded_credits,
-      null,
-      jsonb_build_object('reason', 'unused_reservation')
-    );
-  end if;
-
-  return jsonb_build_object(
-    'reservation_id', p_reservation_id,
-    'reserved_credits', reservation_credits,
-    'settled_credits', settled_credits,
-    'refunded_credits', refunded_credits,
-    'account', to_jsonb(account_row)
-  );
-end
-$$;
-
-create or replace function public.beegame_refund_credit_reservation(
-  p_user_id uuid,
-  p_reservation_id text,
-  p_project_id text default null,
-  p_metadata jsonb default '{}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-  reservation_row public.beegame_credit_ledger%rowtype;
-  target_project_id text;
-begin
-  if p_user_id is null then
-    raise exception 'User id is required';
-  end if;
-  if coalesce(auth.role(), '') <> 'service_role' and (
-    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
-  if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
-    raise exception 'Reservation id is required';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_user_id)
-  on conflict (user_id) do nothing;
-
-  select *
-  into account_row
-  from public.beegame_credit_accounts
-  where user_id = p_user_id
-  for update;
-
-  select *
-  into reservation_row
-  from public.beegame_credit_ledger
-  where user_id = p_user_id
-    and reservation_id = p_reservation_id
-    and kind = 'reserve'
-  order by created_at asc
-  limit 1;
-
-  if not found then
-    raise exception 'Credit reservation not found';
-  end if;
-
-  if exists (
-    select 1
-    from public.beegame_credit_ledger
-    where user_id = p_user_id
-      and reservation_id = p_reservation_id
-      and kind in ('settle', 'refund')
-  ) then
-    raise exception 'Credit reservation already settled';
-  end if;
-
-  target_project_id := coalesce(p_project_id, reservation_row.project_id);
-
-  update public.beegame_credit_accounts
-  set reserved_credits = greatest(0, reserved_credits - reservation_row.credits),
-      updated_at = now()
-  where user_id = p_user_id
-  returning * into account_row;
-
-  insert into public.beegame_credit_ledger (
-    user_id,
-    project_id,
-    reservation_id,
-    kind,
-    credits,
-    weighted_tokens,
-    metadata
-  )
-  values (
-    p_user_id,
-    target_project_id,
-    p_reservation_id,
-    'refund',
-    reservation_row.credits,
-    null,
-    coalesce(p_metadata, jsonb_build_object('reason', 'reservation_refunded'))
-  );
-
-  return jsonb_build_object(
-    'reservation_id', p_reservation_id,
-    'reserved_credits', reservation_row.credits,
-    'settled_credits', 0,
-    'refunded_credits', reservation_row.credits,
-    'account', to_jsonb(account_row)
-  );
-end
-$$;
-
-create or replace function public.beegame_expire_stale_credit_reservations(
-  p_user_id uuid,
-  p_older_than timestamptz,
-  p_project_id text default null,
-  p_metadata jsonb default '{"reason":"stale_reservation_expired"}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-  expired_ids text[];
-  refunded_credits integer;
-begin
-  if p_user_id is null then
-    raise exception 'User id is required';
-  end if;
-  if coalesce(auth.role(), '') <> 'service_role' and (
-    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
-  if p_older_than is null then
-    raise exception 'Expiry cutoff is required';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_user_id)
-  on conflict (user_id) do nothing;
-
-  select *
-  into account_row
-  from public.beegame_credit_accounts
-  where user_id = p_user_id
-  for update;
-
-  with stale_reservations as (
-    select reserve.reservation_id, reserve.project_id, reserve.credits
-    from public.beegame_credit_ledger reserve
-    where reserve.user_id = p_user_id
-      and reserve.kind = 'reserve'
-      and reserve.created_at < p_older_than
-      and (p_project_id is null or reserve.project_id = p_project_id)
-      and not exists (
-        select 1
-        from public.beegame_credit_ledger completed
-        where completed.user_id = reserve.user_id
-          and completed.reservation_id = reserve.reservation_id
-          and completed.kind in ('settle', 'refund')
-      )
-  ),
-  inserted_refunds as (
-    insert into public.beegame_credit_ledger (
-      user_id,
-      project_id,
-      reservation_id,
-      kind,
-      credits,
-      weighted_tokens,
-      metadata
-    )
-    select
-      p_user_id,
-      stale_reservations.project_id,
-      stale_reservations.reservation_id,
-      'refund',
-      stale_reservations.credits,
-      null,
-      coalesce(p_metadata, '{"reason":"stale_reservation_expired"}'::jsonb)
-    from stale_reservations
-    returning reservation_id, credits
-  )
-  select
-    coalesce(array_agg(reservation_id), '{}'::text[]),
-    coalesce(sum(credits), 0)::integer
-  into expired_ids, refunded_credits
-  from inserted_refunds;
-
-  if refunded_credits > 0 then
-    update public.beegame_credit_accounts
-    set reserved_credits = greatest(0, reserved_credits - refunded_credits),
-        updated_at = now()
-    where user_id = p_user_id
-    returning * into account_row;
-  end if;
-
-  return jsonb_build_object(
-    'expired_reservation_ids', expired_ids,
-    'refunded_credits', refunded_credits,
-    'account', to_jsonb(account_row)
-  );
-end
-$$;
-
-create or replace function public.beegame_admin_grant_credits(
-  p_target_user_id uuid,
-  p_credits integer,
-  p_metadata jsonb default '{"source":"manual"}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-begin
-  if auth.uid() is null or public.beegame_is_platform_owner() is false then
-    raise exception 'Forbidden';
-  end if;
-  if p_target_user_id is null then
-    raise exception 'Target user id is required';
-  end if;
-  if p_credits is null or p_credits <= 0 then
-    raise exception 'Credits must be positive';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_target_user_id)
-  on conflict (user_id) do nothing;
-
-  update public.beegame_credit_accounts
-  set included_credits = included_credits + p_credits,
-      updated_at = now()
-  where user_id = p_target_user_id
-  returning * into account_row;
-
-  perform public.beegame_migrate_usage_wallet(p_target_user_id);
-  update public.beegame_usage_wallets
-  set included_credits_micro = included_credits_micro + (p_credits::bigint * 1000000),
-      updated_at = now()
-  where user_id = p_target_user_id;
-
-  insert into public.beegame_credit_ledger (
-    user_id,
-    project_id,
-    reservation_id,
-    kind,
-    credits,
-    weighted_tokens,
-    metadata
-  )
-  values (
-    p_target_user_id,
-    null,
-    null,
-    'grant',
-    p_credits,
-    null,
-    coalesce(p_metadata, '{"source":"manual"}'::jsonb) ||
-      jsonb_build_object('granted_by', auth.uid())
-  );
-
-  return jsonb_build_object(
-    'granted_credits', p_credits,
-    'account', to_jsonb(account_row)
-  );
-end
-$$;
-
-drop function if exists public.beegame_admin_upsert_stripe_webhook_secret(text);
-drop function if exists public.beegame_admin_upsert_payment_provider_secret(text, text);
-drop function if exists public.beegame_payment_provider_grant_credits(uuid, integer, text, jsonb);
-drop table if exists public.beegame_payment_provider_secrets;
-
-create or replace function public.beegame_payment_provider_grant_credits(
-  p_target_user_id uuid,
-  p_credits integer,
-  p_metadata jsonb default '{"source":"payment_provider"}'::jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  account_row public.beegame_credit_accounts%rowtype;
-  provider_name text;
-  provider_reference text;
-begin
-  provider_name := coalesce(nullif(trim(p_metadata->>'provider'), ''), '');
-  provider_reference := coalesce(nullif(trim(p_metadata->>'providerReference'), ''), '');
-
-  if p_target_user_id is null then
-    raise exception 'Target user id is required';
-  end if;
-  if p_credits is null or p_credits <= 0 then
-    raise exception 'Credits must be positive';
-  end if;
-  if provider_name = '' or provider_reference = '' then
-    raise exception 'Payment provider and provider reference are required';
-  end if;
-
-  insert into public.beegame_credit_accounts (user_id)
-  values (p_target_user_id)
-  on conflict (user_id) do nothing;
-
-  select *
-  into account_row
-  from public.beegame_credit_accounts
-  where user_id = p_target_user_id
-  for update;
-
-  if exists (
-    select 1
-    from public.beegame_credit_ledger
-    where user_id = p_target_user_id
-      and kind = 'grant'
-      and metadata->>'provider' = provider_name
-      and metadata->>'providerReference' = provider_reference
-  ) then
-    return jsonb_build_object(
-      'granted_credits', 0,
-      'account', to_jsonb(account_row)
-    );
-  end if;
-
-  update public.beegame_credit_accounts
-  set included_credits = included_credits + p_credits,
-      updated_at = now()
-  where user_id = p_target_user_id
-  returning * into account_row;
-
-  perform public.beegame_migrate_usage_wallet(p_target_user_id);
-  update public.beegame_usage_wallets
-  set included_credits_micro = included_credits_micro + (p_credits::bigint * 1000000),
-      updated_at = now()
-  where user_id = p_target_user_id;
-
-  insert into public.beegame_credit_ledger (
-    user_id,
-    project_id,
-    reservation_id,
-    kind,
-    credits,
-    weighted_tokens,
-    metadata
-  )
-  values (
-    p_target_user_id,
-    null,
-    null,
-    'grant',
-    p_credits,
-    null,
-    coalesce(p_metadata, '{"source":"payment_provider"}'::jsonb)
-  );
-
-  return jsonb_build_object(
-    'granted_credits', p_credits,
-    'account', to_jsonb(account_row)
-  );
 end
 $$;
 
@@ -2483,8 +1770,6 @@ alter table public.beegame_resource_dependencies enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
-alter table public.beegame_credit_accounts enable row level security;
-alter table public.beegame_credit_ledger enable row level security;
 alter table public.beegame_billing_credit_packs enable row level security;
 alter table public.beegame_billing_events enable row level security;
 alter table public.beegame_audit_events enable row level security;
@@ -2633,15 +1918,6 @@ drop policy if exists "account link owner access" on public.beegame_account_link
 create policy "account link owner access" on public.beegame_account_links
   for select using (user_id = auth.uid() or account_id = public.beegame_account_id(auth.uid()));
 
-drop policy if exists "credit account owner access" on public.beegame_credit_accounts;
-create policy "credit account owner access" on public.beegame_credit_accounts
-  for all using (user_id = public.beegame_account_id(auth.uid()))
-  with check (user_id = public.beegame_account_id(auth.uid()));
-
-drop policy if exists "credit ledger owner access" on public.beegame_credit_ledger;
-create policy "credit ledger owner access" on public.beegame_credit_ledger
-  for select using (user_id = public.beegame_account_id(auth.uid()));
-
 drop policy if exists "billing credit packs owner read" on public.beegame_billing_credit_packs;
 create policy "billing credit packs owner read" on public.beegame_billing_credit_packs
   for select using (public.beegame_is_platform_owner());
@@ -2686,24 +1962,6 @@ grant execute on function public.beegame_runtime_env(uuid, text, text) to authen
 
 revoke execute on function public.beegame_set_default_model_config(uuid, text) from public;
 grant execute on function public.beegame_set_default_model_config(uuid, text) to authenticated;
-
-revoke execute on function public.beegame_reserve_credits(uuid, integer, text, text, jsonb) from public;
-grant execute on function public.beegame_reserve_credits(uuid, integer, text, text, jsonb) to authenticated;
-
-revoke execute on function public.beegame_settle_credit_reservation(uuid, text, integer, integer, text, jsonb) from public;
-grant execute on function public.beegame_settle_credit_reservation(uuid, text, integer, integer, text, jsonb) to authenticated;
-
-revoke execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) from public;
-grant execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) to authenticated;
-
-revoke execute on function public.beegame_expire_stale_credit_reservations(uuid, timestamptz, text, jsonb) from public;
-grant execute on function public.beegame_expire_stale_credit_reservations(uuid, timestamptz, text, jsonb) to authenticated;
-
-revoke execute on function public.beegame_admin_grant_credits(uuid, integer, jsonb) from public;
-grant execute on function public.beegame_admin_grant_credits(uuid, integer, jsonb) to authenticated;
-
-revoke execute on function public.beegame_payment_provider_grant_credits(uuid, integer, jsonb) from public;
-grant execute on function public.beegame_payment_provider_grant_credits(uuid, integer, jsonb) to service_role;
 
 revoke execute on function public.beegame_delete_current_user() from public;
 grant execute on function public.beegame_delete_current_user() to authenticated;

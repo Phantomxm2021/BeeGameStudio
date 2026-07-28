@@ -605,20 +605,14 @@ describe('DashboardRepository Supabase boundaries', () => {
         fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
           const url = String(input)
           calls.push(url)
-          if (url.includes('/beegame_credit_accounts')) {
+          if (url.includes('/beegame_usage_wallets')) {
             return Response.json([
               {
                 user_id: 'canonical-user',
-                plan: 'free',
-                included_credits: 300,
-                consumed_credits: 7,
-                reserved_credits: 2,
-                updated_at: '2026-07-01T00:00:00.000Z',
+                included_credits_micro: 300_000_000,
+                consumed_credits_micro: 7_000_000,
               },
             ])
-          }
-          if (url.includes('/beegame_credit_ledger')) {
-            return Response.json([])
           }
           return new Response('not found', { status: 404 })
         }) as unknown as typeof fetch,
@@ -635,11 +629,9 @@ describe('DashboardRepository Supabase boundaries', () => {
 
     try {
       const balance = await repository.getCreditBalance(request, user)
-      await repository.listCreditLedger(request, user)
 
       expect(balance.userId).toBe('canonical-user')
       expect(calls[0]).toContain('user_id=eq.canonical-user')
-      expect(calls[1]).toContain('user_id=eq.canonical-user')
       expect(calls.join('\n')).not.toContain('oauth-provider-user')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })

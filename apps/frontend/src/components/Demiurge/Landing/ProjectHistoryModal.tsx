@@ -4,7 +4,7 @@ import { Clock, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
-import { getCreditSummary, type BeeGameCreditSummary } from '../../../services/creditsApi';
+import { getCreditSummary, type BeeGameUsageSummary } from '../../../services/creditsApi';
 import { Skeleton } from '../../ui/skeleton';
 
 interface ProjectHistoryModalProps {
@@ -40,7 +40,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-  const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameCreditSummary>>({});
+  const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
   const t = useCommonText(lang);
   const text = useBeeGameText(lang);
 
@@ -125,7 +125,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
       }),
     ).then(entries => {
       if (cancelled) return;
-      setCreditSummaries(Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, BeeGameCreditSummary]>));
+      setCreditSummaries(Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, BeeGameUsageSummary]>));
     });
     return () => {
       cancelled = true;
@@ -223,7 +223,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         {creditSummary ? (
                           <>
                             <span className="text-zinc-300">
-                              {formatCreditAmount(creditSummary.settledCredits)} credits
+                              {formatCreditAmount(creditSummary.consumedCredits)} credits
                             </span>
                           </>
                         ) : (

@@ -172,7 +172,7 @@ export type WebSocketMessageType =
   | 'artifact_created' // Real-time artifact created event
   | 'context_update' // Context bundle visibility event
   | 'project_renamed' // Project renamed event (AI auto-naming)
-  | 'credit_update'; // Credit balance or ledger changed
+  ;
 
 export interface RuntimeContextEvidence {
   bundle_id?: string;
@@ -318,13 +318,10 @@ export interface WebSocketMessage {
   requires_user_action?: boolean;
 
   /** Credit event kind, used for balance/ledger refresh */
-  credit_event?: 'credit.settled' | 'credit.refunded';
 
   /** Latest credit balance from backend event payload */
-  balance_credits?: number;
 
   /** Credit delta from backend event payload */
-  credits?: number;
   
   /** External timestamp from backend (Unix ms) */
   timestamp?: number;

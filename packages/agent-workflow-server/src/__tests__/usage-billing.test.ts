@@ -3,14 +3,14 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  calculateShadowCreditsMicro,
-  calculateShadowWeightedTokens,
-  recordShadowUsage,
-  summarizeShadowUsage,
-} from '../usage-billing-shadow'
+  calculateCreditsMicro,
+  calculateWeightedTokens,
+  recordUsage,
+  summarizeUsage,
+} from '../usage-billing'
 
 const usage = (
-  input: Partial<Parameters<typeof calculateShadowWeightedTokens>[0]> = {},
+  input: Partial<Parameters<typeof calculateWeightedTokens>[0]> = {},
 ) => ({
   prompt_tokens: 100,
   completion_tokens: 20,
@@ -20,18 +20,18 @@ const usage = (
   ...input,
 })
 
-describe('shadow token billing', () => {
+describe('usage token billing', () => {
   test('uses the weighted token pricing baseline and fractional credits', () => {
-    expect(calculateShadowWeightedTokens(usage())).toBe(200)
+    expect(calculateWeightedTokens(usage())).toBe(200)
     expect(
-      calculateShadowWeightedTokens({ ...usage(), cache_read_tokens: 100 }),
+      calculateWeightedTokens({ ...usage(), cache_read_tokens: 100 }),
     ).toBe(225)
-    expect(calculateShadowCreditsMicro(10_000)).toBe(1_000_000)
+    expect(calculateCreditsMicro(10_000)).toBe(1_000_000)
   })
 
   test('records only the usage delta for repeated cumulative snapshots', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-shadow-'))
-    const first = recordShadowUsage({
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-usage-'))
+    const first = recordUsage({
       dataDir,
       userId: 'user-1',
       sessionId: 'session-1',
@@ -39,7 +39,7 @@ describe('shadow token billing', () => {
       usage: usage(),
       idempotencyKey: 'session-1:usage:1',
     })
-    const repeated = recordShadowUsage({
+    const repeated = recordUsage({
       dataDir,
       userId: 'user-1',
       sessionId: 'session-1',
@@ -50,11 +50,11 @@ describe('shadow token billing', () => {
 
     expect(first.event.weightedTokensDelta).toBe(200)
     expect(repeated.event.weightedTokensDelta).toBe(0)
-    expect(repeated.shadowCreditsMicro).toBe(first.shadowCreditsMicro)
+    expect(repeated.creditsMicro).toBe(first.creditsMicro)
   })
 
   test('is idempotent for a repeated event key', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-shadow-'))
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-usage-'))
     const input = {
       dataDir,
       userId: 'user-1',
@@ -62,10 +62,10 @@ describe('shadow token billing', () => {
       usage: usage(),
       idempotencyKey: 'session-1:usage:1',
     }
-    const first = recordShadowUsage(input)
-    const repeated = recordShadowUsage(input)
+    const first = recordUsage(input)
+    const repeated = recordUsage(input)
     const stored = JSON.parse(
-      await readFile(join(dataDir, 'usage-billing-shadow.json'), 'utf8'),
+      await readFile(join(dataDir, 'usage-billing-events.json'), 'utf8'),
     )
 
     expect(repeated.duplicate).toBe(true)
@@ -74,16 +74,16 @@ describe('shadow token billing', () => {
   })
 
   test('summarizes incremental events without re-adding cumulative snapshots', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-shadow-'))
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-usage-'))
     const events = [
-      recordShadowUsage({
+      recordUsage({
         dataDir,
         userId: 'user-1',
         sessionId: 'session-1',
         usage: usage(),
         idempotencyKey: 'session-1:usage:1',
       }).event,
-      recordShadowUsage({
+      recordUsage({
         dataDir,
         userId: 'user-1',
         sessionId: 'session-1',
@@ -95,7 +95,7 @@ describe('shadow token billing', () => {
         idempotencyKey: 'session-1:usage:2',
       }).event,
     ]
-    const summary = summarizeShadowUsage(events)
+    const summary = summarizeUsage(events)
 
     expect(summary.promptTokens).toBe(150)
     expect(summary.completionTokens).toBe(30)
@@ -104,8 +104,8 @@ describe('shadow token billing', () => {
   })
 
   test('starts a new accounting epoch when a provider snapshot resets', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-shadow-'))
-    recordShadowUsage({
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-usage-'))
+    recordUsage({
       dataDir,
       userId: 'user-1',
       sessionId: 'session-1',
@@ -116,7 +116,7 @@ describe('shadow token billing', () => {
       }),
       idempotencyKey: 'session-1:usage:1',
     })
-    const nextEpoch = recordShadowUsage({
+    const nextEpoch = recordUsage({
       dataDir,
       userId: 'user-1',
       sessionId: 'session-1',

@@ -71,12 +71,11 @@ import {
 import {
   getBillingCreditPacks,
   getBillingEvents,
-  getCreditAuditLedger,
+  getCreditSummary,
   upsertBillingCreditPack,
   type BeeGameBillingCreditPack,
   type BeeGameBillingEvent,
-  type BeeGameCreditAuditLedger,
-  type BeeGameCreditLedgerEntry,
+  type BeeGameUsageSummary,
 } from '../../../services/creditsApi';
 import {
   getProjectLifecycleOverview,
@@ -252,8 +251,8 @@ export function SettingsMenu({
   const [projectLifecycleStatus, setProjectLifecycleStatus] = useState('');
   const [projectRetentionResult, setProjectRetentionResult] = useState<BeeGameProjectRetentionResult | null>(null);
   const [isProjectRetentionRunning, setIsProjectRetentionRunning] = useState(false);
-  const [creditAuditLedger, setCreditAuditLedger] = useState<BeeGameCreditAuditLedger | null>(null);
-  const [creditAuditStatus, setCreditAuditStatus] = useState('');
+  const [usageSummary, setUsageSummary] = useState<BeeGameUsageSummary | null>(null);
+  const [billingStatus, setBillingStatus] = useState('');
   const [billingCreditPacks, setBillingCreditPacks] = useState<BeeGameBillingCreditPack[]>([]);
   const [billingEvents, setBillingEvents] = useState<BeeGameBillingEvent[]>([]);
   const [billingPackForm, setBillingPackForm] = useState(createEmptyBillingPackForm());
@@ -393,16 +392,16 @@ export function SettingsMenu({
         });
     }
     if (effectiveCanManageCredits) {
-      void getCreditAuditLedger()
-        .then(ledger => {
+      void getCreditSummary()
+        .then(summary => {
           if (cancelled) return;
-          setCreditAuditLedger(ledger);
-          setCreditAuditStatus('');
+          setUsageSummary(summary);
+          setBillingStatus('');
         })
         .catch(error => {
           if (!cancelled) {
-            setCreditAuditLedger(null);
-            setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.auditUnavailable);
+            setUsageSummary(null);
+            setBillingStatus(error instanceof Error ? error.message : billingCopy.auditUnavailable);
           }
         });
       void Promise.all([getBillingCreditPacks(), getBillingEvents()])
@@ -416,7 +415,7 @@ export function SettingsMenu({
           if (!cancelled) {
             setBillingCreditPacks([]);
             setBillingEvents([]);
-            setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.billingUnavailable);
+            setBillingStatus(error instanceof Error ? error.message : billingCopy.billingUnavailable);
           }
         });
     }
@@ -958,7 +957,7 @@ export function SettingsMenu({
     const priceId = billingPackForm.priceId.trim();
     const credits = Number(billingPackForm.credits);
     if (!priceId || !Number.isFinite(credits) || credits <= 0) {
-      setCreditAuditStatus(billingCopy.positiveCreditsRequired);
+      setBillingStatus(billingCopy.positiveCreditsRequired);
       return;
     }
     setIsSavingBillingPack(true);
@@ -976,9 +975,9 @@ export function SettingsMenu({
         ),
       );
       setBillingPackForm(createEmptyBillingPackForm());
-      setCreditAuditStatus(billingCopy.packSaved);
+      setBillingStatus(billingCopy.packSaved);
     } catch (error) {
-      setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.packSaveFailed);
+      setBillingStatus(error instanceof Error ? error.message : billingCopy.packSaveFailed);
     } finally {
       setIsSavingBillingPack(false);
     }
@@ -1326,9 +1325,9 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'credit' && effectiveCanManageCredits ? (
-                <CreditAuditPanel
-                  ledger={creditAuditLedger}
-                  status={creditAuditStatus}
+                <UsageBillingPanel
+                  summary={usageSummary}
+                  status={billingStatus}
                   billingCreditPacks={billingCreditPacks}
                   billingEvents={billingEvents}
                   packForm={billingPackForm}
@@ -1603,7 +1602,6 @@ function getBillingSettingsCopy(translate: SettingsTranslate): BillingSettingsCo
     edit: translate('billing.edit'),
     noPacks: translate('billing.noPacks'),
     noEvents: translate('billing.noEvents'),
-    noLedger: translate('billing.noLedger'),
     noReference: translate('billing.noReference'),
     positiveCreditsRequired: translate('billing.positiveCreditsRequired'),
     packSaved: translate('billing.packSaved'),
@@ -1611,7 +1609,7 @@ function getBillingSettingsCopy(translate: SettingsTranslate): BillingSettingsCo
     auditUnavailable: translate('billing.auditUnavailable'),
     billingUnavailable: translate('billing.billingUnavailable'),
     metrics: {
-      settled: translate('billing.metrics.settled'),
+      consumed: translate('billing.metrics.consumed'),
       weightedTokens: translate('billing.metrics.weightedTokens'),
     },
   };
@@ -1841,7 +1839,6 @@ type BillingSettingsCopy = {
   edit: string;
   noPacks: string;
   noEvents: string;
-  noLedger: string;
   noReference: string;
   positiveCreditsRequired: string;
   packSaved: string;
@@ -1849,7 +1846,7 @@ type BillingSettingsCopy = {
   auditUnavailable: string;
   billingUnavailable: string;
   metrics: {
-    settled: string;
+    consumed: string;
     weightedTokens: string;
   };
 };
@@ -2905,8 +2902,8 @@ function ProjectLifecycleDeletionRow({
   );
 }
 
-function CreditAuditPanel({
-  ledger,
+function UsageBillingPanel({
+  summary,
   status,
   billingCreditPacks,
   billingEvents,
@@ -2916,7 +2913,7 @@ function CreditAuditPanel({
   onPackFormChange,
   onSavePack,
 }: {
-  ledger: BeeGameCreditAuditLedger | null;
+  summary: BeeGameUsageSummary | null;
   status: string;
   billingCreditPacks: BeeGameBillingCreditPack[];
   billingEvents: BeeGameBillingEvent[];
@@ -2926,8 +2923,6 @@ function CreditAuditPanel({
   onPackFormChange: (form: BillingPackFormState) => void;
   onSavePack: () => void;
 }) {
-  const summary = ledger?.summary;
-  const entries = ledger?.entries.slice(0, 8) ?? [];
   const recentBillingEvents = billingEvents.slice(0, 8);
   return (
     <div className="space-y-4 py-3">
@@ -3014,10 +3009,7 @@ function CreditAuditPanel({
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <CreditMetric
-          label={copy.metrics.settled}
-          value={`${formatCreditAmount(summary?.settledCredits ?? 0)} credits`}
-        />
+        <CreditMetric label={copy.metrics.consumed} value={`${formatCreditAmount(summary?.consumedCredits ?? 0)} credits`} />
         <CreditMetric label={copy.metrics.weightedTokens} value={String(summary?.weightedTokens ?? 0)} />
       </div>
       {status ? (
@@ -3025,17 +3017,6 @@ function CreditAuditPanel({
           {status}
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-2xl border border-white/10">
-        {entries.length ? (
-          <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-            {entries.map(entry => (
-              <CreditAuditEntryRow key={entry.id} entry={entry} copy={copy} />
-            ))}
-          </div>
-        ) : (
-          <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noLedger}</div>
-        )}
-      </div>
       <div className="overflow-hidden rounded-2xl border border-white/10">
         {recentBillingEvents.length ? (
           <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
@@ -3092,7 +3073,7 @@ function BillingEventRow({ event, copy }: { event: BeeGameBillingEvent; copy: Bi
         </div>
       </div>
       <div className="type-caption-1 text-zinc-500">
-        {event.createdAt ? formatCreditAuditTime(event.createdAt) : ''}
+        {event.createdAt ? formatBillingEventTime(event.createdAt) : ''}
       </div>
     </div>
   );
@@ -3107,29 +3088,13 @@ function CreditMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CreditAuditEntryRow({ entry, copy }: { entry: BeeGameCreditLedgerEntry; copy: BillingSettingsCopy }) {
-  return (
-    <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
-      <div>
-        <div className="type-footnote text-zinc-100">{entry.kind}</div>
-        <div className="type-caption-1 text-zinc-500">{formatCreditAmount(entry.credits)} credits</div>
-      </div>
-      <div className="min-w-0">
-        <div className="type-footnote break-all text-zinc-300">{entry.userId}</div>
-        <div className="type-caption-1 break-all text-zinc-500">{entry.projectId || copy.noReference}</div>
-      </div>
-      <div className="type-caption-1 text-zinc-500">{formatCreditAuditTime(entry.createdAt)}</div>
-    </div>
-  );
-}
-
 function formatCreditAmount(value: number): string {
   return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
     maximumFractionDigits: 1,
   });
 }
 
-function formatCreditAuditTime(value: string): string {
+function formatBillingEventTime(value: string): string {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return value;
   return new Date(time).toLocaleString();

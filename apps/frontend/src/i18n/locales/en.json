@@ -84,11 +84,6 @@
         "emailFallback": "Email not shared",
         "balance": "Balance",
         "consumed": "Used",
-        "loadingCreditDetails": "Loading records...",
-        "viewCreditDetails": "View credit details",
-        "ledgerCount": "{{count}} entries",
-        "noLedgerRecords": "No records",
-        "closeCreditDetails": "Close credit details",
         "deleteAccount": "Delete account",
         "deleteConfirm": "Deleting your account removes your BeeGame login account and cloud data. This cannot be undone. Continue?",
         "deleteFailed": "Unable to delete account. Try again later.",
@@ -330,7 +325,6 @@
       "edit": "Edit",
       "noPacks": "No billing credit packs configured.",
       "noEvents": "No billing events yet.",
-      "noLedger": "No credit ledger entries yet.",
       "noReference": "No reference",
       "positiveCreditsRequired": "Stripe price id and positive credits are required.",
       "packSaved": "Credit pack saved.",
@@ -338,7 +332,7 @@
       "auditUnavailable": "Credit audit unavailable",
       "billingUnavailable": "Billing audit unavailable",
       "metrics": {
-        "settled": "Settled",
+        "consumed": "Consumed",
         "weightedTokens": "Weighted tokens"
       }
     },

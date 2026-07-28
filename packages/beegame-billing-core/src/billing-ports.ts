@@ -4,7 +4,6 @@ export type BeeGameCreditBalance = {
   balanceCredits: number
   includedCredits: number
   consumedCredits: number
-  reservedCredits: number
   creditUnitWeightedTokens: number
   estimates: Record<string, { minCredits: number; maxCredits: number }>
 }
@@ -61,7 +60,7 @@ export type BeeGameBillingCreditPackFilters = {
 }
 
 export type BeeGameBillingRouteRepository = {
-  recordShadowUsageForUser: (
+  recordUsageForUser: (
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ) => Promise<BeeGameUsageBillingRecordResult>

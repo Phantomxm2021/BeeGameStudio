@@ -8,8 +8,8 @@ work, not individual generated game fixes.
 
 ## Current State
 
-- BeeGame dashboard, Supabase Auth/RLS data access, credit quote/reserve/settle
-  flow, runtime host, and Docker deployment scaffolding are implemented.
+- BeeGame dashboard, Supabase Auth/RLS data access, realtime usage billing,
+  runtime host, and Docker deployment scaffolding are implemented.
 - The Docker stack deploys the BeeGame application and local runtime host, and
   has been smoke-tested on a server deployment.
 - Generated game projects are stored in the runtime workspace volume.
@@ -84,50 +84,10 @@ work, not individual generated game fixes.
 
 ## P1
 
-- [x] Credit billing hardening
-  - Problem: quote/reserve/settle/refund exists and interrupted runtime tasks are
-    refunded or settled in tested paths. Stale reservation expiry and recovered
-    pending session credit retries now exist. Operator credit audit data is
-    exposed through permission-gated APIs, and provider-neutral credit grants
-    exist for future payment integration. Stripe Checkout webhook processing
-    now grants mapped credits idempotently after signature verification.
-  - Completed:
-    - Local credit store can expire stale reservations by cutoff time and
-      project, refunding only reservations that have not already settled or
-      refunded.
-    - Supabase RPC `beegame_expire_stale_credit_reservations` provides the same
-      owner-scoped reconciliation under authenticated RLS context.
-    - `/api/credits/reconcile-stale-reservations` exposes a current-user
-      reconciliation endpoint without requiring direct database edits.
-    - `/api/credits/reconcile-pending-session-operations` retries pending
-      settle/refund operations recovered in the current user's runtime sessions.
-    - `/api/admin/credits/ledger` exposes permission-gated credit audit entries
-      and summary totals with structured filters for user, project, kind, and
-      reservation.
-    - Frontend credit API client can call the admin credit audit endpoint.
-    - Local and Supabase credit stores support provider-neutral credit grants
-      that increase included credits and write `grant` ledger entries with
-      payment metadata.
-    - `/api/admin/credits/grants` exposes permission-gated manual/provider
-      credit grants, and the frontend credit API client can call it.
-    - Settings > Platform > Credit exposes a permission-gated operator audit
-      summary and recent ledger entries through the admin credit audit endpoint.
-    - `/api/payments/stripe/webhook` verifies `Stripe-Signature`, maps Stripe
-      Price IDs to credits through `BEEGAME_STRIPE_PRICE_CREDITS`, grants
-      credits, and treats duplicate webhook deliveries as idempotent.
-    - `/api/payments/stripe/credit-packs` exposes configured credit packs to
-      signed-in users, and `/api/payments/stripe/checkout-session` creates
-      Stripe Checkout Sessions only for mapped Price IDs.
-    - The account menu exposes a user-facing `Credit Store`; Settings >
-      Platform > Credit remains the operator audit view.
-    - Supabase schema includes `beegame_payment_provider_grant_credits` scoped
-      to `service_role`; the runtime host uses that server-only key only after
-      Stripe webhook signature verification succeeds.
-  - Acceptance:
-    - Interrupted tasks do not leave credits permanently frozen.
-    - Ledger entries show task type, phase, project, reservation, settlement,
-      refund, and actual usage.
-    - Operators can reconcile credit state without direct database surgery.
+- [x] Realtime usage wallet billing
+  - The realtime usage wallet is the only credit source of truth.
+  - Token usage is recorded idempotently and debited in realtime.
+  - Stripe credit packs grant directly to the realtime wallet.
 
 - [x] Generated project lifecycle controls
   - Problem: project/session deletion can remove local workspace artifacts, new

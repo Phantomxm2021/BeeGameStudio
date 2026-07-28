@@ -404,12 +404,6 @@ begin
     jsonb_build_object('beegame_invitation_redeemed_at', now())
   where id = current_user_id;
 
-  insert into public.beegame_credit_accounts (user_id)
-  values (current_account_id)
-  on conflict (user_id) do update
-  set included_credits = greatest(public.beegame_credit_accounts.included_credits, 300),
-      updated_at = now();
-
   return jsonb_build_object('ok', true);
 end
 $$;
@@ -537,10 +531,6 @@ begin
     where lower(email) = lower(new.email)
       and (claimed_user_id is null or claimed_user_id = new.id);
   end if;
-
-  insert into public.beegame_credit_accounts (user_id, included_credits)
-  values (canonical_account_id, initial_included_credits)
-  on conflict (user_id) do nothing;
 
   return new;
 end

@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { RecordShadowUsageResult } from './usage-billing-shadow'
+import type { RecordUsageResult } from './usage-billing'
 
 const WALLET_FILE = 'realtime-usage-wallet.json'
 const INITIAL_CREDITS_MICRO = 300 * 1_000_000
@@ -27,6 +27,20 @@ export type RealtimeUsageWallet = {
   includedCreditsMicro: number
   consumedCreditsMicro: number
   balanceCreditsMicro: number
+}
+
+export type CreditBalance = RealtimeUsageWallet & {
+  plan: 'free'
+  balanceCredits: number
+  includedCredits: number
+  consumedCredits: number
+  creditUnitWeightedTokens: number
+  estimates: Record<string, { minCredits: number; maxCredits: number }>
+}
+
+export type CreditGrant = {
+  grantedCredits: number
+  balance: CreditBalance
 }
 
 export function grantLocalRealtimeCredits(input: {
@@ -58,8 +72,8 @@ export function debitLocalRealtimeUsage(input: {
   dataDir: string
   userId: string
   idempotencyKey: string
-  shadow: RecordShadowUsageResult
-}): RecordShadowUsageResult {
+  usage: RecordUsageResult
+}): RecordUsageResult {
   const store = loadWallet(input.dataDir)
   const account = store.accounts[input.userId] ?? {
     includedCreditsMicro: INITIAL_CREDITS_MICRO,
@@ -69,16 +83,16 @@ export function debitLocalRealtimeUsage(input: {
   const existingDebit = account.debits[input.idempotencyKey]
   if (existingDebit !== undefined) {
     saveWallet(input.dataDir, store)
-    return { ...input.shadow, duplicate: true }
+    return { ...input.usage, duplicate: true }
   }
-  const amount = Math.max(0, input.shadow.event.shadowCreditsMicro)
+  const amount = Math.max(0, input.usage.event.creditsMicro)
   const available = account.includedCreditsMicro - account.consumedCreditsMicro
   if (available < amount) throw new Error('Insufficient realtime usage credits')
   account.consumedCreditsMicro += amount
   account.debits[input.idempotencyKey] = amount
   store.accounts[input.userId] = account
   saveWallet(input.dataDir, store)
-  return input.shadow
+  return input.usage
 }
 
 export function getLocalRealtimeUsageWallet(input: {

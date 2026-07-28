@@ -15,7 +15,7 @@ function createRepository(
     debitRealTimeUsageForUser: async () => {
       throw new Error('not used')
     },
-    recordShadowUsageForUser: async () => {
+    recordUsageForUser: async () => {
       throw new Error('not used')
     },
     grantPaymentProviderCredits: async () => {

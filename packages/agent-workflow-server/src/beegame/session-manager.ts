@@ -36,10 +36,10 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
-  recordShadowUsage,
-  type ShadowUsage,
-  type RecordShadowUsageResult,
-} from '../usage-billing-shadow'
+  recordUsage,
+  type Usage,
+  type RecordUsageResult,
+} from '../usage-billing'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
   interruptUnfinishedNativeAcceptances,
@@ -386,8 +386,8 @@ type SessionRecord = {
   /** Serializes workflow usage writes without blocking the SDK callback. */
   workflowUsageWriteTail: Promise<void>
   workflowUsageWriteError?: Error
-  /** Serializes shadow billing events without blocking the SDK callback. */
-  shadowUsageWriteTail: Promise<void>
+    /** Serializes usage billing events without blocking the SDK callback. */
+  usageWriteTail: Promise<void>
   resumeEventPending: boolean
 }
 
@@ -444,30 +444,30 @@ export type BeeGameSessionInternalMetadata = {
 }
 
 export type BeeGameSessionUsageBillingBackend = {
-  recordShadowUsage?: (
+  recordUsage?: (
     userId: string,
     options: {
       dataDir: string
       sessionId: string
       turnId?: string
       projectId?: string
-      usage: ShadowUsage
+      usage: Usage
       idempotencyKey: string
       metadata?: Record<string, unknown>
       authToken?: string
     },
-  ) => RecordShadowUsageResult | Promise<RecordShadowUsageResult>
+  ) => RecordUsageResult | Promise<RecordUsageResult>
   debitRealtimeUsage?: (
     userId: string,
     options: Parameters<
-      NonNullable<BeeGameSessionUsageBillingBackend['recordShadowUsage']>
+      NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>
     >[1],
-  ) => RecordShadowUsageResult | Promise<RecordShadowUsageResult>
+  ) => RecordUsageResult | Promise<RecordUsageResult>
 }
 
 const localUsageBillingBackend: BeeGameSessionUsageBillingBackend = {
-  recordShadowUsage: (_userId, input) =>
-    recordShadowUsage({
+  recordUsage: (_userId, input) =>
+    recordUsage({
       ...input,
       userId: _userId,
     }),
@@ -594,7 +594,7 @@ export class BeeGameSessionManager {
       currentTurnId: null,
       workflowUsageCommitted: emptyRuntimeUsage(),
       workflowUsageWriteTail: Promise.resolve(),
-      shadowUsageWriteTail: Promise.resolve(),
+      usageWriteTail: Promise.resolve(),
       resumeEventPending: Boolean(recoveredTranscript),
     }
     if (confirmedBriefContext) {
@@ -1367,30 +1367,30 @@ export class BeeGameSessionManager {
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
-        this.queueShadowUsageRecord(record, submittedTurnId, message)
+        this.queueUsageRecord(record, submittedTurnId, message)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
-    await record.shadowUsageWriteTail
+    await record.usageWriteTail
     if (executionError && !signal.aborted) throw executionError
   }
 
-  private queueShadowUsageRecord(
+  private queueUsageRecord(
     record: SessionRecord,
     turnId: string,
     message: DashboardSDKMessage,
   ): void {
-    if (!this.usageBillingBackend.recordShadowUsage) return
+    if (!this.usageBillingBackend.recordUsage) return
     const usage = this.deriveRuntimeSnapshot(record).usage
     if (usage.total_tokens <= 0) return
-    const idempotencyKey = `shadow:${record.session.id}:${turnId}:${createHash(
+    const idempotencyKey = `usage:${record.session.id}:${turnId}:${createHash(
       'sha256',
     )
       .update(JSON.stringify(usage))
       .digest('hex')}`
-    record.shadowUsageWriteTail = record.shadowUsageWriteTail
+    record.usageWriteTail = record.usageWriteTail
       .then(async () => {
-        const result = await this.usageBillingBackend.recordShadowUsage!(
+        const result = await this.usageBillingBackend.recordUsage!(
           record.userId,
           {
             dataDir: record.userDataRoot ?? this.dashboardDataRoot,
@@ -1430,26 +1430,26 @@ export class BeeGameSessionManager {
               type: 'billing.realtime_debited',
               debitEventId: debit.event.id,
               weightedTokens: debit.event.weightedTokensDelta,
-              shadowCreditsMicro: debit.event.shadowCreditsMicro,
+              creditsMicro: debit.event.creditsMicro,
               pricingVersion: debit.event.pricingVersion,
               idempotencyKey,
             })
           }
         }
         if (!result.duplicate && result.event.weightedTokensDelta > 0) {
-          this.append(record, 'system.status', 'Shadow usage recorded', {
-            type: 'billing.shadow_recorded',
-            shadowEventId: result.event.id,
+          this.append(record, 'system.status', 'Usage recorded', {
+            type: 'billing.usage_recorded',
+            usageEventId: result.event.id,
             weightedTokens: result.event.weightedTokensDelta,
-            shadowCreditsMicro: result.event.shadowCreditsMicro,
+            creditsMicro: result.event.creditsMicro,
             pricingVersion: result.event.pricingVersion,
             idempotencyKey,
           })
         }
       })
       .catch(error => {
-        this.append(record, 'system.status', 'Shadow usage recording failed', {
-          type: 'billing.shadow_record_failed',
+        this.append(record, 'system.status', 'Usage recording failed', {
+          type: 'billing.usage_record_failed',
           error: error instanceof Error ? error.message : String(error),
           idempotencyKey,
         })

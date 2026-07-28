@@ -753,27 +753,6 @@ export const useChat = ({
 
           break
 
-        case 'credit_update':
-          refs
-            .loadCurrentUser()
-            .catch(err =>
-              console.error('[useChat] Credit balance refresh failed:', err),
-            )
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('beegame:credits-updated', {
-                detail: {
-                  projectId: message.project_id,
-                  event: message.credit_event,
-                  balanceCredits: message.balance_credits,
-                  credits: message.credits,
-                },
-              }),
-            )
-          }
-          refs.onTaskEvent?.('credit_update', message)
-          break
-
         case 'p2p_route':
           // Peer-to-peer routing event
           if (message.data) {

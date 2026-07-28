@@ -106,7 +106,6 @@ vi.mock('../services/beeGameAdapter', () => ({
 vi.mock('../services/creditsApi', () => ({
   getCreditQuote: vi.fn().mockResolvedValue({
     taskType: 'edit_turn',
-    reservedCredits: 1,
     balanceCredits: 300,
     canStart: true,
   }),
@@ -270,27 +269,6 @@ describe('useChat clarification gate handling', () => {
       documentTitle: 'GDD.md',
       taskKind: 'artifact_created',
     }));
-  });
-
-  it('refreshes current user credits when credit events arrive', async () => {
-    const onTaskEvent = vi.fn();
-    renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
-
-    act(() => {
-      latestWebSocketOptions.onMessage?.({
-        type: 'credit_update',
-        task_id: 'task_1',
-        project_id: 'proj_1',
-        credit_event: 'credit.refunded',
-        balance_credits: 294,
-        credits: 50,
-      });
-    });
-
-    await waitFor(() => {
-      expect(systemStoreState.loadCurrentUser).toHaveBeenCalled();
-    });
-    expect(onTaskEvent).toHaveBeenCalledWith('credit_update', expect.any(Object));
   });
 
   it('uses BeeGame usage events without issuing a duplicate token request', async () => {

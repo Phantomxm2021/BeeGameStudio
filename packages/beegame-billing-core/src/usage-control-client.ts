@@ -21,7 +21,7 @@ export type BeeGameUsageBillingEvent = {
   delta: BeeGameUsageBillingUsage
   weightedTokens: number
   weightedTokensDelta: number
-  shadowCreditsMicro: number
+  creditsMicro: number
   createdAt: string
   metadata: Record<string, unknown>
 }
@@ -42,11 +42,11 @@ export type BeeGameUsageBillingRecordResult = {
   duplicate: boolean
   cumulativeUsage: BeeGameUsageBillingUsage
   cumulativeWeightedTokens: number
-  shadowCreditsMicro: number
+  creditsMicro: number
 }
 
 export type BeeGameUsageBillingClient = {
-  recordShadowUsage: (
+  recordUsage: (
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ) => Promise<BeeGameUsageBillingRecordResult>
@@ -72,7 +72,7 @@ export function createRemoteUsageBillingClient(
 }
 
 class DisabledRemoteUsageBillingClient implements BeeGameUsageBillingClient {
-  recordShadowUsage(): Promise<BeeGameUsageBillingRecordResult> {
+  recordUsage(): Promise<BeeGameUsageBillingRecordResult> {
     return Promise.reject(remoteUsageBillingConfigError())
   }
 
@@ -88,11 +88,11 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
     private readonly fetchImpl: typeof fetch,
   ) {}
 
-  recordShadowUsage(
+  recordUsage(
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
-    return this.post('/api/internal/usage/shadow-events', {
+    return this.post('/api/internal/usage/events', {
       userId,
       ...input,
     })
