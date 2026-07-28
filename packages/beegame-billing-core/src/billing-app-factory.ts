@@ -26,16 +26,13 @@ export function createBeeGameBillingRouteApp(
       `[BeeGame billing] ${c.req.method} ${c.req.path} failed:`,
       error,
     )
-    if (c.req.path.startsWith('/api/internal/credits/')) {
-      return c.json(
-        {
-          error: 'Credit control operation failed',
-          message: toErrorMessage(error),
-        },
-        500,
-      )
-    }
-    return c.json({ error: 'Billing request failed' }, 500)
+    return c.json(
+      {
+        error: 'Billing request failed',
+        message: toErrorMessage(error),
+      },
+      500,
+    )
   })
 
   app.use('/api/*', cors())
