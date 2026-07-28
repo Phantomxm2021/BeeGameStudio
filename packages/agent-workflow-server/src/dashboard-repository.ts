@@ -90,7 +90,11 @@ import {
   type WebToolsConfig,
 } from './web-tools-store'
 import { getUserDashboardDataRoot } from './local-runtime-service'
-import type { BeeGameUsageBillingClient } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import type {
+  BeeGameUsageBillingClient,
+  BeeGameUsageBillingRecordInput,
+  BeeGameUsageBillingRecordResult,
+} from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import type { BeeGameUsageBillingMode } from '@bee-game-studio/beegame-billing-core/billing-config'
 import type {
   BeeGameBillingCreditPack,
@@ -750,6 +754,42 @@ export class DashboardRepository {
     return debitLocalRealtimeUsage({
       dataDir: this.options.getUserDataRoot(request),
       userId: user.id,
+      idempotencyKey: input.idempotencyKey,
+      shadow,
+    })
+  }
+
+  async recordShadowUsageForUser(
+    userId: string,
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    if (this.options.remoteUsageBilling) {
+      return this.options.remoteUsageBilling.recordShadowUsage(userId, input)
+    }
+    if (this.supabaseStore) {
+      return this.supabaseStore.recordShadowUsage(userId, input)
+    }
+    return recordShadowUsage({
+      ...input,
+      userId,
+      dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+    })
+  }
+
+  async debitRealTimeUsageForUser(
+    userId: string,
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    if (this.options.remoteUsageBilling) {
+      return this.options.remoteUsageBilling.debitRealTimeUsage(userId, input)
+    }
+    if (this.supabaseStore) {
+      return this.supabaseStore.debitRealTimeUsage(userId, input)
+    }
+    const shadow = await this.recordShadowUsageForUser(userId, input)
+    return debitLocalRealtimeUsage({
+      dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+      userId,
       idempotencyKey: input.idempotencyKey,
       shadow,
     })

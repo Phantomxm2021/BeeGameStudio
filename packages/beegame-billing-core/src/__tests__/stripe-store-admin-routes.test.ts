@@ -4,7 +4,7 @@ import type { BeeGameBillingRouteRepository } from '../billing-ports'
 import type { BillingRouteDeps } from '../billing-route-types'
 import { registerBeeGameStripeStoreRoutes } from '../stripe-store-admin-routes'
 
-const billingConfig = { mode: 'server' as const }
+const billingConfig = { mode: 'server' as const, usageBillingMode: 'realtime' as const }
 
 function createRepository(
   overrides: Partial<BeeGameBillingRouteRepository> = {},

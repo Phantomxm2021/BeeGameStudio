@@ -6,6 +6,7 @@ import {
 } from './usage-control-request-helpers'
 import { isObject, readJson } from './http-helpers'
 import type { BillingRouteDeps } from './billing-route-types'
+import type { BeeGameUsageBillingRecordInput } from './usage-control-client'
 
 export function registerBeeGameUsageControlRoutes(
   app: Hono,
@@ -56,7 +57,7 @@ function registerUsageRoute(
         400,
       )
     }
-    const input = {
+    const input: BeeGameUsageBillingRecordInput = {
       sessionId,
       turnId: stringValue(body.turnId) || undefined,
       projectId: stringValue(body.projectId) || undefined,

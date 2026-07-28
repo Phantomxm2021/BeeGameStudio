@@ -29,7 +29,7 @@ async function defaultAudit(
   options?: { includeChecklist?: boolean },
 ): Promise<ReturnType<ReadinessAudit>> {
   const { auditDocumentReadiness } = await import('../document-readiness-audit')
-  return auditDocumentReadiness(workspacePath, options)
+  return auditDocumentReadiness(workspacePath)
 }
 
 async function defaultChecklistIds(workspacePath: string): Promise<string[]> {

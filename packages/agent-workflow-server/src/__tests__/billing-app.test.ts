@@ -117,8 +117,8 @@ describe('BeeGame billing app', () => {
     }
   })
 
-  test('protects internal credit-control mutations with a service token', async () => {
-    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-control-'))
+  test('protects realtime usage debits with a service token', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-usage-billing-'))
     const originalToken = process.env.BEEGAME_CREDIT_CONTROL_TOKEN
     try {
       process.env.BEEGAME_CREDIT_CONTROL_TOKEN = 'control-token-test'
@@ -126,14 +126,14 @@ describe('BeeGame billing app', () => {
         dashboardDataRoot: projectsRoot,
       })
 
-      const forbiddenRes = await billingApp.request('/api/internal/credits/reservations', {
+      const forbiddenRes = await billingApp.request('/api/internal/usage/debits', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ userId: 'customer-a', credits: 10 }),
       })
       expect(forbiddenRes.status).toBe(401)
 
-      const reserveRes = await billingApp.request('/api/internal/credits/reservations', {
+      const debitRes = await billingApp.request('/api/internal/usage/debits', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -141,24 +141,25 @@ describe('BeeGame billing app', () => {
         },
         body: JSON.stringify({
           userId: 'customer-a',
-          credits: 10,
-          kind: 'edit_turn',
+          sessionId: 'session-a',
           projectId: 'project-a',
-          idempotencyKey: 'reserve-once',
+          idempotencyKey: 'debit-once',
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            total_tokens: 120,
+          },
           metadata: { source: 'runtime-host' },
         }),
       })
-      expect(reserveRes.status).toBe(200)
-      const reservation = await reserveRes.json() as {
-        id: string
-        reservedCredits: number
-        balance: { reservedCredits: number }
-      }
-      expect(reservation.id).toBeTruthy()
-      expect(reservation.reservedCredits).toBe(10)
-      expect(reservation.balance.reservedCredits).toBe(10)
+      expect(debitRes.status).toBe(200)
+      const debit = await debitRes.json() as { event: { sessionId: string }; duplicate: boolean }
+      expect(debit.event.sessionId).toBe('session-a')
+      expect(debit.duplicate).toBe(false)
 
-      const replayReserveRes = await billingApp.request('/api/internal/credits/reservations', {
+      const replayDebitRes = await billingApp.request('/api/internal/usage/debits', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -166,63 +167,20 @@ describe('BeeGame billing app', () => {
         },
         body: JSON.stringify({
           userId: 'customer-a',
-          credits: 10,
-          kind: 'edit_turn',
+          sessionId: 'session-a',
           projectId: 'project-a',
-          idempotencyKey: 'reserve-once',
+          idempotencyKey: 'debit-once',
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            total_tokens: 120,
+          },
         }),
       })
-      expect(replayReserveRes.status).toBe(200)
-      expect(await replayReserveRes.json()).toEqual(expect.objectContaining({
-        id: reservation.id,
-        reservedCredits: 10,
-        balance: expect.objectContaining({ reservedCredits: 10 }),
-      }))
-
-      const refundRes = await billingApp.request(
-        `/api/internal/credits/reservations/${reservation.id}/refund`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-beegame-credit-control-token': 'control-token-test',
-          },
-          body: JSON.stringify({
-            userId: 'customer-a',
-            projectId: 'project-a',
-            idempotencyKey: 'refund-once',
-            metadata: { reason: 'test_refund' },
-          }),
-        },
-      )
-      expect(refundRes.status).toBe(200)
-      expect(await refundRes.json()).toEqual(expect.objectContaining({
-        reservationId: reservation.id,
-        refundedCredits: 10,
-        balance: expect.objectContaining({ reservedCredits: 0 }),
-      }))
-
-      const replayRefundRes = await billingApp.request(
-        `/api/internal/credits/reservations/${reservation.id}/refund`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-beegame-credit-control-token': 'control-token-test',
-          },
-          body: JSON.stringify({
-            userId: 'customer-a',
-            projectId: 'project-a',
-            idempotencyKey: 'refund-once',
-          }),
-        },
-      )
-      expect(replayRefundRes.status).toBe(200)
-      expect(await replayRefundRes.json()).toEqual(expect.objectContaining({
-        reservationId: reservation.id,
-        refundedCredits: 10,
-        balance: expect.objectContaining({ reservedCredits: 0 }),
-      }))
+      expect(replayDebitRes.status).toBe(200)
+      expect((await replayDebitRes.json()).duplicate).toBe(true)
     } finally {
       if (originalToken === undefined) {
         delete process.env.BEEGAME_CREDIT_CONTROL_TOKEN
@@ -303,6 +261,7 @@ describe('BeeGame billing app', () => {
         dashboardDataRoot: projectsRoot,
         billingConfig: {
           mode: 'remote',
+          usageBillingMode: 'realtime',
           remoteApiBaseUrl: 'https://billing.beegame.test',
         },
         currentUserResolver: request => {
