@@ -77,4 +77,23 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/Token 用量/)).not.toBeInTheDocument();
     expect(screen.queryByText(/输入 10/)).not.toBeInTheDocument();
   });
+
+  it('keeps the original card width and background while showing only elapsed time', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_4',
+          status: 'completed',
+          currentPhase: 'DELIVERY',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          updatedAt: '2026-07-28T00:01:05.000Z',
+        }}
+      />,
+    );
+
+    const card = screen.getByTestId('beegame-workflow-card-run_4');
+    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'glass-control', 'bg-sky-300/[0.055]');
+    expect(screen.getByText('00:01:05')).toBeInTheDocument();
+    expect(screen.queryByText(/本阶段/)).not.toBeInTheDocument();
+  });
 });

@@ -131,7 +131,7 @@ export function WorkflowCard({
   return (
     <section
       data-testid={`beegame-workflow-card-${workflow.runId}`}
-      className="glass-control w-full max-w-[46rem] overflow-hidden rounded-3xl border border-sky-300/20 bg-sky-300/[0.055] text-zinc-100 shadow-sm backdrop-blur-2xl"
+      className="glass-control box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-sky-300/20 bg-sky-300/[0.055] text-zinc-100 shadow-sm backdrop-blur-2xl"
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
@@ -187,7 +187,7 @@ export function WorkflowCard({
 
             {actionError ? <p role="alert" className="mt-3 text-xs text-rose-300">{actionError}</p> : null}
             <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-              <span className="text-[11px] tabular-nums text-zinc-500">本阶段 {formatDuration(elapsed)}</span>
+              <span className="text-[11px] tabular-nums text-zinc-500">{formatDuration(elapsed)}</span>
               {workflow.nextAction && onAction ? (
                 <button
                   type="button"
