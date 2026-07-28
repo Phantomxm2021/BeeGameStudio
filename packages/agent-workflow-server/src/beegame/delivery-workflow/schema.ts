@@ -97,6 +97,7 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
 export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
     id: z.string().min(1),
+    code: z.string().min(1).optional(),
     title: z.string().min(1),
     sourceRequirementIds: z.array(z.string().min(1)).min(1),
     checklistIds: z.array(z.string().min(1)),
@@ -171,30 +172,28 @@ const resourceEvidenceSchema = z.union([
     .strict(),
 ])
 
+const documentReviewFindingSchema = z
+  .object({
+    id: z.string().min(1),
+    severity: z.enum(['blocking', 'non_blocking']),
+    category: z.enum([
+      'cross_document_conflict',
+      'missing_spec',
+      'calculation',
+      'other',
+    ]),
+    documents: z.array(z.string().min(1)).min(1),
+    description: z.string().min(1),
+    requiredAction: z.string().min(1),
+  })
+  .strict()
+
 const documentRemediationSchema: z.ZodType<DocumentRemediation> = z
   .object({
     sourceRevision: z.string().min(1),
     evidencePath: z.string().min(1),
     attempt: z.number().int().positive(),
-    findings: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1),
-            severity: z.enum(['blocking', 'non_blocking']),
-            category: z.enum([
-              'cross_document_conflict',
-              'missing_spec',
-              'calculation',
-              'other',
-            ]),
-            documents: z.array(z.string().min(1)).min(1),
-            description: z.string().min(1),
-            requiredAction: z.string().min(1),
-          })
-          .strict(),
-      )
-      .min(1),
+    findings: z.array(documentReviewFindingSchema).min(1),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
   })
   .strict()
@@ -277,6 +276,8 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       })
       .strict(),
     documentRemediation: documentRemediationSchema.optional(),
+    documentAdvisories: z.array(documentReviewFindingSchema).optional(),
+    documentReviewCycleCount: z.number().int().positive().optional(),
     checklistRemediation: checklistRemediationSchema.optional(),
     resourceRemediation: resourceRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),

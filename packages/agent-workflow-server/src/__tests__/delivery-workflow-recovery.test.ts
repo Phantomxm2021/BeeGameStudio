@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { retryRun } from '../beegame/delivery-workflow/recovery'
+import {
+  reconcileRunOnStartup,
+  retryRun,
+} from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
   createInitialDeliveryRun,
@@ -41,6 +44,48 @@ describe('delivery workflow recovery', () => {
         event => event.type === 'run.retry_requested',
       ),
     ).toBe(false)
+  })
+
+  test('marks an orphaned running worker interrupted and makes the run retryable', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-restart-recovery-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createInitialDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      activeDispatch: {
+        dispatchId: 'dispatch-1',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+
+    const interrupted = await reconcileRunOnStartup({
+      store,
+      sessionIsOpen: async () => false,
+    })
+    expect(interrupted).toMatchObject({
+      status: 'stopped',
+      thinking: 'idle',
+      activeDispatch: { status: 'interrupted' },
+    })
+
+    const retried = await retryRun({ store, runId: initial.runId })
+    expect(retried).toMatchObject({
+      status: 'running',
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+    })
+    expect(retried.activeDispatch).toBeUndefined()
   })
 
   test('carries exact resource failures into a retry repair contract', async () => {

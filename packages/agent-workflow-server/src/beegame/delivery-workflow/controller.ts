@@ -931,6 +931,9 @@ export function createDeliveryWorkflowController(input: {
         allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
         contract: {
           ...(await contractFactsFor(run)),
+          ...(run.documentAdvisories?.length
+            ? { documentAdvisories: run.documentAdvisories }
+            : {}),
           ...(run.changeRequest ? { changeRequest: run.changeRequest } : {}),
         },
       })

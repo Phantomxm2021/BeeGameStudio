@@ -20,12 +20,12 @@ type EvidenceEvent = { evidence: EvidenceRef }
 
 export type DeliveryTransition =
   | { type: 'documents_ready' }
+  | ({ type: 'document_review_ready' } & EvidenceEvent)
   | ({
-      type:
-        | 'document_review_ready'
-        | 'document_review_needs_revision'
-        | 'document_review_blocked'
+      type: 'document_review_needs_revision'
+      target?: 'foundation' | 'checklist' | 'resource'
     } & EvidenceEvent)
+  | ({ type: 'document_review_blocked' } & EvidenceEvent)
   | ({
       type: 'resource_preparation_ready'
       resourceRevision: string
@@ -207,6 +207,9 @@ export function transitionDeliveryRun(
         ...run,
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
+        documentRemediation: undefined,
+        documentAdvisories: undefined,
+        documentReviewCycleCount: undefined,
         checklistRemediation: undefined,
         updatedAt: timestamp(),
       }
@@ -220,6 +223,8 @@ export function transitionDeliveryRun(
         ...withEvidence(run, 'documentReview', event.evidence),
         phase: 'ATOMIC_TASK_PLANNING',
         documentStep: undefined,
+        documentRemediation: undefined,
+        documentReviewCycleCount: undefined,
       }
       break
     case 'document_review_needs_revision':
@@ -233,8 +238,18 @@ export function transitionDeliveryRun(
       )
       next = {
         ...withEvidence(run, 'documentReview', event.evidence),
-        phase: 'DOCUMENT_DRAFTING',
-        documentStep: 'FOUNDATION_DRAFTING',
+        phase:
+          event.target === 'resource'
+            ? 'RESOURCE_PREPARATION'
+            : event.target === 'checklist'
+              ? 'DOCUMENT_REVIEW'
+              : 'DOCUMENT_DRAFTING',
+        documentStep:
+          event.target === 'resource'
+            ? undefined
+            : event.target === 'checklist'
+              ? 'CHECKLIST_DRAFTING'
+              : 'FOUNDATION_DRAFTING',
         revision: {
           ...run.revision,
           resource: undefined,

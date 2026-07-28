@@ -96,6 +96,7 @@ export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
 export type DocumentReviewFinding = {
   id: string
+  code?: string
   severity: 'blocking' | 'non_blocking'
   category: 'cross_document_conflict' | 'missing_spec' | 'calculation' | 'other'
   documents: string[]
@@ -247,6 +248,10 @@ export type DeliveryRun = {
   }
   /** Exact reviewer corrections carried across author/reviewer retries. */
   documentRemediation?: DocumentRemediation
+  /** Non-blocking review findings preserved for downstream planning. */
+  documentAdvisories?: DocumentReviewFinding[]
+  /** Cumulative blocking review cycles for the current confirmed brief. */
+  documentReviewCycleCount?: number
   /** Deterministic checklist-structure issues carried across bounded author retries. */
   checklistRemediation?: ChecklistRemediation
   /** Exact deterministic resource-contract failures carried into a repair pass. */

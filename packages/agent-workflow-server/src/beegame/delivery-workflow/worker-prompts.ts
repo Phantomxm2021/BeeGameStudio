@@ -58,7 +58,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : []),
     ...(request.workerType === 'document-reviewer'
       ? [
-          'Classify every finding structurally. Any unresolved contradiction between canonical artifacts, missing behavior needed for a unique implementation, or missing acceptance definition is blocking. A READY verdict is valid only when there are zero blocking findings. Do not resolve a contradiction by choosing one document as authority; return NEEDS_REVISION so the documents can be reconciled.',
+          'Classify every finding structurally. Give each finding a short stable code derived from its affected requirement or artifact rule, and preserve that code in follow-up reviews. Any unresolved contradiction between canonical artifacts, missing behavior needed for a unique implementation, or missing acceptance definition is blocking. A READY verdict is valid only when there are zero blocking findings. Do not resolve a contradiction by choosing one document as authority; return NEEDS_REVISION so the documents can be reconciled.',
           request.contract.reviewScope === 'foundation'
             ? 'This is the foundation review substep. Review only the six foundation documents listed in the current workspace; do not require or review docs/acceptance/gameplay-checklist.md yet. Return reviewedDocumentPaths for those six documents and an empty checklistIds array.'
             : 'This is the final comprehensive review substep. Review all six approved foundation documents, docs/acceptance/gameplay-checklist.md, and assets/asset-manifest.json together. Verify their cross-artifact consistency and return all eight paths in reviewedDocumentPaths plus coverage for every checklist ID.',
@@ -80,6 +80,13 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
             : []),
         ]
       : []),
+    ...(request.workerType === 'atomic-task-planner' &&
+    Array.isArray(request.contract.documentAdvisories) &&
+    request.contract.documentAdvisories.length
+      ? [
+          'Non-blocking documentAdvisories do not invalidate the approved review. Carry each advisory into an appropriate implementation or delivery-cleanup task when action is still required; never reinterpret an advisory as a reason to return to document drafting.',
+        ]
+      : []),
     ...(request.workerType === 'implementation-worker'
       ? [
           'Do not edit assets/asset-manifest.json. Report every actual imported-resource reference, composition integration, and requirement satisfaction in the terminal resource arrays. The workflow service validates those paths against the active task and updates the manifest after task completion.',
@@ -96,7 +103,7 @@ function terminalContractInstruction(
     case 'document-author':
       return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","writtenPaths":["<workspace-relative path>"],"resolvedFindingIds":["<review finding id>"]}. The server computes revisions from the written files; do not return revision or documentRevision. Use an empty resolvedFindingIds array outside remediation passes. Do not use worker, succeeded, or changedPaths.'
     case 'document-reviewer':
-      return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":[{"severity":"blocking|non_blocking","category":"cross_document_conflict|missing_spec|calculation|other","documents":["<workspace-relative path>"],"description":"<finding>","requiredAction":"<required correction>"}],"evidencePath":".beegame/workflow/evidence/<file>"}. READY requires zero blocking findings.'
+      return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":[{"code":"<stable finding code>","severity":"blocking|non_blocking","category":"cross_document_conflict|missing_spec|calculation|other","documents":["<workspace-relative path>"],"description":"<finding>","requiredAction":"<required correction>"}],"evidencePath":".beegame/workflow/evidence/<file>"}. READY requires zero blocking findings.'
     case 'resource-preparer':
       return 'Terminal JSON contract (exact keys): {"workerType":"resource-preparer","revision":"<dispatch revision>","status":"completed|failed|blocked","writtenPaths":["<workspace-relative path>"],"importIds":["<import id>"],"compositionIds":["<composition id>"],"evidencePath":".beegame/workflow/evidence/<file>"}.'
     case 'atomic-task-planner':

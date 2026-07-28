@@ -21,6 +21,7 @@ export const documentReviewerTerminalSchema = base
     findings: z.array(
       z
         .object({
+          code: z.string().min(1).optional(),
           severity: z.enum(['blocking', 'non_blocking']),
           category: z.enum([
             'cross_document_conflict',

@@ -17,7 +17,9 @@ import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/c
 import { parseWorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import {
+  CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENTS,
   type DeliveryRun,
   type DeliveryWorkerPort,
   type WorkerDispatchRequest,
@@ -293,7 +295,10 @@ describe('delivery workflow document ordering', () => {
     }
     const checklistPath = 'docs/acceptance/gameplay-checklist.md'
     await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
-    await writeFile(join(workspace, checklistPath), '# Acceptance\nNo tasks yet.\n')
+    await writeFile(
+      join(workspace, checklistPath),
+      '# Acceptance\nNo tasks yet.\n',
+    )
     let run: DeliveryRun = {
       ...createInitialDeliveryRun({
         projectId: 'project-1',
@@ -321,7 +326,7 @@ describe('delivery workflow document ordering', () => {
     }
   })
 
-  test('does not advance a READY review that contains a blocking finding', async () => {
+  test('routes an explicitly blocking review finding into remediation', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-gate-'))
     const evidencePath = '.beegame/workflow/evidence/foundation-review.md'
     await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
@@ -348,14 +353,12 @@ describe('delivery workflow document ordering', () => {
       terminal: {
         workerType: 'document-reviewer',
         revision: run.revision.document,
-        verdict: 'READY',
+        verdict: 'NEEDS_REVISION',
         reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
         checklistIds: [],
         findings: [
           {
-            // Category-level policy remains authoritative even if a reviewer
-            // under-classifies the severity.
-            severity: 'non_blocking',
+            severity: 'blocking',
             category: 'cross_document_conflict',
             documents: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
             description: 'The documents define incompatible runtime behavior.',
@@ -441,6 +444,229 @@ describe('delivery workflow document ordering', () => {
     })
   })
 
+  test('advances a comprehensive READY review with non-blocking findings', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-advisory-'))
+    const evidencePath = '.beegame/workflow/evidence/complete-review.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      revision: {
+        document: 'document-revision-1',
+        resource: 'resource-revision-1',
+        workspace: 'workspace-revision-1',
+      },
+      documentReviewCycleCount: 2,
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.resource,
+        verdict: 'READY',
+        reviewedDocumentPaths: [
+          ...CANONICAL_PROJECT_DOCUMENTS,
+          CANONICAL_ASSET_MANIFEST,
+        ],
+        checklistIds: [],
+        findings: [
+          {
+            severity: 'non_blocking',
+            category: 'missing_spec',
+            documents: [CANONICAL_ASSET_MANIFEST],
+            description: 'Implementation-time icon provenance is pending.',
+            requiredAction:
+              'Record final icon provenance during implementation.',
+          },
+          {
+            severity: 'non_blocking',
+            category: 'cross_document_conflict',
+            documents: ['docs/ASSET_PLAN.md'],
+            description: 'A referenced metadata version is stale.',
+            requiredAction: 'Refresh the metadata version before delivery.',
+          },
+        ],
+        evidencePath,
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      phase: 'ATOMIC_TASK_PLANNING',
+      status: 'running',
+      evidence: {
+        documentReview: {
+          revision: 'resource-revision-1',
+          status: 'ready',
+        },
+      },
+      documentAdvisories: [
+        { severity: 'non_blocking', category: 'missing_spec' },
+        { severity: 'non_blocking', category: 'cross_document_conflict' },
+      ],
+    })
+    expect(reconciled.documentRemediation).toBeUndefined()
+    expect(reconciled.documentReviewCycleCount).toBeUndefined()
+    expect(reconciled.revision.resource).toBe('resource-revision-1')
+  })
+
+  test('rejects an internally inconsistent READY result without guessing a verdict', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-invalid-'))
+    const evidencePath = '.beegame/workflow/evidence/invalid-review.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.document,
+        verdict: 'READY',
+        reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        checklistIds: [],
+        findings: [
+          {
+            severity: 'blocking',
+            category: 'missing_spec',
+            documents: ['docs/GDD.md'],
+            description: 'A required behavior is absent.',
+            requiredAction: 'Define the behavior.',
+          },
+        ],
+        evidencePath,
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      blockedReason: 'document review returned READY with blocking findings',
+      evidence: { documentReview: { status: 'blocked' } },
+    })
+    expect(reconciled.documentRemediation).toBeUndefined()
+  })
+
+  test('routes blocking derived-artifact findings to the narrow repair stage', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-routing-'))
+    const evidencePath = '.beegame/workflow/evidence/routed-review.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const baseRun = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      revision: {
+        document: 'document-revision-1',
+        resource: 'resource-revision-1',
+        workspace: 'workspace-revision-1',
+      },
+    }
+    const terminal = {
+      workerType: 'document-reviewer' as const,
+      revision: 'resource-revision-1',
+      verdict: 'NEEDS_REVISION' as const,
+      reviewedDocumentPaths: [
+        ...CANONICAL_PROJECT_DOCUMENTS,
+        CANONICAL_ASSET_MANIFEST,
+      ],
+      checklistIds: [],
+      evidencePath,
+    }
+
+    const checklistRepair = await reconcileDocumentReview({
+      run: baseRun,
+      workspacePath: workspace,
+      currentDocumentRevision: baseRun.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        ...terminal,
+        findings: [
+          {
+            severity: 'blocking',
+            category: 'missing_spec',
+            documents: ['docs/acceptance/gameplay-checklist.md'],
+            description: 'A required acceptance definition is absent.',
+            requiredAction: 'Add the observable acceptance definition.',
+          },
+        ],
+      },
+    })
+    expect(checklistRepair).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      documentRemediation: { attempt: 1 },
+      revision: { resource: undefined },
+    })
+
+    const resourceRepair = await reconcileDocumentReview({
+      run: baseRun,
+      workspacePath: workspace,
+      currentDocumentRevision: baseRun.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        ...terminal,
+        findings: [
+          {
+            severity: 'blocking',
+            category: 'cross_document_conflict',
+            documents: [CANONICAL_ASSET_MANIFEST],
+            description: 'The manifest contradicts the approved asset plan.',
+            requiredAction: 'Align the manifest with the approved asset plan.',
+          },
+        ],
+      },
+    })
+    expect(resourceRepair).toMatchObject({
+      phase: 'RESOURCE_PREPARATION',
+      documentStep: undefined,
+      documentRemediation: { attempt: 1 },
+      resourceRemediation: {
+        attempt: 1,
+        issues: ['Align the manifest with the approved asset plan.'],
+      },
+      revision: { resource: undefined },
+    })
+  })
+
   test('persists the current foundation review evidence before checklist drafting', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-review-'))
     const evidencePath = '.beegame/workflow/evidence/foundation-review.md'
@@ -491,7 +717,7 @@ describe('delivery workflow document ordering', () => {
     })
   })
 
-  test('stops automatic document remediation after three failed passes', async () => {
+  test('keeps the document review limit across intermediate successful reviews', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-'))
     const evidencePath = '.beegame/workflow/evidence/review-limit.md'
     await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
@@ -507,10 +733,11 @@ describe('delivery workflow document ordering', () => {
       }),
       phase: 'DOCUMENT_REVIEW' as const,
       documentStep: 'FOUNDATION_REVIEW' as const,
+      documentReviewCycleCount: 3,
       documentRemediation: {
         sourceRevision: 'document-revision-3',
         evidencePath: '.beegame/workflow/evidence/review-3.md',
-        attempt: 3,
+        attempt: 1,
         resolvedFindingIds: ['review-existing'],
         findings: [
           {

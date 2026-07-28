@@ -67,25 +67,49 @@ function normalizedReviewFindings(
     { workerType: 'document-reviewer' }
   >['findings'],
 ): DocumentReviewFinding[] {
-  return findings.map((finding, index) => {
-    const severity =
-      finding.category === 'cross_document_conflict' ||
-      finding.category === 'missing_spec'
-        ? 'blocking'
-        : finding.severity
-    const identity = JSON.stringify({
-      category: finding.category,
-      documents: [...finding.documents].sort(),
-      description: finding.description,
-      requiredAction: finding.requiredAction,
-      index,
-    })
+  return findings.map(finding => {
+    const identity = JSON.stringify(
+      finding.code
+        ? {
+            code: finding.code,
+            category: finding.category,
+            documents: [...finding.documents].sort(),
+          }
+        : {
+            category: finding.category,
+            documents: [...finding.documents].sort(),
+            description: finding.description,
+            requiredAction: finding.requiredAction,
+          },
+    )
     return {
       ...finding,
-      severity,
       id: `review-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`,
     }
   })
+}
+
+function remediationTarget(
+  findings: DocumentReviewFinding[],
+): 'foundation' | 'checklist' | 'resource' {
+  const documents = new Set(findings.flatMap(finding => finding.documents))
+  if (CANONICAL_FOUNDATION_DOCUMENTS.some(path => documents.has(path)))
+    return 'foundation'
+  if (documents.has('docs/acceptance/gameplay-checklist.md')) return 'checklist'
+  if (documents.has(CANONICAL_ASSET_MANIFEST)) return 'resource'
+  return 'foundation'
+}
+
+function mergeFindings(
+  ...groups: Array<DocumentReviewFinding[] | undefined>
+): DocumentReviewFinding[] {
+  return [
+    ...new Map(
+      groups
+        .flatMap(group => group ?? [])
+        .map(finding => [finding.id, finding]),
+    ).values(),
+  ]
 }
 
 export async function startDocumentStage(input: {
@@ -158,6 +182,16 @@ export async function startChecklistDraftStage(input: {
       ...(input.run.checklistRemediation
         ? { checklistRemediation: input.run.checklistRemediation }
         : {}),
+      ...(input.run.documentRemediation
+        ? {
+            remediation: {
+              sourceRevision: input.run.documentRemediation.sourceRevision,
+              evidencePath: input.run.documentRemediation.evidencePath,
+              attempt: input.run.documentRemediation.attempt,
+              findings: input.run.documentRemediation.findings,
+            },
+          }
+        : {}),
     },
   })
 }
@@ -219,10 +253,7 @@ export async function completeDocumentDraft(input: {
   )
   const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
   const expectedFindingIds =
-    documentSet === 'foundation'
-      ? (input.run.documentRemediation?.findings.map(finding => finding.id) ??
-        [])
-      : []
+    input.run.documentRemediation?.findings.map(finding => finding.id) ?? []
   const resolvedFindingIds = [
     ...new Set(input.terminal.resolvedFindingIds ?? []),
   ]
@@ -277,9 +308,7 @@ export async function completeDocumentDraft(input: {
                 ]
               : []),
           ].join('; '),
-    ...(documentSet === 'checklist'
-      ? { checklistRemediation }
-      : {}),
+    ...(documentSet === 'checklist' ? { checklistRemediation } : {}),
     ...(input.run.documentRemediation
       ? {
           documentRemediation: {
@@ -297,9 +326,7 @@ export async function completeDocumentDraft(input: {
     phase:
       documentSet === 'checklist' ? 'RESOURCE_PREPARATION' : 'DOCUMENT_REVIEW',
     documentStep: documentSet === 'checklist' ? undefined : 'FOUNDATION_REVIEW',
-    ...(documentSet === 'checklist'
-      ? { checklistRemediation: undefined }
-      : {}),
+    ...(documentSet === 'checklist' ? { checklistRemediation: undefined } : {}),
   }
 }
 
@@ -360,18 +387,24 @@ export async function reconcileDocumentReview(input: {
   )
     throw new Error('document review does not cover the current checklist')
   const findings = normalizedReviewFindings(input.terminal.findings)
-  // The workflow, not reviewer prose, owns the readiness gate. Normalize an
-  // internally contradictory READY result so blocking findings can never
-  // advance downstream work.
-  const effectiveVerdict =
-    input.terminal.verdict === 'READY' &&
-    findings.some(finding => finding.severity === 'blocking')
-      ? 'NEEDS_REVISION'
-      : input.terminal.verdict
-  const status =
-    effectiveVerdict === 'READY'
+  const blockingFindings = findings.filter(
+    finding => finding.severity === 'blocking',
+  )
+  const advisories = findings.filter(
+    finding => finding.severity === 'non_blocking',
+  )
+  const verdictIssue =
+    input.terminal.verdict === 'READY' && blockingFindings.length > 0
+      ? 'document review returned READY with blocking findings'
+      : input.terminal.verdict === 'NEEDS_REVISION' &&
+          blockingFindings.length === 0
+        ? 'document review returned NEEDS_REVISION without a blocking finding'
+        : undefined
+  const status = verdictIssue
+    ? 'blocked'
+    : input.terminal.verdict === 'READY'
       ? 'ready'
-      : effectiveVerdict === 'NEEDS_REVISION'
+      : input.terminal.verdict === 'NEEDS_REVISION'
         ? 'failed'
         : 'blocked'
   const reviewRevision =
@@ -386,7 +419,21 @@ export async function reconcileDocumentReview(input: {
     status,
     observedAt: new Date().toISOString(),
   }
-  if (scope === 'foundation' && effectiveVerdict === 'READY') {
+  if (verdictIssue) {
+    return {
+      ...input.run,
+      status: 'needs_action',
+      evidence: { ...input.run.evidence, documentReview: evidence },
+      blockedReason: verdictIssue,
+      activeDispatch: undefined,
+      documentAdvisories: mergeFindings(
+        input.run.documentAdvisories,
+        advisories,
+      ),
+      updatedAt: new Date().toISOString(),
+    }
+  }
+  if (scope === 'foundation' && input.terminal.verdict === 'READY') {
     return {
       ...input.run,
       status: 'running',
@@ -398,39 +445,57 @@ export async function reconcileDocumentReview(input: {
       blockedReason: undefined,
       activeDispatch: undefined,
       documentRemediation: undefined,
+      documentAdvisories: mergeFindings(
+        input.run.documentAdvisories,
+        advisories,
+      ),
       checklistRemediation: undefined,
       updatedAt: new Date().toISOString(),
     }
   }
+  const target = remediationTarget(blockingFindings)
   const reconciled = transitionDeliveryRun(
     input.run,
-    effectiveVerdict === 'READY'
+    input.terminal.verdict === 'READY'
       ? { type: 'document_review_ready', evidence }
-      : effectiveVerdict === 'NEEDS_REVISION'
-        ? { type: 'document_review_needs_revision', evidence }
+      : input.terminal.verdict === 'NEEDS_REVISION'
+        ? { type: 'document_review_needs_revision', evidence, target }
         : { type: 'document_review_blocked', evidence },
   )
-  if (effectiveVerdict === 'READY')
-    return { ...reconciled, documentRemediation: undefined }
-  if (findings.length === 0) {
+  if (input.terminal.verdict === 'READY')
+    return {
+      ...reconciled,
+      documentRemediation: undefined,
+      documentAdvisories: advisories,
+    }
+  if (blockingFindings.length === 0) {
     return {
       ...reconciled,
       status: 'needs_action',
-      blockedReason: 'document review requires action but supplied no findings',
+      blockedReason:
+        'document review requires action but supplied no blocking findings',
       activeDispatch: undefined,
       documentRemediation: undefined,
+      documentAdvisories: mergeFindings(
+        input.run.documentAdvisories,
+        advisories,
+      ),
       updatedAt: new Date().toISOString(),
     }
   }
-  const attempt = (input.run.documentRemediation?.attempt ?? 0) + 1
+  const attempt =
+    Math.max(
+      input.run.documentReviewCycleCount ?? 0,
+      input.run.documentRemediation?.attempt ?? 0,
+    ) + 1
   const remediation = {
     sourceRevision: reviewRevision,
     evidencePath: input.terminal.evidencePath,
     attempt,
-    findings,
+    findings: blockingFindings,
   }
   if (
-    effectiveVerdict === 'NEEDS_REVISION' &&
+    input.terminal.verdict === 'NEEDS_REVISION' &&
     attempt > MAX_DOCUMENT_REMEDIATION_ATTEMPTS
   ) {
     return {
@@ -439,8 +504,29 @@ export async function reconcileDocumentReview(input: {
       blockedReason: `document review still requires revision after ${MAX_DOCUMENT_REMEDIATION_ATTEMPTS} remediation attempts`,
       activeDispatch: undefined,
       documentRemediation: remediation,
+      documentAdvisories: mergeFindings(
+        input.run.documentAdvisories,
+        advisories,
+      ),
+      documentReviewCycleCount: attempt,
       updatedAt: new Date().toISOString(),
     }
   }
-  return { ...reconciled, documentRemediation: remediation }
+  return {
+    ...reconciled,
+    documentRemediation: remediation,
+    documentAdvisories: mergeFindings(input.run.documentAdvisories, advisories),
+    documentReviewCycleCount: attempt,
+    ...(input.terminal.verdict === 'NEEDS_REVISION' && target === 'resource'
+      ? {
+          resourceRemediation: {
+            sourceRevision: reviewRevision,
+            attempt,
+            issues: blockingFindings.map(finding => finding.requiredAction),
+            preserveImportIds: [],
+            preserveCompositionIds: [],
+          },
+        }
+      : {}),
+  }
 }
