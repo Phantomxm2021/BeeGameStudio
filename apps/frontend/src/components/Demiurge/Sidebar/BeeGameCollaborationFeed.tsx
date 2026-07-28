@@ -234,7 +234,7 @@ export const BeeGameCollaborationFeed = memo(({
             {workflow ? (
                 <MessageScrollerItem
                     messageId={`beegame-workflow-${workflow.runId || 'current'}`}
-                    className="relative z-10 mb-4"
+                    className="relative z-10 mb-4 pl-12"
                 >
                     <WorkflowCard workflow={workflow} onAction={onWorkflowAction} />
                 </MessageScrollerItem>

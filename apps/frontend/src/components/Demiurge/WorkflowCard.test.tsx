@@ -78,7 +78,7 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/输入 10/)).not.toBeInTheDocument();
   });
 
-  it('keeps the original card width and background while showing only elapsed time', () => {
+  it('keeps the bounded card width and black background while showing only elapsed time', () => {
     render(
       <WorkflowCard
         workflow={{
@@ -92,7 +92,8 @@ describe('WorkflowCard', () => {
     );
 
     const card = screen.getByTestId('beegame-workflow-card-run_4');
-    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'glass-control', 'bg-sky-300/[0.055]');
+    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'bg-black/40');
+    expect(card).not.toHaveClass('bg-sky-300/[0.055]');
     expect(screen.getByText('00:01:05')).toBeInTheDocument();
     expect(screen.queryByText(/本阶段/)).not.toBeInTheDocument();
   });

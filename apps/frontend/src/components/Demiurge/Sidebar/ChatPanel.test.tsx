@@ -404,6 +404,7 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByTestId('beegame-thinking-message-beegame-runtime-activity')).toBeInTheDocument();
         expect(screen.getByText('Thinking...')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-workflow-card-proj_1').closest('[data-message-id]')).toHaveClass('pl-12');
     });
 
     it('renders BeeGame messages as a compact feed with tools after their message', async () => {

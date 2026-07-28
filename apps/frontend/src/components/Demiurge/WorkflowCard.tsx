@@ -131,7 +131,7 @@ export function WorkflowCard({
   return (
     <section
       data-testid={`beegame-workflow-card-${workflow.runId}`}
-      className="glass-control box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-sky-300/20 bg-sky-300/[0.055] text-zinc-100 shadow-sm backdrop-blur-2xl"
+      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-sky-300/20 bg-black/40 text-zinc-100 shadow-sm backdrop-blur-2xl"
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
