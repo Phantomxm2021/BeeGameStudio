@@ -21,7 +21,7 @@ import {
   BeeGameAuthUnavailableError,
   DEFAULT_LOCAL_USER_ID,
 } from '../auth/user-context'
-import { listCreditLedger, reserveCredits } from '../credit-store'
+import { listCreditLedger } from '../credit-store'
 import type {
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,

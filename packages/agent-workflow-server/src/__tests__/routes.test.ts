@@ -15,11 +15,7 @@ import { recordNativeImplementationAuditReportForTest } from '../beegame/native-
 import type {
   BeeGameModelRuntimeHost,
 } from '../beegame/model-runtime-host'
-import {
-  getCreditBalance,
-  reserveCredits,
-  settleCreditReservation,
-} from '../credit-store'
+import { getCreditBalance } from '../credit-store'
 
 describe.skip('agent workflow server routes', () => {
   const testOwner = { id: 'owner-user', role: 'owner' } as const
