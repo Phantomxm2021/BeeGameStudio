@@ -23,6 +23,16 @@ import type {
   BeeGamePermission,
 } from '../services/currentUserApi';
 
+export interface PhaseInfo {
+  current_phase: number;
+  phase_name: string;
+  history: Array<{
+    phase: number;
+    name: string;
+    timestamp: number;
+  }>;
+}
+
 export interface ProjectTask {
   id: string;
   status: string;
@@ -84,6 +94,9 @@ interface SystemState {
   /** Loading state for async operations */
   isLoading: boolean;
 
+  /** Team OS telemetry phase tracking */
+  phaseInfo: PhaseInfo | null;
+
   /** List of all work packages/tasks for the project */
   tasks: ProjectTask[];
 
@@ -115,9 +128,19 @@ interface SystemState {
   loadActivities: () => Promise<void>;
 
   /**
+   * Load phase history from backend (Team OS Telemetry)
+   */
+  loadPhases: (projectId: string) => Promise<void>;
+
+  /**
    * Load all tasks for a project
    */
   loadTasks: (projectId: string) => Promise<void>;
+
+  /**
+   * Load cumulative token usage for a project
+   */
+  loadTokenUsage: (projectId: string) => Promise<void>;
 
   /** Last detected P2P routing event */
   lastP2PRoute: { source_agent: string; target_agent: string; timestamp: number } | null;
@@ -168,6 +191,7 @@ export const useSystemStore = create<SystemState>()(
       tokenUsage: {},
       isLoading: false,
       isSyncing: false,
+      phaseInfo: null,
       isDark: true, // Default to dark mode
 
       tasks: [],
@@ -243,6 +267,16 @@ export const useSystemStore = create<SystemState>()(
         }
       },
 
+      loadPhases: async (projectId: string) => {
+        if (!projectId) return;
+        try {
+          const phases = (await api.getWorkflowPhases(projectId)) as unknown as PhaseInfo;
+          set({ phaseInfo: phases });
+        } catch (error) {
+          console.error('Failed to load telemetry phases:', error);
+        }
+      },
+
       loadTasks: async (projectId: string) => {
         if (!projectId) return;
         try {
@@ -253,42 +287,60 @@ export const useSystemStore = create<SystemState>()(
         }
       },
 
+      loadTokenUsage: async (projectId: string) => {
+        if (!projectId) return;
+        try {
+          const usage = (await api.getProjectTokenUsage(projectId)) as unknown as TokenUsage;
+          get().updateTokenUsage(usage, projectId);
+        } catch (error) {
+          if (!isAuthenticationServiceUnavailable(error)) {
+            console.error('Failed to load token usage:', error);
+          }
+        }
+      },
+
       updateTokenUsage: (usage: TokenUsage, projectId: string, taskId?: string) => {
         if (!usage || !projectId) return;
 
         set((state) => {
           const newTaskUsage = { ...state.taskUsage };
           const newTokenUsage = { ...state.tokenUsage };
+          const promptTokens = Number(usage.input_tokens ?? usage.prompt_tokens) || 0;
+          const completionTokens = Number(usage.output_tokens ?? usage.completion_tokens) || 0;
+          const cachedInputTokens =
+            Number(usage.cached_input_tokens) ||
+            (Number(usage.cache_read_tokens) || 0) + (Number(usage.cache_creation_tokens) || 0);
           const safeUsage = {
-            prompt_tokens: Number(usage.prompt_tokens) || 0,
-            completion_tokens: Number(usage.completion_tokens) || 0,
-            total_tokens: Number(usage.total_tokens) || 0,
-            input_tokens: Number(usage.input_tokens ?? usage.prompt_tokens) || 0,
-            cached_input_tokens: Number(usage.cached_input_tokens ?? usage.cache_read_tokens) || 0,
-            cache_read_tokens: Number(usage.cache_read_tokens ?? usage.cached_input_tokens) || 0,
-            cache_creation_tokens: Number(usage.cache_creation_tokens) || 0,
-            output_tokens: Number(usage.output_tokens ?? usage.completion_tokens) || 0,
-          };
-          const mergeUsage = (current: TokenUsage | undefined): TokenUsage => {
-            const merged: TokenUsage = {
-              prompt_tokens: Math.max(current?.prompt_tokens || 0, safeUsage.prompt_tokens),
-              completion_tokens: Math.max(current?.completion_tokens || 0, safeUsage.completion_tokens),
-              total_tokens: Math.max(current?.total_tokens || 0, safeUsage.total_tokens),
-              input_tokens: Math.max(current?.input_tokens || 0, safeUsage.input_tokens),
-              cached_input_tokens: Math.max(current?.cached_input_tokens || 0, safeUsage.cached_input_tokens),
-              output_tokens: Math.max(current?.output_tokens || 0, safeUsage.output_tokens),
-            };
-            return merged;
+            prompt_tokens: promptTokens,
+            input_tokens: promptTokens,
+            cached_input_tokens: cachedInputTokens,
+            completion_tokens: completionTokens,
+            output_tokens: completionTokens,
+            total_tokens: Number(usage.total_tokens) || 0
           };
 
           // Optional task-level mirror for debugging/inspection.
           if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
-            newTaskUsage[taskId] = mergeUsage(newTaskUsage[taskId]);
+            newTaskUsage[taskId] = {
+              prompt_tokens: Math.max((newTaskUsage[taskId]?.prompt_tokens || 0), safeUsage.prompt_tokens),
+              completion_tokens: Math.max((newTaskUsage[taskId]?.completion_tokens || 0), safeUsage.completion_tokens),
+              total_tokens: Math.max((newTaskUsage[taskId]?.total_tokens || 0), safeUsage.total_tokens),
+              input_tokens: Math.max((newTaskUsage[taskId]?.input_tokens || 0), safeUsage.input_tokens),
+              cached_input_tokens: Math.max((newTaskUsage[taskId]?.cached_input_tokens || 0), safeUsage.cached_input_tokens),
+              output_tokens: Math.max((newTaskUsage[taskId]?.output_tokens || 0), safeUsage.output_tokens),
+            };
           }
 
           // Cumulative usage per project.
           const currentProjectUsage = newTokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-          newTokenUsage[projectId] = mergeUsage(currentProjectUsage);
+          newTokenUsage[projectId] = {
+            prompt_tokens: Math.max(currentProjectUsage.prompt_tokens || 0, safeUsage.prompt_tokens),
+            completion_tokens: Math.max(currentProjectUsage.completion_tokens || 0, safeUsage.completion_tokens),
+            total_tokens: Math.max(currentProjectUsage.total_tokens || 0, safeUsage.total_tokens),
+            input_tokens: Math.max(currentProjectUsage.input_tokens || 0, safeUsage.input_tokens),
+            cached_input_tokens: Math.max(currentProjectUsage.cached_input_tokens || 0, safeUsage.cached_input_tokens),
+            output_tokens: Math.max(currentProjectUsage.output_tokens || 0, safeUsage.output_tokens),
+          };
 
           return {
             taskUsage: newTaskUsage,
