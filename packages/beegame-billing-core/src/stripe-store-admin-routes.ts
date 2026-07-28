@@ -9,26 +9,19 @@ import {
   stripeCreditPacksToCreditMap,
   toPublicStripeCreditPack,
 } from './credit-pack-helpers'
-import {
-  numberValue,
-  stringValue,
-} from './credit-control-request-helpers'
+import { numberValue, stringValue } from './usage-control-request-helpers'
 import {
   getRequestOrigin,
   isObject,
   readJson,
   toErrorMessage,
 } from './http-helpers'
-import {
-  proxyBeeGameBillingRequest,
-} from './remote-billing-proxy'
+import { proxyBeeGameBillingRequest } from './remote-billing-proxy'
 import {
   StripeWebhookError,
   createStripeCheckoutSession,
 } from './stripe-payments'
-import type {
-  BillingRouteDeps,
-} from './billing-route-types'
+import type { BillingRouteDeps } from './billing-route-types'
 
 export function registerBeeGameStripeStoreRoutes(
   app: Hono,
@@ -47,20 +40,30 @@ export function registerBeeGameStripeStoreRoutes(
         return c.json({ packs: [] })
       }
       return c.json({
-        packs: (await loadAvailableStripeCreditPacks(c.req.raw, deps.dashboardRepository))
-          .map(toPublicStripeCreditPack),
+        packs: (
+          await loadAvailableStripeCreditPacks(
+            c.req.raw,
+            deps.dashboardRepository,
+          )
+        ).map(toPublicStripeCreditPack),
       })
     } catch (error) {
       if (error instanceof StripeWebhookError) {
-        return c.json({
-          error: 'Stripe credit packs failed',
-          message: error.message,
-        }, error.status as 400 | 503)
+        return c.json(
+          {
+            error: 'Stripe credit packs failed',
+            message: error.message,
+          },
+          error.status as 400 | 503,
+        )
       }
-      return c.json({
-        error: 'Stripe credit packs failed',
-        message: toErrorMessage(error),
-      }, 400)
+      return c.json(
+        {
+          error: 'Stripe credit packs failed',
+          message: toErrorMessage(error),
+        },
+        400,
+      )
     }
   })
 
@@ -75,17 +78,24 @@ export function registerBeeGameStripeStoreRoutes(
         )
       }
       if (deps.billingConfig.mode === 'disabled') {
-        return c.json({
-          error: 'Billing disabled',
-          message: 'Billing is not configured',
-        }, 503)
+        return c.json(
+          {
+            error: 'Billing disabled',
+            message: 'Billing is not configured',
+          },
+          503,
+        )
       }
       const body = await readJson(c.req.raw)
-      const priceId = isObject(body) && typeof body.priceId === 'string'
-        ? body.priceId.trim()
-        : ''
+      const priceId =
+        isObject(body) && typeof body.priceId === 'string'
+          ? body.priceId.trim()
+          : ''
       const priceCredits = stripeCreditPacksToCreditMap(
-        await loadAvailableStripeCreditPacks(c.req.raw, deps.dashboardRepository),
+        await loadAvailableStripeCreditPacks(
+          c.req.raw,
+          deps.dashboardRepository,
+        ),
       )
       const credits = priceCredits[priceId]
       if (!priceId || !credits) {
@@ -97,10 +107,13 @@ export function registerBeeGameStripeStoreRoutes(
           priceId,
           errorMessage: 'Stripe price is not available for BeeGame credits',
         })
-        return c.json({
-          error: 'Invalid request',
-          message: 'Stripe price is not available for BeeGame credits',
-        }, 400)
+        return c.json(
+          {
+            error: 'Invalid request',
+            message: 'Stripe price is not available for BeeGame credits',
+          },
+          400,
+        )
       }
       const origin = getRequestOrigin(c.req.raw)
       const session = await createStripeCheckoutSession({
@@ -135,10 +148,13 @@ export function registerBeeGameStripeStoreRoutes(
           userId: user.id,
           errorMessage: error.message,
         })
-        return c.json({
-          error: 'Stripe checkout failed',
-          message: error.message,
-        }, error.status as 400 | 503)
+        return c.json(
+          {
+            error: 'Stripe checkout failed',
+            message: error.message,
+          },
+          error.status as 400 | 503,
+        )
       }
       await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
         provider: 'stripe',
@@ -147,10 +163,13 @@ export function registerBeeGameStripeStoreRoutes(
         userId: user.id,
         errorMessage: toErrorMessage(error),
       })
-      return c.json({
-        error: 'Stripe checkout failed',
-        message: toErrorMessage(error),
-      }, 400)
+      return c.json(
+        {
+          error: 'Stripe checkout failed',
+          message: toErrorMessage(error),
+        },
+        400,
+      )
     }
   })
 
@@ -167,7 +186,9 @@ export function registerBeeGameStripeStoreRoutes(
       )
     }
     try {
-      return c.json({ events: await deps.dashboardRepository.listBillingEvents(c.req.raw) })
+      return c.json({
+        events: await deps.dashboardRepository.listBillingEvents(c.req.raw),
+      })
     } catch (error) {
       return tracedRouteError(c, 'admin.billing.events.list', error)
     }
@@ -186,7 +207,9 @@ export function registerBeeGameStripeStoreRoutes(
       )
     }
     try {
-      return c.json({ packs: await deps.dashboardRepository.listBillingCreditPacks(c.req.raw) })
+      return c.json({
+        packs: await deps.dashboardRepository.listBillingCreditPacks(c.req.raw),
+      })
     } catch (error) {
       return tracedRouteError(c, 'admin.billing.credit-packs.list', error)
     }
@@ -206,14 +229,17 @@ export function registerBeeGameStripeStoreRoutes(
     }
     const body = await readJson(c.req.raw)
     try {
-      const pack = await deps.dashboardRepository.upsertBillingCreditPack(c.req.raw, {
-        priceId: stringValue(body.priceId),
-        credits: numberValue(body.credits),
-        displayName: stringValue(body.displayName) || undefined,
-        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
-        sortOrder: numberValue(body.sortOrder),
-        metadata: isObject(body.metadata) ? body.metadata : undefined,
-      })
+      const pack = await deps.dashboardRepository.upsertBillingCreditPack(
+        c.req.raw,
+        {
+          priceId: stringValue(body.priceId),
+          credits: numberValue(body.credits),
+          displayName: stringValue(body.displayName) || undefined,
+          enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+          sortOrder: numberValue(body.sortOrder),
+          metadata: isObject(body.metadata) ? body.metadata : undefined,
+        },
+      )
       return c.json({ pack })
     } catch (error) {
       return tracedRouteError(c, 'admin.billing.credit-packs.upsert', error)
@@ -233,44 +259,42 @@ export function registerBeeGameStripeStoreRoutes(
       )
     }
     const body = await readJson(c.req.raw)
-    const targetUserId = isObject(body) && typeof body.userId === 'string'
-      ? body.userId.trim()
-      : ''
-    const credits = isObject(body) && typeof body.credits === 'number'
-      ? Math.floor(body.credits)
-      : 0
+    const targetUserId =
+      isObject(body) && typeof body.userId === 'string'
+        ? body.userId.trim()
+        : ''
+    const credits =
+      isObject(body) && typeof body.credits === 'number'
+        ? Math.floor(body.credits)
+        : 0
     if (!targetUserId || credits <= 0) {
-      return c.json({
-        error: 'Invalid request',
-        message: 'userId and positive credits are required.',
-      }, 400)
-    }
-    const metadata = isObject(body) && isObject(body.metadata)
-      ? body.metadata
-      : {}
-    try {
-      return c.json(await deps.dashboardRepository.grantCredits(
-        c.req.raw,
-        targetUserId,
+      return c.json(
         {
+          error: 'Invalid request',
+          message: 'userId and positive credits are required.',
+        },
+        400,
+      )
+    }
+    const metadata =
+      isObject(body) && isObject(body.metadata) ? body.metadata : {}
+    try {
+      return c.json(
+        await deps.dashboardRepository.grantCredits(c.req.raw, targetUserId, {
           credits,
           metadata: {
             ...metadata,
             grantedBy: user.id,
           },
-        },
-      ))
+        }),
+      )
     } catch (error) {
       return tracedRouteError(c, 'admin.credits.grants', error)
     }
   })
 }
 
-function tracedRouteError(
-  c: Context,
-  route: string,
-  error: unknown,
-): Response {
+function tracedRouteError(c: Context, route: string, error: unknown): Response {
   const traceId = randomUUID()
   console.warn('[BeeGame] route failed', {
     traceId,

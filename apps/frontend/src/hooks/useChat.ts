@@ -1,46 +1,56 @@
 /**
  * useChat Hook
- * 
+ *
  * Manages chat functionality including:
  * - WebSocket message routing and processing
  * - Message type handling (token, status, tool_start, tool_end, usage, error_paused)
  * - Chat operations (sendMessage, continueTask, stopTask)
  * - Loading state management
- * 
+ *
  * Requirements: 1.1, 1.2, 1.3, 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useWebSocket } from './useWebSocket';
-import { useChatStore } from '../store/chatStore';
-import { useProjectStore } from '../store/projectStore';
-import { useSystemStore } from '../store/systemStore';
-import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ChatAttachmentPayload, type ReviewBindingPayload } from '../services/api';
-import type { ContinueTaskResponse, SendMessageResponse } from '../services/api';
-import type { WebSocketMessage } from '../types/message';
-import type { WebSocketState } from './useWebSocket';
-import { normalizeChatHistory } from '../utils/chatHistory';
-import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
-import { getWaitingApprovalState } from '../utils/waitingApproval';
-import { toProjectRuntimeDisplayModel } from '../viewModels/displayModels';
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useWebSocket } from './useWebSocket'
+import { useChatStore } from '../store/chatStore'
+import { useProjectStore } from '../store/projectStore'
+import { useSystemStore } from '../store/systemStore'
 import {
-  getCreditQuote,
-  type BeeGameCreditQuote,
-  type BeeGameCreditTaskType,
-} from '../services/creditsApi';
+  api,
+  normalizeApprovePlanPayload,
+  normalizeReviewBindingPayload,
+  type ChatAttachmentPayload,
+  type ReviewBindingPayload,
+} from '../services/api'
+import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
+import type { WebSocketMessage } from '../types/message'
+import type { WebSocketState } from './useWebSocket'
+import { normalizeChatHistory } from '../utils/chatHistory'
+import { normalizeWebSocketSemanticType } from '../utils/messageSemantics'
+import { getWaitingApprovalState } from '../utils/waitingApproval'
 
-const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const newClientMessageId = (): string =>
+  `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
 function getErrorDisplayMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
-    const message = error.message.trim();
-    return message || fallback;
+    const message = error.message.trim()
+    return message || fallback
   }
   if (typeof error === 'string') {
-    const message = error.trim();
-    return message || fallback;
+    const message = error.trim()
+    return message || fallback
   }
-  return fallback;
+  return fallback
+}
+
+function isProjectStatusRunning(status: unknown): boolean {
+  return Boolean(
+    status &&
+      typeof status === 'object' &&
+      'phase' in status &&
+      (status as { phase?: unknown }).phase === 'running',
+  )
 }
 
 /**
@@ -48,22 +58,21 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
  */
 export interface UseChatOptions {
   /** Project ID for the chat session */
-  projectId: string;
+  projectId: string
 
   /** Callback when an error occurs (optional) */
-  onError?: (error: Error) => void;
+  onError?: (error: Error) => void
 
   /** Callback when a task completes (optional) */
-  onTaskComplete?: () => void;
+  onTaskComplete?: () => void
 
   /** Callback when ANY task event occurs (usage, status, tool, etc.) (optional) */
-  onTaskEvent?: (type: string, data?: unknown) => void;
+  onTaskEvent?: (type: string, data?: unknown) => void
 
   /** Toast notification callbacks (optional) */
 
-  showToastError?: (message: string) => void;
-  showToastSuccess?: (message: string) => void;
-  confirmCreditQuote?: (quote: BeeGameCreditQuote) => Promise<boolean>;
+  showToastError?: (message: string) => void
+  showToastSuccess?: (message: string) => void
 }
 
 /**
@@ -79,31 +88,40 @@ export interface UseChatReturn {
     terminationNode?: string,
     attachments?: ChatAttachmentPayload[],
     supersedesMessageId?: string,
-  ) => Promise<void>;
+  ) => Promise<void>
 
   /**
    * Continue a paused task
    */
-  continueTask: () => Promise<void>;
+  continueTask: () => Promise<void>
 
   /**
    * Stop the current task
    */
-  stopTask: () => Promise<void>;
+  stopTask: () => Promise<void>
 
   /** Whether a stop request is awaiting backend confirmation */
-  isStopping: boolean;
+  isStopping: boolean
 
   /**
    * Approve the current plan
    * @param feedback - Optional user feedback
    */
   approvePlan: (
-    review: { gate_id: string; artifact_id?: string; artifact_version?: number; checkpoint_id?: string; commit_sha?: string; workspace_path?: string; workspace_ref?: string; binding?: ReviewBindingPayload },
+    review: {
+      gate_id: string
+      artifact_id?: string
+      artifact_version?: number
+      checkpoint_id?: string
+      commit_sha?: string
+      workspace_path?: string
+      workspace_ref?: string
+      binding?: ReviewBindingPayload
+    },
     feedback?: string,
     action?: 'approve' | 'revise' | 'reject',
-    permissionScope?: 'once' | 'session'
-  ) => Promise<void>;
+    permissionScope?: 'once' | 'session',
+  ) => Promise<void>
 
   /**
    * Upload and optionally auto-approve a revised manifest CSV
@@ -111,53 +129,60 @@ export interface UseChatReturn {
    * @param csvContent - The raw CSV content
    * @param autoApprove - Whether to automatically approve after uploading
    */
-  uploadManifestCsv: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
+  uploadManifestCsv: (
+    gateId: string,
+    csvContent: string,
+    autoApprove?: boolean,
+  ) => Promise<void>
 
   /**
    * Approve a manifest gate
    * @param gateId - The asset gate ID to approve
    * @param feedback - Optional feedback
    */
-  approveManifest: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
+  approveManifest: (
+    review: ReviewBindingPayload & { gate_id: string },
+    feedback?: string,
+  ) => Promise<void>
 
   /**
    * Revise a manifest gate
    * @param gateId - The asset gate ID to request revision for
    * @param feedback - Required feedback indicating what needs to change
    */
-  reviseManifest: (gateId: string, feedback: string) => Promise<void>;
+  reviseManifest: (gateId: string, feedback: string) => Promise<void>
 
   /** Local state for plan approval / revision submission UX */
   approvalState: {
-    gateId: string | null;
-    action: 'approve' | 'revise' | 'reject' | null;
-    phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed';
-    message: string;
-  };
+    gateId: string | null
+    action: 'approve' | 'revise' | 'reject' | null
+    phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed'
+    message: string
+  }
 
   /** Whether a task is currently being processed */
 
-  isLoading: boolean;
+  isLoading: boolean
 
   /** Current task ID (if any) */
-  currentTaskId: string | null;
+  currentTaskId: string | null
 
   /** Whether the task is paused and can be continued */
-  canContinue: boolean;
+  canContinue: boolean
 
   /** WebSocket connection state */
-  wsState: WebSocketState;
+  wsState: WebSocketState
 }
 
 /**
  * Custom hook for managing chat functionality
- * 
+ *
  * This hook integrates WebSocket communication, message routing,
  * and chat operations (send, continue, stop) into a single interface.
- * 
+ *
  * @param options - Configuration options for the chat
  * @returns Chat operations and state
- * 
+ *
  * @example
  * ```typescript
  * const { sendMessage, continueTask, stopTask, isLoading } = useChat({
@@ -166,13 +191,13 @@ export interface UseChatReturn {
  *     console.error('Chat error:', error);
  *   }
  * });
- * 
+ *
  * // Send a message
  * await sendMessage('Hello, AI team!');
- * 
+ *
  * // Continue after error_paused
  * await continueTask();
- * 
+ *
  * // Stop current task
  * await stopTask();
  * ```
@@ -184,29 +209,52 @@ export const useChat = ({
   onTaskEvent,
   showToastError,
   showToastSuccess,
-  confirmCreditQuote,
 }: UseChatOptions): UseChatReturn => {
   // State management
-  const [isLoading, setIsLoading] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const isStoppingRef = useRef(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
-  const [canContinue, setCanContinue] = useState(false);
-  const [approvalState, setApprovalState] = useState<UseChatReturn['approvalState']>({
+  const [isLoading, setIsLoading] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
+  const isStoppingRef = useRef(false)
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const [canContinue, setCanContinue] = useState(false)
+  const [approvalState, setApprovalState] = useState<
+    UseChatReturn['approvalState']
+  >({
     gateId: null,
     action: null,
     phase: 'idle',
     message: '',
-  });
+  })
 
   // Store actions
-  const { addMessage, updateMessage, updateThought, removeMessage, finalizeMessage, setCurrentSender, setIsStreaming, loadHistory } = useChatStore();
-  const pendingReviews = useProjectStore((state) => state.pendingReviews);
-  const projectStatus = useProjectStore((state) => state.projectStatus);
-  const removePendingReview = useProjectStore((state) => state.removePendingReview);
-  const upsertPendingReview = useProjectStore((state) => state.upsertPendingReview);
-  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
-  const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews);
+  const {
+    addMessage,
+    updateMessage,
+    updateThought,
+    removeMessage,
+    finalizeMessage,
+    setCurrentSender,
+    setIsStreaming,
+    loadHistory,
+  } = useChatStore()
+  const pendingReviews = useProjectStore(state => state.pendingReviews)
+  const projectStatus = useProjectStore(state => state.projectStatus)
+  const removePendingReview = useProjectStore(
+    state => state.removePendingReview,
+  )
+  const upsertPendingReview = useProjectStore(
+    state => state.upsertPendingReview,
+  )
+  const {
+    updateTokenUsage,
+    updateLastP2PRoute,
+    loadTasks,
+    loadActivities,
+    loadCurrentUser,
+    setAgentStatus,
+    refreshAgents,
+    setIsSyncing,
+  } = useSystemStore()
+  const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews)
 
   useEffect(() => {
     // These values describe one project's active turn. The hook remains
@@ -215,58 +263,65 @@ export const useChat = ({
     // another runtime event happens to arrive. Reset only client-side
     // transients here; the authoritative runtime snapshot below will restore
     // a genuine running turn for the newly selected project.
-    isStoppingRef.current = false;
-    setIsStopping(false);
-    setIsLoading(false);
-    setCurrentTaskId(null);
-    setCanContinue(false);
+    isStoppingRef.current = false
+    setIsStopping(false)
+    setIsLoading(false)
+    setCurrentTaskId(null)
+    setCanContinue(false)
     setApprovalState({
       gateId: null,
       action: null,
       phase: 'idle',
       message: '',
-    });
-    setCurrentSender(null);
-    setIsStreaming(false);
-  }, [projectId, setCurrentSender, setIsStreaming]);
+    })
+    setCurrentSender(null)
+    setIsStreaming(false)
+  }, [projectId, setCurrentSender, setIsStreaming])
 
   useEffect(() => {
     if (!approvalState.gateId) {
-      return;
+      return
     }
-    const gateStillPresent = pendingReviews.some((review) => String(review?.gate_id || '').trim() === String(approvalState.gateId || '').trim());
+    const gateStillPresent = pendingReviews.some(
+      review =>
+        String(review?.gate_id || '').trim() ===
+        String(approvalState.gateId || '').trim(),
+    )
     if (!gateStillPresent && approvalState.phase !== 'failed') {
       setApprovalState({
         gateId: null,
         action: null,
         phase: 'idle',
         message: '',
-      });
+      })
     }
-  }, [approvalState, pendingReviews]);
+  }, [approvalState, pendingReviews])
 
   const refreshProjectVisibility = useCallback(async () => {
-    if (useSystemStore.getState().authenticationStatus !== 'authenticated') return;
-    const store = useProjectStore.getState();
-    await store.loadProjectRuntimeState(projectId);
-  }, [projectId]);
+    if (useSystemStore.getState().authenticationStatus !== 'authenticated')
+      return
+    const store = useProjectStore.getState()
+    await store.loadProjectRuntimeState(projectId)
+  }, [projectId])
 
-  const emitWaitingApprovalBlock = useCallback((message: string) => {
-    setIsLoading(false);
-    setCanContinue(false);
-    addMessage({
-      id: `waiting-approval-${Date.now()}`,
-      sender: 'system',
-      content: message,
-      timestamp: Date.now(),
-      type: 'error',
-      taskKind: 'approval_gate',
-      requiresUserAction: true,
-    });
-    showToastError?.(message);
-    onError?.(new Error(message));
-  }, [addMessage, onError, showToastError]);
-
+  const emitWaitingApprovalBlock = useCallback(
+    (message: string) => {
+      setIsLoading(false)
+      setCanContinue(false)
+      addMessage({
+        id: `waiting-approval-${Date.now()}`,
+        sender: 'system',
+        content: message,
+        timestamp: Date.now(),
+        type: 'error',
+        taskKind: 'approval_gate',
+        requiresUserAction: true,
+      })
+      showToastError?.(message)
+      onError?.(new Error(message))
+    },
+    [addMessage, onError, showToastError],
+  )
 
   // Use refs to avoid handleWebSocketMessage dependency churn and WebSocket reconnections
   const latestRefs = useRef({
@@ -281,7 +336,7 @@ export const useChat = ({
     loadActivities,
     loadCurrentUser,
     refreshProjectVisibility,
-  });
+  })
 
   // Update refs on every render
   latestRefs.current = {
@@ -296,228 +351,294 @@ export const useChat = ({
     loadActivities,
     loadCurrentUser,
     refreshProjectVisibility,
-  };
+  }
 
   /**
    * Handle incoming WebSocket messages
    * Routes messages to appropriate handlers based on type
-   * 
+   *
    * Requirements: 1.2, 7.1, 7.2
    */
-  const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
-    const refs = latestRefs.current;
+  const handleWebSocketMessage = useCallback(
+    (message: WebSocketMessage) => {
+      const refs = latestRefs.current
 
-    switch (message.type) {
-      case 'token':
-        // Streaming token - accumulate content
-        // Requirements: 1.3
-        if (message.content && message.sender) {
-          const semanticType = normalizeWebSocketSemanticType(message);
-          updateMessage(
-            message.task_id,
-            message.content,
-            message.sender,
-            semanticType,
-            message.is_document,
-            message.artifact_id,
-            message.document_title,
-            {
-              renderHint: message.render_hint,
-              artifactType: message.artifact_type,
-              taskKind: message.task_kind,
-              nextAction: message.next_action,
-              requiresUserAction: message.requires_user_action,
-            },
-            message.timestamp,
-            message.message_id
-          );
-          setCurrentSender(message.sender);
-          // Real-time status injection
-          setAgentStatus(message.sender, 'working', message.task_id);
-        }
-        break;
-
-      case 'agent_message':
-        if (message.content && message.sender) {
-          const semanticType = normalizeWebSocketSemanticType(message);
-          finalizeMessage(
-            message.task_id,
-            message.content,
-            message.sender,
-            semanticType,
-            message.is_document,
-            message.artifact_id,
-            message.document_title,
-            {
-              renderHint: message.render_hint,
-              artifactType: message.artifact_type,
-              taskKind: message.task_kind,
-              nextAction: message.next_action,
-              requiresUserAction: message.requires_user_action,
-            },
-            message.timestamp,
-            message.message_id
-          );
-          setCurrentSender(message.sender);
-        }
-        break;
-
-      case 'thought':
-        // Streaming thought - accumulate reasoning
-        if (message.content && message.sender) {
-          updateThought(message.task_id, message.content, message.sender, message.timestamp, message.message_id);
-          setCurrentSender(message.sender);
-          // Real-time status injection
-          setAgentStatus(message.sender, 'working', message.task_id);
-        }
-        break;
-
-      case 'think_start':
-        if (message.sender && message.message_id) {
-          finalizeMessage(
-            message.task_id,
-            message.content || 'Thinking',
-            message.sender,
-            'thought',
-            false,
-            undefined,
-            undefined,
-            { taskKind: 'assistant_thinking' },
-            message.timestamp,
-            message.message_id,
-          );
-          setCurrentSender(message.sender);
-        }
-        break;
-
-      case 'think_end':
-        if (message.message_id) removeMessage(message.message_id);
-        break;
-
-      case 'status':
-        // Task status update
-        // Requirements: 6.2
-        if (message.status === 'finished' || message.status === 'stopped' || message.status === 'idle') {
-          setIsLoading(false);
-          setCurrentTaskId(null);
-          setCurrentSender(null);
-          setIsStreaming(false); // Mark streaming as complete
-          if (message.status === 'finished') {
-            refs.onTaskComplete?.();
+      switch (message.type) {
+        case 'token':
+          // Streaming token - accumulate content
+          // Requirements: 1.3
+          if (message.content && message.sender) {
+            const semanticType = normalizeWebSocketSemanticType(message)
+            updateMessage(
+              message.task_id,
+              message.content,
+              message.sender,
+              semanticType,
+              message.is_document,
+              message.artifact_id,
+              message.document_title,
+              {
+                renderHint: message.render_hint,
+                artifactType: message.artifact_type,
+                taskKind: message.task_kind,
+                nextAction: message.next_action,
+                requiresUserAction: message.requires_user_action,
+              },
+              message.timestamp,
+              message.message_id,
+            )
+            setCurrentSender(message.sender)
+            // Real-time status injection
+            setAgentStatus(message.sender, 'working', message.task_id)
           }
-          // Trigger event for UI refresh
-          refs.onTaskEvent?.(message.status === 'idle' ? 'status_idle' : 'status_finished', message);
+          break
 
-          // Final refresh to clear "working" status of agents
-          refreshAgents().catch(err => console.error('[useChat] Status refresh failed:', err));
-        } else if (message.status === 'queued' || message.status === 'running' || message.status === 'resuming') {
-          setIsLoading(true);
-          if (message.sender) {
-            setCurrentSender(message.sender);
+        case 'agent_message':
+          if (message.content && message.sender) {
+            const semanticType = normalizeWebSocketSemanticType(message)
+            finalizeMessage(
+              message.task_id,
+              message.content,
+              message.sender,
+              semanticType,
+              message.is_document,
+              message.artifact_id,
+              message.document_title,
+              {
+                renderHint: message.render_hint,
+                artifactType: message.artifact_type,
+                taskKind: message.task_kind,
+                nextAction: message.next_action,
+                requiresUserAction: message.requires_user_action,
+              },
+              message.timestamp,
+              message.message_id,
+            )
+            setCurrentSender(message.sender)
           }
-          refs.onTaskEvent?.('status_running', message);
-        } else if (message.status === 'paused' || message.status === 'failed') {
-          setIsLoading(false);
-          if (message.content) {
-            addMessage({
-              id: `status-${message.status}-${message.task_id || 'na'}-${String(message.content).substring(0, 48)}`,
-              sender: 'system',
-              content: message.content,
-              timestamp: message.timestamp || Date.now(),
-              type: message.status === 'paused' ? 'system_status' : 'error',
-              taskKind: message.status === 'paused' ? 'workflow_paused' : 'workflow_failed',
-              canContinue: message.status === 'paused',
-            });
+          break
+
+        case 'thought':
+          // Streaming thought - accumulate reasoning
+          if (message.content && message.sender) {
+            updateThought(
+              message.task_id,
+              message.content,
+              message.sender,
+              message.timestamp,
+              message.message_id,
+            )
+            setCurrentSender(message.sender)
+            // Real-time status injection
+            setAgentStatus(message.sender, 'working', message.task_id)
           }
-          setApprovalState((prev) => {
-            if (message.status !== 'failed' || (prev.phase !== 'awaiting_runtime' && prev.phase !== 'submitting')) {
-              return prev;
+          break
+
+        case 'think_start':
+          if (message.sender && message.message_id) {
+            finalizeMessage(
+              message.task_id,
+              message.content || 'Thinking',
+              message.sender,
+              'thought',
+              false,
+              undefined,
+              undefined,
+              { taskKind: 'assistant_thinking' },
+              message.timestamp,
+              message.message_id,
+            )
+            setCurrentSender(message.sender)
+          }
+          break
+
+        case 'think_end':
+          if (message.message_id) removeMessage(message.message_id)
+          break
+
+        case 'status':
+          // Task status update
+          // Requirements: 6.2
+          if (
+            message.status === 'finished' ||
+            message.status === 'stopped' ||
+            message.status === 'idle'
+          ) {
+            setIsLoading(false)
+            setCurrentTaskId(null)
+            setCurrentSender(null)
+            setIsStreaming(false) // Mark streaming as complete
+            if (message.status === 'finished') {
+              refs.onTaskComplete?.()
             }
-            return {
-              gateId: prev.gateId,
-              action: prev.action,
-              phase: 'failed',
-              message: '审批已提交，但后续阶段启动失败。',
-            };
-          });
-          refs.onTaskEvent?.('status_failed', message);
-        }
-        break;
+            // Trigger event for UI refresh
+            refs.onTaskEvent?.(
+              message.status === 'idle' ? 'status_idle' : 'status_finished',
+              message,
+            )
 
-      case 'plan_approved':
-        // Plan approval event
-        // Requirements: 4.4, 7.3
-        refs.showToastSuccess?.(message.content || '审批已确认，系统正在继续执行。');
-        setApprovalState((prev) => ({
-          gateId: prev.gateId,
-          action: prev.action,
-          phase: 'idle',
-          message: message.content || '审批已通过，系统正在继续执行。',
-        }));
-        refs.onTaskEvent?.('plan_approved', message);
-        break;
+            // Final refresh to clear "working" status of agents
+            refreshAgents().catch(err =>
+              console.error('[useChat] Status refresh failed:', err),
+            )
+          } else if (
+            message.status === 'queued' ||
+            message.status === 'running' ||
+            message.status === 'resuming'
+          ) {
+            setIsLoading(true)
+            if (message.sender) {
+              setCurrentSender(message.sender)
+            }
+            refs.onTaskEvent?.('status_running', message)
+          } else if (
+            message.status === 'paused' ||
+            message.status === 'failed'
+          ) {
+            setIsLoading(false)
+            if (message.content) {
+              addMessage({
+                id: `status-${message.status}-${message.task_id || 'na'}-${String(message.content).substring(0, 48)}`,
+                sender: 'system',
+                content: message.content,
+                timestamp: message.timestamp || Date.now(),
+                type: message.status === 'paused' ? 'system_status' : 'error',
+                taskKind:
+                  message.status === 'paused'
+                    ? 'workflow_paused'
+                    : 'workflow_failed',
+                canContinue: message.status === 'paused',
+              })
+            }
+            setApprovalState(prev => {
+              if (
+                message.status !== 'failed' ||
+                (prev.phase !== 'awaiting_runtime' &&
+                  prev.phase !== 'submitting')
+              ) {
+                return prev
+              }
+              return {
+                gateId: prev.gateId,
+                action: prev.action,
+                phase: 'failed',
+                message: '审批已提交，但后续阶段启动失败。',
+              }
+            })
+            refs.onTaskEvent?.('status_failed', message)
+          }
+          break
 
-      case 'human_gate':
-        setIsLoading(false);
-        setCanContinue(false);
+        case 'plan_approved':
+          // Plan approval event
+          // Requirements: 4.4, 7.3
+          refs.showToastSuccess?.(
+            message.content || '审批已确认，系统正在继续执行。',
+          )
+          setApprovalState(prev => ({
+            gateId: prev.gateId,
+            action: prev.action,
+            phase: 'idle',
+            message: message.content || '审批已通过，系统正在继续执行。',
+          }))
+          refs.onTaskEvent?.('plan_approved', message)
+          break
 
-        // Permission events can arrive while the document is hidden, when the
-        // dashboard's visibility-aware status poll is intentionally paused.
-        // Refresh the authoritative pending review snapshot immediately so
-        // the browser-tab attention indicator and approval dialog do not wait
-        // for the user to return to the page.
-        refs.refreshProjectVisibility().catch(err => console.error('[useChat] Permission visibility refresh failed:', err));
-        refs.onTaskEvent?.('human_gate', message);
-        break;
+        case 'human_gate':
+          setIsLoading(false)
+          setCanContinue(false)
 
-      case 'artifact_created':
-        // Real-time artifact event
-        // Requirements: System Design §8.9.5
-        if (!message.project_id || message.project_id === refs.projectId) {
-          const artifactName = message.name || message.artifact_id || 'new artifact';
+          // Permission events can arrive while the document is hidden, when the
+          // dashboard's visibility-aware status poll is intentionally paused.
+          // Refresh the authoritative pending review snapshot immediately so
+          // the browser-tab attention indicator and approval dialog do not wait
+          // for the user to return to the page.
+          refs
+            .refreshProjectVisibility()
+            .catch(err =>
+              console.error(
+                '[useChat] Permission visibility refresh failed:',
+                err,
+              ),
+            )
+          refs.onTaskEvent?.('human_gate', message)
+          break
+
+        case 'artifact_created':
+          // Real-time artifact event
+          // Requirements: System Design §8.9.5
+          if (!message.project_id || message.project_id === refs.projectId) {
+            const artifactName =
+              message.name || message.artifact_id || 'new artifact'
+            addMessage({
+              id: `artifact-${message.artifact_id || message.task_id || Date.now()}`,
+              sender: message.agent || message.sender || 'system',
+              content: `Artifact created: ${artifactName}`,
+              timestamp: Date.now(),
+              type: 'artifact_card',
+              artifactId: message.artifact_id,
+              artifactType: message.artifact_type,
+              documentTitle: artifactName,
+              taskKind: 'artifact_created',
+            })
+            refs
+              .loadActivities()
+              .catch(err =>
+                console.error('[useChat] Artifact refresh failed:', err),
+              )
+            refs
+              .refreshProjectVisibility()
+              .catch(err =>
+                console.error(
+                  '[useChat] Artifact visibility refresh failed:',
+                  err,
+                ),
+              )
+            refs.onTaskEvent?.('artifact_created', message)
+          }
+          break
+
+        case 'context_update': {
+          const context = message.context
+          if (
+            !context ||
+            (message.project_id && message.project_id !== refs.projectId)
+          ) {
+            break
+          }
+          const ragCount = context.rag_sources?.length ?? 0
+          const skillCount = context.selected_skills?.length ?? 0
           addMessage({
-            id: `artifact-${message.artifact_id || message.task_id || Date.now()}`,
-            sender: message.agent || message.sender || 'system',
-            content: `Artifact created: ${artifactName}`,
+            id: `context-${context.bundle_id || message.task_id || Date.now()}`,
+            sender: 'system',
+            content: `Context used for ${context.phase || 'phase'}: blackboard ${context.blackboard_record_count ?? 0}, memory ${context.memory_hits ?? 0}, RAG ${ragCount}, skills ${skillCount}.`,
             timestamp: Date.now(),
-            type: 'artifact_card',
-            artifactId: message.artifact_id,
-            artifactType: message.artifact_type,
-            documentTitle: artifactName,
-            taskKind: 'artifact_created',
-          });
-          refs.loadActivities().catch(err => console.error('[useChat] Artifact refresh failed:', err));
-          refs.refreshProjectVisibility().catch(err => console.error('[useChat] Artifact visibility refresh failed:', err));
-          refs.onTaskEvent?.('artifact_created', message);
+            type: 'system_status',
+            taskKind: 'context_update',
+          })
+          refs
+            .refreshProjectVisibility()
+            .catch(err =>
+              console.error(
+                '[useChat] Context visibility refresh failed:',
+                err,
+              ),
+            )
+          refs.onTaskEvent?.('context_update', message)
+          break
         }
-        break;
 
-      case 'context_update': {
-        const context = message.context;
-        if (!context || (message.project_id && message.project_id !== refs.projectId)) {
-          break;
-        }
-        const ragCount = context.rag_sources?.length ?? 0;
-        const skillCount = context.selected_skills?.length ?? 0;
-        addMessage({
-          id: `context-${context.bundle_id || message.task_id || Date.now()}`,
-          sender: 'system',
-          content: `Context used for ${context.phase || 'phase'}: blackboard ${context.blackboard_record_count ?? 0}, memory ${context.memory_hits ?? 0}, RAG ${ragCount}, skills ${skillCount}.`,
-          timestamp: Date.now(),
-          type: 'system_status',
-          taskKind: 'context_update',
-        });
-        refs.refreshProjectVisibility().catch(err => console.error('[useChat] Context visibility refresh failed:', err));
-        refs.onTaskEvent?.('context_update', message);
-        break;
-      }
-
-      case 'error': {
-        const errContent = message.content || message.message || message.error || '任务执行出现错误';
-        const contextualError =
-          refs.approvalState.phase === 'awaiting_runtime' || refs.approvalState.phase === 'submitting'
-            ? `审批已提交，但后续执行失败：${errContent}`
-            : errContent;
+        case 'error': {
+          const errContent =
+            message.content ||
+            message.message ||
+            message.error ||
+            '任务执行出现错误'
+          const contextualError =
+            refs.approvalState.phase === 'awaiting_runtime' ||
+            refs.approvalState.phase === 'submitting'
+              ? `审批已提交，但后续执行失败：${errContent}`
+              : errContent
           addMessage({
             id: `error-${message.task_id || 'na'}-${contextualError.substring(0, 32)}`,
             sender: 'system',
@@ -525,191 +646,233 @@ export const useChat = ({
             timestamp: Date.now(),
             type: 'error',
             taskKind: 'runtime_error',
-            errorDetails: message.error || message.message || message.code
-          });
-        setIsLoading(false);
-        setApprovalState((prev) => {
-          if (prev.phase !== 'awaiting_runtime' && prev.phase !== 'submitting') {
-            return prev;
+            errorDetails: message.error || message.message || message.code,
+          })
+          setIsLoading(false)
+          setApprovalState(prev => {
+            if (
+              prev.phase !== 'awaiting_runtime' &&
+              prev.phase !== 'submitting'
+            ) {
+              return prev
+            }
+            return {
+              gateId: prev.gateId,
+              action: prev.action,
+              phase: 'failed',
+              message: contextualError,
+            }
+          })
+          if (message.recoverable) {
+            setCanContinue(true)
           }
-          return {
-            gateId: prev.gateId,
-            action: prev.action,
-            phase: 'failed',
-            message: contextualError,
-          };
-        });
-        if (message.recoverable) {
-          setCanContinue(true);
+          refs.showToastError?.(contextualError)
+          refs.onError?.(new Error(contextualError))
+          refs.onTaskEvent?.('error', message)
+          break
         }
-        refs.showToastError?.(contextualError);
-        refs.onError?.(new Error(contextualError));
-        refs.onTaskEvent?.('error', message);
-        break;
+
+        case 'tool_start':
+          // Tool invocation started
+          // Requirements: 7.1
+          if (message.tool) {
+            const toolMessageId =
+              message.message_id ||
+              `tool-${message.task_id}-${message.tool_use_id || message.tool}`
+            addMessage({
+              id: toolMessageId,
+              messageId: toolMessageId,
+              sender: 'system',
+              content:
+                message.content || `Tool: ${message.tool}\nStatus: running`,
+              timestamp: message.timestamp || Date.now(),
+              type: 'tool',
+              taskKind: 'tool_execution',
+              toolName: message.tool,
+              toolStatus: message.tool_status || 'running',
+              toolDetail: message.tool_detail,
+              toolOutput: message.tool_output,
+              artifactId: message.artifact_id,
+              artifactPath: message.artifact_path,
+              isSubagentTool: message.is_subagent_tool,
+            })
+            refs.onTaskEvent?.('tool_start', message)
+          }
+          break
+
+        case 'tool_end':
+          // Tool invocation completed
+          // Requirements: 7.2
+          if (message.tool) {
+            const toolMessageId =
+              message.message_id ||
+              `tool-${message.task_id}-${message.tool_use_id || message.tool}`
+            const toolResult = message.result || message.output
+            const outputSummary = toolResult
+              ? toolResult.length > 100
+                ? `${toolResult.substring(0, 100)}...`
+                : toolResult
+              : '(无输出)'
+            const status =
+              message.error ||
+              String(message.output || '')
+                .toLowerCase()
+                .includes('failed')
+                ? 'failed'
+                : 'completed'
+
+            addMessage({
+              id: toolMessageId,
+              messageId: toolMessageId,
+              sender: 'system',
+              content:
+                message.content ||
+                `Tool: ${message.tool}\nStatus: ${status}\nOutput: ${outputSummary}`,
+              timestamp: message.timestamp || Date.now(),
+              type: 'tool',
+              taskKind: 'tool_execution',
+              toolName: message.tool,
+              toolStatus: message.tool_status || status,
+              toolDetail: message.tool_detail,
+              toolOutput: message.tool_output || outputSummary,
+              artifactId: message.artifact_id,
+              artifactPath: message.artifact_path,
+              isSubagentTool: message.is_subagent_tool,
+            })
+            refs.onTaskEvent?.('tool_end', message)
+          }
+          break
+
+        case 'usage':
+          // Token usage statistics
+          // Requirements: 4.3
+          if (message.usage) {
+            updateTokenUsage(message.usage, refs.projectId, message.task_id)
+            refs.onTaskEvent?.('usage', message.usage)
+          }
+
+          break
+
+        case 'credit_update':
+          refs
+            .loadCurrentUser()
+            .catch(err =>
+              console.error('[useChat] Credit balance refresh failed:', err),
+            )
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('beegame:credits-updated', {
+                detail: {
+                  projectId: message.project_id,
+                  event: message.credit_event,
+                  balanceCredits: message.balance_credits,
+                  credits: message.credits,
+                },
+              }),
+            )
+          }
+          refs.onTaskEvent?.('credit_update', message)
+          break
+
+        case 'p2p_route':
+          // Peer-to-peer routing event
+          if (message.data) {
+            updateLastP2PRoute(message.data)
+          }
+          break
+
+        case 'error_paused':
+          // Error occurred, task paused
+          // Requirements: 6.3
+          setIsLoading(false)
+          setCanContinue(true)
+
+          addMessage({
+            id: `error-paused-${message.task_id}-${message.content?.substring(0, 32)}`,
+            sender: 'system',
+            content: message.content || '任务遇到错误并已暂停',
+            timestamp: Date.now(),
+            type: 'error',
+            taskKind: 'runtime_error',
+            canContinue: true,
+            errorDetails: message.error || message.message || message.code,
+          })
+
+          break
+
+        case 'project_renamed':
+          // Project renamed (AI auto-naming)
+          if (message.project_id && message.name) {
+            useProjectStore
+              .getState()
+              .renameProjectLocally(message.project_id, message.name)
+          }
+          break
+
+        default:
+          console.warn(
+            '[useChat] Unknown message type:',
+            (message as unknown as Record<string, unknown>).type,
+          )
       }
-
-      case 'tool_start':
-        // Tool invocation started
-        // Requirements: 7.1
-        if (message.tool) {
-          const toolMessageId = message.message_id || `tool-${message.task_id}-${message.tool_use_id || message.tool}`;
-          addMessage({
-            id: toolMessageId,
-            messageId: toolMessageId,
-            sender: 'system',
-            content: message.content || `Tool: ${message.tool}\nStatus: running`,
-            timestamp: message.timestamp || Date.now(),
-            type: 'tool',
-            taskKind: 'tool_execution',
-            toolName: message.tool,
-            toolStatus: message.tool_status || 'running',
-            toolDetail: message.tool_detail,
-            toolOutput: message.tool_output,
-            artifactId: message.artifact_id,
-            artifactPath: message.artifact_path,
-            isSubagentTool: message.is_subagent_tool,
-          });
-          refs.onTaskEvent?.('tool_start', message);
-        }
-        break;
-
-      case 'tool_end':
-        // Tool invocation completed
-        // Requirements: 7.2
-        if (message.tool) {
-          const toolMessageId = message.message_id || `tool-${message.task_id}-${message.tool_use_id || message.tool}`;
-          const toolResult = message.result || message.output;
-          const outputSummary = toolResult
-            ? toolResult.length > 100
-              ? `${toolResult.substring(0, 100)}...`
-              : toolResult
-            : '(无输出)';
-          const status = message.error || String(message.output || '').toLowerCase().includes('failed') ? 'failed' : 'completed';
-
-          addMessage({
-            id: toolMessageId,
-            messageId: toolMessageId,
-            sender: 'system',
-            content: message.content || `Tool: ${message.tool}\nStatus: ${status}\nOutput: ${outputSummary}`,
-            timestamp: message.timestamp || Date.now(),
-            type: 'tool',
-            taskKind: 'tool_execution',
-            toolName: message.tool,
-            toolStatus: message.tool_status || status,
-            toolDetail: message.tool_detail,
-            toolOutput: message.tool_output || outputSummary,
-            artifactId: message.artifact_id,
-            artifactPath: message.artifact_path,
-            isSubagentTool: message.is_subagent_tool,
-          });
-          refs.onTaskEvent?.('tool_end', message);
-        }
-        break;
-
-      case 'usage':
-        // Token usage statistics
-        // Requirements: 4.3
-        if (message.usage) {
-          updateTokenUsage(message.usage, refs.projectId, message.task_id);
-          refs.onTaskEvent?.('usage', message.usage);
-        }
-
-        break;
-
-      case 'credit_update':
-        refs.loadCurrentUser().catch(err => console.error('[useChat] Credit balance refresh failed:', err));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('beegame:credits-updated', {
-            detail: {
-              projectId: message.project_id,
-              event: message.credit_event,
-              balanceCredits: message.balance_credits,
-              credits: message.credits,
-            },
-          }));
-        }
-        refs.onTaskEvent?.('credit_update', message);
-        break;
-
-
-      case 'p2p_route':
-        // Peer-to-peer routing event
-        if (message.data) {
-          updateLastP2PRoute(message.data);
-        }
-        break;
-
-      case 'error_paused':
-        // Error occurred, task paused
-        // Requirements: 6.3
-        setIsLoading(false);
-        setCanContinue(true);
-
-        addMessage({
-          id: `error-paused-${message.task_id}-${message.content?.substring(0, 32)}`,
-          sender: 'system',
-          content: message.content || '任务遇到错误并已暂停',
-          timestamp: Date.now(),
-          type: 'error',
-          taskKind: 'runtime_error',
-          canContinue: true,
-          errorDetails: message.error || message.message || message.code
-        });
-
-        break;
-
-      case 'project_renamed':
-        // Project renamed (AI auto-naming)
-        if (message.project_id && message.name) {
-          useProjectStore.getState().renameProjectLocally(message.project_id, message.name);
-        }
-        break;
-
-      default:
-        console.warn('[useChat] Unknown message type:', (message as unknown as Record<string, unknown>).type);
-    }
-  }, [addMessage, updateMessage, finalizeMessage, removeMessage, setCurrentSender, updateTokenUsage, setIsStreaming, updateThought, setAgentStatus, refreshAgents, updateLastP2PRoute]);
-
+    },
+    [
+      addMessage,
+      updateMessage,
+      finalizeMessage,
+      removeMessage,
+      setCurrentSender,
+      updateTokenUsage,
+      setIsStreaming,
+      updateThought,
+      setAgentStatus,
+      refreshAgents,
+      updateLastP2PRoute,
+    ],
+  )
 
   /**
    * Synchronize all state with backend after reconnection
    * Requirements: 7.2
    */
   const syncAfterReconnect = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId) return
 
-    setIsSyncing(true);
+    setIsSyncing(true)
 
     try {
       // BeeGame has one server-owned runtime-state snapshot. Do not fan a
       // reconnect out into legacy phase, token, agent and task probes.
-      await refreshProjectVisibility();
-      const projectStatus = useProjectStore.getState().projectStatus;
-      if (toProjectRuntimeDisplayModel(projectStatus)?.workflow?.status === 'running') {
-        setCurrentTaskId(currentTaskId || projectId);
-        setIsLoading(true);
-        setCanContinue(false);
+      await refreshProjectVisibility()
+      const projectStatus = useProjectStore.getState().projectStatus
+      if (isProjectStatusRunning(projectStatus)) {
+        setCurrentTaskId(currentTaskId || projectId)
+        setIsLoading(true)
+        setCanContinue(false)
       }
 
       // Sync chat history only after the authoritative runtime state.
-      const { isStreaming } = useChatStore.getState();
+      const { isStreaming } = useChatStore.getState()
       if (!isStreaming) {
-        const history = await api.getChatHistory(projectId) as unknown;
-        const messages = normalizeChatHistory(history);
-        const currentMessages = useChatStore.getState().messages;
+        const history = (await api.getChatHistory(projectId)) as unknown
+        const messages = normalizeChatHistory(history)
+        const currentMessages = useChatStore.getState().messages
         if (messages.length > 0 || currentMessages.length === 0) {
-          loadHistory(messages);
+          loadHistory(messages)
         }
       }
-
     } catch (error) {
-      console.error('[useChat] Failed to synchronize state:', error);
+      console.error('[useChat] Failed to synchronize state:', error)
     } finally {
-      setIsSyncing(false);
+      setIsSyncing(false)
     }
-  }, [projectId, currentTaskId, loadHistory, setIsSyncing, refreshProjectVisibility]);
-
-
+  }, [
+    projectId,
+    currentTaskId,
+    loadHistory,
+    setIsSyncing,
+    refreshProjectVisibility,
+  ])
 
   /**
    * Handle WebSocket errors
@@ -718,37 +881,36 @@ export const useChat = ({
     // Browser WebSocket error events do not expose actionable diagnostics.
     // Treat close/failure state as the source of truth and avoid surfacing
     // transient reconnect noise as a fatal UI error.
-    console.warn('[useChat] WebSocket transport error event:', error);
-  }, []);
+    console.warn('[useChat] WebSocket transport error event:', error)
+  }, [])
 
   /**
    * Handle WebSocket close
    */
   const handleWebSocketClose = useCallback(() => {
-    // A transport disconnect does not mean the server-owned Claude Code turn
+    // A transport disconnect does not mean the server-owned BeeGame turn
     // stopped. Keep the runtime lock until the authoritative runtime snapshot
     // or a terminal status event says otherwise.
-    setIsStreaming(false);
-  }, [setIsStreaming]);
+    setIsStreaming(false)
+  }, [setIsStreaming])
 
   useEffect(() => {
-    if (!projectStatus || projectStatus.project_id !== projectId) return;
-    const workflow = toProjectRuntimeDisplayModel(projectStatus)?.workflow;
-    if (workflow?.status === 'running') {
-      setIsLoading(true);
-      setCanContinue(false);
-      setCurrentTaskId((current) => current || projectId);
-      return;
+    if (!projectStatus || projectStatus.project_id !== projectId) return
+    const phase = String(projectStatus.phase || '').toLowerCase()
+    if (phase === 'running' || phase === 'starting') {
+      setIsLoading(true)
+      setCanContinue(false)
+      setCurrentTaskId(current => current || projectId)
+      return
     }
     // The backend snapshot is authoritative for whether a native turn is
     // alive. In particular, a server restart recovers an unterminated turn as
     // paused/failed. Leaving the previous local loading flag untouched for
-    // those phases permanently locks the composer even though no Claude Code
+    // those phases permanently locks the composer even though no BeeGame
     // worker exists. Approval state has its own explicit UI lock.
-    setIsLoading(false);
-    setCurrentTaskId(null);
-  }, [projectId, projectStatus]);
-
+    setIsLoading(false)
+    setCurrentTaskId(null)
+  }, [projectId, projectStatus])
 
   // Initialize WebSocket connection
   const { state: wsState, reconnect } = useWebSocket({
@@ -757,90 +919,90 @@ export const useChat = ({
     onError: handleWebSocketError,
     onClose: handleWebSocketClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
-    showToastError
-  });
-
-  const confirmTaskCredits = useCallback(async (
-    taskType: BeeGameCreditTaskType,
-  ): Promise<boolean> => {
-    const quote = await getCreditQuote(taskType);
-    if (!quote.canStart) {
-      showToastError?.(`Credit 不足。本次请求需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
-      return false;
-    }
-    if (!confirmCreditQuote) return true;
-    return confirmCreditQuote(quote);
-  }, [confirmCreditQuote, showToastError]);
-
+    showToastError,
+  })
 
   /**
    * Send a message to the backend
    * Requirements: 1.1, 6.1
    */
-  const sendMessage = useCallback(async (
-    content: string,
-    terminationNode?: string,
-    attachments?: ChatAttachmentPayload[],
-    supersedesMessageId?: string,
-  ) => {
-    if (waitingApproval.isBlockingChat) {
-      emitWaitingApprovalBlock(waitingApproval.message);
-      return;
-    }
-    try {
-      const confirmed = await confirmTaskCredits('edit_turn');
-      if (!confirmed) return;
-      setIsLoading(true);
-      setCanContinue(false);
-      if (wsState !== 'connected') {
-        reconnect();
+  const sendMessage = useCallback(
+    async (
+      content: string,
+      terminationNode?: string,
+      attachments?: ChatAttachmentPayload[],
+      supersedesMessageId?: string,
+    ) => {
+      if (waitingApproval.isBlockingChat) {
+        emitWaitingApprovalBlock(waitingApproval.message)
+        return
       }
+      try {
+        setIsLoading(true)
+        setCanContinue(false)
+        if (wsState !== 'connected') {
+          reconnect()
+        }
 
-      const clientMessageId = newClientMessageId();
-      const optimisticTimestamp = Date.now();
+        const clientMessageId = newClientMessageId()
+        const optimisticTimestamp = Date.now()
 
-      // Add user message to chat history
-      addMessage({
-        id: clientMessageId,
-        clientMessageId,
-        supersedesMessageId,
-        sender: 'user',
-        content,
-        attachments,
-        timestamp: optimisticTimestamp,
-        type: 'text',
-      });
+        // Add user message to chat history
+        addMessage({
+          id: clientMessageId,
+          clientMessageId,
+          supersedesMessageId,
+          sender: 'user',
+          content,
+          attachments,
+          timestamp: optimisticTimestamp,
+          type: 'text',
+        })
 
+        // Send message to backend via REST API
+        const response = (await api.sendMessage({
+          content,
+          project_id: projectId,
+          termination_node: terminationNode,
+          client_message_id: clientMessageId,
+          attachments,
+          supersedes_message_id: supersedesMessageId,
+        })) as SendMessageResponse
 
-      // Send message to backend via REST API
-      const response = await api.sendMessage({
-        content,
-        project_id: projectId,
-        termination_node: terminationNode,
-        client_message_id: clientMessageId,
-        attachments,
-        supersedes_message_id: supersedesMessageId,
-      }) as SendMessageResponse;
+        setCurrentTaskId(response.task_id)
+        void syncAfterReconnect()
+      } catch (error) {
+        console.error('[useChat] Failed to send message:', error)
+        setIsLoading(false)
+        const errorMessage = getErrorDisplayMessage(
+          error,
+          '发送消息失败，请重试',
+        )
+        // Add error message to chat
+        addMessage({
+          id: `error-${Date.now()}`,
+          sender: 'system',
+          content: errorMessage,
+          timestamp: Date.now(),
+          type: 'error',
+        })
 
-      setCurrentTaskId(response.task_id);
-      void syncAfterReconnect();
-    } catch (error) {
-      console.error('[useChat] Failed to send message:', error);
-      setIsLoading(false);
-      const errorMessage = getErrorDisplayMessage(error, '发送消息失败，请重试');
-      // Add error message to chat
-      addMessage({
-        id: `error-${Date.now()}`,
-        sender: 'system',
-        content: errorMessage,
-        timestamp: Date.now(),
-        type: 'error'
-      });
-
-      showToastError?.(errorMessage);
-      onError?.(error instanceof Error ? error : new Error(errorMessage));
-    }
-  }, [projectId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+        showToastError?.(errorMessage)
+        onError?.(error instanceof Error ? error : new Error(errorMessage))
+      }
+    },
+    [
+      projectId,
+      addMessage,
+      onError,
+      showToastError,
+      wsState,
+      reconnect,
+      syncAfterReconnect,
+      waitingApproval,
+      emitWaitingApprovalBlock,
+    ],
+  )
 
   /**
    * Continue a paused task
@@ -848,69 +1010,77 @@ export const useChat = ({
    */
   const continueTask = useCallback(async () => {
     if (waitingApproval.isBlockingChat) {
-      emitWaitingApprovalBlock(waitingApproval.message);
-      return;
+      emitWaitingApprovalBlock(waitingApproval.message)
+      return
     }
     try {
-      const confirmed = await confirmTaskCredits('continue_turn');
-      if (!confirmed) return;
-      setIsLoading(true);
-      setCanContinue(false);
+      setIsLoading(true)
+      setCanContinue(false)
       if (wsState !== 'connected') {
-        reconnect();
+        reconnect()
       }
 
-
       // Send continue request to backend
-      const response = await api.continueTask({
+      const response = (await api.continueTask({
         project_id: projectId,
-        task_id: currentTaskId || undefined
-      }) as ContinueTaskResponse;
+        task_id: currentTaskId || undefined,
+      })) as ContinueTaskResponse
 
-      setCurrentTaskId(response.resume_task_id);
-      void syncAfterReconnect();
+      setCurrentTaskId(response.resume_task_id)
+      void syncAfterReconnect()
     } catch (error) {
-      console.error('[useChat] Failed to continue task:', error);
-      setIsLoading(false);
-      setCanContinue(true);
-      const errorMessage = getErrorDisplayMessage(error, '继续任务失败，请重试');
+      console.error('[useChat] Failed to continue task:', error)
+      setIsLoading(false)
+      setCanContinue(true)
+      const errorMessage = getErrorDisplayMessage(error, '继续任务失败，请重试')
       // Add error message to chat
       addMessage({
         id: `error-${Date.now()}`,
         sender: 'system',
         content: errorMessage,
         timestamp: Date.now(),
-        type: 'error'
-      });
+        type: 'error',
+      })
 
-      showToastError?.(errorMessage);
-      onError?.(error instanceof Error ? error : new Error(errorMessage));
+      showToastError?.(errorMessage)
+      onError?.(error instanceof Error ? error : new Error(errorMessage))
     }
-  }, [projectId, currentTaskId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+  }, [
+    projectId,
+    currentTaskId,
+    addMessage,
+    onError,
+    showToastError,
+    wsState,
+    reconnect,
+    syncAfterReconnect,
+    waitingApproval,
+    emitWaitingApprovalBlock,
+  ])
 
   /**
    * Stop the current task
    * Requirements: 6.1
    */
   const stopTask = useCallback(async () => {
-    if (isStoppingRef.current) return;
-    const stopTargetId = currentTaskId || projectId;
+    if (isStoppingRef.current) return
+    const stopTargetId = currentTaskId || projectId
     if (!stopTargetId) {
-      console.warn('[useChat] No task to stop');
-      return;
+      console.warn('[useChat] No task to stop')
+      return
     }
 
     try {
-      isStoppingRef.current = true;
-      setIsStopping(true);
+      isStoppingRef.current = true
+      setIsStopping(true)
 
       // Send stop request to backend
-      await api.stopTask({ task_id: stopTargetId, project_id: projectId });
+      await api.stopTask({ task_id: stopTargetId, project_id: projectId })
 
-      setIsLoading(false);
-      setCurrentTaskId(null);
-      setCurrentSender(null);
-      setCanContinue(false);
+      setIsLoading(false)
+      setCurrentTaskId(null)
+      setCurrentSender(null)
+      setCanContinue(false)
 
       // Add system message
       addMessage({
@@ -920,10 +1090,9 @@ export const useChat = ({
         timestamp: Date.now(),
         type: 'system_status',
         taskKind: 'task_stopped',
-      });
-
+      })
     } catch (error) {
-      console.error('[useChat] Failed to stop task:', error);
+      console.error('[useChat] Failed to stop task:', error)
 
       // Add error message to chat
       addMessage({
@@ -931,159 +1100,241 @@ export const useChat = ({
         sender: 'system',
         content: '停止任务失败，请重试',
         timestamp: Date.now(),
-        type: 'error'
-      });
+        type: 'error',
+      })
 
-      onError?.(error as Error);
+      onError?.(error as Error)
     } finally {
-      isStoppingRef.current = false;
-      setIsStopping(false);
+      isStoppingRef.current = false
+      setIsStopping(false)
     }
-  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError]);
+  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError])
 
   /**
    * Approve the current plan
    * Requirements: 7.3
    */
-  const approvePlan = useCallback(async (
-    review: ReviewBindingPayload & { gate_id: string; binding?: ReviewBindingPayload },
-    feedback?: string,
-    action: 'approve' | 'revise' | 'reject' = 'approve',
-    permissionScope: 'once' | 'session' = 'once'
-  ) => {
-    const reviewSnapshot = pendingReviews.find((item) => String(item?.gate_id || '').trim() === String(review.gate_id || '').trim());
-    try {
-      const binding = review.binding ?? review;
-      const submittedMessage =
-        action === 'approve'
-          ? '已提交批准，系统正在进入下一阶段。'
-          : action === 'revise'
-            ? '已提交修订请求，系统将返回设计修订流程。'
-            : '已提交拒绝。';
-      setApprovalState({
-        gateId: review.gate_id,
-        action,
-        phase: 'submitting',
-        message: submittedMessage,
-      });
+  const approvePlan = useCallback(
+    async (
+      review: ReviewBindingPayload & {
+        gate_id: string
+        binding?: ReviewBindingPayload
+      },
+      feedback?: string,
+      action: 'approve' | 'revise' | 'reject' = 'approve',
+      permissionScope: 'once' | 'session' = 'once',
+    ) => {
+      const reviewSnapshot = pendingReviews.find(
+        item =>
+          String(item?.gate_id || '').trim() ===
+          String(review.gate_id || '').trim(),
+      )
+      try {
+        const binding = review.binding ?? review
+        const submittedMessage =
+          action === 'approve'
+            ? '已提交批准，系统正在进入下一阶段。'
+            : action === 'revise'
+              ? '已提交修订请求，系统将返回设计修订流程。'
+              : '已提交拒绝。'
+        setApprovalState({
+          gateId: review.gate_id,
+          action,
+          phase: 'submitting',
+          message: submittedMessage,
+        })
 
-      showToastSuccess?.(submittedMessage);
+        showToastSuccess?.(submittedMessage)
 
-      await api.approvePlan(normalizeApprovePlanPayload({
-        project_id: projectId,
-        gate_id: review.gate_id,
-        action,
-        artifact_id: binding.artifact_id ?? review.artifact_id,
-        artifact_version: binding.artifact_version ?? review.artifact_version,
-        checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
-        commit_sha: binding.commit_sha ?? review.commit_sha,
-        workspace_path: binding.workspace_path ?? review.workspace_path ?? review.workspace_ref,
-        workspace_ref: binding.workspace_ref ?? review.workspace_ref ?? review.workspace_path,
-        feedback,
-        permission_scope: permissionScope,
-      }));
+        await api.approvePlan(
+          normalizeApprovePlanPayload({
+            project_id: projectId,
+            gate_id: review.gate_id,
+            action,
+            artifact_id: binding.artifact_id ?? review.artifact_id,
+            artifact_version:
+              binding.artifact_version ?? review.artifact_version,
+            checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
+            commit_sha: binding.commit_sha ?? review.commit_sha,
+            workspace_path:
+              binding.workspace_path ??
+              review.workspace_path ??
+              review.workspace_ref,
+            workspace_ref:
+              binding.workspace_ref ??
+              review.workspace_ref ??
+              review.workspace_path,
+            feedback,
+            permission_scope: permissionScope,
+          }),
+        )
 
-      removePendingReview(review.gate_id);
-      await refreshProjectVisibility();
-      setApprovalState({
-        gateId: null,
-        action: null,
-        phase: 'idle',
-        message: '',
-      });
-      onTaskEvent?.('plan_submitted', { gate_id: review.gate_id, action });
-    } catch (error) {
-      console.error('[useChat] Failed to approve plan:', error);
-      if (reviewSnapshot) {
-        upsertPendingReview(reviewSnapshot);
+        removePendingReview(review.gate_id)
+        await refreshProjectVisibility()
+        setApprovalState({
+          gateId: null,
+          action: null,
+          phase: 'idle',
+          message: '',
+        })
+        onTaskEvent?.('plan_submitted', { gate_id: review.gate_id, action })
+      } catch (error) {
+        console.error('[useChat] Failed to approve plan:', error)
+        if (reviewSnapshot) {
+          upsertPendingReview(reviewSnapshot)
+        }
+        const errorMessage =
+          error instanceof Error ? error.message : '审批操作失败，请重试'
+        setApprovalState({
+          gateId: review.gate_id,
+          action,
+          phase: 'failed',
+          message: errorMessage,
+        })
+
+        showToastError?.(`审批操作失败：${errorMessage}`)
+
+        onError?.(error as Error)
       }
-      const errorMessage = error instanceof Error ? error.message : '审批操作失败，请重试';
-      setApprovalState({
-        gateId: review.gate_id,
-        action,
-        phase: 'failed',
-        message: errorMessage,
-      });
-
-      showToastError?.(`审批操作失败：${errorMessage}`);
-
-      onError?.(error as Error);
-    }
-  }, [onError, onTaskEvent, pendingReviews, projectId, refreshProjectVisibility, removePendingReview, showToastError, showToastSuccess, upsertPendingReview]);
+    },
+    [
+      onError,
+      onTaskEvent,
+      pendingReviews,
+      projectId,
+      refreshProjectVisibility,
+      removePendingReview,
+      showToastError,
+      showToastSuccess,
+      upsertPendingReview,
+    ],
+  )
 
   /**
    * Upload and optionally auto-approve a manifest CSV
    */
-  const uploadManifestCsv = useCallback(async (gateId: string, csvContent: string, autoApprove: boolean = false) => {
-    try {
-      await api.uploadManifestCsv({
-        project_id: projectId,
-        gate_id: gateId,
-        csv_content: csvContent,
-        auto_approve: autoApprove
-      });
-      showToastSuccess?.(autoApprove
-        ? '资源清单已上传并提交确认，系统正在校验资源并继续执行。'
-        : '资源清单已上传，请确认后继续。');
-      onTaskEvent?.(autoApprove ? 'manifest_auto_approved' : 'manifest_uploaded');
-    } catch (error) {
-      console.error('[useChat] Failed to upload manifest CSV:', error);
-      showToastError?.('上传资源清单失败，请重试');
-      onError?.(error as Error);
-    }
-  }, [onError, onTaskEvent, projectId, showToastError, showToastSuccess]);
+  const uploadManifestCsv = useCallback(
+    async (
+      gateId: string,
+      csvContent: string,
+      autoApprove: boolean = false,
+    ) => {
+      try {
+        await api.uploadManifestCsv({
+          project_id: projectId,
+          gate_id: gateId,
+          csv_content: csvContent,
+          auto_approve: autoApprove,
+        })
+        showToastSuccess?.(
+          autoApprove
+            ? '资源清单已上传并提交确认，系统正在校验资源并继续执行。'
+            : '资源清单已上传，请确认后继续。',
+        )
+        onTaskEvent?.(
+          autoApprove ? 'manifest_auto_approved' : 'manifest_uploaded',
+        )
+      } catch (error) {
+        console.error('[useChat] Failed to upload manifest CSV:', error)
+        showToastError?.('上传资源清单失败，请重试')
+        onError?.(error as Error)
+      }
+    },
+    [onError, onTaskEvent, projectId, showToastError, showToastSuccess],
+  )
 
   /**
    * Approve a manifest gate
    */
-  const approveManifest = useCallback(async (review: ReviewBindingPayload & { gate_id: string; binding?: ReviewBindingPayload }, feedback?: string) => {
-    try {
-      const binding = review.binding ?? review;
-      const normalized = normalizeReviewBindingPayload({
-        project_id: projectId,
-        gate_id: review.gate_id,
-        checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
-        commit_sha: binding.commit_sha ?? review.commit_sha,
-        workspace_path: binding.workspace_path ?? review.workspace_path ?? review.workspace_ref,
-        workspace_ref: binding.workspace_ref ?? review.workspace_ref ?? review.workspace_path,
-        artifact_id: binding.artifact_id ?? review.artifact_id,
-        artifact_version: binding.artifact_version ?? review.artifact_version,
-        feedback
-      });
-      const result = await api.approveManifest(normalized) as unknown as { validation_status?: string };
-      const validationStatus = String(result?.validation_status || 'VALIDATING');
-      const content = validationStatus === 'VALIDATING'
-        ? '资源清单已确认，系统正在校验资源并继续执行。'
-        : `资源清单已确认，当前状态：${validationStatus}`;
-      showToastSuccess?.(content);
-      await refreshProjectVisibility();
-      onTaskEvent?.('manifest_approved', { validation_status: validationStatus });
-    } catch (error) {
-      console.error('[useChat] Failed to approve manifest:', error);
-      showToastError?.('审批资源清单失败，请重试');
-      onError?.(error as Error);
-    }
-  }, [onError, onTaskEvent, projectId, refreshProjectVisibility, showToastError, showToastSuccess]);
+  const approveManifest = useCallback(
+    async (
+      review: ReviewBindingPayload & {
+        gate_id: string
+        binding?: ReviewBindingPayload
+      },
+      feedback?: string,
+    ) => {
+      try {
+        const binding = review.binding ?? review
+        const normalized = normalizeReviewBindingPayload({
+          project_id: projectId,
+          gate_id: review.gate_id,
+          checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
+          commit_sha: binding.commit_sha ?? review.commit_sha,
+          workspace_path:
+            binding.workspace_path ??
+            review.workspace_path ??
+            review.workspace_ref,
+          workspace_ref:
+            binding.workspace_ref ??
+            review.workspace_ref ??
+            review.workspace_path,
+          artifact_id: binding.artifact_id ?? review.artifact_id,
+          artifact_version: binding.artifact_version ?? review.artifact_version,
+          feedback,
+        })
+        const result = (await api.approveManifest(normalized)) as unknown as {
+          validation_status?: string
+        }
+        const validationStatus = String(
+          result?.validation_status || 'VALIDATING',
+        )
+        const content =
+          validationStatus === 'VALIDATING'
+            ? '资源清单已确认，系统正在校验资源并继续执行。'
+            : `资源清单已确认，当前状态：${validationStatus}`
+        showToastSuccess?.(content)
+        await refreshProjectVisibility()
+        onTaskEvent?.('manifest_approved', {
+          validation_status: validationStatus,
+        })
+      } catch (error) {
+        console.error('[useChat] Failed to approve manifest:', error)
+        showToastError?.('审批资源清单失败，请重试')
+        onError?.(error as Error)
+      }
+    },
+    [
+      onError,
+      onTaskEvent,
+      projectId,
+      refreshProjectVisibility,
+      showToastError,
+      showToastSuccess,
+    ],
+  )
 
   /**
    * Revise a manifest gate
    */
-  const reviseManifest = useCallback(async (gateId: string, feedback: string) => {
-    try {
-      await api.reviseManifest({
-        project_id: projectId,
-        gate_id: gateId,
-        feedback
-      });
-      showToastSuccess?.('已提交资源清单修订请求，系统会重新生成并等待你再次确认。');
-      await refreshProjectVisibility();
-      onTaskEvent?.('manifest_revise_requested');
-    } catch (error) {
-      console.error('[useChat] Failed to revise manifest:', error);
-      showToastError?.('驳回资源清单失败，请重试');
-      onError?.(error as Error);
-    }
-  }, [onError, onTaskEvent, projectId, refreshProjectVisibility, showToastError, showToastSuccess]);
+  const reviseManifest = useCallback(
+    async (gateId: string, feedback: string) => {
+      try {
+        await api.reviseManifest({
+          project_id: projectId,
+          gate_id: gateId,
+          feedback,
+        })
+        showToastSuccess?.(
+          '已提交资源清单修订请求，系统会重新生成并等待你再次确认。',
+        )
+        await refreshProjectVisibility()
+        onTaskEvent?.('manifest_revise_requested')
+      } catch (error) {
+        console.error('[useChat] Failed to revise manifest:', error)
+        showToastError?.('驳回资源清单失败，请重试')
+        onError?.(error as Error)
+      }
+    },
+    [
+      onError,
+      onTaskEvent,
+      projectId,
+      refreshProjectVisibility,
+      showToastError,
+      showToastSuccess,
+    ],
+  )
 
   return {
     sendMessage,
@@ -1098,6 +1349,6 @@ export const useChat = ({
     isStopping,
     currentTaskId,
     canContinue,
-    wsState
-  };
-};
+    wsState,
+  }
+}

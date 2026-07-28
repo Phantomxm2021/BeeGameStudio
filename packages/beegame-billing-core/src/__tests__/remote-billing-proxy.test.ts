@@ -15,7 +15,7 @@ describe('remote-billing-proxy', () => {
   test('returns unavailable when remote billing base URL is missing', async () => {
     const response = await proxyBeeGameBillingRequest(
       new Request('https://runtime.beegame.test/api/payments/stripe/credit-packs'),
-      { mode: 'remote' },
+      { mode: 'remote', usageBillingMode: 'realtime' },
       '/api/payments/stripe/credit-packs',
     )
 
@@ -41,6 +41,7 @@ describe('remote-billing-proxy', () => {
       }),
       {
         mode: 'remote',
+        usageBillingMode: 'realtime',
         remoteApiBaseUrl: 'https://billing.beegame.test',
       },
       '/api/payments/stripe/checkout-session',

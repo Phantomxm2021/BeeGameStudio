@@ -269,22 +269,15 @@ export const useSystemStore = create<SystemState>()(
             cache_creation_tokens: Number(usage.cache_creation_tokens) || 0,
             output_tokens: Number(usage.output_tokens ?? usage.completion_tokens) || 0,
           };
-          const hasExtendedUsage = Object.prototype.hasOwnProperty.call(usage, 'input_tokens') ||
-            Object.prototype.hasOwnProperty.call(usage, 'cached_input_tokens') ||
-            Object.prototype.hasOwnProperty.call(usage, 'cache_read_tokens') ||
-            Object.prototype.hasOwnProperty.call(usage, 'cache_creation_tokens') ||
-            Object.prototype.hasOwnProperty.call(usage, 'output_tokens');
           const mergeUsage = (current: TokenUsage | undefined): TokenUsage => {
             const merged: TokenUsage = {
               prompt_tokens: Math.max(current?.prompt_tokens || 0, safeUsage.prompt_tokens),
               completion_tokens: Math.max(current?.completion_tokens || 0, safeUsage.completion_tokens),
               total_tokens: Math.max(current?.total_tokens || 0, safeUsage.total_tokens),
+              input_tokens: Math.max(current?.input_tokens || 0, safeUsage.input_tokens),
+              cached_input_tokens: Math.max(current?.cached_input_tokens || 0, safeUsage.cached_input_tokens),
+              output_tokens: Math.max(current?.output_tokens || 0, safeUsage.output_tokens),
             };
-            if (hasExtendedUsage || current?.input_tokens !== undefined) merged.input_tokens = Math.max(current?.input_tokens || 0, safeUsage.input_tokens);
-            if (hasExtendedUsage || current?.cached_input_tokens !== undefined) merged.cached_input_tokens = Math.max(current?.cached_input_tokens || 0, safeUsage.cached_input_tokens);
-            if (hasExtendedUsage || current?.cache_read_tokens !== undefined) merged.cache_read_tokens = Math.max(current?.cache_read_tokens || 0, safeUsage.cache_read_tokens);
-            if (hasExtendedUsage || current?.cache_creation_tokens !== undefined) merged.cache_creation_tokens = Math.max(current?.cache_creation_tokens || 0, safeUsage.cache_creation_tokens);
-            if (hasExtendedUsage || current?.output_tokens !== undefined) merged.output_tokens = Math.max(current?.output_tokens || 0, safeUsage.output_tokens);
             return merged;
           };
 

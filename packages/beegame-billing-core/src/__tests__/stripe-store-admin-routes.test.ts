@@ -4,22 +4,28 @@ import type { BeeGameBillingRouteRepository } from '../billing-ports'
 import type { BillingRouteDeps } from '../billing-route-types'
 import { registerBeeGameStripeStoreRoutes } from '../stripe-store-admin-routes'
 
-const billingConfig = { mode: 'server' as const }
+const billingConfig = { mode: 'server' as const, usageBillingMode: 'realtime' as const }
 
 function createRepository(
   overrides: Partial<BeeGameBillingRouteRepository> = {},
 ): BeeGameBillingRouteRepository {
   return {
-    reserveCreditsForUser: async () => { throw new Error('unused') },
-    findCreditReservationByIdempotencyKeyForUser: async () => undefined,
-    getCreditSettlementForUser: async () => undefined,
-    settleCreditReservationForUser: async () => { throw new Error('unused') },
-    refundCreditReservationForUser: async () => { throw new Error('unused') },
-    expireStaleCreditReservationsForUser: async () => { throw new Error('unused') },
-    grantPaymentProviderCredits: async () => { throw new Error('unused') },
-    grantCredits: async () => { throw new Error('unused') },
+    debitRealTimeUsageForUser: async () => {
+      throw new Error('not used')
+    },
+    recordShadowUsageForUser: async () => {
+      throw new Error('not used')
+    },
+    grantPaymentProviderCredits: async () => {
+      throw new Error('unused')
+    },
+    grantCredits: async () => {
+      throw new Error('unused')
+    },
     listBillingCreditPacks: async () => [],
-    upsertBillingCreditPack: async () => { throw new Error('unused') },
+    upsertBillingCreditPack: async () => {
+      throw new Error('unused')
+    },
     appendBillingEvent: async () => {},
     listBillingEvents: async () => [],
     ...overrides,
@@ -51,15 +57,22 @@ describe('stripe store admin routes', () => {
     const failure = new Error('database secret')
     const warnings: unknown[] = []
     console.warn = (...args: unknown[]) => warnings.push(args)
-    const app = createApp(createRepository({
-      listBillingCreditPacks: async () => { throw failure },
-    }))
+    const app = createApp(
+      createRepository({
+        listBillingCreditPacks: async () => {
+          throw failure
+        },
+      }),
+    )
 
     const response = await app.request('/api/admin/billing/credit-packs')
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(body).toEqual({
+      error: 'Request failed',
+      traceId: expect.any(String),
+    })
     expect(JSON.stringify(body)).not.toContain('database secret')
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toEqual([
@@ -76,15 +89,22 @@ describe('stripe store admin routes', () => {
     const failure = new Error('billing events backend secret')
     const warnings: unknown[] = []
     console.warn = (...args: unknown[]) => warnings.push(args)
-    const app = createApp(createRepository({
-      listBillingEvents: async () => { throw failure },
-    }))
+    const app = createApp(
+      createRepository({
+        listBillingEvents: async () => {
+          throw failure
+        },
+      }),
+    )
 
     const response = await app.request('/api/admin/billing/events')
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(body).toEqual({
+      error: 'Request failed',
+      traceId: expect.any(String),
+    })
     expect(JSON.stringify(body)).not.toContain('billing events backend secret')
     expect(warnings[0]).toEqual([
       '[BeeGame] route failed',
@@ -98,12 +118,15 @@ describe('stripe store admin routes', () => {
 
   test('preserves billing events audit authorization before repository access', async () => {
     let repositoryCalls = 0
-    const app = createApp(createRepository({
-      listBillingEvents: async () => {
-        repositoryCalls += 1
-        return []
-      },
-    }), () => false)
+    const app = createApp(
+      createRepository({
+        listBillingEvents: async () => {
+          repositoryCalls += 1
+          return []
+        },
+      }),
+      () => false,
+    )
 
     const response = await app.request('/api/admin/billing/events')
 
@@ -116,9 +139,13 @@ describe('stripe store admin routes', () => {
     const failure = new Error('upsert backend secret')
     const warnings: unknown[] = []
     console.warn = (...args: unknown[]) => warnings.push(args)
-    const app = createApp(createRepository({
-      upsertBillingCreditPack: async () => { throw failure },
-    }))
+    const app = createApp(
+      createRepository({
+        upsertBillingCreditPack: async () => {
+          throw failure
+        },
+      }),
+    )
 
     const response = await app.request('/api/admin/billing/credit-packs', {
       method: 'POST',
@@ -128,7 +155,10 @@ describe('stripe store admin routes', () => {
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(body).toEqual({
+      error: 'Request failed',
+      traceId: expect.any(String),
+    })
     expect(JSON.stringify(body)).not.toContain('upsert backend secret')
     expect(warnings[0]).toEqual([
       '[BeeGame] route failed',
@@ -144,9 +174,13 @@ describe('stripe store admin routes', () => {
     const failure = new Error('grant backend secret')
     const warnings: unknown[] = []
     console.warn = (...args: unknown[]) => warnings.push(args)
-    const app = createApp(createRepository({
-      grantCredits: async () => { throw failure },
-    }))
+    const app = createApp(
+      createRepository({
+        grantCredits: async () => {
+          throw failure
+        },
+      }),
+    )
 
     const response = await app.request('/api/admin/credits/grants', {
       method: 'POST',
@@ -156,7 +190,10 @@ describe('stripe store admin routes', () => {
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(body).toEqual({
+      error: 'Request failed',
+      traceId: expect.any(String),
+    })
     expect(JSON.stringify(body)).not.toContain('grant backend secret')
     expect(warnings[0]).toEqual([
       '[BeeGame] route failed',
@@ -170,7 +207,9 @@ describe('stripe store admin routes', () => {
 
   test('preserves credits admin authorization and grant validation responses', async () => {
     const app = createApp(createRepository(), () => false)
-    const forbidden = await app.request('/api/admin/credits/grants', { method: 'POST' })
+    const forbidden = await app.request('/api/admin/credits/grants', {
+      method: 'POST',
+    })
     expect(forbidden.status).toBe(403)
     expect(await forbidden.json()).toEqual({ error: 'Forbidden' })
 

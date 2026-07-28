@@ -1,8 +1,31 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
-import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
+import {
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
@@ -13,17 +36,10 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
-  refundCreditReservation,
-  reserveCredits,
-  settleCreditReservation,
-  type CreditReservation,
-  type CreditSettlement,
-} from '../credit-store'
-import {
-  getCreditTaskPolicy,
-  type BeeGameCreditTaskPolicy,
-  type BeeGameCreditTaskType,
-} from '../credit-policy'
+  recordShadowUsage,
+  type ShadowUsage,
+  type RecordShadowUsageResult,
+} from '../usage-billing-shadow'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
   interruptUnfinishedNativeAcceptances,
@@ -51,6 +67,8 @@ import {
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
+import { createRunStore } from './delivery-workflow/run-store'
+import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -74,12 +92,16 @@ const PROJECT_AGENT_RAW_LOG_ARCHIVES = 3
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
-  '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  '.docx': [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ],
   '.txt': ['text/plain'],
   '.md': ['text/markdown', 'text/plain'],
   '.csv': ['text/csv', 'application/csv'],
   '.xls': ['application/vnd.ms-excel'],
-  '.xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  '.xlsx': [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ],
   '.json': ['application/json', 'text/json'],
   '.jsonl': ['application/jsonl', 'application/x-ndjson', 'text/jsonl'],
 }
@@ -100,16 +122,16 @@ export type MaterializedBeeGameFileAttachment = {
 export type BeeGamePromptInput =
   | string
   | Array<
-    | { type: 'text'; text: string }
-    | {
-      type: 'image'
-      source: {
-        type: 'base64'
-        media_type: BeeGameImageAttachment['mediaType']
-        data: string
-      }
-    }
-  >
+      | { type: 'text'; text: string }
+      | {
+          type: 'image'
+          source: {
+            type: 'base64'
+            media_type: BeeGameImageAttachment['mediaType']
+            data: string
+          }
+        }
+    >
 
 export type BeeGameSessionStatus = 'running' | 'stopped' | 'failed'
 
@@ -132,6 +154,7 @@ export type BeeGameEventType =
   | 'session.resumed'
   | 'turn.started'
   | 'user.message'
+  | 'usage'
   | 'assistant.message'
   | 'assistant.partial'
   | 'assistant.thinking'
@@ -265,7 +288,8 @@ const RUNTIME_PROVIDER_URL_KEYS = [
   'GROK_BASE_URL',
 ] as const
 
-export type BeeGameRuntimeProviderUrlKey = (typeof RUNTIME_PROVIDER_URL_KEYS)[number]
+export type BeeGameRuntimeProviderUrlKey =
+  (typeof RUNTIME_PROVIDER_URL_KEYS)[number]
 
 export type BeeGameApprovedOutboundTargets = Partial<
   Record<BeeGameRuntimeProviderUrlKey, ApprovedOutboundTarget>
@@ -314,25 +338,27 @@ export type DashboardPermissionDecision = {
 }
 
 type PendingPermission = DashboardPermissionRequest & {
+  requestedAt: Date
   resolve(decision: DashboardPermissionDecision): void
 }
 
-type PendingCreditOperation =
-  | {
-      kind: 'settle'
-      reservation: CreditReservation
-      policy: BeeGameCreditTaskPolicy
-      weightedTokens: number
-      settleToTotalTokens: number
-      settleToWeightedTokens: number
-    }
-  | {
-      kind: 'refund'
-      reservation: CreditReservation
-    }
+export type BeeGamePendingPermission = DashboardPermissionRequest & {
+  sessionId: string
+  projectId?: string
+  workflowWorker?: boolean
+  workflowRunId?: string
+  workflowDispatchId?: string
+  requestedAt: Date
+}
 
 type SessionRecord = {
   session: BeeGameSession
+  /** Workflow workers have isolated transcripts and may share a workspace lease with the chat surface. */
+  workflowWorker?: boolean
+  workflowRunId?: string
+  workflowDispatchId?: string
+  workflowWorkerType?: string
+  workflowAllowedPaths?: string[]
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -355,13 +381,38 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
-  lastSettledTotalTokens: number
-  lastSettledWeightedTokens: number
-  pendingCreditOperation: PendingCreditOperation | null
-  pendingCreditRetryInFlight: boolean
-  pendingCreditRetryFailures: number
-  pendingCreditRetryAfter: number
+  /** Usage already committed to the durable workflow run ledger. */
+  workflowUsageCommitted: BeeGameRuntimeSnapshot['usage']
+  /** Serializes workflow usage writes without blocking the SDK callback. */
+  workflowUsageWriteTail: Promise<void>
+  workflowUsageWriteError?: Error
+  /** Serializes shadow billing events without blocking the SDK callback. */
+  shadowUsageWriteTail: Promise<void>
   resumeEventPending: boolean
+}
+
+function workflowDocumentFromToolEvent(
+  record: SessionRecord,
+  event: BeeGameEvent,
+): string | undefined {
+  if (event.type !== 'tool.started') return undefined
+  const payload = event.payload
+  const input = payload?.input
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return undefined
+  const filePath = (input as Record<string, unknown>).file_path
+  if (typeof filePath !== 'string' || !filePath.trim()) return undefined
+  const absolutePath = isAbsolute(filePath)
+    ? filePath
+    : join(record.session.cwd, filePath)
+  const relativePath = relative(record.session.cwd, resolve(absolutePath))
+    .split('\\')
+    .join('/')
+  return CANONICAL_PROJECT_DOCUMENTS.includes(
+    relativePath as (typeof CANONICAL_PROJECT_DOCUMENTS)[number],
+  )
+    ? relativePath
+    : undefined
 }
 
 export type StartBeeGameSessionInput = {
@@ -373,6 +424,11 @@ export type StartBeeGameSessionInput = {
   authToken?: string
   userDataRoot?: string
   language?: BeeGameSessionLanguage
+  workflowWorker?: boolean
+  workflowRunId?: string
+  workflowDispatchId?: string
+  workflowWorkerType?: string
+  workflowAllowedPaths?: string[]
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -387,48 +443,34 @@ export type BeeGameSessionInternalMetadata = {
   updatedAt: Date
 }
 
-export type BeeGameSessionCreditBackend = {
-  reserveCredits: (
+export type BeeGameSessionUsageBillingBackend = {
+  recordShadowUsage?: (
     userId: string,
     options: {
       dataDir: string
-      credits: number
-      kind?: string
+      sessionId: string
+      turnId?: string
       projectId?: string
-      idempotencyKey?: string
+      usage: ShadowUsage
+      idempotencyKey: string
       metadata?: Record<string, unknown>
       authToken?: string
     },
-  ) => CreditReservation | Promise<CreditReservation>
-  settleCreditReservation: (
+  ) => RecordShadowUsageResult | Promise<RecordShadowUsageResult>
+  debitRealtimeUsage?: (
     userId: string,
-    options: {
-      dataDir: string
-      reservationId: string
-      weightedTokens: number
-      projectId?: string
-      idempotencyKey?: string
-      metadata?: Record<string, unknown>
-      authToken?: string
-    },
-  ) => CreditSettlement | Promise<CreditSettlement>
-  refundCreditReservation: (
-    userId: string,
-    options: {
-      dataDir: string
-      reservationId: string
-      projectId?: string
-      idempotencyKey?: string
-      metadata?: Record<string, unknown>
-      authToken?: string
-    },
-  ) => CreditSettlement | Promise<CreditSettlement>
+    options: Parameters<
+      NonNullable<BeeGameSessionUsageBillingBackend['recordShadowUsage']>
+    >[1],
+  ) => RecordShadowUsageResult | Promise<RecordShadowUsageResult>
 }
 
-const localCreditBackend: BeeGameSessionCreditBackend = {
-  reserveCredits,
-  settleCreditReservation,
-  refundCreditReservation,
+const localUsageBillingBackend: BeeGameSessionUsageBillingBackend = {
+  recordShadowUsage: (_userId, input) =>
+    recordShadowUsage({
+      ...input,
+      userId: _userId,
+    }),
 }
 
 export class BeeGameSessionManager {
@@ -444,7 +486,7 @@ export class BeeGameSessionManager {
       authToken?: string,
       modelConfigId?: string,
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
-    private readonly creditBackend: BeeGameSessionCreditBackend = localCreditBackend,
+    private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = localUsageBillingBackend,
     private readonly allowExternalRuntimeEnv = false,
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
@@ -462,9 +504,13 @@ export class BeeGameSessionManager {
       throw new Error('Workspace path must be absolute')
     }
     const cwd = resolve(input.workspacePath)
-    const existingLease = [...this.sessions.values()].find(record => (
-      record.session.cwd === cwd && record.session.status === 'running'
-    ))
+    const existingLease = [...this.sessions.values()].find(
+      record =>
+        record.session.cwd === cwd &&
+        record.session.status === 'running' &&
+        !input.workflowWorker &&
+        !record.workflowWorker,
+    )
     if (existingLease) {
       if (
         input.projectId &&
@@ -486,8 +532,8 @@ export class BeeGameSessionManager {
     }
 
     const now = new Date()
-    const sessionId = input.transcriptSessionId ||
-      `beegame_${randomUUID().replaceAll('-', '')}`
+    const sessionId =
+      input.transcriptSessionId || `beegame_${randomUUID().replaceAll('-', '')}`
     const session: BeeGameSession = {
       id: sessionId,
       cwd,
@@ -499,16 +545,24 @@ export class BeeGameSessionManager {
     }
 
     const recoveredTranscript = input.transcriptSessionId
-      ? readExistingTranscriptForResume(
-          input.transcriptSessionId,
-          cwd,
-        )
+      ? readExistingTranscriptForResume(input.transcriptSessionId, cwd)
       : undefined
     const confirmedBriefContext = recoverConfirmedBriefContext(
       recoveredTranscript?.events ?? [],
     )
     const record: SessionRecord = {
       session,
+      ...(input.workflowWorker ? { workflowWorker: true } : {}),
+      ...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
+      ...(input.workflowDispatchId
+        ? { workflowDispatchId: input.workflowDispatchId }
+        : {}),
+      ...(input.workflowWorkerType
+        ? { workflowWorkerType: input.workflowWorkerType }
+        : {}),
+      ...(input.workflowAllowedPaths
+        ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
+        : {}),
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
@@ -517,14 +571,10 @@ export class BeeGameSessionManager {
       ...(input.language
         ? { language: input.language }
         : recoverSessionLanguage(recoveredTranscript?.events ?? [])),
-      ...(confirmedBriefContext
-        ? { confirmedBriefContext }
-        : {}),
-      transcriptPath: recoveredTranscript?.path ??
-        getSessionTranscriptPath(
-          session.id,
-          session.cwd,
-        ),
+      ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
+      transcriptPath:
+        recoveredTranscript?.path ??
+        getSessionTranscriptPath(session.id, session.cwd),
       runner: null,
       abortController: null,
       pendingPermissions: new Map(),
@@ -542,18 +592,9 @@ export class BeeGameSessionManager {
         ? getNextTurnIndex(session.id, recoveredTranscript.events)
         : 1,
       currentTurnId: null,
-      lastSettledTotalTokens: recoveredTranscript
-        ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
-        : 0,
-      lastSettledWeightedTokens: recoveredTranscript
-        ? calculateCreditWeightedTokens(getLatestRuntimeUsage(recoveredTranscript.events))
-        : 0,
-      pendingCreditOperation: recoverPendingCreditOperation(
-        recoveredTranscript?.events ?? [],
-      ),
-      pendingCreditRetryInFlight: false,
-      pendingCreditRetryFailures: 0,
-      pendingCreditRetryAfter: 0,
+      workflowUsageCommitted: emptyRuntimeUsage(),
+      workflowUsageWriteTail: Promise.resolve(),
+      shadowUsageWriteTail: Promise.resolve(),
       resumeEventPending: Boolean(recoveredTranscript),
     }
     if (confirmedBriefContext) {
@@ -588,21 +629,135 @@ export class BeeGameSessionManager {
     this.sessions.set(session.id, record)
     this.persistRuntimeSnapshot(record)
     if (!recoveredTranscript) {
-      this.append(record, 'session.started', `Created BeeGame session in ${cwd}`, {
-        type: 'session.started',
-        ...(record.language ? { language: record.language } : {}),
-      })
+      this.append(
+        record,
+        'session.started',
+        `Created BeeGame session in ${cwd}`,
+        {
+          type: 'session.started',
+          ...(record.language ? { language: record.language } : {}),
+        },
+      )
     }
 
     return cloneSession(record.session)
   }
 
-  list(userId?: string): BeeGameSession[] {
+  list(
+    userId?: string,
+    options?: { includeWorkflowWorkers?: boolean },
+  ): BeeGameSession[] {
     return [...this.sessions.values()]
       .filter(record => !userId || record.userId === userId)
-      .map(record =>
-        cloneSession(record.session),
+      .filter(
+        record =>
+          options?.includeWorkflowWorkers === true || !record.workflowWorker,
       )
+      .map(record => cloneSession(record.session))
+  }
+
+  isWorkflowWorker(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.workflowWorker === true
+  }
+
+  isWorkflowWorkerOpen(dispatchId: string): boolean {
+    return [...this.sessions.values()].some(
+      record =>
+        record.workflowWorker === true &&
+        record.workflowDispatchId === dispatchId &&
+        record.session.status === 'running',
+    )
+  }
+
+  workflowWorkerSessionIds(
+    workflowRunId: string,
+    workspacePath: string,
+  ): string[] {
+    const root = resolve(workspacePath)
+    return [...this.sessions.values()]
+      .filter(
+        record =>
+          record.workflowWorker === true &&
+          record.workflowRunId === workflowRunId &&
+          resolve(record.session.cwd) === root,
+      )
+      .map(record => record.session.id)
+  }
+
+  pendingPermissionsForProject(
+    userId: string,
+    projectId: string,
+    workspacePath: string,
+  ): BeeGamePendingPermission[] {
+    const root = resolve(workspacePath)
+    const pending: BeeGamePendingPermission[] = []
+    for (const record of this.sessions.values()) {
+      if (
+        record.userId !== userId ||
+        record.projectId !== projectId ||
+        resolve(record.session.cwd) !== root
+      )
+        continue
+      for (const request of record.pendingPermissions.values()) {
+        pending.push({
+          ...request,
+          sessionId: record.session.id,
+          ...(record.projectId ? { projectId: record.projectId } : {}),
+          ...(record.workflowWorker ? { workflowWorker: true } : {}),
+          ...(record.workflowRunId
+            ? { workflowRunId: record.workflowRunId }
+            : {}),
+          ...(record.workflowDispatchId
+            ? { workflowDispatchId: record.workflowDispatchId }
+            : {}),
+        })
+      }
+    }
+    return pending.sort(
+      (left, right) => left.requestedAt.getTime() - right.requestedAt.getTime(),
+    )
+  }
+
+  resolveProjectPermission(
+    userId: string,
+    projectId: string,
+    workspacePath: string,
+    toolUseID: string,
+    decision: DashboardPermissionDecision & { remember?: boolean },
+  ): { resolved: boolean; sessionId?: string } {
+    const root = resolve(workspacePath)
+    const candidates = [...this.sessions.values()].filter(
+      record =>
+        record.userId === userId &&
+        record.projectId === projectId &&
+        resolve(record.session.cwd) === root &&
+        record.pendingPermissions.has(toolUseID),
+    )
+    if (candidates.length !== 1) return { resolved: false }
+    const record = candidates[0]
+    return {
+      ...this.resolvePermission(record.session.id, toolUseID, decision),
+      sessionId: record.session.id,
+    }
+  }
+
+  workflowUsage(workflowRunId: string): BeeGameRuntimeSnapshot['usage'] {
+    const total = emptyRuntimeUsage()
+    for (const record of this.sessions.values()) {
+      if (!record.workflowWorker || record.workflowRunId !== workflowRunId)
+        continue
+      // The durable run already contains every delta whose write completed.
+      // Expose only the uncommitted live delta so the API can add it without
+      // double-counting active workers.
+      addRuntimeUsage(
+        total,
+        subtractRuntimeUsage(
+          this.deriveRuntimeSnapshot(record).usage,
+          record.workflowUsageCommitted,
+        ),
+      )
+    }
+    return total
   }
 
   get(sessionId: string): BeeGameSession | undefined {
@@ -618,137 +773,6 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record || !authToken) return
     record.authToken = authToken
-  }
-
-  async retryPendingCreditOperation(sessionId: string): Promise<boolean> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.pendingCreditOperation) return false
-    if (record.pendingCreditRetryInFlight || Date.now() < record.pendingCreditRetryAfter) return false
-    record.pendingCreditRetryInFlight = true
-    const operation = record.pendingCreditOperation
-    try {
-      if (operation.kind === 'settle') {
-        const idempotencyKey = `turn:${record.session.id}:retry:settle:${operation.reservation.id}`
-        const settlement = await this.creditBackend.settleCreditReservation(record.userId, {
-          dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-          reservationId: operation.reservation.id,
-          weightedTokens: operation.weightedTokens,
-          projectId: getCreditProjectId(record),
-          idempotencyKey,
-          metadata: {
-            idempotencyKey,
-            taskType: operation.policy.taskType,
-            displayName: operation.policy.displayName,
-            sessionId: record.session.id,
-            ...(record.projectId ? { projectId: record.projectId } : {}),
-            workspacePath: record.session.cwd,
-            totalTokens: operation.settleToTotalTokens,
-            previousSettledTotalTokens: record.lastSettledTotalTokens,
-            weightedTokenTotal: operation.settleToWeightedTokens,
-            previousSettledWeightedTokens: record.lastSettledWeightedTokens,
-            retry: true,
-          },
-          ...(record.authToken ? { authToken: record.authToken } : {}),
-        })
-        record.lastSettledTotalTokens = Math.max(
-          record.lastSettledTotalTokens,
-          operation.settleToTotalTokens,
-        )
-        record.lastSettledWeightedTokens = Math.max(
-          record.lastSettledWeightedTokens,
-          operation.settleToWeightedTokens,
-        )
-        record.pendingCreditOperation = null
-        record.pendingCreditRetryFailures = 0
-        record.pendingCreditRetryAfter = 0
-        this.append(record, 'system.status', 'Credit settled', {
-          type: 'credit.settled',
-          reservationId: operation.reservation.id,
-          credits: settlement.settledCredits,
-          refundedCredits: settlement.refundedCredits,
-          weightedTokens: operation.weightedTokens,
-          balanceCredits: settlement.balance.balanceCredits,
-          retry: true,
-        })
-        return true
-      }
-      const idempotencyKey = `turn:${record.session.id}:retry:refund:${operation.reservation.id}`
-      const refund = await this.creditBackend.refundCreditReservation(record.userId, {
-        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-        reservationId: operation.reservation.id,
-        projectId: getCreditProjectId(record),
-        idempotencyKey,
-        metadata: {
-          idempotencyKey,
-          sessionId: record.session.id,
-          ...(record.projectId ? { projectId: record.projectId } : {}),
-          reason: 'turn_finished_without_billable_usage',
-          retry: true,
-        },
-        ...(record.authToken ? { authToken: record.authToken } : {}),
-      })
-      record.pendingCreditOperation = null
-      record.pendingCreditRetryFailures = 0
-      record.pendingCreditRetryAfter = 0
-      this.append(record, 'system.status', 'Credit reservation refunded', {
-        type: 'credit.refunded',
-        reservationId: operation.reservation.id,
-        credits: refund.refundedCredits,
-        balanceCredits: refund.balance.balanceCredits,
-        retry: true,
-      })
-      return true
-    } catch (err) {
-      record.pendingCreditRetryFailures += 1
-      const retryAfterMs = Math.min(
-        30_000,
-        1_000 * (2 ** Math.min(5, record.pendingCreditRetryFailures - 1)),
-      )
-      record.pendingCreditRetryAfter = Date.now() + retryAfterMs
-      this.append(record, 'system.status', toErrorMessage(err), {
-        type: operation.kind === 'settle'
-          ? 'credit.settle_retry_failed'
-          : 'credit.refund_retry_failed',
-        reservationId: operation.reservation.id,
-        error: toErrorMessage(err),
-        retryCount: record.pendingCreditRetryFailures,
-        retryAfterMs,
-      })
-      return false
-    } finally {
-      record.pendingCreditRetryInFlight = false
-    }
-  }
-
-  async retryPendingCreditOperations(
-    userId: string,
-    authToken?: string,
-  ): Promise<{
-    attempted: number
-    succeeded: string[]
-    failed: string[]
-  }> {
-    const pendingSessionIds = [...this.sessions.values()]
-      .filter(record => (
-        record.userId === userId &&
-        Boolean(record.pendingCreditOperation)
-      ))
-      .map(record => record.session.id)
-    const succeeded: string[] = []
-    const failed: string[] = []
-    for (const sessionId of pendingSessionIds) {
-      if (authToken) this.updateAuthToken(sessionId, authToken)
-      if (await this.retryPendingCreditOperation(sessionId)) {
-        succeeded.push(sessionId)
-      } else {
-        failed.push(sessionId)
-      }
-    }
-    return {
-      attempted: pendingSessionIds.length,
-      succeeded,
-      failed,
-    }
   }
 
   metadata(sessionId: string): BeeGameSessionInternalMetadata | undefined {
@@ -778,7 +802,10 @@ export class BeeGameSessionManager {
     const persisted = this.readPersistedRuntimeSnapshot(sessionId)
     if (workspacePath) {
       const root = resolveExistingPath(workspacePath)
-      const recoveredTranscript = readExistingTranscriptForResume(sessionId, root)
+      const recoveredTranscript = readExistingTranscriptForResume(
+        sessionId,
+        root,
+      )
       if (recoveredTranscript) {
         return deriveRuntimeSnapshotFromEvents(
           sessionId,
@@ -792,7 +819,8 @@ export class BeeGameSessionManager {
     if (persisted) {
       if (
         !workspacePath ||
-        resolveExistingPath(workspacePath) === resolveExistingPath(persisted.workspacePath)
+        resolveExistingPath(workspacePath) ===
+          resolveExistingPath(persisted.workspacePath)
       ) {
         return persisted
       }
@@ -814,7 +842,9 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     return record.events
-      .filter(event => event.id > after && !isThinkingProtocolControlEvent(event))
+      .filter(
+        event => event.id > after && !isThinkingProtocolControlEvent(event),
+      )
       .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
@@ -841,6 +871,20 @@ export class BeeGameSessionManager {
       }))
   }
 
+  /** Persist a user message for the chat surface without starting a model turn. */
+  appendUserMessage(
+    sessionId: string,
+    text: string,
+    payload?: Record<string, unknown>,
+  ): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    this.append(record, 'user.message', text, {
+      type: 'user.message',
+      ...(payload ?? {}),
+    })
+  }
+
   async send(sessionId: string, text: string): Promise<BeeGameSession> {
     return this.sendWithDisplay(sessionId, text)
   }
@@ -851,7 +895,7 @@ export class BeeGameSessionManager {
     display?: {
       displayText?: string
       displayKind?: string
-      taskType?: BeeGameCreditTaskType
+      taskType?: string
       authToken?: string
       clientMessageId?: string
       supersedesMessageId?: string
@@ -875,69 +919,69 @@ export class BeeGameSessionManager {
     record.session.turnStatus = 'running'
     let turnAccepted = false
     try {
-    if (display?.authToken) record.authToken = display.authToken
-    if (display?.language) record.language = display.language
-    if (display?.confirmedBriefContext) {
-      record.confirmedBriefContext = display.confirmedBriefContext
-      recordConfirmedBriefEvidence({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        confirmedBriefContext: display.confirmedBriefContext,
-        createdAt: new Date(),
-      })
-    }
-    if (record.resumeEventPending) {
-      record.resumeEventPending = false
-      this.append(record, 'session.resumed', `Resumed BeeGame session in ${record.session.cwd}`, {
-        type: 'session.resumed',
-        ...(record.language ? { language: record.language } : {}),
-      })
-    }
+      if (display?.authToken) record.authToken = display.authToken
+      if (display?.language) record.language = display.language
+      if (display?.confirmedBriefContext) {
+        record.confirmedBriefContext = display.confirmedBriefContext
+        recordConfirmedBriefEvidence({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          confirmedBriefContext: display.confirmedBriefContext,
+          createdAt: new Date(),
+        })
+      }
+      if (record.resumeEventPending) {
+        record.resumeEventPending = false
+        this.append(
+          record,
+          'session.resumed',
+          `Resumed BeeGame session in ${record.session.cwd}`,
+          {
+            type: 'session.resumed',
+            ...(record.language ? { language: record.language } : {}),
+          },
+        )
+      }
 
-    const preparedPrompt = await prepareBeeGamePromptInput({
-      text,
-      workspace: record.session.cwd,
-      attachments: display?.attachments,
-      displayKind: display?.displayKind,
-    })
-    const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
-    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
-    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display, nextTurnId)
-    record.assistantPartialTextByMessage.clear()
-    record.activeAssistantMessageId = null
-    record.emittedAssistantMessageIds.clear()
-    record.thinkingBlockIndexes.clear()
-    record.visibleThinkingBlockIndexes.clear()
-    record.currentTurnId = nextTurnId
-    record.nextTurnIndex += 1
-    display?.onTurnAccepted?.()
-    turnAccepted = true
-    record.abortController = new AbortController()
-    this.append(record, 'turn.started', text)
-    this.append(
-      record,
-      'user.message',
-      text,
-      {
+      const preparedPrompt = await prepareBeeGamePromptInput({
+        text,
+        workspace: record.session.cwd,
+        attachments: display?.attachments,
+        displayKind: display?.displayKind,
+      })
+      const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+      record.assistantPartialTextByMessage.clear()
+      record.activeAssistantMessageId = null
+      record.emittedAssistantMessageIds.clear()
+      record.thinkingBlockIndexes.clear()
+      record.visibleThinkingBlockIndexes.clear()
+      record.currentTurnId = nextTurnId
+      record.nextTurnIndex += 1
+      display?.onTurnAccepted?.()
+      turnAccepted = true
+      record.abortController = new AbortController()
+      this.append(record, 'turn.started', text)
+      this.append(record, 'user.message', text, {
         type: 'user.message',
         ...(display?.displayText ? { displayText: display.displayText } : {}),
         ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
         ...(display?.confirmedBriefContext
           ? { confirmedBriefContext: display.confirmedBriefContext }
           : {}),
-        ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
-        ...(display?.supersedesMessageId ? { supersedesMessageId: display.supersedesMessageId } : {}),
-      },
-    )
+        ...(display?.clientMessageId
+          ? { clientMessageId: display.clientMessageId }
+          : {}),
+        ...(display?.supersedesMessageId
+          ? { supersedesMessageId: display.supersedesMessageId }
+          : {}),
+      })
 
-    void this.runDirectTurn(
-      record,
-      preparedPrompt.prompt,
-      creditReservation,
-      creditPolicy,
-      preparedPrompt.attachmentDirectory,
-    )
-    return cloneSession(record.session)
+      void this.runDirectTurn(
+        record,
+        preparedPrompt.prompt,
+        preparedPrompt.attachmentDirectory,
+      )
+      return cloneSession(record.session)
     } catch (error) {
       if (!turnAccepted) {
         record.currentTurnId = null
@@ -962,7 +1006,11 @@ export class BeeGameSessionManager {
       record.session.status = 'stopped'
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
-      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', record.session.updatedAt)
+      this.interruptUnfinishedNativeEvidence(
+        record,
+        'session_stopped',
+        record.session.updatedAt,
+      )
       this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped')
     }
@@ -980,7 +1028,11 @@ export class BeeGameSessionManager {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
-      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', new Date())
+      this.interruptUnfinishedNativeEvidence(
+        record,
+        'session_stopped',
+        new Date(),
+      )
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session deleted before permission was resolved',
@@ -1001,22 +1053,62 @@ export class BeeGameSessionManager {
     return { deleted: true, deletedArtifactPaths }
   }
 
+  /**
+   * Workflow workers are disposable transport sessions. Their durable
+   * progress lives in .beegame/workflow, so remove the private transcript and
+   * runtime snapshot when the worker reaches a terminal state.
+   */
+  async disposeWorkflowWorker(sessionId: string): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.workflowWorker) return
+    if (record.session.status === 'running') this.stop(sessionId)
+    await this.flushWorkflowUsage(sessionId)
+    await rm(record.transcriptPath, { force: true })
+    await rm(
+      getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
+      { force: true },
+    )
+    this.sessions.delete(sessionId)
+  }
+
+  async flushWorkflowUsage(sessionId: string): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.workflowWorker) return
+    await record.workflowUsageWriteTail
+    if (record.workflowUsageWriteError) {
+      throw record.workflowUsageWriteError
+    }
+  }
+
   dispose(): void {
     for (const record of this.sessions.values()) {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
-      this.interruptUnfinishedNativeEvidence(record, 'session_stopped', new Date())
+      this.interruptUnfinishedNativeEvidence(
+        record,
+        'session_stopped',
+        new Date(),
+      )
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'BeeGame server stopped before permission was resolved',
       })
+      if (record.workflowWorker) {
+        void this.flushWorkflowUsage(record.session.id).catch(error => {
+          console.error('[BeeGame] Failed to flush workflow token usage', {
+            runId: record.workflowRunId,
+            dispatchId: record.workflowDispatchId,
+            cause: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
     }
   }
 
   /**
    * Runtime feature changes apply by rebuilding only idle native runners.
-   * Active Claude Code turns are never interrupted or rescheduled by BeeGame.
+   * Active BeeGame Studio turns are never interrupted or rescheduled by BeeGame.
    */
   refreshIdleRunners(): number {
     let refreshed = 0
@@ -1045,7 +1137,10 @@ export class BeeGameSessionManager {
     interruptUnfinishedNativeAcceptances(input)
   }
 
-  async readArtifact(sessionId: string, path: string): Promise<BeeGameArtifact> {
+  async readArtifact(
+    sessionId: string,
+    path: string,
+  ): Promise<BeeGameArtifact> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     const targetPath = isAbsolute(path)
@@ -1094,11 +1189,8 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: BeeGamePromptInput,
-    creditReservation?: CreditReservation,
-    creditPolicy?: BeeGameCreditTaskPolicy,
     attachmentDirectory?: string,
   ): Promise<void> {
-    let shouldRefundReservation = Boolean(creditReservation)
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -1111,22 +1203,28 @@ export class BeeGameSessionManager {
           record.session.modelConfigId,
         ),
       )
-      const approvedOutboundTargets = await this.resolveRuntimeOutboundTargets(env)
-      const runner = record.runner ?? await this.runner.start({
-        sessionId: record.session.id,
-        deliveryEvidenceDataRoot: this.dashboardDataRoot,
-        resumeSessionId: record.session.id,
-        cwd: record.session.cwd,
-        env,
-        approvedOutboundTargets,
-        ...(this.resourceSelectionConfig && env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0'
-          ? { resourceSelectionConfig: this.resourceSelectionConfig }
-          : {}),
-        ...(record.language ? { language: record.language } : {}),
-        onNativeTaskNotification: notification =>
-          this.observeNativeTaskNotification(record, notification),
-        requestPermission: request => this.requestPermission(record, request),
-      })
+      const approvedOutboundTargets =
+        await this.resolveRuntimeOutboundTargets(env)
+      const runner =
+        record.runner ??
+        (await this.runner.start({
+          sessionId: record.session.id,
+          deliveryEvidenceDataRoot: this.dashboardDataRoot,
+          resumeSessionId: record.session.id,
+          cwd: record.session.cwd,
+          env,
+          approvedOutboundTargets,
+          ...(this.resourceSelectionConfig &&
+          env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
+          (!record.workflowWorker ||
+            record.workflowWorkerType === 'resource-preparer')
+            ? { resourceSelectionConfig: this.resourceSelectionConfig }
+            : {}),
+          ...(record.language ? { language: record.language } : {}),
+          onNativeTaskNotification: notification =>
+            this.observeNativeTaskNotification(record, notification),
+          requestPermission: request => this.requestPermission(record, request),
+        }))
       record.runner = runner
       try {
         await this.submitToRunner(record, runner, prompt, signal)
@@ -1151,13 +1249,6 @@ export class BeeGameSessionManager {
             )
           }
         }
-        if (creditReservation) {
-          shouldRefundReservation = !await this.settleTurnCredits(
-            record,
-            creditReservation,
-            creditPolicy ?? getCreditTaskPolicy('agent_turn'),
-          )
-        }
       } finally {
         if (signal.aborted && record.runner === runner) {
           disposeRunner(record.runner)
@@ -1167,13 +1258,6 @@ export class BeeGameSessionManager {
     } catch (err) {
       disposeRunner(record.runner)
       record.runner = null
-      if (creditReservation) {
-        shouldRefundReservation = !await this.settleTurnCredits(
-          record,
-          creditReservation,
-          creditPolicy ?? getCreditTaskPolicy('agent_turn'),
-        )
-      }
       if (record.session.status === 'running') {
         this.closeOpenThinkingLifecycle(record, 'turn_failed')
         this.append(
@@ -1183,9 +1267,6 @@ export class BeeGameSessionManager {
         )
       }
     } finally {
-      if (creditReservation && shouldRefundReservation) {
-        await this.refundTurnCredits(record, creditReservation)
-      }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
@@ -1250,31 +1331,129 @@ export class BeeGameSessionManager {
           !submittedTurnId ||
           record.currentTurnId !== submittedTurnId ||
           hasTurnEnded(record.events, submittedTurnId)
-        ) return
+        )
+          return
+        // Claude-compatible streaming transports report authoritative usage on
+        // message_delta, which has no visible text. Preserve it as a
+        // first-class event so runtime snapshots advance during the turn.
+        if (
+          message.type === 'stream_event' &&
+          getUsageFromEventPayload(message).total_tokens > 0
+        ) {
+          this.append(record, 'usage', '', message)
+        }
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
             this.append(record, mapped.type, mapped.text, message)
             this.appendAssistantPartialText(record, message)
           } else if (mapped.type === 'assistant.message') {
-            const reconciled = this.reconcileAssistantText(record, message, mapped.text)
-            if (reconciled) this.append(record, mapped.type, reconciled, message)
+            const reconciled = this.reconcileAssistantText(
+              record,
+              message,
+              mapped.text,
+            )
+            if (reconciled)
+              this.append(record, mapped.type, reconciled, message)
           } else {
-            this.append(record, mapped.type, mapped.text, mapped.payload ?? message)
+            this.append(
+              record,
+              mapped.type,
+              mapped.text,
+              mapped.payload ?? message,
+            )
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          this.append(
-            record,
-            toolEvent.type,
-            toolEvent.text,
-            toolEvent.payload,
-          )
+          this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
+        this.queueShadowUsageRecord(record, submittedTurnId, message)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
+    await record.shadowUsageWriteTail
     if (executionError && !signal.aborted) throw executionError
+  }
+
+  private queueShadowUsageRecord(
+    record: SessionRecord,
+    turnId: string,
+    message: DashboardSDKMessage,
+  ): void {
+    if (!this.usageBillingBackend.recordShadowUsage) return
+    const usage = this.deriveRuntimeSnapshot(record).usage
+    if (usage.total_tokens <= 0) return
+    const idempotencyKey = `shadow:${record.session.id}:${turnId}:${createHash(
+      'sha256',
+    )
+      .update(JSON.stringify(usage))
+      .digest('hex')}`
+    record.shadowUsageWriteTail = record.shadowUsageWriteTail
+      .then(async () => {
+        const result = await this.usageBillingBackend.recordShadowUsage!(
+          record.userId,
+          {
+            dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+            sessionId: record.session.id,
+            turnId,
+            ...(record.projectId ? { projectId: record.projectId } : {}),
+            usage,
+            idempotencyKey,
+            metadata: {
+              sourceMessageType: message.type,
+              modelConfigId: record.session.modelConfigId,
+              workflowWorker: Boolean(record.workflowWorker),
+            },
+            ...(record.authToken ? { authToken: record.authToken } : {}),
+          },
+        )
+        if (this.usageBillingBackend.debitRealtimeUsage) {
+          const debit = await this.usageBillingBackend.debitRealtimeUsage(
+            record.userId,
+            {
+              dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+              sessionId: record.session.id,
+              turnId,
+              ...(record.projectId ? { projectId: record.projectId } : {}),
+              usage,
+              idempotencyKey,
+              metadata: {
+                sourceMessageType: message.type,
+                modelConfigId: record.session.modelConfigId,
+                workflowWorker: Boolean(record.workflowWorker),
+              },
+              ...(record.authToken ? { authToken: record.authToken } : {}),
+            },
+          )
+          if (!debit.duplicate && debit.event.weightedTokensDelta > 0) {
+            this.append(record, 'system.status', 'Realtime usage debited', {
+              type: 'billing.realtime_debited',
+              debitEventId: debit.event.id,
+              weightedTokens: debit.event.weightedTokensDelta,
+              shadowCreditsMicro: debit.event.shadowCreditsMicro,
+              pricingVersion: debit.event.pricingVersion,
+              idempotencyKey,
+            })
+          }
+        }
+        if (!result.duplicate && result.event.weightedTokensDelta > 0) {
+          this.append(record, 'system.status', 'Shadow usage recorded', {
+            type: 'billing.shadow_recorded',
+            shadowEventId: result.event.id,
+            weightedTokens: result.event.weightedTokensDelta,
+            shadowCreditsMicro: result.event.shadowCreditsMicro,
+            pricingVersion: result.event.pricingVersion,
+            idempotencyKey,
+          })
+        }
+      })
+      .catch(error => {
+        this.append(record, 'system.status', 'Shadow usage recording failed', {
+          type: 'billing.shadow_record_failed',
+          error: error instanceof Error ? error.message : String(error),
+          idempotencyKey,
+        })
+      })
   }
 
   private observeNativeTaskNotification(
@@ -1292,26 +1471,35 @@ export class BeeGameSessionManager {
     try {
       observeNativeDocumentReviewTaskNotification(evidenceInput)
     } catch (error) {
-      console.warn('[BeeGame] Failed to persist native document review notification', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
+      console.warn(
+        '[BeeGame] Failed to persist native document review notification',
+        {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        },
+      )
     }
     try {
       observeNativeAcceptanceTaskNotification(evidenceInput)
     } catch (error) {
-      console.warn('[BeeGame] Failed to persist native acceptance notification', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
+      console.warn(
+        '[BeeGame] Failed to persist native acceptance notification',
+        {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        },
+      )
     }
     try {
       observeNativeImplementationAuditTaskNotification(evidenceInput)
     } catch (error) {
-      console.warn('[BeeGame] Failed to persist native implementation audit notification', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
+      console.warn(
+        '[BeeGame] Failed to persist native implementation audit notification',
+        {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        },
+      )
     }
   }
 
@@ -1334,8 +1522,10 @@ export class BeeGameSessionManager {
     message: DashboardSDKMessage,
     finalText: string,
   ): string | null {
-    const messageId = getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId
-    if (messageId && record.emittedAssistantMessageIds.has(messageId)) return null
+    const messageId =
+      getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId
+    if (messageId && record.emittedAssistantMessageIds.has(messageId))
+      return null
 
     const messageKey = messageId ?? record.currentTurnId
     const partialText = messageKey
@@ -1384,7 +1574,8 @@ export class BeeGameSessionManager {
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
     if (isUserQuestionTool(request.toolName)) {
-      const message = 'This headless BeeGame session cannot collect structured AskUserQuestion answers. Ask the user in the assistant response instead.'
+      const message =
+        'This headless BeeGame session cannot collect structured AskUserQuestion answers. Ask the user in the assistant response instead.'
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved',
         toolUseID: request.toolUseID,
@@ -1441,7 +1632,11 @@ export class BeeGameSessionManager {
       })
     }
     return new Promise(resolve => {
-      record.pendingPermissions.set(request.toolUseID, { ...request, resolve })
+      record.pendingPermissions.set(request.toolUseID, {
+        ...request,
+        requestedAt: new Date(),
+        resolve,
+      })
       this.append(record, 'permission.requested', request.message, {
         type: 'permission.requested',
         toolUseID: request.toolUseID,
@@ -1452,7 +1647,10 @@ export class BeeGameSessionManager {
     })
   }
 
-  private closeOpenThinkingLifecycle(record: SessionRecord, reason: string): void {
+  private closeOpenThinkingLifecycle(
+    record: SessionRecord,
+    reason: string,
+  ): void {
     if (record.thinkingBlockIndexes.size === 0) return
     record.thinkingBlockIndexes.clear()
     if (record.visibleThinkingBlockIndexes.size === 0) return
@@ -1480,6 +1678,10 @@ export class BeeGameSessionManager {
     text: string,
     payload?: DashboardSDKMessage,
   ): BeeGameEvent {
+    const workflowUsageBefore =
+      record.workflowWorker && record.workflowRunId
+        ? this.deriveRuntimeSnapshot(record).usage
+        : undefined
     const event: BeeGameEvent = {
       id: record.nextEventId,
       sessionId: record.session.id,
@@ -1492,102 +1694,198 @@ export class BeeGameSessionManager {
     record.events.push(event)
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
-    try {
-      observeNativeToolProvenance({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      console.warn('[BeeGame] Failed to persist native tool provenance', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
+    if (record.workflowWorker && record.workflowRunId) {
+      // Only completed assistant messages are user-facing workflow copy.
+      // Tool/system lifecycle labels are telemetry and must never replace the
+      // durable message shown in the workflow card.
+      const progressMessage =
+        event.type === 'assistant.message' ? event.text.trim() : ''
+      const currentItemId = workflowDocumentFromToolEvent(record, event)
+      const clearCurrentItem =
+        event.type === 'tool.completed' || event.type === 'tool.failed'
+      const thinking =
+        event.type === 'assistant.thinking' || event.type === 'tool.started'
+          ? 'working'
+          : event.type === 'turn.completed' ||
+              event.type === 'turn.empty' ||
+              event.type === 'turn.failed' ||
+              event.type === 'result'
+            ? 'idle'
+            : undefined
+      if (progressMessage || thinking) {
+        void createRunStore(record.session.cwd, record.userId)
+          .updateProgress(record.workflowRunId, {
+            ...(progressMessage ? { message: progressMessage } : {}),
+            ...(thinking ? { thinking } : {}),
+            ...(record.workflowWorkerType
+              ? { workerType: record.workflowWorkerType }
+              : {}),
+            ...(record.workflowDispatchId
+              ? { dispatchId: record.workflowDispatchId }
+              : {}),
+            ...(currentItemId ? { currentItemId } : {}),
+            ...(clearCurrentItem ? { currentItemId: null } : {}),
+          })
+          .catch(() => undefined)
+      }
     }
-    try {
-      observeNativeDocumentReviewToolEvent({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      // Delivery provenance is a passive gate, never an Agent runtime
-      // controller. Failure to persist it must not interrupt Claude Code.
-      console.warn('[BeeGame] Failed to persist native document review evidence', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
-    }
-    try {
-      observeNativeAcceptanceToolEvent({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      // Acceptance provenance is a deployment gate, never an Agent runtime
-      // controller. Failure to persist it must not interrupt Claude Code.
-      console.warn('[BeeGame] Failed to persist native delivery evidence', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
-    }
-    try {
-      observeNativeImplementationAuditToolEvent({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      // Audit provenance is passive evidence. Persistence failure must not
-      // interrupt or steer Claude Code's native Agent lifecycle.
-      console.warn('[BeeGame] Failed to persist native implementation audit evidence', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
-    }
-    try {
-      observeNativeResourceLibraryToolEvent({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      // Resource provenance is passive evidence for library-first fallback.
-      // It must never alter or interrupt Claude Code's native tool lifecycle.
-      console.warn('[BeeGame] Failed to persist native resource query evidence', {
-        sessionId: record.session.id,
-        cause: error instanceof Error ? error.name : 'unknown_error',
-      })
+    if (!record.workflowWorker) {
+      try {
+        observeNativeToolProvenance({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          eventType: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        })
+      } catch (error) {
+        console.warn('[BeeGame] Failed to persist native tool provenance', {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        })
+      }
+      try {
+        observeNativeDocumentReviewToolEvent({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          eventType: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        })
+      } catch (error) {
+        // Delivery provenance is a passive gate, never an Agent runtime
+        // controller. Failure to persist it must not interrupt BeeGame Studio.
+        console.warn(
+          '[BeeGame] Failed to persist native document review evidence',
+          {
+            sessionId: record.session.id,
+            cause: error instanceof Error ? error.name : 'unknown_error',
+          },
+        )
+      }
+      try {
+        observeNativeAcceptanceToolEvent({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          eventType: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        })
+      } catch (error) {
+        // Acceptance provenance is a deployment gate, never an Agent runtime
+        // controller. Failure to persist it must not interrupt BeeGame Studio.
+        console.warn('[BeeGame] Failed to persist native delivery evidence', {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        })
+      }
+      try {
+        observeNativeImplementationAuditToolEvent({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          eventType: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        })
+      } catch (error) {
+        // Audit provenance is passive evidence. Persistence failure must not
+        // interrupt or steer BeeGame Studio's native Agent lifecycle.
+        console.warn(
+          '[BeeGame] Failed to persist native implementation audit evidence',
+          {
+            sessionId: record.session.id,
+            cause: error instanceof Error ? error.name : 'unknown_error',
+          },
+        )
+      }
+      try {
+        observeNativeResourceLibraryToolEvent({
+          dataRoot: this.dashboardDataRoot,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          eventType: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        })
+      } catch (error) {
+        // Resource provenance is passive evidence for library-first fallback.
+        // It must never alter or interrupt BeeGame Studio's native tool lifecycle.
+        console.warn(
+          '[BeeGame] Failed to persist native resource query evidence',
+          {
+            sessionId: record.session.id,
+            cause: error instanceof Error ? error.name : 'unknown_error',
+          },
+        )
+      }
     }
     record.nextEventId += 1
     record.session.updatedAt = new Date()
     this.persistRuntimeSnapshot(record)
+    if (record.workflowWorker && record.workflowRunId && workflowUsageBefore) {
+      const workflowUsageAfter = this.deriveRuntimeSnapshot(record).usage
+      const delta = subtractRuntimeUsage(
+        workflowUsageAfter,
+        workflowUsageBefore,
+      )
+      if (
+        delta.total_tokens <= 0 &&
+        delta.prompt_tokens <= 0 &&
+        delta.completion_tokens <= 0 &&
+        delta.cache_read_tokens <= 0 &&
+        delta.cache_creation_tokens <= 0
+      ) {
+        return event
+      }
+      const usageDelta = {
+        input_tokens: delta.prompt_tokens,
+        cache_read_tokens: delta.cache_read_tokens,
+        cache_creation_tokens: delta.cache_creation_tokens,
+        completion_tokens: delta.completion_tokens,
+        total_tokens: delta.total_tokens,
+      }
+      const previousWrite = record.workflowUsageWriteTail
+      const nextWrite = previousWrite
+        .catch(() => undefined)
+        .then(async () => {
+          const persisted = await createRunStore(
+            record.session.cwd,
+            record.userId,
+          ).addWorkflowUsage(record.workflowRunId as string, usageDelta)
+          if (!persisted) {
+            throw new Error(
+              'workflow run disappeared before usage was persisted',
+            )
+          }
+          addRuntimeUsage(record.workflowUsageCommitted, delta)
+        })
+      record.workflowUsageWriteTail = nextWrite.catch(error => {
+        record.workflowUsageWriteError =
+          error instanceof Error ? error : new Error(String(error))
+        console.error('[BeeGame] Failed to persist workflow token usage', {
+          runId: record.workflowRunId,
+          dispatchId: record.workflowDispatchId,
+          cause: record.workflowUsageWriteError.message,
+        })
+      })
+    }
     return event
   }
 
   private persistRuntimeSnapshot(record: SessionRecord): void {
     const snapshot = this.deriveRuntimeSnapshot(record)
-    const snapshotPath = getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id)
+    const snapshotPath = getRuntimeSnapshotPath(
+      this.dashboardDataRoot,
+      record.session.id,
+    )
     mkdirSync(dirname(snapshotPath), { recursive: true })
     writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2))
   }
@@ -1606,164 +1904,17 @@ export class BeeGameSessionManager {
   ): BeeGameRuntimeSnapshot | undefined {
     try {
       return normalizeRuntimeSnapshot(
-        JSON.parse(readFileSync(getRuntimeSnapshotPath(this.dashboardDataRoot, sessionId), 'utf8')),
+        JSON.parse(
+          readFileSync(
+            getRuntimeSnapshotPath(this.dashboardDataRoot, sessionId),
+            'utf8',
+          ),
+        ),
       )
     } catch {
       return undefined
     }
   }
-
-  private async reserveTurnCredits(
-    record: SessionRecord,
-    policy: BeeGameCreditTaskPolicy,
-    display?: { displayText?: string; displayKind?: string },
-    requestedTurnId?: string,
-  ): Promise<CreditReservation | undefined> {
-    const dataDir = record.userDataRoot ?? this.dashboardDataRoot
-    const turnId = requestedTurnId ?? record.currentTurnId ?? `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
-    const idempotencyKey = `turn:${record.session.id}:${turnId}:reserve`
-    try {
-      return await this.creditBackend.reserveCredits(record.userId, {
-        dataDir,
-        credits: policy.reservedCredits,
-        kind: policy.taskType,
-        projectId: getCreditProjectId(record),
-        idempotencyKey,
-        metadata: {
-          idempotencyKey,
-          turnId,
-          taskType: policy.taskType,
-          displayName: policy.displayName,
-          sessionId: record.session.id,
-          ...(record.projectId ? { projectId: record.projectId } : {}),
-          workspacePath: record.session.cwd,
-          ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
-        },
-        ...(record.authToken ? { authToken: record.authToken } : {}),
-      })
-    } catch (err) {
-      this.append(record, 'system.status', toErrorMessage(err), {
-        type: 'credit.reserve_failed',
-        error: toErrorMessage(err),
-      })
-      throw err
-    }
-  }
-
-  private async settleTurnCredits(
-    record: SessionRecord,
-    reservation: CreditReservation,
-    policy: BeeGameCreditTaskPolicy,
-  ): Promise<boolean> {
-    const usage = this.deriveRuntimeSnapshot(record).usage
-    const weightedTokenTotal = calculateCreditWeightedTokens(usage)
-    const tokenDelta = Math.max(
-      0,
-      weightedTokenTotal - record.lastSettledWeightedTokens,
-    )
-    if (tokenDelta <= 0) return false
-    let settlement: CreditSettlement
-    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}`
-    const idempotencyKey = `turn:${record.session.id}:${turnId}:settle:${reservation.id}`
-    try {
-      settlement = await this.creditBackend.settleCreditReservation(record.userId, {
-        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-        reservationId: reservation.id,
-        weightedTokens: tokenDelta,
-        projectId: getCreditProjectId(record),
-        idempotencyKey,
-        metadata: {
-          idempotencyKey,
-          turnId,
-          taskType: policy.taskType,
-          displayName: policy.displayName,
-          sessionId: record.session.id,
-          ...(record.projectId ? { projectId: record.projectId } : {}),
-          workspacePath: record.session.cwd,
-          totalTokens: usage.total_tokens,
-          previousSettledTotalTokens: record.lastSettledTotalTokens,
-          weightedTokenTotal,
-          previousSettledWeightedTokens: record.lastSettledWeightedTokens,
-          creditWeights: CREDIT_TOKEN_WEIGHTS,
-        },
-        ...(record.authToken ? { authToken: record.authToken } : {}),
-      })
-    } catch (err) {
-      record.pendingCreditOperation = {
-        kind: 'settle',
-        reservation,
-        policy,
-        weightedTokens: tokenDelta,
-        settleToTotalTokens: usage.total_tokens,
-        settleToWeightedTokens: weightedTokenTotal,
-      }
-      record.pendingCreditRetryFailures = 0
-      record.pendingCreditRetryAfter = 0
-      this.append(record, 'system.status', toErrorMessage(err), {
-        type: 'credit.settle_pending',
-        reservationId: reservation.id,
-        error: toErrorMessage(err),
-        pendingCreditOperation: record.pendingCreditOperation,
-        weightedTokens: tokenDelta,
-      })
-      return true
-    }
-    record.lastSettledTotalTokens = usage.total_tokens
-    record.lastSettledWeightedTokens = weightedTokenTotal
-    this.append(record, 'system.status', 'Credit settled', {
-      type: 'credit.settled',
-      reservationId: reservation.id,
-      credits: settlement.settledCredits,
-      refundedCredits: settlement.refundedCredits,
-      weightedTokens: tokenDelta,
-      balanceCredits: settlement.balance.balanceCredits,
-    })
-    return true
-  }
-
-  private async refundTurnCredits(
-    record: SessionRecord,
-    reservation: CreditReservation,
-  ): Promise<void> {
-    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}`
-    const idempotencyKey = `turn:${record.session.id}:${turnId}:refund:${reservation.id}`
-    try {
-      const refund = await this.creditBackend.refundCreditReservation(record.userId, {
-        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-        reservationId: reservation.id,
-        projectId: getCreditProjectId(record),
-        idempotencyKey,
-        metadata: {
-          idempotencyKey,
-          turnId,
-          sessionId: record.session.id,
-          ...(record.projectId ? { projectId: record.projectId } : {}),
-          reason: 'turn_finished_without_billable_usage',
-        },
-        ...(record.authToken ? { authToken: record.authToken } : {}),
-      })
-      this.append(record, 'system.status', 'Credit reservation refunded', {
-        type: 'credit.refunded',
-        reservationId: reservation.id,
-        credits: refund.refundedCredits,
-        balanceCredits: refund.balance.balanceCredits,
-      })
-    } catch (err) {
-      record.pendingCreditOperation = {
-        kind: 'refund',
-        reservation,
-      }
-      record.pendingCreditRetryFailures = 0
-      record.pendingCreditRetryAfter = 0
-      this.append(record, 'system.status', toErrorMessage(err), {
-        type: 'credit.refund_pending',
-        reservationId: reservation.id,
-        error: toErrorMessage(err),
-        pendingCreditOperation: record.pendingCreditOperation,
-      })
-    }
-  }
-
 }
 
 function resolveExistingPath(path: string): string {
@@ -1823,33 +1974,35 @@ export async function readSessionTranscriptFromDisk(
   sessionId: string,
   cwd: string,
   dashboardDataRoot?: string,
-): Promise<Array<{
-  id: number
-  sessionId?: string
-  type: BeeGameEventType
-  text: string
-  turnId?: string
-  payload?: DashboardSDKMessage
-  createdAt: string
-}>> {
-  const transcriptPath = await resolveReadableTranscriptPath(
-    sessionId,
-    cwd,
-  )
+): Promise<
+  Array<{
+    id: number
+    sessionId?: string
+    type: BeeGameEventType
+    text: string
+    turnId?: string
+    payload?: DashboardSDKMessage
+    createdAt: string
+  }>
+> {
+  const transcriptPath = await resolveReadableTranscriptPath(sessionId, cwd)
   const raw = await readFile(transcriptPath, 'utf8')
   const events = raw
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
-    .map(line => JSON.parse(line) as {
-      sessionId?: string
-      id: number
-      type: BeeGameEventType
-      text: string
-      turnId?: string
-      payload?: DashboardSDKMessage
-      createdAt: string
-    })
+    .map(
+      line =>
+        JSON.parse(line) as {
+          sessionId?: string
+          id: number
+          type: BeeGameEventType
+          text: string
+          turnId?: string
+          payload?: DashboardSDKMessage
+          createdAt: string
+        },
+    )
   return events
 }
 
@@ -1875,13 +2028,23 @@ export async function recoverLatestProjectSessionFromDisk(
   try {
     const raw = await readFile(getProjectLogIndexPath(workspacePath), 'utf8')
     const parsed = JSON.parse(raw) as Partial<ProjectLogIndex>
-    if (parsed.version !== 1 || !parsed.sessions || typeof parsed.sessions !== 'object') {
+    if (
+      parsed.version !== 1 ||
+      !parsed.sessions ||
+      typeof parsed.sessions !== 'object'
+    ) {
       return undefined
     }
     index = {
       version: 1,
-      project: typeof parsed.project === 'string' ? parsed.project : basename(workspacePath),
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString(),
+      project:
+        typeof parsed.project === 'string'
+          ? parsed.project
+          : basename(workspacePath),
+      updatedAt:
+        typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : new Date(0).toISOString(),
       sessions: parsed.sessions as Record<string, ProjectLogIndexSession>,
     }
   } catch {
@@ -1889,17 +2052,23 @@ export async function recoverLatestProjectSessionFromDisk(
   }
 
   const candidates = Object.entries(index.sessions)
-    .filter(([sessionId, entry]) => (
-      Boolean(sessionId) &&
-      entry?.sessionId === sessionId &&
-      typeof entry.transcript === 'string' &&
-      typeof entry.updatedAt === 'string'
-    ))
-    .sort(([, left], [, right]) => right.updatedAt.localeCompare(left.updatedAt))
+    .filter(
+      ([sessionId, entry]) =>
+        Boolean(sessionId) &&
+        entry?.sessionId === sessionId &&
+        typeof entry.transcript === 'string' &&
+        typeof entry.updatedAt === 'string',
+    )
+    .sort(([, left], [, right]) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    )
 
   for (const [sessionId, entry] of candidates) {
     const indexedTranscriptPath = resolve(workspacePath, entry.transcript)
-    const expectedTranscriptPath = getSessionTranscriptPath(sessionId, workspacePath)
+    const expectedTranscriptPath = getSessionTranscriptPath(
+      sessionId,
+      workspacePath,
+    )
     if (
       relative(workspacePath, indexedTranscriptPath).startsWith('..') ||
       indexedTranscriptPath !== expectedTranscriptPath
@@ -1907,7 +2076,10 @@ export async function recoverLatestProjectSessionFromDisk(
       continue
     }
     try {
-      const events = await readSessionTranscriptFromDisk(sessionId, workspacePath)
+      const events = await readSessionTranscriptFromDisk(
+        sessionId,
+        workspacePath,
+      )
       if (
         events.length === 0 ||
         events.some(event => event.sessionId && event.sessionId !== sessionId)
@@ -1915,11 +2087,12 @@ export async function recoverLatestProjectSessionFromDisk(
         continue
       }
       const terminalType = events.at(-1)?.type
-      const status = terminalType === 'session.failed'
-        ? 'failed'
-        : terminalType === 'session.stopped'
-          ? 'stopped'
-          : 'running'
+      const status =
+        terminalType === 'session.failed'
+          ? 'failed'
+          : terminalType === 'session.stopped'
+            ? 'stopped'
+            : 'running'
       return {
         id: sessionId,
         workspacePath,
@@ -1939,10 +2112,7 @@ async function resolveReadableTranscriptPath(
   sessionId: string,
   cwd: string,
 ): Promise<string> {
-  const primary = getSessionTranscriptPath(
-    sessionId,
-    cwd,
-  )
+  const primary = getSessionTranscriptPath(sessionId, cwd)
   await readFile(primary, 'utf8')
   return primary
 }
@@ -1951,10 +2121,7 @@ function readExistingTranscriptForResume(
   sessionId: string,
   cwd: string,
 ): { path: string; events: BeeGameEvent[] } | undefined {
-  const transcriptPath = resolveReadableTranscriptPathSync(
-    sessionId,
-    cwd,
-  )
+  const transcriptPath = resolveReadableTranscriptPathSync(sessionId, cwd)
   if (!transcriptPath) return undefined
   const raw = readFileSync(transcriptPath, 'utf8')
   return {
@@ -2033,112 +2200,11 @@ function recoverSessionLanguage(
   return {}
 }
 
-function recoverPendingCreditOperation(
-  events: BeeGameEvent[],
-): PendingCreditOperation | null {
-  const completedReservationIds = new Set<string>()
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const payload = events[index]?.payload
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue
-    const type = payload.type
-    const reservationId = typeof payload.reservationId === 'string'
-      ? payload.reservationId
-      : ''
-    if (
-      (type === 'credit.settled' || type === 'credit.refunded') &&
-      reservationId
-    ) {
-      completedReservationIds.add(reservationId)
-      continue
-    }
-    if (type !== 'credit.settle_pending' && type !== 'credit.refund_pending') {
-      continue
-    }
-    const operation = parsePendingCreditOperation(payload.pendingCreditOperation)
-    if (!operation || completedReservationIds.has(operation.reservation.id)) {
-      continue
-    }
-    return operation
-  }
-  return null
-}
-
-function parsePendingCreditOperation(
-  value: unknown,
-): PendingCreditOperation | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const reservation = parseCreditReservation(record.reservation)
-  if (!reservation) return null
-  if (record.kind === 'refund') {
-    return { kind: 'refund', reservation }
-  }
-  if (record.kind !== 'settle') return null
-  const policy = parseCreditTaskPolicy(record.policy)
-  const weightedTokens = normalizeNonNegativeInteger(record.weightedTokens)
-  const settleToTotalTokens = normalizeNonNegativeInteger(record.settleToTotalTokens)
-  const settleToWeightedTokens = normalizeNonNegativeInteger(
-    record.settleToWeightedTokens ?? weightedTokens,
-  )
-  if (!policy || weightedTokens <= 0 || settleToTotalTokens <= 0 || settleToWeightedTokens <= 0) return null
-  return {
-    kind: 'settle',
-    reservation,
-    policy,
-    weightedTokens,
-    settleToTotalTokens,
-    settleToWeightedTokens,
-  }
-}
-
-function parseCreditReservation(value: unknown): CreditReservation | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  if (typeof record.id !== 'string' || !record.id) return null
-  const reservedCredits = normalizeNonNegativeInteger(record.reservedCredits)
-  const balance = record.balance
-  if (!balance || typeof balance !== 'object' || Array.isArray(balance)) return null
-  return {
-    id: record.id,
-    reservedCredits,
-    balance: balance as CreditReservation['balance'],
-  }
-}
-
-function parseCreditTaskPolicy(value: unknown): BeeGameCreditTaskPolicy | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const taskType = record.taskType
-  if (taskType !== 'idea_intake' &&
-    taskType !== 'full_build' &&
-    taskType !== 'edit_turn' &&
-    taskType !== 'continue_turn' &&
-    taskType !== 'asset_integration' &&
-    taskType !== 'large_build' &&
-    taskType !== 'agent_turn') {
-    return null
-  }
-  return {
-    taskType,
-    reservedCredits: normalizeNonNegativeInteger(record.reservedCredits),
-    displayName: typeof record.displayName === 'string'
-      ? record.displayName
-      : taskType,
-    description: typeof record.description === 'string'
-      ? record.description
-      : '',
-  }
-}
-
-function normalizeNonNegativeInteger(value: unknown): number {
-  const number = Number(value)
-  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
-}
-
 function isBeeGameSessionLanguage(
   value: unknown,
 ): value is BeeGameSessionLanguage {
-  return value === 'en' ||
+  return (
+    value === 'en' ||
     value === 'zh' ||
     value === 'zh-TW' ||
     value === 'ja' ||
@@ -2148,12 +2214,16 @@ function isBeeGameSessionLanguage(
     value === 'es' ||
     value === 'it' ||
     value === 'pt'
+  )
 }
 
-function recoverConfirmedBriefContext(events: BeeGameEvent[]): string | undefined {
+function recoverConfirmedBriefContext(
+  events: BeeGameEvent[],
+): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type !== 'user.message' || !isRuntimeRecord(event.payload)) continue
+    if (event?.type !== 'user.message' || !isRuntimeRecord(event.payload))
+      continue
     if (event.payload.displayKind !== 'confirmed_brief') continue
     const context = event.payload.confirmedBriefContext
     if (typeof context === 'string' && context.trim()) return context.trim()
@@ -2175,37 +2245,44 @@ async function prepareBeeGamePromptInput(input: {
 }): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
   const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
-  const materializedFiles = files.length > 0
-    ? await materializeBeeGameFileAttachments(input.workspace, files)
-    : []
-  const documentContext = materializedFiles.length > 0
-    ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
-    : ''
-  const requestText = input.text || (images.length > 0 ? 'Analyze the attached image.' : '')
+  const materializedFiles =
+    files.length > 0
+      ? await materializeBeeGameFileAttachments(input.workspace, files)
+      : []
+  const documentContext =
+    materializedFiles.length > 0
+      ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
+      : ''
+  const requestText =
+    input.text || (images.length > 0 ? 'Analyze the attached image.' : '')
   const userInput = `${requestText}${documentContext}`
   // BeeGame forwards the user's objective without a hidden execution plan.
-  // Native Claude Code owns Skill selection, tool use, implementation and
+  // Native BeeGame Studio owns Skill selection, tool use, implementation and
   // validation exactly as it does in the TUI.
   const promptText = userInput
   if (images.length === 0) {
     return {
       prompt: promptText,
-      ...(materializedFiles.length > 0 ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') } : {}),
+      ...(materializedFiles.length > 0
+        ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') }
+        : {}),
     }
   }
   return {
     prompt: [
-    { type: 'text', text: promptText || 'Analyze the attached image.' },
-    ...images.map(image => ({
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: image.mediaType,
-        data: image.data,
-      },
-    })),
+      { type: 'text', text: promptText || 'Analyze the attached image.' },
+      ...images.map(image => ({
+        type: 'image' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: image.mediaType,
+          data: image.data,
+        },
+      })),
     ],
-    ...(materializedFiles.length > 0 ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') } : {}),
+    ...(materializedFiles.length > 0
+      ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') }
+      : {}),
   }
 }
 
@@ -2218,27 +2295,40 @@ export async function materializeBeeGameFileAttachments(
   await mkdir(attachmentDirectory, { recursive: true })
 
   try {
-    return await Promise.all(attachments.map(async (attachment) => {
-      const filename = basename(attachment.filename)
-      const extension = filename.slice(filename.lastIndexOf('.')).toLowerCase()
-      const allowedTypes = DOCUMENT_ATTACHMENT_TYPES[extension]
-      if (!filename || !allowedTypes || !allowedTypes.includes(attachment.mediaType)) {
-        throw new Error(`Unsupported document attachment: ${attachment.filename}`)
-      }
-      const data = Buffer.from(attachment.data, 'base64')
-      if (data.length === 0 || data.length > MAX_BEEGAME_ATTACHMENT_BYTES) {
-        throw new Error(`Invalid document attachment size: ${attachment.filename}`)
-      }
-      const safeFilename = filename.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'attachment'
-      const storedFilename = `${randomUUID()}-${safeFilename}`
-      const storedPath = join(attachmentDirectory, storedFilename)
-      await writeFile(storedPath, data, { flag: 'wx' })
-      return {
-        relativePath: relative(workspace, storedPath),
-        filename,
-        mediaType: attachment.mediaType,
-      }
-    }))
+    return await Promise.all(
+      attachments.map(async attachment => {
+        const filename = basename(attachment.filename)
+        const extension = filename
+          .slice(filename.lastIndexOf('.'))
+          .toLowerCase()
+        const allowedTypes = DOCUMENT_ATTACHMENT_TYPES[extension]
+        if (
+          !filename ||
+          !allowedTypes ||
+          !allowedTypes.includes(attachment.mediaType)
+        ) {
+          throw new Error(
+            `Unsupported document attachment: ${attachment.filename}`,
+          )
+        }
+        const data = Buffer.from(attachment.data, 'base64')
+        if (data.length === 0 || data.length > MAX_BEEGAME_ATTACHMENT_BYTES) {
+          throw new Error(
+            `Invalid document attachment size: ${attachment.filename}`,
+          )
+        }
+        const safeFilename =
+          filename.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'attachment'
+        const storedFilename = `${randomUUID()}-${safeFilename}`
+        const storedPath = join(attachmentDirectory, storedFilename)
+        await writeFile(storedPath, data, { flag: 'wx' })
+        return {
+          relativePath: relative(workspace, storedPath),
+          filename,
+          mediaType: attachment.mediaType,
+        }
+      }),
+    )
   } catch (error) {
     await rm(attachmentDirectory, { recursive: true, force: true })
     throw error
@@ -2250,10 +2340,12 @@ function isBeeGameImageAttachment(
 ): value is BeeGameImageAttachment {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const attachment = value as Partial<BeeGameImageAttachment>
-  return attachment.type === 'image' &&
+  return (
+    attachment.type === 'image' &&
     isSupportedBeeGameImageMediaType(attachment.mediaType) &&
     typeof attachment.data === 'string' &&
     attachment.data.trim().length > 0
+  )
 }
 
 function isBeeGameFileAttachment(
@@ -2261,34 +2353,38 @@ function isBeeGameFileAttachment(
 ): value is BeeGameFileAttachment {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const attachment = value as Partial<BeeGameFileAttachment>
-  return attachment.type === 'file' &&
+  return (
+    attachment.type === 'file' &&
     typeof attachment.mediaType === 'string' &&
     typeof attachment.filename === 'string' &&
     typeof attachment.data === 'string' &&
     attachment.data.trim().length > 0
+  )
 }
 
 function isSupportedBeeGameImageMediaType(
   mediaType: unknown,
 ): mediaType is BeeGameImageAttachment['mediaType'] {
-  return mediaType === 'image/png' ||
+  return (
+    mediaType === 'image/png' ||
     mediaType === 'image/jpeg' ||
     mediaType === 'image/webp'
+  )
 }
 
 function getEmptyTurnMessage(language?: BeeGameSessionLanguage): string {
   switch (language) {
     case 'zh':
-      return 'Claude Code 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。'
+      return 'BeeGame Studio 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。'
     case 'zh-TW':
-      return 'Claude Code 已結束本輪，但沒有返回最終答覆。目前任務可能尚未完成，請在同一工作階段中繼續。'
+      return 'BeeGame Studio 已結束本輪，但沒有返回最終答覆。目前任務可能尚未完成，請在同一工作階段中繼續。'
     case 'ja':
-      return 'Claude Code はこのターンを終了しましたが、最終回答を返しませんでした。タスクが未完了の可能性があるため、同じセッションで続行してください。'
+      return 'BeeGame Studio はこのターンを終了しましたが、最終回答を返しませんでした。タスクが未完了の可能性があるため、同じセッションで続行してください。'
     case 'ko':
-      return 'Claude Code가 이 턴을 종료했지만 최종 답변을 반환하지 않았습니다. 작업이 완료되지 않았을 수 있으므로 같은 세션에서 계속하세요.'
+      return 'BeeGame Studio가 이 턴을 종료했지만 최종 답변을 반환하지 않았습니다. 작업이 완료되지 않았을 수 있으므로 같은 세션에서 계속하세요.'
     case 'en':
     default:
-      return 'Claude Code ended the turn without a final response. The task may be incomplete; continue in the same session.'
+      return 'BeeGame Studio ended the turn without a final response. The task may be incomplete; continue in the same session.'
   }
 }
 
@@ -2304,11 +2400,12 @@ export function formatRuntimeErrorForDisplay(
   const text = value.trim()
   const objectStart = text.indexOf('{')
   const arrayStart = text.indexOf('[')
-  const jsonStart = objectStart < 0
-    ? arrayStart
-    : arrayStart < 0
-      ? objectStart
-      : Math.min(objectStart, arrayStart)
+  const jsonStart =
+    objectStart < 0
+      ? arrayStart
+      : arrayStart < 0
+        ? objectStart
+        : Math.min(objectStart, arrayStart)
   if (jsonStart < 0) return text
   const prefix = text.slice(0, jsonStart).trim()
   let envelope: unknown
@@ -2318,7 +2415,8 @@ export function formatRuntimeErrorForDisplay(
     return text
   }
   const status = findHttpStatus(prefix)
-  const hasErrorContainer = isObject(envelope) && Object.hasOwn(envelope, 'error')
+  const hasErrorContainer =
+    isObject(envelope) && Object.hasOwn(envelope, 'error')
   if (!status && !hasErrorContainer) return text
   const messages = collectStructuredMessages(envelope)
   if (messages.length) return messages.join('\n\n')
@@ -2337,7 +2435,8 @@ export function formatBeeGameEventForDisplay(
     event.type !== 'assistant.message' &&
     event.type !== 'turn.failed' &&
     event.type !== 'session.failed'
-  ) return { ...event }
+  )
+    return { ...event }
   return {
     ...event,
     text: formatRuntimeErrorForDisplay(event.text, language),
@@ -2347,12 +2446,15 @@ export function formatBeeGameEventForDisplay(
 function collectStructuredMessages(value: unknown, depth = 0): string[] {
   if (depth > 6) return []
   if (Array.isArray(value)) {
-    return deduplicateStrings(value.flatMap(item => collectStructuredMessages(item, depth + 1)))
+    return deduplicateStrings(
+      value.flatMap(item => collectStructuredMessages(item, depth + 1)),
+    )
   }
   if (!isObject(value)) return []
-  const direct = typeof value.message === 'string' && value.message.trim()
-    ? [value.message.trim()]
-    : []
+  const direct =
+    typeof value.message === 'string' && value.message.trim()
+      ? [value.message.trim()]
+      : []
   const nested = Object.entries(value)
     .filter(([key]) => key !== 'message')
     .flatMap(([, item]) => collectStructuredMessages(item, depth + 1))
@@ -2365,17 +2467,27 @@ function deduplicateStrings(values: string[]): string[] {
 
 function runtimeErrorHeading(language?: BeeGameSessionLanguage): string {
   switch (language) {
-    case 'zh': return '请求失败'
-    case 'zh-TW': return '請求失敗'
-    case 'ja': return 'リクエストに失敗しました'
-    case 'ko': return '요청 실패'
-    case 'fr': return 'Échec de la requête'
-    case 'de': return 'Anfrage fehlgeschlagen'
-    case 'es': return 'Error en la solicitud'
-    case 'it': return 'Richiesta non riuscita'
-    case 'pt': return 'Falha na solicitação'
+    case 'zh':
+      return '请求失败'
+    case 'zh-TW':
+      return '請求失敗'
+    case 'ja':
+      return 'リクエストに失敗しました'
+    case 'ko':
+      return '요청 실패'
+    case 'fr':
+      return 'Échec de la requête'
+    case 'de':
+      return 'Anfrage fehlgeschlagen'
+    case 'es':
+      return 'Error en la solicitud'
+    case 'it':
+      return 'Richiesta non riuscita'
+    case 'pt':
+      return 'Falha na solicitação'
     case 'en':
-    default: return 'Request failed'
+    default:
+      return 'Request failed'
   }
 }
 
@@ -2404,7 +2516,9 @@ function renderStructuredValue(
       ? []
       : [`${indent}- ${escapeMarkdown(String(value))}`]
   }
-  const entries = Object.entries(value).filter(([, item]) => item !== null && item !== '')
+  const entries = Object.entries(value).filter(
+    ([, item]) => item !== null && item !== '',
+  )
   if (!entries.length) return [`${indent}- ${emptyValueLabel('object')}`]
   const lines: string[] = []
   for (const [key, item] of entries.slice(0, 24)) {
@@ -2431,14 +2545,19 @@ function humanizeJsonKey(value: string): string {
     const previous = value[index - 1]
     if (
       index > 0 &&
-      character >= 'A' && character <= 'Z' &&
-      previous >= 'a' && previous <= 'z' &&
+      character >= 'A' &&
+      character <= 'Z' &&
+      previous >= 'a' &&
+      previous <= 'z' &&
       !output.endsWith(' ')
-    ) output += ' '
+    )
+      output += ' '
     output += character
   }
   const normalized = output.trim()
-  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : 'Value'
+  return normalized
+    ? `${normalized[0].toUpperCase()}${normalized.slice(1)}`
+    : 'Value'
 }
 
 function escapeMarkdown(value: string): string {
@@ -2474,10 +2593,7 @@ function findHttpStatus(value: string): number | undefined {
   return undefined
 }
 
-function getSessionTranscriptPath(
-  sessionId: string,
-  cwd: string,
-): string {
+function getSessionTranscriptPath(sessionId: string, cwd: string): string {
   return resolve(
     cwd,
     'transcripts',
@@ -2501,7 +2617,11 @@ function getShortSessionHash(sessionId: string): string {
 }
 
 function getRuntimeSnapshotPath(dataRoot: string, sessionId: string): string {
-  return resolve(dataRoot, 'snapshots', `${getSafeSessionFileName(sessionId)}.json`)
+  return resolve(
+    dataRoot,
+    'snapshots',
+    `${getSafeSessionFileName(sessionId)}.json`,
+  )
 }
 
 function getSafeSessionFileName(sessionId: string): string {
@@ -2536,7 +2656,12 @@ function deriveSnapshotPhaseName(
   options: { recoveredFromTranscript?: boolean } = {},
 ): string {
   if (options.recoveredFromTranscript) return 'idle'
-  if (events.some(event => event.type === 'turn.started' && !hasTurnEnded(events, event.turnId))) {
+  if (
+    events.some(
+      event =>
+        event.type === 'turn.started' && !hasTurnEnded(events, event.turnId),
+    )
+  ) {
     return 'running'
   }
   if (
@@ -2556,8 +2681,8 @@ function deriveSnapshotPhaseStatus(
   if (!latest) return 'idle'
   if (options.recoveredFromTranscript) return 'idle'
   if (latest.type === 'permission.requested') return 'waiting_approval'
-  if (latest.type === 'turn.failed' || latest.type === 'session.failed') return 'failed'
-  if (latest.payload?.type === 'credit.reserve_failed') return 'failed'
+  if (latest.type === 'turn.failed' || latest.type === 'session.failed')
+    return 'failed'
   if (deriveSnapshotPhaseName(events, options) === 'starting') return 'starting'
   if (deriveSnapshotPhaseName(events, options) === 'running') return 'running'
   return 'idle'
@@ -2565,15 +2690,14 @@ function deriveSnapshotPhaseStatus(
 
 function hasTurnEnded(events: BeeGameEvent[], turnId?: string): boolean {
   if (!turnId) return true
-  return events.some(event =>
-    event.turnId === turnId &&
-    (
-      event.type === 'turn.completed' ||
-      event.type === 'turn.empty' ||
-      event.type === 'turn.failed' ||
-      event.type === 'session.stopped' ||
-      event.type === 'session.failed'
-    )
+  return events.some(
+    event =>
+      event.turnId === turnId &&
+      (event.type === 'turn.completed' ||
+        event.type === 'turn.empty' ||
+        event.type === 'turn.failed' ||
+        event.type === 'session.stopped' ||
+        event.type === 'session.failed'),
   )
 }
 
@@ -2582,15 +2706,18 @@ function hasNativeFinalResult(
   turnId?: string | null,
 ): boolean {
   if (!turnId) return false
-  return events.some(event => (
-    event.turnId === turnId &&
-    event.type === 'result' &&
-    event.text.trim().length > 0 &&
-    !isThinkingProtocolControlText(event.text)
-  ))
+  return events.some(
+    event =>
+      event.turnId === turnId &&
+      event.type === 'result' &&
+      event.text.trim().length > 0 &&
+      !isThinkingProtocolControlText(event.text),
+  )
 }
 
-export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+export function getLatestRuntimeUsage(
+  events: BeeGameEvent[],
+): BeeGameRuntimeSnapshot['usage'] {
   // Claude SDK result.modelUsage is cumulative while one native accounting
   // epoch remains active. A resumed/compacted native session may start a new
   // epoch whose counters are lower than the previous terminal snapshot. Keep
@@ -2598,7 +2725,22 @@ export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSna
   // summing every result double-counts while taking only the final result loses
   // all usage before a native counter reset.
   const modelUsage = aggregateCumulativeModelUsage(events)
-  if (modelUsage) return modelUsage
+  if (modelUsage) {
+    // A turn can still be in flight after the previous result. Add only the
+    // stream usage emitted after the latest modelUsage result; stream usage
+    // before that result is already included in its cumulative counters.
+    const inFlight = sumUsageEvents(
+      events,
+      findLastModelUsageEventIndex(events),
+    )
+    addRuntimeUsage(modelUsage, inFlight)
+    return modelUsage
+  }
+
+  // Before a terminal result exists, message_delta is the only authoritative
+  // usage source exposed by the streaming transport.
+  const streamedUsage = sumUsageEvents(events, -1)
+  if (streamedUsage.total_tokens > 0) return streamedUsage
 
   // Older/partial transports do not always expose modelUsage. Preserve the
   // message-level fallback for those sessions; unlike modelUsage these values
@@ -2622,28 +2764,28 @@ export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSna
   }, emptyRuntimeUsage())
 }
 
-export const CREDIT_TOKEN_WEIGHTS = {
-  input: 1,
-  cacheRead: 0.1,
-  cacheCreation: 1.25,
-  output: 5,
-} as const
+function findLastModelUsageEventIndex(events: BeeGameEvent[]): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (
+      event?.type === 'result' &&
+      getModelUsageFromEventPayload(event.payload)
+    ) {
+      return index
+    }
+  }
+  return -1
+}
 
-/**
- * Converts cumulative model usage into cost-equivalent input tokens. The
- * ratios mirror the provider cost shape exposed by Claude-compatible SDK
- * modelUsage: cached reads are discounted, cache writes carry a premium, and
- * generated output is materially more expensive than uncached input.
- */
-export function calculateCreditWeightedTokens(
-  usage: BeeGameRuntimeSnapshot['usage'],
-): number {
-  const hundredths =
-    normalizeFiniteNumber(usage.prompt_tokens) * 100 +
-    normalizeFiniteNumber(usage.cache_read_tokens) * 10 +
-    normalizeFiniteNumber(usage.cache_creation_tokens) * 125 +
-    normalizeFiniteNumber(usage.completion_tokens) * 500
-  return Math.ceil(hundredths / 100)
+function sumUsageEvents(
+  events: BeeGameEvent[],
+  afterIndex: number,
+): BeeGameRuntimeSnapshot['usage'] {
+  return events.slice(afterIndex + 1).reduce((total, event) => {
+    if (event.type !== 'usage') return total
+    addRuntimeUsage(total, getUsageFromEventPayload(event.payload))
+    return total
+  }, emptyRuntimeUsage())
 }
 
 function getRuntimeUsageForTurn(
@@ -2651,8 +2793,12 @@ function getRuntimeUsageForTurn(
   turnId?: string,
 ): BeeGameRuntimeSnapshot['usage'] {
   if (turnId) {
-    const firstTurnEventIndex = events.findIndex(event => event.turnId === turnId)
-    const lastTurnEventIndex = events.findLastIndex(event => event.turnId === turnId)
+    const firstTurnEventIndex = events.findIndex(
+      event => event.turnId === turnId,
+    )
+    const lastTurnEventIndex = events.findLastIndex(
+      event => event.turnId === turnId,
+    )
     if (firstTurnEventIndex >= 0 && lastTurnEventIndex >= firstTurnEventIndex) {
       const throughTurn = aggregateCumulativeModelUsage(
         events.slice(0, lastTurnEventIndex + 1),
@@ -2661,7 +2807,22 @@ function getRuntimeUsageForTurn(
         const beforeTurn = aggregateCumulativeModelUsage(
           events.slice(0, firstTurnEventIndex),
         )
-        return subtractRuntimeUsage(throughTurn, beforeTurn ?? emptyRuntimeUsage())
+        const turnUsage = subtractRuntimeUsage(
+          throughTurn,
+          beforeTurn ?? emptyRuntimeUsage(),
+        )
+        const scopedEvents = events.slice(
+          firstTurnEventIndex,
+          lastTurnEventIndex + 1,
+        )
+        addRuntimeUsage(
+          turnUsage,
+          sumUsageEvents(
+            scopedEvents,
+            findLastModelUsageEventIndex(scopedEvents),
+          ),
+        )
+        return turnUsage
       }
     }
   }
@@ -2669,7 +2830,16 @@ function getRuntimeUsageForTurn(
     ? events.filter(event => event.turnId === turnId)
     : events
   const modelUsage = aggregateCumulativeModelUsage(scopedEvents)
-  if (modelUsage) return modelUsage
+  if (modelUsage) {
+    addRuntimeUsage(
+      modelUsage,
+      sumUsageEvents(scopedEvents, findLastModelUsageEventIndex(scopedEvents)),
+    )
+    return modelUsage
+  }
+
+  const streamedUsage = sumUsageEvents(scopedEvents, -1)
+  if (streamedUsage.total_tokens > 0) return streamedUsage
 
   for (const event of [...scopedEvents].reverse()) {
     if (event.type !== 'result') continue
@@ -2679,21 +2849,29 @@ function getRuntimeUsageForTurn(
   return sumAssistantMessageUsage(scopedEvents)
 }
 
-export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+export function sumAssistantMessageUsage(
+  events: BeeGameEvent[],
+): BeeGameRuntimeSnapshot['usage'] {
   const usageByMessage = new Map<string, BeeGameRuntimeSnapshot['usage']>()
   for (const event of events) {
     if (event.type !== 'assistant.message') continue
-    usageByMessage.set(getAssistantUsageIdentity(event), getUsageFromEventPayload(event.payload))
+    usageByMessage.set(
+      getAssistantUsageIdentity(event),
+      getUsageFromEventPayload(event.payload),
+    )
   }
 
-  return [...usageByMessage.values()].reduce<BeeGameRuntimeSnapshot['usage']>((total, usage) => {
-    total.prompt_tokens += usage.prompt_tokens
-    total.completion_tokens += usage.completion_tokens
-    total.cache_read_tokens += usage.cache_read_tokens
-    total.cache_creation_tokens += usage.cache_creation_tokens
-    total.total_tokens += usage.total_tokens
-    return total
-  }, emptyRuntimeUsage())
+  return [...usageByMessage.values()].reduce<BeeGameRuntimeSnapshot['usage']>(
+    (total, usage) => {
+      total.prompt_tokens += usage.prompt_tokens
+      total.completion_tokens += usage.completion_tokens
+      total.cache_read_tokens += usage.cache_read_tokens
+      total.cache_creation_tokens += usage.cache_creation_tokens
+      total.total_tokens += usage.total_tokens
+      return total
+    },
+    emptyRuntimeUsage(),
+  )
 }
 
 function deriveLatestTurnDiagnostics(
@@ -2703,19 +2881,25 @@ function deriveLatestTurnDiagnostics(
   if (!turnId) return undefined
   const turnEvents = events.filter(event => event.turnId === turnId)
   const usage = getRuntimeUsageForTurn(events, turnId)
-  const countTool = (toolName: string) => turnEvents.filter(event => (
-    event.type === 'tool.started' &&
-    getDashboardPayloadString(event.payload, 'toolName') === toolName
-  )).length
-  const countAgent = (agentType: string) => turnEvents.filter(event => {
-    if (
-      event.type !== 'tool.started' ||
-      getDashboardPayloadString(event.payload, 'toolName') !== 'Agent' ||
-      !isRuntimeRecord(event.payload)
-    ) return false
-    const input = isRuntimeRecord(event.payload.input) ? event.payload.input : undefined
-    return input?.subagent_type === agentType
-  }).length
+  const countTool = (toolName: string) =>
+    turnEvents.filter(
+      event =>
+        event.type === 'tool.started' &&
+        getDashboardPayloadString(event.payload, 'toolName') === toolName,
+    ).length
+  const countAgent = (agentType: string) =>
+    turnEvents.filter(event => {
+      if (
+        event.type !== 'tool.started' ||
+        getDashboardPayloadString(event.payload, 'toolName') !== 'Agent' ||
+        !isRuntimeRecord(event.payload)
+      )
+        return false
+      const input = isRuntimeRecord(event.payload.input)
+        ? event.payload.input
+        : undefined
+      return input?.subagent_type === agentType
+    }).length
   return {
     turnId,
     agentCalls: countTool('Agent'),
@@ -2725,7 +2909,8 @@ function deriveLatestTurnDiagnostics(
     deliveryContractCalls: countTool('ProjectDeliveryContract'),
     skillCalls: countTool('Skill'),
     taskOutputCalls: countTool('TaskOutput'),
-    failedToolCalls: turnEvents.filter(event => event.type === 'tool.failed').length,
+    failedToolCalls: turnEvents.filter(event => event.type === 'tool.failed')
+      .length,
     usage,
     roleTokens: deriveObservedRoleTokens(turnEvents, usage),
   }
@@ -2739,15 +2924,17 @@ function deriveObservedRoleTokens(
   const roleByToolUse = new Map<string, string>()
   const backgroundUsageByToolUse = new Map<string, number>()
   for (const event of events) {
-    if (
-      event.type !== 'tool.started' &&
-      event.type !== 'tool.completed'
-    ) continue
-    if (getDashboardPayloadString(event.payload, 'toolName') !== 'Agent') continue
+    if (event.type !== 'tool.started' && event.type !== 'tool.completed')
+      continue
+    if (getDashboardPayloadString(event.payload, 'toolName') !== 'Agent')
+      continue
     const payload = isRuntimeRecord(event.payload) ? event.payload : undefined
-    const input = payload && isRuntimeRecord(payload.input) ? payload.input : undefined
-    const toolUseID = typeof payload?.toolUseID === 'string' ? payload.toolUseID : ''
-    const role = typeof input?.subagent_type === 'string' ? input.subagent_type : ''
+    const input =
+      payload && isRuntimeRecord(payload.input) ? payload.input : undefined
+    const toolUseID =
+      typeof payload?.toolUseID === 'string' ? payload.toolUseID : ''
+    const role =
+      typeof input?.subagent_type === 'string' ? input.subagent_type : ''
     if (toolUseID && role) roleByToolUse.set(toolUseID, role)
     if (event.type === 'tool.completed' && toolUseID) {
       const launch = parseNativeBackgroundTaskLaunch(
@@ -2767,11 +2954,18 @@ function deriveObservedRoleTokens(
     { toolUseID: string; role: string; tokens: number }
   >()
   for (const event of events) {
-    if (event.type !== 'system.status' || !isRuntimeRecord(event.payload)) continue
-    if (getDashboardPayloadString(event.payload, 'subtype') !== 'task_notification') continue
+    if (event.type !== 'system.status' || !isRuntimeRecord(event.payload))
+      continue
+    if (
+      getDashboardPayloadString(event.payload, 'subtype') !==
+      'task_notification'
+    )
+      continue
     const taskId = getDashboardPayloadString(event.payload, 'task_id')
     const toolUseID = getDashboardPayloadString(event.payload, 'tool_use_id')
-    const usage = isRuntimeRecord(event.payload.usage) ? event.payload.usage : undefined
+    const usage = isRuntimeRecord(event.payload.usage)
+      ? event.payload.usage
+      : undefined
     if (!taskId || !toolUseID || !usage) continue
     latestTerminalByTask.set(taskId, {
       toolUseID,
@@ -2784,9 +2978,12 @@ function deriveObservedRoleTokens(
   }
 
   for (const [toolUseID, tokens] of backgroundUsageByToolUse) {
-    if ([...latestTerminalByTask.values()].some(value =>
-      value.toolUseID === toolUseID
-    )) continue
+    if (
+      [...latestTerminalByTask.values()].some(
+        value => value.toolUseID === toolUseID,
+      )
+    )
+      continue
     latestTerminalByTask.set(`output:${toolUseID}`, {
       toolUseID,
       role: roleByToolUse.get(toolUseID) ?? 'other',
@@ -2800,12 +2997,17 @@ function deriveObservedRoleTokens(
   let otherSubagents = 0
   for (const value of latestTerminalByTask.values()) {
     if (value.role === 'beegame-document-reviewer') reviewer += value.tokens
-    else if (value.role === 'beegame-implementation-auditor') auditor += value.tokens
-    else if (value.role === 'beegame-acceptance-validator') validator += value.tokens
+    else if (value.role === 'beegame-implementation-auditor')
+      auditor += value.tokens
+    else if (value.role === 'beegame-acceptance-validator')
+      validator += value.tokens
     else otherSubagents += value.tokens
   }
   return {
-    mainAgent: Math.max(0, total - reviewer - auditor - validator - otherSubagents),
+    mainAgent: Math.max(
+      0,
+      total - reviewer - auditor - validator - otherSubagents,
+    ),
     reviewer,
     auditor,
     validator,
@@ -2845,19 +3047,21 @@ function getUsageFromEventPayload(
   const completionTokens = normalizeFiniteNumber(
     usage.output_tokens ?? usage.completion_tokens,
   )
+  const cacheReadTokens = normalizeFiniteNumber(
+    usage.cache_read_input_tokens ?? usage.cache_read_tokens,
+  )
+  const cacheCreationTokens = normalizeFiniteNumber(
+    usage.cache_creation_input_tokens ?? usage.cache_creation_tokens,
+  )
   const totalTokens = normalizeFiniteNumber(
     usage.total_tokens,
-    promptTokens + completionTokens,
+    promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens,
   )
   return {
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
-    cache_read_tokens: normalizeFiniteNumber(
-      usage.cache_read_input_tokens ?? usage.cache_read_tokens,
-    ),
-    cache_creation_tokens: normalizeFiniteNumber(
-      usage.cache_creation_input_tokens ?? usage.cache_creation_tokens,
-    ),
+    cache_read_tokens: cacheReadTokens,
+    cache_creation_tokens: cacheCreationTokens,
     total_tokens: totalTokens,
   }
 }
@@ -2865,23 +3069,34 @@ function getUsageFromEventPayload(
 function getModelUsageFromEventPayload(
   payload: DashboardSDKMessage | undefined,
 ): BeeGameRuntimeSnapshot['usage'] | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+    return null
   const modelUsage = payload.modelUsage
-  if (!modelUsage || typeof modelUsage !== 'object' || Array.isArray(modelUsage)) return null
+  if (
+    !modelUsage ||
+    typeof modelUsage !== 'object' ||
+    Array.isArray(modelUsage)
+  )
+    return null
   const total = emptyRuntimeUsage()
   let found = false
   for (const value of Object.values(modelUsage)) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue
     const usage = value as Record<string, unknown>
-    const promptTokens = normalizeFiniteNumber(usage.inputTokens ?? usage.input_tokens)
-    const completionTokens = normalizeFiniteNumber(usage.outputTokens ?? usage.output_tokens)
+    const promptTokens = normalizeFiniteNumber(
+      usage.inputTokens ?? usage.input_tokens,
+    )
+    const completionTokens = normalizeFiniteNumber(
+      usage.outputTokens ?? usage.output_tokens,
+    )
     const cacheReadTokens = normalizeFiniteNumber(
       usage.cacheReadInputTokens ?? usage.cache_read_input_tokens,
     )
     const cacheCreationTokens = normalizeFiniteNumber(
       usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens,
     )
-    const totalTokens = promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens
+    const totalTokens =
+      promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens
     if (totalTokens <= 0) continue
     found = true
     addRuntimeUsage(total, {
@@ -2921,10 +3136,12 @@ function hasCumulativeCounterReset(
   previous: BeeGameRuntimeSnapshot['usage'],
   current: BeeGameRuntimeSnapshot['usage'],
 ): boolean {
-  return current.prompt_tokens < previous.prompt_tokens ||
+  return (
+    current.prompt_tokens < previous.prompt_tokens ||
     current.completion_tokens < previous.completion_tokens ||
     current.cache_read_tokens < previous.cache_read_tokens ||
     current.cache_creation_tokens < previous.cache_creation_tokens
+  )
 }
 
 function subtractRuntimeUsage(
@@ -2982,15 +3199,50 @@ function getUsageRecord(
     return null
   }
   const directUsage = payload.usage
-  if (directUsage && typeof directUsage === 'object' && !Array.isArray(directUsage)) {
+  if (
+    directUsage &&
+    typeof directUsage === 'object' &&
+    !Array.isArray(directUsage)
+  ) {
     return directUsage as Record<string, unknown>
+  }
+  const event = payload.event
+  if (event && typeof event === 'object' && !Array.isArray(event)) {
+    const eventRecord = event as Record<string, unknown>
+    const eventUsage = eventRecord.usage
+    if (
+      eventUsage &&
+      typeof eventUsage === 'object' &&
+      !Array.isArray(eventUsage)
+    ) {
+      return eventUsage as Record<string, unknown>
+    }
+    const eventMessage = eventRecord.message
+    if (
+      eventMessage &&
+      typeof eventMessage === 'object' &&
+      !Array.isArray(eventMessage)
+    ) {
+      const eventMessageUsage = (eventMessage as Record<string, unknown>).usage
+      if (
+        eventMessageUsage &&
+        typeof eventMessageUsage === 'object' &&
+        !Array.isArray(eventMessageUsage)
+      ) {
+        return eventMessageUsage as Record<string, unknown>
+      }
+    }
   }
   const message = payload.message
   if (!message || typeof message !== 'object' || Array.isArray(message)) {
     return null
   }
   const messageUsage = (message as Record<string, unknown>).usage
-  if (messageUsage && typeof messageUsage === 'object' && !Array.isArray(messageUsage)) {
+  if (
+    messageUsage &&
+    typeof messageUsage === 'object' &&
+    !Array.isArray(messageUsage)
+  ) {
     return messageUsage as Record<string, unknown>
   }
   return null
@@ -3007,9 +3259,12 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
     throw new Error('Invalid runtime snapshot')
   }
   const record = value as Record<string, unknown>
-  const usage = record.usage && typeof record.usage === 'object' && !Array.isArray(record.usage)
-    ? record.usage as Record<string, unknown>
-    : {}
+  const usage =
+    record.usage &&
+    typeof record.usage === 'object' &&
+    !Array.isArray(record.usage)
+      ? (record.usage as Record<string, unknown>)
+      : {}
   return {
     sessionId: String(record.sessionId || ''),
     workspacePath: String(record.workspacePath || ''),
@@ -3027,8 +3282,12 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       total_tokens: Number(usage.total_tokens ?? 0),
     },
     roleTokens: normalizeRoleTokens(record.roleTokens),
-    ...(record.turnDiagnostics && typeof record.turnDiagnostics === 'object' && !Array.isArray(record.turnDiagnostics)
-      ? normalizeTurnDiagnostics(record.turnDiagnostics as Record<string, unknown>)
+    ...(record.turnDiagnostics &&
+    typeof record.turnDiagnostics === 'object' &&
+    !Array.isArray(record.turnDiagnostics)
+      ? normalizeTurnDiagnostics(
+          record.turnDiagnostics as Record<string, unknown>,
+        )
       : {}),
   }
 }
@@ -3036,9 +3295,12 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
 function normalizeTurnDiagnostics(
   value: Record<string, unknown>,
 ): Pick<BeeGameRuntimeSnapshot, 'turnDiagnostics'> {
-  const usage = value.usage && typeof value.usage === 'object' && !Array.isArray(value.usage)
-    ? value.usage as Record<string, unknown>
-    : {}
+  const usage =
+    value.usage &&
+    typeof value.usage === 'object' &&
+    !Array.isArray(value.usage)
+      ? (value.usage as Record<string, unknown>)
+      : {}
   return {
     turnDiagnostics: {
       turnId: String(value.turnId || ''),
@@ -3099,7 +3361,9 @@ async function collectPackageFiles(root: string): Promise<string[]> {
   return files.sort((a, b) => a.localeCompare(b))
 }
 
-function createZipArchive(files: Array<{ path: string; data: Uint8Array }>): Uint8Array {
+function createZipArchive(
+  files: Array<{ path: string; data: Uint8Array }>,
+): Uint8Array {
   const localParts: Uint8Array[] = []
   const centralParts: Uint8Array[] = []
   let offset = 0
@@ -3218,25 +3482,85 @@ function isFileMutationTool(toolName: string): boolean {
 }
 
 function getBeeGamePermissionPolicyDecision(
-  _record: SessionRecord,
+  record: SessionRecord,
   _allowedRoot: string,
   request: DashboardPermissionRequest,
 ): { behavior: 'auto_deny' | 'ask_user'; message?: string } {
+  if (record.workflowWorker && isFileMutationTool(request.toolName)) {
+    const paths = extractPermissionPaths(request.input)
+    const allowedPaths = record.workflowAllowedPaths ?? []
+    if (
+      record.workflowWorkerType === 'implementation-worker' &&
+      paths.some(path => isResourceArtifactPath(record.session.cwd, path))
+    ) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          'Implementation workers consume the approved resource manifest; resource files must be changed in RESOURCE_PREPARATION.',
+      }
+    }
+    if (
+      allowedPaths.length === 0 ||
+      paths.length === 0 ||
+      paths.some(
+        path =>
+          !isPathInsideWorkflowScope(record.session.cwd, allowedPaths, path),
+      )
+    ) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          'This workflow worker requested a file outside its declared phase scope. The workflow must finish the current phase before that artifact can be written.',
+      }
+    }
+  }
   if (request.toolName === 'Bash') {
     if (isGlobalProcessControlBashCommand(request.input)) {
       return {
         behavior: 'auto_deny',
-        message: 'Global process control is managed by BeeGame preview controls.',
+        message:
+          'Global process control is managed by BeeGame preview controls.',
       }
     }
     if (isBackgroundProcessBashCommand(request.input)) {
       return {
         behavior: 'auto_deny',
-        message: 'Background processes are managed by BeeGame preview controls.',
+        message:
+          'Background processes are managed by BeeGame preview controls.',
       }
     }
   }
   return { behavior: 'ask_user' }
+}
+
+function isPathInsideWorkflowScope(
+  cwd: string,
+  allowedPaths: string[],
+  targetPath: string,
+): boolean {
+  const resolvedTarget = isAbsolute(targetPath)
+    ? resolve(targetPath)
+    : resolve(cwd, targetPath)
+  return allowedPaths.some(scope => {
+    const resolvedScope = isAbsolute(scope)
+      ? resolve(scope)
+      : resolve(cwd, scope)
+    const relativePath = relative(resolvedScope, resolvedTarget)
+    return (
+      relativePath === '' ||
+      (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+    )
+  })
+}
+
+function isResourceArtifactPath(cwd: string, targetPath: string): boolean {
+  const resolvedTarget = isAbsolute(targetPath)
+    ? resolve(targetPath)
+    : resolve(cwd, targetPath)
+  const relativePath = relative(resolve(cwd), resolvedTarget)
+    .split('\\')
+    .join('/')
+  return relativePath === 'assets' || relativePath.startsWith('assets/')
 }
 
 function isSensitiveProjectMutationPath(path: string): boolean {
@@ -3263,9 +3587,10 @@ function isSensitiveProjectMutationPath(path: string): boolean {
     '.gnupg',
     '.ssh',
   ])
-  return segments.some(segment =>
-    sensitiveDirectoryNames.has(segment.toLowerCase()) ||
-    sensitiveFileNames.has(segment.toLowerCase()),
+  return segments.some(
+    segment =>
+      sensitiveDirectoryNames.has(segment.toLowerCase()) ||
+      sensitiveFileNames.has(segment.toLowerCase()),
   )
 }
 
@@ -3284,27 +3609,32 @@ function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
     text: 'Previous BeeGame turn was interrupted before completion.',
     createdAt: new Date(),
   })
-  appendTranscriptEvent(record.transcriptPath, record.events.at(-1) as BeeGameEvent)
+  appendTranscriptEvent(
+    record.transcriptPath,
+    record.events.at(-1) as BeeGameEvent,
+  )
   record.nextEventId += 1
   record.currentTurnId = previousTurnId
   record.session.updatedAt = new Date()
 }
 
-function getCreditProjectId(record: SessionRecord): string {
-  return record.projectId || record.session.id
-}
-
 function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type === 'turn.started' && event.turnId && !hasTurnEnded(events, event.turnId)) {
+    if (
+      event?.type === 'turn.started' &&
+      event.turnId &&
+      !hasTurnEnded(events, event.turnId)
+    ) {
       return event.turnId
     }
   }
   return ''
 }
 
-function isGlobalProcessControlBashCommand(input: Record<string, unknown>): boolean {
+function isGlobalProcessControlBashCommand(
+  input: Record<string, unknown>,
+): boolean {
   const command = typeof input.command === 'string' ? input.command.trim() : ''
   if (!command) return false
   return splitShellCommandSegments(command).some(part => {
@@ -3315,7 +3645,9 @@ function isGlobalProcessControlBashCommand(input: Record<string, unknown>): bool
   })
 }
 
-function isBackgroundProcessBashCommand(input: Record<string, unknown>): boolean {
+function isBackgroundProcessBashCommand(
+  input: Record<string, unknown>,
+): boolean {
   const command = typeof input.command === 'string' ? input.command.trim() : ''
   if (!command) return false
   return hasShellBackgroundOperator(command)
@@ -3401,13 +3733,19 @@ function splitShellCommandSegments(command: string): string[] {
 function isGlobalProcessControlTokens(tokens: string[]): boolean {
   const command = tokens[0]?.toLowerCase()
   if (!command) return false
-  if (command === 'kill' || command === 'pkill' || command === 'killall') return true
-  if (command === 'fuser' && tokens.some(token => token.toLowerCase() === '-k')) return true
+  if (command === 'kill' || command === 'pkill' || command === 'killall')
+    return true
+  if (command === 'fuser' && tokens.some(token => token.toLowerCase() === '-k'))
+    return true
   if (
     command === 'xargs' &&
     tokens.slice(1).some(token => {
       const normalized = token.toLowerCase()
-      return normalized === 'kill' || normalized === 'pkill' || normalized === 'killall'
+      return (
+        normalized === 'kill' ||
+        normalized === 'pkill' ||
+        normalized === 'killall'
+      )
     })
   ) {
     return true
@@ -3417,9 +3755,7 @@ function isGlobalProcessControlTokens(tokens: string[]): boolean {
 
 function hasUnsafeShellControlSyntax(command: string): boolean {
   return (
-    command.includes(';') ||
-    command.includes('`') ||
-    command.includes('$(')
+    command.includes(';') || command.includes('`') || command.includes('$(')
   )
 }
 
@@ -3431,9 +3767,11 @@ function splitShellCommandChain(command: string): string[] {
 }
 
 function isHarmlessShellRedirectionToken(token: string): boolean {
-  return /^([12])?>&1$/.test(token) ||
+  return (
+    /^([12])?>&1$/.test(token) ||
     /^([12])?>\/dev\/null$/.test(token) ||
     /^([12])?<\/dev\/null$/.test(token)
+  )
 }
 
 function isDangerousShellToken(token: string): boolean {
@@ -3488,7 +3826,9 @@ function isSafeReadOnlyShellCommand(tokens: string[]): boolean {
   const [command, firstArg] = tokens
   if (command === 'pwd') return tokens.length === 1
   if (command === 'sed') return firstArg === '-n'
-  return ['ls', 'cat', 'find', 'grep', 'rg', 'head', 'tail', 'wc'].includes(command)
+  return ['ls', 'cat', 'find', 'grep', 'rg', 'head', 'tail', 'wc'].includes(
+    command,
+  )
 }
 
 function isSafeChangeDirectoryCommand(
@@ -3512,24 +3852,37 @@ function isSafeProjectFilesystemMutationCommand(
   const [command] = tokens
   if (command === 'rm') {
     const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
-    return pathArgs.length > 0 &&
-      pathArgs.every(path => isSafeDependencyCleanupPath(cwd, allowedRoot, path))
+    return (
+      pathArgs.length > 0 &&
+      pathArgs.every(path =>
+        isSafeDependencyCleanupPath(cwd, allowedRoot, path),
+      )
+    )
   }
   if (command === 'mv') {
     const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
-    return pathArgs.length === 2 && pathArgs.every(path => (
-      isSafeProjectMovePath(cwd, allowedRoot, path)
-    ))
+    return (
+      pathArgs.length === 2 &&
+      pathArgs.every(path => isSafeProjectMovePath(cwd, allowedRoot, path))
+    )
   }
   return false
 }
 
-function isSafeProjectMovePath(cwd: string, allowedRoot: string, path: string): boolean {
+function isSafeProjectMovePath(
+  cwd: string,
+  allowedRoot: string,
+  path: string,
+): boolean {
   const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
   const workspaceRoot = resolve(allowedRoot)
   const rel = relative(workspaceRoot, resolvedPath).split('\\').join('/')
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) &&
+  return (
+    rel !== '' &&
+    !rel.startsWith('..') &&
+    !isAbsolute(rel) &&
     !isSensitiveProjectMutationPath(rel)
+  )
 }
 
 function isSafeDependencyCleanupPath(
@@ -3545,7 +3898,11 @@ function isSafeDependencyCleanupPath(
   if (path === '.' || path === './' || path === '..') return false
   if (isSensitiveProjectMutationPath(rel)) return false
   const projectRel = relative(resolve(cwd), resolvedPath).split('\\').join('/')
-  if (projectRel === '' || projectRel.startsWith('..') || isAbsolute(projectRel)) {
+  if (
+    projectRel === '' ||
+    projectRel.startsWith('..') ||
+    isAbsolute(projectRel)
+  ) {
     return false
   }
   const normalized = projectRel.toLowerCase()
@@ -3566,15 +3923,17 @@ function isSafeProjectFilesystemSetupCommand(
 ): boolean {
   const [command] = tokens
   if (!command || !['mkdir', 'touch'].includes(command)) return false
-  const pathArgs = tokens
-    .slice(1)
-    .filter(token => !token.startsWith('-'))
-  return pathArgs.length > 0 &&
+  const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
+  return (
+    pathArgs.length > 0 &&
     pathArgs.every(path => isPathInside(cwd, allowedRoot, path))
+  )
 }
 
 function getMutationArtifactPath(input: Record<string, unknown>): string {
-  return String(input.file_path || input.path || input.notebook_path || '').trim()
+  return String(
+    input.file_path || input.path || input.notebook_path || '',
+  ).trim()
 }
 
 function getWorkspaceRelativeMutationPath(
@@ -3642,11 +4001,7 @@ function getWorkspaceViolation(
 }
 
 function extractPermissionPaths(input: Record<string, unknown>): string[] {
-  const paths: string[] = [
-    input.file_path,
-    input.path,
-    input.notebook_path,
-  ]
+  const paths: string[] = [input.file_path, input.path, input.notebook_path]
     .filter((value): value is string => typeof value === 'string')
     .map(value => value.trim())
     .filter(Boolean)
@@ -3721,11 +4076,7 @@ function isShellWrapperPrefix(char: string | undefined): boolean {
 
 function isShellWrapperSuffix(char: string | undefined): boolean {
   return (
-    char === ')' ||
-    char === ']' ||
-    char === '}' ||
-    char === ',' ||
-    char === ';'
+    char === ')' || char === ']' || char === '}' || char === ',' || char === ';'
   )
 }
 
@@ -3786,11 +4137,15 @@ type ProjectLogIndexSession = {
   updatedAt: string
 }
 
-function appendProjectRuntimeLog(record: SessionRecord, event: BeeGameEvent): void {
-  if (event.type === 'assistant.partial') return
+function appendProjectRuntimeLog(
+  record: SessionRecord,
+  event: BeeGameEvent,
+): void {
+  if (event.type === 'assistant.partial' || event.type === 'usage') return
   try {
     updateProjectLogIndex(record)
-    const path = getProjectRuntimeLogPath(record.session.cwd)
+    const path = getProjectRuntimeLogPath(record)
+    mkdirSync(dirname(path), { recursive: true })
     appendFileSync(
       path,
       [
@@ -3812,7 +4167,8 @@ function appendProjectAgentRawLog(
 ): void {
   try {
     updateProjectLogIndex(record)
-    const path = getProjectAgentRawLogPath(record.session.cwd)
+    const path = getProjectAgentRawLogPath(record)
+    mkdirSync(dirname(path), { recursive: true })
     appendBoundedDiagnosticRecord(
       path,
       `${JSON.stringify({
@@ -3833,25 +4189,43 @@ function appendProjectAgentRawLog(
 
 function updateProjectLogIndex(record: SessionRecord): void {
   const workspacePath = record.session.cwd
-  const logsDir = getProjectLogsDir(workspacePath)
+  const logsDir = getProjectLogsDirForRecord(record)
   mkdirSync(logsDir, { recursive: true })
-  const indexPath = getProjectLogIndexPath(workspacePath)
+  const indexPath =
+    record.workflowWorker && record.workflowRunId
+      ? resolve(logsDir, 'index.json')
+      : getProjectLogIndexPath(workspacePath)
   const now = new Date().toISOString()
   const index = readProjectLogIndex(indexPath, workspacePath)
   index.updatedAt = now
   index.sessions[record.session.id] = {
     sessionId: record.session.id,
     transcript: toProjectRelativePath(workspacePath, record.transcriptPath),
-    agentRawLog: toProjectRelativePath(workspacePath, getProjectAgentRawLogPath(workspacePath)),
-    runtimeLog: toProjectRelativePath(workspacePath, getProjectRuntimeLogPath(workspacePath)),
-    previewLog: toProjectRelativePath(workspacePath, getProjectPreviewLogPath(workspacePath)),
-    deployLog: toProjectRelativePath(workspacePath, getProjectDeployLogPath(workspacePath)),
+    agentRawLog: toProjectRelativePath(
+      workspacePath,
+      getProjectAgentRawLogPath(record),
+    ),
+    runtimeLog: toProjectRelativePath(
+      workspacePath,
+      getProjectRuntimeLogPath(record),
+    ),
+    previewLog: toProjectRelativePath(
+      workspacePath,
+      getProjectPreviewLogPath(workspacePath),
+    ),
+    deployLog: toProjectRelativePath(
+      workspacePath,
+      getProjectDeployLogPath(workspacePath),
+    ),
     updatedAt: now,
   }
   writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
 }
 
-function readProjectLogIndex(path: string, workspacePath: string): ProjectLogIndex {
+function readProjectLogIndex(
+  path: string,
+  workspacePath: string,
+): ProjectLogIndex {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
     if (
@@ -3863,12 +4237,14 @@ function readProjectLogIndex(path: string, workspacePath: string): ProjectLogInd
     ) {
       return {
         version: 1,
-        project: typeof parsed.project === 'string'
-          ? parsed.project
-          : basename(workspacePath),
-        updatedAt: typeof parsed.updatedAt === 'string'
-          ? parsed.updatedAt
-          : new Date().toISOString(),
+        project:
+          typeof parsed.project === 'string'
+            ? parsed.project
+            : basename(workspacePath),
+        updatedAt:
+          typeof parsed.updatedAt === 'string'
+            ? parsed.updatedAt
+            : new Date().toISOString(),
         sessions: parsed.sessions as Record<string, ProjectLogIndexSession>,
       }
     }
@@ -3887,16 +4263,51 @@ function getProjectLogsDir(workspacePath: string): string {
   return resolve(workspacePath, 'logs')
 }
 
+function getProjectLogsDirForRecord(record: SessionRecord): string {
+  if (record.workflowWorker && record.workflowRunId) {
+    return resolve(
+      record.session.cwd,
+      '.beegame',
+      'workflow',
+      'logs',
+      record.workflowRunId,
+    )
+  }
+  return getProjectLogsDir(record.session.cwd)
+}
+
 function getProjectLogIndexPath(workspacePath: string): string {
   return resolve(getProjectLogsDir(workspacePath), 'index.json')
 }
 
-function getProjectRuntimeLogPath(workspacePath: string): string {
-  return resolve(getProjectLogsDir(workspacePath), 'runtime.log')
+function getProjectRuntimeLogPath(record: SessionRecord): string {
+  if (record.workflowWorker && record.workflowRunId) {
+    return resolve(
+      record.session.cwd,
+      '.beegame',
+      'workflow',
+      'logs',
+      record.workflowRunId,
+      record.workflowDispatchId ?? record.session.id,
+      'runtime.log',
+    )
+  }
+  return resolve(getProjectLogsDir(record.session.cwd), 'runtime.log')
 }
 
-function getProjectAgentRawLogPath(workspacePath: string): string {
-  return resolve(getProjectLogsDir(workspacePath), 'agent.raw.jsonl')
+function getProjectAgentRawLogPath(record: SessionRecord): string {
+  if (record.workflowWorker && record.workflowRunId) {
+    return resolve(
+      record.session.cwd,
+      '.beegame',
+      'workflow',
+      'logs',
+      record.workflowRunId,
+      record.workflowDispatchId ?? record.session.id,
+      'agent.raw.jsonl',
+    )
+  }
+  return resolve(getProjectLogsDir(record.session.cwd), 'agent.raw.jsonl')
 }
 
 function getProjectPreviewLogPath(workspacePath: string): string {
@@ -3917,12 +4328,13 @@ function collapseLogLine(text: string): string {
     .map(part => part.trim())
     .filter(Boolean)
     .join(' ')
-  return collapsed.length > 800
-    ? `${collapsed.slice(0, 797)}...`
-    : collapsed
+  return collapsed.length > 800 ? `${collapsed.slice(0, 797)}...` : collapsed
 }
 
-function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessage): {
+function mapSDKMessageToEvent(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): {
   type: BeeGameEventType
   text: string
   payload?: DashboardSDKMessage
@@ -3939,7 +4351,10 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
         ),
       )
     case 'partial_assistant':
-      return mapTextEvent('assistant.partial', extractAssistantVisibleText(message))
+      return mapTextEvent(
+        'assistant.partial',
+        extractAssistantVisibleText(message),
+      )
     case 'stream_event':
       return mapStreamEvent(record, message)
     case 'tool_progress':
@@ -3959,7 +4374,10 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
     }
     case 'system':
     case 'status':
-      return mapNativeTaskLifecycleEvent(message) ?? mapTextEvent('system.status', extractMessageText(message))
+      return (
+        mapNativeTaskLifecycleEvent(message) ??
+        mapTextEvent('system.status', extractMessageText(message))
+      )
     default:
       return mapTextEvent('system.status', extractMessageText(message))
   }
@@ -3976,18 +4394,28 @@ function mapNativeTaskLifecycleEvent(message: DashboardSDKMessage): {
 }
 
 function isSDKExecutionError(message: DashboardSDKMessage): boolean {
-  return message.type === 'result' && getBooleanField(message, 'is_error') === true
+  return (
+    message.type === 'result' && getBooleanField(message, 'is_error') === true
+  )
 }
 
-export function getSDKExecutionErrorDetail(message: DashboardSDKMessage): string {
+export function getSDKExecutionErrorDetail(
+  message: DashboardSDKMessage,
+): string {
   const errors = Array.isArray(message.errors)
-    ? message.errors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ? message.errors.filter(
+        (value): value is string =>
+          typeof value === 'string' && value.trim().length > 0,
+      )
     : []
   if (errors[0]) return errors[0].trim()
   if (typeof message.result === 'string' && message.result.trim()) {
     return message.result.trim()
   }
-  return extractMessageText(message).trim() || 'Model runtime returned an execution error.'
+  return (
+    extractMessageText(message).trim() ||
+    'Model runtime returned an execution error.'
+  )
 }
 
 function mapTextEvent(
@@ -3996,7 +4424,9 @@ function mapTextEvent(
 ): { type: BeeGameEventType; text: string } | null {
   const normalized = text.trim()
   if (
-    (type === 'assistant.partial' || type === 'assistant.message' || type === 'result') &&
+    (type === 'assistant.partial' ||
+      type === 'assistant.message' ||
+      type === 'result') &&
     isThinkingProtocolControlText(normalized)
   ) {
     return null
@@ -4006,7 +4436,8 @@ function mapTextEvent(
 
 function isThinkingProtocolControlEvent(event: BeeGameEvent): boolean {
   return (
-    (event.type === 'assistant.partial' || event.type === 'assistant.message') &&
+    (event.type === 'assistant.partial' ||
+      event.type === 'assistant.message') &&
     isThinkingProtocolControlText(event.text)
   )
 }
@@ -4029,7 +4460,10 @@ function isThinkingProtocolControlText(value: string): boolean {
   return foundControlToken
 }
 
-function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
+function mapStreamEvent(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): {
   type: BeeGameEventType
   text: string
   payload?: DashboardSDKMessage
@@ -4055,9 +4489,13 @@ function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
 function mapSDKMessageToToolEvents(
   record: SessionRecord,
   message: DashboardSDKMessage,
-): Array<{ type: BeeGameEventType; text: string; payload: DashboardSDKMessage }> {
+): Array<{
+  type: BeeGameEventType
+  text: string
+  payload: DashboardSDKMessage
+}> {
   // Stream fragments are presentation-only and may contain a tool block before
-  // its JSON input is complete. Claude Code emits the authoritative tool_use
+  // its JSON input is complete. BeeGame Studio emits the authoritative tool_use
   // block on the final assistant message, so only that block may start a tool.
   if (message.type === 'stream_event' || message.type === 'partial_assistant') {
     return []
@@ -4103,12 +4541,14 @@ function mapSDKMessageToToolEvents(
       const toolName = cached?.toolName ?? 'Tool'
       const failed = getBooleanField(block, 'is_error') === true
       const output = extractMessageText(block.content)
-      const nativeResult = toolName === 'Agent'
-        ? extractNativeAgentResult(block.content)
-        : undefined
-      const nativeTaskResult = toolName === 'TaskOutput'
-        ? extractNativeCompletedTaskResult(message)
-        : undefined
+      const nativeResult =
+        toolName === 'Agent'
+          ? extractNativeAgentResult(block.content)
+          : undefined
+      const nativeTaskResult =
+        toolName === 'TaskOutput'
+          ? extractNativeCompletedTaskResult(message)
+          : undefined
       events.push({
         type: failed ? 'tool.failed' : 'tool.completed',
         text: `${toolName} ${failed ? 'failed' : 'completed'}`,
@@ -4145,8 +4585,10 @@ function extractNativeCompletedTaskResult(
       status !== 'failed' &&
       status !== 'stopped' &&
       status !== 'killed')
-  ) return undefined
-  const result = getStringField(task, 'output').trim() ||
+  )
+    return undefined
+  const result =
+    getStringField(task, 'output').trim() ||
     getStringField(task, 'result').trim()
   return {
     taskId,
@@ -4156,7 +4598,7 @@ function extractNativeCompletedTaskResult(
 }
 
 /**
- * Claude Code may append Agent lifecycle/usage metadata as additional text
+ * BeeGame Studio may append Agent lifecycle/usage metadata as additional text
  * blocks. Preserve the subagent's own terminal text separately instead of
  * asking delivery evidence consumers to parse the flattened presentation
  * string.
@@ -4172,7 +4614,9 @@ function extractNativeAgentResult(value: unknown): string | undefined {
   return undefined
 }
 
-function extractContentBlocks(message: DashboardSDKMessage): Record<string, unknown>[] {
+function extractContentBlocks(
+  message: DashboardSDKMessage,
+): Record<string, unknown>[] {
   const blocks: Record<string, unknown>[] = []
   const event = getObjectField(message, 'event')
   const contentBlock = getObjectField(event, 'content_block')
@@ -4270,14 +4714,16 @@ function extractStreamThinkingStatus(
   if (eventType === 'content_block_start') {
     const contentBlock = getObjectField(event, 'content_block')
     const blockType = getStringField(contentBlock, 'type')
-    if (blockType !== 'thinking' && blockType !== 'redacted_thinking') return null
+    if (blockType !== 'thinking' && blockType !== 'redacted_thinking')
+      return null
     const index = getNumberField(event, 'index')
     if (index !== undefined) record.thinkingBlockIndexes.add(index)
     return 'streaming'
   }
   if (eventType === 'content_block_stop') {
     const index = getNumberField(event, 'index')
-    if (index === undefined || !record.thinkingBlockIndexes.has(index)) return null
+    if (index === undefined || !record.thinkingBlockIndexes.has(index))
+      return null
     record.thinkingBlockIndexes.delete(index)
     if (!record.visibleThinkingBlockIndexes.has(index)) return null
     record.visibleThinkingBlockIndexes.delete(index)
@@ -4287,23 +4733,31 @@ function extractStreamThinkingStatus(
 
   const delta = getObjectField(event, 'delta')
   const deltaType = getStringField(delta, 'type')
-  if (deltaType !== 'thinking_delta' && deltaType !== 'redacted_thinking_delta') {
+  if (
+    deltaType !== 'thinking_delta' &&
+    deltaType !== 'redacted_thinking_delta'
+  ) {
     return null
   }
   const index = getNumberField(event, 'index')
-  if (index === undefined || !record.thinkingBlockIndexes.has(index)) return 'streaming'
+  if (index === undefined || !record.thinkingBlockIndexes.has(index))
+    return 'streaming'
   if (record.visibleThinkingBlockIndexes.has(index)) return 'streaming'
   record.visibleThinkingBlockIndexes.add(index)
   return 'started'
 }
 
-function extractStreamMessageId(message: DashboardSDKMessage): string | undefined {
+function extractStreamMessageId(
+  message: DashboardSDKMessage,
+): string | undefined {
   const event = getObjectField(message, 'event') ?? message
   if (getStringField(event, 'type') !== 'message_start') return undefined
   return getStringField(getObjectField(event, 'message'), 'id') || undefined
 }
 
-function getSDKAssistantMessageId(message: DashboardSDKMessage): string | undefined {
+function getSDKAssistantMessageId(
+  message: DashboardSDKMessage,
+): string | undefined {
   if (message.type !== 'assistant') return undefined
   return getStringField(getObjectField(message, 'message'), 'id') || undefined
 }

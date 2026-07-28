@@ -263,7 +263,12 @@ export const useProjectStore = create<ProjectState>()(
           if (tokenBudget) {
             useSystemStore.getState().updateTokenUsage({
               prompt_tokens: Number(tokenBudget.prompt_tokens ?? tokenBudget.input_tokens) || 0,
+              input_tokens: Number(tokenBudget.input_tokens ?? tokenBudget.prompt_tokens) || 0,
+              cached_input_tokens:
+                Number(tokenBudget.cached_input_tokens) ||
+                (Number(tokenBudget.cache_read_tokens) || 0) + (Number(tokenBudget.cache_creation_tokens) || 0),
               completion_tokens: Number(tokenBudget.completion_tokens ?? tokenBudget.output_tokens) || 0,
+              output_tokens: Number(tokenBudget.output_tokens ?? tokenBudget.completion_tokens) || 0,
               total_tokens: Number(tokenBudget.total_tokens) || 0,
             }, projectId);
           }

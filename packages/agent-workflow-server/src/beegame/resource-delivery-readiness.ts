@@ -26,6 +26,19 @@ export type ResourceDeliveryReadiness = {
   failedActions: string[]
 }
 
+export function confirmedResourceLibraryUsage(
+  confirmedBriefContext?: string,
+): ResourceLibraryUsage | undefined {
+  if (!confirmedBriefContext?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(confirmedBriefContext) as unknown
+    if (!isRecord(parsed)) return undefined
+    return parsePolicy(parsed.resource_library_usage)
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Audits only deterministic resource-contract facts. It never selects a Pack,
  * imports a file, advances an Agent phase, or interprets game semantics.

@@ -10,11 +10,14 @@ import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 
 beforeAll(() => {
-  process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 59).toString('base64')
+  process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 59).toString(
+    'base64',
+  )
 })
 
 afterAll(() => {
-  if (originalEncryptionKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+  if (originalEncryptionKey === undefined)
+    delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalEncryptionKey
 })
 
@@ -31,10 +34,17 @@ describe('DashboardRepository Supabase boundaries', () => {
     const user = { id: 'owner-user', role: 'owner' as const }
 
     try {
-      saveRuntimeSettingsConfig({ skillSearchEnabled: true }, { dataDir: userRoot })
+      saveRuntimeSettingsConfig(
+        { skillSearchEnabled: true },
+        { dataDir: userRoot },
+      )
 
-      await expect(repository.loadRuntimeSettings(request, user)).resolves.toEqual({})
-      await expect(repository.getRuntimeEnv(userRoot, user.id)).resolves.not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      await expect(
+        repository.loadRuntimeSettings(request, user),
+      ).resolves.toEqual({})
+      await expect(
+        repository.getRuntimeEnv(userRoot, user.id),
+      ).resolves.not.toHaveProperty('SKILL_SEARCH_ENABLED')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -51,10 +61,13 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      saveRuntimeSettingsConfig({
-        skillSearchEnabled: true,
-        mcpSkillsEnabled: false,
-      }, { dataDir: dataRoot })
+      saveRuntimeSettingsConfig(
+        {
+          skillSearchEnabled: true,
+          mcpSkillsEnabled: false,
+        },
+        { dataDir: dataRoot },
+      )
 
       const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
       const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
@@ -64,47 +77,66 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerAEnv.CLAUDE_CONFIG_DIR).not.toBe(ownerBEnv.CLAUDE_CONFIG_DIR)
-      await expect(readFile(
-        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(readFile(
-        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(readFile(
-        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-implementation-auditor.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-implementation-auditor')
-      await expect(readFile(
-        join(
-          ownerBEnv.CLAUDE_CONFIG_DIR,
-          'skills',
-          'game-art-director-expert',
-          'references',
-          'lighting-mood-framework.md',
+      await expect(
+        readFile(
+          join(
+            ownerAEnv.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-acceptance-validator.md',
+          ),
+          'utf8',
         ),
-        'utf8',
-      )).resolves.toContain('#')
-      await expect(readFile(
-        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
-        'utf8',
-      )).resolves.toContain('"skillSearchEnabled": true')
-      await expect(readFile(
-        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
-        'utf8',
-      )).resolves.toContain('"skillSearchEnabled": true')
-      await expect(readFile(
-        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
-        'utf8',
-      )).resolves.toContain('"mcpSkillsEnabled": false')
+      ).resolves.toContain('name: beegame-acceptance-validator')
+      await expect(
+        readFile(
+          join(
+            ownerBEnv.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-acceptance-validator.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-acceptance-validator')
+      await expect(
+        readFile(
+          join(
+            ownerAEnv.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-implementation-auditor.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-implementation-auditor')
+      await expect(
+        readFile(
+          join(
+            ownerBEnv.CLAUDE_CONFIG_DIR,
+            'skills',
+            'game-art-director-expert',
+            'references',
+            'lighting-mood-framework.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('#')
+      await expect(
+        readFile(join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+      ).resolves.toContain('"skillSearchEnabled": true')
+      await expect(
+        readFile(join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+      ).resolves.toContain('"skillSearchEnabled": true')
+      await expect(
+        readFile(join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+      ).resolves.toContain('"mcpSkillsEnabled": false')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
 
   test('keeps Supabase logical runtime config while forcing the authenticated user isolation directory', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-supabase-env-'))
+    const dataRoot = await mkdtemp(
+      join(tmpdir(), 'beegame-repository-supabase-env-'),
+    )
     const userRoot = join(dataRoot, 'users', 'owner-user')
     const runtimeCalls: Array<{ url: string; body: unknown }> = []
     const repository = new DashboardRepository({
@@ -158,16 +190,25 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
       expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env.BEEGAME_CONFIG_DIR).toBe(env.CLAUDE_CONFIG_DIR)
-      expect(env.NPM_CONFIG_CACHE).toBe(join(userRoot, '.runtime', 'tooling', 'npm-cache'))
-      expect(env.NPM_CONFIG_USERCONFIG).toBe(join(userRoot, '.runtime', 'tooling', 'npmrc'))
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
-        'utf8',
-      )).resolves.not.toContain('skills: [beegame-game-acceptance]')
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'settings.json'),
-        'utf8',
-      )).resolves.toContain('"autoAllowBashIfSandboxed": true')
+      expect(env.NPM_CONFIG_CACHE).toBe(
+        join(userRoot, '.runtime', 'tooling', 'npm-cache'),
+      )
+      expect(env.NPM_CONFIG_USERCONFIG).toBe(
+        join(userRoot, '.runtime', 'tooling', 'npmrc'),
+      )
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-acceptance-validator.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.not.toContain('skills: [beegame-game-acceptance]')
+      await expect(
+        readFile(join(env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+      ).resolves.toContain('"autoAllowBashIfSandboxed": true')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -191,23 +232,13 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(init?.headers).toEqual({
         authorization: 'Bearer skills-token',
       })
-      return Response.json([{
-        id: 'skill_1',
-        slug: 'runtime-skill',
-        name: 'runtime-skill',
-        description: 'Runtime injected skill.',
-        enabled: true,
-        content: [
-          '---',
-          'name: runtime-skill',
-          'description: Runtime injected skill.',
-          '---',
-          '',
-          '# Runtime Skill',
-        ].join('\n'),
-        references: [],
-        files: [{
-          path: 'SKILL.md',
+      return Response.json([
+        {
+          id: 'skill_1',
+          slug: 'runtime-skill',
+          name: 'runtime-skill',
+          description: 'Runtime injected skill.',
+          enabled: true,
           content: [
             '---',
             'name: runtime-skill',
@@ -216,10 +247,24 @@ describe('DashboardRepository Supabase boundaries', () => {
             '',
             '# Runtime Skill',
           ].join('\n'),
-        }],
-        createdAt: '2026-07-09T00:00:00.000Z',
-        updatedAt: '2026-07-09T00:00:00.000Z',
-      }])
+          references: [],
+          files: [
+            {
+              path: 'SKILL.md',
+              content: [
+                '---',
+                'name: runtime-skill',
+                'description: Runtime injected skill.',
+                '---',
+                '',
+                '# Runtime Skill',
+              ].join('\n'),
+            },
+          ],
+          createdAt: '2026-07-09T00:00:00.000Z',
+          updatedAt: '2026-07-09T00:00:00.000Z',
+        },
+      ])
     }) as typeof fetch
 
     try {
@@ -230,40 +275,65 @@ describe('DashboardRepository Supabase boundaries', () => {
       ])
       expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env.CLAUDE_CONFIG_DIR).toBe(env.BEEGAME_CONFIG_DIR)
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'skills', 'user-runtime-skill', 'SKILL.md'),
-        'utf8',
-      )).resolves.toContain('Runtime Skill')
-      await expect(readFile(
-        join(
-          env.CLAUDE_CONFIG_DIR,
-          'skills',
-          'beegame-game-delivery',
-          'SKILL.md',
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'skills',
+            'user-runtime-skill',
+            'SKILL.md',
+          ),
+          'utf8',
         ),
-        'utf8',
-      )).resolves.toContain('name: beegame-game-delivery')
-      await expect(readFile(
-        join(
-          env.CLAUDE_CONFIG_DIR,
-          'skills',
-          'beegame-game-acceptance',
-          'SKILL.md',
+      ).resolves.toContain('Runtime Skill')
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'skills',
+            'beegame-game-delivery',
+            'SKILL.md',
+          ),
+          'utf8',
         ),
-        'utf8',
-      )).resolves.toContain('name: beegame-game-acceptance')
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-document-reviewer.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-document-reviewer')
-      await expect(readFile(
-        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-implementation-auditor.md'),
-        'utf8',
-      )).resolves.toContain('name: beegame-implementation-auditor')
+      ).resolves.toContain('name: beegame-game-delivery')
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'skills',
+            'beegame-game-acceptance',
+            'SKILL.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-game-acceptance')
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-acceptance-validator.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-acceptance-validator')
+      await expect(
+        readFile(
+          join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-document-reviewer.md'),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-document-reviewer')
+      await expect(
+        readFile(
+          join(
+            env.CLAUDE_CONFIG_DIR,
+            'agents',
+            'beegame-implementation-auditor.md',
+          ),
+          'utf8',
+        ),
+      ).resolves.toContain('name: beegame-implementation-auditor')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })
@@ -271,7 +341,9 @@ describe('DashboardRepository Supabase boundaries', () => {
   })
 
   test('fails closed when required user skills cannot be synchronized', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-required-skills-'))
+    const dataRoot = await mkdtemp(
+      join(tmpdir(), 'beegame-repository-required-skills-'),
+    )
     const repository = new DashboardRepository({
       dashboardDataRoot: dataRoot,
       getUserDataRoot: () => dataRoot,
@@ -286,8 +358,9 @@ describe('DashboardRepository Supabase boundaries', () => {
     }) as unknown as typeof fetch
 
     try {
-      await expect(repository.getRuntimeEnv(dataRoot, 'owner-user'))
-        .rejects.toThrow('User skills synchronization failed')
+      await expect(
+        repository.getRuntimeEnv(dataRoot, 'owner-user'),
+      ).rejects.toThrow('User skills synchronization failed')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })
@@ -295,8 +368,16 @@ describe('DashboardRepository Supabase boundaries', () => {
   })
 
   test('continues without stale user skills when optional development sync is unavailable', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-optional-skills-'))
-    const staleSkillDir = join(dataRoot, '.runtime', 'app', 'skills', 'user-stale')
+    const dataRoot = await mkdtemp(
+      join(tmpdir(), 'beegame-repository-optional-skills-'),
+    )
+    const staleSkillDir = join(
+      dataRoot,
+      '.runtime',
+      'app',
+      'skills',
+      'user-stale',
+    )
     await mkdir(staleSkillDir, { recursive: true })
     await writeFile(join(staleSkillDir, 'SKILL.md'), 'stale', 'utf8')
     const repository = new DashboardRepository({
@@ -313,12 +394,16 @@ describe('DashboardRepository Supabase boundaries', () => {
     globalThis.fetch = (async () => {
       throw new Error('skills unavailable')
     }) as unknown as typeof fetch
-    console.warn = () => { warningCount += 1 }
+    console.warn = () => {
+      warningCount += 1
+    }
 
     try {
       await repository.getRuntimeEnv(dataRoot, 'owner-user')
       await repository.getRuntimeEnv(dataRoot, 'owner-user')
-      await expect(readFile(join(staleSkillDir, 'SKILL.md'), 'utf8')).rejects.toThrow()
+      await expect(
+        readFile(join(staleSkillDir, 'SKILL.md'), 'utf8'),
+      ).rejects.toThrow()
       expect(warningCount).toBe(1)
     } finally {
       globalThis.fetch = originalFetch
@@ -328,8 +413,16 @@ describe('DashboardRepository Supabase boundaries', () => {
   })
 
   test('removes stale user skill materialization when remote skills are disabled', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-disabled-skills-'))
-    const staleSkillDir = join(dataRoot, '.runtime', 'app', 'skills', 'user-stale')
+    const dataRoot = await mkdtemp(
+      join(tmpdir(), 'beegame-repository-disabled-skills-'),
+    )
+    const staleSkillDir = join(
+      dataRoot,
+      '.runtime',
+      'app',
+      'skills',
+      'user-stale',
+    )
     await mkdir(staleSkillDir, { recursive: true })
     await writeFile(join(staleSkillDir, 'SKILL.md'), 'stale', 'utf8')
     const repository = new DashboardRepository({
@@ -340,7 +433,9 @@ describe('DashboardRepository Supabase boundaries', () => {
 
     try {
       await repository.getRuntimeEnv(dataRoot, 'owner-user')
-      await expect(readFile(join(staleSkillDir, 'SKILL.md'), 'utf8')).rejects.toThrow()
+      await expect(
+        readFile(join(staleSkillDir, 'SKILL.md'), 'utf8'),
+      ).rejects.toThrow()
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -390,150 +485,42 @@ describe('DashboardRepository Supabase boundaries', () => {
     const user = { id: 'owner-auth-user', role: 'owner' as const }
 
     try {
-      await expect(repository.loadRuntimeSettings(request, user)).resolves.toEqual({
+      await expect(
+        repository.loadRuntimeSettings(request, user),
+      ).resolves.toEqual({
         skillSearchEnabled: true,
       })
-      await expect(repository.saveRuntimeSettings(request, user, {
-        webBrowserToolEnabled: true,
-      })).resolves.toEqual({
+      await expect(
+        repository.saveRuntimeSettings(request, user, {
+          webBrowserToolEnabled: true,
+        }),
+      ).resolves.toEqual({
         skillSearchEnabled: true,
         webBrowserToolEnabled: true,
       })
 
-      expect(calls.some(call =>
-        call.url.includes('/rest/v1/beegame_platform_settings') &&
-        call.url.includes('key=eq.runtime_settings'),
-      )).toBe(true)
-      expect(calls.some(call =>
-        call.url.includes('/rest/v1/beegame_runtime_settings') ||
-        call.url.includes('owner_id=eq.owner-auth-user'),
-      )).toBe(false)
-      expect(calls.some(call =>
-        call.method === 'POST' &&
-        call.url.includes('/rest/v1/beegame_platform_settings') &&
-        call.url.includes('on_conflict=key'),
-      )).toBe(true)
-    } finally {
-      await rm(dataRoot, { recursive: true, force: true })
-    }
-  })
-
-  test('delegates credit mutations to remote credit control when configured', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
-    const calls: Array<{ operation: string; userId: string; input: unknown }> = []
-    const repository = new DashboardRepository({
-      dashboardDataRoot: dataRoot,
-      getUserDataRoot: () => dataRoot,
-      remoteCreditControl: {
-        reserveCredits: async (userId, input) => {
-          calls.push({ operation: 'reserve', userId, input })
-          return {
-            id: 'reservation-remote',
-            reservedCredits: input.credits,
-            balance: {
-              userId,
-              plan: 'free',
-              balanceCredits: 290,
-              includedCredits: 300,
-              consumedCredits: 0,
-              reservedCredits: input.credits,
-              creditUnitWeightedTokens: 10000,
-              estimates: {},
-            } as any,
-          }
-        },
-        settleCreditReservation: async (userId, input) => {
-          calls.push({ operation: 'settle', userId, input })
-          return {
-            reservationId: input.reservationId,
-            reservedCredits: 10,
-            settledCredits: 1,
-            refundedCredits: 9,
-            balance: {
-              userId,
-              plan: 'free',
-              balanceCredits: 299,
-              includedCredits: 300,
-              consumedCredits: 1,
-              reservedCredits: 0,
-              creditUnitWeightedTokens: 10000,
-              estimates: {},
-            } as any,
-          }
-        },
-        refundCreditReservation: async (userId, input) => {
-          calls.push({ operation: 'refund', userId, input })
-          return {
-            reservationId: input.reservationId,
-            reservedCredits: 10,
-            settledCredits: 0,
-            refundedCredits: 10,
-            balance: {
-              userId,
-              plan: 'free',
-              balanceCredits: 300,
-              includedCredits: 300,
-              consumedCredits: 0,
-              reservedCredits: 0,
-              creditUnitWeightedTokens: 10000,
-              estimates: {},
-            } as any,
-          }
-        },
-        expireStaleCreditReservations: async (userId, input) => {
-          calls.push({ operation: 'expire', userId, input })
-          return {
-            expiredReservations: [],
-            refundedCredits: 0,
-            balance: {
-              userId,
-              plan: 'free',
-              balanceCredits: 300,
-              includedCredits: 300,
-              consumedCredits: 0,
-              reservedCredits: 0,
-              creditUnitWeightedTokens: 10000,
-              estimates: {},
-            } as any,
-          }
-        },
-      },
-    })
-    const request = new Request('http://beegame.test/api/credits')
-    const user = {
-      id: 'oauth-provider-user',
-      accountId: 'canonical-user',
-      role: 'developer' as const,
-    }
-
-    try {
-      await repository.reserveCredits(request, user, {
-        credits: 10,
-        kind: 'edit_turn',
-      })
-      const backend = repository.createSessionCreditBackend()
-      await backend.settleCreditReservation('canonical-user', {
-        dataDir: dataRoot,
-        reservationId: 'reservation-remote',
-        weightedTokens: 1000,
-      })
-
-      expect(calls).toEqual([
-        {
-          operation: 'reserve',
-          userId: 'canonical-user',
-          input: { credits: 10, kind: 'edit_turn' },
-        },
-        {
-          operation: 'settle',
-          userId: 'canonical-user',
-          input: {
-            dataDir: dataRoot,
-            reservationId: 'reservation-remote',
-            weightedTokens: 1000,
-          },
-        },
-      ])
+      expect(
+        calls.some(
+          call =>
+            call.url.includes('/rest/v1/beegame_platform_settings') &&
+            call.url.includes('key=eq.runtime_settings'),
+        ),
+      ).toBe(true)
+      expect(
+        calls.some(
+          call =>
+            call.url.includes('/rest/v1/beegame_runtime_settings') ||
+            call.url.includes('owner_id=eq.owner-auth-user'),
+        ),
+      ).toBe(false)
+      expect(
+        calls.some(
+          call =>
+            call.method === 'POST' &&
+            call.url.includes('/rest/v1/beegame_platform_settings') &&
+            call.url.includes('on_conflict=key'),
+        ),
+      ).toBe(true)
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -556,10 +543,12 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      await expect(repository.getCreditBalance(
-        new Request('http://beegame.test/api/credits'),
-        { id: '00000000-0000-0000-0000-000000000001', role: 'owner' },
-      )).rejects.toThrow('Supabase user token is required')
+      await expect(
+        repository.getCreditBalance(
+          new Request('http://beegame.test/api/credits'),
+          { id: '00000000-0000-0000-0000-000000000001', role: 'owner' },
+        ),
+      ).rejects.toThrow('Supabase user token is required')
       expect(fetchCalls).toBe(0)
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
@@ -572,14 +561,20 @@ describe('DashboardRepository Supabase boundaries', () => {
     const repository = new DashboardRepository({
       dashboardDataRoot: dataRoot,
       getUserDataRoot: () => dataRoot,
-      getAuthToken: request => request.headers.get('cookie') === 'beegame_session=session-id'
-        ? 'cookie-access-token'
-        : undefined,
+      getAuthToken: request =>
+        request.headers.get('cookie') === 'beegame_session=session-id'
+          ? 'cookie-access-token'
+          : undefined,
       supabaseStore: new SupabaseDashboardStore({
         url: 'https://project.supabase.co',
         anonKey: 'anon-key',
-        fetchImpl: (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-          authorizationHeaders.push(new Headers(init?.headers).get('authorization') ?? '')
+        fetchImpl: (async (
+          _input: Parameters<typeof fetch>[0],
+          init?: RequestInit,
+        ) => {
+          authorizationHeaders.push(
+            new Headers(init?.headers).get('authorization') ?? '',
+          )
           return Response.json([])
         }) as unknown as typeof fetch,
       }),
@@ -611,14 +606,16 @@ describe('DashboardRepository Supabase boundaries', () => {
           const url = String(input)
           calls.push(url)
           if (url.includes('/beegame_credit_accounts')) {
-            return Response.json([{
-              user_id: 'canonical-user',
-              plan: 'free',
-              included_credits: 300,
-              consumed_credits: 7,
-              reserved_credits: 2,
-              updated_at: '2026-07-01T00:00:00.000Z',
-            }])
+            return Response.json([
+              {
+                user_id: 'canonical-user',
+                plan: 'free',
+                included_credits: 300,
+                consumed_credits: 7,
+                reserved_credits: 2,
+                updated_at: '2026-07-01T00:00:00.000Z',
+              },
+            ])
           }
           if (url.includes('/beegame_credit_ledger')) {
             return Response.json([])
@@ -714,14 +711,14 @@ describe('DashboardRepository Supabase boundaries', () => {
 
     try {
       await repository.listModelConfigs(request, user)
-      await repository.modelConfigExists(
-        request,
-        user,
-        'llm_platform_default',
-      )
+      await repository.modelConfigExists(request, user, 'llm_platform_default')
 
-      expect(calls[0]?.url).toContain('/rest/v1/beegame_model_configs?owner_id=eq.platform-owner')
-      expect(calls[1]?.url).toContain('/rest/v1/beegame_model_configs?owner_id=eq.platform-owner&id=eq.llm_platform_default')
+      expect(calls[0]?.url).toContain(
+        '/rest/v1/beegame_model_configs?owner_id=eq.platform-owner',
+      )
+      expect(calls[1]?.url).toContain(
+        '/rest/v1/beegame_model_configs?owner_id=eq.platform-owner&id=eq.llm_platform_default',
+      )
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -768,9 +765,12 @@ describe('DashboardRepository Supabase boundaries', () => {
         }) as unknown as typeof fetch,
       }),
     })
-    const request = new Request('http://beegame.test/api/model-configs/llm_platform_default', {
-      headers: { authorization: 'Bearer user-token' },
-    })
+    const request = new Request(
+      'http://beegame.test/api/model-configs/llm_platform_default',
+      {
+        headers: { authorization: 'Bearer user-token' },
+      },
+    )
 
     try {
       const updated = await repository.updateModelConfig(
@@ -788,9 +788,11 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(calls[0]?.method).toBe('PATCH')
       expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
       expect(calls[0]?.url).not.toContain('owner_id=eq.owner-auth-user')
-      expect(calls[0]?.body).toEqual(expect.objectContaining({
-        api_key_ciphertext: expect.stringMatching(/^v1\./u),
-      }))
+      expect(calls[0]?.body).toEqual(
+        expect.objectContaining({
+          api_key_ciphertext: expect.stringMatching(/^v1\./u),
+        }),
+      )
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -822,11 +824,9 @@ describe('DashboardRepository Supabase boundaries', () => {
 
     try {
       expect(await repository.listModelConfigs(request, user)).toEqual([])
-      expect(await repository.modelConfigExists(
-        request,
-        user,
-        'llm_default',
-      )).toBe(false)
+      expect(
+        await repository.modelConfigExists(request, user, 'llm_default'),
+      ).toBe(false)
       expect(calls).toEqual([
         'https://project.supabase.co/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
         'https://project.supabase.co/rest/v1/beegame_model_configs?id=eq.llm_default&select=id&limit=1',

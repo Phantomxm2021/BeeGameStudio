@@ -1,13 +1,17 @@
-import type { BeeGameCreditBalance } from './credit-control-client'
+export type BeeGameCreditBalance = {
+  userId: string
+  plan: 'free'
+  balanceCredits: number
+  includedCredits: number
+  consumedCredits: number
+  reservedCredits: number
+  creditUnitWeightedTokens: number
+  estimates: Record<string, { minCredits: number; maxCredits: number }>
+}
 import type {
-  BeeGameCreditControlExpireInput,
-  BeeGameCreditControlRefundInput,
-  BeeGameCreditControlReserveInput,
-  BeeGameCreditControlSettleInput,
-  BeeGameCreditReservation,
-  BeeGameCreditSettlement,
-  BeeGameStaleCreditReservationExpiry,
-} from './credit-control-client'
+  BeeGameUsageBillingRecordInput,
+  BeeGameUsageBillingRecordResult,
+} from './usage-control-client'
 
 export type BeeGameCreditGrant = {
   grantedCredits: number
@@ -57,30 +61,14 @@ export type BeeGameBillingCreditPackFilters = {
 }
 
 export type BeeGameBillingRouteRepository = {
-  reserveCreditsForUser: (
+  recordShadowUsageForUser: (
     userId: string,
-    input: BeeGameCreditControlReserveInput,
-  ) => Promise<BeeGameCreditReservation>
-  findCreditReservationByIdempotencyKeyForUser: (
+    input: BeeGameUsageBillingRecordInput,
+  ) => Promise<BeeGameUsageBillingRecordResult>
+  debitRealTimeUsageForUser: (
     userId: string,
-    idempotencyKey: string,
-  ) => Promise<BeeGameCreditReservation | undefined>
-  getCreditSettlementForUser: (
-    userId: string,
-    reservationId: string,
-  ) => Promise<BeeGameCreditSettlement | undefined>
-  settleCreditReservationForUser: (
-    userId: string,
-    input: BeeGameCreditControlSettleInput,
-  ) => Promise<BeeGameCreditSettlement>
-  refundCreditReservationForUser: (
-    userId: string,
-    input: BeeGameCreditControlRefundInput,
-  ) => Promise<BeeGameCreditSettlement>
-  expireStaleCreditReservationsForUser: (
-    userId: string,
-    input: BeeGameCreditControlExpireInput,
-  ) => Promise<BeeGameStaleCreditReservationExpiry>
+    input: BeeGameUsageBillingRecordInput,
+  ) => Promise<BeeGameUsageBillingRecordResult>
   grantPaymentProviderCredits: (
     request: Request,
     targetUserId: string,

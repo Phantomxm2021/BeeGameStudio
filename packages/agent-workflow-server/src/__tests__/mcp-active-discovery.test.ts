@@ -1,33 +1,23 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createServer, type RequestListener, type Server } from 'node:http'
 import { discoverActiveMcpServers } from '../mcp-active-discovery'
 
-const servers: Server[] = []
+const originalFetch = globalThis.fetch
 
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+  globalThis.fetch = originalFetch
 })
-
-async function startServer(handler: RequestListener): Promise<number> {
-  const server = createServer(handler)
-  servers.push(server)
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
-  return address.port
-}
 
 describe('active MCP discovery', () => {
   test('connects to its bounded loopback candidate without the public outbound policy', async () => {
-    const port = await startServer((req, res) => {
-      if (req.url !== '/') {
-        res.writeHead(404)
-        res.end()
-        return
-      }
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'local' } } }))
-    })
+    const port = 41000
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (new URL(String(input)).pathname !== '/') return new Response('not found', { status: 404 })
+      return Response.json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { protocolVersion: '2024-11-05', serverInfo: { name: 'local' } },
+      })
+    }) as unknown as typeof fetch
 
     const discovered = await discoverActiveMcpServers([], { ports: [port], timeoutMs: 500 })
 
@@ -36,10 +26,10 @@ describe('active MCP discovery', () => {
   })
 
   test('does not follow a redirect from a loopback candidate', async () => {
-    const port = await startServer((_req, res) => {
-      res.writeHead(302, { location: 'http://127.0.0.1:1/escaped' })
-      res.end()
-    })
+    const port = 41001
+    globalThis.fetch = (async () => {
+      throw new TypeError('redirect error')
+    }) as unknown as typeof fetch
 
     const discovered = await discoverActiveMcpServers([], { ports: [port], timeoutMs: 500 })
 
