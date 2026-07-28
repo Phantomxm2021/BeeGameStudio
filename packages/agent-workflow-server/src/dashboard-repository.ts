@@ -103,7 +103,11 @@ import {
   reconcileCreditLedgers,
   type CreditReconciliationReport,
 } from './credit-reconciliation'
-import { debitLocalRealtimeUsage } from './realtime-usage-wallet'
+import {
+  debitLocalRealtimeUsage,
+  getLocalRealtimeUsageWallet,
+  type RealtimeUsageWallet,
+} from './realtime-usage-wallet'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
@@ -748,6 +752,18 @@ export class DashboardRepository {
       userId: user.id,
       idempotencyKey: input.idempotencyKey,
       shadow,
+    })
+  }
+
+  async getRealtimeUsageWallet(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<RealtimeUsageWallet> {
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) return supabase.getRealtimeUsageWallet(user.id)
+    return getLocalRealtimeUsageWallet({
+      dataDir: this.options.getUserDataRoot(request),
+      userId: user.id,
     })
   }
 

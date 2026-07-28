@@ -28,6 +28,7 @@ import {
   type CreditLedgerKind,
   type CreditLedgerSummary,
 } from './credit-store'
+import type { RealtimeUsageWallet } from './realtime-usage-wallet'
 import type {
   McpServerConfig,
   McpServerEnvVar,
@@ -1021,6 +1022,35 @@ export class SupabaseDashboardStore {
       },
     )
     return toUsageBillingRecordResult(result)
+  }
+
+  async getRealtimeUsageWallet(ownerId: string): Promise<RealtimeUsageWallet> {
+    type UsageWalletRow = {
+      user_id: string
+      included_credits_micro: number
+      consumed_credits_micro: number
+    }
+    const rows = await this.rest<UsageWalletRow[]>(
+      `/rest/v1/beegame_usage_wallets?user_id=eq.${q(ownerId)}&select=user_id,included_credits_micro,consumed_credits_micro&limit=1`,
+    )
+    const row = rows[0]
+    if (!row) {
+      return {
+        userId: ownerId,
+        includedCreditsMicro: 300_000_000,
+        consumedCreditsMicro: 0,
+        balanceCreditsMicro: 300_000_000,
+      }
+    }
+    return {
+      userId: row.user_id,
+      includedCreditsMicro: row.included_credits_micro,
+      consumedCreditsMicro: row.consumed_credits_micro,
+      balanceCreditsMicro: Math.max(
+        0,
+        row.included_credits_micro - row.consumed_credits_micro,
+      ),
+    }
   }
 
   async listShadowUsageEvents(

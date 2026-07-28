@@ -960,6 +960,13 @@ export function createAgentWorkflowApp(
     })
   })
 
+  app.get('/api/usage-wallet', async c => {
+    const user = getCurrentUser(c.req.raw)
+    return c.json(
+      await dashboardRepository.getRealtimeUsageWallet(c.req.raw, user),
+    )
+  })
+
   app.get('/api/model-configs', async c => {
     const forbidden = requirePermission(
       getCurrentUser(c.req.raw),

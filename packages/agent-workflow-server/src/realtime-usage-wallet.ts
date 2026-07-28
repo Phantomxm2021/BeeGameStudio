@@ -22,6 +22,13 @@ type WalletStore = {
   accounts: Record<string, WalletAccount>
 }
 
+export type RealtimeUsageWallet = {
+  userId: string
+  includedCreditsMicro: number
+  consumedCreditsMicro: number
+  balanceCreditsMicro: number
+}
+
 export function debitLocalRealtimeUsage(input: {
   dataDir: string
   userId: string
@@ -47,6 +54,27 @@ export function debitLocalRealtimeUsage(input: {
   store.accounts[input.userId] = account
   saveWallet(input.dataDir, store)
   return input.shadow
+}
+
+export function getLocalRealtimeUsageWallet(input: {
+  dataDir: string
+  userId: string
+}): RealtimeUsageWallet {
+  const store = loadWallet(input.dataDir)
+  const account = store.accounts[input.userId] ?? {
+    includedCreditsMicro: INITIAL_CREDITS_MICRO,
+    consumedCreditsMicro: 0,
+    debits: {},
+  }
+  return {
+    userId: input.userId,
+    includedCreditsMicro: account.includedCreditsMicro,
+    consumedCreditsMicro: account.consumedCreditsMicro,
+    balanceCreditsMicro: Math.max(
+      0,
+      account.includedCreditsMicro - account.consumedCreditsMicro,
+    ),
+  }
 }
 
 function loadWallet(dataDir: string): WalletStore {
