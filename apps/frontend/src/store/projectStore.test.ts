@@ -193,7 +193,14 @@ describe('projectStore pending review normalization', () => {
         expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
         expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
         expect(updateTokenUsage).toHaveBeenCalledWith(
-            { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+            {
+                cached_input_tokens: 0,
+                completion_tokens: 30,
+                input_tokens: 120,
+                output_tokens: 30,
+                prompt_tokens: 120,
+                total_tokens: 150,
+            },
             'proj_1',
         );
     });

@@ -598,6 +598,20 @@ describe('DashboardView runtime loading', () => {
     expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
   });
 
+  it('rounds realtime project credit consumption to whole credits', async () => {
+    apiMocks.getCreditSummary.mockResolvedValueOnce({
+      entriesCount: 1,
+      settledCredits: 1.6,
+      weightedTokens: 160,
+    });
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalled());
+    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
   it('moves header metrics into the selected project hover hint and removes BeeGame branding chrome', async () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,

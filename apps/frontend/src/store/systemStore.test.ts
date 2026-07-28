@@ -41,13 +41,40 @@ describe('systemStore token usage', () => {
 
     expect(useSystemStore.getState().tokenUsage.proj_1).toEqual({
       prompt_tokens: 120,
+      input_tokens: 120,
+      cached_input_tokens: 0,
       completion_tokens: 50,
+      output_tokens: 50,
       total_tokens: 170,
     });
     expect(useSystemStore.getState().taskUsage.pipe_1).toEqual({
       prompt_tokens: 120,
+      input_tokens: 120,
+      cached_input_tokens: 0,
       completion_tokens: 50,
+      output_tokens: 50,
       total_tokens: 170,
+    });
+  });
+
+  it('keeps cached input and provider-neutral token aliases current', () => {
+    useSystemStore.getState().updateTokenUsage(
+      {
+        input_tokens: 1_000,
+        cached_input_tokens: 240,
+        output_tokens: 320,
+        total_tokens: 1_320,
+        prompt_tokens: 1_000,
+        completion_tokens: 320,
+      },
+      'proj_1',
+    );
+
+    expect(useSystemStore.getState().tokenUsage.proj_1).toMatchObject({
+      input_tokens: 1_000,
+      cached_input_tokens: 240,
+      output_tokens: 320,
+      total_tokens: 1_320,
     });
   });
 

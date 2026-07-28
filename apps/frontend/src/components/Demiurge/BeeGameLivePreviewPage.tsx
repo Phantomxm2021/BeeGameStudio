@@ -866,9 +866,7 @@ function formatTokenCount(value: number | undefined): string {
 }
 
 function formatCreditAmount(value: number): string {
-  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 1,
-  });
+  return Math.round(Math.max(0, Number(value) || 0)).toLocaleString();
 }
 
 function normalizeProjectTokenUsage(usage?: TokenUsage | null): {
