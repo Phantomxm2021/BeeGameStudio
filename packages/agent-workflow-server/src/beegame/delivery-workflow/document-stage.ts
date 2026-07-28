@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { join } from 'node:path'
 import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
@@ -10,7 +11,12 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   WORKFLOW_EVIDENCE_DIRECTORY,
 } from './types'
-import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
+import type {
+  DeliveryRun,
+  DocumentReviewFinding,
+  EvidenceRef,
+  WorkerDispatchRequest,
+} from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type ReadinessAudit = (
@@ -52,6 +58,35 @@ type Dispatcher = {
   dispatch(request: WorkerDispatchRequest): Promise<unknown>
 }
 
+const MAX_DOCUMENT_REMEDIATION_ATTEMPTS = 3
+
+function normalizedReviewFindings(
+  findings: Extract<
+    WorkerTerminalResult,
+    { workerType: 'document-reviewer' }
+  >['findings'],
+): DocumentReviewFinding[] {
+  return findings.map((finding, index) => {
+    const severity =
+      finding.category === 'cross_document_conflict' ||
+      finding.category === 'missing_spec'
+        ? 'blocking'
+        : finding.severity
+    const identity = JSON.stringify({
+      category: finding.category,
+      documents: [...finding.documents].sort(),
+      description: finding.description,
+      requiredAction: finding.requiredAction,
+      index,
+    })
+    return {
+      ...finding,
+      severity,
+      id: `review-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`,
+    }
+  })
+}
+
 export async function startDocumentStage(input: {
   run: DeliveryRun
   workspacePath: string
@@ -75,6 +110,16 @@ export async function startDocumentStage(input: {
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
       documentSet: 'foundation',
+      ...(input.run.documentRemediation
+        ? {
+            remediation: {
+              sourceRevision: input.run.documentRemediation.sourceRevision,
+              evidencePath: input.run.documentRemediation.evidencePath,
+              attempt: input.run.documentRemediation.attempt,
+              findings: input.run.documentRemediation.findings,
+            },
+          }
+        : {}),
     },
   })
 }
@@ -155,6 +200,18 @@ export async function completeDocumentDraft(input: {
     input.run.confirmedBriefDigest,
   )
   const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const expectedFindingIds =
+    documentSet === 'foundation'
+      ? (input.run.documentRemediation?.findings.map(finding => finding.id) ??
+        [])
+      : []
+  const resolvedFindingIds = [
+    ...new Set(input.terminal.resolvedFindingIds ?? []),
+  ]
+  const resolutionComplete =
+    expectedFindingIds.length === 0 ||
+    (resolvedFindingIds.length === expectedFindingIds.length &&
+      expectedFindingIds.every(id => resolvedFindingIds.includes(id)))
   const updated: DeliveryRun = {
     ...input.run,
     revision: {
@@ -164,7 +221,7 @@ export async function completeDocumentDraft(input: {
     },
     activeDispatch: undefined,
     blockedReason:
-      readiness.valid && outOfScope.length === 0
+      readiness.valid && outOfScope.length === 0 && resolutionComplete
         ? undefined
         : [
             ...readiness.issues,
@@ -173,10 +230,24 @@ export async function completeDocumentDraft(input: {
                   `document author wrote outside the document scope: ${outOfScope.join(', ')}`,
                 ]
               : []),
+            ...(!resolutionComplete
+              ? [
+                  'document author did not resolve every required review finding',
+                ]
+              : []),
           ].join('; '),
+    ...(input.run.documentRemediation
+      ? {
+          documentRemediation: {
+            ...input.run.documentRemediation,
+            resolvedFindingIds,
+          },
+        }
+      : {}),
     updatedAt: new Date().toISOString(),
   }
-  if (!readiness.valid || outOfScope.length > 0) return updated
+  if (!readiness.valid || outOfScope.length > 0 || !resolutionComplete)
+    return updated
   return {
     ...updated,
     phase:
@@ -241,17 +312,13 @@ export async function reconcileDocumentReview(input: {
     expectedChecklistIds.some(id => !input.terminal.checklistIds.includes(id))
   )
     throw new Error('document review does not cover the current checklist')
+  const findings = normalizedReviewFindings(input.terminal.findings)
   // The workflow, not reviewer prose, owns the readiness gate. Normalize an
   // internally contradictory READY result so blocking findings can never
   // advance downstream work.
   const effectiveVerdict =
     input.terminal.verdict === 'READY' &&
-    input.terminal.findings.some(
-      finding =>
-        finding.severity === 'blocking' ||
-        finding.category === 'cross_document_conflict' ||
-        finding.category === 'missing_spec',
-    )
+    findings.some(finding => finding.severity === 'blocking')
       ? 'NEEDS_REVISION'
       : input.terminal.verdict
   const status =
@@ -279,6 +346,7 @@ export async function reconcileDocumentReview(input: {
       documentStep: 'CHECKLIST_DRAFTING',
       blockedReason: undefined,
       activeDispatch: undefined,
+      documentRemediation: undefined,
       updatedAt: new Date().toISOString(),
     }
   }
@@ -290,5 +358,37 @@ export async function reconcileDocumentReview(input: {
         ? { type: 'document_review_needs_revision', evidence }
         : { type: 'document_review_blocked', evidence },
   )
-  return reconciled
+  if (effectiveVerdict === 'READY')
+    return { ...reconciled, documentRemediation: undefined }
+  if (findings.length === 0) {
+    return {
+      ...reconciled,
+      status: 'needs_action',
+      blockedReason: 'document review requires action but supplied no findings',
+      activeDispatch: undefined,
+      documentRemediation: undefined,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+  const attempt = (input.run.documentRemediation?.attempt ?? 0) + 1
+  const remediation = {
+    sourceRevision: reviewRevision,
+    evidencePath: input.terminal.evidencePath,
+    attempt,
+    findings,
+  }
+  if (
+    effectiveVerdict === 'NEEDS_REVISION' &&
+    attempt > MAX_DOCUMENT_REMEDIATION_ATTEMPTS
+  ) {
+    return {
+      ...reconciled,
+      status: 'needs_action',
+      blockedReason: `document review still requires revision after ${MAX_DOCUMENT_REMEDIATION_ATTEMPTS} remediation attempts`,
+      activeDispatch: undefined,
+      documentRemediation: remediation,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+  return { ...reconciled, documentRemediation: remediation }
 }

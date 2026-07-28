@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   completeDocumentDraft,
   reconcileDocumentReview,
+  startDocumentStage,
 } from '../beegame/delivery-workflow/document-stage'
 import {
   createInitialDeliveryRun,
@@ -205,6 +206,144 @@ describe('delivery workflow document ordering', () => {
       documentStep: 'FOUNDATION_DRAFTING',
       status: 'running',
       evidence: { documentReview: { status: 'failed' } },
+      documentRemediation: {
+        sourceRevision: 'document-revision-1',
+        attempt: 1,
+        findings: [
+          {
+            severity: 'blocking',
+            category: 'cross_document_conflict',
+          },
+        ],
+      },
+    })
+
+    const dispatched: WorkerDispatchRequest[] = []
+    await startDocumentStage({
+      run: reconciled,
+      workspacePath: workspace,
+      dispatcher: {
+        dispatch: async request => {
+          dispatched.push(request)
+          return request
+        },
+      },
+    })
+    expect(dispatched[0]?.contract).toMatchObject({
+      documentSet: 'foundation',
+      remediation: {
+        sourceRevision: 'document-revision-1',
+        evidencePath,
+        attempt: 1,
+      },
+    })
+    const findingIds = reconciled.documentRemediation!.findings.map(
+      finding => finding.id,
+    )
+    const incomplete = await completeDocumentDraft({
+      run: reconciled,
+      workspacePath: workspace,
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        revision: reconciled.revision.document,
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: [],
+      },
+    })
+    expect(incomplete).toMatchObject({
+      phase: 'DOCUMENT_DRAFTING',
+      blockedReason:
+        'document author did not resolve every required review finding',
+    })
+
+    const completed = await completeDocumentDraft({
+      run: reconciled,
+      workspacePath: workspace,
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        revision: reconciled.revision.document,
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: findingIds,
+      },
+    })
+    expect(completed).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      blockedReason: undefined,
+      documentRemediation: { resolvedFindingIds: findingIds },
+    })
+  })
+
+  test('stops automatic document remediation after three failed passes', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-'))
+    const evidencePath = '.beegame/workflow/evidence/review-limit.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-4',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      documentRemediation: {
+        sourceRevision: 'document-revision-3',
+        evidencePath: '.beegame/workflow/evidence/review-3.md',
+        attempt: 3,
+        resolvedFindingIds: ['review-existing'],
+        findings: [
+          {
+            id: 'review-existing',
+            severity: 'blocking' as const,
+            category: 'missing_spec' as const,
+            documents: ['docs/UI_UX_SPEC.md'],
+            description: 'A required interaction remains unspecified.',
+            requiredAction: 'Specify the interaction.',
+          },
+        ],
+      },
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.document,
+        verdict: 'NEEDS_REVISION',
+        reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        checklistIds: [],
+        findings: [
+          {
+            severity: 'blocking',
+            category: 'missing_spec',
+            documents: ['docs/UI_UX_SPEC.md'],
+            description: 'A required interaction remains unspecified.',
+            requiredAction: 'Specify the interaction.',
+          },
+        ],
+        evidencePath,
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'needs_action',
+      blockedReason:
+        'document review still requires revision after 3 remediation attempts',
+      activeDispatch: undefined,
+      documentRemediation: { attempt: 4 },
     })
   })
 
@@ -263,6 +402,84 @@ describe('delivery workflow document ordering', () => {
     expect(recovered?.activeDispatch).toMatchObject({ status: 'running' })
     await controller.dispatcher.stop(
       recovered!.activeDispatch!.dispatchId,
+      'test cleanup',
+    )
+  })
+
+  test('passes resolved remediation evidence into the follow-up reviewer', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-followup-'))
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-2',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      documentRemediation: {
+        sourceRevision: 'document-revision-1',
+        evidencePath: '.beegame/workflow/evidence/review-1.md',
+        attempt: 1,
+        resolvedFindingIds: ['review-1'],
+        findings: [
+          {
+            id: 'review-1',
+            severity: 'blocking' as const,
+            category: 'missing_spec' as const,
+            documents: ['docs/UI_UX_SPEC.md'],
+            description: 'A required interaction was unspecified.',
+            requiredAction: 'Specify the interaction.',
+          },
+        ],
+      },
+    }
+    await createRunStore(workspace, run.ownerId).save(run)
+    const started: WorkerDispatchRequest[] = []
+    const workerPort: DeliveryWorkerPort = {
+      start: async request => {
+        started.push(request)
+        return {
+          sessionId: request.dispatchId!,
+          dispatchId: request.dispatchId!,
+        }
+      },
+      submit: async () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+      status: async dispatchId => {
+        const active = await createRunStore(workspace, run.ownerId).load()
+        if (
+          !active?.activeDispatch ||
+          active.activeDispatch.dispatchId !== dispatchId
+        )
+          throw new Error('dispatch is not active')
+        return active.activeDispatch
+      },
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: run.ownerId,
+      workerPort,
+    })
+
+    await controller.ensureProgress(run)
+
+    expect(started).toHaveLength(1)
+    expect(started[0]).toMatchObject({
+      workerType: 'document-reviewer',
+      contract: {
+        reviewScope: 'foundation',
+        priorRemediation: {
+          sourceRevision: 'document-revision-1',
+          attempt: 1,
+          resolvedFindingIds: ['review-1'],
+        },
+      },
+    })
+    const active = await controller.store.load()
+    await controller.dispatcher.stop(
+      active!.activeDispatch!.dispatchId,
       'test cleanup',
     )
   })

@@ -756,7 +756,13 @@ export function createDeliveryWorkflowController(input: {
               ? (run.revision.resource ?? run.revision.document)
               : run.revision.document,
           allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
-          contract: { canonicalDocuments: true, reviewScope },
+          contract: {
+            canonicalDocuments: true,
+            reviewScope,
+            ...(run.documentRemediation
+              ? { priorRemediation: run.documentRemediation }
+              : {}),
+          },
         })
       }
       return

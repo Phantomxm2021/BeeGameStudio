@@ -35,6 +35,13 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     ...(request.workerType === 'document-author'
       ? [
           'Document-author terminal results must not contain evidencePath; the server creates review evidence after the author is finished.',
+          ...(request.contract.remediation
+            ? [
+                'This is a required remediation pass. Treat every structured finding in contract.remediation.findings as mandatory. Apply each requiredAction to the listed documents, do not merely bump versions or timestamps, and return every corresponding finding id in resolvedFindingIds only after the correction is present in the files.',
+              ]
+            : [
+                'This is not a remediation pass; return an empty resolvedFindingIds array.',
+              ]),
           ...(request.contract.documentSet === 'checklist'
             ? [
                 'This is the checklist substep. The six approved foundation documents are read-only authority. Create or update only docs/acceptance/gameplay-checklist.md with observable gameplay checks that cover those approved documents. Do not modify any other document, source code, assets or manifest.',
@@ -50,6 +57,11 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
           request.contract.reviewScope === 'foundation'
             ? 'This is the foundation review substep. Review only the six foundation documents listed in the current workspace; do not require or review docs/acceptance/gameplay-checklist.md yet. Return reviewedDocumentPaths for those six documents and an empty checklistIds array.'
             : 'This is the final comprehensive review substep. Review all six approved foundation documents, docs/acceptance/gameplay-checklist.md, and assets/asset-manifest.json together. Verify their cross-artifact consistency and return all eight paths in reviewedDocumentPaths plus coverage for every checklist ID.',
+          ...(request.contract.priorRemediation
+            ? [
+                'This is a remediation follow-up review. Verify every priorRemediation finding against the current files and record the outcome in the evidence. Do not return READY unless every prior finding is actually corrected and the current review has no blocking findings.',
+              ]
+            : []),
         ]
       : []),
     JSON.stringify(request.contract),
@@ -61,7 +73,7 @@ function terminalContractInstruction(
 ): string {
   switch (workerType) {
     case 'document-author':
-      return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","revision":"<dispatch revision>","writtenPaths":["<workspace-relative path>"]}. documentRevision is optional because the server computes it from the files. Do not use worker, succeeded, or changedPaths.'
+      return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","revision":"<dispatch revision>","writtenPaths":["<workspace-relative path>"],"resolvedFindingIds":["<review finding id>"]}. documentRevision is optional because the server computes it from the files. Use an empty resolvedFindingIds array outside remediation passes. Do not use worker, succeeded, or changedPaths.'
     case 'document-reviewer':
       return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":[{"severity":"blocking|non_blocking","category":"cross_document_conflict|missing_spec|calculation|other","documents":["<workspace-relative path>"],"description":"<finding>","requiredAction":"<required correction>"}],"evidencePath":".beegame/workflow/evidence/<file>"}. READY requires zero blocking findings.'
     case 'resource-preparer':

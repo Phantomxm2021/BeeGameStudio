@@ -12,6 +12,7 @@ export const documentAuthorTerminalSchema = base
     // worker exits.  Requiring the worker to echo that hash created a second,
     // unverifiable protocol value and rejected otherwise valid completions.
     documentRevision: z.string().min(1).optional(),
+    resolvedFindingIds: z.array(z.string().min(1)).optional(),
   })
   .strict()
 

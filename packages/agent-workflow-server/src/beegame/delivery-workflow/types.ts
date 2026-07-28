@@ -94,6 +94,23 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
+export type DocumentReviewFinding = {
+  id: string
+  severity: 'blocking' | 'non_blocking'
+  category: 'cross_document_conflict' | 'missing_spec' | 'calculation' | 'other'
+  documents: string[]
+  description: string
+  requiredAction: string
+}
+
+export type DocumentRemediation = {
+  sourceRevision: string
+  evidencePath: string
+  attempt: number
+  findings: DocumentReviewFinding[]
+  resolvedFindingIds?: string[]
+}
+
 export type Revision = {
   document: string
   resource?: string
@@ -214,6 +231,8 @@ export type DeliveryRun = {
     implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
+  /** Exact reviewer corrections carried across author/reviewer retries. */
+  documentRemediation?: DocumentRemediation
   usage?: WorkflowUsage
   /** Latest deterministic native Resource Library provenance observed for this run. */
   resourceEvidence?: ResourceEvidenceSnapshot

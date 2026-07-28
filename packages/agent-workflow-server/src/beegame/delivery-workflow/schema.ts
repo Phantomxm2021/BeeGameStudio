@@ -3,6 +3,7 @@ import type {
   AtomicTask,
   DeliveryPhase,
   DeliveryRun,
+  DocumentRemediation,
   DispatchRecord,
   EvidenceRef,
   Revision,
@@ -168,6 +169,34 @@ const resourceEvidenceSchema = z.union([
     .strict(),
 ])
 
+const documentRemediationSchema: z.ZodType<DocumentRemediation> = z
+  .object({
+    sourceRevision: z.string().min(1),
+    evidencePath: z.string().min(1),
+    attempt: z.number().int().positive(),
+    findings: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            severity: z.enum(['blocking', 'non_blocking']),
+            category: z.enum([
+              'cross_document_conflict',
+              'missing_spec',
+              'calculation',
+              'other',
+            ]),
+            documents: z.array(z.string().min(1)).min(1),
+            description: z.string().min(1),
+            requiredAction: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+    resolvedFindingIds: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   .object({
     eventId: z.string().min(1),
@@ -227,6 +256,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
+    documentRemediation: documentRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),
     resourceEvidence: resourceEvidenceSchema.optional(),
     currentMessage: z.string().min(1).optional(),
