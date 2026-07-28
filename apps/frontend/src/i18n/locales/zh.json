@@ -203,7 +203,8 @@
         "Voice": "语音",
         "Hand tracking": "手追",
         "Hand tracking XR": "手势追踪 XR"
-      }
+      },
+      "realtimeBillingNotice": "本次生成将按实际 Token 使用实时扣除 Credit，不会预扣；生成失败不会产生扣费。"
     },
     "legal": {
       "terms": {

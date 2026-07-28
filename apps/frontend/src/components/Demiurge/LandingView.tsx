@@ -1641,6 +1641,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         attachments={attachmentBuildAttachments}
         onAttachmentsChange={setAttachmentBuildAttachments}
       />
+      <p className="type-caption-2 relative z-10 mt-3 max-w-[720px] px-6 text-center text-zinc-500">
+        {translate('intake.realtimeBillingNotice')}
+      </p>
 
       {shouldShowIntakeModal ? (
         <div
