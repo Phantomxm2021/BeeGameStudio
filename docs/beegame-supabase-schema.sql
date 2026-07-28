@@ -2295,6 +2295,12 @@ begin
   where user_id = p_target_user_id
   returning * into account_row;
 
+  perform public.beegame_migrate_usage_wallet(p_target_user_id);
+  update public.beegame_usage_wallets
+  set included_credits_micro = included_credits_micro + (p_credits::bigint * 1000000),
+      updated_at = now()
+  where user_id = p_target_user_id;
+
   insert into public.beegame_credit_ledger (
     user_id,
     project_id,
@@ -2384,6 +2390,12 @@ begin
       updated_at = now()
   where user_id = p_target_user_id
   returning * into account_row;
+
+  perform public.beegame_migrate_usage_wallet(p_target_user_id);
+  update public.beegame_usage_wallets
+  set included_credits_micro = included_credits_micro + (p_credits::bigint * 1000000),
+      updated_at = now()
+  where user_id = p_target_user_id;
 
   insert into public.beegame_credit_ledger (
     user_id,

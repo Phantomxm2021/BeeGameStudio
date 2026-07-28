@@ -29,6 +29,31 @@ export type RealtimeUsageWallet = {
   balanceCreditsMicro: number
 }
 
+export function grantLocalRealtimeCredits(input: {
+  dataDir: string
+  userId: string
+  credits: number
+  idempotencyKey?: string
+}): RealtimeUsageWallet {
+  const store = loadWallet(input.dataDir)
+  const account = store.accounts[input.userId] ?? {
+    includedCreditsMicro: INITIAL_CREDITS_MICRO,
+    consumedCreditsMicro: 0,
+    debits: {},
+  }
+  const amountMicro = Math.max(0, Math.round(input.credits * 1_000_000))
+  if (input.idempotencyKey && account.debits[`grant:${input.idempotencyKey}`] !== undefined) {
+    store.accounts[input.userId] = account
+    saveWallet(input.dataDir, store)
+    return getLocalRealtimeUsageWallet(input)
+  }
+  account.includedCreditsMicro += amountMicro
+  if (input.idempotencyKey) account.debits[`grant:${input.idempotencyKey}`] = amountMicro
+  store.accounts[input.userId] = account
+  saveWallet(input.dataDir, store)
+  return getLocalRealtimeUsageWallet(input)
+}
+
 export function debitLocalRealtimeUsage(input: {
   dataDir: string
   userId: string

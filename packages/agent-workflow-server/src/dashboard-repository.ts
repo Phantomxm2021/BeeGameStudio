@@ -109,6 +109,7 @@ import {
 } from './credit-reconciliation'
 import {
   debitLocalRealtimeUsage,
+  grantLocalRealtimeCredits,
   getLocalRealtimeUsageWallet,
   type RealtimeUsageWallet,
 } from './realtime-usage-wallet'
@@ -890,15 +891,17 @@ export class DashboardRepository {
     input: CreditGrantInput,
   ): Promise<CreditGrant> {
     const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.grantCredits(targetUserId, input)
-      : grantCredits(targetUserId, {
-          ...input,
-          dataDir: getUserDashboardDataRoot(
-            this.options.dashboardDataRoot,
-            targetUserId,
-          ),
-        })
+    if (supabase) return supabase.grantCredits(targetUserId, input)
+    const dataDir = getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId)
+    const result = grantCredits(targetUserId, { ...input, dataDir })
+    if (result.grantedCredits > 0) {
+      grantLocalRealtimeCredits({
+        dataDir,
+        userId: targetUserId,
+        credits: result.grantedCredits,
+      })
+    }
+    return result
   }
 
   async grantPaymentProviderCredits(
@@ -913,12 +916,22 @@ export class DashboardRepository {
         'Supabase service role key is required for payment provider credit grants',
       )
     }
-    return paymentProviderStore
-      ? paymentProviderStore.grantPaymentProviderCredits(targetUserId, input)
-      : this.grantLocalPaymentProviderCredits(targetUserId, {
+    if (paymentProviderStore) {
+      return paymentProviderStore.grantPaymentProviderCredits(targetUserId, input)
+    }
+    const result = this.grantLocalPaymentProviderCredits(targetUserId, {
           credits: input.credits,
           metadata,
         })
+    if (result.grantedCredits > 0) {
+      grantLocalRealtimeCredits({
+        dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId),
+        userId: targetUserId,
+        credits: result.grantedCredits,
+        idempotencyKey: `${metadataString(metadata, 'provider')}:${metadataString(metadata, 'providerReference')}`,
+      })
+    }
+    return result
   }
 
   async listBillingCreditPacks(

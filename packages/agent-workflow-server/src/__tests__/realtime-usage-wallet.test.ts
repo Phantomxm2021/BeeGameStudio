@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { debitLocalRealtimeUsage } from '../realtime-usage-wallet'
+import {
+  debitLocalRealtimeUsage,
+  getLocalRealtimeUsageWallet,
+  grantLocalRealtimeCredits,
+} from '../realtime-usage-wallet'
 import type { RecordShadowUsageResult } from '../usage-billing-shadow'
 
 function shadowResult(amount: number): RecordShadowUsageResult {
@@ -81,6 +85,33 @@ describe('local realtime usage wallet', () => {
           shadow: shadowResult(300 * 1_000_000 + 1),
         }),
       ).toThrow('Insufficient realtime usage credits')
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('reflects manual and payment grants in the realtime wallet', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-wallet-'))
+    try {
+      grantLocalRealtimeCredits({ dataDir, userId: 'user-1', credits: 25 })
+      grantLocalRealtimeCredits({
+        dataDir,
+        userId: 'user-1',
+        credits: 10,
+        idempotencyKey: 'stripe:checkout-1',
+      })
+      grantLocalRealtimeCredits({
+        dataDir,
+        userId: 'user-1',
+        credits: 10,
+        idempotencyKey: 'stripe:checkout-1',
+      })
+
+      expect(getLocalRealtimeUsageWallet({ dataDir, userId: 'user-1' })).toMatchObject({
+        includedCreditsMicro: 335_000_000,
+        consumedCreditsMicro: 0,
+        balanceCreditsMicro: 335_000_000,
+      })
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }
