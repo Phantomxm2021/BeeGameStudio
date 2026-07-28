@@ -866,6 +866,10 @@ export const api = {
    */
   continueTask: (data: { project_id: string; task_id?: string }) => beeGameAdapter.continueTask(data),
 
+  resumeWorkflow: (projectId: string) => beeGameAdapter.resumeWorkflow(projectId),
+
+  retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
+
   requestProjectAction: (data: {
     project_id: string;
     kind: 'build_error_repair' | 'deployment_failure_repair';

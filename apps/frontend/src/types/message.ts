@@ -36,12 +36,30 @@ export type WorkflowCardStatus =
   | 'cancelled'
   | 'stale';
 
+export interface WorkflowCardTask {
+  id: string;
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked';
+  attempt?: number;
+  failureReason?: string;
+}
+
 export interface WorkflowCardPayload {
   runId: string;
   status: WorkflowCardStatus;
   currentPhase?: string;
+  documentStep?: string;
   worker?: string;
   thinking?: string;
+  executionStatus?: string;
+  currentItemId?: string;
+  tasks?: WorkflowCardTask[];
+  completedTaskCount?: number;
+  totalTaskCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  stageStartedAt?: string;
+  nextAction?: 'resume' | 'retry';
   block?: {
     message: string;
     nextAction?: string;

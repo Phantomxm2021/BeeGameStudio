@@ -22,6 +22,7 @@ type BeeGameCollaborationFeedProps = {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
+    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
 };
 
 const RUNTIME_ACTIVITY_MESSAGE_TIMESTAMP = 0;
@@ -219,6 +220,7 @@ export const BeeGameCollaborationFeed = memo(({
     projectStatus,
     lang = 'en',
     onEditMessage,
+    onWorkflowAction,
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
@@ -234,7 +236,7 @@ export const BeeGameCollaborationFeed = memo(({
                     messageId={`beegame-workflow-${workflow.runId || 'current'}`}
                     className="relative z-10 mb-4"
                 >
-                    <WorkflowCard workflow={workflow} />
+                    <WorkflowCard workflow={workflow} onAction={onWorkflowAction} />
                 </MessageScrollerItem>
             ) : null}
             {entries.map((entry) => (

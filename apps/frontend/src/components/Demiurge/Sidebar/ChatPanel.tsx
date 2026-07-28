@@ -31,6 +31,7 @@ interface ChatPanelProps {
     onSend: () => void;
     onSendMessage?: (message: string) => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
+    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];
@@ -235,6 +236,7 @@ export const ChatPanel = memo(({
     messages,
     isLoading,
     onStop,
+    onWorkflowAction,
     isStopping = false,
     chatInput,
     onChatInputChange,
@@ -389,6 +391,7 @@ export const ChatPanel = memo(({
                                     currentUserEmail={currentUserEmail}
                                     currentUserAvatarUrl={currentUserAvatarUrl}
                                     onEditMessage={onEditMessage}
+                                    onWorkflowAction={onWorkflowAction}
                                 />
                                 {pendingReviews.map((review: ReviewDisplayModel) => {
                                     const isManifestReview = review?.type === 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);

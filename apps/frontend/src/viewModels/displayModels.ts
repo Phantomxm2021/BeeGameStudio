@@ -10,7 +10,12 @@ import type {
   ReviewStatusPayload,
   VerificationSummaryPayload,
 } from '../services/api';
-import type { Message, WorkflowCardPayload, WorkflowCardStatus } from '../types/message';
+import type {
+  Message,
+  WorkflowCardPayload,
+  WorkflowCardStatus,
+  WorkflowCardTask,
+} from '../types/message';
 
 export interface ChatDisplayMessage
   extends Pick<
@@ -171,12 +176,14 @@ const WORKFLOW_STATUS: Record<string, WorkflowCardStatus> = {
   draft: 'draft',
   starting: 'running',
   running: 'running',
+  needs_action: 'blocked',
   blocked: 'blocked',
   verifying: 'verifying',
   delivered: 'completed',
   completed: 'completed',
   failed: 'failed',
   interrupted: 'cancelled',
+  stopped: 'cancelled',
   cancelled: 'cancelled',
   stale: 'stale',
 };
@@ -199,16 +206,54 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
   const blockMessage = typeof block?.message === 'string' && block.message.trim()
     ? block.message.trim()
     : undefined;
+  const activeDispatch = source.activeDispatch && typeof source.activeDispatch === 'object'
+    ? source.activeDispatch as Record<string, unknown>
+    : undefined;
+  const rawThinking = trimString(source.thinking);
+  const message = trimString(source.message);
+  const tasks = Array.isArray(source.tasks)
+    ? source.tasks.flatMap((task): WorkflowCardTask[] => {
+        if (!task || typeof task !== 'object') return [];
+        const item = task as Record<string, unknown>;
+        const id = trimString(item.id);
+        const title = trimString(item.title);
+        const taskStatus = trimString(item.status).toLowerCase();
+        if (!id || !title || !['pending', 'running', 'completed', 'failed', 'blocked'].includes(taskStatus)) return [];
+        return [{
+          id,
+          title,
+          status: taskStatus as NonNullable<WorkflowCardPayload['tasks']>[number]['status'],
+          attempt: Number.isFinite(Number(item.attempt)) ? Number(item.attempt) : undefined,
+          failureReason: trimString(item.failureReason ?? item.failure_reason) || undefined,
+        }];
+      })
+    : undefined;
+  const failureReason = trimString(source.failureReason ?? source.failure_reason ?? source.blockedReason ?? source.blocked_reason);
+  const nextActionValue = trimString(source.nextAction ?? source.next_action);
 
   return {
     runId,
     status,
-    currentPhase: trimString(source.currentPhase ?? source.current_phase) || undefined,
-    worker: trimString(source.worker) || undefined,
-    thinking,
-    block: blockMessage
+    currentPhase: trimString(source.currentPhase ?? source.current_phase ?? source.phase) || undefined,
+    documentStep: trimString(source.documentStep ?? source.document_step) || undefined,
+    worker: trimString(source.worker ?? activeDispatch?.workerType ?? activeDispatch?.worker_type) || undefined,
+    thinking: message || (thinking && !['working', 'waiting', 'idle'].includes(thinking) ? thinking : undefined),
+    executionStatus: ['working', 'waiting', 'idle'].includes(rawThinking)
+      ? rawThinking
+      : trimString(activeDispatch?.status) || undefined,
+    currentItemId: trimString(
+      source.currentItemId ?? source.current_item_id ?? source.activeTaskId ?? source.active_task_id,
+    ) || undefined,
+    tasks,
+    completedTaskCount: Number.isFinite(Number(source.completedTaskCount)) ? Number(source.completedTaskCount) : undefined,
+    totalTaskCount: Number.isFinite(Number(source.totalTaskCount)) ? Number(source.totalTaskCount) : undefined,
+    createdAt: trimString(source.createdAt ?? source.created_at) || undefined,
+    updatedAt: trimString(source.updatedAt ?? source.updated_at) || undefined,
+    stageStartedAt: trimString(activeDispatch?.startedAt ?? activeDispatch?.started_at) || undefined,
+    nextAction: nextActionValue === 'resume' || nextActionValue === 'retry' ? nextActionValue : undefined,
+    block: blockMessage || failureReason
       ? {
-          message: blockMessage,
+          message: blockMessage || failureReason,
           nextAction: trimString(block?.nextAction ?? block?.next_action) || undefined,
         }
       : undefined,

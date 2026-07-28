@@ -42,6 +42,7 @@ interface RightSidebarProps {
     ) => void;
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
+    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onApprovePlan?: (
@@ -76,6 +77,7 @@ export function RightSidebar({
     onSendMessage,
     isLoading,
     onStopTask,
+    onWorkflowAction,
     isStopping = false,
     isRuntimeBusy = false,
     onApprovePlan,
@@ -378,6 +380,7 @@ export function RightSidebar({
                                 messages={messages}
                                 isLoading={isLoading}
                                 onStop={onStopTask}
+                                onWorkflowAction={onWorkflowAction}
                                 isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
                                 chatInput={chatInput}

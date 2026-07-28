@@ -5198,6 +5198,12 @@ function workflowViewForDisplay(
             typeof workflow.currentItemId === 'string'
               ? workflow.currentItemId
               : undefined,
+          documentStep:
+            typeof workflow.documentStep === 'string'
+              ? (workflow.documentStep as Parameters<
+                  typeof projectDocumentDisplayTasks
+                >[0]['documentStep'])
+              : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
         })
@@ -5215,6 +5221,9 @@ function workflowViewForDisplay(
           : {}),
         ...(typeof workflow.activeDispatch.taskId === 'string'
           ? { taskId: workflow.activeDispatch.taskId }
+          : {}),
+        ...(typeof workflow.activeDispatch.startedAt === 'string'
+          ? { startedAt: workflow.activeDispatch.startedAt }
           : {}),
       }
     : undefined
@@ -5236,10 +5245,16 @@ function workflowViewForDisplay(
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
     phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
+    ...(typeof workflow.documentStep === 'string'
+      ? { documentStep: workflow.documentStep }
+      : {}),
     tasks: displayTasks,
     evidence,
     ...(typeof workflow.activeTaskId === 'string'
       ? { activeTaskId: workflow.activeTaskId }
+      : {}),
+    ...(typeof workflow.currentItemId === 'string'
+      ? { currentItemId: workflow.currentItemId }
       : {}),
     ...(activeDispatch && Object.keys(activeDispatch).length > 0
       ? { activeDispatch }

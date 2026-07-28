@@ -314,16 +314,62 @@ describe('displayModels', () => {
       },
     });
 
-    expect(display?.workflow).toEqual({
+    expect(display?.workflow).toMatchObject({
       runId: 'run_1',
       status: 'running',
       currentPhase: 'DOCUMENT_REVIEW',
       worker: 'document-reviewer',
       thinking: '正在检查当前文档版本。',
-      block: undefined,
-      usage: undefined,
     });
     expect(JSON.stringify(display?.workflow)).not.toContain('READY');
     expect(JSON.stringify(display?.workflow)).not.toContain('internal-only');
+  });
+
+  it('projects workflow tasks, recovery actions and timing without raw state leakage', () => {
+    const display = toProjectRuntimeDisplayModel({
+      project_id: 'proj_1',
+      workflow: {
+        runId: 'run_2',
+        status: 'needs_action',
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        message: '正在修正文档审计问题。',
+        thinking: 'waiting',
+        failureReason: '整改未覆盖所有 finding。',
+        nextAction: 'retry',
+        completedTaskCount: 1,
+        totalTaskCount: 2,
+        createdAt: '2026-07-28T00:00:00.000Z',
+        updatedAt: '2026-07-28T00:01:00.000Z',
+        activeDispatch: {
+          workerType: 'document-author',
+          status: 'failed',
+          startedAt: '2026-07-28T00:00:30.000Z',
+        },
+        tasks: [
+          { id: 'gdd', title: 'docs/GDD.md', status: 'completed' },
+          { id: 'ui', title: 'docs/UI_UX_SPEC.md', status: 'failed', failureReason: 'missing spec' },
+        ],
+      },
+    });
+
+    expect(display?.workflow).toMatchObject({
+      runId: 'run_2',
+      status: 'blocked',
+      currentPhase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      thinking: '正在修正文档审计问题。',
+      executionStatus: 'waiting',
+      worker: 'document-author',
+      nextAction: 'retry',
+      completedTaskCount: 1,
+      totalTaskCount: 2,
+      stageStartedAt: '2026-07-28T00:00:30.000Z',
+      block: { message: '整改未覆盖所有 finding。' },
+      tasks: [
+        { id: 'gdd', status: 'completed' },
+        { id: 'ui', status: 'failed', failureReason: 'missing spec' },
+      ],
+    });
   });
 });
