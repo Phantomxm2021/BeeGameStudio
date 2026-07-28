@@ -38,9 +38,7 @@ import {
   startAcceptance,
   startImplementationAudit,
 } from './validation-stage'
-import {
-  readAcceptanceChecklistIds,
-} from '../document-readiness-audit'
+import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import {
   CANONICAL_DOCUMENT_ARTIFACTS,
   WORKFLOW_EVIDENCE_DIRECTORY,
@@ -234,11 +232,16 @@ export function createDeliveryWorkflowController(input: {
     }
     if (result.workerType === 'document-author') {
       const documentSet =
-        request?.contract.documentSet === 'checklist' ? 'checklist' : 'foundation'
+        request?.contract.documentSet === 'checklist'
+          ? 'checklist'
+          : 'foundation'
       next = await completeDocumentDraft({
         run: {
           ...next,
-          phase: documentSet === 'checklist' ? 'DOCUMENT_REVIEW' : 'DOCUMENT_DRAFTING',
+          phase:
+            documentSet === 'checklist'
+              ? 'DOCUMENT_REVIEW'
+              : 'DOCUMENT_DRAFTING',
         },
         workspacePath: input.workspacePath,
         terminal: result,
@@ -249,59 +252,42 @@ export function createDeliveryWorkflowController(input: {
       )
       if (observedResourceEvidence)
         next = { ...next, resourceEvidence: observedResourceEvidence }
-      if (next.phase === 'DOCUMENT_DRAFTING' && next.status === 'running') {
+      if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
           status: 'needs_action',
           blockedReason: next.blockedReason ?? 'document bundle is incomplete',
         }
       }
-      await persist(
+      next = await persist(
         next,
-        next.phase === 'DOCUMENT_REVIEW'
+        next.status === 'running'
           ? 'phase.entered'
           : 'document.draft.incomplete',
       )
-      if (next.phase === 'DOCUMENT_REVIEW' && next.documentStep === 'FOUNDATION_REVIEW')
-        await dispatcher.dispatch({
-          runId: next.runId,
-          ownerId: next.ownerId,
-          projectId: next.projectId,
-          workspacePath: input.workspacePath,
-          workerType: 'document-reviewer',
-          phase: 'DOCUMENT_REVIEW',
-          revision: next.revision.document,
-          allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
-          contract: { canonicalDocuments: true, reviewScope: 'foundation' },
-        })
-      else if (
-        next.phase === 'DOCUMENT_REVIEW' &&
-        next.documentStep === 'CHECKLIST_REVIEW'
-      )
-        await dispatcher.dispatch({
-          runId: next.runId,
-          ownerId: next.ownerId,
-          projectId: next.projectId,
-          workspacePath: input.workspacePath,
-          workerType: 'document-reviewer',
-          phase: 'DOCUMENT_REVIEW',
-          revision: next.revision.document,
-          allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
-          contract: { canonicalDocuments: true, reviewScope: 'complete' },
-        })
+      await resumeUnlocked(next)
       return
     }
     if (result.workerType === 'document-reviewer') {
       const reviewScope =
-        request?.contract.reviewScope === 'foundation' ? 'foundation' : 'complete'
+        request?.contract.reviewScope === 'foundation'
+          ? 'foundation'
+          : 'complete'
+      const currentReviewRevision =
+        reviewScope === 'foundation'
+          ? await computeDocumentRevision(
+              input.workspacePath,
+              next.confirmedBriefDigest,
+            )
+          : await computeResourceRevision(
+              input.workspacePath,
+              next.revision.document,
+            )
       next = await reconcileDocumentReview({
         run: { ...next, phase: 'DOCUMENT_REVIEW' },
         workspacePath: input.workspacePath,
         terminal: result,
-        currentDocumentRevision: await computeDocumentRevision(
-          input.workspacePath,
-          next.confirmedBriefDigest,
-        ),
+        currentDocumentRevision: currentReviewRevision,
         scope: reviewScope,
       })
       await persist(
@@ -344,24 +330,13 @@ export function createDeliveryWorkflowController(input: {
           ? { resourceEvidence: observedResourceEvidence }
           : {}),
       })
-      await persist(
+      next = await persist(
         next,
-        next.phase === 'ATOMIC_TASK_PLANNING'
+        next.phase === 'DOCUMENT_REVIEW'
           ? 'phase.entered'
           : 'resource.preparation.needs_action',
       )
-      if (next.phase === 'ATOMIC_TASK_PLANNING')
-        await dispatcher.dispatch({
-          runId: next.runId,
-          ownerId: next.ownerId,
-          projectId: next.projectId,
-          workspacePath: input.workspacePath,
-          workerType: 'atomic-task-planner',
-          phase: 'ATOMIC_TASK_PLANNING',
-          revision: next.revision.document,
-          allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
-          contract: await contractFactsFor(next),
-        })
+      await resumeUnlocked(next)
       return
     }
     if (result.workerType === 'atomic-task-planner') {
@@ -631,6 +606,15 @@ export function createDeliveryWorkflowController(input: {
     )
   }
 
+  function comprehensiveReviewMissing(run: DeliveryRun): boolean {
+    const evidence = run.evidence.documentReview
+    return (
+      !run.revision.resource ||
+      evidence?.status !== 'ready' ||
+      evidence.revision !== run.revision.resource
+    )
+  }
+
   async function restartResourcePreparation(
     run: DeliveryRun,
     reason: string,
@@ -759,9 +743,7 @@ export function createDeliveryWorkflowController(input: {
         })
       } else {
         const reviewScope =
-          run.documentStep === 'FOUNDATION_REVIEW'
-            ? 'foundation'
-            : 'complete'
+          run.documentStep === 'FOUNDATION_REVIEW' ? 'foundation' : 'complete'
         await dispatcher.dispatch({
           runId: run.runId,
           ownerId: run.ownerId,
@@ -769,7 +751,10 @@ export function createDeliveryWorkflowController(input: {
           workspacePath: input.workspacePath,
           workerType: 'document-reviewer',
           phase: run.phase,
-          revision: run.revision.document,
+          revision:
+            reviewScope === 'complete'
+              ? (run.revision.resource ?? run.revision.document)
+              : run.revision.document,
           allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
           contract: { canonicalDocuments: true, reviewScope },
         })
@@ -804,6 +789,21 @@ export function createDeliveryWorkflowController(input: {
           run,
           'resource preparation evidence is missing; the resource stage must be completed before task planning',
         )
+        return
+      }
+      if (comprehensiveReviewMissing(run)) {
+        const awaitingReview = await persist(
+          {
+            ...run,
+            phase: 'DOCUMENT_REVIEW',
+            documentStep: 'CHECKLIST_REVIEW',
+            activeDispatch: undefined,
+            status: 'running',
+            blockedReason: undefined,
+          },
+          'comprehensive.review.required',
+        )
+        await resumeUnlocked(awaitingReview)
         return
       }
       await dispatcher.dispatch({

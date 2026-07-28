@@ -212,20 +212,35 @@ export function transitionDeliveryRun(
       break
     case 'document_review_ready':
       requirePhase(run, 'DOCUMENT_REVIEW')
-      requireEvidence(event.evidence, run.revision.document, ['ready'])
+      if (!run.revision.resource)
+        fail('comprehensive document review requires a resource revision')
+      requireEvidence(event.evidence, run.revision.resource, ['ready'])
       next = {
         ...withEvidence(run, 'documentReview', event.evidence),
-        phase: 'RESOURCE_PREPARATION',
+        phase: 'ATOMIC_TASK_PLANNING',
         documentStep: undefined,
       }
       break
     case 'document_review_needs_revision':
       requirePhase(run, 'DOCUMENT_REVIEW')
-      requireEvidence(event.evidence, run.revision.document, ['failed'])
+      requireEvidence(
+        event.evidence,
+        run.documentStep === 'CHECKLIST_REVIEW'
+          ? (run.revision.resource ?? run.revision.document)
+          : run.revision.document,
+        ['failed'],
+      )
       next = {
         ...withEvidence(run, 'documentReview', event.evidence),
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
+        revision: {
+          ...run.revision,
+          resource: undefined,
+          implementation: undefined,
+        },
+        tasks: [],
+        evidence: { documentReview: event.evidence },
       }
       break
     case 'resource_preparation_ready':
@@ -234,7 +249,8 @@ export function transitionDeliveryRun(
       next = {
         ...withEvidence(run, 'resourcePreparation', event.evidence),
         revision: { ...run.revision, resource: event.resourceRevision },
-        phase: 'ATOMIC_TASK_PLANNING',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_REVIEW',
         status: 'running',
         blockedReason: undefined,
       }
@@ -253,7 +269,13 @@ export function transitionDeliveryRun(
       break
     case 'document_review_blocked':
       requirePhase(run, 'DOCUMENT_REVIEW')
-      requireEvidence(event.evidence, run.revision.document, ['blocked'])
+      requireEvidence(
+        event.evidence,
+        run.documentStep === 'CHECKLIST_REVIEW'
+          ? (run.revision.resource ?? run.revision.document)
+          : run.revision.document,
+        ['blocked'],
+      )
       next = {
         ...withEvidence(run, 'documentReview', event.evidence),
         status: 'needs_action',
@@ -267,6 +289,11 @@ export function transitionDeliveryRun(
         run.evidence.resourcePreparation?.status !== 'passed'
       )
         fail('task planning requires passed resource preparation evidence')
+      if (
+        run.evidence.documentReview?.status !== 'ready' ||
+        run.evidence.documentReview.revision !== run.revision.resource
+      )
+        fail('task planning requires current comprehensive review evidence')
       assertTaskGraph(event.tasks)
       if (!event.tasks.length) fail('atomic task graph must not be empty')
       next = {

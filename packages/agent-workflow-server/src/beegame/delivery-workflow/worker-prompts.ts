@@ -1,5 +1,6 @@
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENTS,
   CANONICAL_PROJECT_ARTIFACTS,
 } from './types'
 import type { WorkerDispatchRequest } from './types'
@@ -9,10 +10,15 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     ? request.allowedPaths.join(', ')
     : 'read-only'
   const canonicalArtifacts =
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation'
+    (request.workerType === 'document-author' &&
+      request.contract.documentSet === 'foundation') ||
+    (request.workerType === 'document-reviewer' &&
+      request.contract.reviewScope === 'foundation')
       ? CANONICAL_FOUNDATION_DOCUMENTS
-      : CANONICAL_PROJECT_ARTIFACTS
+      : request.workerType === 'document-author' &&
+          request.contract.documentSet === 'checklist'
+        ? CANONICAL_PROJECT_DOCUMENTS
+        : CANONICAL_PROJECT_ARTIFACTS
   return [
     `BeeGame delivery worker: ${request.workerType}`,
     `Phase: ${request.phase}`,
@@ -42,7 +48,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       ? [
           request.contract.reviewScope === 'foundation'
             ? 'This is the foundation review substep. Review only the six foundation documents listed in the current workspace; do not require or review docs/acceptance/gameplay-checklist.md yet. Return reviewedDocumentPaths for those six documents and an empty checklistIds array.'
-            : 'This is the final document review substep. Review all six approved foundation documents plus docs/acceptance/gameplay-checklist.md, and return coverage for every document and checklist ID.',
+            : 'This is the final comprehensive review substep. Review all six approved foundation documents, docs/acceptance/gameplay-checklist.md, and assets/asset-manifest.json together. Verify their cross-artifact consistency and return all eight paths in reviewedDocumentPaths plus coverage for every checklist ID.',
         ]
       : []),
     JSON.stringify(request.contract),

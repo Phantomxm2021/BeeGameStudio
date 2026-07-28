@@ -14,6 +14,41 @@ describe('document readiness audit', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
+  test('accepts the six foundation documents before checklist and manifest creation', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-foundation-'))
+    for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+
+    expect(
+      auditDocumentReadiness(workspace, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      }),
+    ).toEqual({ valid: true, issues: [] })
+  })
+
+  test('accepts an approved checklist before resource preparation creates the manifest', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-checklist-'))
+    for (const path of REQUIRED_PROJECT_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(
+        join(workspace, path),
+        path.endsWith('gameplay-checklist.md')
+          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: playable state evidence: runtime\n'
+          : `# ${path}\n`,
+      )
+    }
+
+    expect(
+      auditDocumentReadiness(workspace, {
+        includeChecklist: true,
+        includeAssetManifest: false,
+      }),
+    ).toEqual({ valid: true, issues: [] })
+  })
+
   test('requires the complete non-empty document baseline and canonical asset contract', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-readiness-'))
     expect(auditDocumentReadiness(workspace)).toMatchObject({ valid: false })
@@ -28,19 +63,25 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        platform: 'selected-target',
-        runtime: 'project-native',
-        asset_format_capabilities: ['glb'],
-      },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 5,
+        project_target: {
+          platform: 'selected-target',
+          runtime: 'project-native',
+          asset_format_capabilities: ['glb'],
+        },
+        requirements: [],
+        imports: [],
+        compositions: [],
+      }),
+    )
 
-    expect(auditDocumentReadiness(workspace)).toEqual({ valid: true, issues: [] })
+    expect(auditDocumentReadiness(workspace)).toEqual({
+      valid: true,
+      issues: [],
+    })
   })
 
   test('rejects an invented asset manifest root shape', async () => {
@@ -55,11 +96,14 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project: { platform: 'selected-target' },
-      assets: [],
-    }))
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 1,
+        project: { platform: 'selected-target' },
+        assets: [],
+      }),
+    )
 
     const audit = auditDocumentReadiness(workspace)
     expect(audit.valid).toBe(false)
@@ -80,22 +124,24 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        platform: 'selected-target',
-        runtime: 'project-native',
-        asset_format_capabilities: ['glb'],
-      },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 5,
+        project_target: {
+          platform: 'selected-target',
+          runtime: 'project-native',
+          asset_format_capabilities: ['glb'],
+        },
+        requirements: [],
+        imports: [],
+        compositions: [],
+      }),
+    )
 
     expect(auditDocumentReadiness(workspace).issues).toEqual([
       'docs/acceptance/gameplay-checklist.md: Checklist task 1 has no stable identifier.',
       'docs/acceptance/gameplay-checklist.md: Checklist task PATH-002 has no observable task description.',
-      'docs/acceptance/gameplay-checklist.md: Checklist task PATH-003 is missing atomic fields: source, implement, expected, evidence.',
       'docs/acceptance/gameplay-checklist.md: Checklist stable identifier is duplicated: PATH-003',
     ])
   })
@@ -112,14 +158,20 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: { asset_format_capabilities: ['glb'] },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 5,
+        project_target: { asset_format_capabilities: ['glb'] },
+        requirements: [],
+        imports: [],
+        compositions: [],
+      }),
+    )
 
-    expect(auditDocumentReadiness(workspace)).toEqual({ valid: true, issues: [] })
+    expect(auditDocumentReadiness(workspace)).toEqual({
+      valid: true,
+      issues: [],
+    })
   })
 })

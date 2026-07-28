@@ -5,20 +5,20 @@ import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
 import { isWorkflowEvidenceFile } from './evidence'
 import { transitionDeliveryRun } from './transition'
 import {
+  CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   WORKFLOW_EVIDENCE_DIRECTORY,
 } from './types'
-import type {
-  DeliveryRun,
-  EvidenceRef,
-  WorkerDispatchRequest,
-} from './types'
+import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type ReadinessAudit = (
   workspacePath: string,
-  options?: { includeChecklist?: boolean },
+  options?: {
+    includeChecklist?: boolean
+    includeAssetManifest?: boolean
+  },
 ) => {
   valid: boolean
   issues: string[]
@@ -26,10 +26,13 @@ type ReadinessAudit = (
 
 async function defaultAudit(
   workspacePath: string,
-  options?: { includeChecklist?: boolean },
+  options?: {
+    includeChecklist?: boolean
+    includeAssetManifest?: boolean
+  },
 ): Promise<ReturnType<ReadinessAudit>> {
   const { auditDocumentReadiness } = await import('../document-readiness-audit')
-  return auditDocumentReadiness(workspacePath)
+  return auditDocumentReadiness(workspacePath, options)
 }
 
 async function defaultChecklistIds(workspacePath: string): Promise<string[]> {
@@ -129,9 +132,11 @@ export async function completeDocumentDraft(input: {
   const readiness = input.audit
     ? input.audit(input.workspacePath, {
         includeChecklist: documentSet === 'checklist',
+        includeAssetManifest: false,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: documentSet === 'checklist',
+        includeAssetManifest: false,
       })
   const allowedPaths =
     documentSet === 'checklist'
@@ -174,9 +179,9 @@ export async function completeDocumentDraft(input: {
   if (!readiness.valid || outOfScope.length > 0) return updated
   return {
     ...updated,
-    phase: 'DOCUMENT_REVIEW',
-    documentStep:
-      documentSet === 'checklist' ? 'CHECKLIST_REVIEW' : 'FOUNDATION_REVIEW',
+    phase:
+      documentSet === 'checklist' ? 'RESOURCE_PREPARATION' : 'DOCUMENT_REVIEW',
+    documentStep: documentSet === 'checklist' ? undefined : 'FOUNDATION_REVIEW',
   }
 }
 
@@ -191,15 +196,16 @@ export async function reconcileDocumentReview(input: {
   if (input.run.phase !== 'DOCUMENT_REVIEW')
     throw new Error('document review is not the active phase')
   const scope = input.scope ?? 'complete'
-  if (
-    scope === 'foundation' &&
-    input.run.documentStep !== 'FOUNDATION_REVIEW'
-  )
+  if (scope === 'foundation' && input.run.documentStep !== 'FOUNDATION_REVIEW')
     throw new Error('foundation review requires the foundation review step')
   const readiness = input.audit
-    ? input.audit(input.workspacePath, { includeChecklist: scope === 'complete' })
+    ? input.audit(input.workspacePath, {
+        includeChecklist: scope === 'complete',
+        includeAssetManifest: scope === 'complete',
+      })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: scope === 'complete',
+        includeAssetManifest: scope === 'complete',
       })
   if (!readiness.valid)
     throw new Error(
@@ -220,7 +226,7 @@ export async function reconcileDocumentReview(input: {
     scope === 'complete' ? await defaultChecklistIds(input.workspacePath) : []
   const expectedPaths = new Set<string>(
     scope === 'complete'
-      ? CANONICAL_PROJECT_DOCUMENTS
+      ? [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
       : CANONICAL_FOUNDATION_DOCUMENTS,
   )
   if (
@@ -241,10 +247,15 @@ export async function reconcileDocumentReview(input: {
       : input.terminal.verdict === 'NEEDS_REVISION'
         ? 'failed'
         : 'blocked'
+  const reviewRevision =
+    input.currentDocumentRevision ??
+    (scope === 'complete'
+      ? (input.run.revision.resource ?? input.run.revision.document)
+      : input.run.revision.document)
   const evidence: EvidenceRef = {
     path: input.terminal.evidencePath,
     kind: 'document_review',
-    revision: input.run.revision.document,
+    revision: reviewRevision,
     status,
     observedAt: new Date().toISOString(),
   }
