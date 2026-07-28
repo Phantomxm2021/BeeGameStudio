@@ -50,6 +50,8 @@ const apiMocks = vi.hoisted(() => ({
     deployedAt: '2026-06-21T00:00:00.000Z',
   }),
   requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
+  resumeWorkflow: vi.fn().mockResolvedValue({ status: 'running' }),
+  retryWorkflow: vi.fn().mockResolvedValue({ status: 'running' }),
   getCreditBalance: vi.fn(() =>
     Promise.resolve({
       userId: 'user_1',
@@ -234,6 +236,8 @@ vi.mock('../../services/api', () => ({
     deployProject: apiMocks.deployProject,
     rollbackProjectDeployment: apiMocks.rollbackProjectDeployment,
     requestProjectAction: apiMocks.requestProjectAction,
+    resumeWorkflow: apiMocks.resumeWorkflow,
+    retryWorkflow: apiMocks.retryWorkflow,
   },
 }));
 
@@ -378,6 +382,57 @@ describe('DashboardView runtime loading', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('refreshes project credits when the persisted workflow usage snapshot changes', async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+      await act(async () => Promise.resolve());
+      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(1);
+
+      mockedProjectStatus = {
+        ...mockedProjectStatus,
+        workflow: {
+          runId: 'run-1',
+          status: 'running',
+          phase: 'DOCUMENT_REVIEW',
+          usage: {
+            input_tokens: 100,
+            cache_read_tokens: 50,
+            cache_creation_tokens: 0,
+            completion_tokens: 25,
+            total_tokens: 175,
+          },
+        },
+      };
+      view.rerender(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+      await act(async () => Promise.resolve());
+      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1_050);
+        await Promise.resolve();
+      });
+      expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes the workflow snapshot immediately after a retry succeeds', async () => {
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+    await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
+    loadPendingReviews.mockClear();
+    loadProjectStatus.mockClear();
+
+    await act(async () => {
+      await capturedRightSidebarProps?.onWorkflowAction('retry');
+    });
+
+    expect(apiMocks.retryWorkflow).toHaveBeenCalledWith('proj_1');
+    expect(loadPendingReviews).toHaveBeenCalledWith('proj_1');
+    expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
   });
 
   it('covers the dashboard while the server is starting the project runtime', async () => {

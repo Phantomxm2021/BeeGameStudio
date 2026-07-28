@@ -194,6 +194,17 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
   const reviewDisplayModels = useMemo(() => toReviewDisplayModels(pendingReviews), [pendingReviews]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
+  const workflowUsageRevision = useMemo(() => {
+    const usage = projectRuntimeDisplay?.workflow?.usage;
+    if (!usage) return '';
+    return [
+      usage.input_tokens ?? usage.prompt_tokens ?? 0,
+      usage.cache_read_tokens ?? 0,
+      usage.cache_creation_tokens ?? 0,
+      usage.output_tokens ?? usage.completion_tokens ?? 0,
+      usage.total_tokens ?? 0,
+    ].join(':');
+  }, [projectRuntimeDisplay?.workflow?.usage]);
   const projectTokenUsage = tokenUsage?.[projectId] ?? null;
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
@@ -212,6 +223,25 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const projectTargetLabel = String(
     projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
   ).trim();
+
+  useEffect(() => {
+    if (!workflowUsageRevision) return undefined;
+    let cancelled = false;
+    let trailingRefresh: ReturnType<typeof setTimeout> | undefined;
+    // Workflow usage is persisted independently from the billing ledger.
+    // Refresh once more after the ledger write/retry window so the final
+    // usage snapshot cannot leave project credits one event behind.
+    void refreshCredits().finally(() => {
+      if (cancelled) return;
+      trailingRefresh = setTimeout(() => {
+        void refreshCredits();
+      }, 1_000);
+    });
+    return () => {
+      cancelled = true;
+      if (trailingRefresh) clearTimeout(trailingRefresh);
+    };
+  }, [refreshCredits, workflowUsageRevision]);
 
   const isPipelineActive = useMemo(() => {
     const workflowStatus = projectRuntimeDisplay?.workflow?.status;
@@ -509,6 +539,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             ? async action => {
                 if (action === 'resume') await api.resumeWorkflow(projectId);
                 else await api.retryWorkflow(projectId);
+                await loadProjectRuntimeState(projectId);
               }
             : undefined
         }

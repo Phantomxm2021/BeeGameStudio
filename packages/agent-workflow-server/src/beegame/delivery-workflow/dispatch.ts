@@ -41,7 +41,13 @@ function idempotencyKey(
   request: WorkerDispatchRequest,
   attempt: number,
 ): string {
-  return `${request.runId}:${request.phase}:${request.taskId ?? request.phase}:${request.revision}:${attempt}`
+  const lane =
+    request.workerType === 'document-author'
+      ? `document:${String(request.contract.documentSet ?? 'foundation')}`
+      : request.workerType === 'document-reviewer'
+        ? `review:${String(request.contract.reviewScope ?? 'complete')}`
+        : request.workerType
+  return `${request.runId}:${request.phase}:${request.workerType}:${lane}:${request.taskId ?? request.phase}:${request.revision}:${attempt}`
 }
 
 function now(): string {
@@ -190,6 +196,7 @@ export function createDeliveryDispatcher(options: {
         {
           ...run,
           activeDispatch: record,
+          lastProgressAt: record.startedAt,
           currentMessage: undefined,
           currentMessageKey: undefined,
           currentItemId: undefined,

@@ -38,7 +38,7 @@ describe('MarkdownRenderer structured output', () => {
         expect(screen.queryByText('protocol_valid')).toBeNull();
     });
 
-    it('keeps generic structured JSON rendering for non-reviewer payloads', () => {
+    it('renders only the explicit user-facing text from a generic JSON payload', () => {
         const content = JSON.stringify({
             verdict: 'APPROVED',
             final_output: 'done',
@@ -48,6 +48,39 @@ describe('MarkdownRenderer structured output', () => {
         render(<MarkdownRenderer content={content} isUser={false} />);
 
         expect(screen.getByText('done')).not.toBeNull();
+        expect(screen.queryByText('metadata')).toBeNull();
+        expect(screen.queryByText('foo')).toBeNull();
+        expect(screen.queryByText('bar')).toBeNull();
+    });
+
+    it('hides internal JSON payloads without user-facing text', () => {
+        const content = JSON.stringify({
+            workerType: 'resource-preparer',
+            status: 'completed',
+            writtenPaths: ['assets/asset-manifest.json'],
+            importIds: ['imp-one'],
+        });
+
+        const { container } = render(<MarkdownRenderer content={content} isUser={false} />);
+
+        expect(container).toBeEmptyDOMElement();
+        expect(screen.queryByText('resource-preparer')).toBeNull();
+        expect(screen.queryByText('assets/asset-manifest.json')).toBeNull();
+    });
+
+    it('does not expose nested JSON inside a deliverable payload', () => {
+        const content = JSON.stringify({
+            deliverable: {
+                summary: '资源准备完成。',
+                internal: { revision: 'private-revision' },
+            },
+        });
+
+        render(<MarkdownRenderer content={content} isUser={false} />);
+
+        expect(screen.getByText('资源准备完成。')).not.toBeNull();
+        expect(screen.queryByText('internal')).toBeNull();
+        expect(screen.queryByText('private-revision')).toBeNull();
     });
 
     it('renders languageless fenced code blocks as pre blocks', () => {

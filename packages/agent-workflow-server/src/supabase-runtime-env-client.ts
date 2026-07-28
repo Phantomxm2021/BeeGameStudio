@@ -26,6 +26,25 @@ export type SupabaseRuntimeEnvRequest = {
   modelConfigId?: string
 }
 
+export class SupabaseRuntimeEnvRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'SupabaseRuntimeEnvRequestError'
+  }
+}
+
+export function isSupabaseRuntimeEnvAuthError(
+  error: unknown,
+): error is SupabaseRuntimeEnvRequestError {
+  return (
+    error instanceof SupabaseRuntimeEnvRequestError &&
+    (error.status === 401 || error.status === 403)
+  )
+}
+
 export class SupabaseRuntimeEnvClient {
   private readonly baseUrl: string
   private readonly anonKey: string
@@ -89,7 +108,8 @@ export class SupabaseRuntimeEnvClient {
     )
     if (!response.ok) {
       const text = await response.text().catch(() => '')
-      throw new Error(
+      throw new SupabaseRuntimeEnvRequestError(
+        response.status,
         `Supabase runtime env RPC failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
       )
     }

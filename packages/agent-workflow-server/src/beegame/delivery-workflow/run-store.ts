@@ -16,6 +16,7 @@ import type {
   WorkflowEvent,
   WorkflowUsage,
 } from './types'
+import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 
 export type { WorkflowEvent } from './types'
 
@@ -621,7 +622,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         run.activeDispatch?.dispatchId !== progress.dispatchId
       )
         return run
-      const message = progress.message?.trim()
+      const message = progress.message
+        ? sanitizeWorkflowDisplayMessage(progress.message)
+        : ''
       const next = {
         ...run,
         lastProgressAt: now(),

@@ -32,6 +32,7 @@ describe('WorkflowCard', () => {
     expect(screen.getByText(/Document Reviewer · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
     expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getByRole('list')).not.toHaveClass('border-l');
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
@@ -95,29 +96,71 @@ describe('WorkflowCard', () => {
     );
 
     const card = screen.getByTestId('beegame-workflow-card-run_4');
-    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'bg-black/40');
+    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'border-white/15', 'bg-white/[0.04]');
+    expect(card).not.toHaveClass('border-sky-300/20', 'bg-black/40');
     expect(card).not.toHaveClass('bg-sky-300/[0.055]');
     expect(screen.getByText('00:01:05')).toBeInTheDocument();
     expect(screen.queryByText(/本阶段/)).not.toBeInTheDocument();
   });
 
-  it('keeps accumulating from run creation while blocked and ignores stage start', () => {
+  it('freezes elapsed time at the durable update when the workflow fails', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-28T00:01:05.000Z'));
     render(
       <WorkflowCard
         workflow={{
           runId: 'run_5',
-          status: 'blocked',
+          status: 'failed',
           currentPhase: 'DOCUMENT_REVIEW',
           createdAt: '2026-07-28T00:00:00.000Z',
+          updatedAt: '2026-07-28T00:01:02.000Z',
           stageStartedAt: '2026-07-28T00:01:00.000Z',
         }}
       />,
     );
 
-    expect(screen.getByText('00:01:05')).toBeInTheDocument();
+    expect(screen.getByText('00:01:02')).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(2_000));
-    expect(screen.getByText('00:01:07')).toBeInTheDocument();
+    expect(screen.getByText('00:01:02')).toBeInTheDocument();
+  });
+
+  it.each(['blocked', 'cancelled', 'stale'] as const)('does not keep ticking while %s', status => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:02:00.000Z'));
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: `run_${status}`,
+          status,
+          currentPhase: 'DOCUMENT_REVIEW',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          updatedAt: '2026-07-28T00:01:00.000Z',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('00:01:00')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('00:01:00')).toBeInTheDocument();
+  });
+
+  it('continues ticking while the workflow is running', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:01:00.000Z'));
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_active',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          updatedAt: '2026-07-28T00:00:55.000Z',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('00:01:00')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('00:01:02')).toBeInTheDocument();
   });
 });

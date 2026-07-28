@@ -17,5 +17,15 @@ export function sanitizeWorkflowDisplayMessage(value: string): string {
     if (!insideFence) visible.push(line)
   }
 
-  return visible.join('\n').trim()
+  const message = visible.join('\n').trim()
+  if (!message) return ''
+
+  try {
+    const payload: unknown = JSON.parse(message)
+    if (payload !== null && typeof payload === 'object') return ''
+  } catch {
+    // Human-readable progress is not required to be JSON.
+  }
+
+  return message
 }

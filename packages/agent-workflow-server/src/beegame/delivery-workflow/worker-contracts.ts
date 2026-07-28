@@ -3,15 +3,11 @@ import { atomicTaskSchema } from './schema'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
-export const documentAuthorTerminalSchema = base
-  .extend({
+export const documentAuthorTerminalSchema = z
+  .object({
     workerType: z.literal('document-author'),
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)).min(1),
-    // The server computes the document revision from the files after the
-    // worker exits.  Requiring the worker to echo that hash created a second,
-    // unverifiable protocol value and rejected otherwise valid completions.
-    documentRevision: z.string().min(1).optional(),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
   })
   .strict()
@@ -70,6 +66,41 @@ export const implementationWorkerTerminalSchema = base
     changedPaths: z.array(z.string().min(1)),
     evidenceRefs: z.array(z.string().min(1)),
     evidencePath: z.string().min(1),
+    resourceReferences: z
+      .array(
+        z
+          .object({
+            importId: z.string().min(1),
+            references: z.array(z.string().min(1)).min(1),
+            runtimeEventIds: z.array(z.string().min(1)).default([]),
+          })
+          .strict(),
+      )
+      .default([]),
+    compositionIntegrations: z
+      .array(
+        z
+          .object({
+            compositionId: z.string().min(1),
+            recipePath: z.string().min(1),
+            references: z.array(z.string().min(1)).min(1),
+            runtimeEventIds: z.array(z.string().min(1)).default([]),
+          })
+          .strict(),
+      )
+      .default([]),
+    requirementSatisfactions: z
+      .array(
+        z
+          .object({
+            requirementId: z.string().min(1),
+            importIds: z.array(z.string().min(1)).default([]),
+            compositionIds: z.array(z.string().min(1)).default([]),
+            projectReferences: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      )
+      .default([]),
   })
   .strict()
 
@@ -150,19 +181,29 @@ function normalizeDocumentAuthorEnvelope(value: unknown): unknown {
   const status = value.status
   const changedPaths = value.changedPaths
   if (
+    worker === 'document-author' &&
+    status === 'completed' &&
+    Array.isArray(value.writtenPaths)
+  ) {
+    const {
+      revision: _obsoleteRevision,
+      documentRevision: _obsoleteDocumentRevision,
+      ...canonical
+    } = value
+    return canonical
+  }
+  if (
     worker !== 'document-author' ||
     status !== 'succeeded' ||
-    !Array.isArray(changedPaths) ||
-    typeof value.revision !== 'string'
+    !Array.isArray(changedPaths)
   )
     return value
   return {
     workerType: 'document-author',
     status: 'completed',
-    revision: value.revision,
     writtenPaths: changedPaths,
-    ...(typeof value.documentRevision === 'string'
-      ? { documentRevision: value.documentRevision }
+    ...(Array.isArray(value.resolvedFindingIds)
+      ? { resolvedFindingIds: value.resolvedFindingIds }
       : {}),
   }
 }

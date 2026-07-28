@@ -3,6 +3,7 @@ import { isWorkflowEvidenceFile } from './evidence'
 import { WORKFLOW_EVIDENCE_DIRECTORY } from './types'
 import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
+import type { ResourceDeliveryReadiness } from '../resource-delivery-readiness'
 
 type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 
@@ -30,12 +31,17 @@ export async function startImplementationAudit(input: {
   expectedImportIds: string[]
   expectedCompositionIds: string[]
   currentImplementationRevision?: string
+  resourceReadiness?: ResourceDeliveryReadiness
 }): Promise<unknown> {
   if (input.run.phase !== 'IMPLEMENTATION_AUDIT')
     throw new Error('implementation audit requires IMPLEMENTATION_AUDIT phase')
   if (!allTasksComplete(input.run))
     throw new Error(
       'implementation audit requires every task to be complete with current evidence',
+    )
+  if (input.resourceReadiness && !input.resourceReadiness.integrationReady)
+    throw new Error(
+      `implementation audit requires complete resource integration: ${input.resourceReadiness.integrationIssues.join('; ')}`,
     )
   return input.dispatcher.dispatch({
     runId: input.run.runId,

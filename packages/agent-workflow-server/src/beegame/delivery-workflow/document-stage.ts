@@ -59,6 +59,7 @@ type Dispatcher = {
 }
 
 const MAX_DOCUMENT_REMEDIATION_ATTEMPTS = 3
+const MAX_CHECKLIST_REMEDIATION_ATTEMPTS = 3
 
 function normalizedReviewFindings(
   findings: Extract<
@@ -151,7 +152,12 @@ export async function startChecklistDraftStage(input: {
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
       documentSet: 'checklist',
-      approvedDocumentRevision: input.run.revision.document,
+      approvedDocumentRevision:
+        input.run.evidence.documentReview?.revision ??
+        input.run.revision.document,
+      ...(input.run.checklistRemediation
+        ? { checklistRemediation: input.run.checklistRemediation }
+        : {}),
     },
   })
 }
@@ -183,6 +189,18 @@ export async function completeDocumentDraft(input: {
         includeChecklist: documentSet === 'checklist',
         includeAssetManifest: false,
       })
+  const foundationReadiness =
+    documentSet === 'checklist'
+      ? input.audit
+        ? input.audit(input.workspacePath, {
+            includeChecklist: false,
+            includeAssetManifest: false,
+          })
+        : await defaultAudit(input.workspacePath, {
+            includeChecklist: false,
+            includeAssetManifest: false,
+          })
+      : undefined
   const allowedPaths =
     documentSet === 'checklist'
       ? new Set(['docs/acceptance/gameplay-checklist.md'])
@@ -212,6 +230,25 @@ export async function completeDocumentDraft(input: {
     expectedFindingIds.length === 0 ||
     (resolvedFindingIds.length === expectedFindingIds.length &&
       expectedFindingIds.every(id => resolvedFindingIds.includes(id)))
+  const checklistCanBeRemediated =
+    documentSet === 'checklist' &&
+    !readiness.valid &&
+    foundationReadiness?.valid === true &&
+    outOfScope.length === 0
+  const checklistRemediationAttempt = checklistCanBeRemediated
+    ? (input.run.checklistRemediation?.attempt ?? 0) + 1
+    : undefined
+  const checklistRemediation =
+    checklistRemediationAttempt !== undefined
+      ? {
+          sourceRevision: documentRevision,
+          attempt: checklistRemediationAttempt,
+          issues: readiness.issues,
+        }
+      : undefined
+  const checklistRetryAvailable =
+    checklistRemediationAttempt !== undefined &&
+    checklistRemediationAttempt <= MAX_CHECKLIST_REMEDIATION_ATTEMPTS
   const updated: DeliveryRun = {
     ...input.run,
     revision: {
@@ -220,6 +257,10 @@ export async function completeDocumentDraft(input: {
       workspace: workspaceRevision,
     },
     activeDispatch: undefined,
+    status:
+      checklistRemediationAttempt !== undefined && !checklistRetryAvailable
+        ? 'needs_action'
+        : input.run.status,
     blockedReason:
       readiness.valid && outOfScope.length === 0 && resolutionComplete
         ? undefined
@@ -236,6 +277,9 @@ export async function completeDocumentDraft(input: {
                 ]
               : []),
           ].join('; '),
+    ...(documentSet === 'checklist'
+      ? { checklistRemediation }
+      : {}),
     ...(input.run.documentRemediation
       ? {
           documentRemediation: {
@@ -253,6 +297,9 @@ export async function completeDocumentDraft(input: {
     phase:
       documentSet === 'checklist' ? 'RESOURCE_PREPARATION' : 'DOCUMENT_REVIEW',
     documentStep: documentSet === 'checklist' ? undefined : 'FOUNDATION_REVIEW',
+    ...(documentSet === 'checklist'
+      ? { checklistRemediation: undefined }
+      : {}),
   }
 }
 
@@ -351,6 +398,7 @@ export async function reconcileDocumentReview(input: {
       blockedReason: undefined,
       activeDispatch: undefined,
       documentRemediation: undefined,
+      checklistRemediation: undefined,
       updatedAt: new Date().toISOString(),
     }
   }

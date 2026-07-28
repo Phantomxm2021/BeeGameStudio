@@ -23,7 +23,9 @@ function taskTypeForWorker(
 export function createBeeGameDeliveryWorkerPort(input: {
   sessions: BeeGameSessionManager
   userId: string
-  getAuthToken?: () => string | undefined | Promise<string | undefined>
+  getAuthToken?: (options?: {
+    forceRefresh?: boolean
+  }) => string | undefined | Promise<string | undefined>
   userDataRoot?: string
   modelConfigId?: string
   language?: BeeGameSessionLanguage
@@ -42,6 +44,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
         projectId: request.projectId,
         userId: input.userId,
         ...(authToken ? { authToken } : {}),
+        ...(input.getAuthToken
+          ? { getValidAuthToken: input.getAuthToken }
+          : {}),
         ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
         ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
         ...(input.language ? { language: input.language } : {}),

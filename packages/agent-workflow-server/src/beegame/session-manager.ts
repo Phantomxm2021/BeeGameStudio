@@ -66,10 +66,12 @@ import {
 } from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 import { isRetryableQueryEngineError } from './query-engine-worker-protocol'
+import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import { createRunStore } from './delivery-workflow/run-store'
 import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
+import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -363,6 +365,9 @@ type SessionRecord = {
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
+  getValidAuthToken?: (options?: {
+    forceRefresh?: boolean
+  }) => Promise<string | undefined> | string | undefined
   projectId?: string
   userDataRoot?: string
   language?: BeeGameSessionLanguage
@@ -433,6 +438,9 @@ export type StartBeeGameSessionInput = {
   transcriptSessionId?: string
   userId: string
   authToken?: string
+  getValidAuthToken?: (options?: {
+    forceRefresh?: boolean
+  }) => Promise<string | undefined> | string | undefined
   userDataRoot?: string
   language?: BeeGameSessionLanguage
   workflowWorker?: boolean
@@ -577,6 +585,9 @@ export class BeeGameSessionManager {
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
+      ...(input.getValidAuthToken
+        ? { getValidAuthToken: input.getValidAuthToken }
+        : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
       ...(input.language
@@ -687,7 +698,7 @@ export class BeeGameSessionManager {
     workspacePath: string,
   ): string[] {
     const root = resolve(workspacePath)
-    return [...this.sessions.values()]
+    const active = [...this.sessions.values()]
       .filter(
         record =>
           record.workflowWorker === true &&
@@ -695,6 +706,12 @@ export class BeeGameSessionManager {
           resolve(record.session.cwd) === root,
       )
       .map(record => record.session.id)
+    return [
+      ...new Set([
+        ...active,
+        ...readWorkflowWorkerSessionIdsFromLogIndex(root, workflowRunId),
+      ]),
+    ]
   }
 
   pendingPermissionsForProject(
@@ -1209,12 +1226,7 @@ export class BeeGameSessionManager {
       if (!signal) throw new Error('Turn abort controller was not initialized')
       const env = buildRuntimeEnv(
         record.runtime,
-        await this.getAdditionalRuntimeEnv(
-          record.userDataRoot,
-          record.userId,
-          record.authToken,
-          record.session.modelConfigId,
-        ),
+        await this.loadAdditionalRuntimeEnv(record),
       )
       const approvedOutboundTargets =
         await this.resolveRuntimeOutboundTargets(env)
@@ -1315,6 +1327,36 @@ export class BeeGameSessionManager {
       record.visibleThinkingBlockIndexes.clear()
       record.abortController = null
       record.session.updatedAt = new Date()
+    }
+  }
+
+  private async loadAdditionalRuntimeEnv(
+    record: SessionRecord,
+  ): Promise<Record<string, string>> {
+    try {
+      return await this.getAdditionalRuntimeEnv(
+        record.userDataRoot,
+        record.userId,
+        record.authToken,
+        record.session.modelConfigId,
+      )
+    } catch (error) {
+      if (!isSupabaseRuntimeEnvAuthError(error) || !record.getValidAuthToken) {
+        throw error
+      }
+      const refreshed = await record.getValidAuthToken({ forceRefresh: true })
+      if (!refreshed) {
+        throw new Error(
+          'Workflow authentication expired and could not be refreshed. Please sign in again.',
+        )
+      }
+      record.authToken = refreshed
+      return this.getAdditionalRuntimeEnv(
+        record.userDataRoot,
+        record.userId,
+        refreshed,
+        record.session.modelConfigId,
+      )
     }
   }
 
@@ -1781,7 +1823,9 @@ export class BeeGameSessionManager {
       // Tool/system lifecycle labels are telemetry and must never replace the
       // durable message shown in the workflow card.
       const progressMessage =
-        event.type === 'assistant.message' ? event.text.trim() : ''
+        event.type === 'assistant.message'
+          ? sanitizeWorkflowDisplayMessage(event.text)
+          : ''
       const currentItemId = workflowDocumentFromToolEvent(record, event)
       const clearCurrentItem =
         event.type === 'tool.completed' || event.type === 'tool.failed'
@@ -1887,27 +1931,30 @@ export class BeeGameSessionManager {
           },
         )
       }
-      try {
-        observeNativeResourceLibraryToolEvent({
-          dataRoot: this.dashboardDataRoot,
+    }
+    try {
+      // Resource preparation runs in a workflow worker. Recording only visible
+      // chat sessions loses the native import provenance at the exact boundary
+      // that owns it and makes restart recovery report a false `missing` state.
+      observeNativeResourceLibraryToolEvent({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      // Resource provenance is passive evidence for library-first fallback.
+      // It must never alter or interrupt BeeGame Studio's native tool lifecycle.
+      console.warn(
+        '[BeeGame] Failed to persist native resource query evidence',
+        {
           sessionId: record.session.id,
-          workspacePath: record.session.cwd,
-          ...(event.turnId ? { turnId: event.turnId } : {}),
-          eventType: event.type,
-          payload: event.payload,
-          createdAt: event.createdAt,
-        })
-      } catch (error) {
-        // Resource provenance is passive evidence for library-first fallback.
-        // It must never alter or interrupt BeeGame Studio's native tool lifecycle.
-        console.warn(
-          '[BeeGame] Failed to persist native resource query evidence',
-          {
-            sessionId: record.session.id,
-            cause: error instanceof Error ? error.name : 'unknown_error',
-          },
-        )
-      }
+          cause: error instanceof Error ? error.name : 'unknown_error',
+        },
+      )
     }
     record.nextEventId += 1
     record.session.updatedAt = new Date()
@@ -4339,6 +4386,19 @@ function readProjectLogIndex(
     updatedAt: new Date().toISOString(),
     sessions: {},
   }
+}
+
+/** Recover workflow worker provenance after a server restart. */
+export function readWorkflowWorkerSessionIdsFromLogIndex(
+  workspacePath: string,
+  workflowRunId: string,
+): string[] {
+  const root = resolve(workspacePath)
+  const index = readProjectLogIndex(
+    resolve(root, '.beegame', 'workflow', 'logs', workflowRunId, 'index.json'),
+    root,
+  )
+  return Object.keys(index.sessions)
 }
 
 function getProjectLogsDir(workspacePath: string): string {

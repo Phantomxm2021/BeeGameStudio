@@ -1,12 +1,14 @@
 import { z } from 'zod/v4'
 import type {
   AtomicTask,
+  ChecklistRemediation,
   DeliveryPhase,
   DeliveryRun,
   DocumentRemediation,
   DispatchRecord,
   EvidenceRef,
   Revision,
+  ResourceRemediation,
   TaskVerification,
   WorkflowEvent,
   WorkerDispatchRequest,
@@ -197,6 +199,24 @@ const documentRemediationSchema: z.ZodType<DocumentRemediation> = z
   })
   .strict()
 
+const checklistRemediationSchema: z.ZodType<ChecklistRemediation> = z
+  .object({
+    sourceRevision: z.string().min(1),
+    attempt: z.number().int().positive(),
+    issues: z.array(z.string().min(1)).min(1),
+  })
+  .strict()
+
+const resourceRemediationSchema: z.ZodType<ResourceRemediation> = z
+  .object({
+    sourceRevision: z.string().min(1),
+    attempt: z.number().int().positive(),
+    issues: z.array(z.string().min(1)).min(1),
+    preserveImportIds: z.array(z.string().min(1)),
+    preserveCompositionIds: z.array(z.string().min(1)),
+  })
+  .strict()
+
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   .object({
     eventId: z.string().min(1),
@@ -257,6 +277,8 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       })
       .strict(),
     documentRemediation: documentRemediationSchema.optional(),
+    checklistRemediation: checklistRemediationSchema.optional(),
+    resourceRemediation: resourceRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),
     resourceEvidence: resourceEvidenceSchema.optional(),
     currentMessage: z.string().min(1).optional(),

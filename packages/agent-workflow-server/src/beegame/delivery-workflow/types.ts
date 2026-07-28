@@ -111,6 +111,20 @@ export type DocumentRemediation = {
   resolvedFindingIds?: string[]
 }
 
+export type ChecklistRemediation = {
+  sourceRevision: string
+  attempt: number
+  issues: string[]
+}
+
+export type ResourceRemediation = {
+  sourceRevision: string
+  attempt: number
+  issues: string[]
+  preserveImportIds: string[]
+  preserveCompositionIds: string[]
+}
+
 export type Revision = {
   document: string
   resource?: string
@@ -233,6 +247,10 @@ export type DeliveryRun = {
   }
   /** Exact reviewer corrections carried across author/reviewer retries. */
   documentRemediation?: DocumentRemediation
+  /** Deterministic checklist-structure issues carried across bounded author retries. */
+  checklistRemediation?: ChecklistRemediation
+  /** Exact deterministic resource-contract failures carried into a repair pass. */
+  resourceRemediation?: ResourceRemediation
   usage?: WorkflowUsage
   /** Latest deterministic native Resource Library provenance observed for this run. */
   resourceEvidence?: ResourceEvidenceSnapshot

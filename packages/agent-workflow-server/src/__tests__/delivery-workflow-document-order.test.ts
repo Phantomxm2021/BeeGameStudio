@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   completeDocumentDraft,
   reconcileDocumentReview,
+  startChecklistDraftStage,
   startDocumentStage,
 } from '../beegame/delivery-workflow/document-stage'
 import {
@@ -13,8 +14,11 @@ import {
 } from '../beegame/delivery-workflow/run-store'
 import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
+import { parseWorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
+import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  type DeliveryRun,
   type DeliveryWorkerPort,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
@@ -47,7 +51,6 @@ describe('delivery workflow document ordering', () => {
       terminal: {
         workerType: 'document-author',
         status: 'completed',
-        revision: 'uncomputed',
         writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
       documentSet: 'foundation',
@@ -167,7 +170,6 @@ describe('delivery workflow document ordering', () => {
       terminal: {
         workerType: 'document-author',
         status: 'completed',
-        revision: run.revision.document,
         writtenPaths: [checklistPath],
       },
       documentSet: 'checklist',
@@ -179,6 +181,144 @@ describe('delivery workflow document ordering', () => {
       blockedReason: undefined,
     })
     expect(completed.documentStep).toBeUndefined()
+  })
+
+  test('automatically remediates a table-only checklist and then advances once checkbox tasks are valid', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-checklist-remediation-'))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+    const checklistPath = 'docs/acceptance/gameplay-checklist.md'
+    await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
+    await writeFile(
+      join(workspace, checklistPath),
+      '# Acceptance\n| ID | Check |\n| --- | --- |\n| PATH-001 | Observe the playable result and retain runtime evidence. |\n',
+    )
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'foundation-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_DRAFTING' as const,
+      evidence: {
+        documentReview: {
+          path: '.beegame/workflow/evidence/foundation-review.md',
+          kind: 'document_review' as const,
+          revision: 'foundation-revision-1',
+          status: 'ready' as const,
+          observedAt: new Date().toISOString(),
+        },
+      },
+    }
+
+    const incomplete = await completeDocumentDraft({
+      run,
+      workspacePath: workspace,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [checklistPath],
+        resolvedFindingIds: [],
+      },
+      documentSet: 'checklist',
+    })
+
+    expect(incomplete).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      status: 'running',
+      checklistRemediation: {
+        attempt: 1,
+        issues: [
+          'docs/acceptance/gameplay-checklist.md: Acceptance checklist contains no task items.',
+        ],
+      },
+    })
+
+    const dispatched: WorkerDispatchRequest[] = []
+    await startChecklistDraftStage({
+      run: incomplete,
+      workspacePath: workspace,
+      dispatcher: {
+        dispatch: async request => {
+          dispatched.push(request)
+          return request
+        },
+      },
+    })
+    expect(dispatched[0]?.contract).toMatchObject({
+      documentSet: 'checklist',
+      approvedDocumentRevision: 'foundation-revision-1',
+      checklistRemediation: {
+        attempt: 1,
+        issues: [
+          'docs/acceptance/gameplay-checklist.md: Acceptance checklist contains no task items.',
+        ],
+      },
+    })
+
+    await writeFile(
+      join(workspace, checklistPath),
+      '# Acceptance\n- [ ] PATH-001 Observe the playable result and retain runtime evidence.\n',
+    )
+    const completed = await completeDocumentDraft({
+      run: incomplete,
+      workspacePath: workspace,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [checklistPath],
+        resolvedFindingIds: [],
+      },
+      documentSet: 'checklist',
+    })
+
+    expect(completed).toMatchObject({
+      phase: 'RESOURCE_PREPARATION',
+      status: 'running',
+      blockedReason: undefined,
+      checklistRemediation: undefined,
+    })
+  })
+
+  test('stops automatic checklist remediation after three correction passes', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-checklist-limit-'))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+    const checklistPath = 'docs/acceptance/gameplay-checklist.md'
+    await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
+    await writeFile(join(workspace, checklistPath), '# Acceptance\nNo tasks yet.\n')
+    let run: DeliveryRun = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_DRAFTING' as const,
+    }
+
+    for (let pass = 1; pass <= 4; pass += 1) {
+      run = await completeDocumentDraft({
+        run,
+        workspacePath: workspace,
+        terminal: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: [checklistPath],
+          resolvedFindingIds: [],
+        },
+        documentSet: 'checklist',
+      })
+      expect(run.checklistRemediation?.attempt).toBe(pass)
+      expect(run.status).toBe(pass <= 3 ? 'running' : 'needs_action')
+    }
   })
 
   test('does not advance a READY review that contains a blocking finding', async () => {
@@ -272,7 +412,6 @@ describe('delivery workflow document ordering', () => {
       terminal: {
         workerType: 'document-author',
         status: 'completed',
-        revision: reconciled.revision.document,
         writtenPaths: ['docs/GDD.md'],
         resolvedFindingIds: [],
       },
@@ -290,7 +429,6 @@ describe('delivery workflow document ordering', () => {
       terminal: {
         workerType: 'document-author',
         status: 'completed',
-        revision: reconciled.revision.document,
         writtenPaths: ['docs/GDD.md'],
         resolvedFindingIds: findingIds,
       },
@@ -475,6 +613,251 @@ describe('delivery workflow document ordering', () => {
       contract: { documentSet: 'checklist' },
     })
     expect(recovered?.activeDispatch).toMatchObject({ status: 'running' })
+    await controller.dispatcher.stop(
+      recovered!.activeDispatch!.dispatchId,
+      'test cleanup',
+    )
+  })
+
+  test('document author contract uses server-computed revisions and accepts retained legacy output', () => {
+    const request: WorkerDispatchRequest = {
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'uncomputed',
+      allowedPaths: ['docs/'],
+      contract: { documentSet: 'foundation' },
+    }
+    const prompt = buildWorkerPrompt(request)
+    const terminalContract = prompt
+      .split('\n')
+      .find(line => line.startsWith('Terminal JSON contract'))
+
+    expect(terminalContract).not.toContain('"revision"')
+    expect(
+      parseWorkerTerminalResult({
+        workerType: 'document-author',
+        status: 'completed',
+        revision: request.runId,
+        writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        resolvedFindingIds: [],
+      }),
+    ).toEqual({
+      workerType: 'document-author',
+      status: 'completed',
+      writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+      resolvedFindingIds: [],
+    })
+  })
+
+  test('checklist author prompt requires canonical checkbox task lines', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'document-revision-1',
+      allowedPaths: ['docs/acceptance/'],
+      contract: {
+        documentSet: 'checklist',
+        checklistRemediation: {
+          sourceRevision: 'document-revision-1',
+          attempt: 1,
+          issues: ['The checklist has no machine-readable tasks.'],
+        },
+      },
+    })
+
+    expect(prompt).toContain(
+      '- [ ] <stable-id> <observable check and evidence expectation>',
+    )
+    expect(prompt).toContain(
+      'Tables may supplement these tasks but must not replace the checkbox task lines.',
+    )
+    expect(prompt).toContain('bounded checklist-structure remediation pass')
+  })
+
+  test('controller immediately dispatches a scoped checklist correction after structural rejection', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-checklist-controller-'))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+    const checklistPath = 'docs/acceptance/gameplay-checklist.md'
+    await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
+    await writeFile(
+      join(workspace, checklistPath),
+      '# Acceptance\n| ID | Check |\n| --- | --- |\n| PATH-001 | Observe the result. |\n',
+    )
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'foundation-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_DRAFTING' as const,
+    }
+    await createRunStore(workspace, run.ownerId).save(run)
+    const started: WorkerDispatchRequest[] = []
+    const workerPort: DeliveryWorkerPort = {
+      start: async request => {
+        started.push(request)
+        return {
+          sessionId: request.dispatchId!,
+          dispatchId: request.dispatchId!,
+        }
+      },
+      submit: async () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+      status: async dispatchId => {
+        const active = await createRunStore(workspace, run.ownerId).load()
+        if (active?.activeDispatch?.dispatchId !== dispatchId)
+          throw new Error('dispatch is not active')
+        return active.activeDispatch
+      },
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: run.ownerId,
+      workerPort,
+    })
+
+    await controller.ensureProgress(run)
+    const first = await controller.store.load()
+    await controller.dispatcher.completeDispatch(
+      first!.activeDispatch!.dispatchId,
+      {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [checklistPath],
+        resolvedFindingIds: [],
+      },
+    )
+
+    const remediating = await controller.store.load()
+    expect(started).toHaveLength(2)
+    expect(remediating).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      status: 'running',
+      checklistRemediation: { attempt: 1 },
+      activeDispatch: {
+        workerType: 'document-author',
+        status: 'running',
+        request: {
+          allowedPaths: ['docs/acceptance/'],
+          contract: {
+            documentSet: 'checklist',
+            checklistRemediation: { attempt: 1 },
+          },
+        },
+      },
+    })
+    await controller.dispatcher.stop(
+      remediating!.activeDispatch!.dispatchId,
+      'test cleanup',
+    )
+  })
+
+  test('retry salvages a valid retained document-author completion without reauthoring', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-author-recovery-'))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+    const running = transitionDeliveryRun(
+      createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+      }),
+      { type: 'documents_ready' },
+    )
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'dispatch-1',
+      runId: running.runId,
+      ownerId: running.ownerId,
+      projectId: running.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'uncomputed',
+      allowedPaths: ['docs/'],
+      contract: {
+        documentSet: 'foundation',
+        confirmedBriefDigest: running.confirmedBriefDigest,
+      },
+    }
+    const failed = {
+      ...running,
+      status: 'failed' as const,
+      blockedReason: 'worker terminal result does not match dispatch contract',
+      activeDispatch: {
+        dispatchId: request.dispatchId!,
+        workerType: request.workerType,
+        phase: request.phase,
+        revision: request.revision,
+        status: 'invalid' as const,
+        request,
+        terminalOutput: JSON.stringify({
+          workerType: 'document-author',
+          status: 'completed',
+          revision: running.runId,
+          writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+          resolvedFindingIds: [],
+        }),
+        startedAt: '2026-07-28T00:00:00.000Z',
+        finishedAt: '2026-07-28T00:01:00.000Z',
+      },
+    }
+    const retried = transitionDeliveryRun(failed, { type: 'retry' })
+    await createRunStore(workspace, retried.ownerId).save(retried)
+    const started: WorkerDispatchRequest[] = []
+    const workerPort: DeliveryWorkerPort = {
+      start: async nextRequest => {
+        started.push(nextRequest)
+        return {
+          sessionId: nextRequest.dispatchId!,
+          dispatchId: nextRequest.dispatchId!,
+        }
+      },
+      submit: async () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+      status: async dispatchId => ({
+        dispatchId,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'uncomputed',
+        status: 'running',
+        startedAt: '2026-07-28T00:01:00.000Z',
+      }),
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: retried.ownerId,
+      workerPort,
+    })
+
+    await controller.ensureProgress(retried)
+
+    const recovered = await controller.store.load()
+    expect(started).toHaveLength(1)
+    expect(started[0]?.workerType).toBe('document-reviewer')
+    expect(recovered).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      activeDispatch: { workerType: 'document-reviewer', status: 'running' },
+    })
     await controller.dispatcher.stop(
       recovered!.activeDispatch!.dispatchId,
       'test cleanup',

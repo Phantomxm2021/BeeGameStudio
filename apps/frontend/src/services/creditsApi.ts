@@ -179,18 +179,23 @@ const requestUsageEvents = (
 export const getUsageEvents = async (): Promise<BeeGameUsageEvent[]> =>
   (await requestUsageEvents()).map(toUsageEvent)
 
-export const getCreditSummary = (
+const requestUsageSummary = (
   projectId?: string,
-): Promise<BeeGameUsageSummary> =>
-  apiClient
-    .get<BeeGameUsageSummaryResponse>('/api/usage/summary', {
-      ...(projectId ? { params: { projectId } } : {}),
-    })
-    .then(response => ({
-      entriesCount: response.data.eventsCount,
-      consumedCredits: response.data.creditsMicro / 1_000_000,
-      weightedTokens: response.data.weightedTokens,
-    }))
+): Promise<BeeGameUsageSummaryResponse> =>
+  apiClient.get('/api/usage/summary', {
+    ...(projectId ? { params: { projectId } } : {}),
+  })
+
+export const getCreditSummary = async (
+  projectId?: string,
+): Promise<BeeGameUsageSummary> => {
+  const summary = await requestUsageSummary(projectId)
+  return {
+    entriesCount: summary.eventsCount,
+    consumedCredits: summary.creditsMicro / 1_000_000,
+    weightedTokens: summary.weightedTokens,
+  }
+}
 
 
 export const grantCredits = (

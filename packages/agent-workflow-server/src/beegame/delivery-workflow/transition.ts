@@ -207,6 +207,7 @@ export function transitionDeliveryRun(
         ...run,
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
+        checklistRemediation: undefined,
         updatedAt: timestamp(),
       }
       break
@@ -241,6 +242,7 @@ export function transitionDeliveryRun(
         },
         tasks: [],
         evidence: { documentReview: event.evidence },
+        checklistRemediation: undefined,
       }
       break
     case 'resource_preparation_ready':
@@ -253,6 +255,7 @@ export function transitionDeliveryRun(
         documentStep: 'CHECKLIST_REVIEW',
         status: 'running',
         blockedReason: undefined,
+        resourceRemediation: undefined,
       }
       break
     case 'resource_preparation_needs_action':

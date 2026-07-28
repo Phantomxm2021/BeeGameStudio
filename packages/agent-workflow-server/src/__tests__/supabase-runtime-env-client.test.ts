@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createSupabaseRuntimeEnvClientFromEnv } from '../supabase-runtime-env-client'
+import {
+  createSupabaseRuntimeEnvClientFromEnv,
+  isSupabaseRuntimeEnvAuthError,
+} from '../supabase-runtime-env-client'
 import { encryptSecret } from '../security/secret-crypto'
 
 describe('SupabaseRuntimeEnvClient', () => {
@@ -93,5 +96,26 @@ describe('SupabaseRuntimeEnvClient', () => {
       OPENAI_BASE_URL: 'https://llm.example/v1',
       OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
     })
+  })
+
+  test('preserves structured auth status for refresh decisions', async () => {
+    process.env.VITE_SUPABASE_URL = 'https://vite-project.supabase.co'
+    process.env.VITE_SUPABASE_ANON_KEY = 'vite-anon-key'
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ message: 'expired' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })) as unknown as typeof fetch
+
+    const client = createSupabaseRuntimeEnvClientFromEnv()
+    const error = await client
+      ?.loadRuntimeEnv({
+        userId: '00000000-0000-0000-0000-000000000001',
+        dataDir: '/workspace',
+        authToken: 'expired-token',
+      })
+      .catch(value => value)
+
+    expect(isSupabaseRuntimeEnvAuthError(error)).toBe(true)
   })
 })

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import {
   registerBeeGameSessionRoutes,
+  resolveValidRequestAccessToken,
   SESSION_COOKIE_NAME,
 } from '../auth/session-routes'
 import { encryptSecret } from '../security/secret-crypto'
@@ -71,6 +72,43 @@ function supabaseFetch(userId = 'user-1') {
 }
 
 describe('HttpOnly session routes', () => {
+  it('prefers a refreshed HttpOnly session token over a stale bearer token', async () => {
+    const request = new Request('http://localhost/api/projects/project-1/workflow', {
+      headers: { authorization: 'Bearer expired-bearer-token' },
+    })
+    const token = await resolveValidRequestAccessToken(request, {
+      getAccessToken: () => undefined,
+      getValidAccessToken: async () => 'refreshed-session-token',
+    })
+
+    expect(token).toBe('refreshed-session-token')
+  })
+
+  it('falls back to a bearer token when no refreshable session exists', async () => {
+    const request = new Request('http://localhost/api/projects/project-1/workflow', {
+      headers: { authorization: 'Bearer current-bearer-token' },
+    })
+
+    expect(await resolveValidRequestAccessToken(request)).toBe(
+      'current-bearer-token',
+    )
+  })
+
+  it('does not reuse a stale bearer token when a cookie session cannot refresh', async () => {
+    const request = new Request('http://localhost/api/projects/project-1/workflow', {
+      headers: {
+        authorization: 'Bearer expired-bearer-token',
+        cookie: `${SESSION_COOKIE_NAME}=session-1`,
+      },
+    })
+    const token = await resolveValidRequestAccessToken(request, {
+      getAccessToken: () => undefined,
+      getValidAccessToken: async () => undefined,
+    })
+
+    expect(token).toBeUndefined()
+  })
+
   it('sets a Secure HttpOnly Lax root cookie and refreshes from the cookie', async () => {
     const app = createApp(supabaseFetch())
     const sessionResponse = await app.request('/api/auth/session', {
@@ -247,14 +285,14 @@ describe('HttpOnly session routes', () => {
     expect(await refreshResponse.json()).toMatchObject({ authenticated: true })
   })
 
-  it('refreshes an expired access token for a background workflow dispatch', async () => {
+  it('proactively refreshes a near-expiry token for a background workflow dispatch', async () => {
     const storePath = await createSessionStorePath()
     process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString('base64')
     const sessionId = 'background-workflow-session'
     const record = {
       accessToken: 'expired-access-token',
       refreshToken: 'refresh-token',
-      expiresAt: Date.now() - 1,
+      expiresAt: Date.now() + 20_000,
       sessionExpiresAt: Date.now() + 60_000,
       user: { id: 'user-1', role: 'viewer' },
     }
@@ -275,6 +313,11 @@ describe('HttpOnly session routes', () => {
 
     expect(await auth?.getValidAccessToken(request)).toBe('refreshed-access-token')
     expect(auth?.getAccessToken(request)).toBe('refreshed-access-token')
+    const credential = auth?.getCredential?.(request)
+    expect(credential).toBeDefined()
+    expect(
+      await credential?.getValidAccessToken({ forceRefresh: true }),
+    ).toBe('refreshed-access-token')
   })
 
   it('preserves the cookie session when the auth provider refresh is temporarily unavailable', async () => {

@@ -12,6 +12,7 @@ import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTransl
 import { MessageScrollerItem } from '../../ui/message-scroller';
 import { Marker, MarkerContent, MarkerIcon } from '../../ui/marker';
 import { WorkflowCard } from '../WorkflowCard';
+import type { WorkflowCardPayload } from '../../../types/message';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -24,8 +25,6 @@ type BeeGameCollaborationFeedProps = {
     onEditMessage?: (message: ChatDisplayMessage) => void;
     onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
 };
-
-const RUNTIME_ACTIVITY_MESSAGE_TIMESTAMP = 0;
 
 type ToolFeedMessage = ChatDisplayMessage & {
     tool?: string;
@@ -47,6 +46,7 @@ type NormalizedTool = {
     output: string;
     artifactId?: string;
     kind: ToolKind;
+    timestamp: number;
 };
 
 type ToolKind = 'search' | 'read' | 'write' | 'edit' | 'bash' | 'subagent' | 'generic';
@@ -137,6 +137,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         output,
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind: getToolKind(name),
+        timestamp: Number(message.timestamp || 0),
     };
 };
 
@@ -170,7 +171,10 @@ type FeedEntry =
     | { kind: 'thinking'; message: ChatDisplayMessage }
     | { kind: 'context'; message: ChatDisplayMessage }
     | { kind: 'agent'; message: ChatDisplayMessage; tools: NormalizedTool[] }
-    | { kind: 'tools'; id: string; tools: NormalizedTool[] };
+    | { kind: 'tools'; id: string; tools: NormalizedTool[] }
+    | { kind: 'workflow'; workflow: WorkflowCardPayload };
+
+const FEED_ITEM_CLASS_NAME = 'relative z-10 mb-4 min-w-0 max-w-full pl-12';
 
 const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     const entries: FeedEntry[] = [];
@@ -215,6 +219,41 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     return entries;
 };
 
+const feedEntryTimestamp = (entry: FeedEntry): number => {
+    if (entry.kind === 'workflow') {
+        const timestamp = Date.parse(entry.workflow.createdAt || '');
+        return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+    }
+    if (entry.kind === 'tools') return entry.tools[0]?.timestamp || Number.POSITIVE_INFINITY;
+    return Number(entry.message.timestamp || Number.POSITIVE_INFINITY);
+};
+
+const insertWorkflowEntry = (
+    entries: FeedEntry[],
+    workflow?: WorkflowCardPayload,
+): FeedEntry[] => {
+    if (!workflow) return entries;
+    const workflowTimestamp = Date.parse(workflow.createdAt || '');
+    if (!Number.isFinite(workflowTimestamp)) {
+        const firstUserIndex = entries.findIndex(entry => entry.kind === 'user');
+        const insertionIndex = firstUserIndex >= 0 ? firstUserIndex + 1 : 0;
+        return [
+            ...entries.slice(0, insertionIndex),
+            { kind: 'workflow', workflow },
+            ...entries.slice(insertionIndex),
+        ];
+    }
+    const laterEntryIndex = entries.findIndex(
+        entry => feedEntryTimestamp(entry) > workflowTimestamp,
+    );
+    const insertionIndex = laterEntryIndex >= 0 ? laterEntryIndex : entries.length;
+    return [
+        ...entries.slice(0, insertionIndex),
+        { kind: 'workflow', workflow },
+        ...entries.slice(insertionIndex),
+    ];
+};
+
 export const BeeGameCollaborationFeed = memo(({
     messages,
     projectStatus,
@@ -222,29 +261,33 @@ export const BeeGameCollaborationFeed = memo(({
     onEditMessage,
     onWorkflowAction,
 }: BeeGameCollaborationFeedProps) => {
-    const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
-    const hasThinkingEntry = entries.some((entry) => entry.kind === 'thinking');
     const workflow = getWorkflowControlState(projectStatus);
     const workflowRunning = workflow?.status === 'running';
-    const showRuntimeActivity = workflowRunning && !hasThinkingEntry;
+    const entries = useMemo(
+        () => insertWorkflowEntry(buildFeedEntries(messages), workflow),
+        [messages, workflow],
+    );
+    const visibleEntries = workflowRunning
+        ? entries
+        : entries.filter(entry => entry.kind !== 'thinking');
 
     return (
         <>
-            {workflow ? (
-                <MessageScrollerItem
-                    messageId={`beegame-workflow-${workflow.runId || 'current'}`}
-                    className="relative z-10 mb-4 pl-12"
-                >
-                    <WorkflowCard workflow={workflow} onAction={onWorkflowAction} />
-                </MessageScrollerItem>
-            ) : null}
-            {entries.map((entry) => (
-                entry.kind === 'user' ? (
+            {visibleEntries.map((entry) => (
+                entry.kind === 'workflow' ? (
+                    <MessageScrollerItem
+                        key={`beegame-workflow-${entry.workflow.runId || 'current'}`}
+                        messageId={`beegame-workflow-${entry.workflow.runId || 'current'}`}
+                        className={FEED_ITEM_CLASS_NAME}
+                    >
+                        <WorkflowCard workflow={entry.workflow} onAction={onWorkflowAction} />
+                    </MessageScrollerItem>
+                ) : entry.kind === 'user' ? (
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-4 pl-12"
+                        className={FEED_ITEM_CLASS_NAME}
                     >
                         <UserMessageCard
                             message={entry.message}
@@ -256,7 +299,7 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-4 pl-12"
+                        className={FEED_ITEM_CLASS_NAME}
                     >
                         <ThinkingStatusCard
                             message={entry.message}
@@ -268,7 +311,7 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-4 pl-12"
+                        className={FEED_ITEM_CLASS_NAME}
                     >
                         <ContextUpdateSeparator text={text} />
                     </MessageScrollerItem>
@@ -276,7 +319,7 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-4 pl-12"
+                        className={FEED_ITEM_CLASS_NAME}
                     >
                         <AgentFeedGroup
                             message={entry.message}
@@ -289,31 +332,12 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.id}
                         messageId={entry.id}
-                        className="relative z-10 mb-4 pl-12"
+                        className={FEED_ITEM_CLASS_NAME}
                     >
                         <ToolGroup tools={entry.tools} text={text} lang={lang} />
                     </MessageScrollerItem>
                 )
             ))}
-            {showRuntimeActivity ? (
-                <MessageScrollerItem
-                    messageId="beegame-runtime-activity"
-                    className="relative z-10 mb-4 pl-12"
-                >
-                    <ThinkingStatusCard
-                        message={{
-                            id: 'beegame-runtime-activity',
-                            sender: 'system',
-                            content: text.thinkingActive,
-                            timestamp: RUNTIME_ACTIVITY_MESSAGE_TIMESTAMP,
-                            type: 'thought',
-                            taskKind: 'assistant_thinking',
-                        }}
-                        text={text}
-                        isRunning
-                    />
-                </MessageScrollerItem>
-            ) : null}
         </>
     );
 });
@@ -340,6 +364,8 @@ function ThinkingStatusCard({
     const elapsedMs = Math.max(0, now - Number(message.timestamp || now));
     const isStalled = isRunning && elapsedMs >= 60000;
     const label = isStalled ? text.thinkingStalled : text.thinkingActive;
+
+    if (!isRunning) return null;
 
     return (
         <section
@@ -378,7 +404,7 @@ function UserMessageCard({
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
-            className="w-full max-w-[46rem] rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
+            className="w-full min-w-0 max-w-[46rem] overflow-hidden rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
         >
             <div className="group/message relative">
                 <MarkdownRenderer
@@ -417,7 +443,7 @@ function AgentFeedGroup({
     return (
         <div
             data-testid={`beegame-agent-feed-group-${message.id}`}
-            className="max-w-[46rem]"
+            className="w-full min-w-0 max-w-[46rem]"
         >
             <AgentResponseBlock
                 message={message}
@@ -438,7 +464,7 @@ function AgentResponseBlock({
     lang: Language;
 }) {
     return (
-        <section data-testid={`beegame-agent-message-${message.id}`} className="beegame-ai-prose w-full px-0 py-0 text-zinc-100">
+        <section data-testid={`beegame-agent-message-${message.id}`} className="beegame-ai-prose w-full min-w-0 max-w-full overflow-hidden px-0 py-0 text-zinc-100">
             <MarkdownRenderer
                 content={message.content}
                 isUser={false}

@@ -24,6 +24,7 @@ import {
   completeImplementationTask,
   startNextImplementationTask,
 } from './implementation-stage'
+import { applyImplementationResourceBindings } from './resource-integration'
 import {
   computeDocumentRevision,
   computeResourceRevision,
@@ -54,13 +55,17 @@ import type {
   DispatchRecord,
   WorkerDispatchRequest,
 } from './types'
-import type { WorkerTerminalResult } from './worker-contracts'
+import {
+  parseWorkerTerminalResult,
+  type WorkerTerminalResult,
+} from './worker-contracts'
 import type { NativeResourceLibraryEvidenceState } from '../native-resource-library-evidence'
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
   ownerId: string
   workerPort: DeliveryWorkerPort
+  handoffRecoveryGraceMs?: number
   getResourceLibraryEvidence?: (
     runId: string,
   ) => NativeResourceLibraryEvidenceState
@@ -68,6 +73,7 @@ export function createDeliveryWorkflowController(input: {
   const store = createRunStore(input.workspacePath, input.ownerId)
   let dispatcher: ReturnType<typeof createDeliveryDispatcher>
   let controllerTail: Promise<void> = Promise.resolve()
+  const handoffRecoveryGraceMs = input.handoffRecoveryGraceMs ?? 1_000
 
   function serialize<T>(operation: () => Promise<T>): Promise<T> {
     const previous = controllerTail
@@ -90,7 +96,7 @@ export function createDeliveryWorkflowController(input: {
     run: DeliveryRun,
     eventType: string,
   ): Promise<DeliveryRun> {
-    return store.commit(run, {
+    const committed = await store.commit(run, {
       runId: run.runId,
       type: eventType,
       phase: run.phase,
@@ -98,6 +104,32 @@ export function createDeliveryWorkflowController(input: {
       revision: run.revision,
       activeTaskId: run.activeTaskId,
     })
+    scheduleOrphanedHandoffRecovery(committed)
+    return committed
+  }
+
+  function scheduleOrphanedHandoffRecovery(run: DeliveryRun): void {
+    if (
+      handoffRecoveryGraceMs < 0 ||
+      run.status !== 'running' ||
+      run.activeDispatch
+    )
+      return
+    const handoffUpdatedAt = run.updatedAt
+    const timer = setTimeout(() => {
+      void serialize(async () => {
+        const current = await store.load()
+        if (
+          !current ||
+          current.status !== 'running' ||
+          current.activeDispatch ||
+          current.updatedAt !== handoffUpdatedAt
+        )
+          return
+        await resumeUnlocked(current)
+      }).catch(() => undefined)
+    }, handoffRecoveryGraceMs)
+    timer.unref()
   }
 
   async function contractFactsFor(run: DeliveryRun): Promise<
@@ -201,6 +233,10 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? {}
             : { documentReview: next.evidence.documentReview },
+        checklistRemediation:
+          result.classification === 'documents_required'
+            ? undefined
+            : next.checklistRemediation,
         blockedReason: undefined,
       }
       // A change is a new revision of the same delivery run. Creating a child
@@ -252,7 +288,11 @@ export function createDeliveryWorkflowController(input: {
       )
       if (observedResourceEvidence)
         next = { ...next, resourceEvidence: observedResourceEvidence }
-      if (next.blockedReason && next.status === 'running') {
+      if (
+        next.blockedReason &&
+        next.status === 'running' &&
+        !(documentSet === 'checklist' && next.checklistRemediation)
+      ) {
         next = {
           ...next,
           status: 'needs_action',
@@ -262,7 +302,9 @@ export function createDeliveryWorkflowController(input: {
       next = await persist(
         next,
         next.status === 'running'
-          ? 'phase.entered'
+          ? documentSet === 'checklist' && next.checklistRemediation
+            ? 'document.checklist.remediation_requested'
+            : 'phase.entered'
           : 'document.draft.incomplete',
       )
       await resumeUnlocked(next)
@@ -314,21 +356,21 @@ export function createDeliveryWorkflowController(input: {
       const observedResourceEvidence = input.getResourceLibraryEvidence?.(
         next.runId,
       )
+      const resourceEvidence =
+        next.resourceEvidence?.state === 'current'
+          ? next.resourceEvidence
+          : observedResourceEvidence
       const resourceAudit = auditResourcesForPreparation({
         workspacePath: input.workspacePath,
         confirmedBriefContext: next.confirmedBriefContext,
-        ...(observedResourceEvidence
-          ? { resourceEvidence: observedResourceEvidence }
-          : {}),
+        ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       next = await completeResourcePreparation({
         run: { ...next, phase: 'RESOURCE_PREPARATION' },
         workspacePath: input.workspacePath,
         terminal: result,
         audit: resourceAudit,
-        ...(observedResourceEvidence
-          ? { resourceEvidence: observedResourceEvidence }
-          : {}),
+        ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       next = await persist(
         next,
@@ -392,15 +434,6 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const currentRevision = await computeWorkspaceRevision(
-        input.workspacePath,
-      )
-      next = completeImplementationTask({
-        run: { ...next, phase: 'IMPLEMENTATION', activeTaskId: record.taskId },
-        workspacePath: input.workspacePath,
-        terminal: result,
-        currentRevision,
-      })
       if (
         result.status === 'completed' &&
         result.changedPaths.some(path => isCanonicalDocumentPath(path))
@@ -411,14 +444,45 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
+      const activeTask = next.tasks.find(task => task.id === record.taskId)
+      let completionFailureReason: string | undefined
+      if (result.status === 'completed' && activeTask) {
+        try {
+          await applyImplementationResourceBindings({
+            workspacePath: input.workspacePath,
+            task: activeTask,
+            terminal: result,
+          })
+        } catch (error) {
+          completionFailureReason =
+            error instanceof Error ? error.message : String(error)
+        }
+      }
+      const currentRevision = await computeWorkspaceRevision(
+        input.workspacePath,
+      )
+      next = completeImplementationTask({
+        run: { ...next, phase: 'IMPLEMENTATION', activeTaskId: record.taskId },
+        workspacePath: input.workspacePath,
+        terminal: result,
+        currentRevision,
+        ...(completionFailureReason ? { completionFailureReason } : {}),
+      })
       await persist(
         next,
         next.status === 'failed' ? 'task.failed' : 'task.completed',
       )
       if (next.status !== 'running') return
       if (next.tasks.every(task => task.status === 'completed')) {
-        next = await persist(enterImplementationAudit(next), 'phase.entered')
         const auditFacts = await contractFactsFor(next)
+        if (!auditFacts.resourceReadiness.integrationReady) {
+          await persist(
+            resourceIntegrationBlocked(next, auditFacts.resourceReadiness),
+            'resource.integration.needs_action',
+          )
+          return
+        }
+        next = await persist(enterImplementationAudit(next), 'phase.entered')
         await startImplementationAudit({
           run: next,
           workspacePath: input.workspacePath,
@@ -426,6 +490,7 @@ export function createDeliveryWorkflowController(input: {
           expectedChecklistIds: auditFacts.checklistIds,
           expectedImportIds: auditFacts.importIds,
           expectedCompositionIds: auditFacts.compositionIds,
+          resourceReadiness: auditFacts.resourceReadiness,
         })
       } else {
         await startNextImplementationTask({
@@ -580,6 +645,21 @@ export function createDeliveryWorkflowController(input: {
     }
   }
 
+  function resourceIntegrationBlocked(
+    run: DeliveryRun,
+    readiness: ResourceDeliveryReadiness,
+  ): DeliveryRun {
+    return {
+      ...run,
+      status: 'needs_action',
+      activeDispatch: undefined,
+      blockedReason: [...readiness.issues, ...readiness.integrationIssues].join(
+        '; ',
+      ),
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
   async function resourceRevisionChanged(run: DeliveryRun): Promise<boolean> {
     if (!run.revision.resource) return false
     const current = await computeResourceRevision(
@@ -672,6 +752,7 @@ export function createDeliveryWorkflowController(input: {
       },
       tasks: [],
       evidence: {},
+      checklistRemediation: undefined,
     }
     await persist(invalidated, 'document.revision.invalidated')
     await startDocumentStage({
@@ -688,6 +769,33 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.activeDispatch?.status === 'running') return
+    if (
+      run.activeDispatch?.status === 'invalid' &&
+      run.activeDispatch.workerType === 'document-author' &&
+      run.activeDispatch.terminalOutput &&
+      run.activeDispatch.request?.runId === run.runId &&
+      run.activeDispatch.request.ownerId === run.ownerId &&
+      run.activeDispatch.request.projectId === run.projectId &&
+      run.activeDispatch.request.workspacePath === input.workspacePath &&
+      run.activeDispatch.request.phase === run.phase &&
+      run.activeDispatch.request.workerType === 'document-author'
+    ) {
+      let recovered: WorkerTerminalResult | undefined
+      try {
+        recovered = parseWorkerTerminalResult(run.activeDispatch.terminalOutput)
+      } catch {
+        // The retained result is not a valid document-author completion.
+        // Continue through the normal retry path and start a fresh worker.
+      }
+      if (recovered?.workerType === 'document-author') {
+        await handleTerminalUnlocked(
+          run.activeDispatch,
+          recovered,
+          run.activeDispatch.request,
+        )
+        return
+      }
+    }
     if (run.changeRequest && !run.changeRoute && run.phase === 'DELIVERY') {
       await dispatcher.dispatch(
         buildChangeImpactDispatch(run, input.workspacePath, run.changeRequest),
@@ -869,6 +977,13 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       const auditFacts = await contractFactsFor(run)
+      if (!auditFacts.resourceReadiness.integrationReady) {
+        await persist(
+          resourceIntegrationBlocked(run, auditFacts.resourceReadiness),
+          'resource.integration.needs_action',
+        )
+        return
+      }
       await startImplementationAudit({
         run,
         workspacePath: input.workspacePath,
@@ -876,6 +991,7 @@ export function createDeliveryWorkflowController(input: {
         expectedChecklistIds: auditFacts.checklistIds,
         expectedImportIds: auditFacts.importIds,
         expectedCompositionIds: auditFacts.compositionIds,
+        resourceReadiness: auditFacts.resourceReadiness,
       })
       return
     }

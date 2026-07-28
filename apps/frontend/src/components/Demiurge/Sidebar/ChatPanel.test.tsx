@@ -380,7 +380,7 @@ describe('ChatPanel approval bar', () => {
                 phase: 'running',
                 blocked: false,
                 next_action: 'running',
-            } as any,
+            },
         });
 
         const thinkingMessage = screen.getByTestId('beegame-thinking-message-thinking_1');
@@ -388,7 +388,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByText('Thinking...')).toHaveClass('shimmer', 'text-muted-foreground');
     });
 
-    it('shows runtime activity after entering a running task even before a thinking event arrives', () => {
+    it('does not synthesize a permanent thinking message for a running workflow', () => {
         renderChatPanel({
             actionReview: undefined,
             pendingReviews: [],
@@ -399,12 +399,71 @@ describe('ChatPanel approval bar', () => {
                 phase: 'running',
                 blocked: false,
                 next_action: 'Claude Code is processing',
-            } as any,
+            },
         });
 
-        expect(screen.getByTestId('beegame-thinking-message-beegame-runtime-activity')).toBeInTheDocument();
-        expect(screen.getByText('Thinking...')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-thinking-message-beegame-runtime-activity')).not.toBeInTheDocument();
+        expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
         expect(screen.getByTestId('beegame-workflow-card-proj_1').closest('[data-message-id]')).toHaveClass('pl-12');
+    });
+
+    it('places the workflow card in timestamp order after its triggering user message', () => {
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'user_before_run', sender: 'user', content: '开始构建', timestamp: 1_000 },
+                { id: 'agent_after_run', sender: 'beegame', content: '开始处理。', timestamp: 2_000 },
+            ],
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+                workflow: {
+                    runId: 'run_timeline',
+                    status: 'running',
+                    currentPhase: 'DOCUMENT_DRAFTING',
+                    createdAt: '1970-01-01T00:00:01.500Z',
+                },
+            },
+        });
+
+        const user = document.querySelector('[data-message-id="user_before_run"]')!;
+        const workflow = document.querySelector('[data-message-id="beegame-workflow-run_timeline"]')!;
+        const agent = document.querySelector('[data-message-id="agent_after_run"]')!;
+        expect(user.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(workflow.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('hides a stale thinking entry after the workflow fails', () => {
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [{
+                id: 'stale_thinking',
+                sender: 'system',
+                content: 'Thinking...',
+                timestamp: Date.now(),
+                type: 'thought',
+                taskKind: 'assistant_thinking',
+            }],
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'paused',
+                blocked: true,
+                workflow: {
+                    runId: 'run_failed',
+                    status: 'failed',
+                    currentPhase: 'DOCUMENT_REVIEW',
+                    updatedAt: '2026-07-28T00:01:00.000Z',
+                },
+            },
+        });
+
+        expect(screen.queryByTestId('beegame-thinking-message-stale_thinking')).not.toBeInTheDocument();
+        expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
     });
 
     it('renders BeeGame messages as a compact feed with tools after their message', async () => {
@@ -507,6 +566,11 @@ describe('ChatPanel approval bar', () => {
         expect(document.querySelector('[data-message-id="m_user"]')).toHaveClass('pl-12');
         expect(document.querySelector('[data-message-id="m_agent"]')).toBeInTheDocument();
         expect(document.querySelector('[data-message-id="m_agent"]')).toHaveAttribute('data-scroll-anchor', 'false');
+        const userFeedItem = document.querySelector('[data-message-id="m_user"]')!;
+        const workflowFeedItem = document.querySelector('[data-message-id="beegame-workflow-proj_1"]')!;
+        const agentFeedItem = document.querySelector('[data-message-id="m_agent"]')!;
+        expect(userFeedItem.compareDocumentPosition(workflowFeedItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(workflowFeedItem.compareDocumentPosition(agentFeedItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
@@ -546,6 +610,86 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('docs/PLAYABLE_SPEC.md')).not.toBeInTheDocument();
         expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
         expect(screen.queryByText('Build passed')).not.toBeInTheDocument();
+    });
+
+    it('keeps oversized messages inside the dedicated scroll viewport', () => {
+        const scrollContainerRef = createRef<HTMLDivElement>();
+        const uninterruptedContent = 'x'.repeat(12_000);
+
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            scrollContainerRef,
+            messages: [
+                {
+                    id: 'm_oversized_user',
+                    sender: 'user',
+                    content: uninterruptedContent,
+                    timestamp: 1,
+                },
+                {
+                    id: 'm_oversized_agent',
+                    sender: 'beegame',
+                    content: `\`\`\`text\n${uninterruptedContent}\n\`\`\``,
+                    timestamp: 2,
+                },
+            ],
+        });
+
+        expect(screen.getByTestId('beegame-chat-panel')).toHaveClass(
+            'min-h-0',
+            'min-w-0',
+            'overflow-hidden',
+        );
+        const scroller = screen.getByTestId('beegame-message-scroller');
+        const viewport = screen.getByTestId('beegame-message-scroller-viewport');
+        const content = screen.getByTestId('beegame-message-scroller-content');
+        expect(scroller).toHaveClass('min-w-0', 'overflow-hidden');
+        expect(viewport).toBe(scrollContainerRef.current);
+        expect(viewport).toHaveClass('min-h-0', 'overflow-y-auto', 'overflow-x-hidden');
+        expect(content).toHaveClass('min-w-0', 'max-w-full');
+
+        const userItem = document.querySelector('[data-message-id="m_oversized_user"]');
+        const agentItem = document.querySelector('[data-message-id="m_oversized_agent"]');
+        expect(userItem).toHaveClass('min-w-0', 'max-w-full');
+        expect(agentItem).toHaveClass('min-w-0', 'max-w-full');
+        expect(screen.getByTestId('beegame-user-message-m_oversized_user')).toHaveClass(
+            'min-w-0',
+            'overflow-hidden',
+        );
+        expect(screen.getByTestId('beegame-agent-message-m_oversized_agent')).toHaveClass(
+            'min-w-0',
+            'max-w-full',
+            'overflow-hidden',
+        );
+        expect(screen.getByTestId('beegame-agent-message-m_oversized_agent').querySelector('pre')).toHaveClass(
+            'max-w-full',
+            'overflow-x-auto',
+        );
+    });
+
+    it('does not render passive status copy above the composer', () => {
+        const onCancelEdit = vi.fn();
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            chatInput: 'updated request',
+            editingMessageId: 'm_editing',
+            onCancelEdit,
+            waitingApproval: {
+                kind: 'review',
+                isWaitingStatus: true,
+                isBlockingChat: true,
+                message: 'Waiting for the current workflow stage to finish',
+                placeholder: 'Workflow is running',
+            },
+        });
+
+        expect(screen.queryByText('Waiting for the current workflow stage to finish')).not.toBeInTheDocument();
+        expect(screen.queryByText('Editing message')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-editing-message-banner')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByTestId('beegame-cancel-edit-button'));
+        expect(onCancelEdit).toHaveBeenCalledOnce();
     });
 
     it('hides the BeeGame message scroller button when already at the latest message', () => {

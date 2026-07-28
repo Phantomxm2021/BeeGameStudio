@@ -12,6 +12,8 @@ import {
   serializeQueryEngineError,
 } from '../beegame/query-engine-worker-protocol'
 import type { RecordUsageResult, Usage } from '../usage-billing'
+import { getObservedNativeResourceLibraryEvidence } from '../beegame/native-resource-library-evidence'
+import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -82,6 +84,68 @@ describe('BeeGame session runtime resilience', () => {
     })
   })
 
+  test('records native Resource Library provenance from workflow workers', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-evidence-'))
+    const workspacePath = join(root, 'workspace')
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'resource-tool-1',
+                  name: 'ResourceLibrary',
+                  input: { action: 'inspect_project' },
+                },
+              ],
+            },
+          })
+          input.onMessage({
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'resource-tool-1',
+                  content: JSON.stringify({ result: 'inspected' }),
+                },
+              ],
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'resource-preparer',
+    })
+
+    await manager.send(session.id, 'prepare resources')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      getObservedNativeResourceLibraryEvidence({
+        dataRoot: root,
+        sessionId: session.id,
+        workspacePath,
+      }),
+    ).toMatchObject({
+      state: 'current',
+      actions: ['inspect_project'],
+      failedActions: [],
+    })
+    manager.dispose()
+  })
+
   test('restarts once when a retryable worker failure precedes all runtime messages', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-runtime-retry-'))
     let starts = 0
@@ -114,6 +178,49 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
 
     expect(starts).toBe(2)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
+    manager.dispose()
+  })
+
+  test('refreshes workflow credentials once when runtime env rejects an expired token', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-runtime-auth-refresh-'))
+    const observedTokens: Array<string | undefined> = []
+    const refreshOptions: Array<{ forceRefresh?: boolean } | undefined> = []
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async () => undefined,
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(
+      runner,
+      root,
+      async (_dataRoot, _userId, authToken) => {
+        observedTokens.push(authToken)
+        if (authToken === 'expired-token') {
+          throw new SupabaseRuntimeEnvRequestError(401, 'unauthorized')
+        }
+        return { OPENAI_API_KEY: 'runtime-key' }
+      },
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      authToken: 'expired-token',
+      workflowWorker: true,
+      getValidAuthToken: options => {
+        refreshOptions.push(options)
+        return 'refreshed-token'
+      },
+    })
+
+    await manager.send(session.id, 'continue')
+    await waitForIdle(manager, session.id)
+
+    expect(observedTokens).toEqual(['expired-token', 'refreshed-token'])
+    expect(refreshOptions).toEqual([{ forceRefresh: true }])
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)

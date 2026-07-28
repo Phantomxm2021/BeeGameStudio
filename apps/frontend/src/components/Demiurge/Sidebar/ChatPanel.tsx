@@ -316,7 +316,6 @@ export const ChatPanel = memo(({
         ? activeComposerReview
         : undefined;
     const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview && !activeBeeGamePermissionReview);
-    const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
     const canSubmitComposer = Boolean(chatInput.trim() || attachments.length > 0);
     const messageOutlineItems = useMemo(
@@ -334,7 +333,7 @@ export const ChatPanel = memo(({
         if (nextAttachments.length > 0) onAddAttachments(nextAttachments);
     };
 
-    const panelClassName = 'flex h-full flex-col bg-transparent';
+    const panelClassName = 'flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-transparent';
     const composerShellClassName = 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl';
     const normalComposerClassName = 'glass-control group flex min-h-[60px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl';
     const textareaClassName = 'type-input scrollbar-hide w-full bg-transparent px-5 py-3 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[56px] max-h-[150px] resize-none overflow-y-auto outline-none';
@@ -353,10 +352,12 @@ export const ChatPanel = memo(({
                 >
                     <MessageScroller
                         data-testid="beegame-message-scroller"
+                        className="min-w-0 overflow-hidden"
                     >
                         <MessageScrollerViewport
                             ref={scrollContainerRef}
                             data-testid="beegame-message-scroller-viewport"
+                            className="w-full min-w-0 overflow-x-hidden"
                             onScroll={(event) => {
                                 if (
                                     event.currentTarget.scrollTop <= 48 &&
@@ -369,6 +370,7 @@ export const ChatPanel = memo(({
                         >
                             <MessageScrollerContent
                                 data-testid="beegame-message-scroller-content"
+                                className="w-full min-w-0 max-w-full"
                             >
                                 {hasOlderHistory ? (
                                     <div className="flex justify-center pb-3">
@@ -460,27 +462,6 @@ export const ChatPanel = memo(({
                 </MessageScrollerProvider>
             }
             <div className={composerShellClassName}>
-                {editingMessageId ? (
-                    <div
-                        data-testid="beegame-editing-message-banner"
-                        className="mb-3 flex items-center justify-between rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.055] px-3 py-2 text-zinc-300"
-                    >
-                        <span className="type-footnote">Editing message</span>
-                        <button
-                            type="button"
-                            aria-label="Cancel edit"
-                            onClick={onCancelEdit}
-                            className="type-footnote rounded-lg px-2 py-1 text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                ) : null}
-                {shouldShowWaitingBanner && (
-                    <div className="glass-control type-footnote mb-3 rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-zinc-300 backdrop-blur-2xl">
-                        {waitingApproval.message}
-                    </div>
-                )}
                 {activeBeeGamePermissionReview ? (
                     <BeeGamePermissionPanel
                         review={activeBeeGamePermissionReview}
@@ -633,15 +614,29 @@ export const ChatPanel = memo(({
                                     className="flex items-center justify-between px-3 pb-2 pt-0"
                                     data-testid="beegame-chat-toolbar"
                                 >
-                                    <label
-                                        htmlFor="beegame-chat-attachment-upload"
-                                        aria-label={attachFileLabel}
-                                        title={attachFileLabel}
-                                        className={`flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
-                                        data-testid="beegame-chat-attach-button"
-                                    >
-                                        <FaPaperclip className="h-4 w-4" />
-                                    </label>
+                                    <div className="flex items-center gap-1">
+                                        <label
+                                            htmlFor="beegame-chat-attachment-upload"
+                                            aria-label={attachFileLabel}
+                                            title={attachFileLabel}
+                                            className={`flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
+                                            data-testid="beegame-chat-attach-button"
+                                        >
+                                            <FaPaperclip className="h-4 w-4" />
+                                        </label>
+                                        {editingMessageId ? (
+                                            <button
+                                                type="button"
+                                                aria-label="Cancel edit"
+                                                title="Cancel edit"
+                                                onClick={onCancelEdit}
+                                                className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-100"
+                                                data-testid="beegame-cancel-edit-button"
+                                            >
+                                                <X className="h-4 w-4" aria-hidden="true" />
+                                            </button>
+                                        ) : null}
+                                    </div>
                                     <div className="flex items-center gap-3">
                                         <button
                                             onClick={isLoading ? () => void onStop?.() : onSend}

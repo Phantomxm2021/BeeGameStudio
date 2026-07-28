@@ -97,6 +97,7 @@ export function completeImplementationTask(input: {
     { workerType: 'implementation-worker' }
   >
   currentRevision: string
+  completionFailureReason?: string
 }): DeliveryRun {
   if (input.run.phase !== 'IMPLEMENTATION')
     throw new Error('implementation is not the active phase')
@@ -105,6 +106,12 @@ export function completeImplementationTask(input: {
   )
   if (!task || input.run.activeTaskId !== task.id)
     throw new Error('implementation terminal does not match the active task')
+  if (input.completionFailureReason)
+    return transitionDeliveryRun(input.run, {
+      type: 'task_failed',
+      taskId: task.id,
+      reason: input.completionFailureReason,
+    })
   const outOfScope = input.terminal.changedPaths.filter(
     path => !pathAllowed(path, task.allowedPaths),
   )

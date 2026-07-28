@@ -102,7 +102,12 @@ import {
   createPreviewCapabilityManager,
   type PreviewCapabilityManager,
 } from './auth/preview-capability'
-import { registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes } from './auth/session-routes'
+import {
+  registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes,
+  hasBeeGameSessionCookie,
+  resolveValidRequestAccessToken,
+  type BeeGameSessionCredential,
+} from './auth/session-routes'
 import {
   DashboardRepository,
   ProjectQuotaExceededError,
@@ -426,12 +431,18 @@ export function createAgentWorkflowApp(
   const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
   const requestUserResolver = sessionAuth
     ? async (request: Request) => {
-        const accessToken = await sessionAuth.getValidAccessToken(request)
-        if (!accessToken) return baseUserResolver?.(request)
+        const accessToken = await resolveValidRequestAccessToken(
+          request,
+          sessionAuth,
+        )
         const headers = new Headers(request.headers)
-        if (!headers.has('authorization')) {
-          headers.set('authorization', `Bearer ${accessToken}`)
+        if (!accessToken) {
+          if (!hasBeeGameSessionCookie(request))
+            return baseUserResolver?.(request)
+          headers.delete('authorization')
+          return baseUserResolver?.(new Request(request, { headers }))
         }
+        headers.set('authorization', `Bearer ${accessToken}`)
         return baseUserResolver?.(new Request(request, { headers }))
       }
     : baseUserResolver
@@ -499,10 +510,14 @@ export function createAgentWorkflowApp(
     resolveOutboundTarget,
     options.resourceSelectionRuntimeConfig,
   )
-  const deliveryControllers = new Map<string, {
-    controller: ReturnType<typeof createDeliveryWorkflowController>
-    authContext: { request: Request }
-  }>()
+  const deliveryControllers = new Map<
+    string,
+    {
+      controller: ReturnType<typeof createDeliveryWorkflowController>
+      authContext: { credential?: BeeGameSessionCredential }
+      resourceEvidenceSessionIds: Set<string>
+    }
+  >()
   const deliveryStartQueues = new Map<string, Promise<void>>()
   const getDeliveryController = (input: {
     request: Request
@@ -515,19 +530,34 @@ export function createAgentWorkflowApp(
     resourceEvidenceSessionId?: string
   }) => {
     const workspaceKey = resolve(input.workspacePath)
-    const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}:${input.resourceEvidenceSessionId ?? 'default'}`
+    const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}`
+    const requestCredential = sessionAuth?.getCredential?.(input.request)
     const existing = deliveryControllers.get(key)
     if (existing) {
-      existing.authContext.request = input.request
+      if (requestCredential) existing.authContext.credential = requestCredential
+      if (input.resourceEvidenceSessionId)
+        existing.resourceEvidenceSessionIds.add(input.resourceEvidenceSessionId)
       return existing.controller
     }
-    const deliveryAuthContext = { request: input.request }
+    const deliveryAuthContext: { credential?: BeeGameSessionCredential } = {
+      ...(requestCredential ? { credential: requestCredential } : {}),
+    }
+    const resourceEvidenceSessionIds = new Set<string>()
+    if (input.resourceEvidenceSessionId)
+      resourceEvidenceSessionIds.add(input.resourceEvidenceSessionId)
     const workerPort = createBeeGameDeliveryWorkerPort({
       sessions: beeGameSessions,
       userId: input.user.id,
-      getAuthToken: async () =>
-        getBearerToken(deliveryAuthContext.request) ??
-        await sessionAuth?.getValidAccessToken(deliveryAuthContext.request),
+      getAuthToken: async options => {
+        if (!supabaseRuntimeEnvClient) return undefined
+        const token = await deliveryAuthContext.credential?.getValidAccessToken(
+          options,
+        )
+        if (token) return token
+        throw new Error(
+          'Workflow requires a refreshable authenticated session. Please sign in again.',
+        )
+      },
       userDataRoot: getCurrentUserDataRoot(input.request),
       ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
       ...(input.language ? { language: input.language } : {}),
@@ -547,60 +577,50 @@ export function createAgentWorkflowApp(
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
-      ...(input.resourceEvidenceSessionId
-        ? {
-            getResourceLibraryEvidence: (runId: string) => {
-              const sessionIds = [
-                input.resourceEvidenceSessionId!,
-                ...beeGameSessions.workflowWorkerSessionIds(
-                  runId,
-                  workspaceKey,
-                ),
-              ]
-              const states = sessionIds
-                .filter(
-                  (sessionId, index, all) => all.indexOf(sessionId) === index,
-                )
-                .map(sessionId =>
-                  getObservedNativeResourceLibraryEvidence({
-                    dataRoot: dashboardDataRoot,
-                    sessionId,
-                    workspacePath: workspaceKey,
-                  }),
-                )
-              const current = states.filter(state => state.state === 'current')
-              const selected = current.length
-                ? current
-                : states.filter(state => state.state === 'stale')
-              if (!selected.length) return { state: 'missing' }
-              const actions = [
-                ...new Set(selected.flatMap(state => state.actions)),
-              ]
-              const failedActions = [
-                ...new Set(selected.flatMap(state => state.failedActions)),
-              ]
-              return {
-                state: current.length ? 'current' : 'stale',
-                actions,
-                failedActions,
-                successfulImportCount: Math.max(
-                  ...selected.map(state => state.successfulImportCount),
-                ),
-                failedImportCount: Math.max(
-                  ...selected.map(state => state.failedImportCount),
-                ),
-                observedAt: selected
-                  .map(state => state.observedAt)
-                  .sort()
-                  .at(-1)!,
-              } satisfies NativeResourceLibraryEvidenceState
-            },
-          }
-        : {}),
+      getResourceLibraryEvidence: (runId: string) => {
+        const sessionIds = [
+          ...resourceEvidenceSessionIds,
+          ...beeGameSessions.workflowWorkerSessionIds(runId, workspaceKey),
+        ]
+        const states = sessionIds
+          .filter((sessionId, index, all) => all.indexOf(sessionId) === index)
+          .map(sessionId =>
+            getObservedNativeResourceLibraryEvidence({
+              dataRoot: dashboardDataRoot,
+              sessionId,
+              workspacePath: workspaceKey,
+            }),
+          )
+        const current = states.filter(state => state.state === 'current')
+        const selected = current.length
+          ? current
+          : states.filter(state => state.state === 'stale')
+        if (!selected.length) return { state: 'missing' }
+        const actions = [...new Set(selected.flatMap(state => state.actions))]
+        const failedActions = [
+          ...new Set(selected.flatMap(state => state.failedActions)),
+        ]
+        return {
+          state: current.length ? 'current' : 'stale',
+          actions,
+          failedActions,
+          successfulImportCount: Math.max(
+            ...selected.map(state => state.successfulImportCount),
+          ),
+          failedImportCount: Math.max(
+            ...selected.map(state => state.failedImportCount),
+          ),
+          observedAt: selected
+            .map(state => state.observedAt)
+            .sort()
+            .at(-1)!,
+        } satisfies NativeResourceLibraryEvidenceState
+      },
     })
     deliveryControllers.set(key, {
       controller,
       authContext: deliveryAuthContext,
+      resourceEvidenceSessionIds,
     })
     return controller
   }

@@ -17,8 +17,7 @@ import type {
   WorkflowCardTask,
 } from '../types/message';
 
-export interface ChatDisplayMessage
-  extends Pick<
+export type ChatDisplayMessage = Pick<
     Message,
     | 'id'
     | 'messageId'
@@ -47,8 +46,7 @@ export interface ChatDisplayMessage
     | 'toolDetail'
     | 'toolOutput'
     | 'isSubagentTool'
-> {
-}
+>
 
 export interface ReviewStatusDisplayPayload {
   workflow_id: string;
@@ -62,10 +60,10 @@ export interface ReviewStatusDisplayPayload {
   } | null;
 }
 
-export interface ReviewDisplayBindingRef extends Pick<
+export type ReviewDisplayBindingRef = Pick<
   ReviewBindingRef,
   'artifact_id' | 'artifact_version' | 'checkpoint_id' | 'workspace_ref' | 'workspace_path'
-> {}
+>
 
 export interface ReviewDisplaySummary {
   current_run?: Record<string, unknown> | null;
@@ -188,6 +186,18 @@ const WORKFLOW_STATUS: Record<string, WorkflowCardStatus> = {
   stale: 'stale',
 };
 
+const normalizeWorkflowMessage = (value: unknown): string | undefined => {
+  const message = trimString(value);
+  if (!message) return undefined;
+  try {
+    const payload: unknown = JSON.parse(message);
+    if (payload !== null && typeof payload === 'object') return undefined;
+  } catch {
+    // Workflow progress is ordinary display copy unless it is a complete JSON payload.
+  }
+  return message;
+};
+
 /** Convert backend workflow data into the only shape the UI may render. */
 const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undefined => {
   if (!payload || typeof payload !== 'object') return undefined;
@@ -210,7 +220,7 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
     ? source.activeDispatch as Record<string, unknown>
     : undefined;
   const rawThinking = trimString(source.thinking);
-  const message = trimString(source.message);
+  const message = normalizeWorkflowMessage(source.message);
   const tasks = Array.isArray(source.tasks)
     ? source.tasks.flatMap((task): WorkflowCardTask[] => {
         if (!task || typeof task !== 'object') return [];

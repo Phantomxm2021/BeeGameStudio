@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { toProjectRuntimeDisplayModel, toReviewDisplayModel } from './displayModels';
-import type { PendingUserReviewItem, ProjectBaselineStatusPayload } from '../services/api';
+import type {
+  OperatorVisibilityPayload,
+  PendingUserReviewItem,
+  ProjectBaselineStatusPayload,
+} from '../services/api';
 
 describe('displayModels', () => {
   it('maps pending review to review display model with only runtime-required fields', () => {
@@ -275,7 +279,7 @@ describe('displayModels', () => {
           open_blocker_ids: ['issue_1'],
         },
       },
-    } as any);
+    } satisfies OperatorVisibilityPayload);
 
     expect(display?.build_report).toMatchObject({
       summary: 'build packaged',
@@ -323,6 +327,28 @@ describe('displayModels', () => {
     });
     expect(JSON.stringify(display?.workflow)).not.toContain('READY');
     expect(JSON.stringify(display?.workflow)).not.toContain('internal-only');
+  });
+
+  it('does not expose a complete worker protocol object as workflow copy', () => {
+    const display = toProjectRuntimeDisplayModel({
+      project_id: 'proj_1',
+      phase: 'running',
+      blocked: false,
+      workflow: {
+        runId: 'run_protocol',
+        status: 'running',
+        currentPhase: 'RESOURCE_PREPARATION',
+        message: JSON.stringify({
+          workerType: 'resource-preparer',
+          status: 'completed',
+          revision: 'resource-revision',
+        }),
+        thinking: 'working',
+      },
+    });
+
+    expect(display?.workflow?.thinking).toBeUndefined();
+    expect(JSON.stringify(display?.workflow)).not.toContain('resource-revision');
   });
 
   it('projects workflow tasks, recovery actions and timing without raw state leakage', () => {

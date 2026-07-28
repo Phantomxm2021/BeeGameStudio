@@ -86,31 +86,105 @@ export async function computeDocumentRevision(
     .digest('hex')
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (!isRecord(value)) return JSON.stringify(value) ?? 'null'
+  return `{${Object.keys(value)
+    .sort()
+    .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+    .join(',')}}`
+}
+
+/** Mutable implementation evidence does not change the approved resource selection. */
+function resourceIdentityManifest(manifest: Record<string, unknown>): unknown {
+  return {
+    ...manifest,
+    requirements: Array.isArray(manifest.requirements)
+      ? manifest.requirements.map(value => {
+          if (!isRecord(value)) return value
+          const {
+            status: _status,
+            satisfied_by: _satisfiedBy,
+            ...identity
+          } = value
+          return identity
+        })
+      : manifest.requirements,
+    imports: Array.isArray(manifest.imports)
+      ? manifest.imports.map(value => {
+          if (!isRecord(value)) return value
+          const {
+            status: _status,
+            usage_evidence: _usageEvidence,
+            error: _error,
+            ...identity
+          } = value
+          return identity
+        })
+      : manifest.imports,
+    compositions: Array.isArray(manifest.compositions)
+      ? manifest.compositions.map(value => {
+          if (!isRecord(value)) return value
+          const {
+            status: _status,
+            recipe: _recipe,
+            integration_evidence: _integrationEvidence,
+            ...identity
+          } = value
+          return identity
+        })
+      : manifest.compositions,
+  }
+}
+
 /**
  * Resource identity is independent from source implementation identity. It
- * includes the manifest and every file under assets so a changed import or
- * binding invalidates the task plan that consumed it.
+ * hashes the immutable manifest selection/plan plus the exact imported files.
+ * Runtime integration status and evidence are deliberately excluded because
+ * implementation updates those facts after resource approval.
  */
 export async function computeResourceRevision(
   workspacePath: string,
   documentRevision: string,
 ): Promise<string> {
   const root = resolve(workspacePath)
-  const files: string[] = []
+  const manifestPath = 'assets/asset-manifest.json'
+  let manifest: Record<string, unknown> | undefined
   try {
-    await collectFiles(root, root, files)
+    const parsed = JSON.parse(await readFile(join(root, manifestPath), 'utf8'))
+    if (isRecord(parsed)) manifest = parsed
   } catch {
-    // Resource preparation may start before an assets directory exists.
+    // Resource preparation may start before the manifest exists.
   }
-  const resourceFiles = files.filter(
-    path => path === 'assets' || path.startsWith('assets/'),
-  )
-  const digest = await digestFiles(root, resourceFiles, '<missing>')
-  return createHash('sha256')
+  const importedFiles = Array.isArray(manifest?.imports)
+    ? [
+        ...new Set(
+          manifest.imports.flatMap(value =>
+            isRecord(value) ? stringArray(value.local_files) : [],
+          ),
+        ),
+      ]
+    : []
+  const importedDigest = await digestFiles(root, importedFiles, '<missing>')
+  const hash = createHash('sha256')
     .update(documentRevision)
     .update('\0')
-    .update(digest)
-    .digest('hex')
+    .update(
+      manifest ? stableJson(resourceIdentityManifest(manifest)) : '<missing>',
+    )
+    .update('\0')
+    .update(importedDigest)
+  return hash.digest('hex')
 }
 
 export async function computeImplementationRevision(

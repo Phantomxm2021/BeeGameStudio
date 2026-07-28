@@ -82,6 +82,7 @@ export function WorkflowCard({
   const [actionState, setActionState] = useState<'idle' | 'pending'>('idle');
   const [actionError, setActionError] = useState('');
   const isCompleted = workflow.status === 'completed';
+  const isActive = ['draft', 'running', 'verifying'].includes(workflow.status);
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(workflow.status);
   const StatusIcon = isCompleted ? CheckCircle2 : LoaderCircle;
   const tasks = workflow.tasks ?? [];
@@ -89,18 +90,18 @@ export function WorkflowCard({
   const totalCount = workflow.totalTaskCount ?? tasks.length;
   const stageTitle = stageLabel[workflow.documentStep || ''] || stageLabel[workflow.currentPhase || ''] || workflow.currentPhase || '等待阶段';
   const startedAt = Date.parse(workflow.createdAt || '');
-  const finishedAt = Date.parse(workflow.completedAt || (isCompleted ? workflow.updatedAt || '' : ''));
+  const finishedAt = Date.parse(workflow.completedAt || (!isActive ? workflow.updatedAt || '' : ''));
   const elapsed = Number.isFinite(startedAt)
-    ? isCompleted && Number.isFinite(finishedAt)
+    ? !isActive && Number.isFinite(finishedAt)
       ? finishedAt - startedAt
       : now - startedAt
     : 0;
 
   useEffect(() => {
-    if (isCompleted || !Number.isFinite(startedAt)) return;
+    if (!isActive || !Number.isFinite(startedAt)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [isCompleted, startedAt]);
+  }, [isActive, startedAt]);
 
   const executionText = useMemo(() => {
     const worker = workerLabel[workflow.worker || ''] || workflow.worker || '';
@@ -131,7 +132,7 @@ export function WorkflowCard({
   return (
     <section
       data-testid={`beegame-workflow-card-${workflow.runId}`}
-      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-sky-300/20 bg-black/40 text-zinc-100 shadow-sm backdrop-blur-2xl"
+      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-white/15 bg-white/[0.04] text-zinc-100 shadow-sm backdrop-blur-2xl"
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
@@ -170,7 +171,7 @@ export function WorkflowCard({
             </div>
 
             {tasks.length > 0 ? (
-              <ul className="mt-4 space-y-2 border-l border-white/10 pl-3">
+              <ul className="mt-4 space-y-2 pl-3">
                 {tasks.slice(0, 8).map(task => (
                   <li key={task.id} className="flex min-w-0 items-start gap-2 text-xs">
                     <span className="mt-px shrink-0">{taskIcon(task)}</span>

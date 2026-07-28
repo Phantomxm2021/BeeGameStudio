@@ -44,7 +44,12 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
               ]),
           ...(request.contract.documentSet === 'checklist'
             ? [
-                'This is the checklist substep. The six approved foundation documents are read-only authority. Create or update only docs/acceptance/gameplay-checklist.md with observable gameplay checks that cover those approved documents. Do not modify any other document, source code, assets or manifest.',
+                'This is the checklist substep. The six approved foundation documents are read-only authority. Create or update only docs/acceptance/gameplay-checklist.md with observable gameplay checks that cover those approved documents. Every acceptance task must be a Markdown checkbox on its own line using exactly `- [ ] <stable-id> <observable check and evidence expectation>`. Tables may supplement these tasks but must not replace the checkbox task lines. Do not modify any other document, source code, assets or manifest.',
+                ...(request.contract.checklistRemediation
+                  ? [
+                      'This is a bounded checklist-structure remediation pass. Correct every deterministic issue in contract.checklistRemediation while preserving the approved gameplay semantics and stable IDs. Rewrite non-task representations into the canonical checkbox task lines; do not modify the six approved foundation documents.',
+                    ]
+                  : []),
               ]
             : [
                 'This is the foundation-document substep. Create or update only the six foundation documents: docs/GDD.md, docs/TECHNICAL_DESIGN.md, docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, docs/AUDIO_DESIGN.md and docs/ASSET_PLAN.md. Do not create or modify docs/acceptance/gameplay-checklist.md; it is generated only after foundation review is READY.',
@@ -64,6 +69,22 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
             : []),
         ]
       : []),
+    ...(request.workerType === 'resource-preparer'
+      ? [
+          'Resource preparation approves inventory and an integration plan; it does not claim implementation that has not happened. New imports must remain available, requirements that implementation has not fulfilled must remain planned, and compositions without an existing target-native recipe must remain planned. Never report satisfied, assembled, integrated, usage_evidence, integration_evidence, or recipe.path unless the referenced project files already exist and the evidence is current.',
+          'The manifest must preserve project_target.resource_library_usage and declare the real target-supported asset_format_capabilities plus a concrete workspace-relative project_target.runtime_asset_root. Imported files may be written under that declared runtime root even when it is outside assets/.',
+          ...(request.contract.remediation
+            ? [
+                'This is a repair pass over existing resources. Preserve every import and composition ID listed by contract.remediation, preserve valid imported files, and correct only the reported deterministic issues. Do not browse, select, or import replacement resources during this pass; a separate explicit resource-selection request is required if an existing file is genuinely missing. If native provenance is missing after restart, invoke refresh_import_metadata exactly once to verify the pinned imports and rebuild current provenance without downloading or replacing them.',
+              ]
+            : []),
+        ]
+      : []),
+    ...(request.workerType === 'implementation-worker'
+      ? [
+          'Do not edit assets/asset-manifest.json. Report every actual imported-resource reference, composition integration, and requirement satisfaction in the terminal resource arrays. The workflow service validates those paths against the active task and updates the manifest after task completion.',
+        ]
+      : []),
     JSON.stringify(request.contract),
   ].join('\n')
 }
@@ -73,7 +94,7 @@ function terminalContractInstruction(
 ): string {
   switch (workerType) {
     case 'document-author':
-      return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","revision":"<dispatch revision>","writtenPaths":["<workspace-relative path>"],"resolvedFindingIds":["<review finding id>"]}. documentRevision is optional because the server computes it from the files. Use an empty resolvedFindingIds array outside remediation passes. Do not use worker, succeeded, or changedPaths.'
+      return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","writtenPaths":["<workspace-relative path>"],"resolvedFindingIds":["<review finding id>"]}. The server computes revisions from the written files; do not return revision or documentRevision. Use an empty resolvedFindingIds array outside remediation passes. Do not use worker, succeeded, or changedPaths.'
     case 'document-reviewer':
       return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":[{"severity":"blocking|non_blocking","category":"cross_document_conflict|missing_spec|calculation|other","documents":["<workspace-relative path>"],"description":"<finding>","requiredAction":"<required correction>"}],"evidencePath":".beegame/workflow/evidence/<file>"}. READY requires zero blocking findings.'
     case 'resource-preparer':
@@ -81,7 +102,7 @@ function terminalContractInstruction(
     case 'atomic-task-planner':
       return 'Terminal JSON contract: use exactly the keys workerType, status, revision, tasks, and evidencePath; status is completed, tasks is a non-empty array of complete atomic task objects, and evidencePath is under .beegame/workflow/evidence/.'
     case 'implementation-worker':
-      return 'Terminal JSON contract (exact keys): {"workerType":"implementation-worker","taskId":"<task id>","status":"completed|failed|blocked","revision":"<dispatch revision>","changedPaths":["<workspace-relative path>"],"evidenceRefs":["<evidence path>"],"evidencePath":".beegame/workflow/evidence/<file>"}.'
+      return 'Terminal JSON contract (exact keys): {"workerType":"implementation-worker","taskId":"<task id>","status":"completed|failed|blocked","revision":"<dispatch revision>","changedPaths":["<workspace-relative path>"],"evidenceRefs":["<evidence path>"],"evidencePath":".beegame/workflow/evidence/<file>","resourceReferences":[{"importId":"<task resource import id>","references":["<existing project usage path>"],"runtimeEventIds":[]}],"compositionIntegrations":[{"compositionId":"<task composition id>","recipePath":"<existing target-native recipe path>","references":["<existing integration evidence path>"],"runtimeEventIds":[]}],"requirementSatisfactions":[{"requirementId":"<task source requirement id>","importIds":["<task import id>"],"compositionIds":["<task composition id>"],"projectReferences":["<existing implementation path>"]}]}. Use empty arrays when the task has no corresponding resource facts.'
     case 'implementation-auditor':
       return 'Terminal JSON contract (exact keys): {"workerType":"implementation-auditor","status":"passed|failed|blocked","revision":"<dispatch revision>","auditedTaskIds":["<task id>"],"checklistIds":["<stable checklist id>"],"importIds":["<import id>"],"compositionIds":["<composition id>"],"findings":["<finding>"],"evidencePath":".beegame/workflow/evidence/<file>"}.'
     case 'acceptance-validator':
@@ -106,7 +127,7 @@ function workerInstruction(
       return 'Perform the assigned review or analysis as a read-only worker. Do not modify project files.'
     case 'document-author':
       return contract?.documentSet === 'checklist'
-        ? 'Author only docs/acceptance/gameplay-checklist.md from the approved foundation documents. Every checklist item must be an observable gameplay check with a stable identifier and evidence expectation. Do not modify any foundation document, source code, assets or manifest.'
+        ? 'Author only docs/acceptance/gameplay-checklist.md from the approved foundation documents. Every checklist item must be an observable gameplay check with a stable identifier and evidence expectation and must use its own canonical `- [ ] <stable-id> <observable check and evidence expectation>` Markdown task line. Do not modify any foundation document, source code, assets or manifest.'
         : 'Author only the six foundation documents required by the confirmed brief: GDD, technical design, art direction, UI/UX, audio design and asset plan. Every document must begin with YAML front matter declaring document_id, version in MAJOR.MINOR.PATCH form, and updated_at as an ISO 8601 UTC timestamp. Do not create or edit docs/acceptance/gameplay-checklist.md, search Resource Library, create or edit assets/asset-manifest.json, import resources, or implement runtime code. The checklist is generated only after foundation document review.'
     case 'resource-preparer':
       return 'Prepare resources only after the six foundation documents passed foundation review and the gameplay checklist was created. Read those approved documents and technical constraints, search the Resource Library with bounded requests, import only selected resources, and write a valid assets/asset-manifest.json. Do not write source code or docs, do not use placeholders, and report every manifest import and composition ID in the terminal result. The final comprehensive review happens only after this manifest is complete.'

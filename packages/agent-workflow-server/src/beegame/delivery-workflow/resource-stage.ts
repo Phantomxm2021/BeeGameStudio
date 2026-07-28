@@ -1,5 +1,11 @@
 import { auditAssetContract } from '../asset-contract-audit'
 import {
+  readBeeGameAssetManifest,
+  writeBeeGameAssetManifest,
+} from '../asset-contracts'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
   type ResourceDeliveryReadiness,
@@ -19,17 +25,118 @@ type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 
 type ResourceAudit = ResourceDeliveryReadiness
 
-function pathAllowed(path: string): boolean {
+function runtimeAssetRoot(workspacePath: string): string | undefined {
+  const manifestPath = join(
+    resolve(workspacePath),
+    'assets',
+    'asset-manifest.json',
+  )
+  if (!existsSync(manifestPath)) return undefined
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
+      return undefined
+    const projectTarget = (manifest as Record<string, unknown>).project_target
+    if (
+      !projectTarget ||
+      typeof projectTarget !== 'object' ||
+      Array.isArray(projectTarget)
+    )
+      return undefined
+    const value = (projectTarget as Record<string, unknown>).runtime_asset_root
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function resourcePreparationAllowedPaths(
+  workspacePath: string,
+): string[] {
+  return [
+    'assets/asset-manifest.json',
+    ...(runtimeAssetRoot(workspacePath)
+      ? [`${runtimeAssetRoot(workspacePath)!.replace(/\/+$/, '')}/`]
+      : []),
+    WORKFLOW_EVIDENCE_DIRECTORY,
+  ]
+}
+
+function pathAllowed(path: string, allowedPaths: string[]): boolean {
   const normalized = path.replaceAll('\\', '/')
   return (
     !normalized.startsWith('/') &&
     !normalized.split('/').includes('..') &&
-    (normalized.startsWith('assets/') ||
-      normalized.startsWith(WORKFLOW_EVIDENCE_DIRECTORY))
+    allowedPaths.some(allowed => {
+      const scope = allowed.replaceAll('\\', '/').replace(/\/+$/, '')
+      return normalized === scope || normalized.startsWith(`${scope}/`)
+    })
   )
 }
 
-export function startResourcePreparation(input: {
+async function repairDeterministicPreparationState(input: {
+  workspacePath: string
+  confirmedPolicy?: ReturnType<typeof confirmedResourceLibraryUsage>
+}): Promise<void> {
+  const manifest = await readBeeGameAssetManifest(input.workspacePath)
+  let changed = false
+  if (
+    input.confirmedPolicy &&
+    manifest.project_target?.resource_library_usage !== input.confirmedPolicy
+  ) {
+    manifest.project_target = {
+      ...(manifest.project_target ?? {}),
+      resource_library_usage: input.confirmedPolicy,
+    }
+    changed = true
+  }
+  manifest.requirements = manifest.requirements.map(requirement => {
+    const bindings = requirement.satisfied_by
+    const hasBinding = Boolean(
+      bindings?.import_ids?.length ||
+        bindings?.composition_ids?.length ||
+        bindings?.project_references?.length,
+    )
+    if (requirement.status !== 'satisfied' || hasBinding) return requirement
+    changed = true
+    const { satisfied_by: _satisfiedBy, ...planned } = requirement
+    return { ...planned, status: 'planned' as const }
+  })
+  manifest.imports = (manifest.imports ?? []).map(resourceImport => {
+    const hasEvidence = Boolean(
+      resourceImport.usage_evidence?.references?.length ||
+        resourceImport.usage_evidence?.runtime_event_ids?.length,
+    )
+    if (resourceImport.status !== 'referenced' || hasEvidence)
+      return resourceImport
+    changed = true
+    const { usage_evidence: _usageEvidence, ...available } = resourceImport
+    return { ...available, status: 'available' as const }
+  })
+  manifest.compositions = (manifest.compositions ?? []).map(composition => {
+    const hasRecipe = Boolean(composition.recipe?.path)
+    const hasEvidence = Boolean(
+      composition.integration_evidence?.references?.length ||
+        composition.integration_evidence?.runtime_event_ids?.length,
+    )
+    if (
+      (composition.status !== 'assembled' &&
+        composition.status !== 'integrated') ||
+      (hasRecipe && (composition.status !== 'integrated' || hasEvidence))
+    )
+      return composition
+    changed = true
+    const {
+      integration_evidence: _integrationEvidence,
+      recipe: _recipe,
+      ...planned
+    } = composition
+    return { ...planned, status: 'planned' as const }
+  })
+  if (changed) await writeBeeGameAssetManifest(input.workspacePath, manifest)
+}
+
+export async function startResourcePreparation(input: {
   run: DeliveryRun
   workspacePath: string
   dispatcher: Dispatcher
@@ -40,6 +147,26 @@ export function startResourcePreparation(input: {
     )
   if (input.run.activeDispatch?.status === 'running')
     return Promise.resolve(input.run.activeDispatch)
+  const confirmedPolicy = confirmedResourceLibraryUsage(
+    input.run.confirmedBriefContext,
+  )
+  if (input.run.resourceRemediation)
+    await repairDeterministicPreparationState({
+      workspacePath: input.workspacePath,
+      ...(confirmedPolicy ? { confirmedPolicy } : {}),
+    })
+  const existingContract = auditAssetContract(input.workspacePath)
+  const remediation = input.run.resourceRemediation
+    ? {
+        ...input.run.resourceRemediation,
+        preserveImportIds: (existingContract.imports ?? []).map(
+          item => item.id,
+        ),
+        preserveCompositionIds: existingContract.compositions.map(
+          item => item.id,
+        ),
+      }
+    : undefined
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -48,13 +175,15 @@ export function startResourcePreparation(input: {
     workerType: 'resource-preparer',
     phase: 'RESOURCE_PREPARATION',
     revision: input.run.revision.document,
-    allowedPaths: ['assets/', WORKFLOW_EVIDENCE_DIRECTORY],
+    allowedPaths: resourcePreparationAllowedPaths(input.workspacePath),
     contract: {
       documentRevision: input.run.revision.document,
-      resourceLibraryUsage: confirmedResourceLibraryUsage(
-        input.run.confirmedBriefContext,
-      ),
+      resourceLibraryUsage: confirmedPolicy,
       assetPlan: 'docs/ASSET_PLAN.md',
+      dynamicRuntimeAssetRoot:
+        runtimeAssetRoot(input.workspacePath) ??
+        'Declare project_target.runtime_asset_root in the manifest before importing; that exact workspace-relative directory is in resource scope.',
+      ...(remediation ? { remediation } : {}),
     },
   })
 }
@@ -72,8 +201,9 @@ export async function completeResourcePreparation(input: {
     input.workspacePath,
     input.run.revision.document,
   )
+  const allowedPaths = resourcePreparationAllowedPaths(input.workspacePath)
   const outOfScope = input.terminal.writtenPaths.filter(
-    path => !pathAllowed(path),
+    path => !pathAllowed(path, allowedPaths),
   )
   const contract = auditAssetContract(input.workspacePath)
   const policy =

@@ -328,7 +328,7 @@ export function RightSidebar({
     }, [activeTab, projectId]);
 
     const dockClassName = 'absolute right-4 top-24 bottom-4 w-[420px] z-40 pointer-events-auto';
-    const panelClassName = 'h-full flex flex-col bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] overflow-hidden';
+    const panelClassName = 'flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] backdrop-blur-2xl';
     const headerClassName = 'flex h-14 items-center justify-between border-b border-zinc-800 px-4';
     const tabButtonClassName = (isActive: boolean) => `type-button relative pb-3 transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`;
     const tabLabel = (tab: 'chat' | 'artifacts' | 'assets') => {
@@ -373,7 +373,7 @@ export function RightSidebar({
 
                     {/* Content Area */}
                     <div
-                        className="relative flex-1 overflow-hidden pointer-events-auto"
+                        className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto"
                     >
                         {activeTab === 'chat' ? (
                             <ChatPanel 

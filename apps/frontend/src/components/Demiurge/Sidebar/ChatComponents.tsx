@@ -130,54 +130,8 @@ const reviewerSummaryToMarkdown = (payload: Record<string, unknown>): string => 
     return lines.join('\n');
 };
 
-const formatStructuredPrimitive = (value: unknown): string => {
-    if (value === null) return 'null';
-    if (typeof value === 'string') return value.trim();
-    return String(value);
-};
-
-const formatStructuredSection = (key: string, value: unknown, depth = 2): string => {
-    const headingLevel = '#'.repeat(Math.min(depth, 6));
-    const title = `${headingLevel} ${key}`;
-
-    if (Array.isArray(value)) {
-        if (value.length === 0) return `${title}\n\n- None`;
-        const items = value.map((item, index) => {
-            if (item && typeof item === 'object') {
-                const nested = formatStructuredObject(item as Record<string, unknown>, depth + 1);
-                return `- Item ${index + 1}\n${nested.split('\n').map((line) => `  ${line}`).join('\n')}`;
-            }
-            return `- ${formatStructuredPrimitive(item)}`;
-        });
-        return `${title}\n\n${items.join('\n')}`;
-    }
-
-    if (value && typeof value === 'object') {
-        return `${title}\n\n${formatStructuredObject(value as Record<string, unknown>, depth + 1)}`;
-    }
-
-    return `${title}\n\n${formatStructuredPrimitive(value)}`;
-};
-
-const formatStructuredObject = (value: Record<string, unknown>, depth = 2): string => {
-    const visibleEntries = Object.entries(value).filter(([key]) => !['perceive', 'model', 'plan', 'verify'].includes(key));
-    if (visibleEntries.length === 0) return 'Structured output generated.';
-    return visibleEntries.map(([key, sectionValue]) => formatStructuredSection(key, sectionValue, depth)).join('\n\n');
-};
-
 const structuredJsonToMarkdown = (value: unknown): string | null => {
-    if (Array.isArray(value)) {
-        if (value.length === 0) return 'Structured output produced an empty list.';
-        const previewItems = value.slice(0, 5).map((item, index) => {
-            if (item && typeof item === 'object') {
-                const record = item as Record<string, unknown>;
-                const label = String(record.name || record.id || record.key || `Item ${index + 1}`);
-                return `- ${label}`;
-            }
-            return `- ${String(item)}`;
-        });
-        return `Structured output (${value.length} items)\n\n${previewItems.join('\n')}`;
-    }
+    if (Array.isArray(value)) return null;
     if (!value || typeof value !== 'object') return null;
     const payload = value as Record<string, unknown>;
     if (isReviewerSummaryPayload(payload)) {
@@ -190,13 +144,12 @@ const structuredJsonToMarkdown = (value: unknown): string | null => {
     const deliverable = payload.deliverable;
     if (typeof deliverable === 'string' && deliverable.trim()) return deliverable.trim();
     if (deliverable && typeof deliverable === 'object' && !Array.isArray(deliverable)) {
-        const sections = Object.entries(deliverable as Record<string, unknown>).map(([key, sectionValue]) => {
-            if (typeof sectionValue === 'string') return `## ${key}\n\n${sectionValue.trim()}`;
-            return `## ${key}\n\n\`\`\`json\n${JSON.stringify(sectionValue, null, 2)}\n\`\`\``;
-        });
-        return sections.join('\n\n').trim();
+        const sections = Object.entries(deliverable as Record<string, unknown>)
+            .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()))
+            .map(([key, sectionValue]) => `## ${key}\n\n${sectionValue.trim()}`);
+        return sections.join('\n\n').trim() || null;
     }
-    return formatStructuredObject(payload);
+    return null;
 };
 
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
@@ -205,8 +158,8 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
     const isBeeGameVariant = true;
     const textColor = isBeeGameVariant ? 'text-zinc-200' : isUser ? 'text-white dark:text-zinc-900' : 'text-zinc-800 dark:text-zinc-100';
     const bodyClassName = isBeeGameVariant
-        ? `max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`
-        : `type-body max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`;
+        ? `min-w-0 max-w-full select-text ${textColor} break-words [overflow-wrap:anywhere]`
+        : `type-body min-w-0 max-w-full select-text ${textColor} break-words [overflow-wrap:anywhere]`;
     const [isThoughtExpanded, setIsThoughtExpanded] = useState(false);
     const text = useBeeGameText(lang);
 
@@ -214,11 +167,16 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
         const normalized = normalizeEscapedNewlines(content);
         const fromProcessor = artifactProcessor.stripMarkers(normalized);
         const structuredPayload = tryParseStructuredJson(fromProcessor);
-        const structured = structuredPayload ? structuredJsonToMarkdown(structuredPayload) : null;
+        const structured = structuredPayload !== null
+            ? structuredJsonToMarkdown(structuredPayload)
+            : null;
         const thoughtMatch = fromProcessor.match(/<thought>([\s\S]*?)<\/thought>/);
         const main = fromProcessor.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
         const thought = thoughtMatch ? thoughtMatch[1].trim() : null;
-        const formatted = formatMessageContent(structured || main || (thought ? '' : fromProcessor));
+        const visibleContent = structuredPayload !== null
+            ? structured || ''
+            : main || (thought ? '' : fromProcessor);
+        const formatted = formatMessageContent(visibleContent);
         return { thoughtContent: thought, formattedMainContent: formatted, renderAsCsv: isLikelyCsvContent(formatted) };
     }, [content]);
 
@@ -228,6 +186,8 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
         const rows = lines.map(parseCsvLine);
         return { header: rows[0] || [], body: rows.slice(1) };
     }, [renderAsCsv, formattedMainContent]);
+
+    if (!thoughtContent && !formattedMainContent) return null;
 
     return (
         <MarkdownErrorBoundary messageId={messageId} rawContent={content}>
@@ -256,7 +216,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
 
                 <div className={`mt-1`}>
                     {renderAsCsv && csvData ? (
-                        <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                        <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
 	                            <table className="type-table w-full border-collapse">
                                 <thead className="bg-zinc-100/50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800">
                                     <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors">
@@ -341,7 +301,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
 	                                a: (props) => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-4 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
 	                                strong: (props) => <strong className="opacity-100" {...props} />,
                                 table: (props) => (
-                                    <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                                    <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
 	                                        <table className="type-table w-full border-collapse" {...props} />
                                     </div>
                                 ),
@@ -360,7 +320,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                     );
                                 },
                                 pre: (props) => (
-	                                    <pre className={`type-code ${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} my-4 overflow-x-auto rounded-lg border p-4 text-zinc-100`}>
+	                                    <pre className={`type-code ${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} my-4 max-w-full overflow-x-auto rounded-lg border p-4 text-zinc-100`}>
                                         {props.children}
                                     </pre>
                                 ),

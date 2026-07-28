@@ -10,13 +10,20 @@ import {
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Hono } from 'hono'
-import type { BeeGameUserContext } from './user-context'
+import {
+  getBearerToken,
+  type BeeGameUserContext,
+} from './user-context'
 import { decryptSecret, encryptSecret } from '../security/secret-crypto'
 
 export const SESSION_COOKIE_NAME = 'beegame_session'
 const SESSION_RECORD_TYPE = 'auth:session'
 const SESSION_COOKIE_MAX_AGE_SECONDS = 28_800
 const SESSION_COOKIE_MAX_AGE_MS = SESSION_COOKIE_MAX_AGE_SECONDS * 1000
+// Session records already reserve 30 seconds when Supabase reports expires_in.
+// This second guard refreshes another 30 seconds early, giving an outbound RPC
+// a full minute of safety relative to the provider's actual expiry.
+const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 30_000
 
 type SessionRecord = {
   accessToken: string
@@ -36,6 +43,10 @@ type SessionRefreshOutcome =
   | { status: 'invalid' }
   | { status: 'unavailable' }
 
+function accessTokenIsFresh(record: SessionRecord): boolean {
+  return record.expiresAt > Date.now() + ACCESS_TOKEN_REFRESH_LEEWAY_MS
+}
+
 export type BeeGameSessionRouteOptions = {
   supabaseUrl?: string
   supabaseAnonKey?: string
@@ -47,6 +58,31 @@ export type BeeGameSessionRouteOptions = {
 export type BeeGameSessionAuth = {
   getAccessToken: (request: Request) => string | undefined
   getValidAccessToken: (request: Request) => Promise<string | undefined>
+  getCredential?: (request: Request) => BeeGameSessionCredential | undefined
+}
+
+export type BeeGameSessionCredential = {
+  getValidAccessToken: (options?: {
+    forceRefresh?: boolean
+  }) => Promise<string | undefined>
+}
+
+export function hasBeeGameSessionCookie(request: Request): boolean {
+  return (request.headers.get('cookie') ?? '')
+    .split(';')
+    .some(part => part.trim().startsWith(`${SESSION_COOKIE_NAME}=`))
+}
+
+export async function resolveValidRequestAccessToken(
+  request: Request,
+  sessionAuth?: BeeGameSessionAuth,
+): Promise<string | undefined> {
+  const refreshableSessionToken = await sessionAuth?.getValidAccessToken(
+    request,
+  )
+  if (refreshableSessionToken) return refreshableSessionToken
+  if (sessionAuth && hasBeeGameSessionCookie(request)) return undefined
+  return getBearerToken(request)
 }
 
 export function registerBeeGameSessionRoutes(
@@ -73,8 +109,9 @@ export function registerBeeGameSessionRoutes(
   const sessionStorePath = resolveSessionStorePath(options.sessionStorePath)
   const pendingRefreshes = new Map<string, Promise<SessionRefreshOutcome>>()
 
-  const getRecord = (request: Request): { id: string; record: SessionRecord } | undefined => {
-    const id = readCookie(request, SESSION_COOKIE_NAME)
+  const getRecordById = (
+    id: string,
+  ): { id: string; record: SessionRecord } | undefined => {
     if (!id) return undefined
     const records = loadRecords(sessionStorePath)
     const encrypted = records[id]
@@ -99,6 +136,12 @@ export function registerBeeGameSessionRoutes(
       persistRecords(sessionStorePath, records)
       return undefined
     }
+  }
+  const getRecord = (
+    request: Request,
+  ): { id: string; record: SessionRecord } | undefined => {
+    const id = readCookie(request, SESSION_COOKIE_NAME)
+    return id ? getRecordById(id) : undefined
   }
 
   const saveRecord = (record: SessionRecord, id = randomBytes(32).toString('base64url')): string => {
@@ -225,19 +268,35 @@ export function registerBeeGameSessionRoutes(
   return {
     getAccessToken: request => {
       const record = getRecord(request)?.record
-      return record && record.expiresAt > Date.now()
+      return record && accessTokenIsFresh(record)
         ? record.accessToken
         : undefined
     },
     getValidAccessToken: async request => {
       const current = getRecord(request)
       if (!current) return undefined
-      if (current.record.expiresAt > Date.now()) {
+      if (accessTokenIsFresh(current.record)) {
         return current.record.accessToken
       }
       if (!supabaseUrl || !supabaseAnonKey) return undefined
       const outcome = await refreshRecord(current)
       return outcome.status === 'ok' ? outcome.record.accessToken : undefined
+    },
+    getCredential: request => {
+      const id = readCookie(request, SESSION_COOKIE_NAME)
+      if (!id || !getRecordById(id)) return undefined
+      return {
+        getValidAccessToken: async options => {
+          const current = getRecordById(id)
+          if (!current) return undefined
+          if (!options?.forceRefresh && accessTokenIsFresh(current.record)) {
+            return current.record.accessToken
+          }
+          if (!supabaseUrl || !supabaseAnonKey) return undefined
+          const outcome = await refreshRecord(current)
+          return outcome.status === 'ok' ? outcome.record.accessToken : undefined
+        },
+      }
     },
   }
 }
