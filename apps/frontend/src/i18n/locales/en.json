@@ -204,7 +204,9 @@
         "Hand tracking": "Hand tracking",
         "Hand tracking XR": "Hand tracking XR"
       },
-      "realtimeBillingNotice": "This generation uses realtime token-based Credit billing. Credits are not pre-deducted, and failed generations are not charged."
+      "realtimeBillingNotice": "This generation uses realtime token-based Credit billing. Credits are not pre-deducted, and failed generations are not charged.",
+      "realtimeBillingTitle": "Realtime Credit billing",
+      "realtimeBillingConfirm": "Continue generation"
     },
     "legal": {
       "terms": {

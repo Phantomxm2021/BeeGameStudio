@@ -199,7 +199,9 @@
         "Hand tracking": "手追",
         "Hand tracking XR": "手勢追蹤 XR"
       },
-      "realtimeBillingNotice": "本次生成将按实际 Token 使用实时扣除 Credit，不会预扣；生成失败不会产生扣费。"
+      "realtimeBillingNotice": "本次生成将按实际 Token 使用实时扣除 Credit，不会预扣；生成失败不会产生扣费。",
+      "realtimeBillingTitle": "实时 Credit 扣除提示",
+      "realtimeBillingConfirm": "继续生成"
     },
     "legal": {
       "terms": {

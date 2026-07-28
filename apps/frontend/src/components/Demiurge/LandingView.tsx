@@ -639,6 +639,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
   const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
+  const [pendingRealtimeBillingIdea, setPendingRealtimeBillingIdea] = useState('');
+  const [isRealtimeBillingNoticeOpen, setIsRealtimeBillingNoticeOpen] = useState(false);
   const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
   const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
   const inputMenuRef = useRef<HTMLDivElement | null>(null);
@@ -821,6 +823,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     await runIntake(idea);
   };
 
+  const requestIntakeStart = (idea: string) => {
+    setPendingRealtimeBillingIdea(idea);
+    setIsRealtimeBillingNoticeOpen(true);
+  };
+
   useEffect(() => {
     if (!currentUser || isPreparing || intakePhase !== 'idle') {
       return;
@@ -831,7 +838,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setProjectName(pendingAuthIdea.idea);
     setPendingIdeaAfterLogin('');
     setIsLoginPromptOpen(false);
-    void startIntake(pendingAuthIdea.idea);
+    requestIntakeStart(pendingAuthIdea.idea);
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -967,7 +974,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       await runAttachmentBuildAnalysis();
       return;
     }
-    await startIntake(idea);
+    setIsPreparing(false);
+    requestIntakeStart(idea);
+  };
+
+  const handleConfirmRealtimeBilling = () => {
+    const idea = pendingRealtimeBillingIdea;
+    setPendingRealtimeBillingIdea('');
+    setIsRealtimeBillingNoticeOpen(false);
+    if (idea) void startIntake(idea);
+  };
+
+  const handleCancelRealtimeBilling = () => {
+    setPendingRealtimeBillingIdea('');
+    setIsRealtimeBillingNoticeOpen(false);
   };
 
   const handleLoginSubmit = async (event: React.FormEvent) => {
@@ -1641,10 +1661,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         attachments={attachmentBuildAttachments}
         onAttachmentsChange={setAttachmentBuildAttachments}
       />
-      <p className="type-caption-2 relative z-10 mt-3 max-w-[720px] px-6 text-center text-zinc-500">
-        {translate('intake.realtimeBillingNotice')}
-      </p>
-
       {shouldShowIntakeModal ? (
         <div
           role="dialog"
@@ -1942,6 +1958,38 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                   </div>
                 </div>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isRealtimeBillingNoticeOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="beegame-realtime-billing-title"
+            className="input-surface glass-panel w-full max-w-[520px] rounded-[30px] p-6 text-left text-zinc-100 sm:p-7"
+          >
+            <h2 id="beegame-realtime-billing-title" className="type-title-2 text-white">
+              {translate('intake.realtimeBillingTitle')}
+            </h2>
+            <p className="type-body mt-4 text-zinc-300">{translate('intake.realtimeBillingNotice')}</p>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleCancelRealtimeBilling}
+                className="secondary-pill type-button px-6 py-3"
+              >
+                {intakeText.actions.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRealtimeBilling}
+                className="primary-pill type-button px-7 py-3"
+              >
+                {translate('intake.realtimeBillingConfirm')}
+              </button>
             </div>
           </div>
         </div>
