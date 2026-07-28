@@ -23,6 +23,9 @@ const usage = (
 describe('shadow token billing', () => {
   test('uses the weighted token pricing baseline and fractional credits', () => {
     expect(calculateShadowWeightedTokens(usage())).toBe(200)
+    expect(
+      calculateShadowWeightedTokens({ ...usage(), cache_read_tokens: 100 }),
+    ).toBe(225)
     expect(calculateShadowCreditsMicro(10_000)).toBe(1_000_000)
   })
 

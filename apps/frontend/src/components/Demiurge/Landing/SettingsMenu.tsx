@@ -3014,7 +3014,10 @@ function CreditAuditPanel({
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <CreditMetric label={copy.metrics.settled} value={`${summary?.settledCredits ?? 0} credits`} />
+        <CreditMetric
+          label={copy.metrics.settled}
+          value={`${formatCreditAmount(summary?.settledCredits ?? 0)} credits`}
+        />
         <CreditMetric label={copy.metrics.weightedTokens} value={String(summary?.weightedTokens ?? 0)} />
       </div>
       {status ? (
@@ -3080,7 +3083,7 @@ function BillingEventRow({ event, copy }: { event: BeeGameBillingEvent; copy: Bi
     <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
       <div>
         <div className="type-footnote text-zinc-100">{event.status}</div>
-        <div className="type-caption-1 text-zinc-500">{event.credits ?? 0} credits</div>
+        <div className="type-caption-1 text-zinc-500">{formatCreditAmount(event.credits ?? 0)} credits</div>
       </div>
       <div className="min-w-0">
         <div className="type-footnote truncate text-zinc-300">{event.eventType}</div>
@@ -3109,7 +3112,7 @@ function CreditAuditEntryRow({ entry, copy }: { entry: BeeGameCreditLedgerEntry;
     <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
       <div>
         <div className="type-footnote text-zinc-100">{entry.kind}</div>
-        <div className="type-caption-1 text-zinc-500">{entry.credits} credits</div>
+        <div className="type-caption-1 text-zinc-500">{formatCreditAmount(entry.credits)} credits</div>
       </div>
       <div className="min-w-0">
         <div className="type-footnote break-all text-zinc-300">{entry.userId}</div>
@@ -3118,6 +3121,12 @@ function CreditAuditEntryRow({ entry, copy }: { entry: BeeGameCreditLedgerEntry;
       <div className="type-caption-1 text-zinc-500">{formatCreditAuditTime(entry.createdAt)}</div>
     </div>
   );
+}
+
+function formatCreditAmount(value: number): string {
+  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  });
 }
 
 function formatCreditAuditTime(value: string): string {

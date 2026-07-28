@@ -366,7 +366,7 @@ export function BeeGameLivePreviewPage({
                 />
                 {projectTarget ? <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} /> : null}
                 {credits ? (
-                  <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />
+                  <ProjectHintRow label={labels.credits} value={formatCreditAmount(credits.settledCredits)} />
                 ) : null}
                 <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                 <ProjectHintRow
@@ -863,6 +863,12 @@ function formatDeploymentTime(value: string): string {
 
 function formatTokenCount(value: number | undefined): string {
   return Math.max(0, Number(value) || 0).toLocaleString();
+}
+
+function formatCreditAmount(value: number): string {
+  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  });
 }
 
 function normalizeProjectTokenUsage(usage?: TokenUsage | null): {

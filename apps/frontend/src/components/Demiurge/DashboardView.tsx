@@ -148,8 +148,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         void refreshCredits();
         return;
       }
+      if (type === 'usage') {
+        void refreshCredits();
+      }
       if (
-        type === 'usage' ||
         type === 'status_finished' ||
         type === 'status_failed' ||
         type === 'tool_start' ||

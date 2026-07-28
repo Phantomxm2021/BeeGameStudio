@@ -1788,7 +1788,7 @@ begin
   where user_id = p_user_id
   for update;
 
-  weighted_tokens := ceil((prompt_tokens * 100 + cache_read_tokens * 10 + cache_creation_tokens * 125 + completion_tokens * 500)::numeric / 100)::bigint;
+  weighted_tokens := ceil((prompt_tokens * 100 + cache_read_tokens * 25 + cache_creation_tokens * 125 + completion_tokens * 500)::numeric / 100)::bigint;
   if shadow_row.id is not null then
     amount_micro := shadow_row.weighted_tokens_delta * 100;
   else

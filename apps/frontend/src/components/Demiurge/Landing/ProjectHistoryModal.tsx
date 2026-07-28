@@ -223,7 +223,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         {creditSummary ? (
                           <>
                             <span className="text-zinc-300">
-                              {creditSummary.settledCredits.toLocaleString()} credits
+                              {formatCreditAmount(creditSummary.settledCredits)} credits
                             </span>
                           </>
                         ) : (
@@ -282,6 +282,12 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
         : null}
     </>
   );
+}
+
+function formatCreditAmount(value: number): string {
+  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  });
 }
 
 function ProjectHistoryListSkeleton() {

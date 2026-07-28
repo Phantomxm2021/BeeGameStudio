@@ -380,14 +380,20 @@ function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
 }
 
 function formatCreditLedgerAmount(entry: BeeGameCreditLedgerEntry): string {
-  const amount = Math.abs(entry.credits);
+  const amount = formatCreditAmount(Math.abs(entry.credits));
   if (entry.kind === 'grant') {
     return `+${amount}`;
   }
   if (entry.kind === 'settle') {
     return `-${amount}`;
   }
-  return String(entry.credits);
+  return formatCreditAmount(entry.credits);
+}
+
+function formatCreditAmount(value: number): string {
+  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  });
 }
 
 function getCreditLedgerAmountClass(kind: BeeGameCreditLedgerEntry['kind']): string {

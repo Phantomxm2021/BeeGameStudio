@@ -7,7 +7,7 @@ export const SHADOW_CREDIT_SCALE = 1_000_000
 
 export const DEFAULT_SHADOW_TOKEN_WEIGHTS = {
   input: 1,
-  cacheRead: 0.1,
+  cacheRead: 0.25,
   cacheCreation: 1.25,
   output: 5,
 } as const
