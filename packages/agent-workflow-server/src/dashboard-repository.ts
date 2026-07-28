@@ -104,10 +104,6 @@ import type {
 import type { BeeGameUsageBillingEvent } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import type { ProjectAssetStorage } from './r2-project-asset-storage'
 import {
-  reconcileCreditLedgers,
-  type CreditReconciliationReport,
-} from './credit-reconciliation'
-import {
   debitLocalRealtimeUsage,
   grantLocalRealtimeCredits,
   getLocalRealtimeUsageWallet,
@@ -849,26 +845,6 @@ export class DashboardRepository {
         shadowCreditsMicro: 0,
       },
     )
-  }
-
-  async reconcileCreditLedgers(
-    request: Request,
-    user: BeeGameUserContext,
-    filters: { projectId?: string; from?: Date; to?: Date } = {},
-  ): Promise<CreditReconciliationReport> {
-    const [shadowEvents, legacyEntries] = await Promise.all([
-      this.listShadowUsageEvents(request, user, filters),
-      this.listCreditLedger(request, user),
-    ])
-    const scopedLegacyEntries = legacyEntries.filter(entry => {
-      if (filters.projectId && entry.projectId !== filters.projectId)
-        return false
-      const createdAt = new Date(entry.createdAt)
-      if (filters.from && createdAt < filters.from) return false
-      if (filters.to && createdAt > filters.to) return false
-      return true
-    })
-    return reconcileCreditLedgers(shadowEvents, scopedLegacyEntries)
   }
 
   async listCreditAuditLedger(

@@ -935,20 +935,6 @@ export function createAgentWorkflowApp(
     )
   })
 
-  app.get('/api/credits/reconciliation', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const projectId = c.req.query('projectId')?.trim()
-    const window = parseUsageWindow(c.req.query('from'), c.req.query('to'))
-    if (window.error) return c.json({ error: window.error }, 400)
-    return c.json(
-      await dashboardRepository.reconcileCreditLedgers(c.req.raw, user, {
-        ...(projectId ? { projectId } : {}),
-        ...(window.from ? { from: window.from } : {}),
-        ...(window.to ? { to: window.to } : {}),
-      }),
-    )
-  })
-
   app.get('/api/credits/usage-mode', async c => {
     const user = getCurrentUser(c.req.raw)
     return c.json({
