@@ -241,10 +241,23 @@ export async function reconcileDocumentReview(input: {
     expectedChecklistIds.some(id => !input.terminal.checklistIds.includes(id))
   )
     throw new Error('document review does not cover the current checklist')
+  // The workflow, not reviewer prose, owns the readiness gate. Normalize an
+  // internally contradictory READY result so blocking findings can never
+  // advance downstream work.
+  const effectiveVerdict =
+    input.terminal.verdict === 'READY' &&
+    input.terminal.findings.some(
+      finding =>
+        finding.severity === 'blocking' ||
+        finding.category === 'cross_document_conflict' ||
+        finding.category === 'missing_spec',
+    )
+      ? 'NEEDS_REVISION'
+      : input.terminal.verdict
   const status =
-    input.terminal.verdict === 'READY'
+    effectiveVerdict === 'READY'
       ? 'ready'
-      : input.terminal.verdict === 'NEEDS_REVISION'
+      : effectiveVerdict === 'NEEDS_REVISION'
         ? 'failed'
         : 'blocked'
   const reviewRevision =
@@ -259,7 +272,7 @@ export async function reconcileDocumentReview(input: {
     status,
     observedAt: new Date().toISOString(),
   }
-  if (scope === 'foundation' && input.terminal.verdict === 'READY') {
+  if (scope === 'foundation' && effectiveVerdict === 'READY') {
     return {
       ...input.run,
       status: 'running',
@@ -271,9 +284,9 @@ export async function reconcileDocumentReview(input: {
   }
   const reconciled = transitionDeliveryRun(
     input.run,
-    input.terminal.verdict === 'READY'
+    effectiveVerdict === 'READY'
       ? { type: 'document_review_ready', evidence }
-      : input.terminal.verdict === 'NEEDS_REVISION'
+      : effectiveVerdict === 'NEEDS_REVISION'
         ? { type: 'document_review_needs_revision', evidence }
         : { type: 'document_review_blocked', evidence },
   )

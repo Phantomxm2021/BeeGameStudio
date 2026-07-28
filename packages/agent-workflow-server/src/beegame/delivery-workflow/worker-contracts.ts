@@ -21,7 +21,22 @@ export const documentReviewerTerminalSchema = base
     verdict: z.enum(['READY', 'NEEDS_REVISION', 'BLOCKED']),
     reviewedDocumentPaths: z.array(z.string().min(1)),
     checklistIds: z.array(z.string().min(1)),
-    findings: z.array(z.string()),
+    findings: z.array(
+      z
+        .object({
+          severity: z.enum(['blocking', 'non_blocking']),
+          category: z.enum([
+            'cross_document_conflict',
+            'missing_spec',
+            'calculation',
+            'other',
+          ]),
+          documents: z.array(z.string().min(1)).min(1),
+          description: z.string().min(1),
+          requiredAction: z.string().min(1),
+        })
+        .strict(),
+    ),
     evidencePath: z.string().min(1),
   })
   .strict()

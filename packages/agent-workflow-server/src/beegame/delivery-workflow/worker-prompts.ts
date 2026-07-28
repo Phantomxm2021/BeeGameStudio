@@ -46,6 +46,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : []),
     ...(request.workerType === 'document-reviewer'
       ? [
+          'Classify every finding structurally. Any unresolved contradiction between canonical artifacts, missing behavior needed for a unique implementation, or missing acceptance definition is blocking. A READY verdict is valid only when there are zero blocking findings. Do not resolve a contradiction by choosing one document as authority; return NEEDS_REVISION so the documents can be reconciled.',
           request.contract.reviewScope === 'foundation'
             ? 'This is the foundation review substep. Review only the six foundation documents listed in the current workspace; do not require or review docs/acceptance/gameplay-checklist.md yet. Return reviewedDocumentPaths for those six documents and an empty checklistIds array.'
             : 'This is the final comprehensive review substep. Review all six approved foundation documents, docs/acceptance/gameplay-checklist.md, and assets/asset-manifest.json together. Verify their cross-artifact consistency and return all eight paths in reviewedDocumentPaths plus coverage for every checklist ID.',
@@ -62,7 +63,7 @@ function terminalContractInstruction(
     case 'document-author':
       return 'Terminal JSON contract (exact keys): {"workerType":"document-author","status":"completed","revision":"<dispatch revision>","writtenPaths":["<workspace-relative path>"]}. documentRevision is optional because the server computes it from the files. Do not use worker, succeeded, or changedPaths.'
     case 'document-reviewer':
-      return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":["<finding>"],"evidencePath":".beegame/workflow/evidence/<file>"}. Findings must be strings.'
+      return 'Terminal JSON contract (exact keys): {"workerType":"document-reviewer","revision":"<dispatch revision>","verdict":"READY|NEEDS_REVISION|BLOCKED","reviewedDocumentPaths":["<workspace-relative path>"],"checklistIds":["<stable checklist id>"],"findings":[{"severity":"blocking|non_blocking","category":"cross_document_conflict|missing_spec|calculation|other","documents":["<workspace-relative path>"],"description":"<finding>","requiredAction":"<required correction>"}],"evidencePath":".beegame/workflow/evidence/<file>"}. READY requires zero blocking findings.'
     case 'resource-preparer':
       return 'Terminal JSON contract (exact keys): {"workerType":"resource-preparer","revision":"<dispatch revision>","status":"completed|failed|blocked","writtenPaths":["<workspace-relative path>"],"importIds":["<import id>"],"compositionIds":["<composition id>"],"evidencePath":".beegame/workflow/evidence/<file>"}.'
     case 'atomic-task-planner':
@@ -96,7 +97,7 @@ function workerInstruction(
         ? 'Author only docs/acceptance/gameplay-checklist.md from the approved foundation documents. Every checklist item must be an observable gameplay check with a stable identifier and evidence expectation. Do not modify any foundation document, source code, assets or manifest.'
         : 'Author only the six foundation documents required by the confirmed brief: GDD, technical design, art direction, UI/UX, audio design and asset plan. Every document must begin with YAML front matter declaring document_id, version in MAJOR.MINOR.PATCH form, and updated_at as an ISO 8601 UTC timestamp. Do not create or edit docs/acceptance/gameplay-checklist.md, search Resource Library, create or edit assets/asset-manifest.json, import resources, or implement runtime code. The checklist is generated only after foundation document review.'
     case 'resource-preparer':
-      return 'Prepare resources only after the complete document review is READY. Read the approved ASSET_PLAN and technical constraints, search the Resource Library with bounded requests, import only selected resources, and write a valid assets/asset-manifest.json. Do not write source code or docs, do not use placeholders, and report every manifest import and composition ID in the terminal result.'
+      return 'Prepare resources only after the six foundation documents passed foundation review and the gameplay checklist was created. Read those approved documents and technical constraints, search the Resource Library with bounded requests, import only selected resources, and write a valid assets/asset-manifest.json. Do not write source code or docs, do not use placeholders, and report every manifest import and composition ID in the terminal result. The final comprehensive review happens only after this manifest is complete.'
     case 'atomic-task-planner':
       return 'Convert every approved document requirement and every validated resource import/composition into a complete atomic task graph. Use the approved resource manifest as read-only input; do not search Resource Library, import resources, edit the manifest, or modify project files.'
     case 'implementation-worker':
