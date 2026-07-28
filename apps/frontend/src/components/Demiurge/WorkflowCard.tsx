@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
   Circle,
   LoaderCircle,
   RotateCcw,
@@ -84,8 +83,7 @@ export function WorkflowCard({
   const [actionError, setActionError] = useState('');
   const isCompleted = workflow.status === 'completed';
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(workflow.status);
-  const StatusIcon = isCompleted ? CheckCircle2 : isBlocked ? AlertTriangle : LoaderCircle;
-  const usage = workflow.usage;
+  const StatusIcon = isCompleted ? CheckCircle2 : LoaderCircle;
   const tasks = workflow.tasks ?? [];
   const completedCount = workflow.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = workflow.totalTaskCount ?? tasks.length;
@@ -137,29 +135,38 @@ export function WorkflowCard({
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
-          <StatusIcon className={`mt-0.5 h-4 w-4 shrink-0 ${isCompleted ? 'text-emerald-300' : isBlocked ? 'text-amber-300' : 'animate-spin text-sky-300'}`} />
+          {!isBlocked ? <StatusIcon className={`mt-0.5 h-4 w-4 shrink-0 ${isCompleted ? 'text-emerald-300' : 'animate-spin text-sky-300'}`} /> : null}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="truncate text-sm font-semibold text-zinc-100">{stageTitle}</h3>
                   {totalCount > 0 ? <span className="text-[11px] tabular-nums text-zinc-500">{completedCount} / {totalCount}</span> : null}
-                  {workflow.block ? (
-                    <details className="relative">
-                      <summary className="list-none cursor-pointer rounded-full text-amber-300 outline-none hover:text-amber-200" aria-label="查看错误详情" title={workflow.block.message}>
-                        <AlertTriangle className="h-4 w-4" />
-                      </summary>
-                      <div role="alert" className="absolute left-0 top-6 z-30 w-72 rounded-xl border border-amber-300/20 bg-zinc-950/95 p-3 text-xs leading-5 text-amber-100 shadow-2xl backdrop-blur-xl">
-                        <p>{workflow.block.message}</p>
-                        {workflow.block.nextAction ? <p className="mt-1 text-amber-200/70">下一步：{workflow.block.nextAction}</p> : null}
-                      </div>
-                    </details>
-                  ) : null}
                 </div>
                 <p className="mt-1.5 text-sm leading-5 text-zinc-300">{workflow.thinking || (isBlocked ? workflow.block?.message : '正在准备当前阶段…')}</p>
                 {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
               </div>
-              <span className="shrink-0 text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
+                {workflow.block ? (
+                  <div className="group relative">
+                    <button
+                      type="button"
+                      className="rounded-full text-amber-300 outline-none transition-colors hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-amber-300/40"
+                      aria-label="查看错误详情"
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                    </button>
+                    <div
+                      role="tooltip"
+                      className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-amber-300/20 bg-zinc-950/95 p-3 text-xs leading-5 text-amber-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                    >
+                      <p>{workflow.block.message}</p>
+                      {workflow.block.nextAction ? <p className="mt-1 text-amber-200/70">下一步：{workflow.block.nextAction}</p> : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             {tasks.length > 0 ? (
@@ -197,20 +204,6 @@ export function WorkflowCard({
         </div>
       </div>
 
-      {usage ? (
-        <details className="group border-t border-white/10 px-4 py-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-xs text-zinc-500 outline-none">
-            <span>Token 用量 {usage.total_tokens?.toLocaleString() ?? 0}</span>
-            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500 sm:grid-cols-4">
-            <span>输入 {usage.input_tokens?.toLocaleString() ?? 0}</span>
-            <span>缓存 {usage.cache_read_tokens?.toLocaleString() ?? 0}</span>
-            <span>输出 {usage.output_tokens?.toLocaleString() ?? 0}</span>
-            <span>总计 {usage.total_tokens?.toLocaleString() ?? 0}</span>
-          </div>
-        </details>
-      ) : null}
     </section>
   );
 }

@@ -48,12 +48,13 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getByLabelText('查看错误详情')).toHaveAttribute('title', '文档整改超过最大自动重试次数。');
+    expect(screen.getByLabelText('查看错误详情')).toBeInTheDocument();
+    expect(screen.getByRole('tooltip')).toHaveTextContent('文档整改超过最大自动重试次数。');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
   });
 
-  it('keeps token details collapsed as secondary information', () => {
+  it('does not render token usage in the workflow card', () => {
     render(
       <WorkflowCard
         workflow={{
@@ -73,6 +74,7 @@ describe('WorkflowCard', () => {
     );
 
     expect(screen.getByText('运行验收')).toBeInTheDocument();
-    expect(screen.getByText('Token 用量 15')).toBeInTheDocument();
+    expect(screen.queryByText(/Token 用量/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/输入 10/)).not.toBeInTheDocument();
   });
 });
