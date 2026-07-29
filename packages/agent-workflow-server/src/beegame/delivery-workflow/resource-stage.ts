@@ -26,11 +26,7 @@ type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 type ResourceAudit = ResourceDeliveryReadiness
 
 function runtimeAssetRoot(workspacePath: string): string | undefined {
-  const manifestPath = join(
-    resolve(workspacePath),
-    'assets',
-    'asset-manifest.json',
-  )
+  const manifestPath = assetManifestPath(workspacePath)
   if (!existsSync(manifestPath)) return undefined
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
@@ -47,6 +43,24 @@ function runtimeAssetRoot(workspacePath: string): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined
   } catch {
     return undefined
+  }
+}
+
+function assetManifestPath(workspacePath: string): string {
+  return join(resolve(workspacePath), 'assets', 'asset-manifest.json')
+}
+
+function assetManifestExists(workspacePath: string): boolean {
+  return existsSync(assetManifestPath(workspacePath))
+}
+
+async function hasCanonicalAssetManifest(workspacePath: string): Promise<boolean> {
+  if (!assetManifestExists(workspacePath)) return false
+  try {
+    await readBeeGameAssetManifest(workspacePath)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -78,6 +92,10 @@ async function repairDeterministicPreparationState(input: {
   workspacePath: string
   confirmedPolicy?: ReturnType<typeof confirmedResourceLibraryUsage>
 }): Promise<void> {
+  // `readBeeGameAssetManifest` intentionally exposes a non-persistable draft
+  // when the file is absent. A fresh resource attempt owns manifest creation;
+  // deterministic repair applies only to an existing canonical contract.
+  if (!assetManifestExists(input.workspacePath)) return
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
   let changed = false
   if (
@@ -150,21 +168,38 @@ export async function startResourcePreparation(input: {
   const confirmedPolicy = confirmedResourceLibraryUsage(
     input.run.confirmedBriefContext,
   )
-  if (input.run.resourceRemediation)
+  const manifestPresent = assetManifestExists(input.workspacePath)
+  const hasCanonicalManifest = await hasCanonicalAssetManifest(
+    input.workspacePath,
+  )
+  if (input.run.resourceRemediation && hasCanonicalManifest)
     await repairDeterministicPreparationState({
       workspacePath: input.workspacePath,
       ...(confirmedPolicy ? { confirmedPolicy } : {}),
     })
   const existingContract = auditAssetContract(input.workspacePath)
-  const remediation = input.run.resourceRemediation
+  const resourceRemediation = input.run.resourceRemediation
+  const remediation = resourceRemediation && hasCanonicalManifest
     ? {
-        ...input.run.resourceRemediation,
+        ...resourceRemediation,
         preserveImportIds: (existingContract.imports ?? []).map(
           item => item.id,
         ),
         preserveCompositionIds: existingContract.compositions.map(
           item => item.id,
         ),
+      }
+    : undefined
+  const freshRestart = resourceRemediation && !hasCanonicalManifest
+    ? {
+        attempt: resourceRemediation.attempt,
+        manifestState: manifestPresent ? 'invalid' : 'missing',
+        issues: [
+          ...resourceRemediation.issues,
+          ...existingContract.issues.filter(
+            issue => !resourceRemediation.issues.includes(issue),
+          ),
+        ],
       }
     : undefined
   return input.dispatcher.dispatch({
@@ -183,7 +218,9 @@ export async function startResourcePreparation(input: {
       dynamicRuntimeAssetRoot:
         runtimeAssetRoot(input.workspacePath) ??
         'Declare project_target.runtime_asset_root in the manifest before importing; that exact workspace-relative directory is in resource scope.',
+      resourceAttemptMode: remediation ? 'repair' : 'fresh',
       ...(remediation ? { remediation } : {}),
+      ...(freshRestart ? { freshRestart } : {}),
     },
   })
 }

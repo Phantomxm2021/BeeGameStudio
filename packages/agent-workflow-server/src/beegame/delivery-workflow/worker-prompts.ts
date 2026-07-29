@@ -73,11 +73,17 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       ? [
           'Resource preparation approves inventory and an integration plan; it does not claim implementation that has not happened. New imports must remain available, requirements that implementation has not fulfilled must remain planned, and compositions without an existing target-native recipe must remain planned. Never report satisfied, assembled, integrated, usage_evidence, integration_evidence, or recipe.path unless the referenced project files already exist and the evidence is current.',
           'The manifest must preserve project_target.resource_library_usage and declare the real target-supported asset_format_capabilities plus a concrete workspace-relative project_target.runtime_asset_root. Imported files may be written under that declared runtime root even when it is outside assets/.',
+          'On a fresh attempt, create and validate the canonical assets/asset-manifest.json foundation before the first import_elements call. Derive the real target fields and requirements from the approved documents; project_target.asset_format_capabilities must be a non-empty array of non-empty strings, project_target.runtime_asset_root must be concrete and workspace-relative, and imports and compositions must be initialized as arrays. Never persist a placeholder value. ResourceLibrary import requires this target contract to exist first.',
+          'Use index_pack_elements for bounded compact inventory pages. For each import_elements selection provide exactly one locator: element_id or element_path, never both.',
           ...(request.contract.remediation
             ? [
                 'This is a repair pass over existing resources. Preserve every import and composition ID listed by contract.remediation, preserve valid imported files, and correct only the reported deterministic issues. Do not browse, select, or import replacement resources during this pass; a separate explicit resource-selection request is required if an existing file is genuinely missing. If native provenance is missing after restart, invoke refresh_import_metadata exactly once to verify the pinned imports and rebuild current provenance without downloading or replacing them.',
               ]
-            : []),
+            : request.contract.freshRestart
+              ? [
+                  'The previous resource attempt produced no durable canonical manifest. This is a fresh restart, not a repair pass over canonical inventory: rebuild the manifest foundation first, salvage only provenance and files that can be validated when an invalid draft exists, then perform bounded resource selection and import for remaining requirements.',
+                ]
+              : []),
         ]
       : []),
     ...(request.workerType === 'atomic-task-planner' &&
@@ -137,7 +143,7 @@ function workerInstruction(
         ? 'Author only docs/acceptance/gameplay-checklist.md from the approved foundation documents. Every checklist item must be an observable gameplay check with a stable identifier and evidence expectation and must use its own canonical `- [ ] <stable-id> <observable check and evidence expectation>` Markdown task line. Do not modify any foundation document, source code, assets or manifest.'
         : 'Author only the six foundation documents required by the confirmed brief: GDD, technical design, art direction, UI/UX, audio design and asset plan. Every document must begin with YAML front matter declaring document_id, version in MAJOR.MINOR.PATCH form, and updated_at as an ISO 8601 UTC timestamp. Do not create or edit docs/acceptance/gameplay-checklist.md, search Resource Library, create or edit assets/asset-manifest.json, import resources, or implement runtime code. The checklist is generated only after foundation document review.'
     case 'resource-preparer':
-      return 'Prepare resources only after the six foundation documents passed foundation review and the gameplay checklist was created. Read those approved documents and technical constraints, search the Resource Library with bounded requests, import only selected resources, and write a valid assets/asset-manifest.json. Do not write source code or docs, do not use placeholders, and report every manifest import and composition ID in the terminal result. The final comprehensive review happens only after this manifest is complete.'
+      return 'Prepare resources only after the six foundation documents passed foundation review and the gameplay checklist was created. Read those approved documents and technical constraints. On a fresh attempt, write and validate the canonical manifest target and empty inventory arrays before Resource Library import, then search with bounded compact requests and import only explicitly selected resources. Do not write source code or docs, do not use placeholders, and report every manifest import and composition ID in the terminal result. The final comprehensive review happens only after this manifest is complete.'
     case 'atomic-task-planner':
       return 'Convert every approved document requirement and every validated resource import/composition into a complete atomic task graph. Use the approved resource manifest as read-only input; do not search Resource Library, import resources, edit the manifest, or modify project files.'
     case 'implementation-worker':

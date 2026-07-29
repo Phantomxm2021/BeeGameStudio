@@ -192,6 +192,77 @@ describe('delivery workflow recovery', () => {
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
   })
 
+  test('starts a fresh retry dispatch even while the timed-out transport is still closing', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-stale-key-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createInitialDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    await store.save({
+      ...initial,
+      phase: 'RESOURCE_PREPARATION',
+    })
+    const started: string[] = []
+    let closeCalls = 0
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      idleProgressTimeoutMs: 30,
+      progressPollIntervalMs: 5,
+      workerPort: {
+        async start(request) {
+          const dispatchId = request.dispatchId ?? 'missing-dispatch-id'
+          started.push(dispatchId)
+          return { sessionId: dispatchId, dispatchId }
+        },
+        async submit() {},
+        async stop() {},
+        async close() {
+          closeCalls += 1
+          await new Promise<void>(() => undefined)
+        },
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const request: WorkerDispatchRequest = {
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'resource-preparer',
+      phase: 'RESOURCE_PREPARATION',
+      revision: initial.revision.document,
+      allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
+      contract: {},
+    }
+    const first = await dispatcher.dispatch(request)
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await store.load())?.status === 'needs_action') break
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect((await store.load())?.status).toBe('needs_action')
+    expect(closeCalls).toBe(1)
+
+    const retried = await retryRun({ store, runId: initial.runId })
+    expect(retried.activeDispatch).toBeUndefined()
+    const second = await dispatcher.dispatch(request)
+
+    expect(second.dispatchId).not.toBe(first.dispatchId)
+    expect(started).toEqual([first.dispatchId, second.dispatchId])
+    expect(await store.load()).toMatchObject({
+      status: 'running',
+      activeDispatch: {
+        dispatchId: second.dispatchId,
+        status: 'running',
+      },
+    })
+  })
+
   test('uses worker and document lane identity in dispatch idempotency keys', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-identity-'))
     const store = createRunStore(workspace, 'owner-1')

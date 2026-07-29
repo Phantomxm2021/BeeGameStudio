@@ -5,6 +5,7 @@ import type {
   ResourceCatalogPage,
   ResourceCatalogRequest,
 } from '@bee-game-studio/beegame-resource-core'
+import { serializeQueryEngineError } from './query-engine-worker-protocol'
 
 export type ResourceSelectionElementRelation = { kind: string; targetElementId: string; role?: string; required?: boolean }
 export type ResourceSelectionDependencyResult = { key: string; parentKey: string; elementId: string; elementPath: string; referencePath: string; sourceUrl: string; kind?: string }
@@ -19,9 +20,15 @@ export type ResourcePackInspectionResult = { pack: Record<string, unknown>; fold
 export type ResourceExplicitSelectionInput = { importId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }
 export type ResourceResolvedSelection = ResourceSelectionResult & { importId: string; destinationPath?: string; selectionReason: string[] }
 
-export function createResourceSelectionClient(options: { baseUrl: string; serviceToken: string; fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> }) {
+export function createResourceSelectionClient(options: { baseUrl: string; serviceToken: string; fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; transportRetryAttempts?: number; transportRetryDelayMs?: number }) {
   const fetchImpl = options.fetchImpl ?? fetch
   const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  const transportRetryAttempts = Number.isFinite(options.transportRetryAttempts)
+    ? Math.max(0, Math.trunc(options.transportRetryAttempts!))
+    : 2
+  const transportRetryDelayMs = Number.isFinite(options.transportRetryDelayMs)
+    ? Math.max(0, Math.trunc(options.transportRetryDelayMs!))
+    : 100
   return {
     async browsePacks(input: ResourceCatalogInput): Promise<ResourceCatalogPackPage> {
       const response = await servicePost('/api/resource-catalog/packs', input)
@@ -36,7 +43,7 @@ export function createResourceSelectionClient(options: { baseUrl: string; servic
       return parseCatalogPage(body, parseCatalogElement)
     },
     async inspectPack(packId: string): Promise<ResourcePackInspectionResult> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-catalog/packs/${encodeURIComponent(packId)}`, { headers: serviceHeaders(false) })
+      const response = await serviceFetch(`${baseUrl}/api/resource-catalog/packs/${encodeURIComponent(packId)}`, { headers: serviceHeaders(false) })
       const body = await response.json().catch(() => undefined) as ResourcePackInspectionResult & { error?: { message?: string } }
       if (!response.ok || !isRecord(body?.pack) || !Array.isArray(body?.folders)) throw new Error(body?.error?.message || `Resource Pack inspection failed (${response.status})`)
       return { pack: body.pack, folders: body.folders.filter(isRecord), ...(isRecord(body.summary) ? { summary: body.summary } : {}) }
@@ -50,7 +57,20 @@ export function createResourceSelectionClient(options: { baseUrl: string; servic
   }
 
   function servicePost(path: string, body: unknown) {
-    return fetchImpl(`${baseUrl}${path}`, { method: 'POST', headers: serviceHeaders(true), body: JSON.stringify(body) })
+    return serviceFetch(`${baseUrl}${path}`, { method: 'POST', headers: serviceHeaders(true), body: JSON.stringify(body) })
+  }
+
+  async function serviceFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await fetchImpl(input, init)
+      } catch (error) {
+        const classified = serializeQueryEngineError(error, 'Resource service transport failed')
+        if (!classified.retryable || attempt >= transportRetryAttempts) throw error
+        const delayMs = transportRetryDelayMs * 2 ** attempt
+        if (delayMs > 0) await new Promise<void>(resolve => setTimeout(resolve, delayMs))
+      }
+    }
   }
 
   function serviceHeaders(json: boolean) {

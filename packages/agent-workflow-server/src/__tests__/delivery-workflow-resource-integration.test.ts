@@ -13,8 +13,9 @@ import { resourcePreparationAllowedPaths } from '../beegame/delivery-workflow/re
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import { computeResourceRevision } from '../beegame/delivery-workflow/revision'
 import { createInitialDeliveryRun } from '../beegame/delivery-workflow/run-store'
+import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { parseWorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
-import type { AtomicTask } from '../beegame/delivery-workflow/types'
+import type { AtomicTask, WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import { readWorkflowWorkerSessionIdsFromLogIndex } from '../beegame/session-manager'
 
 describe('delivery workflow resource integration', () => {
@@ -112,6 +113,109 @@ describe('delivery workflow resource integration', () => {
       status: 'planned',
     })
     expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      contract: {
+        resourceAttemptMode: 'repair',
+        remediation: {
+          preserveImportIds: ['import-1'],
+          preserveCompositionIds: ['composition-1'],
+        },
+      },
+    })
+  })
+
+  test('restarts resource preparation fresh when no canonical manifest was persisted', async () => {
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-resource-fresh-restart-'),
+    )
+    const requests: WorkerDispatchRequest[] = []
+    const base = createInitialDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+
+    await startResourcePreparation({
+      run: {
+        ...base,
+        phase: 'RESOURCE_PREPARATION',
+        resourceRemediation: {
+          sourceRevision: base.revision.document,
+          attempt: 1,
+          issues: ['previous attempt did not persist the canonical contract'],
+          preserveImportIds: [],
+          preserveCompositionIds: [],
+        },
+      },
+      workspacePath: workspace,
+      dispatcher: {
+        dispatch: async request => {
+          requests.push(request)
+          return request
+        },
+      },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.contract).toMatchObject({
+      resourceAttemptMode: 'fresh',
+      freshRestart: {
+        attempt: 1,
+        manifestState: 'missing',
+        issues: ['previous attempt did not persist the canonical contract'],
+      },
+    })
+    expect(requests[0]?.contract).not.toHaveProperty('remediation')
+    expect(buildWorkerPrompt(requests[0]!)).toContain(
+      'create and validate the canonical assets/asset-manifest.json foundation before the first import_elements call',
+    )
+  })
+
+  test('rebuilds an invalid manifest instead of entering deterministic repair', async () => {
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-resource-invalid-restart-'),
+    )
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(
+      join(workspace, 'assets/asset-manifest.json'),
+      JSON.stringify({ version: 5, project_target: {}, requirements: [] }),
+    )
+    const requests: WorkerDispatchRequest[] = []
+    const base = createInitialDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+
+    await startResourcePreparation({
+      run: {
+        ...base,
+        phase: 'RESOURCE_PREPARATION',
+        resourceRemediation: {
+          sourceRevision: base.revision.document,
+          attempt: 1,
+          issues: ['canonical contract requires recovery'],
+          preserveImportIds: [],
+          preserveCompositionIds: [],
+        },
+      },
+      workspacePath: workspace,
+      dispatcher: {
+        dispatch: async request => {
+          requests.push(request)
+          return request
+        },
+      },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.contract).toMatchObject({
+      resourceAttemptMode: 'fresh',
+      freshRestart: { attempt: 1, manifestState: 'invalid' },
+    })
+    expect(requests[0]?.contract).not.toHaveProperty('remediation')
   })
 
   test('server reconciles implementation facts without invalidating approved resource identity', async () => {

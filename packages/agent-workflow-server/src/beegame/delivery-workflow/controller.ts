@@ -1066,9 +1066,14 @@ export function createDeliveryWorkflowController(input: {
 
   function ensureProgress(run: DeliveryRun): Promise<void> {
     return serialize(async () => {
-      if (run.status !== 'running') return
-      if (run.activeDispatch?.status === 'running') return
-      await resumeUnlocked(run)
+      // Polling and retry requests may carry a stale snapshot. Always make the
+      // recovery decision from the durable run so an orphaned `running` state
+      // cannot be preserved by an outdated activeDispatch value.
+      const current = await store.load()
+      if (!current || current.runId !== run.runId) return
+      if (current.status !== 'running') return
+      if (current.activeDispatch?.status === 'running') return
+      await resumeUnlocked(current)
     })
   }
 

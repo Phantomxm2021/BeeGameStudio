@@ -6,6 +6,7 @@ import {
   BeeGameSessionManager,
   type BeeGameSessionRunner,
   type DashboardSDKMessage,
+  type DashboardPermissionDecision,
 } from '../beegame/session-manager'
 import {
   QueryEngineWorkerError,
@@ -143,6 +144,158 @@ describe('BeeGame session runtime resilience', () => {
       actions: ['inspect_project'],
       failedActions: [],
     })
+    manager.dispose()
+  })
+
+  test('auto-approves only an exact Resource Library import for the resource worker', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-permission-'))
+    const workspacePath = join(root, 'workspace')
+    let decision: DashboardPermissionDecision | undefined
+    let outsideDecision: DashboardPermissionDecision | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decision = await startInput.requestPermission?.({
+            toolUseID: 'resource-import-1',
+            toolName: 'ResourceLibrary',
+            message: 'Import selected resources',
+            input: {
+              action: 'import_elements',
+              selections: [
+                {
+                  import_id: 'selected-resource',
+                  pack_id: 'pack-1',
+                  element_id: 'element-1',
+                  destination_path: 'assets/library/selected-resource',
+                },
+              ],
+            },
+          })
+          outsideDecision = await startInput.requestPermission?.({
+            toolUseID: 'resource-import-outside',
+            toolName: 'ResourceLibrary',
+            message: 'Import selected resources',
+            input: {
+              action: 'import_elements',
+              selections: [
+                {
+                  import_id: 'outside-resource',
+                  pack_id: 'pack-1',
+                  element_id: 'element-2',
+                  destination_path: '../outside/resource',
+                },
+              ],
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'resource-preparer',
+      workflowAllowedPaths: ['assets/'],
+    })
+
+    await manager.send(session.id, 'prepare resources')
+    await waitForIdle(manager, session.id)
+
+    expect(decision).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(outsideDecision).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('outside the current project workspace'),
+    })
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
+    expect(
+      manager
+        .events(session.id)
+        .find(
+          event =>
+            event.type === 'permission.resolved' &&
+            event.payload?.toolUseID === 'resource-import-1',
+        )?.payload,
+    ).toMatchObject({
+      decision: 'allow',
+      scope: 'once',
+      autoApproved: true,
+      reason: 'workflow_resource_preparer_import',
+    })
+    manager.dispose()
+  })
+
+  test('keeps Resource Library imports interactive for other workflow workers', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-non-resource-permission-'))
+    const workspacePath = join(root, 'workspace')
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'implementation-import-1',
+            toolName: 'ResourceLibrary',
+            message: 'Import selected resources',
+            input: {
+              action: 'import_elements',
+              selections: [
+                {
+                  import_id: 'selected-resource',
+                  pack_id: 'pack-1',
+                  element_id: 'element-1',
+                  destination_path: 'assets/library/selected-resource',
+                },
+              ],
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'implementation-worker',
+      workflowAllowedPaths: ['src/'],
+    })
+
+    await manager.send(session.id, 'implement the project')
+    await waitForIdle(manager, session.id)
+    const pending = manager.pendingPermissionsForProject(
+      'user-1',
+      'project-1',
+      workspacePath,
+    )
+
+    expect(pending).toEqual([
+      expect.objectContaining({
+        toolUseID: 'implementation-import-1',
+        toolName: 'ResourceLibrary',
+      }),
+    ])
+    manager.resolveProjectPermission(
+      'user-1',
+      'project-1',
+      workspacePath,
+      'implementation-import-1',
+      { behavior: 'deny' },
+    )
+    expect(await decisionPromise).toEqual({ behavior: 'deny' })
     manager.dispose()
   })
 

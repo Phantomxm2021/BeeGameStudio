@@ -1755,6 +1755,19 @@ export class BeeGameSessionManager {
         message: policyDecision.message,
       })
     }
+    if (isWorkflowResourceImportPermission(record, request)) {
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: 'workflow_resource_preparer_import',
+        input: request.input,
+      })
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
@@ -3662,6 +3675,20 @@ function getBeeGamePermissionPolicyDecision(
   return { behavior: 'ask_user' }
 }
 
+function isWorkflowResourceImportPermission(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): boolean {
+  return (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-preparer' &&
+    request.toolName === 'ResourceLibrary' &&
+    request.input.action === 'import_elements' &&
+    Array.isArray(request.input.selections) &&
+    request.input.selections.length > 0
+  )
+}
+
 function isPathInsideWorkflowScope(
   cwd: string,
   allowedPaths: string[],
@@ -4134,6 +4161,16 @@ function extractPermissionPaths(input: Record<string, unknown>): string[] {
     .filter((value): value is string => typeof value === 'string')
     .map(value => value.trim())
     .filter(Boolean)
+  if (Array.isArray(input.selections)) {
+    paths.push(
+      ...input.selections
+        .filter(isObject)
+        .map(selection => selection.destination_path)
+        .filter((value): value is string => typeof value === 'string')
+        .map(value => value.trim())
+        .filter(Boolean),
+    )
+  }
   if (typeof input.command === 'string') {
     paths.push(...extractShellPathReferences(input.command))
   }

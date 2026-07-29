@@ -26,6 +26,7 @@ export type DispatchCredits = {
 
 const DEFAULT_IDLE_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
 const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
+const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
   constructor(
@@ -99,6 +100,7 @@ export function createDeliveryDispatcher(options: {
   const byKey = new Map<string, DispatchRecord>()
   const requests = new Map<string, WorkerDispatchRequest>()
   const creditSettled = new Set<string>()
+  const transportCleanupStarted = new Set<string>()
   let dispatchTail: Promise<void> = Promise.resolve()
   const idleProgressTimeoutMs =
     options.idleProgressTimeoutMs ?? DEFAULT_IDLE_PROGRESS_TIMEOUT_MS
@@ -110,6 +112,34 @@ export function createDeliveryDispatcher(options: {
       if (record.dispatchId === dispatchId) byKey.delete(key)
     }
     requests.delete(dispatchId)
+  }
+
+  function releaseDispatch(
+    dispatchId: string,
+    cleanup: { stopReason?: string } = {},
+  ): void {
+    // Durable state is authoritative. Release the idempotency lane before
+    // touching the disposable transport so a stalled session close can never
+    // prevent a retry from creating a fresh dispatch.
+    forgetDispatch(dispatchId)
+    if (transportCleanupStarted.has(dispatchId)) return
+    transportCleanupStarted.add(dispatchId)
+    const cleanupOperation = (async () => {
+      if (cleanup.stopReason)
+        await options.workerPort
+          .stop(dispatchId, cleanup.stopReason)
+          .catch(() => undefined)
+      await options.workerPort.close?.(dispatchId).catch(() => undefined)
+    })()
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined
+    const cleanupDeadline = new Promise<void>(resolve => {
+      cleanupTimer = setTimeout(resolve, TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS)
+      cleanupTimer.unref?.()
+    })
+    void Promise.race([cleanupOperation, cleanupDeadline]).finally(() => {
+      if (cleanupTimer) clearTimeout(cleanupTimer)
+      transportCleanupStarted.delete(dispatchId)
+    })
   }
 
   function dispatch(request: WorkerDispatchRequest): Promise<DispatchRecord> {
@@ -174,8 +204,18 @@ export function createDeliveryDispatcher(options: {
       : 1
     const key = idempotencyKey(request, attempt)
     const existing = byKey.get(key)
-    if (existing?.status === 'running' || existing?.status === 'completed')
-      return existing
+    if (existing) {
+      // A record in this map is reusable only while the durable run points at
+      // the same dispatch. Reaching this branch means it does not, so keeping
+      // it would manufacture a running workflow with no worker.
+      releaseDispatch(existing.dispatchId, {
+        ...(existing.status === 'running'
+          ? {
+              stopReason: 'stale delivery dispatch superseded by durable state',
+            }
+          : {}),
+      })
+    }
     const dispatchId = randomUUID()
     const dispatchRequest = { ...request, dispatchId }
     const record = parseDispatchRecord({
@@ -228,14 +268,10 @@ export function createDeliveryDispatcher(options: {
       ).catch(() => undefined)
       const reason =
         error instanceof Error ? error.message : 'worker dispatch failed'
-      await options.workerPort
-        .stop(startedDispatchId ?? record.dispatchId, reason)
-        .catch(() => undefined)
-      await options.workerPort
-        .close?.(startedDispatchId ?? record.dispatchId)
-        .catch(() => undefined)
-      byKey.delete(key)
-      requests.delete(record.dispatchId)
+      const transportDispatchId = startedDispatchId ?? record.dispatchId
+      releaseDispatch(transportDispatchId, { stopReason: reason })
+      if (transportDispatchId !== record.dispatchId)
+        forgetDispatch(record.dispatchId)
       throw error
     }
     if (options.workerPort.waitForTerminal) {
@@ -353,8 +389,7 @@ export function createDeliveryDispatcher(options: {
           reason,
         },
       )
-      await options.workerPort.close?.(dispatchId).catch(() => undefined)
-      forgetDispatch(dispatchId)
+      releaseDispatch(dispatchId)
       throw new DispatchError(
         'invalid_terminal',
         'invalid worker terminal result',
@@ -464,7 +499,7 @@ export function createDeliveryDispatcher(options: {
     } finally {
       // The durable run/event journal is the worker's retained evidence. The
       // private transport session is disposable once a terminal result exists.
-      await options.workerPort.close?.(dispatchId).catch(() => undefined)
+      releaseDispatch(dispatchId)
     }
     return { record: completed, result }
   }
@@ -526,6 +561,8 @@ export function createDeliveryDispatcher(options: {
       }
       forgetDispatch(record.dispatchId)
       throw error
+    } finally {
+      releaseDispatch(record.dispatchId)
     }
   }
 
@@ -561,9 +598,7 @@ export function createDeliveryDispatcher(options: {
         reason,
       },
     )
-    await options.workerPort.stop(dispatchId, reason).catch(() => undefined)
-    await options.workerPort.close?.(dispatchId).catch(() => undefined)
-    forgetDispatch(dispatchId)
+    releaseDispatch(dispatchId, { stopReason: reason })
     return saved.activeDispatch ?? failed
   }
 
@@ -599,9 +634,7 @@ export function createDeliveryDispatcher(options: {
         reason,
       },
     )
-    await options.workerPort.stop(dispatchId, reason).catch(() => undefined)
-    await options.workerPort.close?.(dispatchId).catch(() => undefined)
-    forgetDispatch(dispatchId)
+    releaseDispatch(dispatchId, { stopReason: reason })
     return saved.activeDispatch ?? interrupted
   }
 
@@ -635,9 +668,7 @@ export function createDeliveryDispatcher(options: {
         dispatchId,
       },
     )
-    await options.workerPort.stop(dispatchId, reason).catch(() => undefined)
-    await options.workerPort.close?.(dispatchId).catch(() => undefined)
-    forgetDispatch(dispatchId)
+    releaseDispatch(dispatchId, { stopReason: reason })
     return stopped
   }
 

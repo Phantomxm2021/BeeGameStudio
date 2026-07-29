@@ -31,6 +31,43 @@ describe('resource exploration client', () => {
       expect.objectContaining({ importId: 'tree', sourceUrl: 'https://signed', technicalFacts: { boundsSizeY: 6, hasNormals: true } }),
     ])
   })
+
+  test('retries a structured transient transport failure', async () => {
+    let calls = 0
+    const client = createResourceSelectionClient({
+      baseUrl: 'http://resource.test/',
+      serviceToken: 'token',
+      transportRetryDelayMs: 0,
+      fetchImpl: async () => {
+        calls += 1
+        if (calls === 1) {
+          throw Object.assign(new Error('transport unavailable'), {
+            cause: { code: 'CERTIFICATE_VERIFY_FAILED' },
+          })
+        }
+        return Response.json({ items: [], total: 0, facets: facets() })
+      },
+    })
+
+    await expect(client.browsePacks({})).resolves.toMatchObject({ items: [] })
+    expect(calls).toBe(2)
+  })
+
+  test('does not retry an unclassified application failure', async () => {
+    let calls = 0
+    const client = createResourceSelectionClient({
+      baseUrl: 'http://resource.test/',
+      serviceToken: 'token',
+      transportRetryDelayMs: 0,
+      fetchImpl: async () => {
+        calls += 1
+        throw new Error('request rejected')
+      },
+    })
+
+    await expect(client.browsePacks({})).rejects.toThrow('request rejected')
+    expect(calls).toBe(1)
+  })
 })
 
 function facets() {

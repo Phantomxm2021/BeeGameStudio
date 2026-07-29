@@ -550,9 +550,8 @@ export function createAgentWorkflowApp(
       userId: input.user.id,
       getAuthToken: async options => {
         if (!supabaseRuntimeEnvClient) return undefined
-        const token = await deliveryAuthContext.credential?.getValidAccessToken(
-          options,
-        )
+        const token =
+          await deliveryAuthContext.credential?.getValidAccessToken(options)
         if (token) return token
         throw new Error(
           'Workflow requires a refreshable authenticated session. Please sign in again.',
@@ -637,6 +636,47 @@ export function createAgentWorkflowApp(
       workspacePath: input.workspacePath,
     })
     await controller.ensureProgress(input.run)
+  }
+  const scheduleDeliveryResume = (input: {
+    controller: ReturnType<typeof getDeliveryController>
+    store: ReturnType<typeof createRunStore>
+    run: DeliveryRun
+  }): void => {
+    queueMicrotask(() => {
+      void input.controller.resume(input.run).catch(async error => {
+        const reason = toErrorMessage(error)
+        try {
+          const current = await input.store.load()
+          if (
+            current?.runId === input.run.runId &&
+            current.status === 'running' &&
+            current.activeDispatch?.status !== 'running'
+          ) {
+            await input.store.commit(
+              {
+                ...current,
+                status: 'needs_action',
+                blockedReason: reason,
+                thinking: 'idle',
+              },
+              {
+                runId: current.runId,
+                type: 'workflow.resume_failed',
+                phase: current.phase,
+                status: 'needs_action',
+                revision: current.revision,
+                reason,
+              },
+            )
+          }
+        } catch (persistError) {
+          console.warn('[BeeGame] Failed to persist workflow resume error:', {
+            runId: input.run.runId,
+            error: toErrorMessage(persistError),
+          })
+        }
+      })
+    })
   }
   const startBeeGameDeliveryWorkflow = async (input: {
     request: Request
@@ -2182,8 +2222,8 @@ export function createAgentWorkflowApp(
           }
         },
       })
-      await controller.resume(retried)
-      return c.json((await store.load()) ?? retried)
+      scheduleDeliveryResume({ controller, store, run: retried })
+      return c.json(retried, 202)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -2900,8 +2940,7 @@ export function createAgentWorkflowApp(
       dataDir: getCurrentUserDataRoot(request),
       userId: user.id,
       sessionId: `attachment-analysis:${clientRequestId ?? randomUUID()}`,
-      record: input =>
-        dashboardRepository.recordUsage(request, user, input),
+      record: input => dashboardRepository.recordUsage(request, user, input),
       debit: input =>
         dashboardRepository.debitRealTimeUsage(request, user, input),
     })
@@ -2948,8 +2987,7 @@ export function createAgentWorkflowApp(
       dataDir: getCurrentUserDataRoot(request),
       userId: user.id,
       sessionId: `idea-intake:${clientRequestId ?? randomUUID()}`,
-      record: input =>
-        dashboardRepository.recordUsage(request, user, input),
+      record: input => dashboardRepository.recordUsage(request, user, input),
       debit: input =>
         dashboardRepository.debitRealTimeUsage(request, user, input),
     })
