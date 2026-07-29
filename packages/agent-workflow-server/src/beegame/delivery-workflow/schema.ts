@@ -97,7 +97,6 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
 export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
     id: z.string().min(1),
-    code: z.string().min(1).optional(),
     title: z.string().min(1),
     sourceRequirementIds: z.array(z.string().min(1)).min(1),
     checklistIds: z.array(z.string().min(1)),
@@ -175,6 +174,7 @@ const resourceEvidenceSchema = z.union([
 const documentReviewFindingSchema = z
   .object({
     id: z.string().min(1),
+    code: z.string().min(1).optional(),
     severity: z.enum(['blocking', 'non_blocking']),
     category: z.enum([
       'cross_document_conflict',

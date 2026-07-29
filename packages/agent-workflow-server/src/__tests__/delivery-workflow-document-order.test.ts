@@ -358,11 +358,20 @@ describe('delivery workflow document ordering', () => {
         checklistIds: [],
         findings: [
           {
+            code: 'RUNTIME-BEHAVIOR-CONFLICT',
             severity: 'blocking',
             category: 'cross_document_conflict',
             documents: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
             description: 'The documents define incompatible runtime behavior.',
             requiredAction: 'Reconcile the behavior into one canonical rule.',
+          },
+          {
+            code: 'CAMERA-BASELINE-ADVISORY',
+            severity: 'non_blocking',
+            category: 'missing_spec',
+            documents: ['docs/TECHNICAL_DESIGN.md'],
+            description: 'The default camera baseline can be more explicit.',
+            requiredAction: 'Record the final baseline before delivery.',
           },
         ],
         evidencePath,
@@ -379,11 +388,30 @@ describe('delivery workflow document ordering', () => {
         attempt: 1,
         findings: [
           {
+            code: 'RUNTIME-BEHAVIOR-CONFLICT',
             severity: 'blocking',
             category: 'cross_document_conflict',
           },
         ],
       },
+      documentAdvisories: [
+        {
+          code: 'CAMERA-BASELINE-ADVISORY',
+          severity: 'non_blocking',
+          category: 'missing_spec',
+        },
+      ],
+    })
+
+    const store = createRunStore(workspace, reconciled.ownerId)
+    await store.save(reconciled)
+    const reloaded = await store.load()
+    expect(reloaded).toMatchObject({
+      documentRemediation: {
+        findings: [{ code: 'RUNTIME-BEHAVIOR-CONFLICT' }],
+      },
+      documentAdvisories: [{ code: 'CAMERA-BASELINE-ADVISORY' }],
+      documentReviewCycleCount: 1,
     })
 
     const dispatched: WorkerDispatchRequest[] = []
