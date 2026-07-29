@@ -72,6 +72,11 @@ const apiMocks = vi.hoisted(() => ({
   getCreditSummary: vi.fn(() =>
     Promise.resolve({
       entriesCount: 3,
+      inputTokens: 80_000,
+      cacheReadTokens: 25_000,
+      cacheCreationTokens: 5_000,
+      outputTokens: 15_000,
+      totalTokens: 125_000,
       consumedCredits: 12,
       weightedTokens: 120000,
     }),
@@ -591,10 +596,8 @@ describe('DashboardView runtime loading', () => {
     expect(screen.queryByText('实现构建 · 0%')).not.toBeInTheDocument();
   });
 
-  it('shows the complete token accounting in the project info hint', async () => {
+  it('shows project token accounting from the durable billing summary', async () => {
     mockedTokenUsage = {
-      // Simulates the historical client overcount. A newer runtime
-      // snapshot must be allowed to correct this value downward.
       proj_1: { prompt_tokens: 8_000, completion_tokens: 1_999, total_tokens: 9_999 },
     };
     mockedProjectStatus = {
@@ -609,19 +612,30 @@ describe('DashboardView runtime loading', () => {
         },
       },
     };
+    apiMocks.getCreditSummary.mockResolvedValueOnce({
+      entriesCount: 4,
+      inputTokens: 1_234,
+      cacheReadTokens: 56,
+      cacheCreationTokens: 7,
+      outputTokens: 89,
+      totalTokens: 1_386,
+      consumedCredits: 2,
+      weightedTokens: 2_000,
+    });
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-    await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
+    await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
 
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('总 Tokens')).toBeInTheDocument();
+    const hint = screen.getByTestId('beegame-project-hint');
+    expect(within(hint).getByText('1,234')).toBeInTheDocument();
+    expect(within(hint).getByText('63')).toBeInTheDocument();
+    expect(within(hint).getByText('89')).toBeInTheDocument();
+    expect(within(hint).getByText('1,386')).toBeInTheDocument();
   });
 
-  it('uses the current runtime token snapshot in project info', async () => {
+  it('does not use the runtime transcript snapshot as project accounting authority', async () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       context: {
@@ -635,10 +649,15 @@ describe('DashboardView runtime loading', () => {
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
+    await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
+    const hint = screen.getByTestId('beegame-project-hint');
+    expect(within(hint).getByText('80,000')).toBeInTheDocument();
+    expect(within(hint).getByText('30,000')).toBeInTheDocument();
+    expect(within(hint).getByText('15,000')).toBeInTheDocument();
+    expect(within(hint).getByText('125,000')).toBeInTheDocument();
+    expect(within(hint).queryByText('254,542')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('6,424,792')).not.toBeInTheDocument();
   });
 
   it('rounds realtime project credit consumption to whole credits', async () => {

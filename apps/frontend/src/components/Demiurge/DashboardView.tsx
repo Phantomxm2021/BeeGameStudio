@@ -90,7 +90,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
 
   // Zustand State
-  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus, tokenUsage } = useSystemStore();
+  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore();
   const { projects, pendingReviews, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore();
   const { messages } = useChatStore();
   const { showSuccess, showError, showWarning } = useToast();
@@ -205,7 +205,20 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       usage.total_tokens ?? 0,
     ].join(':');
   }, [projectRuntimeDisplay?.workflow?.usage]);
-  const projectTokenUsage = tokenUsage?.[projectId] ?? null;
+  // Project Info uses the project-scoped billing ledger. Runtime events and
+  // transcript pages are transport views and must never redefine a project's
+  // cumulative token total.
+  const projectTokenUsage = useMemo(() => creditSummary ? {
+    prompt_tokens: creditSummary.inputTokens,
+    input_tokens: creditSummary.inputTokens,
+    cached_input_tokens:
+      creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
+    cache_read_tokens: creditSummary.cacheReadTokens,
+    cache_creation_tokens: creditSummary.cacheCreationTokens,
+    completion_tokens: creditSummary.outputTokens,
+    output_tokens: creditSummary.outputTokens,
+    total_tokens: creditSummary.totalTokens,
+  } : null, [creditSummary]);
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
     !projectRuntimeDisplay?.workflow &&

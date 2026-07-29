@@ -33,6 +33,11 @@ export type BeeGameUsageEvent = {
 
 export type BeeGameUsageSummary = {
   entriesCount: number
+  inputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  outputTokens: number
+  totalTokens: number
   consumedCredits: number
   weightedTokens: number
 }
@@ -119,6 +124,11 @@ type BeeGameUsageEventResponse = {
 
 type BeeGameUsageSummaryResponse = {
   eventsCount: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  totalTokens: number
   weightedTokens: number
   creditsMicro: number
 }
@@ -192,6 +202,11 @@ export const getCreditSummary = async (
   const summary = await requestUsageSummary(projectId)
   return {
     entriesCount: summary.eventsCount,
+    inputTokens: Number(summary.promptTokens) || 0,
+    cacheReadTokens: Number(summary.cacheReadTokens) || 0,
+    cacheCreationTokens: Number(summary.cacheCreationTokens) || 0,
+    outputTokens: Number(summary.completionTokens) || 0,
+    totalTokens: Number(summary.totalTokens) || 0,
     consumedCredits: summary.creditsMicro / 1_000_000,
     weightedTokens: summary.weightedTokens,
   }
