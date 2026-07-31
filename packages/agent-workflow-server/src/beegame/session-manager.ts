@@ -53,7 +53,10 @@ import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
-import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
+import {
+  CANONICAL_ASSET_MANIFEST,
+  CANONICAL_PROJECT_DOCUMENTS,
+} from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
 import { auditAssetContract } from './asset-contract-audit'
 import { auditResourceInventoryPolicy } from './delivery-workflow/resource-stage'
@@ -392,7 +395,8 @@ function workflowDocumentFromToolEvent(
   record: SessionRecord,
   event: BeeGameEvent,
 ): string | undefined {
-  if (event.type !== 'tool.started') return undefined
+  if (event.type !== 'tool.started' && event.type !== 'tool.completed')
+    return undefined
   const payload = event.payload
   const input = payload?.input
   if (!input || typeof input !== 'object' || Array.isArray(input))
@@ -405,8 +409,13 @@ function workflowDocumentFromToolEvent(
   const relativePath = relative(record.session.cwd, resolve(absolutePath))
     .split('\\')
     .join('/')
-  return CANONICAL_PROJECT_DOCUMENTS.includes(
-    relativePath as (typeof CANONICAL_PROJECT_DOCUMENTS)[number],
+  return [
+    ...CANONICAL_PROJECT_DOCUMENTS,
+    CANONICAL_ASSET_MANIFEST,
+  ].includes(
+    relativePath as
+      | (typeof CANONICAL_PROJECT_DOCUMENTS)[number]
+      | typeof CANONICAL_ASSET_MANIFEST,
   )
     ? relativePath
     : undefined
@@ -428,24 +437,24 @@ function resourceWorkerActivityMessage(
   const action = String((input as Record<string, unknown>).action ?? '')
   const traditional = record.language === 'zh-TW'
   const chinese = record.language === 'zh' || traditional
-  if (action === 'browse_packs')
+  if (action === 'query_candidates')
     return chinese
       ? traditional
-        ? '正在瀏覽可用資源包…'
-        : '正在浏览可用资源包…'
-      : 'Browsing available resource packs…'
-  if (action === 'inspect_pack' || action === 'index_pack_elements')
-    return chinese
-      ? traditional
-        ? '正在篩選資源候選…'
-        : '正在筛选资源候选…'
-      : 'Evaluating resource candidates…'
+        ? '正在查詢精確資源候選…'
+        : '正在查询精确资源候选…'
+      : 'Querying exact resource candidates…'
   if (action === 'import_elements')
     return chinese
       ? traditional
         ? '正在匯入已選資源…'
         : '正在导入已选资源…'
       : 'Importing selected resources…'
+  if (action === 'record_no_match')
+    return chinese
+      ? traditional
+        ? '正在記錄資源無匹配結果…'
+        : '正在记录资源无匹配结果…'
+      : 'Recording the resource no-match outcome…'
   if (action === 'refresh_import_metadata')
     return chinese
       ? traditional
@@ -1716,6 +1725,19 @@ export class BeeGameSessionManager {
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
     }
+    if (isWorkflowResourceNoMatchPermission(record, request)) {
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: 'workflow_resource_preparer_no_match',
+        input: request.input,
+      })
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
     if (isWorkflowResourceRefreshPermission(record, request)) {
       const contract = auditAssetContract(record.session.cwd)
       const refreshIssues = [
@@ -1843,6 +1865,11 @@ export class BeeGameSessionManager {
           ? sanitizeWorkflowDisplayMessage(event.text)
           : (resourceActivityMessage ?? '')
       const currentItemId = workflowDocumentFromToolEvent(record, event)
+      const reviewedDocumentPath =
+        record.workflowWorkerType === 'document-reviewer' &&
+        event.type === 'tool.completed'
+          ? currentItemId
+          : undefined
       const clearCurrentItem =
         event.type === 'tool.completed' || event.type === 'tool.failed'
       const durableProgress =
@@ -1876,6 +1903,7 @@ export class BeeGameSessionManager {
               : {}),
             ...(currentItemId ? { currentItemId } : {}),
             ...(clearCurrentItem ? { currentItemId: null } : {}),
+            ...(reviewedDocumentPath ? { reviewedDocumentPath } : {}),
             durable: durableProgress,
           })
           .catch(() => undefined)
@@ -2003,6 +2031,7 @@ function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
   const input = getDashboardPayloadRecord(event.payload, 'input')
   return (
     input?.action === 'import_elements' ||
+    input?.action === 'record_no_match' ||
     input?.action === 'refresh_import_metadata'
   )
 }
@@ -3634,12 +3663,25 @@ function getBeeGamePermissionPolicyDecision(
     record.workflowWorkerType === 'resource-preparer' &&
     record.workflowResourceAttemptMode === 'repair' &&
     request.toolName === 'ResourceLibrary' &&
-    request.input.action === 'import_elements'
+    (request.input.action === 'import_elements' ||
+      request.input.action === 'record_no_match')
   ) {
     return {
       behavior: 'auto_deny',
       message:
-        'Repair mode must preserve the canonical inventory. Refresh metadata or repair bindings instead of importing resources again.',
+        'Repair mode must preserve the canonical inventory and source decisions. Refresh metadata or repair bindings instead of selecting another outcome.',
+    }
+  }
+  if (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-preparer' &&
+    record.workflowResourceAttemptMode !== 'repair' &&
+    isFileMutationTool(request.toolName)
+  ) {
+    return {
+      behavior: 'auto_deny',
+      message:
+        'Resource planning and selection use their canonical structured tools. Generic file mutation would create a second manifest or inventory write lane.',
     }
   }
   if (record.workflowWorker && isFileMutationTool(request.toolName)) {
@@ -3717,6 +3759,22 @@ function isWorkflowResourceImportPermission(
     request.input.action === 'import_elements' &&
     Array.isArray(request.input.selections) &&
     request.input.selections.length > 0
+  )
+}
+
+function isWorkflowResourceNoMatchPermission(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): boolean {
+  return (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-preparer' &&
+    (record.workflowResourceAttemptMode === 'selection' ||
+      record.workflowResourceAttemptMode === 'reselection') &&
+    request.toolName === 'ResourceLibrary' &&
+    request.input.action === 'record_no_match' &&
+    Array.isArray(request.input.requirement_ids) &&
+    request.input.requirement_ids.length > 0
   )
 }
 

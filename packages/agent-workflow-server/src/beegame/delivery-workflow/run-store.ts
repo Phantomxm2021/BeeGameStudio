@@ -571,6 +571,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       workerType?: string
       dispatchId?: string
       currentItemId?: string | null
+      reviewedDocumentPath?: string
       /** False for UI activity that did not change durable workflow facts. */
       durable?: boolean
     },
@@ -586,6 +587,14 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const message = progress.message
         ? sanitizeWorkflowDisplayMessage(progress.message)
         : ''
+      const reviewedDocumentPaths = progress.reviewedDocumentPath
+        ? [
+            ...new Set([
+              ...(run.reviewedDocumentPaths ?? []),
+              progress.reviewedDocumentPath,
+            ]),
+          ]
+        : run.reviewedDocumentPaths
       const next = {
         ...run,
         ...(progress.durable === false ? {} : { lastProgressAt: now() }),
@@ -596,6 +605,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : progress.currentItemId
             ? { currentItemId: progress.currentItemId }
             : {}),
+        ...(reviewedDocumentPaths ? { reviewedDocumentPaths } : {}),
       }
       return commitUnlocked(next, {
         runId: next.runId,

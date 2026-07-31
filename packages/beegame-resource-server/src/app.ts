@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   RESOURCE_CATEGORIES,
   RESOURCE_ASSET_KINDS,
@@ -10,6 +11,8 @@ import {
   browseResourcePackElements,
   browseResourceCatalogPacks,
   browseResourceCatalogPackSummaries,
+  hasElementCatalogFilters,
+  queryResourceCatalogElements,
   ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
   resolveExactResourceElement,
@@ -79,6 +82,7 @@ export function createBeeGameResourceServerApp(
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
           '/api/resource-catalog/packs',
+          '/api/resource-catalog/elements',
           '/api/resource-imports/resolve',
         ].includes(pathname)) ||
         (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
@@ -113,12 +117,40 @@ export function createBeeGameResourceServerApp(
       }
       if (request.method === 'POST' && pathname === '/api/resource-catalog/packs') {
         const catalogRequest = parseCatalogRequest(await request.json())
-        if (options.repository.listCatalogPacks) {
+        if (
+          options.repository.listCatalogPacks &&
+          !hasElementCatalogFilters(catalogRequest.filters)
+        ) {
           return corsResponse(Response.json(browseResourceCatalogPackSummaries(await options.repository.listCatalogPacks(), catalogRequest)), options.corsOrigin)
         }
         const packs = await options.repository.listPacks()
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
+      }
+      if (request.method === 'POST' && pathname === '/api/resource-catalog/elements') {
+        const catalogRequest = parseCatalogRequest(await request.json())
+        const packs = await options.repository.listPacks()
+        const elements = (
+          await Promise.all(
+            packs.map(pack => options.repository.listElements(pack.id)),
+          )
+        ).flat()
+        const catalogRevision = resourceCatalogRevision(packs, elements)
+        return corsResponse(
+          Response.json(
+            {
+              ...queryResourceCatalogElements(
+                packs,
+                elements,
+                catalogRequest,
+                catalogRevision,
+              ),
+              catalogRevision,
+              normalizedFilters: catalogRequest.filters ?? {},
+            },
+          ),
+          options.corsOrigin,
+        )
       }
       const packElementsMatch = pathname.match(/^\/api\/resource-catalog\/packs\/([^/]+)\/elements$/)
       if (request.method === 'POST' && packElementsMatch) {
@@ -420,6 +452,36 @@ export function createBeeGameResourceServerApp(
       }
     },
   }
+}
+
+function resourceCatalogRevision(
+  packs: readonly ResourcePack[],
+  elements: readonly import('@bee-game-studio/beegame-resource-core').ResourceElement[],
+): string {
+  const snapshot = {
+    packs: [...packs]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map(canonicalCatalogValue),
+    elements: [...elements]
+      .sort(
+        (left, right) =>
+          left.packId.localeCompare(right.packId) ||
+          left.id.localeCompare(right.id),
+      )
+      .map(canonicalCatalogValue),
+  }
+  return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
+}
+
+function canonicalCatalogValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalCatalogValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, field]) => field !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, field]) => [key, canonicalCatalogValue(field)]),
+  )
 }
 
 function isSupportedCover(file: File): boolean {

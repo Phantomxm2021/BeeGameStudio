@@ -130,6 +130,7 @@ export function auditResourceDeliveryReadiness(input: {
       : resourceEvidence.failedActions.filter(action =>
           [
             'import_elements',
+            'record_no_match',
             'refresh_import_metadata',
           ].includes(action),
         )

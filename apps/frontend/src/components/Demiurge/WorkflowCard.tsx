@@ -6,6 +6,7 @@ import {
   Circle,
   LoaderCircle,
   RotateCcw,
+  ScanText as ScanTextTaskIcon,
   XCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -68,6 +69,12 @@ const documentTitle: Record<string, string> = {
   'docs/AUDIO_DESIGN.md': '音频设计',
   'docs/ASSET_PLAN.md': '资产计划',
   'docs/acceptance/gameplay-checklist.md': 'Gameplay Checklist',
+  'assets/asset-manifest.json': 'Asset Manifest',
+};
+
+const displayTaskTitle = (task: WorkflowCardTask): string => {
+  const title = documentTitle[task.title] || task.title;
+  return task.operation === 'review' ? `审计：${title}` : title;
 };
 
 const formatDuration = (milliseconds: number): string => {
@@ -128,11 +135,26 @@ const useVerticalOverflow = <T extends HTMLElement>(contentKey: string) => {
   return { elementRef, isOverflowing };
 };
 
+const taskStatusText = (task: WorkflowCardTask): string => {
+  if (task.operation === 'review') {
+    if (task.status === 'completed') return '已审计';
+    if (task.status === 'running') return '审计中';
+    if (task.status === 'failed' || task.status === 'blocked') return '审计失败';
+    return '待审计';
+  }
+  if (task.status === 'completed') return '已完成';
+  if (task.status === 'running') return '编写中';
+  if (task.status === 'failed' || task.status === 'blocked') return '编写失败';
+  return '待编写';
+};
+
 const taskIcon = (task: WorkflowCardTask) => {
-  if (task.status === 'completed') return <CircleCheckBig className="h-4 w-4 text-emerald-300" />;
-  if (task.status === 'running') return <LoaderCircle className="h-4 w-4 animate-spin text-sky-300" />;
-  if (task.status === 'failed' || task.status === 'blocked') return <XCircle className="h-4 w-4 text-rose-300" />;
-  return <Circle className="h-4 w-4 text-zinc-600" />;
+  const label = `任务状态：${taskStatusText(task)}`;
+  if (task.status === 'completed') return <CircleCheckBig aria-label={label} data-task-icon={task.operation === 'review' ? 'review-completed' : 'write-completed'} className="h-4 w-4 text-emerald-300" />;
+  if (task.status === 'failed' || task.status === 'blocked') return <XCircle aria-label={label} data-task-icon={task.operation === 'review' ? 'review-failed' : 'write-failed'} className="h-4 w-4 text-rose-300" />;
+  if (task.operation === 'review') return <ScanTextTaskIcon aria-label={label} data-task-icon={task.status === 'running' ? 'review-running' : 'review-pending'} className={`h-4 w-4 ${task.status === 'running' ? 'animate-pulse text-sky-300' : 'text-zinc-600'}`} />;
+  if (task.status === 'running') return <LoaderCircle aria-label={label} data-task-icon="write-running" className="h-4 w-4 animate-spin text-sky-300" />;
+  return <Circle aria-label={label} data-task-icon="write-pending" className="h-4 w-4 text-zinc-600" />;
 };
 
 type AnimatedStatusIconHandle = {
@@ -350,10 +372,13 @@ export function WorkflowCard({
                     <span className="mt-px shrink-0">{taskIcon(task)}</span>
                     <div className="min-w-0 flex-1">
                       <p className={task.status === 'completed' ? 'truncate text-zinc-500 line-through decoration-zinc-700' : task.status === 'running' ? 'truncate text-zinc-200' : 'truncate text-zinc-400'}>
-                        {documentTitle[task.title] || task.title}
+                        {displayTaskTitle(task)}
                       </p>
                       {task.failureReason ? <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p> : null}
                     </div>
+                    <span className={task.status === 'running' ? 'shrink-0 text-[10px] text-sky-300' : task.status === 'failed' || task.status === 'blocked' ? 'shrink-0 text-[10px] text-rose-300' : 'shrink-0 text-[10px] text-zinc-600'}>
+                      {taskStatusText(task)}
+                    </span>
                   </li>
                 ))}
               </ul>

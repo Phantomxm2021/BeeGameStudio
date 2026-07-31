@@ -1218,7 +1218,7 @@ describe('delivery workflow document ordering', () => {
     expect(prompt).toContain('Semantic suitability is mandatory')
     expect(prompt).toContain('Never reinterpret an unrelated shape')
     expect(prompt).toContain(
-      'use the returned facets to correct unsupported manifest constraints once',
+      'Its filters are derived by the workflow service from the canonical manifest; do not invent or translate filters',
     )
     expect(prompt).toContain(
       'One import_elements selection may list multiple requirement_ids',

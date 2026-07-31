@@ -1,8 +1,7 @@
 export const RESOURCE_LIBRARY_ACTIONS = [
-  'browse_packs',
-  'inspect_pack',
-  'index_pack_elements',
+  'query_candidates',
   'import_elements',
+  'record_no_match',
   'refresh_import_metadata',
 ] as const
 

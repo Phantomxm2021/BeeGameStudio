@@ -1,13 +1,6 @@
 export const RESOURCE_DIMENSIONS = ['2D', '3D', 'agnostic'] as const
 export type ResourceDimension = (typeof RESOURCE_DIMENSIONS)[number]
 
-/** Historical project slot vocabulary, retained only to audit pre-v5 manifests. */
-export const LEGACY_RESOURCE_SLOT_DELIVERY_MODES = [
-  'managed-file',
-  'embedded',
-  'procedural',
-] as const
-
 export const RESOURCE_LIBRARY_USAGE = ['optional', 'preferred', 'required'] as const
 export type ResourceLibraryUsage = (typeof RESOURCE_LIBRARY_USAGE)[number]
 

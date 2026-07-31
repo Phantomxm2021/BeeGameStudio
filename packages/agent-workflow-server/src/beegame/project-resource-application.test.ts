@@ -15,16 +15,16 @@ describe('project resource application', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
-  test('forwards catalog filters without creating requirement roles', async () => {
+  test('forwards exact candidate filters without creating requirement roles', async () => {
     const observed: unknown[] = []
     const application = new ProjectResourceApplication(client({
-      browsePacks: async input => {
+      queryCandidates: async input => {
         observed.push(input)
-        return { items: [], total: 0, facets: facets() }
+        return candidatePage({ items: [], total: 0, facets: facets() })
       },
     }))
 
-    await application.browsePacks({
+    await application.queryCandidates({
       filters: { dimensions: ['3D'], assetKinds: ['model'], capabilities: ['modular'] },
     })
 
@@ -218,9 +218,8 @@ describe('project resource application', () => {
 
 function client(overrides: Partial<ProjectResourceSelectionClient> = {}): ProjectResourceSelectionClient {
   return {
-    browsePacks: async () => ({ items: [], total: 0, facets: facets() }),
-    browsePackElements: async () => ({ items: [], total: 0, facets: facets() }),
-    inspectPack: async packId => ({ pack: { id: packId }, folders: [] }),
+    queryCandidates: async () =>
+      candidatePage({ items: [], total: 0, facets: facets() }),
     resolveSelections: async () => [],
     ...overrides,
   }
@@ -228,6 +227,16 @@ function client(overrides: Partial<ProjectResourceSelectionClient> = {}): Projec
 
 function facets() {
   return { dimensions: [], primaryCategories: [], categories: [], styles: [], gameTypes: [], packTags: [], usageTags: [], assetKinds: [], capabilities: [], formats: [] }
+}
+
+function candidatePage<T extends { items: unknown[]; total: number; facets: ReturnType<typeof facets> }>(
+  page: T,
+) {
+  return {
+    ...page,
+    catalogRevision: 'a'.repeat(64),
+    normalizedFilters: {},
+  }
 }
 
 async function createWorkspace(slotOverrides: Record<string, unknown> = {}): Promise<string> {

@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 
 import { ChatPanel } from './ChatPanel';
 import type { PendingToolPermissionItem } from '../../../services/api';
+import { ToastProvider } from '../../../contexts/ToastContext';
 
 const defaultWaitingPermission = {
     kind: 'none' as const,
@@ -55,7 +56,7 @@ const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = 
     return {
         onResolveToolPermission,
         onPreviewArtifact,
-        ...render(<ChatPanel {...props} />),
+        ...render(<ToastProvider><ChatPanel {...props} /></ToastProvider>),
     };
 };
 

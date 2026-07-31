@@ -126,30 +126,37 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toBe(false)
   })
 
-  test('removes the deferred ResourceLibrary call lane only from resource workers', () => {
+  test('removes deferred tool wrappers from every workflow worker terminal lane', () => {
     const tools = [
       { name: 'Read' },
       { name: 'SearchExtraTools' },
       { name: 'ExecuteExtraTool' },
       { name: 'Task' },
+      { name: 'SubmitDocumentAuthorResult' },
     ]
 
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual(['Read', 'Task'])
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer', 'fresh').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual(['Read', 'Task'])
-    expect(selectBeeGameWorkerTools(tools, 'implementation-worker')).toEqual(
-      tools,
-    )
+    for (const workerType of [
+      'document-author',
+      'document-reviewer',
+      'resource-preparer',
+      'implementation-worker',
+      'implementation-auditor',
+      'acceptance-validator',
+      'change-impact-analyzer',
+      'question-answerer',
+    ]) {
+      expect(
+        selectBeeGameWorkerTools(tools, workerType, 'repair').map(
+          tool => (tool as { name: string }).name,
+        ),
+      ).toEqual(['Read', 'Task', 'SubmitDocumentAuthorResult'])
+    }
+
+    expect(selectBeeGameWorkerTools(tools)).toEqual(tools)
+    expect(selectBeeGameWorkerTools(tools, 'unrelated-agent')).toEqual(tools)
   })
 
-  test('removes generic manifest mutation tools from a fresh resource dispatch', () => {
+  test('keeps generic manifest mutation tools only for scoped resource repair', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -165,6 +172,16 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual(['Read'])
     expect(
       selectBeeGameWorkerTools(tools, 'resource-preparer', 'selection').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer', 'reselection').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer', 'repair').map(
         tool => (tool as { name: string }).name,
       ),
     ).toEqual(tools.map(tool => tool.name))
@@ -186,9 +203,19 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual([])
   })
 
-  test('publishes BeeGame capabilities through the native subagent tool pool', () => {
+  test('inherits operational capabilities but keeps terminal tools on the main worker', () => {
     const existing = { name: 'existing-mcp-tool' }
     const resourceLibrary = { name: 'ResourceLibrary' }
+    const terminalTools = [
+      'SubmitAssetManifest',
+      'SubmitAtomicTaskPlan',
+      'SubmitImplementationResult',
+      'SubmitValidationResult',
+      'SubmitDocumentAuthorResult',
+      'SubmitDocumentReviewResult',
+      'SubmitChangeImpactResult',
+      'SubmitQuestionAnswerResult',
+    ].map(name => ({ name }))
     const state = installInheritedBeeGameTools(
       {
         mcp: {
@@ -198,7 +225,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
           resources: {},
         },
       },
-      [resourceLibrary],
+      [resourceLibrary, ...terminalTools],
     )
 
     expect((state.mcp as { tools: unknown[] }).tools).toEqual([
@@ -320,9 +347,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       },
     )
     const toolInput = {
-      action: 'index_pack_elements',
-      pack_id: 'pack-a',
-      filters: { asset_kinds: ['model'] },
+      action: 'query_candidates',
+      requirement_ids: ['model'],
     }
 
     expect(
@@ -347,7 +373,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'browse_packs' },
+        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
         assistantMessage: turn,
         toolUseContext: {},
       }),
@@ -356,7 +382,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'inspect_pack', pack_id: 'pack-a' },
+        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
         assistantMessage: turn,
         toolUseContext: {},
       }),
@@ -374,7 +400,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'index_pack_elements', pack_id: 'pack-a' },
+        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
         assistantMessage: {},
         toolUseContext: {},
       }),
@@ -403,7 +429,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       expect.objectContaining({
         behavior: 'deny',
         message:
-          'Unsupported ResourceLibrary action "match". Allowed actions: browse_packs, inspect_pack, index_pack_elements, import_elements, refresh_import_metadata.',
+          'Unsupported ResourceLibrary action "match". Allowed actions: query_candidates, import_elements, record_no_match, refresh_import_metadata.',
       }),
     )
     expect(requests).toEqual([])

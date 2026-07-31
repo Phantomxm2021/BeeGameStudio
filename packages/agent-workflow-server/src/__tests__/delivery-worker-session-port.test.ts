@@ -376,6 +376,63 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('does not accept a structured document result hidden behind a deferred wrapper', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-wrapped-author' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'wrapped-author-result',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'ExecuteExtraTool',
+              input: {
+                tool_name: 'SubmitDocumentAuthorResult',
+                params: { resolvedFindingIds: ['finding-1'] },
+              },
+              output: JSON.stringify({
+                result: { accepted: true, workerType: 'document-author' },
+                tool_name: 'SubmitDocumentAuthorResult',
+              }),
+            },
+          },
+          {
+            id: 'wrapped-author-turn-result',
+            type: 'result',
+            text: 'Accepted.',
+            createdAt: new Date(),
+            payload: { result: 'Accepted.' },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+
+    await port.start({
+      dispatchId: 'dispatch-wrapped-author',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {},
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-wrapped-author'),
+    ).rejects.toThrow(
+      'worker terminal result is missing a valid SubmitDocumentAuthorResult call',
+    )
+  })
+
   test('resolves the current auth token for every worker start and submit', async () => {
     const starts: Array<{ authToken?: string }> = []
     const updates: Array<{ sessionId: string; authToken?: string }> = []
@@ -730,7 +787,7 @@ describe('delivery worker session credentials', () => {
       payload: {
         toolUseID: `read-${index}`,
         toolName: 'ResourceLibrary',
-        input: { action: 'index_pack_elements', pack_id: 'pack-1' },
+        input: { action: 'query_candidates', requirement_ids: ['ground'] },
         output: repeatedOutput,
       },
     }))

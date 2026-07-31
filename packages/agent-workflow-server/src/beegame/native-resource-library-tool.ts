@@ -1,44 +1,19 @@
+import { createHash } from 'node:crypto'
 import { z } from 'zod/v4'
-import {
-  RESOURCE_ASSET_KINDS,
-  RESOURCE_CAPABILITIES,
-  RESOURCE_CATEGORIES,
-  RESOURCE_DIMENSIONS,
-  RESOURCE_PACK_PRIMARY_CATEGORIES,
-  RESOURCE_USAGE_TAGS,
-} from '@bee-game-studio/beegame-resource-core'
 import {
   ProjectResourceApplication,
   type ProjectResourceSelectionClient,
 } from './project-resource-application'
-import type {
-  ResourceCatalogFilterInput,
-  ResourceCatalogInput,
-} from './resource-selection-client'
+import type { ResourceCatalogFilterInput } from './resource-selection-client'
+import {
+  BEEGAME_RESOURCE_NO_MATCH_OUTCOMES,
+  effectiveAssetFormats,
+  readBeeGameAssetManifest,
+  recordBeeGameResourceNoMatchInWorkspace,
+  type BeeGameRequirementDiscoveryReceipt,
+} from './asset-contracts'
 
-const catalogFiltersSchema = z.object({
-  pack_ids: z.array(z.string().min(1)).optional(),
-  dimensions: z.array(z.enum(RESOURCE_DIMENSIONS)).optional(),
-  primary_categories: z
-    .array(z.enum(RESOURCE_PACK_PRIMARY_CATEGORIES))
-    .optional(),
-  categories: z.array(z.enum(RESOURCE_CATEGORIES)).optional(),
-  styles: z.array(z.string().min(1)).optional(),
-  game_types: z.array(z.string().min(1)).optional(),
-  pack_tags: z.array(z.string().min(1)).optional(),
-  usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)).optional(),
-  asset_kinds: z.array(z.enum(RESOURCE_ASSET_KINDS)).optional(),
-  capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)).optional(),
-  formats: z.array(z.string().min(1)).optional(),
-})
-const packElementFiltersSchema = catalogFiltersSchema.omit({ pack_ids: true })
 const MAX_CATALOG_PAGE_ITEMS = 16
-
-const catalogPageSchema = z.object({
-  filters: catalogFiltersSchema.optional(),
-  cursor: z.string().min(1).optional(),
-  limit: z.number().int().min(1).max(MAX_CATALOG_PAGE_ITEMS).optional(),
-})
 
 const explicitImportSelectionSchema = z
   .object({
@@ -46,32 +21,27 @@ const explicitImportSelectionSchema = z
     requirement_ids: z.array(z.string().min(1)).min(1),
     pack_id: z.string().min(1),
     expected_pack_version: z.string().min(1),
-    element_id: z.string().min(1).optional(),
-    element_path: z.string().min(1).optional(),
+    element_id: z.string().min(1),
     destination_path: z.string().min(1),
     selection_reason: z.array(z.string().min(1)).min(1).max(8),
   })
-  .refine(
-    selection =>
-      Boolean(selection.element_id) !== Boolean(selection.element_path),
-    {
-      message: 'Provide exactly one of element_id or element_path',
-    },
-  )
 
 const resourceLibraryInputSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('browse_packs'), ...catalogPageSchema.shape }),
-  z.object({ action: z.literal('inspect_pack'), pack_id: z.string().min(1) }),
   z.object({
-    action: z.literal('index_pack_elements'),
-    pack_id: z.string().min(1),
-    filters: packElementFiltersSchema.optional(),
+    action: z.literal('query_candidates'),
+    requirement_ids: z.array(z.string().min(1)).min(1),
     cursor: z.string().min(1).optional(),
     limit: z.number().int().min(1).max(MAX_CATALOG_PAGE_ITEMS).optional(),
   }),
   z.object({
     action: z.literal('import_elements'),
     selections: z.array(explicitImportSelectionSchema).min(1).max(64),
+  }),
+  z.object({
+    action: z.literal('record_no_match'),
+    requirement_ids: z.array(z.string().min(1)).min(1),
+    outcome: z.enum(BEEGAME_RESOURCE_NO_MATCH_OUTCOMES),
+    reasons: z.array(z.string().trim().min(1)).min(1).max(8),
   }),
   z.object({ action: z.literal('refresh_import_metadata') }),
 ])
@@ -100,6 +70,19 @@ export function createNativeResourceLibraryTool(options: {
   )
   let catalogReadsSinceMutation = 0
   let callInFlight = false
+  let candidateObservation:
+    | {
+        requirementKey: string
+        requirementIds: string[]
+        queryDigest: string
+        catalogRevision?: string
+        candidateIds: Set<string>
+        packIds: Set<string>
+        total: number
+        decisionReady: boolean
+        structuredConstraintCount: number
+      }
+    | undefined
   const catalogBudget = () => ({
     limit: catalogReadLimit,
     used: catalogReadsSinceMutation,
@@ -116,18 +99,19 @@ export function createNativeResourceLibraryTool(options: {
     isConcurrencySafe: () => false,
     isReadOnly: (input: ResourceLibraryInput) =>
       input.action !== 'import_elements' &&
+      input.action !== 'record_no_match' &&
       input.action !== 'refresh_import_metadata',
     async description() {
-      return 'Explore Resource Packs and elements, then import the exact reusable material you choose. BeeGame never chooses a candidate, assembles a scene, or certifies runtime integration for you.'
+      return 'Query exact cross-Pack candidates for the active manifest responsibilities, then either import a proven selection or record the approved no-match outcome. BeeGame never chooses artistic suitability for you.'
     },
     async prompt() {
       return [
         'ResourceLibrary is an exact catalog and import capability. BeeGame does not select resources, infer intent, rank artistic compatibility, or author target-runtime compositions.',
         'Catalog results are paginated. Pack and element records expose authored metadata, preview descriptors, dependency information, semantic relations and objective technical facts when available.',
-        'Catalog filters are exact metadata constraints. Start with an unfiltered or canonical-structure browse, then reuse style, game-type and Pack-tag values exactly as returned in facets; do not translate or invent free-text filter values. Facets describe the available catalog scope even when the current filters return zero items.',
+        'Catalog filters are exact metadata constraints derived from the canonical requirement group. Do not translate, broaden, or invent free-text filter values. Facets describe the available catalog scope even when the exact query returns zero items.',
         'For semantic selection, element usageTags are authoritative. Pack dimension, style and game type provide compatibility context, while element category, format, assetKind, capabilities and contentProfile provide technical facts. Names, paths, folders and Pack tags may identify or discover records but never prove what gameplay or art responsibility an element can fulfill.',
-        'Browse Packs first, inspect relevant Pack metadata, then page through Pack elements with exact catalog filters. Resource Library returns authored facts only; it never turns the first returned element into a recommendation.',
-        'Read actions do not modify the project. import_elements copies only the exact elements supplied by Claude Code, pins their Pack versions and includes their declared dependency closures. It owns those provenance and copied-file inventory records atomically; do not hand-author or repeatedly rewrite them. refresh_import_metadata updates objective facts for existing pinned imports.',
+        'query_candidates derives exact filters from the supplied canonical manifest requirement IDs and searches reusable elements across every published Pack. Page until decision_ready is true before recording no-match.',
+        'Read actions do not modify the project. import_elements copies only the exact elements supplied by Claude Code, pins their Pack versions and includes their declared dependency closures. record_no_match atomically records the already-approved non-library source outcome with the completed canonical discovery receipt. These actions own manifest mutation; never hand-author their records. refresh_import_metadata updates objective facts for existing pinned imports.',
         'Every import_elements selection must identify all current manifest requirement_ids it genuinely satisfies. One imported element may be reused by multiple requirements; BeeGame validates every requirement format contract before downloading and records those bindings atomically.',
         'New imports are accepted only while the canonical requirements declare enough resource_requirement.import_budget capacity. This budget is project inventory authority derived from the approved asset plan, not permission to import unrelated candidates.',
         'This tool reports catalog, provenance, copied-file and dependency facts only. It cannot mark a target-runtime composition complete or certify rendering, loading, visual quality, interaction, audio playback, gameplay, or player paths. Use the target runtime, native Skills and native Validator for those observations.',
@@ -137,6 +121,7 @@ export function createNativeResourceLibraryTool(options: {
     async checkPermissions(input: ResourceLibraryInput) {
       if (
         input.action !== 'import_elements' &&
+        input.action !== 'record_no_match' &&
         input.action !== 'refresh_import_metadata'
       )
         return { behavior: 'allow', updatedInput: input }
@@ -147,6 +132,8 @@ export function createNativeResourceLibraryTool(options: {
             'Allow objective metadata for existing Resource Library imports to be refreshed from their pinned Pack versions?',
           updatedInput: input,
         }
+      if (input.action === 'record_no_match')
+        return { behavior: 'allow', updatedInput: input }
       return {
         behavior: 'ask',
         message: `Allow ${input.selections.length} explicitly selected Resource Library element(s) to be copied into this project?`,
@@ -161,48 +148,103 @@ export function createNativeResourceLibraryTool(options: {
       }
       callInFlight = true
       try {
-        const catalogRead =
-          input.action === 'browse_packs' ||
-          input.action === 'inspect_pack' ||
-          input.action === 'index_pack_elements'
-        if (catalogRead) {
-          if (catalogReadsSinceMutation >= catalogReadLimit) {
+        const catalogRead = input.action === 'query_candidates'
+        if (catalogRead && catalogReadsSinceMutation >= catalogReadLimit) {
+          throw new Error(
+            `ResourceLibrary catalog budget is exhausted after ${catalogReadLimit} reads. Import a proven selection or finish with the concrete catalog blocker; another catalog read was not executed.`,
+          )
+        }
+        if (input.action === 'query_candidates') {
+          const query = await deriveCandidateQuery(
+            options.workspacePath,
+            input.requirement_ids,
+          )
+          const requirementKey = query.requirementIds.join('\0')
+          if (!input.cursor) {
+            candidateObservation = {
+              requirementKey,
+              requirementIds: query.requirementIds,
+              queryDigest: query.queryDigest,
+              candidateIds: new Set(),
+              packIds: new Set(),
+              total: 0,
+              decisionReady: false,
+              structuredConstraintCount: query.structuredConstraintCount,
+            }
+          } else if (candidateObservation?.requirementKey !== requirementKey) {
             throw new Error(
-              `ResourceLibrary catalog budget is exhausted after ${catalogReadLimit} reads. Import a proven selection or finish with the concrete catalog blocker; another catalog read was not executed.`,
+              'Resource candidate cursor does not belong to these requirements',
             )
           }
+          const page = await application.queryCandidates({
+            filters: query.filters,
+            ...(input.cursor ? { cursor: input.cursor } : {}),
+            ...(input.limit ? { limit: input.limit } : {}),
+          })
           catalogReadsSinceMutation += 1
-        }
-        if (input.action === 'browse_packs') {
-          const page = await application.browsePacks(toCatalogInput(input))
-          return catalogResult(compactPackPage(page))
-        }
-        if (input.action === 'inspect_pack') {
-          const pack = await application.inspectPack(input.pack_id)
-          return catalogResult(pack)
-        }
-        if (input.action === 'index_pack_elements') {
-          const page = await application.indexPackElements(
-            input.pack_id,
-            toCatalogInput(input),
+          const observation = candidateObservation!
+          const snapshotQueryDigest = digest([
+            query.queryDigest,
+            page.catalogRevision,
+            JSON.stringify(page.normalizedFilters),
+          ])
+          if (
+            observation.catalogRevision &&
+            (observation.catalogRevision !== page.catalogRevision ||
+              observation.queryDigest !== snapshotQueryDigest)
           )
+            throw new Error(
+              'Resource candidate catalog changed during pagination',
+            )
+          observation.catalogRevision = page.catalogRevision
+          observation.queryDigest = snapshotQueryDigest
+          if (observation.candidateIds.size && observation.total !== page.total)
+            throw new Error('Resource candidate catalog changed during pagination')
+          observation.total = page.total
+          for (const element of page.items) {
+            observation.candidateIds.add(
+              `${element.packId}:${element.elementId}`,
+            )
+            observation.packIds.add(element.packId)
+          }
+          observation.decisionReady =
+            !page.nextCursor && observation.candidateIds.size === page.total
           return catalogResult(
-            compactElementIndex(input.pack_id, page, !input.cursor),
+            compactCandidatePage(page, observation.decisionReady),
           )
         }
         if (input.action === 'import_elements') {
+          const observation = candidateObservation
+          if (!observation)
+            throw new Error(
+              'Query candidates before importing Resource Library elements',
+            )
+          const observedRequirementIds = new Set(observation.requirementIds)
+          for (const selection of input.selections) {
+            if (
+              selection.requirement_ids.some(
+                requirementId => !observedRequirementIds.has(requirementId),
+              )
+            )
+              throw new Error(
+                'Import selections must bind only the active candidate requirement group',
+              )
+            if (
+              !observation.candidateIds.has(
+                `${selection.pack_id}:${selection.element_id}`,
+              )
+            )
+              throw new Error(
+                `Resource candidate was not observed in the active exact query: ${selection.pack_id}:${selection.element_id}`,
+              )
+          }
           const selections = await Promise.all(
             input.selections.map(async selection => ({
               importId: selection.import_id,
               requirementIds: selection.requirement_ids,
               packId: selection.pack_id,
               expectedPackVersion: selection.expected_pack_version,
-              elementId:
-                selection.element_id ??
-                (await application.resolveElementIdByExactPath(
-                  selection.pack_id,
-                  selection.element_path!,
-                )),
+              elementId: selection.element_id,
               destinationPath: selection.destination_path,
               selectionReason: selection.selection_reason,
             })),
@@ -213,8 +255,53 @@ export function createNativeResourceLibraryTool(options: {
           )
           if (result.results.some(item => item.status === 'available')) {
             catalogReadsSinceMutation = 0
+            candidateObservation = undefined
           }
           return { data: summarizeImportBatch(result) }
+        }
+        if (input.action === 'record_no_match') {
+          const requirementIds = [...new Set(input.requirement_ids)].sort()
+          const requirementKey = requirementIds.join('\0')
+          const observation = candidateObservation
+          if (
+            !observation ||
+            observation.requirementKey !== requirementKey ||
+            !observation.decisionReady
+          )
+            throw new Error(
+              'Complete query_candidates pagination for these requirements before recording no-match',
+            )
+          const candidateIds = [...observation.candidateIds].sort()
+          const packIds = [...observation.packIds].sort()
+          const receipt: BeeGameRequirementDiscoveryReceipt = {
+            version: 1,
+            query_digest: observation.queryDigest,
+            candidate_digest: digest(candidateIds),
+            candidate_ids: candidateIds,
+            inspected_pack_ids: packIds,
+            represented_pack_ids: packIds,
+            candidate_count: candidateIds.length,
+            total_compatible: candidateIds.length,
+            structured_constraint_count:
+              observation.structuredConstraintCount,
+            decision_ready: true,
+          }
+          await recordBeeGameResourceNoMatchInWorkspace({
+            root: options.workspacePath,
+            requirementIds,
+            outcome: input.outcome,
+            reasons: input.reasons,
+            receipt,
+          })
+          catalogReadsSinceMutation = 0
+          candidateObservation = undefined
+          return {
+            data: {
+              result: 'recorded',
+              requirement_ids: requirementIds,
+              outcome: input.outcome,
+            },
+          }
         }
         if (input.action === 'refresh_import_metadata') {
           const refreshed = await application.refreshImportedMetadata(
@@ -255,30 +342,101 @@ export function createNativeResourceLibraryTool(options: {
   })
 }
 
-function toCatalogInput(
-  input: Extract<
-    ResourceLibraryInput,
-    { action: 'browse_packs' | 'index_pack_elements' }
-  >,
-): ResourceCatalogInput {
+async function deriveCandidateQuery(
+  workspacePath: string,
+  requestedRequirementIds: readonly string[],
+): Promise<{
+  requirementIds: string[]
+  filters: ResourceCatalogFilterInput
+  queryDigest: string
+  structuredConstraintCount: number
+}> {
+  const requirementIds = [...new Set(requestedRequirementIds)].sort()
+  const manifest = await readBeeGameAssetManifest(workspacePath)
+  const byId = new Map(
+    manifest.requirements.map(requirement => [requirement.id, requirement]),
+  )
+  const requirements = requirementIds.map(id => {
+    const requirement = byId.get(id)
+    if (!requirement?.resource_requirement)
+      throw new Error(`Resource requirement ${id} is not awaiting selection`)
+    return requirement
+  })
+  const normalized = requirements.map(requirement => {
+    const resource = requirement.resource_requirement!
+    return {
+      ...(resource.category ? { category: resource.category } : {}),
+      ...(resource.dimension ? { dimension: resource.dimension } : {}),
+      accepted_formats: effectiveAssetFormats(
+        requirement,
+        manifest.project_target,
+      ),
+      ...(resource.styles?.length ? { styles: [...resource.styles].sort() } : {}),
+      ...(resource.game_types?.length
+        ? { game_types: [...resource.game_types].sort() }
+        : {}),
+      ...(resource.tags?.length ? { tags: [...resource.tags].sort() } : {}),
+      ...(resource.asset_kinds?.length
+        ? { asset_kinds: [...resource.asset_kinds].sort() }
+        : {}),
+      ...(resource.capabilities?.length
+        ? { capabilities: [...resource.capabilities].sort() }
+        : {}),
+      ...(resource.subresources?.length
+        ? { subresources: resource.subresources }
+        : {}),
+      ...(resource.relations?.length ? { relations: resource.relations } : {}),
+      no_match: resource.no_match,
+    }
+  })
+  const groupKey = JSON.stringify(normalized[0])
+  if (normalized.some(value => JSON.stringify(value) !== groupKey))
+    throw new Error(
+      'query_candidates accepts only requirements from one exact selection group',
+    )
+  const resource = requirements[0]!.resource_requirement!
+  const filters = {
+    ...(resource.category ? { categories: [resource.category] } : {}),
+    ...(resource.dimension ? { dimensions: [resource.dimension] } : {}),
+    ...(resource.styles?.length ? { styles: resource.styles } : {}),
+    ...(resource.game_types?.length ? { gameTypes: resource.game_types } : {}),
+    ...(resource.tags?.length ? { usageTags: resource.tags } : {}),
+    ...(resource.asset_kinds?.length
+      ? { assetKinds: resource.asset_kinds }
+      : {}),
+    ...(resource.capabilities?.length
+      ? { capabilities: resource.capabilities }
+      : {}),
+    formats: normalized[0]!.accepted_formats,
+  } as ResourceCatalogFilterInput
+  const structuredConstraintCount = Object.entries(normalized[0]!).filter(
+    ([key, value]) =>
+      key !== 'no_match' &&
+      value !== undefined &&
+      (!Array.isArray(value) || value.length > 0),
+  ).length
   return {
-    ...(input.filters ? { filters: toCatalogFilters(input.filters) } : {}),
-    ...(input.cursor ? { cursor: input.cursor } : {}),
-    ...(input.limit ? { limit: input.limit } : {}),
+    requirementIds,
+    filters,
+    queryDigest: digest([groupKey]),
+    structuredConstraintCount,
   }
 }
 
-function compactElementIndex(
-  packId: string,
-  page: Awaited<ReturnType<ProjectResourceApplication['indexPackElements']>>,
-  includeFacets: boolean,
+function digest(values: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(values)).digest('hex')
+}
+
+function compactCandidatePage(
+  page: Awaited<ReturnType<ProjectResourceApplication['queryCandidates']>>,
+  decisionReady: boolean,
 ) {
   return {
-    packId,
-    ...(page.items[0]?.packVersion
-      ? { packVersion: page.items[0].packVersion }
-      : {}),
     items: page.items.map(element => ({
+      packId: element.packId,
+      packVersion: element.packVersion,
+      packName: element.packName,
+      packStyle: element.packStyle,
       elementId: element.elementId,
       elementName: element.elementName,
       elementPath: element.elementPath,
@@ -305,14 +463,15 @@ function compactElementIndex(
     })),
     total: page.total,
     ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-    ...(includeFacets ? { facets: compactFacets(page.facets) } : {}),
+    facets: compactFacets(page.facets),
+    decision_ready: decisionReady,
   }
 }
 
 function compactContentProfile(
   profile: NonNullable<
     Awaited<
-      ReturnType<ProjectResourceApplication['indexPackElements']>
+      ReturnType<ProjectResourceApplication['queryCandidates']>
     >['items'][number]['contentProfile']
   >,
 ) {
@@ -328,32 +487,6 @@ function compactContentProfile(
         ? { skeletonSignature: component.skeletonSignature }
         : {}),
     })),
-  }
-}
-
-function compactPackPage(
-  page: Awaited<ReturnType<ProjectResourceApplication['browsePacks']>>,
-) {
-  return {
-    items: page.items.map(pack => ({
-      packId: pack.packId,
-      packVersion: pack.packVersion,
-      packName: pack.packName,
-      styles: pack.styles,
-      gameTypes: pack.gameTypes,
-      dimension: pack.dimension,
-      primaryCategory: pack.primaryCategory,
-      categories: pack.categories,
-      tags: pack.tags,
-      readyElementCount: pack.readyElementCount,
-      assetKinds: pack.assetKinds,
-      usageTags: pack.usageTags,
-      capabilities: pack.capabilities,
-      formats: pack.formats,
-    })),
-    total: page.total,
-    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-    facets: compactFacets(page.facets),
   }
 }
 
@@ -408,28 +541,6 @@ function compactTechnicalFacts(
       CATALOG_TECHNICAL_FACT_KEYS.has(key),
     ),
   )
-}
-
-function toCatalogFilters(
-  filters: z.infer<typeof catalogFiltersSchema>,
-): ResourceCatalogFilterInput {
-  return {
-    ...(filters.pack_ids?.length ? { packIds: filters.pack_ids } : {}),
-    ...(filters.dimensions?.length ? { dimensions: filters.dimensions } : {}),
-    ...(filters.primary_categories?.length
-      ? { primaryCategories: filters.primary_categories }
-      : {}),
-    ...(filters.categories?.length ? { categories: filters.categories } : {}),
-    ...(filters.styles?.length ? { styles: filters.styles } : {}),
-    ...(filters.game_types?.length ? { gameTypes: filters.game_types } : {}),
-    ...(filters.pack_tags?.length ? { packTags: filters.pack_tags } : {}),
-    ...(filters.usage_tags?.length ? { usageTags: filters.usage_tags } : {}),
-    ...(filters.asset_kinds?.length ? { assetKinds: filters.asset_kinds } : {}),
-    ...(filters.capabilities?.length
-      ? { capabilities: filters.capabilities }
-      : {}),
-    ...(filters.formats?.length ? { formats: filters.formats } : {}),
-  }
 }
 
 function summarizeImportBatch(

@@ -2,17 +2,45 @@ import { describe, expect, test } from 'bun:test'
 import { createResourceSelectionClient } from '../beegame/resource-selection-client'
 
 describe('resource exploration client', () => {
-  test('sends the service token and returns an unsigned catalog page', async () => {
+  test('queries exact candidates across Packs through the service boundary', async () => {
+    const client = createResourceSelectionClient({
+      baseUrl: 'http://resource.test/',
+      serviceToken: 'token',
+      fetchImpl: async (url, init) => {
+        expect(String(url)).toEndWith('/api/resource-catalog/elements')
+        expect(new Headers(init?.headers).get('x-beegame-resource-service-token')).toBe('token')
+        return Response.json({
+          items: [{ packId: 'pack', packVersion: '1', packName: 'Nature Kit', packStyle: 'Stylized', packStyles: ['Stylized'], packGameTypes: ['Adventure'], elementId: 'oak', elementName: 'Oak Tree', elementPath: 'oak.glb', category: 'models', usageTags: ['vegetation'], dimension: '3D', assetKind: 'model', capabilities: [], relations: [], dependencyCount: 0 }],
+          total: 1,
+          facets: facets(),
+          catalogRevision: 'a'.repeat(64),
+          normalizedFilters: { usageTags: ['vegetation'] },
+        })
+      },
+    })
+
+    await expect(
+      client.queryCandidates({ filters: { usageTags: ['vegetation'] } }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        items: [expect.objectContaining({ elementId: 'oak' })],
+      }),
+    )
+  })
+
+  test('sends the service token and returns an unsigned candidate page', async () => {
     const client = createResourceSelectionClient({ baseUrl: 'http://resource.test/', serviceToken: 'token', fetchImpl: async (url, init) => {
-      expect(String(url)).toEndWith('/api/resource-catalog/packs/pack/elements')
+      expect(String(url)).toEndWith('/api/resource-catalog/elements')
       expect(new Headers(init?.headers).get('x-beegame-resource-service-token')).toBe('token')
       return Response.json({
         items: [{ packId: 'pack', packVersion: '1', packName: 'Nature Kit', packStyle: 'Stylized', packStyles: ['Stylized'], packGameTypes: ['Adventure'], elementId: 'oak', elementName: 'Oak Tree', elementPath: 'oak.glb', category: 'models', usageTags: ['vegetation'], dimension: '3D', assetKind: 'model', capabilities: [], technicalFacts: { boundsSizeY: 6, hasNormals: true }, relations: [], dependencyCount: 0 }],
         total: 1,
         facets: facets(),
+        catalogRevision: 'a'.repeat(64),
+        normalizedFilters: { formats: ['glb'] },
       })
     } })
-    await expect(client.browsePackElements('pack', { filters: { formats: ['glb'] } })).resolves.toEqual(expect.objectContaining({
+    await expect(client.queryCandidates({ filters: { formats: ['glb'] } })).resolves.toEqual(expect.objectContaining({
       items: [expect.objectContaining({ elementId: 'oak', elementName: 'Oak Tree', packName: 'Nature Kit', usageTags: ['vegetation'], technicalFacts: { boundsSizeY: 6, hasNormals: true } })],
     }))
   })
@@ -45,11 +73,17 @@ describe('resource exploration client', () => {
             cause: { code: 'CERTIFICATE_VERIFY_FAILED' },
           })
         }
-        return Response.json({ items: [], total: 0, facets: facets() })
+        return Response.json({
+          items: [],
+          total: 0,
+          facets: facets(),
+          catalogRevision: 'a'.repeat(64),
+          normalizedFilters: {},
+        })
       },
     })
 
-    await expect(client.browsePacks({})).resolves.toMatchObject({ items: [] })
+    await expect(client.queryCandidates({})).resolves.toMatchObject({ items: [] })
     expect(calls).toBe(2)
   })
 
@@ -65,7 +99,7 @@ describe('resource exploration client', () => {
       },
     })
 
-    await expect(client.browsePacks({})).rejects.toThrow('request rejected')
+    await expect(client.queryCandidates({})).rejects.toThrow('request rejected')
     expect(calls).toBe(1)
   })
 })

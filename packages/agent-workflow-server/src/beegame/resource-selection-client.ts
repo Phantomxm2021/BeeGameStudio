@@ -1,7 +1,6 @@
 import type {
   ResourceCatalogElement,
   ResourceCatalogFilter,
-  ResourceCatalogPack,
   ResourceCatalogPage,
   ResourceCatalogRequest,
 } from '@bee-game-studio/beegame-resource-core'
@@ -12,11 +11,12 @@ export type ResourceSelectionDependencyResult = { key: string; parentKey: string
 export type ResourceSelectionResult = { packId: string; packVersion: string; packName?: string; packStyle?: string; packGameTypes?: string[]; elementId: string; elementName?: string; elementPath: string; category?: string; usageTags?: string[]; dimension?: '2D' | '3D' | 'agnostic'; sourceUrl: string; assetKind?: string; capabilities?: string[]; contentProfile?: Record<string, unknown>; technicalFacts?: Record<string, string | number | boolean>; relations?: ResourceSelectionElementRelation[]; dependencies?: ResourceSelectionDependencyResult[] }
 export type ResourceCatalogFilterInput = ResourceCatalogFilter
 export type ResourceCatalogInput = ResourceCatalogRequest
-export type ResourceCatalogPackResult = ResourceCatalogPack
 export type ResourceCatalogElementResult = ResourceCatalogElement
-export type ResourceCatalogPackPage = ResourceCatalogPage<ResourceCatalogPack>
 export type ResourceCatalogElementPage = ResourceCatalogPage<ResourceCatalogElement>
-export type ResourcePackInspectionResult = { pack: Record<string, unknown>; folders: Array<Record<string, unknown>>; summary?: Record<string, unknown> }
+export type ResourceCandidatePage = ResourceCatalogElementPage & {
+  catalogRevision: string
+  normalizedFilters: ResourceCatalogFilterInput
+}
 export type ResourceExplicitSelectionInput = { importId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }
 export type ResourceResolvedSelection = ResourceSelectionResult & { importId: string; destinationPath?: string; selectionReason: string[] }
 
@@ -30,23 +30,23 @@ export function createResourceSelectionClient(options: { baseUrl: string; servic
     ? Math.max(0, Math.trunc(options.transportRetryDelayMs!))
     : 100
   return {
-    async browsePacks(input: ResourceCatalogInput): Promise<ResourceCatalogPackPage> {
-      const response = await servicePost('/api/resource-catalog/packs', input)
+    async queryCandidates(input: ResourceCatalogInput): Promise<ResourceCandidatePage> {
+      const response = await servicePost('/api/resource-catalog/elements', input)
       const body = await response.json().catch(() => undefined)
-      if (!response.ok) throw new Error(errorMessage(body) || `Resource Pack catalog failed (${response.status})`)
-      return parseCatalogPage(body, parseCatalogPack)
-    },
-    async browsePackElements(packId: string, input: ResourceCatalogInput): Promise<ResourceCatalogElementPage> {
-      const response = await servicePost(`/api/resource-catalog/packs/${encodeURIComponent(packId)}/elements`, input)
-      const body = await response.json().catch(() => undefined)
-      if (!response.ok) throw new Error(errorMessage(body) || `Resource element catalog failed (${response.status})`)
-      return parseCatalogPage(body, parseCatalogElement)
-    },
-    async inspectPack(packId: string): Promise<ResourcePackInspectionResult> {
-      const response = await serviceFetch(`${baseUrl}/api/resource-catalog/packs/${encodeURIComponent(packId)}`, { headers: serviceHeaders(false) })
-      const body = await response.json().catch(() => undefined) as ResourcePackInspectionResult & { error?: { message?: string } }
-      if (!response.ok || !isRecord(body?.pack) || !Array.isArray(body?.folders)) throw new Error(body?.error?.message || `Resource Pack inspection failed (${response.status})`)
-      return { pack: body.pack, folders: body.folders.filter(isRecord), ...(isRecord(body.summary) ? { summary: body.summary } : {}) }
+      if (!response.ok) throw new Error(errorMessage(body) || `Resource candidate catalog failed (${response.status})`)
+      if (
+        !isRecord(body) ||
+        typeof body.catalogRevision !== 'string' ||
+        body.catalogRevision.trim().length !== 64 ||
+        !isRecord(body.normalizedFilters)
+      )
+        throw new Error('Resource candidate catalog snapshot is invalid')
+      return {
+        ...parseCatalogPage(body, parseCatalogElement),
+        catalogRevision: body.catalogRevision,
+        normalizedFilters:
+          body.normalizedFilters as ResourceCatalogFilterInput,
+      }
     },
     async resolveSelections(selections: ResourceExplicitSelectionInput[]): Promise<ResourceResolvedSelection[]> {
       const response = await servicePost('/api/resource-imports/resolve', { selections })
@@ -95,19 +95,6 @@ function parseCatalogPage<T>(value: unknown, parseItem: (item: unknown) => T): R
     ...(typeof value.nextCursor === 'string' && value.nextCursor ? { nextCursor: value.nextCursor } : {}),
     facets: facets as ResourceCatalogPage<T>['facets'],
   }
-}
-
-function parseCatalogPack(value: unknown): ResourceCatalogPack {
-  if (!isRecord(value)) throw new Error('Resource catalog Pack is invalid')
-  for (const key of ['packId', 'packVersion', 'packName', 'style', 'dimension', 'primaryCategory'] as const) {
-    if (typeof value[key] !== 'string' || !value[key].trim()) throw new Error('Resource catalog Pack is invalid')
-  }
-  for (const key of ['styles', 'gameTypes', 'categories', 'tags', 'assetKinds', 'usageTags', 'capabilities', 'formats', 'compatibleEngines'] as const) {
-    if (!stringArray(value[key])) throw new Error('Resource catalog Pack is invalid')
-  }
-  if (typeof value.readyElementCount !== 'number') throw new Error('Resource catalog Pack is invalid')
-  if (typeof value.license !== 'string' || !value.license.trim()) throw new Error('Resource catalog Pack is invalid')
-  return value as unknown as ResourceCatalogPack
 }
 
 function parseCatalogElement(value: unknown): ResourceCatalogElement {

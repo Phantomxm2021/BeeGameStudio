@@ -30,10 +30,11 @@ describe('WorkflowCard', () => {
           executionStatus: 'working',
           currentItemId: 'docs/UI_UX_SPEC.md',
           completedTaskCount: 1,
-          totalTaskCount: 2,
+          totalTaskCount: 3,
           tasks: [
-            { id: 'gdd', title: 'docs/GDD.md', status: 'completed' },
-            { id: 'ui', title: 'docs/UI_UX_SPEC.md', status: 'running' },
+            { id: 'gdd', title: 'docs/GDD.md', status: 'completed', operation: 'review' },
+            { id: 'ui', title: 'docs/UI_UX_SPEC.md', status: 'running', operation: 'review' },
+            { id: 'audio', title: 'docs/AUDIO_DESIGN.md', status: 'pending', operation: 'review' },
           ],
         }}
       />,
@@ -44,8 +45,13 @@ describe('WorkflowCard', () => {
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
     expect(screen.getByText(/Document Reviewer · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
-    expect(screen.getByText('1 / 2')).toBeInTheDocument();
-    expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('审计：游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getByLabelText('任务状态：已审计')).toHaveAttribute('data-task-icon', 'review-completed');
+    expect(screen.getByLabelText('任务状态：审计中')).toHaveAttribute('data-task-icon', 'review-running');
+    expect(screen.getByLabelText('任务状态：待审计')).toHaveAttribute('data-task-icon', 'review-pending');
+    expect(screen.getByText('审计中')).toBeInTheDocument();
+    expect(screen.getByText('待审计')).toBeInTheDocument();
     expect(screen.getByRole('list')).not.toHaveClass('border-l');
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });

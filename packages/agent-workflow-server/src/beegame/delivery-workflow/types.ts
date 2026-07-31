@@ -244,8 +244,10 @@ export type DeliveryRun = {
   status: DeliveryRunStatus
   revision: Revision
   activeTaskId?: string
-  /** Canonical project document currently being written by a workflow worker. */
+  /** Canonical project artifact currently being processed by a document worker. */
   currentItemId?: string
+  /** Canonical artifacts successfully read by the active document-reviewer dispatch. */
+  reviewedDocumentPaths?: string[]
   tasks: AtomicTask[]
   activeDispatch?: DispatchRecord
   evidence: {

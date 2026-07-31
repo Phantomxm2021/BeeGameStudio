@@ -471,6 +471,18 @@ function buildResourceSelectionPlan(
     groups.set(key, group)
   }
   return [...groups.values()]
+    .map(group => ({
+      ...group,
+      responsibilities: [...group.responsibilities].sort((left, right) =>
+        left.requirementId.localeCompare(right.requirementId),
+      ),
+    }))
+    .sort((left, right) =>
+      left.responsibilities[0]!.requirementId.localeCompare(
+        right.responsibilities[0]!.requirementId,
+      ),
+    )
+    .slice(0, 1)
 }
 
 export async function startResourcePreparation(input: {

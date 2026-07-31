@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
+import { readCurrentResourceReviewState } from './delivery-workflow/resource-stage'
 import type {
   DeliveryWorkerPort,
   DispatchRecord,
@@ -613,6 +614,7 @@ function validationScopeContains(scope: string, artifactPath: string): boolean {
 
 const RESOURCE_MUTATION_ACTIONS = new Set([
   'import_elements',
+  'record_no_match',
   'refresh_import_metadata',
 ])
 
@@ -708,7 +710,11 @@ function isDurableResourceMutation(event: BeeGameEvent): boolean {
   if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput))
     return false
   const action = (toolInput as Record<string, unknown>).action
-  return action === 'import_elements' || action === 'refresh_import_metadata'
+  return (
+    action === 'import_elements' ||
+    action === 'record_no_match' ||
+    action === 'refresh_import_metadata'
+  )
 }
 
 function workerNeedsActionError(reason: string): Error {
@@ -723,6 +729,36 @@ async function createDeterministicResourceTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const contract = auditAssetContract(input.request.workspacePath)
+  const selectedRequirementIds = Array.isArray(
+    input.request.contract.selectionPlan,
+  )
+    ? input.request.contract.selectionPlan.flatMap(group => {
+        if (!group || typeof group !== 'object' || Array.isArray(group)) return []
+        const responsibilities = (group as Record<string, unknown>)
+          .responsibilities
+        if (!Array.isArray(responsibilities)) return []
+        return responsibilities.flatMap(responsibility => {
+          if (
+            !responsibility ||
+            typeof responsibility !== 'object' ||
+            Array.isArray(responsibility)
+          )
+            return []
+          const requirementId = (responsibility as Record<string, unknown>)
+            .requirementId
+          return typeof requirementId === 'string' && requirementId
+            ? [requirementId]
+            : []
+        })
+      })
+    : []
+  const reviewState = contract.valid
+    ? await readCurrentResourceReviewState(input.request.workspacePath)
+    : undefined
+  const selectionResolved = selectedRequirementIds.every(
+    requirementId =>
+      !reviewState?.unresolvedRequirementIds.has(requirementId),
+  )
   const evidencePath = `.beegame/workflow/evidence/resource-preparation-${input.dispatchId}.json`
   const importIds = (contract.imports ?? []).map(
     resourceImport => resourceImport.id,
@@ -754,7 +790,7 @@ async function createDeterministicResourceTerminal(input: {
         : ('fresh' as const),
     revision: input.request.revision,
     status:
-      contract.present && contract.valid
+      contract.present && contract.valid && selectionResolved
         ? ('completed' as const)
         : ('failed' as const),
     writtenPaths,
@@ -776,6 +812,11 @@ async function createDeterministicResourceTerminal(input: {
         manifestPresent: contract.present,
         manifestValid: contract.valid,
         issues: contract.issues,
+        selectedRequirementIds,
+        unresolvedSelectedRequirementIds: selectedRequirementIds.filter(
+          requirementId =>
+            reviewState?.unresolvedRequirementIds.has(requirementId),
+        ),
         importIds,
         compositionIds,
         observedMutationPaths,

@@ -5421,6 +5421,11 @@ function workflowViewForDisplay(
             typeof workflow.currentItemId === 'string'
               ? workflow.currentItemId
               : undefined,
+          reviewedDocumentPaths: Array.isArray(workflow.reviewedDocumentPaths)
+            ? workflow.reviewedDocumentPaths.flatMap(path =>
+                typeof path === 'string' ? [path] : [],
+              )
+            : undefined,
           documentStep:
             typeof workflow.documentStep === 'string'
               ? (workflow.documentStep as Parameters<

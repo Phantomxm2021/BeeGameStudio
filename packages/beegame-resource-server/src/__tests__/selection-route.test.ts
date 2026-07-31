@@ -45,6 +45,60 @@ describe('agentic resource exploration routes', () => {
     }))
   })
 
+  test('queries exact reusable candidates across published Packs', async () => {
+    const otherPack = {
+      ...pack,
+      id: 'other-kit',
+      name: 'Other Kit',
+      version: '2.0.0',
+    }
+    const app = appFor({
+      packs: [pack, otherPack],
+      elements: [
+        {
+          ...element('ground', 'models/ground.glb', ['terrain']),
+          capabilities: ['modular'],
+        },
+        {
+          ...element('wall', 'models/wall.glb', ['building']),
+          capabilities: ['connection-points'],
+        },
+        {
+          ...element('other-ground', 'models/other-ground.glb', ['terrain']),
+          packId: otherPack.id,
+          capabilities: ['connection-points'],
+        },
+      ],
+    })
+
+    const response = await post(app, '/api/resource-catalog/elements', {
+      filters: {
+        usageTags: ['terrain'],
+        capabilities: ['connection-points'],
+        formats: ['glb'],
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        total: 1,
+        catalogRevision: expect.any(String),
+        normalizedFilters: {
+          usageTags: ['terrain'],
+          capabilities: ['connection-points'],
+          formats: ['glb'],
+        },
+        items: [
+          expect.objectContaining({
+            packId: otherPack.id,
+            elementId: 'other-ground',
+          }),
+        ],
+      }),
+    )
+  })
+
   test('resolves signed dependency closures only for explicit selections', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [pack],

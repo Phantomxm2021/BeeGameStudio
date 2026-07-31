@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { browseResourceCatalogPacks, browseResourcePackElements } from '../catalog'
+import {
+  browseResourceCatalogPacks,
+  browseResourcePackElements,
+  queryResourceCatalogElements,
+} from '../catalog'
 import type { ResourceElement, ResourcePack } from '../types'
 
 const packs: ResourcePack[] = [
@@ -27,7 +31,7 @@ describe('resource catalog browsing', () => {
 
     expect(page.total).toBe(2)
     expect(page.items).toHaveLength(1)
-    expect(page.nextCursor).toStartWith('v1:')
+    expect(page.nextCursor).toStartWith('v2:')
     expect(browseResourceCatalogPacks(packs, elements, { limit: 1, cursor: page.nextCursor }).items).toHaveLength(1)
     expect(page.facets.assetKinds).toEqual(['model', 'vfx'])
     expect(page.facets.formats).toEqual(['glb', 'webm'])
@@ -40,6 +44,42 @@ describe('resource catalog browsing', () => {
     expect(page.items).toEqual([])
     expect(page.facets.gameTypes).toEqual(['Action', 'Adventure'])
     expect(page.facets.styles).toEqual(['Stylized'])
+  })
+
+  test('does not combine unrelated Pack elements into one false match', () => {
+    const page = browseResourceCatalogPacks(packs, elements, {
+      filters: {
+        usageTags: ['terrain'],
+        capabilities: ['connection-points'],
+      },
+    })
+
+    expect(page.items).toEqual([])
+  })
+
+  test('queries exact candidates across Packs and binds cursors to filters', () => {
+    const page = queryResourceCatalogElements(packs, elements, {
+      filters: { assetKinds: ['model'], formats: ['glb'] },
+      limit: 1,
+    }, 'revision-1')
+
+    expect(page.total).toBe(2)
+    expect(page.items).toEqual([
+      expect.objectContaining({ packId: 'world-kit', elementId: 'ground' }),
+    ])
+    expect(page.nextCursor).toStartWith('v2:')
+    expect(() =>
+      queryResourceCatalogElements(packs, elements, {
+        filters: { assetKinds: ['vfx'] },
+        cursor: page.nextCursor,
+      }, 'revision-1'),
+    ).toThrow('does not belong to these filters')
+    expect(() =>
+      queryResourceCatalogElements(packs, elements, {
+        filters: { assetKinds: ['model'], formats: ['glb'] },
+        cursor: page.nextCursor,
+      }, 'revision-2'),
+    ).toThrow('does not belong to these filters')
   })
 
   test('keeps element exploration inside the Pack deliberately selected by the Agent', () => {

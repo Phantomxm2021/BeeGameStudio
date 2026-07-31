@@ -155,10 +155,30 @@ const WORKFLOW_FILE_MUTATION_TOOLS = new Set([
 
 const WORKFLOW_EXTERNAL_WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
 
+const SINGLE_LANE_WORKFLOW_WORKERS = new Set([
+  'document-author',
+  'document-reviewer',
+  'resource-preparer',
+  'implementation-worker',
+  'implementation-auditor',
+  'acceptance-validator',
+  'change-impact-analyzer',
+  'question-answerer',
+])
+
+const MAIN_THREAD_WORKFLOW_RESULT_TOOLS = new Set([
+  'SubmitAssetManifest',
+  'SubmitAtomicTaskPlan',
+  'SubmitImplementationResult',
+  'SubmitValidationResult',
+  'SubmitDocumentAuthorResult',
+  'SubmitDocumentReviewResult',
+  'SubmitChangeImpactResult',
+  'SubmitQuestionAnswerResult',
+])
+
 const RESOURCE_CATALOG_READ_ACTIONS = new Set([
-  'browse_packs',
-  'inspect_pack',
-  'index_pack_elements',
+  'query_candidates',
 ])
 
 export class ResourceCatalogTurnGate {
@@ -412,6 +432,7 @@ export class NativeResourceLibraryPermissionBroker {
     }
     const mutationAction =
       delegated.action === 'import_elements' ||
+      delegated.action === 'record_no_match' ||
       delegated.action === 'refresh_import_metadata'
     if (!mutationAction) {
       return Promise.resolve({
@@ -1032,10 +1053,9 @@ export class NativeBackgroundTaskLedger {
 }
 
 /**
- * Publishes BeeGame's read-only/project-scoped capabilities through Claude
- * Code's supported inherited tool pool. The main QueryEngine still receives
- * the same tool instances directly; native subagents receive them through
- * appState.mcp.tools when Claude Code assembles their own worker tool pool.
+ * Publishes operational BeeGame capabilities through Claude Code's supported
+ * inherited tool pool. Structured workflow result tools remain main-thread
+ * only so a child Agent cannot become a second terminal submission lane.
  */
 export function installInheritedBeeGameTools(
   appState: MutableAppState,
@@ -1043,11 +1063,14 @@ export function installInheritedBeeGameTools(
 ): MutableAppState {
   const currentMcp = getField<Record<string, unknown>>(appState, 'mcp', {})
   const currentTools = getField<unknown[]>(currentMcp, 'tools', [])
+  const operationalTools = inheritedTools.filter(
+    tool => !MAIN_THREAD_WORKFLOW_RESULT_TOOLS.has(getToolName(tool)),
+  )
   return {
     ...appState,
     mcp: {
       ...currentMcp,
-      tools: [...currentTools, ...inheritedTools],
+      tools: [...currentTools, ...operationalTools],
     },
   }
 }
@@ -1428,11 +1451,10 @@ function getToolName(tool: unknown): string {
 }
 
 /**
- * Resource preparation owns a first-class ResourceLibrary tool. Keeping the
- * deferred-tool discovery/wrapper pair in that worker creates a second call
- * lane: models search for an already-loaded tool, then try to invoke it
- * indirectly. Remove only that redundant lane for this business worker; all
- * other native tools and all other Agents remain unchanged.
+ * Workflow workers own first-class structured tools. Deferred discovery and
+ * execution wrappers would let a worker invoke those tools indirectly while
+ * the event stream records only the wrapper, creating a second and invalid
+ * terminal lane. Remove that lane at the worker capability boundary.
  */
 export function selectBeeGameWorkerTools(
   tools: unknown[],
@@ -1442,9 +1464,21 @@ export function selectBeeGameWorkerTools(
   if (workflowWorkerType === 'atomic-task-planner') {
     return []
   }
-  if (workflowWorkerType !== 'resource-preparer') return tools
+  if (
+    !workflowWorkerType ||
+    !SINGLE_LANE_WORKFLOW_WORKERS.has(workflowWorkerType)
+  )
+    return tools
   const redundantToolNames = new Set(['SearchExtraTools', 'ExecuteExtraTool'])
-  if (resourceAttemptMode === 'fresh') {
+  // Fresh planning has SubmitAssetManifest. Selection and reselection have
+  // ResourceLibrary, which owns imports and canonical bindings atomically.
+  // Generic mutation tools would create a second manifest/inventory lane.
+  // Repair remains the only resource mode that may edit its explicitly scoped
+  // canonical files until repair also has a dedicated structured operation.
+  if (
+    workflowWorkerType === 'resource-preparer' &&
+    resourceAttemptMode !== 'repair'
+  ) {
     for (const toolName of WORKFLOW_FILE_MUTATION_TOOLS)
       redundantToolNames.add(toolName)
   }

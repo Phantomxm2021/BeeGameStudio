@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import {
   basename,
   dirname,
@@ -159,6 +159,85 @@ export type BeeGameRequirementDiscoveryReceipt = {
   total_compatible: number
   structured_constraint_count: number
   decision_ready: true
+}
+
+export async function recordBeeGameResourceNoMatchInWorkspace(input: {
+  root: string
+  requirementIds: readonly string[]
+  outcome: (typeof BEEGAME_RESOURCE_NO_MATCH_OUTCOMES)[number]
+  reasons: readonly string[]
+  receipt: BeeGameRequirementDiscoveryReceipt
+}): Promise<BeeGameAssetManifest> {
+  const requirementIds = [...new Set(input.requirementIds)]
+  if (!requirementIds.length)
+    throw new Error('No-match requires at least one requirement ID')
+  const reasons = input.reasons.map(reason => reason.trim()).filter(Boolean)
+  if (!reasons.length) throw new Error('No-match reasons are required')
+  if (input.receipt.decision_ready !== true)
+    throw new Error('No-match discovery receipt is incomplete')
+  const manifest = await readBeeGameAssetManifest(input.root)
+  const selected = new Set(requirementIds)
+  const known = new Set(manifest.requirements.map(requirement => requirement.id))
+  const unknown = requirementIds.filter(id => !known.has(id))
+  if (unknown.length)
+    throw new Error(`Unknown resource requirements: ${unknown.join(', ')}`)
+  const decidedAt = new Date().toISOString()
+  manifest.requirements = manifest.requirements.map(requirement => {
+    if (!selected.has(requirement.id)) return requirement
+    if (!requirement.resource_requirement)
+      throw new Error(
+        `Resource requirement ${requirement.id} has no active selection lane`,
+      )
+    if (requirement.resource_requirement.no_match !== input.outcome)
+      throw new Error(
+        `Resource requirement ${requirement.id} permits ${requirement.resource_requirement.no_match}, not ${input.outcome}`,
+      )
+    if (
+      requirement.satisfied_by?.import_ids?.length ||
+      requirement.satisfied_by?.composition_ids?.length ||
+      requirement.satisfied_by?.project_references?.length
+    )
+      throw new Error(
+        `Resource requirement ${requirement.id} already has a fulfillment binding`,
+      )
+    const {
+      resource_requirement: _resourceRequirement,
+      satisfied_by: _satisfiedBy,
+      ...base
+    } = requirement
+    return {
+      ...base,
+      status: input.outcome === 'blocked' ? ('blocked' as const) : ('planned' as const),
+      source_decision: {
+        type:
+          input.outcome === 'blocked'
+            ? ('unavailable' as const)
+            : input.outcome,
+        reasons,
+        decided_at: decidedAt,
+        basis: 'catalog-no-match' as const,
+        discovery_receipt: input.receipt,
+      },
+    }
+  })
+  await writeBeeGameAssetManifestAtomically(input.root, manifest)
+  return manifest
+}
+
+async function writeBeeGameAssetManifestAtomically(
+  workspacePath: string,
+  manifest: BeeGameAssetManifest,
+): Promise<void> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`
+  await mkdir(dirname(manifestPath), { recursive: true })
+  try {
+    await writeFile(temporaryPath, serializeAssetManifest(manifest), 'utf8')
+    await rename(temporaryPath, manifestPath)
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined)
+  }
 }
 
 export type BeeGameSubresourceRequirement = {

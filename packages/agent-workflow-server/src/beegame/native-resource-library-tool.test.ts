@@ -23,63 +23,6 @@ describe('native Resource Library tool', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
-  test('exposes a paginated catalog without requirement roles or signed URLs', async () => {
-    workspace = await createWorkspace()
-    const tool = createNativeResourceLibraryTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      client: client({
-        browsePacks: async () => ({
-          items: [
-            {
-              packId: 'pack-a',
-              packVersion: '1.0.0',
-              packName: 'Kit',
-              style: 'Stylized',
-              styles: ['Stylized'],
-              gameTypes: ['Adventure'],
-              dimension: '3D',
-              primaryCategory: '3d-assets',
-              categories: ['models'],
-              tags: [],
-              readyElementCount: 12,
-              assetKinds: ['model'],
-              usageTags: ['environment'],
-              capabilities: ['modular'],
-              formats: ['glb'],
-              license: 'internal',
-              compatibleEngines: [],
-            },
-          ],
-          total: 1,
-          facets: facets(),
-        }),
-      }),
-    }) as ToolDefinition
-
-    const result = await tool.call({
-      action: 'browse_packs',
-      filters: { dimensions: ['3D'], formats: ['glb'] },
-    })
-
-    expect(tool.alwaysLoad).toBe(true)
-    expect(JSON.stringify(result)).not.toContain('sourceUrl')
-    expect(result).toEqual({
-      data: expect.objectContaining({
-        items: [expect.objectContaining({ packId: 'pack-a' })],
-      }),
-    })
-    await expect(tool.prompt()).resolves.toContain(
-      'Catalog results are paginated',
-    )
-    await expect(tool.prompt()).resolves.toContain(
-      'BeeGame does not select resources',
-    )
-    await expect(tool.prompt()).resolves.not.toContain(
-      'author the engine-native assembly yourself',
-    )
-  })
-
   test('asks once for one explicit batch while all exploration stays read-only', async () => {
     workspace = await createWorkspace()
     const tool = createNativeResourceLibraryTool({
@@ -90,15 +33,16 @@ describe('native Resource Library tool', () => {
 
     await expect(
       tool.checkPermissions({
-        action: 'browse_pack_elements',
-        pack_id: 'pack-a',
-        filters: { asset_kinds: ['model'] },
+        action: 'query_candidates',
+        requirement_ids: ['ground'],
       }),
     ).resolves.toMatchObject({ behavior: 'allow' })
     await expect(
       tool.checkPermissions({
-        action: 'index_pack_elements',
-        pack_id: 'pack-a',
+        action: 'record_no_match',
+        requirement_ids: ['ground'],
+        outcome: 'authored-asset',
+        reasons: ['No suitable candidate'],
       }),
     ).resolves.toMatchObject({ behavior: 'allow' })
     await expect(
@@ -132,177 +76,6 @@ describe('native Resource Library tool', () => {
     })
   })
 
-  test('returns a bounded Pack inventory page with exact stable paths', async () => {
-    workspace = await createWorkspace()
-    const calls: Array<{ cursor?: string; limit?: number }> = []
-    const makeElement = (id: string, path: string) => ({
-      packId: 'pack-a',
-      packVersion: '1.0.0',
-      packName: 'Kit',
-      packStyle: 'Stylized',
-      packStyles: ['Stylized'],
-      packGameTypes: ['Strategy'],
-      elementId: id,
-      elementName: path.split('/').pop()!,
-      elementPath: path,
-      preview: { kind: 'model' as const, path },
-      category: 'environment' as const,
-      dimension: '3D' as const,
-      usageTags: [],
-      assetKind: 'model' as const,
-      capabilities: [],
-      contentProfile: {
-        packaging: 'self-contained' as const,
-        components: [
-          {
-            id: 'mesh-root',
-            kind: 'mesh' as const,
-            name: 'Root',
-            roles: ['environment'],
-          },
-        ],
-        inspection: { status: 'complete' as const, source: 'server' as const },
-      },
-      technicalFacts: {
-        boundsSizeY: 6,
-        hasTextureCoordinates: true,
-        externalReferences: '["too-large-for-index"]',
-      },
-      relations:
-        id === 'rock-a'
-          ? [
-              {
-                kind: 'component-of' as const,
-                targetElementId: 'tree-a',
-                role: 'detail',
-              },
-            ]
-          : [],
-      dependencyCount: 0,
-    })
-    const tool = createNativeResourceLibraryTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      client: client({
-        browsePackElements: async (_packId, input) => {
-          calls.push({
-            ...(input.cursor ? { cursor: input.cursor } : {}),
-            ...(input.limit ? { limit: input.limit } : {}),
-          })
-          if (!input.cursor)
-            return {
-              items: [makeElement('tree-a', 'models/tree-a.glb')],
-              total: 2,
-              nextCursor: 'cursor-1',
-              facets: facets(),
-            }
-          return {
-            items: [makeElement('rock-a', 'models/rock-a.glb')],
-            total: 2,
-            facets: facets(),
-          }
-        },
-      }),
-    }) as ToolDefinition
-
-    const result = await tool.call({
-      action: 'index_pack_elements',
-      pack_id: 'pack-a',
-    })
-
-    expect(calls).toEqual([{ limit: 16 }, { cursor: 'cursor-1', limit: 15 }])
-    expect(result).toEqual({
-      data: expect.objectContaining({
-        packId: 'pack-a',
-        total: 2,
-        items: [
-          expect.objectContaining({
-            elementName: 'tree-a.glb',
-            elementPath: 'models/tree-a.glb',
-            preview: { kind: 'model', path: 'models/tree-a.glb' },
-          }),
-          expect.objectContaining({
-            elementName: 'rock-a.glb',
-            elementPath: 'models/rock-a.glb',
-            relations: [
-              {
-                kind: 'component-of',
-                targetElementId: 'tree-a',
-                role: 'detail',
-              },
-            ],
-          }),
-        ],
-      }),
-    })
-    expect(
-      (
-        result.data as {
-          items: Array<{ technicalFacts?: Record<string, unknown> }>
-        }
-      ).items[0]?.technicalFacts,
-    ).toEqual({ boundsSizeY: 6, hasTextureCoordinates: true })
-    expect(
-      (result.data as { items: Array<{ contentProfile?: unknown }> }).items[0]
-        ?.contentProfile,
-    ).toEqual({
-      packaging: 'self-contained',
-      components: [
-        { id: 'mesh-root', kind: 'mesh', name: 'Root', roles: ['environment'] },
-      ],
-      inspection: { status: 'complete', source: 'server' },
-    })
-    await expect(tool.prompt()).resolves.not.toContain(
-      'never restart the same Pack from its first page',
-    )
-  })
-
-  test('does not flood Agent context with a large Pack inventory', async () => {
-    workspace = await createWorkspace()
-    const elements = Array.from({ length: 48 }, (_, index) => ({
-      packId: 'pack-a',
-      packVersion: '1.0.0',
-      packName: 'Kit',
-      packStyle: 'Stylized',
-      packStyles: ['Stylized'],
-      packGameTypes: ['Strategy'],
-      elementId: `asset-${index}`,
-      elementName: `asset-${index}.glb`,
-      elementPath: `models/asset-${index}.glb`,
-      category: 'environment' as const,
-      dimension: '3D' as const,
-      usageTags: [],
-      assetKind: 'model' as const,
-      capabilities: [],
-      relations: [],
-      dependencyCount: 0,
-    }))
-    const tool = createNativeResourceLibraryTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      client: client({
-        browsePackElements: async (_packId, input) => ({
-          items: elements.slice(0, input.limit),
-          total: 200,
-          nextCursor: 'cursor-16',
-          facets: facets(),
-        }),
-      }),
-    }) as ToolDefinition
-
-    const result = await tool.call({
-      action: 'index_pack_elements',
-      pack_id: 'pack-a',
-    })
-    expect(result).toEqual({
-      data: expect.objectContaining({
-        total: 200,
-        nextCursor: 'cursor-16',
-      }),
-    })
-    expect((result.data as { items: unknown[] }).items).toHaveLength(16)
-  })
-
   test('imports exactly the elements supplied by Claude Code and binds their requirements', async () => {
     workspace = await createWorkspace()
     const observed: unknown[] = []
@@ -310,6 +83,11 @@ describe('native Resource Library tool', () => {
       buildTool: definition => definition,
       workspacePath: workspace,
       client: client({
+        queryCandidates: async () => candidatePage({
+          items: [catalogElement('pack-a', 'ground-a')],
+          total: 1,
+          facets: facets(),
+        }),
         resolveSelections: async selections => {
           observed.push(selections)
           return selections.map(selection => ({
@@ -328,6 +106,10 @@ describe('native Resource Library tool', () => {
       fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])),
     }) as ToolDefinition
 
+    await tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })
     const result = await tool.call({
       action: 'import_elements',
       selections: [
@@ -372,78 +154,20 @@ describe('native Resource Library tool', () => {
     })
   })
 
-  test('resolves an exact compact-inventory path only when importing', async () => {
-    workspace = await createWorkspace()
-    const makeElement = (id: string, path: string) => ({
-      packId: 'pack-a',
-      packVersion: '1.0.0',
-      packName: 'Kit',
-      packStyle: 'Stylized',
-      packStyles: ['Stylized'],
-      packGameTypes: ['Strategy'],
-      elementId: id,
-      elementName: path.split('/').pop()!,
-      elementPath: path,
-      category: 'environment' as const,
-      dimension: '3D' as const,
-      usageTags: [],
-      assetKind: 'model' as const,
-      capabilities: [],
-      relations: [],
-      dependencyCount: 0,
-    })
-    const resolved: unknown[] = []
-    const tool = createNativeResourceLibraryTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      client: client({
-        browsePackElements: async () => ({
-          items: [makeElement('tree-id', 'models/tree.glb')],
-          total: 1,
-          facets: facets(),
-        }),
-        resolveSelections: async selections => {
-          resolved.push(selections)
-          return selections.map(selection => ({
-            importId: selection.importId,
-            destinationPath: selection.destinationPath,
-            packId: selection.packId,
-            packVersion: '1.0.0',
-            elementId: selection.elementId,
-            elementPath: 'models/tree.glb',
-            sourceUrl: 'https://signed.example/tree',
-            selectionReason: selection.selectionReason,
-          }))
-        },
-      }),
-      fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])),
-    }) as ToolDefinition
-
-    await tool.call({
-      action: 'import_elements',
-      selections: [
-        {
-          import_id: 'tree',
-          requirement_ids: ['ground'],
-          pack_id: 'pack-a',
-          expected_pack_version: '1.0.0',
-          element_path: 'models/tree.glb',
-          destination_path: 'assets/library/tree',
-          selection_reason: ['Scene vegetation'],
-        },
-      ],
-    })
-    expect(resolved).toEqual([
-      [expect.objectContaining({ elementId: 'tree-id' })],
-    ])
-  })
-
   test('groups repeated import failures instead of returning the entire manifest', async () => {
     workspace = await createWorkspace()
     const tool = createNativeResourceLibraryTool({
       buildTool: definition => definition,
       workspacePath: workspace,
       client: client({
+        queryCandidates: async () => candidatePage({
+          items: [
+            catalogElement('pack-a', 'one-id'),
+            catalogElement('pack-a', 'two-id'),
+          ],
+          total: 2,
+          facets: facets(),
+        }),
         resolveSelections: async selections =>
           selections.map(selection => ({
             importId: selection.importId,
@@ -458,6 +182,10 @@ describe('native Resource Library tool', () => {
       }),
     }) as ToolDefinition
 
+    await tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })
     const result = await tool.call({
       action: 'import_elements',
       selections: ['one', 'two'].map(importId => ({
@@ -491,31 +219,37 @@ describe('native Resource Library tool', () => {
 
   test('rejects concurrent operations instead of queuing precommitted catalog reads', async () => {
     workspace = await createWorkspace()
-    let releaseBrowse!: () => void
-    const browsePending = new Promise<void>(resolve => {
-      releaseBrowse = resolve
+    let releaseQuery!: () => void
+    const queryPending = new Promise<void>(resolve => {
+      releaseQuery = resolve
     })
     const tool = createNativeResourceLibraryTool({
       buildTool: definition => definition,
       workspacePath: workspace,
       client: client({
-        browsePacks: async () => {
-          await browsePending
-          return { items: [], total: 0, facets: facets() }
+        queryCandidates: async () => {
+          await queryPending
+          return candidatePage({ items: [], total: 0, facets: facets() })
         },
       }),
     }) as ToolDefinition
 
-    const first = tool.call({ action: 'browse_packs' })
+    const first = tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })
     await Promise.resolve()
     await expect(
-      tool.call({ action: 'inspect_pack', pack_id: 'pack-a' }),
+      tool.call({
+        action: 'query_candidates',
+        requirement_ids: ['ground'],
+      }),
     ).rejects.toThrow('accepts one operation at a time')
-    releaseBrowse()
+    releaseQuery()
     await first
   })
 
-  test('enforces catalog budget before the next read and resets only after a durable import', async () => {
+  test('enforces catalog budget before the next candidate read', async () => {
     workspace = await createWorkspace()
     let catalogCalls = 0
     const tool = createNativeResourceLibraryTool({
@@ -523,9 +257,9 @@ describe('native Resource Library tool', () => {
       workspacePath: workspace,
       catalogReadLimit: 2,
       client: client({
-        browsePacks: async () => {
+        queryCandidates: async () => {
           catalogCalls += 1
-          return { items: [], total: 0, facets: facets() }
+          return candidatePage({ items: [], total: 0, facets: facets() })
         },
         resolveSelections: async selections =>
           selections.map(selection => ({
@@ -542,8 +276,14 @@ describe('native Resource Library tool', () => {
       fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])),
     }) as ToolDefinition
 
-    const first = await tool.call({ action: 'browse_packs' })
-    const second = await tool.call({ action: 'browse_packs' })
+    const first = await tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })
+    const second = await tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })
     expect(first).toEqual({
       data: expect.objectContaining({
         catalog_budget: { limit: 2, used: 1, remaining: 1 },
@@ -554,31 +294,137 @@ describe('native Resource Library tool', () => {
         catalog_budget: { limit: 2, used: 2, remaining: 0 },
       }),
     })
-    await expect(tool.call({ action: 'browse_packs' })).rejects.toThrow(
-      'catalog budget is exhausted after 2 reads',
-    )
+    await expect(
+      tool.call({
+        action: 'query_candidates',
+        requirement_ids: ['ground'],
+      }),
+    ).rejects.toThrow('catalog budget is exhausted after 2 reads')
     expect(catalogCalls).toBe(2)
+  })
 
-    await tool.call({
-      action: 'import_elements',
-      selections: [
-        {
-          import_id: 'ground-a',
-          requirement_ids: ['ground'],
-          pack_id: 'pack-a',
-          expected_pack_version: '1.0.0',
-          element_id: 'ground-a',
-          destination_path: 'assets/library/ground',
-          selection_reason: ['Primary environment kit'],
+  test('does not consume catalog budget when a read fails before returning catalog data', async () => {
+    workspace = await createWorkspace()
+    let attempts = 0
+    const tool = createNativeResourceLibraryTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      catalogReadLimit: 1,
+      client: client({
+        queryCandidates: async () => {
+          attempts += 1
+          if (attempts === 1) throw new Error('catalog unavailable')
+          return candidatePage({ items: [], total: 0, facets: facets() })
         },
-      ],
-    })
-    const afterImport = await tool.call({ action: 'browse_packs' })
-    expect(afterImport).toEqual({
+      }),
+    }) as ToolDefinition
+
+    await expect(
+      tool.call({
+        action: 'query_candidates',
+        requirement_ids: ['ground'],
+      }),
+    ).rejects.toThrow('catalog unavailable')
+    await expect(tool.call({
+      action: 'query_candidates',
+      requirement_ids: ['ground'],
+    })).resolves.toEqual({
       data: expect.objectContaining({
-        catalog_budget: { limit: 2, used: 1, remaining: 1 },
+        catalog_budget: { limit: 1, used: 1, remaining: 0 },
       }),
     })
+    expect(attempts).toBe(2)
+  })
+
+  test('queries one canonical requirement group across Packs', async () => {
+    workspace = await createWorkspace()
+    const calls: Array<Record<string, unknown>> = []
+    const tool = createNativeResourceLibraryTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      client: client({
+        queryCandidates: async input => {
+          calls.push(input as Record<string, unknown>)
+          return candidatePage({
+            items: [],
+            total: 0,
+            facets: facets(),
+          })
+        },
+      }),
+    }) as ToolDefinition
+
+    await expect(
+      tool.call({ action: 'query_candidates', requirement_ids: ['ground'] }),
+    ).resolves.toEqual({
+      data: expect.objectContaining({
+        total: 0,
+        decision_ready: true,
+      }),
+    })
+    expect(calls).toEqual([
+      {
+        filters: { usageTags: ['terrain'], formats: ['glb'] },
+        limit: 16,
+      },
+    ])
+  })
+
+  test('records the approved no-match only after complete candidate pagination', async () => {
+    workspace = await createWorkspace()
+    const tool = createNativeResourceLibraryTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      client: client({
+        queryCandidates: async () => candidatePage({
+          items: [],
+          total: 0,
+          facets: facets(),
+        }),
+      }),
+    }) as ToolDefinition
+
+    await expect(
+      tool.call({
+        action: 'record_no_match',
+        requirement_ids: ['ground'],
+        outcome: 'authored-asset',
+        reasons: ['The complete exact catalog query returned no candidate.'],
+      }),
+    ).rejects.toThrow('Complete query_candidates pagination')
+
+    await tool.call({ action: 'query_candidates', requirement_ids: ['ground'] })
+    await expect(
+      tool.call({
+        action: 'record_no_match',
+        requirement_ids: ['ground'],
+        outcome: 'authored-asset',
+        reasons: ['The complete exact catalog query returned no candidate.'],
+      }),
+    ).resolves.toEqual({
+      data: {
+        result: 'recorded',
+        requirement_ids: ['ground'],
+        outcome: 'authored-asset',
+      },
+    })
+
+    const manifest = await readBeeGameAssetManifest(workspace)
+    expect(manifest.requirements[0]).toMatchObject({
+      id: 'ground',
+      status: 'planned',
+      source_decision: {
+        type: 'authored-asset',
+        basis: 'catalog-no-match',
+        discovery_receipt: {
+          candidate_ids: [],
+          candidate_count: 0,
+          total_compatible: 0,
+          decision_ready: true,
+        },
+      },
+    })
+    expect(manifest.requirements[0]).not.toHaveProperty('resource_requirement')
   })
 
   test('does not expose a structural self-certification action', async () => {
@@ -594,7 +440,7 @@ describe('native Resource Library tool', () => {
     )
     await expect(tool.prompt()).resolves.toContain('native Validator')
     await expect(tool.prompt()).resolves.toContain(
-      'do not hand-author or repeatedly rewrite them',
+      'never hand-author their records',
     )
     expect(() =>
       tool.inputSchema.parse({ action: 'verify_integration' }),
@@ -609,9 +455,8 @@ function client(
   overrides: Partial<ProjectResourceSelectionClient> = {},
 ): ProjectResourceSelectionClient {
   return {
-    browsePacks: async () => ({ items: [], total: 0, facets: facets() }),
-    browsePackElements: async () => ({ items: [], total: 0, facets: facets() }),
-    inspectPack: async packId => ({ pack: { id: packId }, folders: [] }),
+    queryCandidates: async () =>
+      candidatePage({ items: [], total: 0, facets: facets() }),
     resolveSelections: async () => [],
     ...overrides,
   }
@@ -629,6 +474,37 @@ function facets() {
     assetKinds: [],
     capabilities: [],
     formats: [],
+  }
+}
+
+function candidatePage<T extends { items: unknown[]; total: number; facets: ReturnType<typeof facets> }>(
+  page: T,
+) {
+  return {
+    ...page,
+    catalogRevision: 'a'.repeat(64),
+    normalizedFilters: {},
+  }
+}
+
+function catalogElement(packId: string, elementId: string) {
+  return {
+    packId,
+    packVersion: '1.0.0',
+    packName: 'Kit',
+    packStyle: 'Stylized',
+    packStyles: ['Stylized'],
+    packGameTypes: ['Strategy'],
+    elementId,
+    elementName: elementId,
+    elementPath: `models/${elementId}.glb`,
+    category: 'models' as const,
+    dimension: '3D' as const,
+    usageTags: ['terrain'] as const,
+    assetKind: 'model' as const,
+    capabilities: [],
+    relations: [],
+    dependencyCount: 0,
   }
 }
 

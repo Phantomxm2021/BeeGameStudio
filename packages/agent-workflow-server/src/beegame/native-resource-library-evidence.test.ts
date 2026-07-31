@@ -26,7 +26,7 @@ describe('native Resource Library evidence', () => {
         toolName: 'ResourceLibrary',
         toolUseID: 'tool-a',
         input: {
-          action: 'browse_packs',
+          action: 'query_candidates',
           filters: { dimensions: ['3D'], formats: ['glb'] },
         },
         output: JSON.stringify({ items: [], total: 0 }),
@@ -41,7 +41,7 @@ describe('native Resource Library evidence', () => {
     expect(line).toEqual(expect.objectContaining({
       version: 4,
       phase: 'completed',
-      action: 'browse_packs',
+      action: 'query_candidates',
       outcome: 'succeeded',
       sessionId: 'session-a',
       turnId: 'turn-a',
@@ -263,7 +263,7 @@ describe('native Resource Library evidence', () => {
         payload: {
           toolName: 'ResourceLibrary',
           toolUseID: 'tool-a',
-          input: { action: 'browse_packs' },
+          input: { action: 'query_candidates' },
           output: JSON.stringify({ items: [] }),
         },
         createdAt: new Date('2026-07-19T00:00:00.000Z'),
@@ -273,7 +273,7 @@ describe('native Resource Library evidence', () => {
         dataRoot,
         sessionId: 'session-a',
         workspacePath: workspace,
-      })).toMatchObject({ state: 'current', actions: ['browse_packs'] })
+      })).toMatchObject({ state: 'current', actions: ['query_candidates'] })
 
       await writeFile(join(workspace, 'docs', 'ART_DIRECTION.md'), '# Changed art\n')
       expect(getObservedNativeResourceLibraryEvidence({

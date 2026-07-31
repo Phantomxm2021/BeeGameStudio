@@ -153,6 +153,9 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
           id,
           title,
           status: taskStatus as NonNullable<WorkflowCardPayload['tasks']>[number]['status'],
+          operation: item.operation === 'write' || item.operation === 'review'
+            ? item.operation
+            : undefined,
           attempt: Number.isFinite(Number(item.attempt)) ? Number(item.attempt) : undefined,
           failureReason: trimString(item.failureReason ?? item.failure_reason) || undefined,
         }];

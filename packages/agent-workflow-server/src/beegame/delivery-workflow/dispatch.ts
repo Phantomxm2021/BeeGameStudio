@@ -265,6 +265,9 @@ export function createDeliveryDispatcher(options: {
           lastProgressAt: record.startedAt,
           currentMessage: undefined,
           currentItemId: undefined,
+          ...(request.workerType === 'document-reviewer'
+            ? { reviewedDocumentPaths: [] }
+            : {}),
           thinking: 'working',
           ...(resourceRemediation ? { resourceRemediation } : {}),
         },

@@ -272,6 +272,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     revision: revisionSchema,
     activeTaskId: z.string().min(1).optional(),
     currentItemId: z.string().min(1).optional(),
+    reviewedDocumentPaths: z.array(z.string().min(1)).optional(),
     tasks: z.array(atomicTaskSchema),
     activeDispatch: dispatchRecordSchema.optional(),
     evidence: z

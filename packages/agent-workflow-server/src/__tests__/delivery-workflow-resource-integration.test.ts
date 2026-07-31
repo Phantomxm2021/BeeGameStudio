@@ -52,7 +52,7 @@ describe('delivery workflow resource integration', () => {
     await writeBeeGameAssetManifest(workspace, {
       version: 5,
       project_target: {
-        asset_format_capabilities: ['png'],
+        asset_format_capabilities: ['png', 'ogg'],
         resource_library_usage: 'preferred',
         runtime_asset_root: 'public/assets',
       },
@@ -64,6 +64,17 @@ describe('delivery workflow resource integration', () => {
           resource_requirement: {
             accepted_formats: ['png'],
             asset_kinds: ['sprite'],
+            import_budget: 1,
+            no_match: 'authored-asset',
+          },
+        },
+        {
+          id: 'tower-audio',
+          required: true,
+          status: 'planned',
+          resource_requirement: {
+            accepted_formats: ['ogg'],
+            asset_kinds: ['audio-clip'],
             import_budget: 1,
             no_match: 'authored-asset',
           },
@@ -122,6 +133,9 @@ describe('delivery workflow resource integration', () => {
         },
       ],
     })
+    expect(
+      (requests[0]?.contract.selectionPlan as unknown[] | undefined)?.length,
+    ).toBe(1)
   })
 
   test('recovers workflow worker provenance session IDs from the durable run log', async () => {
@@ -835,12 +849,12 @@ describe('delivery workflow resource integration', () => {
     expect(buildWorkerPrompt(requests[0]!)).toContain(
       'targeted resource reselection pass',
     )
-    expect(buildWorkerPrompt(requests[0]!)).toContain('start with browse_packs')
+    expect(buildWorkerPrompt(requests[0]!)).toContain('Call query_candidates')
     expect(buildWorkerPrompt(requests[0]!)).toContain(
       'One import_elements selection may list multiple requirement_ids',
     )
     expect(buildWorkerPrompt(requests[0]!)).toContain(
-      'return a concrete blocked result instead of fabricating a match',
+      'return a concrete blocker instead of fabricating a decision or switching to a second path',
     )
     expect(buildWorkerPrompt(requests[0]!)).toContain(
       'Do not author or modify any workflow evidence file',
@@ -921,7 +935,7 @@ describe('delivery workflow resource integration', () => {
     )
     expect(freshPrompt).toContain('"import_budget"')
     expect(freshPrompt).toContain('"no_match"')
-    expect(freshPrompt).not.toContain('start with browse_packs')
+    expect(freshPrompt).not.toContain('Call query_candidates')
   })
 
   test('rebuilds an invalid manifest through the same fresh planning path', async () => {

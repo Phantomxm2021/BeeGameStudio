@@ -129,8 +129,8 @@ describe('resource delivery readiness', () => {
       confirmedPolicy: 'preferred',
       resourceEvidence: {
         state: 'current',
-        actions: ['browse_packs', 'inspect_pack', 'index_pack_elements'],
-        failedActions: ['inspect_pack'],
+        actions: ['query_candidates'],
+        failedActions: ['query_candidates'],
         successfulImportCount: 0,
         failedImportCount: 0,
         observedAt: new Date().toISOString(),

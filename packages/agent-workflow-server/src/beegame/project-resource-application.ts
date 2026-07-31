@@ -10,20 +10,15 @@ import {
   type BeeGameResourceImport,
 } from './asset-contracts'
 import type {
-  ResourceCatalogElementPage,
+  ResourceCandidatePage,
   ResourceCatalogInput,
-  ResourceCatalogPackPage,
-  ResourcePackInspectionResult,
   ResourceResolvedSelection,
 } from './resource-selection-client'
 
 export type ProjectResourceSelectionClient = {
-  browsePacks(input: ResourceCatalogInput): Promise<ResourceCatalogPackPage>
-  browsePackElements(
-    packId: string,
+  queryCandidates(
     input: ResourceCatalogInput,
-  ): Promise<ResourceCatalogElementPage>
-  inspectPack(packId: string): Promise<ResourcePackInspectionResult>
+  ): Promise<ResourceCandidatePage>
   resolveSelections(
     selections: Array<{
       importId: string
@@ -67,7 +62,7 @@ export type ProjectResourceMetadataRefreshResult = {
 
 /**
  * Project-side resource application boundary shared by HTTP/UI and native
- * Claude tools. Pack search and signed-resource ownership remain exclusively
+ * Claude tools. Candidate search and signed-resource ownership remain exclusively
  * in the existing Resource Library Service.
  */
 export class ProjectResourceApplication {
@@ -76,99 +71,14 @@ export class ProjectResourceApplication {
     private readonly fetchImpl: ProjectResourceFetch = fetch,
   ) {}
 
-  browsePacks(input: ResourceCatalogInput) {
-    return this.client.browsePacks(input)
-  }
-
-  browsePackElements(packId: string, input: ResourceCatalogInput) {
-    return this.client.browsePackElements(packId, input)
-  }
-
-  /**
-   * Build one bounded, compact-friendly inventory page for an Agent. Large
-   * Pack inventories must remain paginated: returning hundreds of element
-   * records at once can force context compaction before the Agent is able to
-   * use the stable ids it just discovered.
-   */
-  async indexPackElements(
-    packId: string,
-    input: ResourceCatalogInput,
-  ): Promise<ResourceCatalogElementPage> {
-    const requestedLimit = Math.min(
-      Math.max(Math.trunc(input.limit ?? MAX_AGENT_CATALOG_PAGE_ITEMS), 1),
-      MAX_AGENT_CATALOG_PAGE_ITEMS,
-    )
-    const items: ResourceCatalogElementPage['items'][number][] = []
-    const visitedCursors = new Set<string>()
-    let cursor = input.cursor
-    let total = 0
-    let facets: ResourceCatalogElementPage['facets'] | undefined
-
-    while (items.length < requestedLimit) {
-      if (cursor) {
-        if (visitedCursors.has(cursor))
-          throw new Error('Resource element catalog returned a repeated cursor')
-        visitedCursors.add(cursor)
-      }
-      const page = await this.client.browsePackElements(packId, {
-        ...(input.filters ? { filters: input.filters } : {}),
-        ...(cursor ? { cursor } : {}),
-        limit: Math.min(
-          MAX_AGENT_CATALOG_PAGE_ITEMS,
-          requestedLimit - items.length,
-        ),
-      })
-      if (page.items.length > requestedLimit - items.length) {
-        throw new Error(
-          'Resource element catalog exceeded the requested bounded page size',
-        )
-      }
-      items.push(...page.items)
-      total = page.total
-      facets = page.facets
-      cursor = page.nextCursor
-      if (!cursor || page.items.length === 0) break
-    }
-
-    return {
-      items,
-      total,
-      ...(cursor ? { nextCursor: cursor } : {}),
-      facets: facets ?? emptyCatalogFacets(),
-    }
-  }
-
-  inspectPack(packId: string) {
-    return this.client.inspectPack(packId)
-  }
-
-  /** Resolve a path copied verbatim from the compact inventory. This is an
-   * exact identifier lookup, not semantic matching or automatic selection. */
-  async resolveElementIdByExactPath(
-    packId: string,
-    elementPath: string,
-  ): Promise<string> {
-    const visitedCursors = new Set<string>()
-    let cursor: string | undefined
-    do {
-      if (cursor) {
-        if (visitedCursors.has(cursor))
-          throw new Error('Resource element catalog returned a repeated cursor')
-        visitedCursors.add(cursor)
-      }
-      const page = await this.client.browsePackElements(packId, {
-        ...(cursor ? { cursor } : {}),
-        limit: 64,
-      })
-      const match = page.items.find(
-        element => element.elementPath === elementPath,
-      )
-      if (match) return match.elementId
-      cursor = page.nextCursor
-    } while (cursor)
-    throw new Error(
-      `Resource element path is not present in Pack: ${elementPath}`,
-    )
+  queryCandidates(input: ResourceCatalogInput) {
+    return this.client.queryCandidates({
+      ...input,
+      limit: Math.min(
+        Math.max(Math.trunc(input.limit ?? MAX_AGENT_CATALOG_PAGE_ITEMS), 1),
+        MAX_AGENT_CATALOG_PAGE_ITEMS,
+      ),
+    })
   }
 
   async importExplicitSelections(
@@ -496,20 +406,6 @@ async function assertInventoryCeiling(
   }
 }
 
-function emptyCatalogFacets(): ResourceCatalogElementPage['facets'] {
-  return {
-    dimensions: [],
-    primaryCategories: [],
-    categories: [],
-    styles: [],
-    gameTypes: [],
-    packTags: [],
-    usageTags: [],
-    assetKinds: [],
-    capabilities: [],
-    formats: [],
-  }
-}
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Resource operation failed'

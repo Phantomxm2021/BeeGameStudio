@@ -48,6 +48,48 @@ describe('delivery workflow recovery', () => {
     ).toBe(false)
   })
 
+  test('persists reviewer artifact progress only for the active dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-progress-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createInitialDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      reviewedDocumentPaths: [],
+      activeDispatch: {
+        dispatchId: 'review-dispatch',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+
+    await store.updateProgress('run-1', {
+      dispatchId: 'review-dispatch',
+      reviewedDocumentPath: 'docs/GDD.md',
+    })
+    await store.updateProgress('run-1', {
+      dispatchId: 'review-dispatch',
+      reviewedDocumentPath: 'docs/GDD.md',
+    })
+    await store.updateProgress('run-1', {
+      dispatchId: 'stale-dispatch',
+      reviewedDocumentPath: 'docs/TECHNICAL_DESIGN.md',
+    })
+
+    expect((await store.load())?.reviewedDocumentPaths).toEqual([
+      'docs/GDD.md',
+    ])
+  })
+
   test('rejects retired schema-v1 fields without rewriting the snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-normalize-'))
     const store = createRunStore(workspace, 'owner-1')

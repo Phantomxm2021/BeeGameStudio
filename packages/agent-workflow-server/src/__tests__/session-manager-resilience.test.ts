@@ -106,7 +106,10 @@ describe('BeeGame session runtime resilience', () => {
                   type: 'tool_use',
                   id: 'resource-tool-1',
                   name: 'ResourceLibrary',
-                  input: { action: 'browse_packs' },
+                  input: {
+                    action: 'query_candidates',
+                    requirement_ids: ['ground'],
+                  },
                 },
               ],
             },
@@ -148,7 +151,7 @@ describe('BeeGame session runtime resilience', () => {
       }),
     ).toMatchObject({
       state: 'current',
-      actions: ['browse_packs'],
+      actions: ['query_candidates'],
       failedActions: [],
     })
     manager.dispose()
@@ -190,8 +193,8 @@ describe('BeeGame session runtime resilience', () => {
                   id: 'resource-catalog-1',
                   name: 'ResourceLibrary',
                   input: {
-                    action: 'index_pack_elements',
-                    pack_id: 'pack-1',
+                    action: 'query_candidates',
+                    requirement_ids: ['ground'],
                   },
                 },
               ],
@@ -216,7 +219,7 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
     const run = await store.load()
 
-    expect(run?.currentMessage).toBe('正在筛选资源候选…')
+    expect(run?.currentMessage).toBe('正在查询精确资源候选…')
     expect(run?.lastProgressAt).toBe(startedAt)
     manager.dispose()
   })
@@ -430,6 +433,47 @@ describe('BeeGame session runtime resilience', () => {
         workspacePath,
       ),
     ).toEqual([])
+    manager.dispose()
+  })
+
+  test('denies a generic manifest write during resource selection', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-resource-selection-write-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'assets'), { recursive: true })
+    let decision: DashboardPermissionDecision | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decision = await startInput.requestPermission?.({
+            toolUseID: 'selection-manifest-write',
+            toolName: 'Write',
+            message: 'Write a selection result directly',
+            input: {
+              file_path: join(workspacePath, 'assets/asset-manifest.json'),
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowWorkerType: 'resource-preparer',
+      workflowResourceAttemptMode: 'selection',
+      workflowAllowedPaths: ['assets/asset-manifest.json', 'assets/library/'],
+    })
+
+    await manager.send(session.id, 'select resources')
+    await waitForIdle(manager, session.id)
+
+    expect(decision).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('second manifest or inventory write lane'),
+    })
     manager.dispose()
   })
 
