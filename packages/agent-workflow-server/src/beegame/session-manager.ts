@@ -35,30 +35,13 @@ import {
   type ApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
-import {
-  recordUsage,
-  type Usage,
-  type RecordUsageResult,
-} from '../usage-billing'
+import type {
+  BeeGameUsageBillingRecordResult as RecordUsageResult,
+  BeeGameUsageBillingUsage as Usage,
+} from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
-import {
-  interruptUnfinishedNativeAcceptances,
-  observeNativeAcceptanceTaskNotification,
-  observeNativeAcceptanceToolEvent,
-} from './native-acceptance-evidence'
-import {
-  interruptUnfinishedNativeDocumentReviews,
-  observeNativeDocumentReviewTaskNotification,
-  observeNativeDocumentReviewToolEvent,
-} from './native-document-review-evidence'
-import {
-  interruptUnfinishedNativeImplementationAudits,
-  observeNativeImplementationAuditTaskNotification,
-  observeNativeImplementationAuditToolEvent,
-} from './native-implementation-audit-evidence'
 import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
-import { observeNativeToolProvenance } from './native-tool-provenance'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -67,11 +50,13 @@ import {
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 import { isRetryableQueryEngineError } from './query-engine-worker-protocol'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
-import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
+import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
 import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
+import { auditAssetContract } from './asset-contract-audit'
+import { auditResourceInventoryPolicy } from './delivery-workflow/resource-stage'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -216,19 +201,11 @@ export type BeeGameRuntimeSnapshot = {
   }
   roleTokens: {
     mainAgent: number
-    reviewer: number
-    auditor: number
-    validator: number
     otherSubagents: number
-    waiting: number
   }
   turnDiagnostics?: {
     turnId: string
     agentCalls: number
-    reviewerCalls: number
-    auditorCalls: number
-    validatorCalls: number
-    deliveryContractCalls: number
     skillCalls: number
     taskOutputCalls: number
     failedToolCalls: number
@@ -241,11 +218,7 @@ export type BeeGameRuntimeSnapshot = {
     }
     roleTokens: {
       mainAgent: number
-      reviewer: number
-      auditor: number
-      validator: number
       otherSubagents: number
-      waiting: number
     }
   }
 }
@@ -276,6 +249,11 @@ export type BeeGameSessionRunnerStartInput = {
   approvedOutboundTargets: BeeGameApprovedOutboundTargets
   /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
   resourceSelectionConfig?: ResourceSelectionRuntimeConfig
+  /** Workflow identity is propagated into the native permission boundary. */
+  workflowWorker?: boolean
+  workflowWorkerType?: string
+  workflowResourceAttemptMode?: 'fresh' | 'selection' | 'repair' | 'reselection'
+  workflowResourceCatalogReadLimit?: number
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -361,7 +339,10 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
+  workflowResourceAttemptMode?: 'fresh' | 'selection' | 'repair' | 'reselection'
+  workflowResourceCatalogReadLimit?: number
   workflowAllowedPaths?: string[]
+  atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -431,6 +412,49 @@ function workflowDocumentFromToolEvent(
     : undefined
 }
 
+function resourceWorkerActivityMessage(
+  record: SessionRecord,
+  event: BeeGameEvent,
+): string | undefined {
+  if (
+    record.workflowWorkerType !== 'resource-preparer' ||
+    event.type !== 'tool.started' ||
+    event.payload?.toolName !== 'ResourceLibrary'
+  )
+    return undefined
+  const input = event.payload.input
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return undefined
+  const action = String((input as Record<string, unknown>).action ?? '')
+  const traditional = record.language === 'zh-TW'
+  const chinese = record.language === 'zh' || traditional
+  if (action === 'browse_packs')
+    return chinese
+      ? traditional
+        ? '正在瀏覽可用資源包…'
+        : '正在浏览可用资源包…'
+      : 'Browsing available resource packs…'
+  if (action === 'inspect_pack' || action === 'index_pack_elements')
+    return chinese
+      ? traditional
+        ? '正在篩選資源候選…'
+        : '正在筛选资源候选…'
+      : 'Evaluating resource candidates…'
+  if (action === 'import_elements')
+    return chinese
+      ? traditional
+        ? '正在匯入已選資源…'
+        : '正在导入已选资源…'
+      : 'Importing selected resources…'
+  if (action === 'refresh_import_metadata')
+    return chinese
+      ? traditional
+        ? '正在校驗資源清單…'
+        : '正在校验资源清单…'
+      : 'Validating the resource manifest…'
+  return undefined
+}
+
 export type StartBeeGameSessionInput = {
   workspacePath: string
   projectId?: string
@@ -447,6 +471,8 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
+  workflowResourceAttemptMode?: 'fresh' | 'selection' | 'repair' | 'reselection'
+  workflowResourceCatalogReadLimit?: number
   workflowAllowedPaths?: string[]
 }
 
@@ -484,14 +510,6 @@ export type BeeGameSessionUsageBillingBackend = {
   ) => RecordUsageResult | Promise<RecordUsageResult>
 }
 
-const localUsageBillingBackend: BeeGameSessionUsageBillingBackend = {
-  recordUsage: (_userId, input) =>
-    recordUsage({
-      ...input,
-      userId: _userId,
-    }),
-}
-
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -505,7 +523,7 @@ export class BeeGameSessionManager {
       authToken?: string,
       modelConfigId?: string,
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
-    private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = localUsageBillingBackend,
+    private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = {},
     private readonly allowExternalRuntimeEnv = false,
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
@@ -579,6 +597,15 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
+      ...(input.workflowResourceAttemptMode
+        ? { workflowResourceAttemptMode: input.workflowResourceAttemptMode }
+        : {}),
+      ...(input.workflowResourceCatalogReadLimit
+        ? {
+            workflowResourceCatalogReadLimit:
+              input.workflowResourceCatalogReadLimit,
+          }
+        : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
@@ -630,26 +657,6 @@ export class BeeGameSessionManager {
       })
     }
     archiveInterruptedRecoveredTurn(record)
-    if (recoveredTranscript) {
-      interruptUnfinishedNativeDocumentReviews({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: session.id,
-        reason: 'session_recovered',
-        createdAt: now,
-      })
-      interruptUnfinishedNativeImplementationAudits({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: session.id,
-        reason: 'session_recovered',
-        createdAt: now,
-      })
-      interruptUnfinishedNativeAcceptances({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: session.id,
-        reason: 'session_recovered',
-        createdAt: now,
-      })
-    }
     this.sessions.set(session.id, record)
     this.persistRuntimeSnapshot(record)
     if (!recoveredTranscript) {
@@ -1036,11 +1043,6 @@ export class BeeGameSessionManager {
       record.session.status = 'stopped'
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
-      this.interruptUnfinishedNativeEvidence(
-        record,
-        'session_stopped',
-        record.session.updatedAt,
-      )
       this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped')
     }
@@ -1058,11 +1060,6 @@ export class BeeGameSessionManager {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
-      this.interruptUnfinishedNativeEvidence(
-        record,
-        'session_stopped',
-        new Date(),
-      )
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session deleted before permission was resolved',
@@ -1115,11 +1112,6 @@ export class BeeGameSessionManager {
       record.abortController?.abort()
       disposeRunner(record.runner)
       record.runner = null
-      this.interruptUnfinishedNativeEvidence(
-        record,
-        'session_stopped',
-        new Date(),
-      )
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'BeeGame server stopped before permission was resolved',
@@ -1149,22 +1141,6 @@ export class BeeGameSessionManager {
       refreshed += 1
     }
     return refreshed
-  }
-
-  private interruptUnfinishedNativeEvidence(
-    record: SessionRecord,
-    reason: 'session_recovered' | 'session_stopped',
-    createdAt: Date,
-  ): void {
-    const input = {
-      dataRoot: this.dashboardDataRoot,
-      sessionId: record.session.id,
-      reason,
-      createdAt,
-    }
-    interruptUnfinishedNativeDocumentReviews(input)
-    interruptUnfinishedNativeImplementationAudits(input)
-    interruptUnfinishedNativeAcceptances(input)
   }
 
   async readArtifact(
@@ -1248,8 +1224,22 @@ export class BeeGameSessionManager {
               ? { resourceSelectionConfig: this.resourceSelectionConfig }
               : {}),
             ...(record.language ? { language: record.language } : {}),
-            onNativeTaskNotification: notification =>
-              this.observeNativeTaskNotification(record, notification),
+            ...(record.workflowWorker ? { workflowWorker: true } : {}),
+            ...(record.workflowWorkerType
+              ? { workflowWorkerType: record.workflowWorkerType }
+              : {}),
+            ...(record.workflowResourceAttemptMode
+              ? {
+                  workflowResourceAttemptMode:
+                    record.workflowResourceAttemptMode,
+                }
+              : {}),
+            ...(record.workflowResourceCatalogReadLimit
+              ? {
+                  workflowResourceCatalogReadLimit:
+                    record.workflowResourceCatalogReadLimit,
+                }
+              : {}),
             requestPermission: request =>
               this.requestPermission(record, request),
           })
@@ -1580,53 +1570,6 @@ export class BeeGameSessionManager {
     }
   }
 
-  private observeNativeTaskNotification(
-    record: SessionRecord,
-    notification: BeeGameNativeTaskNotification,
-  ): void {
-    const evidenceInput = {
-      dataRoot: this.dashboardDataRoot,
-      sessionId: record.session.id,
-      workspacePath: record.session.cwd,
-      ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-      notification,
-      createdAt: new Date(),
-    }
-    try {
-      observeNativeDocumentReviewTaskNotification(evidenceInput)
-    } catch (error) {
-      console.warn(
-        '[BeeGame] Failed to persist native document review notification',
-        {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        },
-      )
-    }
-    try {
-      observeNativeAcceptanceTaskNotification(evidenceInput)
-    } catch (error) {
-      console.warn(
-        '[BeeGame] Failed to persist native acceptance notification',
-        {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        },
-      )
-    }
-    try {
-      observeNativeImplementationAuditTaskNotification(evidenceInput)
-    } catch (error) {
-      console.warn(
-        '[BeeGame] Failed to persist native implementation audit notification',
-        {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        },
-      )
-    }
-  }
-
   private appendAssistantPartialText(
     record: SessionRecord,
     message: DashboardSDKMessage,
@@ -1755,6 +1698,62 @@ export class BeeGameSessionManager {
         message: policyDecision.message,
       })
     }
+    if (policyDecision.behavior === 'auto_allow') {
+      if (
+        record.workflowWorkerType === 'atomic-task-planner' &&
+        isFileMutationTool(request.toolName)
+      )
+        record.atomicTaskPlannerEvidenceWriteGranted = true
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: policyDecision.message ?? 'workflow_phase_scope',
+        input: request.input,
+      })
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
+    if (isWorkflowResourceRefreshPermission(record, request)) {
+      const contract = auditAssetContract(record.session.cwd)
+      const refreshIssues = [
+        ...(!contract.present
+          ? ['assets/asset-manifest.json is missing.']
+          : contract.issues),
+        ...(await auditResourceInventoryPolicy(record.session.cwd)),
+      ]
+      if (refreshIssues.length) {
+        const message = `Finalize and validate the canonical resource manifest before refreshing metadata: ${refreshIssues.join(' ')}`
+        this.append(
+          record,
+          'permission.resolved',
+          `${request.toolName}: deny`,
+          {
+            type: 'permission.resolved',
+            toolUseID: request.toolUseID,
+            toolName: request.toolName,
+            decision: 'deny',
+            autoDenied: true,
+            reason: message,
+            input: request.input,
+          },
+        )
+        return Promise.resolve({ behavior: 'deny', message })
+      }
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: 'workflow_resource_preparer_validated_refresh',
+        input: request.input,
+      })
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
     if (isWorkflowResourceImportPermission(record, request)) {
       this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
         type: 'permission.resolved',
@@ -1832,16 +1831,24 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
     if (record.workflowWorker && record.workflowRunId) {
-      // Only completed assistant messages are user-facing workflow copy.
-      // Tool/system lifecycle labels are telemetry and must never replace the
-      // durable message shown in the workflow card.
+      // Raw tool/system labels remain telemetry. Resource preparation exposes
+      // only a small structural activity vocabulary so the card can explain
+      // real work without leaking tool inputs or JSON.
+      const resourceActivityMessage = resourceWorkerActivityMessage(
+        record,
+        event,
+      )
       const progressMessage =
         event.type === 'assistant.message'
           ? sanitizeWorkflowDisplayMessage(event.text)
-          : ''
+          : (resourceActivityMessage ?? '')
       const currentItemId = workflowDocumentFromToolEvent(record, event)
       const clearCurrentItem =
         event.type === 'tool.completed' || event.type === 'tool.failed'
+      const durableProgress =
+        record.workflowWorkerType === 'resource-preparer'
+          ? isResourceWorkerDurableProgress(event)
+          : true
       const thinking =
         event.type === 'assistant.thinking' || event.type === 'tool.started'
           ? 'working'
@@ -1851,7 +1858,12 @@ export class BeeGameSessionManager {
               event.type === 'result'
             ? 'idle'
             : undefined
-      if (progressMessage || thinking) {
+      if (
+        progressMessage ||
+        thinking ||
+        clearCurrentItem ||
+        (record.workflowWorkerType === 'resource-preparer' && durableProgress)
+      ) {
         void createRunStore(record.session.cwd, record.userId)
           .updateProgress(record.workflowRunId, {
             ...(progressMessage ? { message: progressMessage } : {}),
@@ -1864,85 +1876,9 @@ export class BeeGameSessionManager {
               : {}),
             ...(currentItemId ? { currentItemId } : {}),
             ...(clearCurrentItem ? { currentItemId: null } : {}),
+            durable: durableProgress,
           })
           .catch(() => undefined)
-      }
-    }
-    if (!record.workflowWorker) {
-      try {
-        observeNativeToolProvenance({
-          dataRoot: this.dashboardDataRoot,
-          sessionId: record.session.id,
-          ...(event.turnId ? { turnId: event.turnId } : {}),
-          eventType: event.type,
-          payload: event.payload,
-          createdAt: event.createdAt,
-        })
-      } catch (error) {
-        console.warn('[BeeGame] Failed to persist native tool provenance', {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        })
-      }
-      try {
-        observeNativeDocumentReviewToolEvent({
-          dataRoot: this.dashboardDataRoot,
-          sessionId: record.session.id,
-          workspacePath: record.session.cwd,
-          ...(event.turnId ? { turnId: event.turnId } : {}),
-          eventType: event.type,
-          payload: event.payload,
-          createdAt: event.createdAt,
-        })
-      } catch (error) {
-        // Delivery provenance is a passive gate, never an Agent runtime
-        // controller. Failure to persist it must not interrupt BeeGame Studio.
-        console.warn(
-          '[BeeGame] Failed to persist native document review evidence',
-          {
-            sessionId: record.session.id,
-            cause: error instanceof Error ? error.name : 'unknown_error',
-          },
-        )
-      }
-      try {
-        observeNativeAcceptanceToolEvent({
-          dataRoot: this.dashboardDataRoot,
-          sessionId: record.session.id,
-          workspacePath: record.session.cwd,
-          ...(event.turnId ? { turnId: event.turnId } : {}),
-          eventType: event.type,
-          payload: event.payload,
-          createdAt: event.createdAt,
-        })
-      } catch (error) {
-        // Acceptance provenance is a deployment gate, never an Agent runtime
-        // controller. Failure to persist it must not interrupt BeeGame Studio.
-        console.warn('[BeeGame] Failed to persist native delivery evidence', {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        })
-      }
-      try {
-        observeNativeImplementationAuditToolEvent({
-          dataRoot: this.dashboardDataRoot,
-          sessionId: record.session.id,
-          workspacePath: record.session.cwd,
-          ...(event.turnId ? { turnId: event.turnId } : {}),
-          eventType: event.type,
-          payload: event.payload,
-          createdAt: event.createdAt,
-        })
-      } catch (error) {
-        // Audit provenance is passive evidence. Persistence failure must not
-        // interrupt or steer BeeGame Studio's native Agent lifecycle.
-        console.warn(
-          '[BeeGame] Failed to persist native implementation audit evidence',
-          {
-            sessionId: record.session.id,
-            cause: error instanceof Error ? error.name : 'unknown_error',
-          },
-        )
       }
     }
     try {
@@ -2057,6 +1993,18 @@ export class BeeGameSessionManager {
       return undefined
     }
   }
+}
+
+function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
+  if (event.type !== 'tool.completed') return false
+  const toolName = getDashboardPayloadString(event.payload, 'toolName')
+  if (isFileMutationTool(toolName)) return true
+  if (toolName !== 'ResourceLibrary') return false
+  const input = getDashboardPayloadRecord(event.payload, 'input')
+  return (
+    input?.action === 'import_elements' ||
+    input?.action === 'refresh_import_metadata'
+  )
 }
 
 function resolveExistingPath(path: string): string {
@@ -3029,26 +2977,9 @@ function deriveLatestTurnDiagnostics(
         event.type === 'tool.started' &&
         getDashboardPayloadString(event.payload, 'toolName') === toolName,
     ).length
-  const countAgent = (agentType: string) =>
-    turnEvents.filter(event => {
-      if (
-        event.type !== 'tool.started' ||
-        getDashboardPayloadString(event.payload, 'toolName') !== 'Agent' ||
-        !isRuntimeRecord(event.payload)
-      )
-        return false
-      const input = isRuntimeRecord(event.payload.input)
-        ? event.payload.input
-        : undefined
-      return input?.subagent_type === agentType
-    }).length
   return {
     turnId,
     agentCalls: countTool('Agent'),
-    reviewerCalls: countAgent('beegame-document-reviewer'),
-    auditorCalls: countAgent('beegame-implementation-auditor'),
-    validatorCalls: countAgent('beegame-acceptance-validator'),
-    deliveryContractCalls: countTool('ProjectDeliveryContract'),
     skillCalls: countTool('Skill'),
     taskOutputCalls: countTool('TaskOutput'),
     failedToolCalls: turnEvents.filter(event => event.type === 'tool.failed')
@@ -3133,28 +3064,13 @@ function deriveObservedRoleTokens(
     })
   }
 
-  let reviewer = 0
-  let auditor = 0
-  let validator = 0
   let otherSubagents = 0
   for (const value of latestTerminalByTask.values()) {
-    if (value.role === 'beegame-document-reviewer') reviewer += value.tokens
-    else if (value.role === 'beegame-implementation-auditor')
-      auditor += value.tokens
-    else if (value.role === 'beegame-acceptance-validator')
-      validator += value.tokens
-    else otherSubagents += value.tokens
+    otherSubagents += value.tokens
   }
   return {
-    mainAgent: Math.max(
-      0,
-      total - reviewer - auditor - validator - otherSubagents,
-    ),
-    reviewer,
-    auditor,
-    validator,
+    mainAgent: Math.max(0, total - otherSubagents),
     otherSubagents,
-    waiting: 0,
   }
 }
 
@@ -3447,10 +3363,6 @@ function normalizeTurnDiagnostics(
     turnDiagnostics: {
       turnId: String(value.turnId || ''),
       agentCalls: Number(value.agentCalls ?? 0),
-      reviewerCalls: Number(value.reviewerCalls ?? 0),
-      auditorCalls: Number(value.auditorCalls ?? 0),
-      validatorCalls: Number(value.validatorCalls ?? 0),
-      deliveryContractCalls: Number(value.deliveryContractCalls ?? 0),
       skillCalls: Number(value.skillCalls ?? 0),
       taskOutputCalls: Number(value.taskOutputCalls ?? 0),
       failedToolCalls: Number(value.failedToolCalls ?? 0),
@@ -3472,11 +3384,7 @@ function normalizeRoleTokens(
   const record = isRuntimeRecord(value) ? value : {}
   return {
     mainAgent: Number(record.mainAgent ?? 0),
-    reviewer: Number(record.reviewer ?? 0),
-    auditor: Number(record.auditor ?? 0),
-    validator: Number(record.validator ?? 0),
     otherSubagents: Number(record.otherSubagents ?? 0),
-    waiting: 0,
   }
 }
 
@@ -3623,11 +3531,117 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
+const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
+  'Agent',
+  'Bash',
+  'Glob',
+  'Grep',
+  'LS',
+  'NotebookRead',
+  'Read',
+  'Task',
+])
+
+const IMPLEMENTATION_READ_DENIED_FILES = new Set([
+  ...CANONICAL_PROJECT_DOCUMENTS,
+  'assets/asset-manifest.json',
+])
+
+const IMPLEMENTATION_READ_DENIED_ROOTS = [
+  '.beegame',
+  'logs',
+  'transcripts',
+] as const
+
 function getBeeGamePermissionPolicyDecision(
   record: SessionRecord,
   _allowedRoot: string,
   request: DashboardPermissionRequest,
-): { behavior: 'auto_deny' | 'ask_user'; message?: string } {
+): { behavior: 'auto_allow' | 'auto_deny' | 'ask_user'; message?: string } {
+  if (
+    record.workflowWorker === true &&
+    ['WebSearch', 'WebFetch'].includes(request.toolName)
+  ) {
+    return {
+      behavior: 'auto_deny',
+      message:
+        'Delivery workflow workers must resolve their assigned contract from approved project artifacts and cannot pause for interactive external-web permission.',
+    }
+  }
+  if (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'atomic-task-planner' &&
+    ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS.has(request.toolName)
+  ) {
+    return {
+      behavior: 'auto_deny',
+      message:
+        'Atomic task planning uses the revision-bound planningDocuments contract. Workspace exploration and nested agents are disabled for this worker.',
+    }
+  }
+  if (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'implementation-worker' &&
+    (request.toolName === 'Read' || request.toolName === 'Bash')
+  ) {
+    const paths = extractPermissionPaths(request.input)
+    const denied =
+      (request.toolName === 'Read' && paths.length === 0) ||
+      paths.some(path => {
+        const resolvedPath = isAbsolute(path)
+          ? resolve(path)
+          : resolve(record.session.cwd, path)
+        const projectRelative = relative(record.session.cwd, resolvedPath)
+        if (
+          projectRelative === '' ||
+          projectRelative.startsWith('..') ||
+          isAbsolute(projectRelative)
+        ) {
+          return true
+        }
+        if (IMPLEMENTATION_READ_DENIED_FILES.has(projectRelative)) return true
+        return IMPLEMENTATION_READ_DENIED_ROOTS.some(
+          root =>
+            projectRelative === root || projectRelative.startsWith(`${root}/`),
+        )
+      })
+    if (denied) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          'Implementation workers use the active task as acceptance authority and may read only current project source, assets, tests, and direct dependencies. Canonical documents, workflow state, logs, transcripts, and paths outside the workspace are unavailable in this phase.',
+      }
+    }
+    return {
+      behavior: 'auto_allow',
+      message: 'workflow_implementation_dependency_scope',
+    }
+  }
+  if (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'atomic-task-planner' &&
+    record.atomicTaskPlannerEvidenceWriteGranted &&
+    isFileMutationTool(request.toolName)
+  ) {
+    return {
+      behavior: 'auto_deny',
+      message:
+        'Atomic task planning permits exactly one evidence mutation. Canonical validation is performed by the workflow service; do not rewrite the evidence.',
+    }
+  }
+  if (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-preparer' &&
+    record.workflowResourceAttemptMode === 'repair' &&
+    request.toolName === 'ResourceLibrary' &&
+    request.input.action === 'import_elements'
+  ) {
+    return {
+      behavior: 'auto_deny',
+      message:
+        'Repair mode must preserve the canonical inventory. Refresh metadata or repair bindings instead of importing resources again.',
+    }
+  }
   if (record.workflowWorker && isFileMutationTool(request.toolName)) {
     const paths = extractPermissionPaths(request.input)
     const allowedPaths = record.workflowAllowedPaths ?? []
@@ -3655,8 +3669,24 @@ function getBeeGamePermissionPolicyDecision(
           'This workflow worker requested a file outside its declared phase scope. The workflow must finish the current phase before that artifact can be written.',
       }
     }
+    return {
+      behavior: 'auto_allow',
+      message: 'workflow_phase_scope',
+    }
   }
   if (request.toolName === 'Bash') {
+    if (
+      record.workflowWorker === true &&
+      record.workflowWorkerType === 'resource-preparer'
+    ) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          record.workflowResourceAttemptMode === 'fresh'
+            ? 'Manifest planning must use scoped reads and SubmitAssetManifest; shell commands, generic file mutation tools, and ResourceLibrary are unavailable in this dispatch.'
+            : 'Resource selection must use the direct ResourceLibrary tool and scoped file tools; shell commands are unavailable in this phase.',
+      }
+    }
     if (isGlobalProcessControlBashCommand(request.input)) {
       return {
         behavior: 'auto_deny',
@@ -3682,10 +3712,23 @@ function isWorkflowResourceImportPermission(
   return (
     record.workflowWorker === true &&
     record.workflowWorkerType === 'resource-preparer' &&
+    record.workflowResourceAttemptMode !== 'repair' &&
     request.toolName === 'ResourceLibrary' &&
     request.input.action === 'import_elements' &&
     Array.isArray(request.input.selections) &&
     request.input.selections.length > 0
+  )
+}
+
+function isWorkflowResourceRefreshPermission(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): boolean {
+  return (
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-preparer' &&
+    request.toolName === 'ResourceLibrary' &&
+    request.input.action === 'refresh_import_metadata'
   )
 }
 

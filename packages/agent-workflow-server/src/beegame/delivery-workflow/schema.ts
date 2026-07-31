@@ -98,7 +98,7 @@ export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
     id: z.string().min(1),
     title: z.string().min(1),
-    sourceRequirementIds: z.array(z.string().min(1)).min(1),
+    resourceRequirementIds: z.array(z.string().min(1)),
     checklistIds: z.array(z.string().min(1)),
     dependsOn: z.array(z.string().min(1)),
     allowedPaths: z.array(z.string().min(1)).min(1),
@@ -124,9 +124,10 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     status: z.enum(DISPATCH_STATUSES),
     terminalEvidencePath: z.string().min(1).optional(),
     failureReason: z.string().min(1).optional(),
-    terminalOutput: z.string().min(1).optional(),
     request: workerDispatchRequestSchema.optional(),
     terminalResult: z.record(z.string(), z.unknown()).optional(),
+    startingUsageTotalTokens: z.number().int().nonnegative().optional(),
+    startingUsageBudgetTokens: z.number().int().nonnegative().optional(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime().optional(),
   })
@@ -182,6 +183,10 @@ const documentReviewFindingSchema = z
       'calculation',
       'other',
     ]),
+    remediationTarget: z.enum(['foundation', 'checklist', 'resource']),
+    resourceAction: z.enum(['repair', 'reselection']).optional(),
+    resourceRequirementIds: z.array(z.string().min(1)).optional(),
+    resourceImportIds: z.array(z.string().min(1)).optional(),
     documents: z.array(z.string().min(1)).min(1),
     description: z.string().min(1),
     requiredAction: z.string().min(1),
@@ -211,8 +216,10 @@ const resourceRemediationSchema: z.ZodType<ResourceRemediation> = z
     sourceRevision: z.string().min(1),
     attempt: z.number().int().positive(),
     issues: z.array(z.string().min(1)).min(1),
+    mode: z.enum(['repair', 'reselection']),
     preserveImportIds: z.array(z.string().min(1)),
     preserveCompositionIds: z.array(z.string().min(1)),
+    reselectImportIds: z.array(z.string().min(1)).optional(),
   })
   .strict()
 
@@ -283,7 +290,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     usage: workflowUsageSchema.optional(),
     resourceEvidence: resourceEvidenceSchema.optional(),
     currentMessage: z.string().min(1).optional(),
-    currentMessageKey: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
     lastProgressAt: z.string().datetime().optional(),
     pendingEvent: workflowEventSchema.optional(),
@@ -303,3 +309,5 @@ export const parseDispatchRecord = (value: unknown): DispatchRecord =>
   dispatchRecordSchema.parse(value)
 export const parseEvidenceRef = (value: unknown): EvidenceRef =>
   evidenceRefSchema.parse(value)
+export const parseResourceRemediation = (value: unknown): ResourceRemediation =>
+  resourceRemediationSchema.parse(value)

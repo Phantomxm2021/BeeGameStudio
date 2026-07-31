@@ -1,5 +1,4 @@
 import { parseWorkerTerminalResult } from './worker-contracts'
-import { WORKFLOW_EVIDENCE_DIRECTORY } from './types'
 import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { RunStore } from './run-store'
 
@@ -30,23 +29,14 @@ export function classifyChangeResult(value: unknown): {
   affectedChecklistIds: string[]
   rationale: string
 } {
-  try {
-    const parsed = parseWorkerTerminalResult(value)
-    if (parsed.workerType !== 'change-impact-analyzer')
-      throw new Error('wrong worker type')
-    return {
-      route: parsed.classification,
-      affectedRequirementIds: parsed.affectedRequirementIds,
-      affectedChecklistIds: parsed.affectedChecklistIds,
-      rationale: parsed.rationale,
-    }
-  } catch {
-    return {
-      route: 'documents_required',
-      affectedRequirementIds: [],
-      affectedChecklistIds: [],
-      rationale: 'impact analysis was invalid or uncertain',
-    }
+  const parsed = parseWorkerTerminalResult(value)
+  if (parsed.workerType !== 'change-impact-analyzer')
+    throw new Error('change impact result has the wrong worker type')
+  return {
+    route: parsed.classification,
+    affectedRequirementIds: parsed.affectedRequirementIds,
+    affectedChecklistIds: parsed.affectedChecklistIds,
+    rationale: parsed.rationale,
   }
 }
 
@@ -94,7 +84,7 @@ export function buildChangeImpactDispatch(
     workerType: 'change-impact-analyzer',
     phase: run.phase,
     revision: run.revision.workspace,
-    allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
+    allowedPaths: [],
     contract: { message, currentRevision: run.revision },
   }
 }
@@ -112,7 +102,7 @@ export function buildQuestionAnswerDispatch(
     workerType: 'question-answerer',
     phase: run.phase,
     revision: run.revision.workspace,
-    allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
+    allowedPaths: [],
     contract: { message, currentRevision: run.revision },
   }
 }

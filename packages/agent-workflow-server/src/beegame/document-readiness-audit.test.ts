@@ -107,9 +107,8 @@ describe('document readiness audit', () => {
 
     const audit = auditDocumentReadiness(workspace)
     expect(audit.valid).toBe(false)
-    expect(audit.issues).toContain(
-      'assets/asset-manifest.json: requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
-    )
+    expect(audit.issues).toContain('assets/asset-manifest.json: requirements must be an array.')
+    expect(audit.issues).toContain('assets/asset-manifest.json: imports must be an array.')
   })
 
   test('requires identified acceptance tasks without interpreting game semantics', async () => {

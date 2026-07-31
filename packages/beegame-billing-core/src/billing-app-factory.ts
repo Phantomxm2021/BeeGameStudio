@@ -80,6 +80,7 @@ export function createBeeGameBillingRouteApp(
   registerBeeGameBillingStoreRoutes(app, {
     billingConfig: options.billingConfig,
     dashboardRepository: options.dashboardRepository,
+    proxyRemoteBillingRequest: options.proxyRemoteBillingRequest,
     getCurrentUser: options.getCurrentUser,
     hasPermission: options.hasPermission,
   })

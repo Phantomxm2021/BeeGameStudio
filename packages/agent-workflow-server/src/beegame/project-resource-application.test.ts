@@ -245,7 +245,7 @@ async function createWorkspace(slotOverrides: Record<string, unknown> = {}): Pro
       id: 'primary-character',
       status: 'planned',
       resource_requirement: {
-        category: 'models', dimension: '3D', accepted_formats: ['glb'], tags: ['character'],
+        category: 'models', dimension: '3D', accepted_formats: ['glb'], tags: ['character'], import_budget: 8, no_match: 'authored-asset',
       },
       ...slotOverrides,
     }],

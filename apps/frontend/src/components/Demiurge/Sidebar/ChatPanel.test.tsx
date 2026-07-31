@@ -4,9 +4,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 
 import { ChatPanel } from './ChatPanel';
-import type { PendingUserReviewItem } from '../../../services/api';
+import type { PendingToolPermissionItem } from '../../../services/api';
 
-const defaultWaitingApproval = {
+const defaultWaitingPermission = {
     kind: 'none' as const,
     isWaitingStatus: false,
     isBlockingChat: false,
@@ -14,41 +14,7 @@ const defaultWaitingApproval = {
     placeholder: 'Ask team (Shift+Enter to new line)...',
 };
 
-const approvalReview: PendingUserReviewItem = {
-    gate_id: 'gate_approval',
-    artifact_id: 'art_1',
-    current_review_artifact_id: 'art_1',
-    current_review_iteration: 2,
-    ready_for_user_approval: true,
-    review_status: {
-        workflow_id: 'review_flow',
-        lane_id: 'internal_board_review',
-        lane_status: 'awaiting_approval',
-        decision_status: 'awaiting_user',
-        current_review_round: 2,
-        requires_user_action: true,
-        user_action_kind: 'approve',
-    },
-    open_issue_ids: [],
-    open_blocker_ids: [],
-};
-
-const legacyGateReview: PendingUserReviewItem = {
-    ...approvalReview,
-    gate_id: 'gate_blockers',
-    gate_kind: 'review_blocker_resolution',
-    ready_for_user_approval: true,
-    ready_for_promotion: false,
-    review_status: {
-        ...approvalReview.review_status!,
-        user_action_kind: 'approve',
-    },
-    open_issue_ids: ['issue_1'],
-    open_blocker_ids: ['issue_1'],
-};
-
-const beeGamePermissionReview: PendingUserReviewItem = {
-    ...approvalReview,
+const beeGamePermissionReview: PendingToolPermissionItem = {
     gate_id: 'gate_beegame_permission',
     type: 'BEEGAME_PERMISSION',
     title: 'Bash permission',
@@ -57,13 +23,10 @@ const beeGamePermissionReview: PendingUserReviewItem = {
             command: 'npm create vite@latest . -- --template react-ts 2>&1',
         },
     },
-    binding: {
-        workspace_ref: '/Projects/BeeGameStudio/generated-game',
-    },
 };
 
 const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = {}) => {
-    const onApprovePlan = vi.fn().mockResolvedValue(undefined);
+    const onResolveToolPermission = vi.fn().mockResolvedValue(undefined);
     const onPreviewArtifact = vi.fn();
     const props: ComponentProps<typeof ChatPanel> = {
         messages: [],
@@ -76,66 +39,34 @@ const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = 
         scrollContainerRef: createRef<HTMLDivElement>(),
         isComposing: false,
         setIsComposing: vi.fn(),
-        onApprovePlan,
-        approvalState: {
+        onResolveToolPermission,
+        permissionState: {
             gateId: null,
             action: null,
             phase: 'idle',
             message: '',
         },
-        actionReview: approvalReview,
-        pendingReviews: [],
-        onUploadManifestCsv: vi.fn(),
-        onApproveManifest: vi.fn(),
-        waitingApproval: defaultWaitingApproval,
+        actionPermission: beeGamePermissionReview,
+        pendingPermissions: [],
+        waitingPermission: defaultWaitingPermission,
         ...overrides,
     };
 
     return {
-        onApprovePlan,
+        onResolveToolPermission,
         onPreviewArtifact,
         ...render(<ChatPanel {...props} />),
     };
 };
 
 describe('ChatPanel approval bar', () => {
-    it('replaces the composer with a bottom approval bar', () => {
-        renderChatPanel();
-
-        expect(screen.queryByPlaceholderText(/ask team/i)).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^revise$/i })).toBeInTheDocument();
-    });
-
-    it('does not give legacy blocker gate kinds custom approval behavior', () => {
-        renderChatPanel({ actionReview: legacyGateReview });
-
-        expect(screen.getByText('Approval Required')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^revise$/i })).toBeInTheDocument();
-    });
-
-    it('keeps approval buttons clickable while global loading is true', async () => {
-        const user = userEvent.setup();
-        const { onApprovePlan } = renderChatPanel({ isLoading: true });
-
-        const approveButton = screen.getByRole('button', { name: /^approve$/i });
-        const reviseButton = screen.getByRole('button', { name: /^revise$/i });
-
-        expect(approveButton).toBeEnabled();
-        expect(reviseButton).toBeEnabled();
-
-        await user.click(approveButton);
-        expect(onApprovePlan).toHaveBeenCalledWith(approvalReview);
-    });
-
     it('shows a single stop action while the AI is processing', async () => {
         const user = userEvent.setup();
         const onStop = vi.fn().mockResolvedValue(undefined);
 
         renderChatPanel({
             isLoading: true,
-            actionReview: undefined,
+            actionPermission: undefined,
             onStop,
             isStopping: false,
         });
@@ -153,7 +84,7 @@ describe('ChatPanel approval bar', () => {
 
         renderChatPanel({
             isLoading: true,
-            actionReview: undefined,
+            actionPermission: undefined,
             onStop,
             isStopping: true,
         });
@@ -161,56 +92,20 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByRole('button', { name: 'Stopping task' })).toBeDisabled();
     });
 
-    it('only disables the submitting action and preserves the compact two-column bar layout', () => {
-        renderChatPanel({
-            approvalState: {
-                gateId: 'gate_approval',
-                action: 'approve',
-                phase: 'submitting',
-                message: '已提交批准，系统正在进入下一阶段。',
-            },
-        });
-
-        expect(screen.getByRole('button', { name: /^submitting$/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^revise$/i })).toBeEnabled();
-
-        const approveButton = screen.getByRole('button', { name: /^submitting$/i });
-        expect(approveButton.parentElement).toHaveClass('min-[360px]:grid-cols-2');
-    });
-
-    it('restores interaction after a failed approval attempt', async () => {
-        const user = userEvent.setup();
-        const { onApprovePlan } = renderChatPanel({
-            approvalState: {
-                gateId: 'gate_approval',
-                action: 'approve',
-                phase: 'failed',
-                message: '审批操作失败，请重试',
-            },
-        });
-
-        const approveButton = screen.getByRole('button', { name: /^approve$/i });
-        expect(approveButton).toBeEnabled();
-        expect(screen.getByText('审批操作失败，请重试')).toBeInTheDocument();
-
-        await user.click(approveButton);
-        expect(onApprovePlan).toHaveBeenCalledWith(approvalReview);
-    });
-
     it('restores the normal composer when no approval gate is active', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
         });
 
-        expect(screen.getByPlaceholderText(/ask team/i)).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('textbox')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
     });
 
     it('shows BeeGame permission requests in a panel above the composer instead of replacing the input', () => {
         renderChatPanel({
-            actionReview: beeGamePermissionReview,
-            pendingReviews: [beeGamePermissionReview],
+            actionPermission: beeGamePermissionReview,
+            pendingPermissions: [beeGamePermissionReview],
             variant: 'beegame',
             lang: 'zh',
         });
@@ -229,7 +124,7 @@ describe('ChatPanel approval bar', () => {
 
     it('shows only the file name for file permission targets', () => {
         renderChatPanel({
-            actionReview: {
+            actionPermission: {
                 ...beeGamePermissionReview,
                 title: 'Edit permission',
                 artifact: {
@@ -249,59 +144,57 @@ describe('ChatPanel approval bar', () => {
 
     it('offers an explicit session-scoped choice for sandbox network access', async () => {
         const user = userEvent.setup();
-        const networkReview: PendingUserReviewItem = {
+        const networkReview: PendingToolPermissionItem = {
             ...beeGamePermissionReview,
             gate_id: 'network_permission',
             title: 'SandboxNetworkAccess permission',
             permission_tool_name: 'SandboxNetworkAccess',
             artifact: { input: { host: 'registry.example', port: 443 } },
         };
-        const { onApprovePlan } = renderChatPanel({
-            actionReview: networkReview,
-            pendingReviews: [networkReview],
+        const { onResolveToolPermission } = renderChatPanel({
+            actionPermission: networkReview,
+            pendingPermissions: [networkReview],
             variant: 'beegame',
             lang: 'zh',
         });
 
         expect(screen.getByText('registry.example:443')).toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: '当前会话允许' }));
-        expect(onApprovePlan).toHaveBeenCalledWith(
+        expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'network_permission' }),
-            undefined,
-            'approve',
+            'allow',
             'session',
         );
     });
 
     it('offers a scoped session grant for Resource Library mutations', async () => {
         const user = userEvent.setup();
-        const resourceReview: PendingUserReviewItem = {
+        const resourceReview: PendingToolPermissionItem = {
             ...beeGamePermissionReview,
             gate_id: 'resource_library_permission',
             title: 'ResourceLibrary permission',
             permission_tool_name: 'ResourceLibrary',
             artifact: { input: { action: 'browse_packs' } },
         };
-        const { onApprovePlan } = renderChatPanel({
-            actionReview: resourceReview,
-            pendingReviews: [resourceReview],
+        const { onResolveToolPermission } = renderChatPanel({
+            actionPermission: resourceReview,
+            pendingPermissions: [resourceReview],
             variant: 'beegame',
             lang: 'zh',
         });
 
         await user.click(screen.getByRole('button', { name: '当前会话允许' }));
-        expect(onApprovePlan).toHaveBeenCalledWith(
+        expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'resource_library_permission' }),
-            undefined,
-            'approve',
+            'allow',
             'session',
         );
     });
 
     it('uses the BeeGame dock styling for the normal composer', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
         });
 
@@ -333,8 +226,8 @@ describe('ChatPanel approval bar', () => {
 
     it('localizes the BeeGame chat composer placeholder', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             lang: 'zh',
         });
@@ -345,8 +238,8 @@ describe('ChatPanel approval bar', () => {
 
     it('keeps BeeGame image attachments in a padded preview strip', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             attachments: [{
                 type: 'image',
@@ -362,8 +255,8 @@ describe('ChatPanel approval bar', () => {
 
     it('uses shadcn shimmer for the active AI thinking state', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -380,6 +273,10 @@ describe('ChatPanel approval bar', () => {
                 phase: 'running',
                 blocked: false,
                 next_action: 'running',
+                workflow: {
+                    runId: 'run_thinking',
+                    status: 'running',
+                },
             },
         });
 
@@ -390,8 +287,8 @@ describe('ChatPanel approval bar', () => {
 
     it('does not synthesize a permanent thinking message for a running workflow', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [],
             projectStatus: {
@@ -399,6 +296,10 @@ describe('ChatPanel approval bar', () => {
                 phase: 'running',
                 blocked: false,
                 next_action: 'Claude Code is processing',
+                workflow: {
+                    runId: 'proj_1',
+                    status: 'running',
+                },
             },
         });
 
@@ -409,8 +310,8 @@ describe('ChatPanel approval bar', () => {
 
     it('places the workflow card in timestamp order after its triggering user message', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 { id: 'user_before_run', sender: 'user', content: '开始构建', timestamp: 1_000 },
@@ -438,8 +339,8 @@ describe('ChatPanel approval bar', () => {
 
     it('hides a stale thinking entry after the workflow fails', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [{
                 id: 'stale_thinking',
@@ -470,8 +371,8 @@ describe('ChatPanel approval bar', () => {
         const user = userEvent.setup();
         const onEditMessage = vi.fn();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -513,6 +414,11 @@ describe('ChatPanel approval bar', () => {
                 phase: 'running',
                 blocked: false,
                 next_action: 'running',
+                workflow: {
+                    runId: 'proj_1',
+                    status: 'running',
+                    createdAt: '1970-01-01T00:00:00.001Z',
+                },
             } as any,
             onEditMessage,
         });
@@ -617,8 +523,8 @@ describe('ChatPanel approval bar', () => {
         const uninterruptedContent = 'x'.repeat(12_000);
 
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             scrollContainerRef,
             messages: [
                 {
@@ -671,12 +577,12 @@ describe('ChatPanel approval bar', () => {
     it('does not render passive status copy above the composer', () => {
         const onCancelEdit = vi.fn();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             chatInput: 'updated request',
             editingMessageId: 'm_editing',
             onCancelEdit,
-            waitingApproval: {
+            waitingPermission: {
                 kind: 'review',
                 isWaitingStatus: true,
                 isBlockingChat: true,
@@ -694,8 +600,8 @@ describe('ChatPanel approval bar', () => {
 
     it('hides the BeeGame message scroller button when already at the latest message', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -721,8 +627,8 @@ describe('ChatPanel approval bar', () => {
 
     it('shows the BeeGame message scroller button when the transcript can scroll down', async () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: Array.from({ length: 8 }, (_, index) => ({
                 id: `m_scroll_${index + 1}`,
@@ -786,8 +692,8 @@ describe('ChatPanel approval bar', () => {
         const onLoadOlderHistory = vi.fn();
         renderChatPanel({
             variant: 'beegame',
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             hasOlderHistory: true,
             onLoadOlderHistory,
             messages: [{
@@ -813,8 +719,8 @@ describe('ChatPanel approval bar', () => {
     it('collapses multiple BeeGame tool calls by default and expands to show all tools', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             lang: 'zh',
             messages: [
@@ -860,8 +766,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame context updates as marker separators', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             lang: 'zh',
             messages: [
@@ -884,8 +790,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame search tool calls without card chrome or status icons', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             lang: 'zh',
             messages: [
@@ -913,8 +819,8 @@ describe('ChatPanel approval bar', () => {
 
     it('shows BeeGame read tool calls as muted file-name markers', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -941,8 +847,8 @@ describe('ChatPanel approval bar', () => {
 
     it('builds the BeeGame message outline from user messages only', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -982,8 +888,8 @@ describe('ChatPanel approval bar', () => {
     it('normalizes BeeGame tool messages from snake_case fields and structured content', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1019,8 +925,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders long BeeGame final summaries as one complete response', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1050,8 +956,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame messages without an avatar header or collapse control', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1083,8 +989,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame agent summaries as markdown instead of raw markdown text', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1111,8 +1017,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders write tool calls as plain markers without details or preview actions', () => {
         const { onPreviewArtifact } = renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1145,8 +1051,8 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame user messages without user identity chrome', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             currentUserDisplayName: 'NSWells',
             currentUserEmail: 'xmcz1996@gmail.com',
@@ -1174,8 +1080,8 @@ describe('ChatPanel approval bar', () => {
     it('does not draw timeline connectors for BeeGame tool rows', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1211,8 +1117,8 @@ describe('ChatPanel approval bar', () => {
     it('omits BeeGame tool status icons', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             variant: 'beegame',
             messages: [
                 {
@@ -1256,8 +1162,8 @@ describe('ChatPanel approval bar', () => {
 
     it('uses the canonical BeeGame message rendering path without a mode switch', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             messages: [
                 {
                     id: 'm_agent',
@@ -1274,9 +1180,9 @@ describe('ChatPanel approval bar', () => {
 
     it('restores the normal composer after approval state idles and the pending review is removed', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
-            approvalState: {
+            actionPermission: undefined,
+            pendingPermissions: [],
+            permissionState: {
                 gateId: null,
                 action: null,
                 phase: 'idle',
@@ -1290,8 +1196,8 @@ describe('ChatPanel approval bar', () => {
 
     it('locks the normal composer while the runtime is busy', () => {
         renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
+            actionPermission: undefined,
+            pendingPermissions: [],
             chatInput: 'continue',
             isComposerLocked: true,
         });
@@ -1302,17 +1208,23 @@ describe('ChatPanel approval bar', () => {
 
     it('does not show stale approval actions after the project has failed', () => {
         renderChatPanel({
-            actionReview: approvalReview,
+            actionPermission: beeGamePermissionReview,
             projectStatus: {
                 project_id: 'proj_1',
                 phase: 'gdd',
                 blocked: true,
                 blocked_reason: 'pipeline_failed',
-                approval_required: false,
+                workflow: {
+                    runId: 'run_failed',
+                    status: 'failed',
+                    block: {
+                        message: 'Pipeline failed',
+                    },
+                },
             } as any,
         });
 
-        expect(screen.getByPlaceholderText(/ask team/i)).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('textbox')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
     });
 });

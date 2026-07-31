@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs'
+import { readBeeGameAssetManifest } from '../asset-contracts'
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
 import { resolveWorkspaceRelativePath } from './revision'
-import { WORKFLOW_EVIDENCE_DIRECTORY } from './types'
 import type { AtomicTask, DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
@@ -32,6 +32,106 @@ export function implementationComplete(run: DeliveryRun): boolean {
   )
 }
 
+export function implementationCompletionIssue(input: {
+  task: AtomicTask
+  workspacePath?: string
+  terminal: Extract<
+    WorkerTerminalResult,
+    { workerType: 'implementation-worker' }
+  >
+}): string | undefined {
+  if (input.terminal.status !== 'completed') return input.terminal.status
+  const allowedPaths = input.task.allowedPaths
+  const outOfScope = input.terminal.changedPaths.filter(
+    path => !pathAllowed(path, allowedPaths),
+  )
+  const verifiedArtifactsMatch = sameIds(
+    input.terminal.verifiedArtifacts,
+    input.task.expectedArtifacts,
+  )
+  const missingFiles = input.workspacePath
+    ? input.task.expectedArtifacts.filter(path => {
+        const resolved = resolveWorkspaceRelativePath(
+          input.workspacePath!,
+          path,
+        )
+        return !resolved || !existsSync(resolved)
+      })
+    : []
+  const expectedIndexes = input.task.verification.map((_, index) => index)
+  const actualIndexes = input.terminal.verificationResults.map(
+    result => result.verificationIndex,
+  )
+  const verificationCoverageMatches = sameNumbers(
+    actualIndexes,
+    expectedIndexes,
+  )
+  const invalidVerification = input.terminal.verificationResults.find(
+    result => {
+      const verification = input.task.verification[result.verificationIndex]
+      return (
+        !verification ||
+        (result.status === 'deferred' && verification.kind !== 'runtime')
+      )
+    },
+  )
+  const missingEvidence =
+    input.workspacePath &&
+    !isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath)
+  const invalidEvidenceRefs = input.workspacePath
+    ? input.terminal.evidenceRefs.filter(
+        path => !isWorkflowEvidenceFile(input.workspacePath!, path),
+      )
+    : []
+  const evidenceRefsMatch = sameIds(input.terminal.evidenceRefs, [
+    input.terminal.evidencePath,
+  ])
+  const issues = [
+    ...(outOfScope.length ? [`out of scope: ${outOfScope.join(',')}`] : []),
+    ...(!verifiedArtifactsMatch
+      ? ['verified artifacts do not match the active task expected artifacts']
+      : []),
+    ...(missingFiles.length
+      ? [`missing files: ${missingFiles.join(',')}`]
+      : []),
+    ...(!verificationCoverageMatches
+      ? [
+          'verification results do not cover every active task verification exactly once',
+        ]
+      : []),
+    ...(invalidVerification
+      ? [
+          `verification ${invalidVerification.verificationIndex} may be deferred only when its kind is runtime`,
+        ]
+      : []),
+    ...(missingEvidence ? ['missing evidence file'] : []),
+    ...(invalidEvidenceRefs.length
+      ? [`invalid evidence refs: ${invalidEvidenceRefs.join(',')}`]
+      : []),
+    ...(!evidenceRefsMatch
+      ? ['evidenceRefs must contain exactly the canonical evidencePath']
+      : []),
+  ]
+  return issues.length
+    ? `implementation scope/evidence mismatch; ${issues.join('; ')}`
+    : undefined
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  const a = [...new Set(left)].sort()
+  const b = [...new Set(right)].sort()
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+function sameNumbers(
+  left: readonly number[],
+  right: readonly number[],
+): boolean {
+  const a = [...new Set(left)].sort((x, y) => x - y)
+  const b = [...new Set(right)].sort((x, y) => x - y)
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 export async function startNextImplementationTask(input: {
   run: DeliveryRun
   workspacePath: string
@@ -49,6 +149,23 @@ export async function startNextImplementationTask(input: {
     taskId: task.id,
     revision: input.revision,
   })
+  const manifest = await readBeeGameAssetManifest(input.workspacePath)
+  const requirementIds = new Set(task.resourceRequirementIds)
+  const resourceBindings = manifest.requirements
+    .filter(requirement => requirementIds.has(requirement.id))
+    .map(requirement => {
+      if (!requirement.source_decision)
+        throw new Error(
+          `implementation requires one final source decision for ${requirement.id}`,
+        )
+      return {
+        requirementId: requirement.id,
+        sourceType: requirement.source_decision.type,
+        importIds: requirement.satisfied_by?.import_ids ?? [],
+        compositionIds: requirement.satisfied_by?.composition_ids ?? [],
+        projectReferences: requirement.satisfied_by?.project_references ?? [],
+      }
+    })
   const request: WorkerDispatchRequest = {
     runId: started.runId,
     ownerId: started.ownerId,
@@ -58,8 +175,13 @@ export async function startNextImplementationTask(input: {
     phase: 'IMPLEMENTATION',
     taskId: task.id,
     revision: input.revision,
-    allowedPaths: [...task.allowedPaths, WORKFLOW_EVIDENCE_DIRECTORY],
-    contract: { task, currentRevision: input.revision },
+    allowedPaths: task.allowedPaths,
+    contract: {
+      task,
+      currentRevision: input.revision,
+      runtimeAssetRoot: manifest.project_target?.runtime_asset_root,
+      resourceBindings,
+    },
   }
   await input.beforeDispatch?.(started)
   return { run: started, dispatch: await input.dispatcher.dispatch(request) }
@@ -112,56 +234,18 @@ export function completeImplementationTask(input: {
       taskId: task.id,
       reason: input.completionFailureReason,
     })
-  const outOfScope = input.terminal.changedPaths.filter(
-    path => !pathAllowed(path, task.allowedPaths),
-  )
-  const missingExpected = task.expectedArtifacts.filter(
-    path => !input.terminal.changedPaths.includes(path),
-  )
-  const missingFiles = input.workspacePath
-    ? task.expectedArtifacts.filter(path => {
-        const resolved = resolveWorkspaceRelativePath(
-          input.workspacePath!,
-          path,
-        )
-        return !resolved || !existsSync(resolved)
-      })
-    : []
-  const missingEvidence =
-    input.workspacePath &&
-    !isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath)
-  const invalidEvidenceRefs = input.workspacePath
-    ? input.terminal.evidenceRefs.filter(
-        path => !isWorkflowEvidenceFile(input.workspacePath!, path),
-      )
-    : []
-  if (
-    input.terminal.status === 'completed' &&
-    (outOfScope.length > 0 ||
-      missingExpected.length > 0 ||
-      missingFiles.length > 0 ||
-      missingEvidence ||
-      invalidEvidenceRefs.length > 0)
-  ) {
-    const fileIssue = missingFiles.length
-      ? `; missing files: ${missingFiles.join(',')}`
-      : ''
-    const evidenceIssue = missingEvidence ? '; missing evidence file' : ''
-    const evidenceRefsIssue = invalidEvidenceRefs.length
-      ? `; invalid evidence refs: ${invalidEvidenceRefs.join(',')}`
-      : ''
+  const completionIssue = implementationCompletionIssue({
+    task,
+    ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
+    terminal: input.terminal,
+  })
+  if (completionIssue) {
     return transitionDeliveryRun(input.run, {
       type: 'task_failed',
       taskId: task.id,
-      reason: `implementation scope/evidence mismatch${outOfScope.length ? `; out of scope: ${outOfScope.join(',')}` : ''}${missingExpected.length ? `; missing artifacts: ${missingExpected.join(',')}` : ''}${fileIssue}${evidenceIssue}${evidenceRefsIssue}`,
+      reason: completionIssue,
     })
   }
-  if (input.terminal.status !== 'completed')
-    return transitionDeliveryRun(input.run, {
-      type: 'task_failed',
-      taskId: task.id,
-      reason: input.terminal.status,
-    })
   return transitionDeliveryRun(input.run, {
     type: 'task_completed',
     taskId: task.id,

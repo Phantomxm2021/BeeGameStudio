@@ -70,6 +70,45 @@ export function auditResourceDeliveryReadiness(input: {
   const requirements = Array.isArray(manifest?.requirements)
     ? manifest.requirements.filter(isRecord)
     : []
+  const requiredRequirements = requirements.filter(
+    requirement => requirement.required !== false,
+  )
+  const requiredSourceDecisionsComplete =
+    requiredRequirements.length > 0 &&
+    requiredRequirements.every(
+      requirement =>
+        !isRecord(requirement.resource_requirement) &&
+        isRecord(requirement.source_decision),
+    )
+  const zeroImportDecisionsAuditable = requiredRequirements.every(
+    requirement => {
+      const decision = isRecord(requirement.source_decision)
+        ? requirement.source_decision
+        : undefined
+      if (!decision) return false
+      if (decision.basis === 'approved-project-plan') return true
+      if (decision.basis !== 'catalog-no-match') return false
+      const receipt = isRecord(decision.discovery_receipt)
+        ? decision.discovery_receipt
+        : undefined
+      if (
+        !receipt ||
+        receipt.version !== 1 ||
+        receipt.decision_ready !== true ||
+        !Number.isInteger(receipt.structured_constraint_count) ||
+        Number(receipt.structured_constraint_count) < 2 ||
+        !Array.isArray(receipt.inspected_pack_ids) ||
+        !Array.isArray(receipt.represented_pack_ids) ||
+        !Array.isArray(receipt.candidate_ids) ||
+        receipt.inspected_pack_ids.length !==
+          receipt.represented_pack_ids.length ||
+        receipt.candidate_ids.length !== Number(receipt.candidate_count) ||
+        Number(receipt.total_compatible) !== Number(receipt.candidate_count)
+      )
+        return false
+      return true
+    },
+  )
   const compositions = Array.isArray(manifest?.compositions)
     ? manifest.compositions.filter(isRecord)
     : []
@@ -86,7 +125,14 @@ export function auditResourceDeliveryReadiness(input: {
     state: 'missing' as const,
   }
   const failedActions =
-    resourceEvidence.state === 'missing' ? [] : resourceEvidence.failedActions
+    resourceEvidence.state === 'missing'
+      ? []
+      : resourceEvidence.failedActions.filter(action =>
+          [
+            'import_elements',
+            'refresh_import_metadata',
+          ].includes(action),
+        )
   const failedImportCount =
     resourceEvidence.state === 'missing' ? 0 : resourceEvidence.failedImportCount
   const integrationIssues: string[] = []
@@ -104,9 +150,19 @@ export function auditResourceDeliveryReadiness(input: {
         'assets/asset-manifest.json: project_target.asset_format_capabilities must declare the actual formats accepted by the target runtime before Resource Library import.',
       )
     }
-    if (importCount === 0) {
+    if (importCount === 0 && !requiredSourceDecisionsComplete) {
       issues.push(
         `assets/asset-manifest.json: ${effectivePolicy} Resource Library usage has no imported resource artifacts in the current manifest.`,
+      )
+    }
+    if (
+      effectivePolicy === 'preferred' &&
+      importCount === 0 &&
+      requiredSourceDecisionsComplete &&
+      !zeroImportDecisionsAuditable
+    ) {
+      issues.push(
+        'assets/asset-manifest.json: preferred Resource Library usage has zero imports without complete structured no-match receipts or an explicitly approved project plan.',
       )
     }
     if (importCount > 0 && resourceEvidence.state === 'missing') {

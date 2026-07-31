@@ -93,7 +93,7 @@ Expected: the new requests return 404 or fail because the route and analysis job
 
 - [ ] **Step 3: Implement the analysis job**
 
-新增 `runBeeGameAttachmentAnalysis` 和 job 路由，复用现有 credit reservation、refund、settle、`clientRequestId` 幂等逻辑。分析前把附件物化到会话目录；构造结构化模型指令：
+新增 `runBeeGameAttachmentAnalysis` 和 job 路由，复用统一的 realtime usage event 与 `clientRequestId` 幂等逻辑。分析前把附件物化到会话目录；构造结构化模型指令：
 
 ```text
 sourceType=gdd: extract confirmed facts, assess minimum build completeness, preserve user facts, and return a GDD draft.
@@ -101,7 +101,7 @@ sourceType=image: infer design with confidence per field and list uncertainty; n
 sourceType=mixed: treat GDD facts as authoritative and return conflicts instead of silently overwriting them.
 ```
 
-模型返回必须经过后端解析和 schema 校验；分析失败或超时退还预留 credit，清理附件目录并返回可重试错误。
+模型返回必须经过后端解析和 schema 校验；仅对模型实际产生的使用量记录幂等 usage event，分析失败或超时后清理附件目录并返回可重试错误。
 
 - [ ] **Step 4: Run route tests and existing intake regression tests**
 

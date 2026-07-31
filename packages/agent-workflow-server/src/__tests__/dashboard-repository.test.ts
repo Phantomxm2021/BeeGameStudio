@@ -80,36 +80,6 @@ describe('DashboardRepository Supabase boundaries', () => {
       await expect(
         readFile(
           join(
-            ownerAEnv.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-acceptance-validator.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(
-        readFile(
-          join(
-            ownerBEnv.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-acceptance-validator.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(
-        readFile(
-          join(
-            ownerAEnv.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-implementation-auditor.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-implementation-auditor')
-      await expect(
-        readFile(
-          join(
             ownerBEnv.CLAUDE_CONFIG_DIR,
             'skills',
             'game-art-director-expert',
@@ -197,16 +167,6 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(userRoot, '.runtime', 'tooling', 'npmrc'),
       )
       await expect(
-        readFile(
-          join(
-            env.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-acceptance-validator.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.not.toContain('skills: [beegame-game-acceptance]')
-      await expect(
         readFile(join(env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"autoAllowBashIfSandboxed": true')
     } finally {
@@ -286,54 +246,6 @@ describe('DashboardRepository Supabase boundaries', () => {
           'utf8',
         ),
       ).resolves.toContain('Runtime Skill')
-      await expect(
-        readFile(
-          join(
-            env.CLAUDE_CONFIG_DIR,
-            'skills',
-            'beegame-game-delivery',
-            'SKILL.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-game-delivery')
-      await expect(
-        readFile(
-          join(
-            env.CLAUDE_CONFIG_DIR,
-            'skills',
-            'beegame-game-acceptance',
-            'SKILL.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-game-acceptance')
-      await expect(
-        readFile(
-          join(
-            env.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-acceptance-validator.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-acceptance-validator')
-      await expect(
-        readFile(
-          join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-document-reviewer.md'),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-document-reviewer')
-      await expect(
-        readFile(
-          join(
-            env.CLAUDE_CONFIG_DIR,
-            'agents',
-            'beegame-implementation-auditor.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('name: beegame-implementation-auditor')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })
@@ -526,35 +438,6 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('requires a user bearer token instead of falling back to anonymous Supabase or local storage', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
-    let fetchCalls = 0
-    const repository = new DashboardRepository({
-      dashboardDataRoot: dataRoot,
-      getUserDataRoot: () => dataRoot,
-      supabaseStore: new SupabaseDashboardStore({
-        url: 'https://project.supabase.co',
-        anonKey: 'anon-key',
-        fetchImpl: (async () => {
-          fetchCalls += 1
-          return Response.json([])
-        }) as unknown as typeof fetch,
-      }),
-    })
-
-    try {
-      await expect(
-        repository.getCreditBalance(
-          new Request('http://beegame.test/api/credits'),
-          { id: '00000000-0000-0000-0000-000000000001', role: 'owner' },
-        ),
-      ).rejects.toThrow('Supabase user token is required')
-      expect(fetchCalls).toBe(0)
-    } finally {
-      await rm(dataRoot, { recursive: true, force: true })
-    }
-  })
-
   test('uses the configured auth transport for HttpOnly session requests', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const authorizationHeaders: string[] = []
@@ -588,51 +471,6 @@ describe('DashboardRepository Supabase boundaries', () => {
         { id: '00000000-0000-0000-0000-000000000001', role: 'owner' },
       )
       expect(authorizationHeaders).toEqual(['Bearer cookie-access-token'])
-    } finally {
-      await rm(dataRoot, { recursive: true, force: true })
-    }
-  })
-
-  test('uses canonical account id for Supabase credit balance and ledger', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
-    const calls: string[] = []
-    const repository = new DashboardRepository({
-      dashboardDataRoot: dataRoot,
-      getUserDataRoot: () => dataRoot,
-      supabaseStore: new SupabaseDashboardStore({
-        url: 'https://project.supabase.co',
-        anonKey: 'anon-key',
-        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
-          const url = String(input)
-          calls.push(url)
-          if (url.includes('/beegame_usage_wallets')) {
-            return Response.json([
-              {
-                user_id: 'canonical-user',
-                included_credits_micro: 300_000_000,
-                consumed_credits_micro: 7_000_000,
-              },
-            ])
-          }
-          return new Response('not found', { status: 404 })
-        }) as unknown as typeof fetch,
-      }),
-    })
-    const request = new Request('http://beegame.test/api/credits', {
-      headers: { authorization: 'Bearer user-token' },
-    })
-    const user = {
-      id: 'oauth-provider-user',
-      accountId: 'canonical-user',
-      role: 'developer' as const,
-    }
-
-    try {
-      const balance = await repository.getCreditBalance(request, user)
-
-      expect(balance.userId).toBe('canonical-user')
-      expect(calls[0]).toContain('user_id=eq.canonical-user')
-      expect(calls.join('\n')).not.toContain('oauth-provider-user')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }

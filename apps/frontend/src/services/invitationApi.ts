@@ -1,4 +1,4 @@
-import { getSupabaseAccessToken } from './supabaseAuthApi';
+import apiClient from './apiClient';
 
 export type InvitationPublicSettings = {
   required: boolean;
@@ -16,33 +16,29 @@ export type InvitationRecord = {
   updatedAt: string;
 };
 
-const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
-const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
-
 export async function getInvitationPublicSettings(): Promise<InvitationPublicSettings> {
-  const value = await callSupabaseRpc<unknown>('beegame_public_invitation_settings', {}, false);
-  return { required: isRecord(value) && value.required === true };
+  return await apiClient.get('/api/invitations/settings');
 }
 
 export async function validateInvitationCode(code: string): Promise<boolean> {
-  return await callSupabaseRpc<boolean>('beegame_validate_invitation_code', { p_code: code }, false);
+  const result = await apiClient.post('/api/invitations/validate', { code }) as { valid: boolean };
+  return result.valid === true;
 }
 
 export async function listInvitations(): Promise<InvitationRecord[]> {
-  return await callSupabaseRpc<InvitationRecord[]>('beegame_admin_list_invitations', {}, true);
+  return await apiClient.get('/api/admin/invitations');
 }
 
 export async function saveInvitationSettings(required: boolean): Promise<InvitationPublicSettings> {
-  const value = await callSupabaseRpc<unknown>('beegame_admin_save_invitation_settings', { p_required: required }, true);
-  return { required: isRecord(value) && value.required === true };
+  return await apiClient.put('/api/admin/invitations/settings', { required });
 }
 
-export async function createInvitation(input: { code: string; label?: string; maxUses?: number | null }): Promise<InvitationRecord> {
-  return await callSupabaseRpc<InvitationRecord>('beegame_admin_create_invitation', {
-    p_code: input.code,
-    p_label: input.label || null,
-    p_max_uses: input.maxUses ?? null,
-  }, true);
+export async function createInvitation(input: {
+  code: string;
+  label?: string;
+  maxUses?: number | null;
+}): Promise<InvitationRecord> {
+  return await apiClient.post('/api/admin/invitations', input);
 }
 
 export async function updateInvitation(input: {
@@ -52,49 +48,13 @@ export async function updateInvitation(input: {
   maxUses?: number | null;
   clearMaxUses?: boolean;
 }): Promise<InvitationRecord> {
-  return await callSupabaseRpc<InvitationRecord>('beegame_admin_update_invitation', {
-    p_id: input.id,
-    p_label: input.label ?? null,
-    p_enabled: input.enabled ?? null,
-    p_max_uses: input.maxUses ?? null,
-    p_clear_max_uses: input.clearMaxUses === true,
-  }, true);
+  const { id, ...body } = input;
+  return await apiClient.patch(`/api/admin/invitations/${encodeURIComponent(id)}`, body);
 }
 
 export async function deleteInvitation(id: string): Promise<boolean> {
-  return await callSupabaseRpc<boolean>('beegame_admin_delete_invitation', { p_id: id }, true);
-}
-
-async function callSupabaseRpc<T>(
-  name: string,
-  body: Record<string, unknown>,
-  authenticated: boolean,
-): Promise<T> {
-  const supabaseUrl = getSupabaseUrl().replace(/\/+$/, '');
-  const anonKey = getSupabaseAnonKey();
-  if (!supabaseUrl || !anonKey) {
-    if (!authenticated) return { required: false } as T;
-    throw new Error('Supabase invitation settings are not configured.');
-  }
-  const accessToken = authenticated ? getSupabaseAccessToken() : '';
-  if (authenticated && !accessToken) {
-    throw new Error('Authentication required.');
-  }
-  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
-    method: 'POST',
-    headers: {
-      apikey: anonKey,
-      authorization: `Bearer ${accessToken || anonKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return await response.json() as T;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  const result = await apiClient.delete(`/api/admin/invitations/${encodeURIComponent(id)}`) as {
+    deleted: boolean;
+  };
+  return result.deleted === true;
 }

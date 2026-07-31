@@ -16,15 +16,14 @@ import type { Project, StartProjectResult, UpdateProjectRequest } from '../types
 import {
   api,
   normalizeProjectBaselineStatusPayload,
-  type PendingUserReviewsResponse,
-  type PendingUserReviewItem,
+  type PendingToolPermissionsResponse,
+  type PendingToolPermissionItem,
   type ProjectBaselineStatusPayload,
 } from '../services/api';
 import type { BeeGameBuildBrief } from '../services/beeGameAdapter';
 import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import { useChatStore } from './chatStore';
 import { useSystemStore } from './systemStore';
-import type { ProductReadinessView } from '../types/message';
 
 const normalizeProjectTimestamp = (project: Project): Project => {
   const ts = Number(project.created_at);
@@ -33,8 +32,7 @@ const normalizeProjectTimestamp = (project: Project): Project => {
   }
   return {
     ...project,
-    // Backward compatibility: old backend values may be in seconds.
-    created_at: ts < 1e11 ? ts * 1000 : ts,
+    created_at: ts,
   };
 };
 
@@ -98,14 +96,13 @@ interface ProjectState {
   /** Whether a project open/switch operation is in progress */
   isOpeningProject: boolean;
 
-  /** List of pending user reviews for the active project */
-  pendingReviews: PendingUserReviewItem[];
+  /** List of pending user permissions for the active project */
+  pendingPermissions: PendingToolPermissionItem[];
 
   /** Current project-level baseline status snapshot */
   projectStatus: ProjectBaselineStatusPayload | null;
 
   /** Current runtime module readiness snapshot */
-  runtimeReadiness: ProductReadinessView | null;
 
   /** Toast notification callbacks */
   showToastError: ((message: string) => void) | null;
@@ -128,32 +125,27 @@ interface ProjectState {
   loadProjects: () => Promise<void>;
 
   /**
-   * Load pending user reviews for a specific project
+   * Load pending user permissions for a specific project
    */
-  loadPendingReviews: (projectId: string) => Promise<void>;
+  loadPendingPermissions: (projectId: string) => Promise<void>;
 
   /** Load the single server-owned runtime snapshot used by dashboard views. */
   loadProjectRuntimeState: (projectId: string) => Promise<void>;
 
   /**
-   * Remove a pending review from local optimistic state
+   * Remove a pending permission from local optimistic state
    */
-  removePendingReview: (gateId: string) => void;
+  removePendingPermission: (gateId: string) => void;
 
   /**
-   * Restore or insert a pending review into local optimistic state
+   * Restore or insert a pending permission into local optimistic state
    */
-  upsertPendingReview: (review: PendingUserReviewItem) => void;
+  upsertPendingPermission: (permission: PendingToolPermissionItem) => void;
 
   /**
    * Load project-level status and current baseline metadata
    */
   loadProjectStatus: (projectId: string) => Promise<void>;
-
-  /**
-   * Load runtime module readiness
-   */
-  loadSystemReadiness: () => Promise<void>;
 
   /**
    * Set the active project
@@ -206,9 +198,8 @@ export const useProjectStore = create<ProjectState>()(
       activeProjectId: null,
       isLoading: false,
       isOpeningProject: false,
-      pendingReviews: [],
+      pendingPermissions: [],
       projectStatus: null,
-      runtimeReadiness: null,
       showToastError: null,
       showToastSuccess: null,
 
@@ -235,15 +226,15 @@ export const useProjectStore = create<ProjectState>()(
         }
       },
 
-      loadPendingReviews: async (projectId) => {
+      loadPendingPermissions: async (projectId) => {
         if (!projectId) return;
         try {
-          const response = (await api.getPendingUserReviews(projectId)) as PendingUserReviewsResponse;
-          set({ pendingReviews: response.items || [] });
+          const response = (await api.getPendingToolPermissions(projectId)) as PendingToolPermissionsResponse;
+          set({ pendingPermissions: response.items || [] });
         } catch (error) {
-          console.error(`Failed to load pending reviews for project ${projectId}:`, error);
+          console.error(`Failed to load pending permissions for project ${projectId}:`, error);
           // Do not fail hard, just set empty to avoid blocking UI
-          set({ pendingReviews: [] });
+          set({ pendingPermissions: [] });
         }
       },
 
@@ -257,7 +248,7 @@ export const useProjectStore = create<ProjectState>()(
           if (currentActiveProjectId && currentActiveProjectId !== projectId) return;
           set({
             projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
-            pendingReviews: runtimeState.pendingReviews,
+            pendingPermissions: runtimeState.pendingPermissions,
           });
           const tokenBudget = runtimeState.status.context?.token_budget;
           if (tokenBudget) {
@@ -283,21 +274,21 @@ export const useProjectStore = create<ProjectState>()(
         }
       },
 
-      removePendingReview: (gateId) => {
+      removePendingPermission: (gateId) => {
         const normalizedGateId = String(gateId || '').trim();
         if (!normalizedGateId) return;
         set((state) => ({
-          pendingReviews: state.pendingReviews.filter((review) => String(review?.gate_id || '').trim() !== normalizedGateId),
+          pendingPermissions: state.pendingPermissions.filter((permission) => String(permission?.gate_id || '').trim() !== normalizedGateId),
         }));
       },
 
-      upsertPendingReview: (review) => {
-        const normalizedGateId = String(review?.gate_id || '').trim();
+      upsertPendingPermission: (permission) => {
+        const normalizedGateId = String(permission?.gate_id || '').trim();
         if (!normalizedGateId) return;
         set((state) => {
-          const remaining = state.pendingReviews.filter((item) => String(item?.gate_id || '').trim() !== normalizedGateId);
+          const remaining = state.pendingPermissions.filter((item) => String(item?.gate_id || '').trim() !== normalizedGateId);
           return {
-            pendingReviews: [review, ...remaining],
+            pendingPermissions: [permission, ...remaining],
           };
         });
       },
@@ -313,15 +304,6 @@ export const useProjectStore = create<ProjectState>()(
           if (showToastError) {
             showToastError('后端状态不可用，请检查服务和数据库配置');
           }
-        }
-      },
-
-      loadSystemReadiness: async () => {
-        try {
-          const readiness = (await api.getSystemReadiness()) as unknown as ProductReadinessView;
-          set({ runtimeReadiness: readiness });
-        } catch (error) {
-          console.error('Failed to load system readiness:', error);
         }
       },
 
@@ -344,7 +326,7 @@ export const useProjectStore = create<ProjectState>()(
           set({
             activeProjectId: normalizedProjectId,
             isOpeningProject: false,
-            pendingReviews: [],
+            pendingPermissions: [],
             projectStatus: null,
           });
           // Clear current messages to prepare for loading new project's history
@@ -363,9 +345,8 @@ export const useProjectStore = create<ProjectState>()(
       clearActiveProject: () => {
         set({
           activeProjectId: null,
-          pendingReviews: [],
+          pendingPermissions: [],
           projectStatus: null,
-          runtimeReadiness: null,
         });
         useChatStore.getState().clearMessages();
       },

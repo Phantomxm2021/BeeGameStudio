@@ -1,12 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ForwardRefExoticComponent, HTMLAttributes, RefAttributes } from 'react';
 import {
-  AlertTriangle,
-  CheckCircle2,
+  AlertCircle,
+  CircleCheckBig,
   Circle,
   LoaderCircle,
   RotateCcw,
   XCircle,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
+import MarkdownErrorBoundary from '../Common/MarkdownErrorBoundary';
+import { BadgeAlertIcon } from '../ui/badge-alert';
+import { CircleCheckIcon } from '../ui/circle-check';
+import { ClockIcon } from '../ui/clock';
+import { GripIcon } from '../ui/grip';
+import { HourglassIcon } from '../ui/hourglass';
+import { PauseIcon } from '../ui/pause';
+import { ScanTextIcon } from '../ui/scan-text';
+import { XIcon } from '../ui/x';
+import { useToastContext } from '../../contexts/ToastContext';
 import type { WorkflowCardPayload, WorkflowCardTask } from '../../types/message';
 
 const statusLabel: Record<WorkflowCardPayload['status'], string> = {
@@ -64,11 +78,121 @@ const formatDuration = (milliseconds: number): string => {
   return [hours, minutes, remainder].map(value => String(value).padStart(2, '0')).join(':');
 };
 
+const copyText = async (text: string): Promise<boolean> => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // The Clipboard API can be unavailable in desktop webviews; use the
+    // user-initiated DOM copy operation below in that case.
+  }
+
+  if (typeof document.execCommand !== 'function') return false;
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.readOnly = true;
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  document.body.appendChild(input);
+  input.select();
+  try {
+    return document.execCommand('copy');
+  } finally {
+    input.remove();
+  }
+};
+
+const useVerticalOverflow = <T extends HTMLElement>(contentKey: string) => {
+  const elementRef = useRef<T | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const measure = useCallback(() => {
+    const element = elementRef.current;
+    setIsOverflowing(Boolean(element && element.scrollHeight > element.clientHeight + 1));
+  }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(measure);
+    window.addEventListener('resize', measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (elementRef.current) observer?.observe(elementRef.current);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [contentKey, measure]);
+
+  return { elementRef, isOverflowing };
+};
+
 const taskIcon = (task: WorkflowCardTask) => {
-  if (task.status === 'completed') return <CheckCircle2 className="h-4 w-4 text-emerald-300" />;
+  if (task.status === 'completed') return <CircleCheckBig className="h-4 w-4 text-emerald-300" />;
   if (task.status === 'running') return <LoaderCircle className="h-4 w-4 animate-spin text-sky-300" />;
   if (task.status === 'failed' || task.status === 'blocked') return <XCircle className="h-4 w-4 text-rose-300" />;
   return <Circle className="h-4 w-4 text-zinc-600" />;
+};
+
+type AnimatedStatusIconHandle = {
+  startAnimation: () => void;
+  stopAnimation: () => void;
+};
+
+type AnimatedStatusIconComponent = ForwardRefExoticComponent<
+  HTMLAttributes<HTMLDivElement> & { size?: number } & RefAttributes<AnimatedStatusIconHandle>
+>;
+
+const AutoPlayStatusIcon = ({ Icon, ...props }: {
+  Icon: AnimatedStatusIconComponent;
+} & HTMLAttributes<HTMLDivElement> & { size?: number }) => {
+  const iconRef = useRef<AnimatedStatusIconHandle>(null);
+
+  useEffect(() => {
+    const icon = iconRef.current;
+    if (!icon) return;
+    void Promise.resolve(icon.startAnimation()).then(() => {
+      if (iconRef.current === icon) icon.stopAnimation();
+    });
+  }, []);
+
+  return (
+    <Icon
+      ref={iconRef}
+      data-animation="once"
+      onMouseEnter={() => iconRef.current?.startAnimation()}
+      onMouseLeave={() => iconRef.current?.stopAnimation()}
+      {...props}
+    />
+  );
+};
+
+const WorkflowStatusIcon = ({ status }: { status: WorkflowCardPayload['status'] }) => {
+  const props = {
+    'aria-label': `工作流状态：${statusLabel[status]}`,
+    className: 'mt-0.5 h-4 w-4 shrink-0',
+    size: 16,
+  };
+
+  switch (status) {
+    case 'draft':
+      return <AutoPlayStatusIcon Icon={HourglassIcon} {...props} className={`${props.className} text-zinc-400`} data-icon="hourglass" />;
+    case 'running':
+      return <GripIcon {...props} data-icon="grip" loop />;
+    case 'blocked':
+      return <AutoPlayStatusIcon Icon={BadgeAlertIcon} {...props} className={`${props.className} text-amber-300`} data-icon="badge-alert" />;
+    case 'verifying':
+      return <AutoPlayStatusIcon Icon={ScanTextIcon} {...props} className={`${props.className} text-sky-300`} data-icon="scan-text" />;
+    case 'completed':
+      return <AutoPlayStatusIcon Icon={CircleCheckIcon} {...props} className={`${props.className} text-emerald-300`} data-icon="circle-check" />;
+    case 'failed':
+      return <AutoPlayStatusIcon Icon={XIcon} {...props} className={`${props.className} text-rose-400`} data-icon="x" />;
+    case 'cancelled':
+      return <AutoPlayStatusIcon Icon={PauseIcon} {...props} className={`${props.className} text-zinc-400`} data-icon="pause" />;
+    case 'stale':
+      return <AutoPlayStatusIcon Icon={ClockIcon} {...props} className={`${props.className} text-amber-300`} data-icon="clock" />;
+  }
 };
 
 export function WorkflowCard({
@@ -78,30 +202,36 @@ export function WorkflowCard({
   workflow: WorkflowCardPayload;
   onAction?: (action: 'resume' | 'retry') => Promise<void> | void;
 }) {
+  const { showSuccess, showError } = useToastContext();
   const [now, setNow] = useState(() => Date.now());
   const [actionState, setActionState] = useState<'idle' | 'pending'>('idle');
   const [actionError, setActionError] = useState('');
-  const isCompleted = workflow.status === 'completed';
   const isActive = ['draft', 'running', 'verifying'].includes(workflow.status);
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(workflow.status);
-  const StatusIcon = isCompleted ? CheckCircle2 : LoaderCircle;
+  const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(workflow.status) && Boolean(workflow.block);
   const tasks = workflow.tasks ?? [];
+  const message = workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
+  const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(message || '');
   const completedCount = workflow.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = workflow.totalTaskCount ?? tasks.length;
   const stageTitle = stageLabel[workflow.documentStep || ''] || stageLabel[workflow.currentPhase || ''] || workflow.currentPhase || '等待阶段';
   const startedAt = Date.parse(workflow.createdAt || '');
   const finishedAt = Date.parse(workflow.completedAt || (!isActive ? workflow.updatedAt || '' : ''));
-  const elapsed = Number.isFinite(startedAt)
-    ? !isActive && Number.isFinite(finishedAt)
-      ? finishedAt - startedAt
-      : now - startedAt
-    : 0;
+  const activeSince = Date.parse(workflow.activeSince || '');
+  const durableElapsed = Number(workflow.elapsedMs);
+  const elapsed = Number.isFinite(durableElapsed)
+    ? Math.max(0, durableElapsed) + (isActive && Number.isFinite(activeSince) ? Math.max(0, now - activeSince) : 0)
+    : Number.isFinite(startedAt)
+      ? !isActive && Number.isFinite(finishedAt)
+        ? finishedAt - startedAt
+        : now - startedAt
+      : 0;
 
   useEffect(() => {
     if (!isActive || !Number.isFinite(startedAt)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [isActive, startedAt]);
+  }, [activeSince, isActive, startedAt]);
 
   const executionText = useMemo(() => {
     const worker = workerLabel[workflow.worker || ''] || workflow.worker || '';
@@ -129,6 +259,14 @@ export function WorkflowCard({
     }
   };
 
+  const handleCopyFailure = async () => {
+    const message = workflow.block?.message;
+    if (!message) return;
+    const copied = await copyText(message);
+    if (copied) showSuccess('错误信息已复制');
+    else showError('复制错误信息失败');
+  };
+
   return (
     <section
       data-testid={`beegame-workflow-card-${workflow.runId}`}
@@ -136,7 +274,7 @@ export function WorkflowCard({
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
-          {!isBlocked ? <StatusIcon className={`mt-0.5 h-4 w-4 shrink-0 ${isCompleted ? 'text-emerald-300' : 'animate-spin text-sky-300'}`} /> : null}
+          <WorkflowStatusIcon status={workflow.status} />
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -144,35 +282,70 @@ export function WorkflowCard({
                   <h3 className="truncate text-sm font-semibold text-zinc-100">{stageTitle}</h3>
                   {totalCount > 0 ? <span className="text-[11px] tabular-nums text-zinc-500">{completedCount} / {totalCount}</span> : null}
                 </div>
-                <p className="mt-1.5 text-sm leading-5 text-zinc-300">{workflow.thinking || (isBlocked ? workflow.block?.message : '正在准备当前阶段…')}</p>
-                {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
-                {workflow.block ? (
+                {hasFailureDetails && workflow.block ? (
                   <div className="group relative">
                     <button
                       type="button"
-                      className="rounded-full text-amber-300 outline-none transition-colors hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-amber-300/40"
-                      aria-label="查看错误详情"
+                      onClick={() => void handleCopyFailure()}
+                      className="rounded-full text-rose-400 outline-none transition-colors hover:text-rose-300 focus-visible:ring-2 focus-visible:ring-rose-400/40"
+                      aria-label="复制错误信息"
+                      title="点击复制错误信息"
                     >
-                      <AlertTriangle className="h-4 w-4" />
+                      <AlertCircle className="h-4 w-4" />
                     </button>
                     <div
                       role="tooltip"
-                      className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-amber-300/20 bg-zinc-950/95 p-3 text-xs leading-5 text-amber-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                      className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-rose-400/20 bg-zinc-950/95 p-3 text-xs leading-5 text-rose-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                     >
                       <p>{workflow.block.message}</p>
-                      {workflow.block.nextAction ? <p className="mt-1 text-amber-200/70">下一步：{workflow.block.nextAction}</p> : null}
+                      {workflow.block.nextAction ? <p className="mt-1 text-rose-200/70">下一步：{workflow.block.nextAction}</p> : null}
                     </div>
                   </div>
                 ) : null}
               </div>
             </div>
 
+            <div
+              ref={messageRegionRef}
+              data-testid="workflow-card-message-region"
+              className={`scrollbar-premium mt-1.5 max-h-20 overflow-y-auto overscroll-contain pr-1 ${isMessageOverflowing ? 'scroll-fade scroll-fade-y scroll-fade-6' : ''}`}
+            >
+              <MarkdownErrorBoundary messageId={`workflow-${workflow.runId}`} rawContent={message}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={{
+                    p: props => <p className="mb-2 text-xs leading-5 text-zinc-300 last:mb-0" {...props} />,
+                    h1: props => <h1 className="mb-2 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
+                    h2: props => <h2 className="mb-2 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
+                    h3: props => <h3 className="mb-1 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
+                    ul: props => <ul className="my-2 ml-4 list-disc space-y-1 text-xs leading-5 text-zinc-300" {...props} />,
+                    ol: props => <ol className="my-2 ml-4 list-decimal space-y-1 text-xs leading-5 text-zinc-300" {...props} />,
+                    li: props => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
+                    blockquote: props => <blockquote className="my-2 border-l-2 border-white/15 pl-3 text-xs leading-5 text-zinc-400" {...props} />,
+                    a: props => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-2 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
+                    strong: props => <strong className="font-semibold text-zinc-100" {...props} />,
+                    pre: props => <pre className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-zinc-950 p-2 text-xs leading-5 text-zinc-200" {...props} />,
+                    code: props => <code className="rounded bg-white/[0.06] px-1 py-0.5 text-xs text-zinc-200" {...props} />,
+                    table: props => <table className="my-2 block max-w-full overflow-x-auto text-xs" {...props} />,
+                    th: props => <th className="border border-white/10 px-2 py-1 text-left font-semibold text-zinc-200" {...props} />,
+                    td: props => <td className="border border-white/10 px-2 py-1 text-zinc-300" {...props} />,
+                  }}
+                >
+                  {message}
+                </ReactMarkdown>
+              </MarkdownErrorBoundary>
+            </div>
+            {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
+
             {tasks.length > 0 ? (
-              <ul className="mt-4 space-y-2 pl-3">
-                {tasks.slice(0, 8).map(task => (
+              <ul
+                data-testid="workflow-card-task-region"
+                className={`scrollbar-premium mt-4 space-y-2 pl-3 pr-1 ${tasks.length > 12 ? 'scroll-fade scroll-fade-y scroll-fade-6 max-h-[17.5rem] overflow-y-auto overscroll-contain' : ''}`}
+              >
+                {tasks.map(task => (
                   <li key={task.id} className="flex min-w-0 items-start gap-2 text-xs">
                     <span className="mt-px shrink-0">{taskIcon(task)}</span>
                     <div className="min-w-0 flex-1">

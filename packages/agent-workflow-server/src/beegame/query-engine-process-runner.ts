@@ -10,8 +10,8 @@ import {
   QueryEngineWorkerError,
   type QueryEngineParentMessage,
   type QueryEngineWorkerMessage,
-  type SerializedQueryEngineStartInput,
 } from './query-engine-worker-protocol'
+import { serializeQueryEngineStartInput } from './query-engine-process-input'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn>
 
@@ -83,7 +83,10 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
           if (!initialized) reject(error)
         }
       })
-      runtime.send({ type: 'runtime.init', input: serializeStartInput(input) })
+      runtime.send({
+        type: 'runtime.init',
+        input: serializeQueryEngineStartInput(input),
+      })
     })
     try {
       await ready
@@ -197,33 +200,6 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
 
   private send(message: QueryEngineParentMessage): void {
     if (this.child.exitCode === null) this.child.send(message)
-  }
-}
-
-function serializeStartInput(
-  input: BeeGameSessionRunnerStartInput,
-): SerializedQueryEngineStartInput {
-  return {
-    sessionId: input.sessionId,
-    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
-    ...(input.language ? { language: input.language } : {}),
-    cwd: input.cwd,
-    env: input.env,
-    ...(input.resourceSelectionConfig
-      ? { resourceSelectionConfig: input.resourceSelectionConfig }
-      : {}),
-    approvedOutboundTargets: Object.fromEntries(
-      Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
-        key,
-        {
-          url: target.url.toString(),
-          addresses: [...target.addresses],
-          ...(target.trustedDevelopmentProxy
-            ? { trustedDevelopmentProxy: true as const }
-            : {}),
-        },
-      ]),
-    ),
   }
 }
 

@@ -11,23 +11,22 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useWebSocket } from './useWebSocket'
+import { useProjectEventPolling } from './useProjectEventPolling'
 import { useChatStore } from '../store/chatStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSystemStore } from '../store/systemStore'
 import {
   api,
-  normalizeApprovePlanPayload,
-  normalizeReviewBindingPayload,
   type ChatAttachmentPayload,
-  type ReviewBindingPayload,
+  type ProjectBaselineStatusPayload,
 } from '../services/api'
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
-import type { WebSocketMessage } from '../types/message'
-import type { WebSocketState } from './useWebSocket'
+import type { ProjectEventMessage } from '../types/message'
+import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
-import { normalizeWebSocketSemanticType } from '../utils/messageSemantics'
-import { getWaitingApprovalState } from '../utils/waitingApproval'
+import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
+import { getWaitingPermissionState } from '../utils/waitingPermission'
+import { toProjectRuntimeDisplayModel } from '../viewModels/displayModels'
 
 const newClientMessageId = (): string =>
   `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -44,13 +43,11 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-function isProjectStatusRunning(status: unknown): boolean {
-  return Boolean(
-    status &&
-      typeof status === 'object' &&
-      'phase' in status &&
-      (status as { phase?: unknown }).phase === 'running',
-  )
+function isProjectWorkflowActive(
+  status?: ProjectBaselineStatusPayload | null,
+): boolean {
+  const workflowStatus = toProjectRuntimeDisplayModel(status)?.workflow?.status
+  return workflowStatus === 'running' || workflowStatus === 'verifying'
 }
 
 /**
@@ -103,59 +100,18 @@ export interface UseChatReturn {
   /** Whether a stop request is awaiting backend confirmation */
   isStopping: boolean
 
-  /**
-   * Approve the current plan
-   * @param feedback - Optional user feedback
-   */
-  approvePlan: (
-    review: {
+  resolveToolPermission: (
+    permission: {
       gate_id: string
-      artifact_id?: string
-      artifact_version?: number
-      checkpoint_id?: string
-      commit_sha?: string
-      workspace_path?: string
-      workspace_ref?: string
-      binding?: ReviewBindingPayload
     },
-    feedback?: string,
-    action?: 'approve' | 'revise' | 'reject',
-    permissionScope?: 'once' | 'session',
+    decision?: 'allow' | 'deny',
+    scope?: 'once' | 'session',
   ) => Promise<void>
 
-  /**
-   * Upload and optionally auto-approve a revised manifest CSV
-   * @param gateId - The asset gate ID to upload for
-   * @param csvContent - The raw CSV content
-   * @param autoApprove - Whether to automatically approve after uploading
-   */
-  uploadManifestCsv: (
-    gateId: string,
-    csvContent: string,
-    autoApprove?: boolean,
-  ) => Promise<void>
-
-  /**
-   * Approve a manifest gate
-   * @param gateId - The asset gate ID to approve
-   * @param feedback - Optional feedback
-   */
-  approveManifest: (
-    review: ReviewBindingPayload & { gate_id: string },
-    feedback?: string,
-  ) => Promise<void>
-
-  /**
-   * Revise a manifest gate
-   * @param gateId - The asset gate ID to request revision for
-   * @param feedback - Required feedback indicating what needs to change
-   */
-  reviseManifest: (gateId: string, feedback: string) => Promise<void>
-
-  /** Local state for plan approval / revision submission UX */
-  approvalState: {
+  /** Local state for tool-permission submission UX */
+  permissionState: {
     gateId: string | null
-    action: 'approve' | 'revise' | 'reject' | null
+    action: 'allow' | 'deny' | null
     phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed'
     message: string
   }
@@ -171,7 +127,7 @@ export interface UseChatReturn {
   canContinue: boolean
 
   /** WebSocket connection state */
-  wsState: WebSocketState
+  wsState: ProjectEventPollingState
 }
 
 /**
@@ -216,8 +172,8 @@ export const useChat = ({
   const isStoppingRef = useRef(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [canContinue, setCanContinue] = useState(false)
-  const [approvalState, setApprovalState] = useState<
-    UseChatReturn['approvalState']
+  const [permissionState, setPermissionState] = useState<
+    UseChatReturn['permissionState']
   >({
     gateId: null,
     action: null,
@@ -236,25 +192,25 @@ export const useChat = ({
     setIsStreaming,
     loadHistory,
   } = useChatStore()
-  const pendingReviews = useProjectStore(state => state.pendingReviews)
+  const pendingPermissions = useProjectStore(state => state.pendingPermissions)
   const projectStatus = useProjectStore(state => state.projectStatus)
-  const removePendingReview = useProjectStore(
-    state => state.removePendingReview,
+  const removePendingPermission = useProjectStore(
+    state => state.removePendingPermission,
   )
-  const upsertPendingReview = useProjectStore(
-    state => state.upsertPendingReview,
+  const upsertPendingPermission = useProjectStore(
+    state => state.upsertPendingPermission,
   )
   const {
     updateTokenUsage,
     updateLastP2PRoute,
-    loadTasks,
-    loadActivities,
     loadCurrentUser,
-    setAgentStatus,
-    refreshAgents,
     setIsSyncing,
   } = useSystemStore()
-  const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews)
+  const projectRuntimeDisplay = toProjectRuntimeDisplayModel(projectStatus)
+  const waitingPermission = getWaitingPermissionState(
+    projectRuntimeDisplay,
+    pendingPermissions,
+  )
 
   useEffect(() => {
     // These values describe one project's active turn. The hook remains
@@ -268,7 +224,7 @@ export const useChat = ({
     setIsLoading(false)
     setCurrentTaskId(null)
     setCanContinue(false)
-    setApprovalState({
+    setPermissionState({
       gateId: null,
       action: null,
       phase: 'idle',
@@ -279,23 +235,23 @@ export const useChat = ({
   }, [projectId, setCurrentSender, setIsStreaming])
 
   useEffect(() => {
-    if (!approvalState.gateId) {
+    if (!permissionState.gateId) {
       return
     }
-    const gateStillPresent = pendingReviews.some(
-      review =>
-        String(review?.gate_id || '').trim() ===
-        String(approvalState.gateId || '').trim(),
+    const gateStillPresent = pendingPermissions.some(
+      permission =>
+        String(permission?.gate_id || '').trim() ===
+        String(permissionState.gateId || '').trim(),
     )
-    if (!gateStillPresent && approvalState.phase !== 'failed') {
-      setApprovalState({
+    if (!gateStillPresent && permissionState.phase !== 'failed') {
+      setPermissionState({
         gateId: null,
         action: null,
         phase: 'idle',
         message: '',
       })
     }
-  }, [approvalState, pendingReviews])
+  }, [permissionState, pendingPermissions])
 
   const refreshProjectVisibility = useCallback(async () => {
     if (useSystemStore.getState().authenticationStatus !== 'authenticated')
@@ -304,7 +260,7 @@ export const useChat = ({
     await store.loadProjectRuntimeState(projectId)
   }, [projectId])
 
-  const emitWaitingApprovalBlock = useCallback(
+  const emitWaitingPermissionBlock = useCallback(
     (message: string) => {
       setIsLoading(false)
       setCanContinue(false)
@@ -323,7 +279,7 @@ export const useChat = ({
     [addMessage, onError, showToastError],
   )
 
-  // Use refs to avoid handleWebSocketMessage dependency churn and WebSocket reconnections
+  // Use refs to avoid handleProjectEventMessage dependency churn and event polling restarts
   const latestRefs = useRef({
     projectId,
     onError,
@@ -331,9 +287,7 @@ export const useChat = ({
     onTaskEvent,
     showToastError,
     showToastSuccess,
-    approvalState,
-    loadTasks,
-    loadActivities,
+    permissionState,
     loadCurrentUser,
     refreshProjectVisibility,
   })
@@ -346,9 +300,7 @@ export const useChat = ({
     onTaskEvent,
     showToastError,
     showToastSuccess,
-    approvalState,
-    loadTasks,
-    loadActivities,
+    permissionState,
     loadCurrentUser,
     refreshProjectVisibility,
   }
@@ -359,8 +311,8 @@ export const useChat = ({
    *
    * Requirements: 1.2, 7.1, 7.2
    */
-  const handleWebSocketMessage = useCallback(
-    (message: WebSocketMessage) => {
+  const handleProjectEventMessage = useCallback(
+    (message: ProjectEventMessage) => {
       const refs = latestRefs.current
 
       switch (message.type) {
@@ -368,7 +320,7 @@ export const useChat = ({
           // Streaming token - accumulate content
           // Requirements: 1.3
           if (message.content && message.sender) {
-            const semanticType = normalizeWebSocketSemanticType(message)
+            const semanticType = normalizeProjectEventSemanticType(message)
             updateMessage(
               message.task_id,
               message.content,
@@ -388,14 +340,12 @@ export const useChat = ({
               message.message_id,
             )
             setCurrentSender(message.sender)
-            // Real-time status injection
-            setAgentStatus(message.sender, 'working', message.task_id)
           }
           break
 
         case 'agent_message':
           if (message.content && message.sender) {
-            const semanticType = normalizeWebSocketSemanticType(message)
+            const semanticType = normalizeProjectEventSemanticType(message)
             finalizeMessage(
               message.task_id,
               message.content,
@@ -429,8 +379,6 @@ export const useChat = ({
               message.message_id,
             )
             setCurrentSender(message.sender)
-            // Real-time status injection
-            setAgentStatus(message.sender, 'working', message.task_id)
           }
           break
 
@@ -477,10 +425,6 @@ export const useChat = ({
               message,
             )
 
-            // Final refresh to clear "working" status of agents
-            refreshAgents().catch(err =>
-              console.error('[useChat] Status refresh failed:', err),
-            )
           } else if (
             message.status === 'queued' ||
             message.status === 'running' ||
@@ -510,7 +454,7 @@ export const useChat = ({
                 canContinue: message.status === 'paused',
               })
             }
-            setApprovalState(prev => {
+            setPermissionState(prev => {
               if (
                 message.status !== 'failed' ||
                 (prev.phase !== 'awaiting_runtime' &&
@@ -522,26 +466,11 @@ export const useChat = ({
                 gateId: prev.gateId,
                 action: prev.action,
                 phase: 'failed',
-                message: '审批已提交，但后续阶段启动失败。',
+                message: '权限决定已提交，但后续执行失败。',
               }
             })
             refs.onTaskEvent?.('status_failed', message)
           }
-          break
-
-        case 'plan_approved':
-          // Plan approval event
-          // Requirements: 4.4, 7.3
-          refs.showToastSuccess?.(
-            message.content || '审批已确认，系统正在继续执行。',
-          )
-          setApprovalState(prev => ({
-            gateId: prev.gateId,
-            action: prev.action,
-            phase: 'idle',
-            message: message.content || '审批已通过，系统正在继续执行。',
-          }))
-          refs.onTaskEvent?.('plan_approved', message)
           break
 
         case 'human_gate':
@@ -550,8 +479,8 @@ export const useChat = ({
 
           // Permission events can arrive while the document is hidden, when the
           // dashboard's visibility-aware status poll is intentionally paused.
-          // Refresh the authoritative pending review snapshot immediately so
-          // the browser-tab attention indicator and approval dialog do not wait
+          // Refresh the authoritative pending permission snapshot immediately so
+          // the browser-tab attention indicator and permission panel do not wait
           // for the user to return to the page.
           refs
             .refreshProjectVisibility()
@@ -581,11 +510,6 @@ export const useChat = ({
               documentTitle: artifactName,
               taskKind: 'artifact_created',
             })
-            refs
-              .loadActivities()
-              .catch(err =>
-                console.error('[useChat] Artifact refresh failed:', err),
-              )
             refs
               .refreshProjectVisibility()
               .catch(err =>
@@ -635,9 +559,9 @@ export const useChat = ({
             message.error ||
             '任务执行出现错误'
           const contextualError =
-            refs.approvalState.phase === 'awaiting_runtime' ||
-            refs.approvalState.phase === 'submitting'
-              ? `审批已提交，但后续执行失败：${errContent}`
+            refs.permissionState.phase === 'awaiting_runtime' ||
+            refs.permissionState.phase === 'submitting'
+              ? `权限决定已提交，但后续执行失败：${errContent}`
               : errContent
           addMessage({
             id: `error-${message.task_id || 'na'}-${contextualError.substring(0, 32)}`,
@@ -649,7 +573,7 @@ export const useChat = ({
             errorDetails: message.error || message.message || message.code,
           })
           setIsLoading(false)
-          setApprovalState(prev => {
+          setPermissionState(prev => {
             if (
               prev.phase !== 'awaiting_runtime' &&
               prev.phase !== 'submitting'
@@ -804,8 +728,6 @@ export const useChat = ({
       updateTokenUsage,
       setIsStreaming,
       updateThought,
-      setAgentStatus,
-      refreshAgents,
       updateLastP2PRoute,
     ],
   )
@@ -820,11 +742,10 @@ export const useChat = ({
     setIsSyncing(true)
 
     try {
-      // BeeGame has one server-owned runtime-state snapshot. Do not fan a
-      // reconnect out into legacy phase, token, agent and task probes.
+      // BeeGame has one server-owned runtime-state snapshot.
       await refreshProjectVisibility()
       const projectStatus = useProjectStore.getState().projectStatus
-      if (isProjectStatusRunning(projectStatus)) {
+      if (isProjectWorkflowActive(projectStatus)) {
         setCurrentTaskId(currentTaskId || projectId)
         setIsLoading(true)
         setCanContinue(false)
@@ -875,8 +796,7 @@ export const useChat = ({
 
   useEffect(() => {
     if (!projectStatus || projectStatus.project_id !== projectId) return
-    const phase = String(projectStatus.phase || '').toLowerCase()
-    if (phase === 'running' || phase === 'starting') {
+    if (isProjectWorkflowActive(projectStatus)) {
       setIsLoading(true)
       setCanContinue(false)
       setCurrentTaskId(current => current || projectId)
@@ -892,9 +812,9 @@ export const useChat = ({
   }, [projectId, projectStatus])
 
   // Initialize WebSocket connection
-  const { state: wsState, reconnect } = useWebSocket({
+  const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
-    onMessage: handleWebSocketMessage,
+    onMessage: handleProjectEventMessage,
     onError: handleWebSocketError,
     onClose: handleWebSocketClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
@@ -912,8 +832,8 @@ export const useChat = ({
       attachments?: ChatAttachmentPayload[],
       supersedesMessageId?: string,
     ) => {
-      if (waitingApproval.isBlockingChat) {
-        emitWaitingApprovalBlock(waitingApproval.message)
+      if (waitingPermission.isBlockingChat) {
+        emitWaitingPermissionBlock(waitingPermission.message)
         return
       }
       try {
@@ -978,8 +898,8 @@ export const useChat = ({
       wsState,
       reconnect,
       syncAfterReconnect,
-      waitingApproval,
-      emitWaitingApprovalBlock,
+      waitingPermission,
+      emitWaitingPermissionBlock,
     ],
   )
 
@@ -988,8 +908,8 @@ export const useChat = ({
    * Requirements: 6.4
    */
   const continueTask = useCallback(async () => {
-    if (waitingApproval.isBlockingChat) {
-      emitWaitingApprovalBlock(waitingApproval.message)
+    if (waitingPermission.isBlockingChat) {
+      emitWaitingPermissionBlock(waitingPermission.message)
       return
     }
     try {
@@ -1033,8 +953,8 @@ export const useChat = ({
     wsState,
     reconnect,
     syncAfterReconnect,
-    waitingApproval,
-    emitWaitingApprovalBlock,
+    waitingPermission,
+    emitWaitingPermissionBlock,
   ])
 
   /**
@@ -1089,89 +1009,60 @@ export const useChat = ({
     }
   }, [currentTaskId, projectId, addMessage, setCurrentSender, onError])
 
-  /**
-   * Approve the current plan
-   * Requirements: 7.3
-   */
-  const approvePlan = useCallback(
+  const resolveToolPermission = useCallback(
     async (
-      review: ReviewBindingPayload & {
-        gate_id: string
-        binding?: ReviewBindingPayload
-      },
-      feedback?: string,
-      action: 'approve' | 'revise' | 'reject' = 'approve',
-      permissionScope: 'once' | 'session' = 'once',
+      permission: { gate_id: string },
+      decision: 'allow' | 'deny' = 'allow',
+      scope: 'once' | 'session' = 'once',
     ) => {
-      const reviewSnapshot = pendingReviews.find(
+      const permissionSnapshot = pendingPermissions.find(
         item =>
           String(item?.gate_id || '').trim() ===
-          String(review.gate_id || '').trim(),
+          String(permission.gate_id || '').trim(),
       )
       try {
-        const binding = review.binding ?? review
         const submittedMessage =
-          action === 'approve'
-            ? '已提交批准，系统正在进入下一阶段。'
-            : action === 'revise'
-              ? '已提交修订请求，系统将返回设计修订流程。'
-              : '已提交拒绝。'
-        setApprovalState({
-          gateId: review.gate_id,
-          action,
+          decision === 'allow' ? '已允许工具操作。' : '已拒绝工具操作。'
+        setPermissionState({
+          gateId: permission.gate_id,
+          action: decision,
           phase: 'submitting',
           message: submittedMessage,
         })
 
         showToastSuccess?.(submittedMessage)
 
-        await api.approvePlan(
-          normalizeApprovePlanPayload({
-            project_id: projectId,
-            gate_id: review.gate_id,
-            action,
-            artifact_id: binding.artifact_id ?? review.artifact_id,
-            artifact_version:
-              binding.artifact_version ?? review.artifact_version,
-            checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
-            commit_sha: binding.commit_sha ?? review.commit_sha,
-            workspace_path:
-              binding.workspace_path ??
-              review.workspace_path ??
-              review.workspace_ref,
-            workspace_ref:
-              binding.workspace_ref ??
-              review.workspace_ref ??
-              review.workspace_path,
-            feedback,
-            permission_scope: permissionScope,
-          }),
-        )
+        await api.resolveToolPermission({
+          project_id: projectId,
+          gate_id: permission.gate_id,
+          decision,
+          scope,
+        })
 
-        removePendingReview(review.gate_id)
+        removePendingPermission(permission.gate_id)
         await refreshProjectVisibility()
-        setApprovalState({
+        setPermissionState({
           gateId: null,
           action: null,
           phase: 'idle',
           message: '',
         })
-        onTaskEvent?.('plan_submitted', { gate_id: review.gate_id, action })
+        onTaskEvent?.('permission_resolved', { gate_id: permission.gate_id, decision })
       } catch (error) {
-        console.error('[useChat] Failed to approve plan:', error)
-        if (reviewSnapshot) {
-          upsertPendingReview(reviewSnapshot)
+        console.error('[useChat] Failed to resolve tool permission:', error)
+        if (permissionSnapshot) {
+          upsertPendingPermission(permissionSnapshot)
         }
         const errorMessage =
-          error instanceof Error ? error.message : '审批操作失败，请重试'
-        setApprovalState({
-          gateId: review.gate_id,
-          action,
+          error instanceof Error ? error.message : '权限操作失败，请重试'
+        setPermissionState({
+          gateId: permission.gate_id,
+          action: decision,
           phase: 'failed',
           message: errorMessage,
         })
 
-        showToastError?.(`审批操作失败：${errorMessage}`)
+        showToastError?.(`权限操作失败：${errorMessage}`)
 
         onError?.(error as Error)
       }
@@ -1179,139 +1070,13 @@ export const useChat = ({
     [
       onError,
       onTaskEvent,
-      pendingReviews,
+      pendingPermissions,
       projectId,
       refreshProjectVisibility,
-      removePendingReview,
+      removePendingPermission,
       showToastError,
       showToastSuccess,
-      upsertPendingReview,
-    ],
-  )
-
-  /**
-   * Upload and optionally auto-approve a manifest CSV
-   */
-  const uploadManifestCsv = useCallback(
-    async (
-      gateId: string,
-      csvContent: string,
-      autoApprove: boolean = false,
-    ) => {
-      try {
-        await api.uploadManifestCsv({
-          project_id: projectId,
-          gate_id: gateId,
-          csv_content: csvContent,
-          auto_approve: autoApprove,
-        })
-        showToastSuccess?.(
-          autoApprove
-            ? '资源清单已上传并提交确认，系统正在校验资源并继续执行。'
-            : '资源清单已上传，请确认后继续。',
-        )
-        onTaskEvent?.(
-          autoApprove ? 'manifest_auto_approved' : 'manifest_uploaded',
-        )
-      } catch (error) {
-        console.error('[useChat] Failed to upload manifest CSV:', error)
-        showToastError?.('上传资源清单失败，请重试')
-        onError?.(error as Error)
-      }
-    },
-    [onError, onTaskEvent, projectId, showToastError, showToastSuccess],
-  )
-
-  /**
-   * Approve a manifest gate
-   */
-  const approveManifest = useCallback(
-    async (
-      review: ReviewBindingPayload & {
-        gate_id: string
-        binding?: ReviewBindingPayload
-      },
-      feedback?: string,
-    ) => {
-      try {
-        const binding = review.binding ?? review
-        const normalized = normalizeReviewBindingPayload({
-          project_id: projectId,
-          gate_id: review.gate_id,
-          checkpoint_id: binding.checkpoint_id ?? review.checkpoint_id,
-          commit_sha: binding.commit_sha ?? review.commit_sha,
-          workspace_path:
-            binding.workspace_path ??
-            review.workspace_path ??
-            review.workspace_ref,
-          workspace_ref:
-            binding.workspace_ref ??
-            review.workspace_ref ??
-            review.workspace_path,
-          artifact_id: binding.artifact_id ?? review.artifact_id,
-          artifact_version: binding.artifact_version ?? review.artifact_version,
-          feedback,
-        })
-        const result = (await api.approveManifest(normalized)) as unknown as {
-          validation_status?: string
-        }
-        const validationStatus = String(
-          result?.validation_status || 'VALIDATING',
-        )
-        const content =
-          validationStatus === 'VALIDATING'
-            ? '资源清单已确认，系统正在校验资源并继续执行。'
-            : `资源清单已确认，当前状态：${validationStatus}`
-        showToastSuccess?.(content)
-        await refreshProjectVisibility()
-        onTaskEvent?.('manifest_approved', {
-          validation_status: validationStatus,
-        })
-      } catch (error) {
-        console.error('[useChat] Failed to approve manifest:', error)
-        showToastError?.('审批资源清单失败，请重试')
-        onError?.(error as Error)
-      }
-    },
-    [
-      onError,
-      onTaskEvent,
-      projectId,
-      refreshProjectVisibility,
-      showToastError,
-      showToastSuccess,
-    ],
-  )
-
-  /**
-   * Revise a manifest gate
-   */
-  const reviseManifest = useCallback(
-    async (gateId: string, feedback: string) => {
-      try {
-        await api.reviseManifest({
-          project_id: projectId,
-          gate_id: gateId,
-          feedback,
-        })
-        showToastSuccess?.(
-          '已提交资源清单修订请求，系统会重新生成并等待你再次确认。',
-        )
-        await refreshProjectVisibility()
-        onTaskEvent?.('manifest_revise_requested')
-      } catch (error) {
-        console.error('[useChat] Failed to revise manifest:', error)
-        showToastError?.('驳回资源清单失败，请重试')
-        onError?.(error as Error)
-      }
-    },
-    [
-      onError,
-      onTaskEvent,
-      projectId,
-      refreshProjectVisibility,
-      showToastError,
-      showToastSuccess,
+      upsertPendingPermission,
     ],
   )
 
@@ -1319,11 +1084,8 @@ export const useChat = ({
     sendMessage,
     continueTask,
     stopTask,
-    approvePlan,
-    uploadManifestCsv,
-    approveManifest,
-    reviseManifest,
-    approvalState,
+    resolveToolPermission,
+    permissionState,
     isLoading,
     isStopping,
     currentTaskId,

@@ -128,22 +128,6 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messages[0].content).toBe('make a snake game');
   });
 
-  it('removes legacy workflow and diagnostic display state while loading history', () => {
-    const { loadHistory } = useChatStore.getState();
-    loadHistory([{
-      id: 'legacy-message',
-      sender: 'assistant',
-      content: 'thinking',
-      timestamp: 1000,
-      workflow: { status: 'running', raw: '{"verdict":"READY"}' },
-      diagnostic: { raw: '{"internal":true}' },
-    } as any]);
-
-    const message = useChatStore.getState().messages[0] as Record<string, unknown>;
-    expect(message).not.toHaveProperty('workflow');
-    expect(message).not.toHaveProperty('diagnostic');
-  });
-
   it('should reconcile duplicate user messages even when client message ids differ', () => {
     const { addMessage } = useChatStore.getState();
 

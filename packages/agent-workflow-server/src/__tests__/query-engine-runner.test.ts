@@ -13,38 +13,196 @@ import {
   drainNativeBackgroundNotifications,
   getCompletedNativeTaskOutputTaskId,
   getBeeGameResponseLanguageInstruction,
+  getBeeGameWorkflowThinkingConfig,
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
   installInheritedBeeGameTools,
-  NativeExtraToolPermissionBroker,
+  NativeResourceLibraryPermissionBroker,
+  ResourceCatalogTurnGate,
   NativeBackgroundTaskLedger,
   NativeSandboxNetworkPermissionBroker,
   parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
+  requiresBeeGameWorkflowBoundaryCheck,
+  selectBeeGameWorkerTools,
   type MutableAppState,
   stopRunningLocalShellTasks,
 } from '../beegame/query-engine-runner'
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+  test('disables extended thinking for structured planning and implementation workers', () => {
+    expect(getBeeGameWorkflowThinkingConfig('atomic-task-planner')).toEqual({
+      type: 'disabled',
+    })
+    expect(getBeeGameWorkflowThinkingConfig('implementation-worker')).toEqual({
+      type: 'disabled',
+    })
+    expect(
+      getBeeGameWorkflowThinkingConfig('document-reviewer'),
+    ).toBeUndefined()
+    expect(getBeeGameWorkflowThinkingConfig()).toBeUndefined()
+  })
+
+  test('forces atomic task planner exploration through the workflow permission boundary', () => {
+    for (const toolName of [
+      'Agent',
+      'Bash',
+      'Glob',
+      'Grep',
+      'LS',
+      'NotebookRead',
+      'Read',
+      'Task',
+    ]) {
+      expect(
+        requiresBeeGameWorkflowBoundaryCheck(
+          {
+            workflowWorker: true,
+            workflowWorkerType: 'atomic-task-planner',
+          },
+          toolName,
+        ),
+      ).toBe(true)
+    }
+
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: true,
+          workflowWorkerType: 'implementation-worker',
+        },
+        'Read',
+      ),
+    ).toBe(true)
+  })
+
+  test('preserves the existing workflow mutation and resource Bash boundaries', () => {
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: true,
+          workflowWorkerType: 'implementation-worker',
+        },
+        'Write',
+      ),
+    ).toBe(true)
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: true,
+          workflowWorkerType: 'resource-preparer',
+        },
+        'Bash',
+      ),
+    ).toBe(true)
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: false,
+          workflowWorkerType: 'atomic-task-planner',
+        },
+        'Read',
+      ),
+    ).toBe(false)
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: true,
+          workflowWorkerType: 'implementation-worker',
+        },
+        'WebSearch',
+      ),
+    ).toBe(true)
+    expect(
+      requiresBeeGameWorkflowBoundaryCheck(
+        {
+          workflowWorker: false,
+          workflowWorkerType: 'implementation-worker',
+        },
+        'WebSearch',
+      ),
+    ).toBe(false)
+  })
+
+  test('removes the deferred ResourceLibrary call lane only from resource workers', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'SearchExtraTools' },
+      { name: 'ExecuteExtraTool' },
+      { name: 'Task' },
+    ]
+
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read', 'Task'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer', 'fresh').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read', 'Task'])
+    expect(selectBeeGameWorkerTools(tools, 'implementation-worker')).toEqual(
+      tools,
+    )
+  })
+
+  test('removes generic manifest mutation tools from a fresh resource dispatch', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'Write' },
+      { name: 'Edit' },
+      { name: 'MultiEdit' },
+      { name: 'NotebookEdit' },
+    ]
+
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer', 'fresh').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer', 'selection').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(tools.map(tool => tool.name))
+  })
+
+  test('removes file and exploration lanes from the atomic planner', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'Bash' },
+      { name: 'Write' },
+      { name: 'Edit' },
+      { name: 'Agent' },
+    ]
+
+    expect(
+      selectBeeGameWorkerTools(tools, 'atomic-task-planner').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual([])
+  })
 
   test('publishes BeeGame capabilities through the native subagent tool pool', () => {
     const existing = { name: 'existing-mcp-tool' }
-    const contract = { name: 'ProjectDeliveryContract' }
     const resourceLibrary = { name: 'ResourceLibrary' }
-    const state = installInheritedBeeGameTools({
-      mcp: {
-        clients: [],
-        tools: [existing],
-        commands: [],
-        resources: {},
+    const state = installInheritedBeeGameTools(
+      {
+        mcp: {
+          clients: [],
+          tools: [existing],
+          commands: [],
+          resources: {},
+        },
       },
-    }, [contract, resourceLibrary])
+      [resourceLibrary],
+    )
 
     expect((state.mcp as { tools: unknown[] }).tools).toEqual([
       existing,
-      contract,
       resourceLibrary,
     ])
   })
@@ -63,20 +221,27 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   test('initializes Claude Code native sandbox and forwards only its network decisions', async () => {
     const calls: string[] = []
     const permissionRequests: Array<Record<string, unknown>> = []
-    await initializeBeeGameNativeSandbox({
-      SandboxManager: {
-        getSandboxUnavailableReason: () => undefined,
-        isSandboxRequired: () => true,
-        isSandboxingEnabled: () => true,
-        initialize: async (ask: (host: { host: string; port?: number }) => Promise<boolean>) => {
-          calls.push('initialize')
-          expect(await ask({ host: 'registry.example', port: 443 })).toBe(true)
+    await initializeBeeGameNativeSandbox(
+      {
+        SandboxManager: {
+          getSandboxUnavailableReason: () => undefined,
+          isSandboxRequired: () => true,
+          isSandboxingEnabled: () => true,
+          initialize: async (
+            ask: (host: { host: string; port?: number }) => Promise<boolean>,
+          ) => {
+            calls.push('initialize')
+            expect(await ask({ host: 'registry.example', port: 443 })).toBe(
+              true,
+            )
+          },
         },
       },
-    }, async request => {
-      permissionRequests.push(request)
-      return { behavior: 'allow' }
-    })
+      async request => {
+        permissionRequests.push(request)
+        return { behavior: 'allow' }
+      },
+    )
 
     expect(calls).toEqual(['initialize'])
     expect(permissionRequests).toEqual([
@@ -88,7 +253,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('coalesces concurrent sandbox requests for one exact network target', async () => {
-    let resolveDecision: ((value: { behavior: 'allow'; scope: 'once' }) => void) | undefined
+    let resolveDecision:
+      | ((value: { behavior: 'allow'; scope: 'once' }) => void)
+      | undefined
     const requests: Array<Record<string, unknown>> = []
     const broker = new NativeSandboxNetworkPermissionBroker(request => {
       requests.push(request)
@@ -106,10 +273,12 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     resolveDecision?.({ behavior: 'allow', scope: 'once' })
 
     expect(await Promise.all(decisions)).toEqual([true, true, true])
-    expect(requests[0]).toEqual(expect.objectContaining({
-      toolName: 'SandboxNetworkAccess',
-      input: { host: 'registry.example', port: 443 },
-    }))
+    expect(requests[0]).toEqual(
+      expect.objectContaining({
+        toolName: 'SandboxNetworkAccess',
+        input: { host: 'registry.example', port: 443 },
+      }),
+    )
   })
 
   test('keeps an exact sandbox host grant only for the current worker session', async () => {
@@ -119,120 +288,248 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       return { behavior: 'allow', scope: 'session' }
     })
 
-    expect(await broker.request({ host: 'registry.example', port: 443 })).toBe(true)
-    expect(await broker.request({ host: 'REGISTRY.EXAMPLE', port: 443 })).toBe(true)
-    expect(await broker.request({ host: 'registry.example', port: 80 })).toBe(true)
+    expect(await broker.request({ host: 'registry.example', port: 443 })).toBe(
+      true,
+    )
+    expect(await broker.request({ host: 'REGISTRY.EXAMPLE', port: 443 })).toBe(
+      true,
+    )
+    expect(await broker.request({ host: 'registry.example', port: 80 })).toBe(
+      true,
+    )
     expect(requests).toHaveLength(2)
 
-    const separateSession = new NativeSandboxNetworkPermissionBroker(async request => {
-      requests.push(request)
-      return { behavior: 'deny' }
-    })
-    expect(await separateSession.request({ host: 'registry.example', port: 443 })).toBe(false)
+    const separateSession = new NativeSandboxNetworkPermissionBroker(
+      async request => {
+        requests.push(request)
+        return { behavior: 'deny' }
+      },
+    )
+    expect(
+      await separateSession.request({ host: 'registry.example', port: 443 }),
+    ).toBe(false)
     expect(requests).toHaveLength(3)
   })
 
-  test('restores read-only ResourceLibrary permission through ExecuteExtraTool without prompting', async () => {
+  test('allows the native read-only ResourceLibrary lane without prompting', async () => {
     const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeExtraToolPermissionBroker(() => async request => {
-      requests.push(request)
-      return { behavior: 'allow' }
-    })
+    const broker = new NativeResourceLibraryPermissionBroker(
+      () => async request => {
+        requests.push(request)
+        return { behavior: 'allow' }
+      },
+    )
     const toolInput = {
-      tool_name: 'ResourceLibrary',
-      params: { action: 'browse_pack_elements', pack_id: 'pack-a', filters: { asset_kinds: ['model'] } },
+      action: 'index_pack_elements',
+      pack_id: 'pack-a',
+      filters: { asset_kinds: ['model'] },
     }
 
-    expect(await broker.authorize({
-      toolName: 'ExecuteExtraTool',
-      toolInput,
-      toolUseID: 'read-resource',
-    })).toEqual(expect.objectContaining({
-      behavior: 'allow',
-      updatedInput: toolInput,
-    }))
+    expect(
+      await broker.authorize({
+        toolName: 'ResourceLibrary',
+        toolInput,
+        toolUseID: 'read-resource',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        behavior: 'allow',
+        updatedInput: toolInput,
+      }),
+    )
     expect(requests).toEqual([])
+  })
+
+  test('allows one catalog read per model turn and leaves imports available', () => {
+    const gate = new ResourceCatalogTurnGate()
+    const turn = {}
+    expect(
+      gate.issue({
+        workerType: 'resource-preparer',
+        toolName: 'ResourceLibrary',
+        toolInput: { action: 'browse_packs' },
+        assistantMessage: turn,
+        toolUseContext: {},
+      }),
+    ).toBeUndefined()
+    expect(
+      gate.issue({
+        workerType: 'resource-preparer',
+        toolName: 'ResourceLibrary',
+        toolInput: { action: 'inspect_pack', pack_id: 'pack-a' },
+        assistantMessage: turn,
+        toolUseContext: {},
+      }),
+    ).toContain('Only one ResourceLibrary catalog read')
+    expect(
+      gate.issue({
+        workerType: 'resource-preparer',
+        toolName: 'ResourceLibrary',
+        toolInput: { action: 'import_elements', selections: [] },
+        assistantMessage: turn,
+        toolUseContext: {},
+      }),
+    ).toBeUndefined()
+    expect(
+      gate.issue({
+        workerType: 'resource-preparer',
+        toolName: 'ResourceLibrary',
+        toolInput: { action: 'index_pack_elements', pack_id: 'pack-a' },
+        assistantMessage: {},
+        toolUseContext: {},
+      }),
+    ).toBeUndefined()
   })
 
   test('rejects an invented ResourceLibrary action with the supported contract', async () => {
     const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeExtraToolPermissionBroker(() => async request => {
-      requests.push(request)
-      return { behavior: 'allow' }
-    })
-
-    expect(await broker.authorize({
-      toolName: 'ExecuteExtraTool',
-      toolInput: {
-        tool_name: 'ResourceLibrary',
-        params: { action: 'match', slot_id: 'primary-character' },
+    const broker = new NativeResourceLibraryPermissionBroker(
+      () => async request => {
+        requests.push(request)
+        return { behavior: 'allow' }
       },
-      toolUseID: 'invalid-resource-action',
-    })).toEqual(expect.objectContaining({
-      behavior: 'deny',
-      message: 'Unsupported ResourceLibrary action "match". Allowed actions: inspect_project, browse_packs, inspect_pack, index_pack_elements, browse_pack_elements, import_elements, refresh_import_metadata.',
-    }))
+    )
+
+    expect(
+      await broker.authorize({
+        toolName: 'ResourceLibrary',
+        toolInput: {
+          action: 'match',
+          slot_id: 'primary-character',
+        },
+        toolUseID: 'invalid-resource-action',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message:
+          'Unsupported ResourceLibrary action "match". Allowed actions: browse_packs, inspect_pack, index_pack_elements, import_elements, refresh_import_metadata.',
+      }),
+    )
     expect(requests).toEqual([])
   })
 
   test('keeps a ResourceLibrary mutation grant scoped to this worker session', async () => {
     const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeExtraToolPermissionBroker(() => async request => {
-      requests.push(request)
-      return { behavior: 'allow', scope: 'session' }
-    })
-    const toolInput = {
-      tool_name: 'ResourceLibrary',
-      params: {
-        action: 'import_elements',
-        selections: [{ import_id: 'primary-character', pack_id: 'pack-a', element_id: 'character-a', destination_path: 'assets/library/character' }],
+    const broker = new NativeResourceLibraryPermissionBroker(
+      () => async request => {
+        requests.push(request)
+        return { behavior: 'allow', scope: 'session' }
       },
+    )
+    const toolInput = {
+      action: 'import_elements',
+      selections: [
+        {
+          import_id: 'primary-character',
+          pack_id: 'pack-a',
+          element_id: 'character-a',
+          destination_path: 'assets/library/character',
+        },
+      ],
     }
 
-    expect((await broker.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-1' }))?.behavior).toBe('allow')
-    expect((await broker.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-2' }))?.behavior).toBe('allow')
+    expect(
+      (
+        await broker.authorize({
+          toolName: 'ResourceLibrary',
+          toolInput,
+          toolUseID: 'write-1',
+        })
+      )?.behavior,
+    ).toBe('allow')
+    expect(
+      (
+        await broker.authorize({
+          toolName: 'ResourceLibrary',
+          toolInput,
+          toolUseID: 'write-2',
+        })
+      )?.behavior,
+    ).toBe('allow')
     expect(requests).toEqual([
       expect.objectContaining({
         toolName: 'ResourceLibrary',
-        input: toolInput.params,
+        input: toolInput,
       }),
     ])
 
-    const separateSession = new NativeExtraToolPermissionBroker(() => async request => {
-      requests.push(request)
-      return { behavior: 'deny' }
-    })
-    expect((await separateSession.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-3' }))?.behavior).toBe('deny')
+    const separateSession = new NativeResourceLibraryPermissionBroker(
+      () => async request => {
+        requests.push(request)
+        return { behavior: 'deny' }
+      },
+    )
+    expect(
+      (
+        await separateSession.authorize({
+          toolName: 'ResourceLibrary',
+          toolInput,
+          toolUseID: 'write-3',
+        })
+      )?.behavior,
+    ).toBe('deny')
     expect(requests).toHaveLength(2)
   })
 
+  test('routes refresh_import_metadata through the ResourceLibrary mutation boundary', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeResourceLibraryPermissionBroker(
+      () => async request => {
+        requests.push(request)
+        return { behavior: 'deny' }
+      },
+    )
+    const toolInput = { action: 'refresh_import_metadata' }
+
+    expect(
+      await broker.authorize({
+        toolName: 'ResourceLibrary',
+        toolInput,
+        toolUseID: 'refresh-resource',
+      }),
+    ).toEqual(expect.objectContaining({ behavior: 'deny' }))
+    expect(requests).toEqual([
+      expect.objectContaining({
+        toolName: 'ResourceLibrary',
+        input: toolInput,
+      }),
+    ])
+  })
+
   test('never treats a session ResourceLibrary grant as approval for another deferred tool', async () => {
-    const broker = new NativeExtraToolPermissionBroker(() => async () => ({
-      behavior: 'allow',
-      scope: 'session',
-    }))
+    const broker = new NativeResourceLibraryPermissionBroker(
+      () => async () => ({
+        behavior: 'allow',
+        scope: 'session',
+      }),
+    )
     await broker.authorize({
-      toolName: 'ExecuteExtraTool',
-      toolInput: { tool_name: 'ResourceLibrary', params: { action: 'import_elements', selections: [] } },
+      toolName: 'ResourceLibrary',
+      toolInput: { action: 'import_elements', selections: [] },
       toolUseID: 'resource-write',
     })
 
-    expect(await broker.authorize({
-      toolName: 'ExecuteExtraTool',
-      toolInput: { tool_name: 'UnrelatedDeferredTool', params: {} },
-      toolUseID: 'unrelated-write',
-    })).toBeUndefined()
+    expect(
+      await broker.authorize({
+        toolName: 'ExecuteExtraTool',
+        toolInput: { tool_name: 'UnrelatedDeferredTool', params: {} },
+        toolUseID: 'unrelated-write',
+      }),
+    ).toBeUndefined()
   })
 
   test('fails at session startup when required native sandbox is unavailable', async () => {
-    await expect(initializeBeeGameNativeSandbox({
-      SandboxManager: {
-        getSandboxUnavailableReason: () => 'missing sandbox dependency',
-        isSandboxRequired: () => true,
-        isSandboxingEnabled: () => false,
-        initialize: async () => {},
-      },
-    })).rejects.toThrow(
+    await expect(
+      initializeBeeGameNativeSandbox({
+        SandboxManager: {
+          getSandboxUnavailableReason: () => 'missing sandbox dependency',
+          isSandboxRequired: () => true,
+          isSandboxingEnabled: () => false,
+          initialize: async () => {},
+        },
+      }),
+    ).rejects.toThrow(
       'Claude Code native sandbox is required but unavailable: missing sandbox dependency',
     )
   })
@@ -247,33 +544,57 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
 
   test('drains only main-session native task notifications without interpreting their result', () => {
     const queued = [
-      { value: '<task-notification>first</task-notification>', mode: 'task-notification' },
+      {
+        value: '<task-notification>first</task-notification>',
+        mode: 'task-notification',
+      },
       { value: 'user input', mode: 'prompt' },
-      { value: '<task-notification>subagent</task-notification>', mode: 'task-notification', agentId: 'agent-1' },
-      { value: '<task-notification>second</task-notification>', mode: 'task-notification' },
+      {
+        value: '<task-notification>subagent</task-notification>',
+        mode: 'task-notification',
+        agentId: 'agent-1',
+      },
+      {
+        value: '<task-notification>second</task-notification>',
+        mode: 'task-notification',
+      },
     ]
     const queue = createNativeNotificationQueue({
-      dequeueAllMatching(predicate: (command: (typeof queued)[number]) => boolean) {
+      dequeueAllMatching(
+        predicate: (command: (typeof queued)[number]) => boolean,
+      ) {
         const selected = queued.filter(predicate)
-        for (const command of selected) queued.splice(queued.indexOf(command), 1)
+        for (const command of selected)
+          queued.splice(queued.indexOf(command), 1)
         return selected
       },
     })
 
-    expect(queue.takeMainThreadTaskNotifications().map(command => command.value)).toEqual([
+    expect(
+      queue.takeMainThreadTaskNotifications().map(command => command.value),
+    ).toEqual([
       '<task-notification>first</task-notification>',
       '<task-notification>second</task-notification>',
     ])
     expect(queued).toEqual([
       { value: 'user input', mode: 'prompt' },
-      { value: '<task-notification>subagent</task-notification>', mode: 'task-notification', agentId: 'agent-1' },
+      {
+        value: '<task-notification>subagent</task-notification>',
+        mode: 'task-notification',
+        agentId: 'agent-1',
+      },
     ])
   })
 
   test('forwards Claude native background SDK events without reconstructing them', () => {
     const nativeEvents = [
       { type: 'system', subtype: 'task_started', task_id: 'agent-1' },
-      { type: 'system', subtype: 'task_notification', task_id: 'agent-1', status: 'completed' },
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'agent-1',
+        status: 'completed',
+      },
     ]
     const queue = createNativeSdkEventQueue({
       drainSdkEvents: () => nativeEvents.splice(0),
@@ -281,14 +602,21 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
 
     expect(queue.drain()).toEqual([
       { type: 'system', subtype: 'task_started', task_id: 'agent-1' },
-      { type: 'system', subtype: 'task_notification', task_id: 'agent-1', status: 'completed' },
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'agent-1',
+        status: 'completed',
+      },
     ])
     expect(queue.drain()).toEqual([])
   })
 
   test('flushes native progress while a Claude message is still pending', async () => {
     let releaseMessage = () => {}
-    const gate = new Promise<void>(resolve => { releaseMessage = resolve })
+    const gate = new Promise<void>(resolve => {
+      releaseMessage = resolve
+    })
     const messages: Array<{ type: string }> = []
     let waits = 0
     let flushes = 0
@@ -302,7 +630,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       stream: stream(),
       signal: new AbortController().signal,
       onMessage: message => messages.push(message),
-      flushProgress: () => { flushes += 1 },
+      flushProgress: () => {
+        flushes += 1
+      },
       waitForProgress: async () => {
         waits += 1
         if (waits === 2) releaseMessage()
@@ -315,18 +645,34 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('waits for native background work but excludes foreground tasks and long-lived teammates', () => {
-    expect(hasRunningNativeBackgroundTasks({
-      tasks: {
-        reviewer: { type: 'local_agent', status: 'running', isBackgrounded: true },
-      },
-    })).toBe(true)
-    expect(hasRunningNativeBackgroundTasks({
-      tasks: {
-        foreground: { type: 'local_agent', status: 'running', isBackgrounded: false },
-        teammate: { type: 'in_process_teammate', status: 'running' },
-        completed: { type: 'local_agent', status: 'completed', isBackgrounded: true },
-      },
-    })).toBe(false)
+    expect(
+      hasRunningNativeBackgroundTasks({
+        tasks: {
+          reviewer: {
+            type: 'local_agent',
+            status: 'running',
+            isBackgrounded: true,
+          },
+        },
+      }),
+    ).toBe(true)
+    expect(
+      hasRunningNativeBackgroundTasks({
+        tasks: {
+          foreground: {
+            type: 'local_agent',
+            status: 'running',
+            isBackgrounded: false,
+          },
+          teammate: { type: 'in_process_teammate', status: 'running' },
+          completed: {
+            type: 'local_agent',
+            status: 'completed',
+            isBackgrounded: true,
+          },
+        },
+      }),
+    ).toBe(false)
   })
 
   test('continues the same native session when a background notification arrives later', async () => {
@@ -351,7 +697,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         waits += 1
         running = false
         queued.push({
-          value: '<task-notification><task-id>review-1</task-id><status>completed</status><result>review complete</result></task-notification>',
+          value:
+            '<task-notification><task-id>review-1</task-id><status>completed</status><result>review complete</result></task-notification>',
           mode: 'task-notification',
           uuid: 'notification-1',
         })
@@ -382,7 +729,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       waitForProgress: async () => {
         running = false
         queued.push({
-          value: '<task-notification><task-id>validator-gap</task-id><status>completed</status></task-notification>',
+          value:
+            '<task-notification><task-id>validator-gap</task-id><status>completed</status></task-notification>',
           mode: 'task-notification',
         })
       },
@@ -423,7 +771,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
           return
         }
         queued.push({
-          value: '<task-notification><task-id>auditor-long-running</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
+          value:
+            '<task-notification><task-id>auditor-long-running</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
           mode: 'task-notification',
         })
       },
@@ -442,25 +791,42 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
 
   test('does not resurrect a settled native task when task_started is replayed', () => {
     const ledger = new NativeBackgroundTaskLedger()
-    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'review-replayed' })
+    ledger.observe({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'review-replayed',
+    })
     ledger.settleTask('review-replayed')
-    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'review-replayed' })
+    ledger.observe({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'review-replayed',
+    })
 
     expect(ledger.hasPendingTasks()).toBe(false)
   })
 
   test('releases pending transport tasks after an explicit interruption', () => {
     const ledger = new NativeBackgroundTaskLedger()
-    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'validator-stopped' })
+    ledger.observe({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'validator-stopped',
+    })
 
     ledger.interruptPendingTasks()
-    ledger.observe({ type: 'system', subtype: 'task_started', task_id: 'validator-stopped' })
+    ledger.observe({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'validator-stopped',
+    })
 
     expect(ledger.hasPendingTasks()).toBe(false)
   })
 
   test('returns a failed native validator notification unchanged to the same session', async () => {
-    const notification = '<task-notification><task-id>validator-1</task-id><tool-use-id>agent-validator-1</tool-use-id><status>failed</status><result>native validator failed</result></task-notification>'
+    const notification =
+      '<task-notification><task-id>validator-1</task-id><tool-use-id>agent-validator-1</tool-use-id><status>failed</status><result>native validator failed</result></task-notification>'
     const processed: string[] = []
     const queued = [{ value: notification, mode: 'task-notification' }]
 
@@ -468,7 +834,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       signal: new AbortController().signal,
       takeNotifications: () => queued.splice(0),
       hasRunningTasks: () => false,
-      runNotification: async command => { processed.push(String(command.value)) },
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
     })
 
     expect(processed).toEqual([notification])
@@ -481,8 +849,16 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     await drainNativeBackgroundNotifications({
       signal: controller.signal,
       takeNotifications: () => [
-        { value: '<task-notification><task-id>first</task-id><status>completed</status></task-notification>', mode: 'task-notification' },
-        { value: '<task-notification><task-id>second</task-id><status>completed</status></task-notification>', mode: 'task-notification' },
+        {
+          value:
+            '<task-notification><task-id>first</task-id><status>completed</status></task-notification>',
+          mode: 'task-notification',
+        },
+        {
+          value:
+            '<task-notification><task-id>second</task-id><status>completed</status></task-notification>',
+          mode: 'task-notification',
+        },
       ],
       hasRunningTasks: () => true,
       runNotification: async command => {
@@ -492,16 +868,23 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       waitForProgress: async () => {},
     })
 
-    expect(processed).toEqual(['<task-notification><task-id>first</task-id><status>completed</status></task-notification>'])
+    expect(processed).toEqual([
+      '<task-notification><task-id>first</task-id><status>completed</status></task-notification>',
+    ])
   })
 
   test('only resumes for unique terminal native task notifications', async () => {
     const controller = new AbortController()
     const processed: string[] = []
     const observed: string[] = []
-    const terminal = '<task-notification><task-id>review-1</task-id><tool-use-id>tool-1</tool-use-id><status>completed</status></task-notification>'
+    const terminal =
+      '<task-notification><task-id>review-1</task-id><tool-use-id>tool-1</tool-use-id><status>completed</status></task-notification>'
     const queued = [
-      { value: '<task-notification><task-id>review-1</task-id></task-notification>', mode: 'task-notification' },
+      {
+        value:
+          '<task-notification><task-id>review-1</task-id></task-notification>',
+        mode: 'task-notification',
+      },
       { value: terminal, mode: 'task-notification' },
       { value: terminal, mode: 'task-notification' },
     ]
@@ -510,7 +893,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       takeNotifications: () => queued.splice(0),
       hasRunningTasks: () => false,
       onTerminalNotification: notification => observed.push(notification.value),
-      runNotification: async command => { processed.push(String(command.value)) },
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
     })
     expect(processed).toEqual([terminal])
     expect(observed).toEqual([terminal])
@@ -519,15 +904,20 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   test('does not resume a delayed notification after native TaskOutput already consumed the task', async () => {
     const processed: string[] = []
     const consumed = new Set(['review-1'])
-    const queued = [{
-      value: '<task-notification><task-id>review-1</task-id><tool-use-id>agent-tool-1</tool-use-id><status>completed</status></task-notification>',
-      mode: 'task-notification',
-    }]
+    const queued = [
+      {
+        value:
+          '<task-notification><task-id>review-1</task-id><tool-use-id>agent-tool-1</tool-use-id><status>completed</status></task-notification>',
+        mode: 'task-notification',
+      },
+    ]
     await drainNativeBackgroundNotifications({
       signal: new AbortController().signal,
       takeNotifications: () => queued.splice(0),
       hasRunningTasks: () => false,
-      runNotification: async command => { processed.push(String(command.value)) },
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
       consumedNotificationKeys: consumed,
     })
 
@@ -535,48 +925,62 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('recognizes only structured terminal TaskOutput consumption', () => {
-    expect(getCompletedNativeTaskOutputTaskId({
-      type: 'user',
-      tool_use_result: {
-        retrieval_status: 'success',
-        task: { task_id: 'review-1', status: 'completed' },
-      },
-    })).toBe('review-1')
-    expect(getCompletedNativeTaskOutputTaskId({
-      type: 'user',
-      tool_use_result: {
-        retrieval_status: 'success',
-        task: { task_id: 'review-1', status: 'running' },
-      },
-    })).toBeUndefined()
+    expect(
+      getCompletedNativeTaskOutputTaskId({
+        type: 'user',
+        tool_use_result: {
+          retrieval_status: 'success',
+          task: { task_id: 'review-1', status: 'completed' },
+        },
+      }),
+    ).toBe('review-1')
+    expect(
+      getCompletedNativeTaskOutputTaskId({
+        type: 'user',
+        tool_use_result: {
+          retrieval_status: 'success',
+          task: { task_id: 'review-1', status: 'running' },
+        },
+      }),
+    ).toBeUndefined()
   })
 
   test('parses only the native terminal lifecycle envelope', () => {
-    expect(parseNativeTerminalTaskNotification({
-      value: '<task-notification><task-id>a</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
-      mode: 'task-notification',
-    })).toEqual({
+    expect(
+      parseNativeTerminalTaskNotification({
+        value:
+          '<task-notification><task-id>a</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
+        mode: 'task-notification',
+      }),
+    ).toEqual({
       key: 'a',
       taskId: 'a',
       status: 'completed',
       result: '{"status":"passed"}',
     })
-    expect(parseNativeTerminalTaskNotification({
-      value: '<task-notification><task-id>a</task-id></task-notification>',
-      mode: 'task-notification',
-    })).toBeUndefined()
-    expect(parseNativeTerminalTaskNotification({
-      value: '<task-notification><task-id>b</task-id><status>completed</status><result>{"detail":"literal </result> text"}</result></task-notification>',
-      mode: 'task-notification',
-    })?.result).toBe('{"detail":"literal </result> text"}')
+    expect(
+      parseNativeTerminalTaskNotification({
+        value: '<task-notification><task-id>a</task-id></task-notification>',
+        mode: 'task-notification',
+      }),
+    ).toBeUndefined()
+    expect(
+      parseNativeTerminalTaskNotification({
+        value:
+          '<task-notification><task-id>b</task-id><status>completed</status><result>{"detail":"literal </result> text"}</result></task-notification>',
+        mode: 'task-notification',
+      })?.result,
+    ).toBe('{"detail":"literal </result> text"}')
   })
 
   test('uses native acceptEdits mode without enabling permission bypass', () => {
-    expect(createBeeGameToolPermissionContext({
-      mode: 'default',
-      customRule: 'preserved',
-      isBypassPermissionsModeAvailable: true,
-    })).toEqual({
+    expect(
+      createBeeGameToolPermissionContext({
+        mode: 'default',
+        customRule: 'preserved',
+        isBypassPermissionsModeAvailable: true,
+      }),
+    ).toEqual({
       mode: 'acceptEdits',
       customRule: 'preserved',
       isBypassPermissionsModeAvailable: false,
@@ -584,11 +988,14 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('allows read-only access to runtime and trusted built-in skill roots without granting edit access', () => {
-    const context = createBeeGameToolPermissionContext({
-      mode: 'default',
-      alwaysAllowRules: { session: ['Read(/existing/reference/**)'] },
-      isBypassPermissionsModeAvailable: true,
-    }, ['/runtime/skills', '/platform/builtin-skills'])
+    const context = createBeeGameToolPermissionContext(
+      {
+        mode: 'default',
+        alwaysAllowRules: { session: ['Read(/existing/reference/**)'] },
+        isBypassPermissionsModeAvailable: true,
+      },
+      ['/runtime/skills', '/platform/builtin-skills'],
+    )
 
     expect(context).toMatchObject({
       mode: 'acceptEdits',
@@ -602,7 +1009,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       isBypassPermissionsModeAvailable: false,
     })
     expect(JSON.stringify(context)).not.toContain('Edit(/runtime/skills')
-    expect(JSON.stringify(context)).not.toContain('Edit(/platform/builtin-skills')
+    expect(JSON.stringify(context)).not.toContain(
+      'Edit(/platform/builtin-skills',
+    )
   })
 
   test('delegates workspace file mutation boundaries to native acceptEdits mode', () => {
@@ -631,9 +1040,14 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       mkdir(builtinSkillsDir, { recursive: true }),
     ])
     try {
-      expect(await resolveBeeGameSkillReadRoots({
-        BEEGAME_CONFIG_DIR: configDir,
-      }, builtinSkillsDir)).toEqual([
+      expect(
+        await resolveBeeGameSkillReadRoots(
+          {
+            BEEGAME_CONFIG_DIR: configDir,
+          },
+          builtinSkillsDir,
+        ),
+      ).toEqual([
         await realpath(runtimeSkillsDir),
         await realpath(builtinSkillsDir),
       ])
@@ -646,11 +1060,17 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const closed: string[] = []
 
     await closeBeeGameRuntimeDispatcher({
-      close: () => { closed.push('close') },
-      destroy: () => { closed.push('unexpected-destroy') },
+      close: () => {
+        closed.push('close')
+      },
+      destroy: () => {
+        closed.push('unexpected-destroy')
+      },
     })
     await closeBeeGameRuntimeDispatcher({
-      destroy: () => { closed.push('destroy') },
+      destroy: () => {
+        closed.push('destroy')
+      },
     })
     await closeBeeGameRuntimeDispatcher({})
 
@@ -673,7 +1093,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({
         url: String(input),
-        dispatcher: (init as RequestInit & { dispatcher?: unknown } | undefined)?.dispatcher,
+        dispatcher: (
+          init as (RequestInit & { dispatcher?: unknown }) | undefined
+        )?.dispatcher,
       })
       return new Response('{}')
     }) as typeof fetch
@@ -699,16 +1121,22 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const target: ApprovedOutboundTarget = {
       url: new URL('https://provider.runtime.test/v1'),
       addresses: ['93.184.216.34'],
-      lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+      lookup: (_hostname, _options, callback) =>
+        callback(null, '93.184.216.34', 4),
     }
     const calls: Array<{ init?: RequestInit }> = []
-    const wrapped = createBeeGamePinnedFetch((async (_input, init) => {
-      calls.push({ init })
-      return new Response('{}')
-    }) as typeof fetch, { OPENAI_BASE_URL: target })
+    const wrapped = createBeeGamePinnedFetch(
+      (async (_input, init) => {
+        calls.push({ init })
+        return new Response('{}')
+      }) as typeof fetch,
+      { OPENAI_BASE_URL: target },
+    )
 
     await wrapped('https://provider.runtime.test/v1/chat/completions')
-    await expect(wrapped('https://provider.runtime.test:8443/v1/chat/completions')).rejects.toThrow('Outbound URL is not permitted')
+    await expect(
+      wrapped('https://provider.runtime.test:8443/v1/chat/completions'),
+    ).rejects.toThrow('Outbound URL is not permitted')
     expect(calls[0]?.init).toMatchObject({ redirect: 'error' })
   })
 
@@ -717,13 +1145,17 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       url: new URL('https://provider.runtime.test/v1'),
       addresses: ['198.18.0.220'],
       trustedDevelopmentProxy: true,
-      lookup: (_hostname, _options, callback) => callback(null, '198.18.0.220', 4),
+      lookup: (_hostname, _options, callback) =>
+        callback(null, '198.18.0.220', 4),
     }
     const calls: Array<{ url: string; init?: RequestInit }> = []
-    const wrapped = createBeeGamePinnedFetch((async (input, init) => {
-      calls.push({ url: String(input), init })
-      return new Response('{}')
-    }) as typeof fetch, { ANTHROPIC_BASE_URL: target })
+    const wrapped = createBeeGamePinnedFetch(
+      (async (input, init) => {
+        calls.push({ url: String(input), init })
+        return new Response('{}')
+      }) as typeof fetch,
+      { ANTHROPIC_BASE_URL: target },
+    )
 
     await wrapped('https://provider.runtime.test/v1/messages')
     await expect(
@@ -737,21 +1169,25 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('installs MACRO globals before loading root CLI modules', () => {
-    const target = globalThis as typeof globalThis & { MACRO?: Record<string, string> }
+    const target = globalThis as typeof globalThis & {
+      MACRO?: Record<string, string>
+    }
     const previous = target.MACRO
     Reflect.deleteProperty(target, 'MACRO')
     try {
       ensureBeeGameMacroGlobals()
 
-      expect(target.MACRO).toEqual(expect.objectContaining({
-        VERSION: expect.any(String),
-        BUILD_TIME: expect.any(String),
-        FEEDBACK_CHANNEL: '',
-        ISSUES_EXPLAINER: '',
-        NATIVE_PACKAGE_URL: '',
-        PACKAGE_URL: '',
-        VERSION_CHANGELOG: '',
-      }))
+      expect(target.MACRO).toEqual(
+        expect.objectContaining({
+          VERSION: expect.any(String),
+          BUILD_TIME: expect.any(String),
+          FEEDBACK_CHANNEL: '',
+          ISSUES_EXPLAINER: '',
+          NATIVE_PACKAGE_URL: '',
+          PACKAGE_URL: '',
+          VERSION_CHANGELOG: '',
+        }),
+      )
     } finally {
       if (previous === undefined) {
         Reflect.deleteProperty(target, 'MACRO')
@@ -793,5 +1229,4 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(killedTaskIds).toEqual(['bash_running'])
     expect(killed).toEqual(['bash_running'])
   })
-
 })

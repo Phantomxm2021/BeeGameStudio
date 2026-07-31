@@ -1,16 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import { createQueryEngineRunner } from './query-engine-runner'
 import type {
-  BeeGameApprovedOutboundTargets,
   BeeGameSessionRuntime,
   DashboardPermissionDecision,
 } from './session-manager'
+import { deserializeQueryEngineStartInput } from './query-engine-process-input'
 import {
   serializeQueryEngineError,
   type QueryEngineParentMessage,
   type QueryEngineWorkerMessage,
-  type SerializedQueryEngineStartInput,
 } from './query-engine-worker-protocol'
 
 let runtime: BeeGameSessionRuntime | null = null
@@ -30,7 +28,7 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
   if (message.type === 'runtime.init') {
     if (runtime) throw new Error('Claude runtime worker is already initialized')
     runtime = await createQueryEngineRunner().start({
-      ...deserializeStartInput(message.input),
+      ...deserializeQueryEngineStartInput(message.input),
       onNativeTaskNotification: notification => send({
         type: 'session.task-notification',
         notification,
@@ -104,50 +102,6 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
     }
     permissions.clear()
     process.exit(0)
-  }
-}
-
-function deserializeStartInput(input: SerializedQueryEngineStartInput) {
-  return {
-    sessionId: input.sessionId,
-    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
-    ...(input.language ? { language: input.language } : {}),
-    cwd: input.cwd,
-    env: input.env,
-    ...(input.resourceSelectionConfig
-      ? { resourceSelectionConfig: input.resourceSelectionConfig }
-      : {}),
-    approvedOutboundTargets: Object.fromEntries(
-      Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
-        key,
-        createApprovedTarget(
-          target.url,
-          target.addresses,
-          target.trustedDevelopmentProxy,
-        ),
-      ]),
-    ) as BeeGameApprovedOutboundTargets,
-  }
-}
-
-function createApprovedTarget(
-  url: string,
-  addresses: string[],
-  trustedDevelopmentProxy?: true,
-): ApprovedOutboundTarget {
-  const parsed = new URL(url)
-  return {
-    url: parsed,
-    addresses,
-    ...(trustedDevelopmentProxy ? { trustedDevelopmentProxy } : {}),
-    lookup(hostname, _options, callback) {
-      if (hostname !== parsed.hostname || addresses.length === 0) {
-        callback(new Error('Outbound URL is not permitted'), '', 4)
-        return
-      }
-      const address = addresses[0]!
-      callback(null, address, address.includes(':') ? 6 : 4)
-    },
   }
 }
 

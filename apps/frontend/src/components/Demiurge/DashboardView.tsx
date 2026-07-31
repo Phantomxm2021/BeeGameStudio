@@ -11,13 +11,13 @@ import type { Language } from './AgentsConfig';
 
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
-import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingUserReviewItem } from '../../services/api';
+import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
 import { api } from '../../services/api';
-import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
+import { deriveDashboardStatus, getWaitingPermissionState } from '../../utils/waitingPermission';
 import {
   toChatDisplayMessages,
   toProjectRuntimeDisplayModel,
-  toReviewDisplayModels,
+  toPermissionDisplayModels,
 } from '../../viewModels/displayModels';
 import {
   getCreditBalance,
@@ -91,7 +91,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
   // Zustand State
   const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore();
-  const { projects, pendingReviews, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore();
+  const { projects, pendingPermissions, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore();
   const { messages } = useChatStore();
   const { showSuccess, showError, showWarning } = useToast();
 
@@ -136,7 +136,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [projectId]);
 
   // Custom Hook for WebSocket & REST
-  const { sendMessage, stopTask, approvePlan, approvalState, isLoading, isStopping, canContinue, wsState } = useChat({
+  const { sendMessage, stopTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
     projectId,
     onError: err => console.error(err),
     showToastError: showError,
@@ -153,12 +153,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         type === 'tool_end' ||
         type === 'human_gate' ||
         type === 'error' ||
-        type === 'plan_submitted' ||
-        type === 'plan_approved' ||
-        type === 'manifest_uploaded' ||
-        type === 'manifest_auto_approved' ||
-        type === 'manifest_approved' ||
-        type === 'manifest_revise_requested'
+        type === 'permission_resolved'
       ) {
         // Debounce refresh to prevent storms during rapid event bursts
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -185,14 +180,14 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   // Local derived state mapped from backend
   const isOffline = wsState === 'failed' || wsState === 'disconnected';
 
-  const hasPendingPlanReview = pendingReviews.some((review: PendingUserReviewItem) => {
-    const reviewType = String(review?.type || '');
-    return reviewType !== 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
-  });
-  const pendingToolPermissionCount = countPendingToolPermissions(pendingReviews);
+  const hasPendingToolPermission = pendingPermissions.some(
+    (permission: PendingToolPermissionItem) =>
+      permission.type === 'BEEGAME_PERMISSION' && Boolean(permission.gate_id),
+  );
+  const pendingToolPermissionCount = countPendingToolPermissions(pendingPermissions);
   usePermissionTabAttention(pendingToolPermissionCount, translateBeeGame('approvalRequestShort'));
   const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
-  const reviewDisplayModels = useMemo(() => toReviewDisplayModels(pendingReviews), [pendingReviews]);
+  const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
   const workflowUsageRevision = useMemo(() => {
     const usage = projectRuntimeDisplay?.workflow?.usage;
@@ -205,20 +200,25 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       usage.total_tokens ?? 0,
     ].join(':');
   }, [projectRuntimeDisplay?.workflow?.usage]);
-  // Project Info uses the project-scoped billing ledger. Runtime events and
-  // transcript pages are transport views and must never redefine a project's
-  // cumulative token total.
-  const projectTokenUsage = useMemo(() => creditSummary ? {
-    prompt_tokens: creditSummary.inputTokens,
-    input_tokens: creditSummary.inputTokens,
-    cached_input_tokens:
-      creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
-    cache_read_tokens: creditSummary.cacheReadTokens,
-    cache_creation_tokens: creditSummary.cacheCreationTokens,
-    completion_tokens: creditSummary.outputTokens,
-    output_tokens: creditSummary.outputTokens,
-    total_tokens: creditSummary.totalTokens,
-  } : null, [creditSummary]);
+  // The durable workflow snapshot is the live, cumulative source from the
+  // beginning of this delivery run. Billing writes may trail it while a worker
+  // is streaming, so use the ledger only when no workflow snapshot exists.
+  const projectTokenUsage = useMemo(() => {
+    const workflowUsage = projectRuntimeDisplay?.workflow?.usage;
+    if (workflowUsage) return workflowUsage;
+    return creditSummary
+      ? {
+          prompt_tokens: creditSummary.inputTokens,
+          input_tokens: creditSummary.inputTokens,
+          cached_input_tokens: creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
+          cache_read_tokens: creditSummary.cacheReadTokens,
+          cache_creation_tokens: creditSummary.cacheCreationTokens,
+          completion_tokens: creditSummary.outputTokens,
+          output_tokens: creditSummary.outputTokens,
+          total_tokens: creditSummary.totalTokens,
+        }
+      : null;
+  }, [creditSummary, projectRuntimeDisplay?.workflow?.usage]);
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
     !projectRuntimeDisplay?.workflow &&
@@ -227,9 +227,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     // request failed or the workflow already reached a terminal
     // state; the dashboard must remain available to show diagnostics.
     String(projectStatus?.phase || '').toLowerCase() === 'starting';
-  const waitingApproval = useMemo(
-    () => getWaitingApprovalState(projectRuntimeDisplay, reviewDisplayModels),
-    [projectRuntimeDisplay, reviewDisplayModels],
+  const waitingPermission = useMemo(
+    () => getWaitingPermissionState(projectRuntimeDisplay, permissionDisplayModels),
+    [projectRuntimeDisplay, permissionDisplayModels],
   );
   const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
   const isProjectInteractionLocked = isOpeningProject || isSyncing || !hasCurrentRuntimeSnapshot;
@@ -258,15 +258,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
   const isPipelineActive = useMemo(() => {
     const workflowStatus = projectRuntimeDisplay?.workflow?.status;
-    if (workflowStatus) return workflowStatus === 'running';
-    const nextAction = String(projectStatus?.next_action || '').toLowerCase();
-    const phase = String(projectStatus?.phase || '').toLowerCase();
-    return (
-      ['pending', 'running', 'clarification_required'].includes(nextAction) ||
-      phase === 'running' ||
-      phase === 'waiting_approval'
-    );
-  }, [projectRuntimeDisplay?.workflow?.status, projectStatus?.next_action, projectStatus?.phase]);
+    return workflowStatus === 'running' || workflowStatus === 'verifying';
+  }, [projectRuntimeDisplay?.workflow?.status]);
   const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isPipelineActive;
   const canSendMessage = hasPermission('agent.send_message') && !isProjectWorkspaceMutationLocked;
   const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
@@ -279,39 +272,30 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const currentStatus = useMemo(() => {
     const workflow = projectRuntimeDisplay?.workflow;
     const workflowStatus = String(workflow?.status || '');
-    const phase = String(projectStatus?.phase || '').toLowerCase();
     const acceptance = projectStatus?.acceptance?.status;
     if (isOffline) return 'offline';
     if (!hasCurrentRuntimeSnapshot) return 'starting';
-    if (
-      ['needs_action', 'blocked', 'failed', 'stopped'].includes(workflowStatus)
-    )
-      return 'paused';
+    if (['blocked', 'failed', 'cancelled', 'stale'].includes(workflowStatus)) return 'paused';
     if (workflowStatus === 'completed') return 'finished';
-    if (workflowStatus === 'running') return 'running';
-    if (phase === 'starting' || isProjectStarting) return 'starting';
-    if (phase === 'running') return 'running';
-    if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
+    if (workflowStatus === 'running' || workflowStatus === 'verifying') return 'running';
+    if (isProjectStarting) return 'starting';
     if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
-    if (phase === 'finished') return 'finished';
-    if (phase === 'paused' || phase === 'failed') return 'paused';
     return deriveDashboardStatus({
       isOffline,
       isLoading,
       canContinue,
-      hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
+      hasWaitingPermission: waitingPermission.isWaitingStatus || hasPendingToolPermission,
       messages: displayMessages,
     });
   }, [
     projectRuntimeDisplay?.workflow,
-    projectStatus?.phase,
     projectStatus?.acceptance?.status,
     isOffline,
     hasCurrentRuntimeSnapshot,
     isLoading,
     canContinue,
-    waitingApproval.isWaitingStatus,
-    hasPendingPlanReview,
+    hasPendingToolPermission,
+    waitingPermission.isWaitingStatus,
     displayMessages,
     isProjectStarting,
   ]);
@@ -558,11 +542,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         }
         isStopping={isStopping}
         isRuntimeBusy={currentStatus === 'running'}
-        onApprovePlan={hasPendingPlanReview && canApproveTool && !isProjectInteractionLocked ? approvePlan : undefined}
-        approvalState={approvalState}
-        pendingReviews={reviewDisplayModels}
+        onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}
+        permissionState={permissionState}
+        pendingPermissions={permissionDisplayModels}
         projectStatus={projectRuntimeDisplay}
-        waitingApproval={waitingApproval}
+        waitingPermission={waitingPermission}
         canSendMessage={canSendMessage}
         canApproveTool={canApproveTool}
         canUploadAssets={canUploadAssets}

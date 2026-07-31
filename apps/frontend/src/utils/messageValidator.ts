@@ -15,7 +15,7 @@
  * Requirements: 1.3, 6.1, 6.2, 6.3, 6.4
  */
 
-import type { WebSocketMessage, WebSocketMessageType } from '../types/message';
+import type { ProjectEventMessage, ProjectEventMessageType } from '../types/message';
 import { errorLogger } from './errorLogger';
 
 /**
@@ -50,7 +50,7 @@ export interface ValidationResult {
   /** Array of validation warnings (allows processing) */
   warnings: ValidationError[];
   /** Original message (only if isValid is true) */
-  sanitizedMessage?: WebSocketMessage;
+  sanitizedMessage?: ProjectEventMessage;
 }
 
 /**
@@ -73,7 +73,7 @@ export interface ValidationResult {
  */
 export class MessageValidator {
   /** List of valid message types accepted by the system */
-  private readonly VALID_MESSAGE_TYPES: WebSocketMessageType[] = [
+  private readonly VALID_MESSAGE_TYPES: ProjectEventMessageType[] = [
     'token',
     'agent_message',
     'thought',
@@ -86,7 +86,6 @@ export class MessageValidator {
     'context_update',
     'error',
     'error_paused',
-    'plan_approved',
     'p2p_route',
     'project_renamed'
   ];
@@ -145,7 +144,7 @@ export class MessageValidator {
     }
 
     // Validate required field: task_id (optional for some types)
-    const typesRequiringTaskId: WebSocketMessageType[] = ['token', 'agent_message', 'thought', 'status', 'tool_start', 'tool_end', 'error_paused'];
+    const typesRequiringTaskId: ProjectEventMessageType[] = ['token', 'agent_message', 'thought', 'status', 'tool_start', 'tool_end', 'error_paused'];
     const isTaskIdRequired = typesRequiringTaskId.includes(message.type);
 
     if (isTaskIdRequired && !message.task_id) {
@@ -296,7 +295,7 @@ export class MessageValidator {
     // Preserve native content exactly. React/Markdown rendering owns output
     // safety; transport code must never rewrite Claude Code events.
     const isValid = errors.length === 0;
-    const sanitizedMessage = isValid ? message as WebSocketMessage : undefined;
+    const sanitizedMessage = isValid ? message as ProjectEventMessage : undefined;
 
     if (isValid) {
       if (warnings.length > 0) {

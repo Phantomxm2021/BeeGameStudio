@@ -79,11 +79,6 @@ function limitMessages(messages: Message[]): Message[] {
 }
 
 function withDerivedIdentity(message: Message): Message {
-  const {
-    workflow: _legacyWorkflow,
-    diagnostic: _legacyDiagnostic,
-    ...messageWithoutLegacyDisplayState
-  } = message as Message & { workflow?: unknown; diagnostic?: unknown };
   const taskId = message.taskId;
   const dedupeKey = message.dedupeKey || buildMessageDedupeKey({
     taskId,
@@ -95,7 +90,7 @@ function withDerivedIdentity(message: Message): Message {
   const messageId = message.messageId || (message.id.startsWith('streaming-') ? undefined : message.id);
   const id = messageId || message.clientMessageId || message.id || `msg-${dedupeKey}-${message.timestamp}`;
   return {
-    ...messageWithoutLegacyDisplayState,
+    ...message,
     id,
     messageId,
     dedupeKey,

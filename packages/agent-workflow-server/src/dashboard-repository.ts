@@ -14,12 +14,6 @@ import {
   type BeeGameAuditEvent,
 } from './audit-events-store'
 import {
-  listUsageEvents,
-  recordUsage,
-  type RecordUsageInput,
-  type RecordUsageResult,
-} from './usage-billing'
-import {
   deleteMcpServer,
   listMcpServers,
   upsertMcpServer,
@@ -35,7 +29,6 @@ import {
   materializeBuiltinSkills,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
-import { materializeBeeGameNativeAgents } from './beegame/delivery-validation-agents'
 import {
   BeeGameProjectMetadataStore,
   getBeeGameProjectDatabasePath,
@@ -82,30 +75,19 @@ import type {
   BeeGameUsageBillingRecordInput,
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import type { BeeGameUsageBillingMode } from '@bee-game-studio/beegame-billing-core/billing-config'
 import type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
   BeeGameBillingEventInput,
+  BeeGameCreditGrant,
 } from '@bee-game-studio/beegame-billing-core/billing-ports'
-import type { BeeGameUsageBillingEvent } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import type { ProjectAssetStorage } from './r2-project-asset-storage'
-import {
-  debitLocalRealtimeUsage,
-  grantLocalRealtimeCredits,
-  getLocalRealtimeUsageWallet,
-  type CreditBalance,
-  type CreditGrant,
-  type RealtimeUsageWallet,
-} from './realtime-usage-wallet'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
-  supabasePaymentProviderStore?: SupabaseDashboardStore
   supabaseRuntimeEnvClient?: SupabaseRuntimeEnvClient
   remoteUsageBilling?: BeeGameUsageBillingClient
-  usageBillingMode?: BeeGameUsageBillingMode
   skillsConfig?: BeeGameSkillsConfig | false
   getUserDataRoot: (request?: Request) => string
   /**
@@ -116,18 +98,6 @@ export type DashboardRepositoryOptions = {
   getAuthToken?: (request: Request) => string | undefined
   modelConfigStore?: ModelConfigStoreOptions | false
   projectAssetStorage?: ProjectAssetStorage
-}
-
-function filterUsageEvents(
-  events: BeeGameUsageBillingEvent[],
-  filters: { from?: Date; to?: Date },
-): BeeGameUsageBillingEvent[] {
-  return events.filter(event => {
-    const createdAt = new Date(event.createdAt)
-    if (filters.from && createdAt < filters.from) return false
-    if (filters.to && createdAt > filters.to) return false
-    return true
-  })
 }
 
 export type BeeGameProjectLifecycleOverview = {
@@ -236,14 +206,6 @@ export class DashboardRepository {
 
   private hasSupabaseProductionStore(): boolean {
     return Boolean(this.supabaseStore)
-  }
-
-  async getCreditBalance(
-    request: Request,
-    user: BeeGameUserContext,
-  ): Promise<CreditBalance> {
-    const wallet = await this.getRealtimeUsageWallet(request, user)
-    return toCreditBalance(wallet)
   }
 
   hasSupabaseStorage(): boolean {
@@ -632,352 +594,109 @@ export class DashboardRepository {
     return listModelConfigs(user.id).some(config => config.id === id)
   }
 
-  async listUsageEvents(
-    request: Request,
-    user: BeeGameUserContext,
-    filters: { projectId?: string; from?: Date; to?: Date } = {},
-  ): Promise<BeeGameUsageBillingEvent[]> {
-    const supabase = this.supabaseForRequest(request)
-    if (supabase)
-      return supabase
-        .listUsageEvents(getCreditOwnerId(user), filters.projectId)
-        .then(events => filterUsageEvents(events, filters))
-    return filterUsageEvents(
-      listUsageEvents(this.options.getUserDataRoot(request), {
-        userId: user.id,
-        ...(filters.projectId ? { projectId: filters.projectId } : {}),
-      }),
-      filters,
-    )
-  }
-
   async recordUsage(
-    request: Request,
+    _request: Request,
     user: BeeGameUserContext,
-    input: Omit<RecordUsageInput, 'dataDir' | 'userId'>,
-  ): Promise<RecordUsageResult> {
-    const remoteInput = {
-      sessionId: input.sessionId,
-      turnId: input.turnId,
-      projectId: input.projectId,
-      usage: input.usage,
-      idempotencyKey: input.idempotencyKey,
-      metadata: input.metadata,
-      pricingVersion: input.pricingVersion,
-      usageSource: input.usageSource,
-    }
-    const supabase = this.supabaseForRequest(request)
-    if (this.options.remoteUsageBilling)
-      return this.options.remoteUsageBilling.recordUsage(
-        user.id,
-        remoteInput,
-      )
-    if (supabase) return supabase.recordUsage(user.id, remoteInput)
-    return recordUsage({
-      ...input,
-      dataDir: this.options.getUserDataRoot(request),
-      userId: user.id,
-    })
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    return this.requireRemoteUsageBilling().recordUsage(user.id, input)
   }
 
   async debitRealTimeUsage(
-    request: Request,
+    _request: Request,
     user: BeeGameUserContext,
-    input: Omit<RecordUsageInput, 'dataDir' | 'userId'>,
-  ): Promise<RecordUsageResult> {
-    const debitInput = {
-      sessionId: input.sessionId,
-      turnId: input.turnId,
-      projectId: input.projectId,
-      usage: input.usage,
-      idempotencyKey: input.idempotencyKey,
-      metadata: input.metadata,
-      pricingVersion: input.pricingVersion,
-      usageSource: input.usageSource,
-    }
-    const supabase = this.supabaseForRequest(request)
-    if (this.options.remoteUsageBilling)
-      return this.options.remoteUsageBilling.debitRealTimeUsage(
-        user.id,
-        debitInput,
-      )
-    if (supabase) return supabase.debitRealTimeUsage(user.id, debitInput)
-    const usage = recordUsage({
-      ...input,
-      dataDir: this.options.getUserDataRoot(request),
-      userId: user.id,
-    })
-    return debitLocalRealtimeUsage({
-      dataDir: this.options.getUserDataRoot(request),
-      userId: user.id,
-      idempotencyKey: input.idempotencyKey,
-      usage,
-    })
+    input: BeeGameUsageBillingRecordInput,
+  ): Promise<BeeGameUsageBillingRecordResult> {
+    return this.requireRemoteUsageBilling().debitRealTimeUsage(user.id, input)
   }
 
   async recordUsageForUser(
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
-    if (this.options.remoteUsageBilling) {
-      return this.options.remoteUsageBilling.recordUsage(userId, input)
-    }
-    if (this.supabaseStore) {
-      return this.supabaseStore.recordUsage(userId, input)
-    }
-    return recordUsage({
-      ...input,
-      userId,
-      dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-    })
+    return this.requireRemoteUsageBilling().recordUsage(userId, input)
   }
 
   async debitRealTimeUsageForUser(
     userId: string,
     input: BeeGameUsageBillingRecordInput,
   ): Promise<BeeGameUsageBillingRecordResult> {
-    if (this.options.remoteUsageBilling) {
-      return this.options.remoteUsageBilling.debitRealTimeUsage(userId, input)
-    }
-    if (this.supabaseStore) {
-      return this.supabaseStore.debitRealTimeUsage(userId, input)
-    }
-    const usage = await this.recordUsageForUser(userId, input)
-    return debitLocalRealtimeUsage({
-      dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
-      userId,
-      idempotencyKey: input.idempotencyKey,
-      usage,
-    })
-  }
-
-  async getRealtimeUsageWallet(
-    request: Request,
-    user: BeeGameUserContext,
-  ): Promise<RealtimeUsageWallet> {
-    const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.getRealtimeUsageWallet(getCreditOwnerId(user))
-    return getLocalRealtimeUsageWallet({
-      dataDir: this.options.getUserDataRoot(request),
-      userId: user.id,
-    })
-  }
-
-  async summarizeUsage(
-    request: Request,
-    user: BeeGameUserContext,
-    filters: { projectId?: string; from?: Date; to?: Date } = {},
-  ): Promise<{
-    eventsCount: number
-    promptTokens: number
-    completionTokens: number
-    cacheReadTokens: number
-    cacheCreationTokens: number
-    totalTokens: number
-    weightedTokens: number
-    creditsMicro: number
-  }> {
-    const events = await this.listUsageEvents(request, user, filters)
-    return events.reduce(
-      (summary, event) => ({
-        eventsCount: summary.eventsCount + 1,
-        promptTokens: summary.promptTokens + event.delta.prompt_tokens,
-        completionTokens:
-          summary.completionTokens + event.delta.completion_tokens,
-        cacheReadTokens:
-          summary.cacheReadTokens + event.delta.cache_read_tokens,
-        cacheCreationTokens:
-          summary.cacheCreationTokens + event.delta.cache_creation_tokens,
-        totalTokens: summary.totalTokens + event.delta.total_tokens,
-        weightedTokens: summary.weightedTokens + event.weightedTokensDelta,
-        creditsMicro: summary.creditsMicro + event.creditsMicro,
-      }),
-      {
-        eventsCount: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        totalTokens: 0,
-        weightedTokens: 0,
-        creditsMicro: 0,
-      },
-    )
+    return this.requireRemoteUsageBilling().debitRealTimeUsage(userId, input)
   }
 
   async grantCredits(
     request: Request,
     targetUserId: string,
     input: CreditGrantInput,
-  ): Promise<CreditGrant> {
-    const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.grantCredits(targetUserId, input)
-    const dataDir = getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId)
-    const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits })
-    return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
+  ): Promise<BeeGameCreditGrant> {
+    throw billingServiceOnlyError()
   }
 
   async grantPaymentProviderCredits(
     request: Request,
     targetUserId: string,
     input: CreditGrantInput,
-  ): Promise<CreditGrant> {
-    const metadata = input.metadata ?? {}
-    const paymentProviderStore = this.options.supabasePaymentProviderStore
-    if (this.supabaseStore && !paymentProviderStore) {
-      throw new Error(
-        'Supabase service role key is required for payment provider credit grants',
-      )
-    }
-    if (paymentProviderStore) {
-      return paymentProviderStore.grantPaymentProviderCredits(targetUserId, input)
-    }
-    const result = this.grantLocalPaymentProviderCredits(targetUserId, {
-          credits: input.credits,
-          metadata,
-        })
-    if (result.grantedCredits > 0) {
-      grantLocalRealtimeCredits({
-        dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId),
-        userId: targetUserId,
-        credits: result.grantedCredits,
-        idempotencyKey: `${metadataString(metadata, 'provider')}:${metadataString(metadata, 'providerReference')}`,
-      })
-    }
-    return result
+  ): Promise<BeeGameCreditGrant> {
+    throw billingServiceOnlyError()
   }
 
   async listBillingCreditPacks(
     _request?: Request,
     options: { enabledOnly?: boolean } = {},
   ): Promise<BeeGameBillingCreditPack[]> {
-    const store = this.options.supabasePaymentProviderStore
-    return store ? store.listBillingCreditPacks(options) : []
+    throw billingServiceOnlyError()
   }
 
   async upsertBillingCreditPack(
     _request: Request,
     input: BeeGameBillingCreditPackInput,
   ): Promise<BeeGameBillingCreditPack> {
-    const store = this.options.supabasePaymentProviderStore
-    if (!store) {
-      throw new Error(
-        'Supabase service role key is required for billing credit pack management',
-      )
-    }
-    return store.upsertBillingCreditPack(input)
+    throw billingServiceOnlyError()
   }
 
   async appendBillingEvent(
     _request: Request | undefined,
     input: BeeGameBillingEventInput,
   ): Promise<void> {
-    const store = this.options.supabasePaymentProviderStore
-    if (!store) return
-    await store.appendBillingEvent(input)
+    throw billingServiceOnlyError()
   }
 
   async listBillingEvents(
     _request?: Request,
   ): Promise<BeeGameBillingEventInput[]> {
-    const store = this.options.supabasePaymentProviderStore
-    return store ? store.listBillingEvents() : []
-  }
-
-  private grantLocalPaymentProviderCredits(
-    targetUserId: string,
-    input: CreditGrantInput,
-  ): CreditGrant {
-    const dataDir = getUserDashboardDataRoot(
-      this.options.dashboardDataRoot,
-      targetUserId,
-    )
-    const provider = metadataString(input.metadata, 'provider')
-    const providerReference = metadataString(
-      input.metadata,
-      'providerReference',
-    )
-    if (provider && providerReference) {
-      const idempotencyKey = `${provider}:${providerReference}`
-      const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits, idempotencyKey })
-      return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
-    }
-    const wallet = grantLocalRealtimeCredits({ dataDir, userId: targetUserId, credits: input.credits })
-    return { grantedCredits: input.credits, balance: toCreditBalance(wallet) }
+    throw billingServiceOnlyError()
   }
 
   createSessionUsageBillingBackend(): BeeGameSessionUsageBillingBackend {
-    if (this.options.remoteUsageBilling) {
-      return {
-        recordUsage: (userId, input) =>
-          this.options.remoteUsageBilling!.recordUsage(userId, {
-            sessionId: input.sessionId,
-            turnId: input.turnId,
-            projectId: input.projectId,
-            usage: input.usage,
-            idempotencyKey: input.idempotencyKey,
-            metadata: input.metadata,
-            pricingVersion: 'weighted-v1',
-            usageSource: 'runtime_snapshot',
-          }),
-        debitRealtimeUsage: (userId, input) =>
-          this.options.remoteUsageBilling!.debitRealTimeUsage(userId, {
-            sessionId: input.sessionId,
-            turnId: input.turnId,
-            projectId: input.projectId,
-            usage: input.usage,
-            idempotencyKey: input.idempotencyKey,
-            metadata: input.metadata,
-            pricingVersion: 'weighted-v1',
-            usageSource: 'runtime_snapshot',
-          }),
-      }
-    }
-    if (this.hasSupabaseProductionStore()) {
-      return {
-        recordUsage: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken).recordUsage(userId, {
-            sessionId: input.sessionId,
-            turnId: input.turnId,
-            projectId: input.projectId,
-            usage: input.usage,
-            idempotencyKey: input.idempotencyKey,
-            metadata: input.metadata,
-            pricingVersion: 'weighted-v1',
-            usageSource: 'runtime_snapshot',
-          }),
-        debitRealtimeUsage: (userId, input) =>
-          this.supabaseForAuthToken(input.authToken).debitRealTimeUsage(
-            userId,
-            {
-              sessionId: input.sessionId,
-              turnId: input.turnId,
-              projectId: input.projectId,
-              usage: input.usage,
-              idempotencyKey: input.idempotencyKey,
-              metadata: input.metadata,
-              pricingVersion: 'weighted-v1',
-              usageSource: 'runtime_snapshot',
-            },
-          ),
-      }
-    }
     return {
-      recordUsage: (userId, input) =>
-        recordUsage({
-          ...input,
-          userId,
-        }),
-      debitRealtimeUsage: async (userId, input) => {
-        const usage = await recordUsage({ ...input, userId })
-        return debitLocalRealtimeUsage({
-          dataDir: input.dataDir,
-          userId,
-          idempotencyKey: input.idempotencyKey,
-          usage,
-        })
-      },
+        recordUsage: (userId, input) =>
+          this.requireRemoteUsageBilling().recordUsage(userId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            projectId: input.projectId,
+            usage: input.usage,
+            idempotencyKey: input.idempotencyKey,
+            metadata: input.metadata,
+            pricingVersion: 'weighted-v1',
+            usageSource: 'runtime_snapshot',
+          }),
+        debitRealtimeUsage: (userId, input) =>
+          this.requireRemoteUsageBilling().debitRealTimeUsage(userId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            projectId: input.projectId,
+            usage: input.usage,
+            idempotencyKey: input.idempotencyKey,
+            metadata: input.metadata,
+            pricingVersion: 'weighted-v1',
+            usageSource: 'runtime_snapshot',
+          }),
     }
+  }
+
+  private requireRemoteUsageBilling(): BeeGameUsageBillingClient {
+    if (this.options.remoteUsageBilling) return this.options.remoteUsageBilling
+    throw billingServiceOnlyError()
   }
 
   async appendAuditEvent(
@@ -1037,7 +756,6 @@ export class DashboardRepository {
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
     materializeBuiltinSkills({ dataDir })
-    materializeBeeGameNativeAgents(dataDir)
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
       if (!client) {
@@ -1226,31 +944,10 @@ export class DashboardRepository {
   }
 }
 
-function toCreditBalance(wallet: RealtimeUsageWallet): CreditBalance {
-  const scale = 1_000_000
-  const balanceCredits = wallet.balanceCreditsMicro / scale
-  const includedCredits = wallet.includedCreditsMicro / scale
-  const consumedCredits = wallet.consumedCreditsMicro / scale
-  const emptyEstimate = { minCredits: 0, maxCredits: 0 }
-  return {
-    ...wallet,
-    plan: 'free',
-    balanceCredits,
-    includedCredits,
-    consumedCredits,
-    creditUnitWeightedTokens: 10_000,
-    estimates: {
-      ideaIntake: emptyEstimate,
-      planningDocs: emptyEstimate,
-      smallPlayableGame: emptyEstimate,
-      standardGame: emptyEstimate,
-      complexGame: emptyEstimate,
-    },
-  }
-}
-
-function getCreditOwnerId(user: BeeGameUserContext): string {
-  return user.accountId || user.id
+function billingServiceOnlyError(): Error {
+  return new Error(
+    'Billing operations are owned by the remote BeeGame billing service',
+  )
 }
 
 function getMaxProjectsPerUser(): number | undefined {
@@ -1345,14 +1042,6 @@ function safeParseJsonObject(
   } catch {
     return undefined
   }
-}
-
-function metadataString(
-  metadata: Record<string, unknown> | undefined,
-  key: string,
-): string {
-  const value = metadata?.[key]
-  return typeof value === 'string' ? value.trim() : ''
 }
 
 async function normalizeWorkspaceIdentity(

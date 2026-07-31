@@ -50,7 +50,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={vi.fn()}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -80,7 +80,7 @@ describe('RightSidebar tabs', () => {
                 onSendMessage={onSendMessage}
                 isLoading={false}
                 isRuntimeBusy={true}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -109,7 +109,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -140,7 +140,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={vi.fn()}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -166,7 +166,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -204,7 +204,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -242,7 +242,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={vi.fn()}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -272,7 +272,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -315,7 +315,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -352,7 +352,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -396,7 +396,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -469,7 +469,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={onSendMessage}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -503,7 +503,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={vi.fn()}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -554,7 +554,7 @@ describe('RightSidebar tabs', () => {
                 progress={0}
                 onSendMessage={vi.fn()}
                 isLoading={false}
-                waitingApproval={{
+                waitingPermission={{
                     kind: 'none',
                     isBlockingChat: false,
                     isWaitingStatus: false,
@@ -604,7 +604,7 @@ describe('RightSidebar tabs', () => {
             progress: 0,
             onSendMessage: vi.fn(),
             isLoading: false,
-            waitingApproval: {
+            waitingPermission: {
                 kind: 'none' as const,
                 isBlockingChat: false,
                 isWaitingStatus: false,

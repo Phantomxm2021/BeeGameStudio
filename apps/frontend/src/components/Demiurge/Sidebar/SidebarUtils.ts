@@ -1,7 +1,6 @@
 import type { ProjectTask } from '../../../store/systemStore';
-import { localizeReviewMessage } from '../../../utils/reviewStatus';
 import type {
-    ReviewDisplayModel,
+    PermissionDisplayModel,
 } from '../../../viewModels/displayModels';
 
 export const TASK_STATUS_COLORS: Record<string, string> = {
@@ -40,99 +39,44 @@ export const getTaskStatusLabel = (task: ProjectTask): string => {
     }
 };
 
-type ReviewLike = ReviewDisplayModel | undefined | null;
-const LEGACY_BEEGAME_PERMISSION_TYPE = ['CLAU', 'DE_CODE_PERMISSION'].join('');
-
-export const isBeeGamePermissionReview = (review: ReviewLike): boolean => {
-    if (!review) return false;
-    return (
-        review.type === 'BEEGAME_PERMISSION' ||
-        review.type === LEGACY_BEEGAME_PERMISSION_TYPE ||
-        review.gate_kind === 'beegame_permission' ||
-        review.review_status?.workflow_id === 'beegame'
-    );
+type PermissionLike = PermissionDisplayModel | undefined | null;
+export const isBeeGamePermission = (permission: PermissionLike): boolean => {
+    if (!permission) return false;
+    return permission.type === 'BEEGAME_PERMISSION';
 };
 
-export const formatReviewTitle = (review: ReviewLike): string => {
-    if (!review) return 'Pending review';
-    if (isBeeGamePermissionReview(review)) return review.title || 'BeeGame permission';
-    if (review.type === 'ASSET_MANIFEST_REVIEW') return 'Asset delivery approval';
-    return review.title || review.task_id || review.artifact_id || 'Pending review';
+export const formatPermissionTitle = (permission: PermissionLike): string => {
+    if (!permission) return 'Pending permission';
+    return permission.title || 'BeeGame permission';
 };
 
-export const formatBeeGamePermissionSummary = (review: ReviewLike): string => {
-    if (!review) return 'BeeGame is waiting for a permission decision.';
-    const artifact = review.artifact || {};
+export const formatBeeGamePermissionSummary = (permission: PermissionLike): string => {
+    if (!permission) return 'BeeGame is waiting for a permission decision.';
+    const artifact = permission.artifact || {};
     const content = String(artifact.content || '').trim();
     const input = artifact.input && typeof artifact.input === 'object'
         ? artifact.input as Record<string, unknown>
         : {};
     const command = String(input.command || '').trim();
     const path = String(input.path || input.file_path || input.notebook_path || '').trim();
-    const target = command || compactPermissionPath(path, getReviewWorkspaceRef(review));
+    const target = command || compactPermissionPath(path);
     if (content.includes('was blocked') && content.includes('allowed working directories')) {
         return `${content} This is a workspace boundary. Change the session workspace if BeeGame should operate there.`;
     }
     if (target) {
-        return `BeeGame requests ${review.title || 'tool access'}:\n${target}`;
+        return `BeeGame requests ${permission.title || 'tool access'}:\n${target}`;
     }
     return content || 'BeeGame is waiting for a tool permission decision.';
 };
 
-const compactPermissionPath = (path: string, workspaceRef: string): string => {
+const compactPermissionPath = (path: string): string => {
     if (!path) return '';
     const normalizedPath = path.replace(/\/+$/, '');
-    const normalizedWorkspace = workspaceRef.replace(/\/+$/, '');
-    if (normalizedWorkspace && normalizedPath.startsWith(`${normalizedWorkspace}/`)) {
-        return `./${normalizedPath.slice(normalizedWorkspace.length + 1)}`;
-    }
     const parts = normalizedPath.split('/').filter(Boolean);
     if (parts.length <= 5) return normalizedPath;
     return `.../${parts.slice(-4).join('/')}`;
 };
 
-export const isReviewAwaitingUserAction = (review: ReviewLike): boolean => {
-    if (!review) return false;
-    if (review.review_status?.requires_user_action === true) return true;
-    return review.ready_for_user_approval === true;
-};
-
-export const isStructuredDocumentApprovalReview = (review: ReviewLike): boolean => {
-    if (!review) return false;
-    if (String(review.review_status?.workflow_id || '').trim()) return true;
-    return Boolean(review.type?.endsWith('_APPROVAL_REVIEW'));
-};
-
-const getCurrentReviewArtifactId = (review: ReviewLike): string => {
-    return String(review?.current_review_artifact_id || review?.artifact_id || '').trim();
-};
-
-export const getReviewWorkspaceRef = (review: ReviewLike): string => {
-    return String(review?.binding?.workspace_ref || review?.binding?.workspace_path || review?.workspace_ref || review?.workspace_path || '').trim();
-};
-
-export const formatReviewSummary = (review: ReviewLike): string => {
-    if (isBeeGamePermissionReview(review)) {
-        return formatBeeGamePermissionSummary(review);
-    }
-    const reviewStatusMessage = localizeReviewMessage(review?.review_status);
-    if (reviewStatusMessage) {
-        return reviewStatusMessage;
-    }
-    const artifactId = getCurrentReviewArtifactId(review);
-    const decisionStatus = String(review?.review_status?.decision_status || '').trim().toLowerCase();
-    const laneStatus = String(review?.review_status?.lane_status || '').trim().toLowerCase();
-    if (decisionStatus === 'awaiting_user') {
-        return `Review is ready for your confirmation${artifactId ? `: ${artifactId}` : ''}.`;
-    }
-    if (decisionStatus === 'revision_required' && !laneStatus.includes('revision')) {
-        return `Revision is required${artifactId ? ` for ${artifactId}` : ''}.`;
-    }
-    if (decisionStatus === 'revision_required' && laneStatus.includes('revision')) {
-        return `Revision has started${artifactId ? ` for ${artifactId}` : ''}.`;
-    }
-    if (decisionStatus === 'running' && laneStatus.includes('revision')) {
-        return `Review is running again${artifactId ? ` for ${artifactId}` : ''}.`;
-    }
-    return `Review needs attention${artifactId ? `: ${artifactId}` : ''}.`;
+export const formatPermissionSummary = (permission: PermissionLike): string => {
+    return formatBeeGamePermissionSummary(permission);
 };

@@ -7,9 +7,6 @@ import {
   createSupabaseStorageDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
-import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
-import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
-import { recordNativeImplementationAuditReportForTest } from '../beegame/native-implementation-audit-evidence'
 
 describe('BeeGameDeploymentManager', () => {
   let root: string
@@ -63,7 +60,7 @@ describe('BeeGameDeploymentManager', () => {
     expect(buildEnv?.BEEGAME_DEPLOYMENT).toBe('1')
     expect(buildEnv?.BEEGAME_SKILLS_SERVICE_TOKEN).toBeUndefined()
     expect(await readFile(join(deployment.artifactPath || '', 'index.html'), 'utf8'))
-      .toContain('input instanceof Request')
+      .toBe('<h1>Playable</h1>')
   })
 
   test('does not append Vite base flags to non-Vite build scripts', async () => {
@@ -159,7 +156,7 @@ describe('BeeGameDeploymentManager', () => {
     expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
     expect(publishedFiles).toEqual([
       { path: 'assets/game.js', content: 'console.log("play")' },
-      { path: 'index.html', content: expect.stringContaining('data-beegame-deployment-asset-base') },
+      { path: 'index.html', content: '<main>Remote game</main>' },
     ])
   })
 
@@ -234,7 +231,7 @@ describe('BeeGameDeploymentManager', () => {
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/html; charset=utf-8',
-        body: expect.stringContaining('data-beegame-deployment-asset-base'),
+        body: '<main>Storage game</main>',
       }),
     ])
   })
@@ -261,91 +258,15 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.url).toBe('')
   })
 
-  test('requires passed native acceptance when the production delivery gate is enabled', async () => {
-    let builds = 0
-    const manager = new BeeGameDeploymentManager({
-      dataRoot: root,
-      requireAcceptedDelivery: true,
-      runner: async (_command, options) => {
-        builds += 1
-        await mkdir(join(options.cwd, 'dist'), { recursive: true })
-        await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Accepted</main>')
-        return { exitCode: 0, stdout: 'built', stderr: '' }
-      },
-    })
+  test('rejects source changes made during the deployment build', async () => {
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = true\n')
     await writeFile(
       join(workspace, 'package.json'),
       JSON.stringify({ scripts: { build: 'vite build' } }),
     )
-
-    const rejected = await manager.deploy({
-      sessionId: 'delivery-gated-session',
-      workspacePath: workspace,
-    })
-    expect(rejected.status).toBe('failed')
-    expect(rejected.message).toContain('native Document Reviewer result')
-    expect(builds).toBe(0)
-
-    await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
-    await mkdir(join(workspace, 'src'), { recursive: true })
-    await mkdir(join(workspace, 'tests'), { recursive: true })
-    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = true\n')
-    await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
-    for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
-      await writeFile(join(workspace, 'docs', name), `# ${name}\n`)
-    }
-    await writeFile(
-      join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
-      [
-        '- [x] [requirement:requirement-primary] Primary behavior',
-        '- [x] [player-path:path-primary] Primary playable path',
-        '',
-      ].join('\n'),
-    )
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        platform: 'selected-target',
-        runtime: 'project-native',
-        asset_format_capabilities: ['png'],
-        resource_library_usage: 'optional',
-      },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
-    const report = {
-      validatorId: 'beegame-acceptance-validator',
-      status: 'passed',
-      summary: 'Observed acceptance passed.',
-      validatedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
-      evidence: passingNativeAcceptanceEvidence(),
-      findings: [],
-    }
-    await writeFile(
-      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
-      JSON.stringify(report),
-    )
-    recordReadyDocumentReview(root, 'delivery-gated-session', workspace)
-    recordPassedImplementationAudit(root, 'delivery-gated-session', workspace)
-    recordNativeAcceptanceReportForTest({
+    const manager = new BeeGameDeploymentManager({
       dataRoot: root,
-      sessionId: 'delivery-gated-session',
-      workspacePath: workspace,
-      report,
-    })
-
-    const accepted = await manager.deploy({
-      sessionId: 'delivery-gated-session',
-      workspacePath: workspace,
-    })
-    expect(accepted.status).toBe('succeeded')
-    expect(builds).toBe(1)
-
-    const mutatingManager = new BeeGameDeploymentManager({
-      dataRoot: root,
-      requireAcceptedDelivery: true,
       runner: async (_command, options) => {
         await mkdir(join(options.cwd, 'dist'), { recursive: true })
         await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Changed</main>')
@@ -353,24 +274,13 @@ describe('BeeGameDeploymentManager', () => {
         return { exitCode: 0, stdout: 'built and changed source', stderr: '' }
       },
     })
-    const changedDuringBuild = await mutatingManager.deploy({
+    const changedDuringBuild = await manager.deploy({
       sessionId: 'delivery-gated-session',
       workspacePath: workspace,
     })
     expect(changedDuringBuild.status).toBe('failed')
-    expect(changedDuringBuild.message).toContain('Project source changed after acceptance')
+    expect(changedDuringBuild.message).toContain('Project source changed during')
   })
-
-  function passingNativeAcceptanceEvidence() {
-    return [
-      { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
-      { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build passed.' },
-      { kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Assertions passed.' },
-      { kind: 'runtime', source: 'path-primary', result: 'passed', detail: 'The player path was observed.' },
-      { kind: 'asset', source: 'project assets', result: 'passed', detail: 'Runtime asset references were verified.' },
-      { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance skill was used.' },
-    ]
-  }
 
   test('rejects malformed self-identifying files in the built artifact', async () => {
     const manager = new BeeGameDeploymentManager({
@@ -450,42 +360,3 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.url).toBe('')
   })
 })
-
-function recordReadyDocumentReview(
-  dataRoot: string,
-  sessionId: string,
-  workspacePath: string,
-): void {
-  recordNativeDocumentReviewForTest({
-    dataRoot,
-    sessionId,
-    workspacePath,
-    report: {
-      reviewerId: 'beegame-document-reviewer',
-      verdict: 'READY',
-      summary: 'The current documents are implementation-ready.',
-      confirmedResourceLibraryUsage: 'optional',
-      findings: [],
-    },
-  })
-}
-
-function recordPassedImplementationAudit(
-  dataRoot: string,
-  sessionId: string,
-  workspacePath: string,
-): void {
-  recordNativeImplementationAuditReportForTest({
-    dataRoot,
-    sessionId,
-    workspacePath,
-    report: {
-      auditorId: 'beegame-implementation-auditor',
-      status: 'passed',
-      summary: 'The implementation matches the approved project contract.',
-      auditedChecklistIds: ['requirement:requirement-primary', 'player-path:path-primary'],
-      evidence: [{ source: 'src/entry.ts', detail: 'The documented implementation exists.' }],
-      findings: [],
-    },
-  })
-}

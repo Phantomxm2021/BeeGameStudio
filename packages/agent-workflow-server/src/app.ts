@@ -35,7 +35,6 @@ import {
   type BeeGameModelUsage,
   type BeeGameModelRuntimeHost,
 } from './beegame/model-runtime-host'
-import { recordUsage } from './usage-billing'
 import {
   parseAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
@@ -97,6 +96,9 @@ import {
   listBeeGamePermissions,
 } from './auth/user-context'
 import { createBeeGameAuthContext } from './auth/auth-context'
+import { proxyAuthenticatedBillingRequest } from './auth/authenticated-billing-proxy'
+import { proxyAuthenticatedSkillsRequest } from './auth/authenticated-skills-proxy'
+import { proxyAuthenticatedResourceRequest } from './auth/authenticated-resource-proxy'
 import {
   PREVIEW_CAPABILITY_QUERY_PARAM,
   createPreviewCapabilityManager,
@@ -122,17 +124,19 @@ import {
 } from './local-runtime-service'
 import {
   createSupabaseDashboardStoreFromEnv,
-  createSupabasePaymentProviderGrantStoreFromEnv,
 } from './supabase-dashboard-store'
 import { createSupabaseRuntimeEnvClientFromEnv } from './supabase-runtime-env-client'
+import {
+  createInvitationServiceFromEnv,
+  InvitationServiceError,
+  type InvitationService,
+} from './invitation-service'
 import { resolveBeeGameBillingConfig } from '@bee-game-studio/beegame-billing-core/billing-config'
 import { createRemoteUsageBillingClient } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import {
-  registerBeeGameBillingPublicRoutes,
   registerBeeGameBillingStoreRoutes,
-} from './billing-routes'
+} from '@bee-game-studio/beegame-billing-core/billing-route-groups'
 import {
-  proxyBeeGameSkillsRequest,
   MAX_SKILL_REQUEST_BYTES,
 } from '@bee-game-studio/beegame-skills-core/client'
 import {
@@ -177,6 +181,7 @@ import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delive
 import type {
   DeliveryRun,
   DispatchRecord,
+  WorkflowEvent,
 } from './beegame/delivery-workflow/types'
 import { projectDocumentDisplayTasks } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
@@ -312,6 +317,7 @@ export type AgentWorkflowAppOptions = {
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
   resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
+  invitationService?: InvitationService | false
   registerCleanup?: (cleanup: () => void) => void
 }
 
@@ -321,6 +327,8 @@ export const ROUTE_PERMISSION = {
   runtimeSettings: 'runtime_settings.manage',
   mcp: 'mcp.manage',
   userSkills: 'skills.manage',
+  resourceLibrary: 'resources.manage',
+  invitations: 'workspace.manage_members',
   creditsAdmin: 'credits.admin',
   lifecycleAdmin: 'lifecycle.admin',
   projectDelete: 'project.delete',
@@ -416,11 +424,12 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const supabaseStore = createSupabaseDashboardStoreFromEnv()
-  const supabasePaymentProviderStore =
-    createSupabasePaymentProviderGrantStoreFromEnv()
   const supabaseRuntimeEnvClient = supabaseStore
     ? createSupabaseRuntimeEnvClientFromEnv()
     : undefined
+  const invitationService = options.invitationService === false
+    ? undefined
+    : (options.invitationService ?? createInvitationServiceFromEnv())
   const configuredUserResolver = createConfiguredUserResolver()
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
     sessionStorePath: options.sessionStorePath,
@@ -459,18 +468,41 @@ export function createAgentWorkflowApp(
     loadModelConfigsFromStore(modelConfigStore)
   }
   const billingConfig = resolveBeeGameBillingConfig()
+  const proxyBillingRequest = (request: Request, path: string) =>
+    proxyAuthenticatedBillingRequest(
+      request,
+      billingConfig,
+      path,
+      sessionAuth,
+    )
   const skillsConfig =
     options.skillsConfig === false
       ? null
       : (options.skillsConfig ?? resolveBeeGameSkillsConfig())
+  const proxySkillsRequest = skillsConfig
+    ? (request: Request, path: string) =>
+        proxyAuthenticatedSkillsRequest(
+          request,
+          skillsConfig,
+          path,
+          sessionAuth,
+        )
+    : undefined
+  const proxyResourceRequest = options.resourceSelectionRuntimeConfig
+    ? (request: Request, path: string) =>
+        proxyAuthenticatedResourceRequest(
+          request,
+          options.resourceSelectionRuntimeConfig!.baseUrl,
+          path,
+          sessionAuth,
+        )
+    : undefined
   const projectAssetStorage = createR2ProjectAssetStorageFromEnv()
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
-    supabasePaymentProviderStore,
     supabaseRuntimeEnvClient,
     remoteUsageBilling: createRemoteUsageBillingClient(billingConfig),
-    usageBillingMode: billingConfig.usageBillingMode,
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
@@ -596,23 +628,21 @@ export function createAgentWorkflowApp(
           : states.filter(state => state.state === 'stale')
         if (!selected.length) return { state: 'missing' }
         const actions = [...new Set(selected.flatMap(state => state.actions))]
-        const failedActions = [
-          ...new Set(selected.flatMap(state => state.failedActions)),
-        ]
+        const latest = selected
+          .slice()
+          .sort((left, right) =>
+            left.observedAt.localeCompare(right.observedAt),
+          )
+          .at(-1)!
         return {
           state: current.length ? 'current' : 'stale',
           actions,
-          failedActions,
+          failedActions: latest.failedActions,
           successfulImportCount: Math.max(
             ...selected.map(state => state.successfulImportCount),
           ),
-          failedImportCount: Math.max(
-            ...selected.map(state => state.failedImportCount),
-          ),
-          observedAt: selected
-            .map(state => state.observedAt)
-            .sort()
-            .at(-1)!,
+          failedImportCount: latest.failedImportCount,
+          observedAt: latest.observedAt,
         } satisfies NativeResourceLibraryEvidenceState
       },
     })
@@ -798,7 +828,6 @@ export function createAgentWorkflowApp(
       createR2DeploymentPublisherFromEnv() ??
       createSupabaseStorageDeploymentPublisherFromEnv(),
     publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
-    requireAcceptedDelivery: true,
   })
   app.get('/deployments/*', async c => {
     const deployedFile = await beeGameDeployments.readPublicFile(c.req.path)
@@ -838,10 +867,30 @@ export function createAgentWorkflowApp(
   }
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
-  registerBeeGameBillingPublicRoutes(app, {
-    billingConfig,
-    dashboardRepository,
+
+  // Registration needs these two invitation checks before a user session
+  // exists. Keeping the routes ahead of the authenticated /api middleware
+  // avoids exposing Supabase credentials or RPC transport to the browser.
+  app.get('/api/invitations/settings', async c => {
+    if (!invitationService) return c.json({ required: false })
+    try {
+      return c.json(await invitationService.getPublicSettings())
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
   })
+
+  app.post('/api/invitations/validate', async c => {
+    const body = await readJson(c.req.raw)
+    const code = typeof body.code === 'string' ? body.code.trim() : ''
+    if (!code || !invitationService) return c.json({ valid: false })
+    try {
+      return c.json({ valid: await invitationService.validateCode(code) })
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
+  })
+
   app.use('/api/*', async (c, next) => {
     if (options.currentUser) {
       await next()
@@ -883,6 +932,7 @@ export function createAgentWorkflowApp(
   registerBeeGameBillingStoreRoutes(app, {
     billingConfig,
     dashboardRepository,
+    proxyRemoteBillingRequest: proxyBillingRequest,
     getCurrentUser,
     hasPermission: (user, permission) =>
       hasBeeGamePermission(user as BeeGameUserContext, permission),
@@ -914,6 +964,125 @@ export function createAgentWorkflowApp(
       ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
       permissions: listBeeGamePermissions(user),
     })
+  })
+
+  const resolveInvitationAdmin = async (request: Request) => {
+    const forbidden = requirePermission(
+      getCurrentUser(request),
+      ROUTE_PERMISSION.invitations,
+    )
+    if (forbidden) return { forbidden }
+    if (!invitationService) {
+      return {
+        unavailable: {
+          error: 'Invitation service unavailable',
+          message: 'Invitation settings are not configured',
+        },
+      }
+    }
+    const accessToken = await resolveValidRequestAccessToken(request, sessionAuth)
+    if (!accessToken) return { unauthorized: true }
+    return { accessToken, invitationService }
+  }
+
+  app.get('/api/admin/invitations', async c => {
+    const resolved = await resolveInvitationAdmin(c.req.raw)
+    if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
+    if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
+    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    try {
+      return c.json(await resolved.invitationService.list(resolved.accessToken))
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
+  })
+
+  app.put('/api/admin/invitations/settings', async c => {
+    const resolved = await resolveInvitationAdmin(c.req.raw)
+    if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
+    if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
+    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    const body = await readJson(c.req.raw)
+    if (typeof body.required !== 'boolean') {
+      return c.json({ error: 'required must be a boolean' }, 400)
+    }
+    try {
+      return c.json(await resolved.invitationService.saveSettings(
+        resolved.accessToken,
+        body.required,
+      ))
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
+  })
+
+  app.post('/api/admin/invitations', async c => {
+    const resolved = await resolveInvitationAdmin(c.req.raw)
+    if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
+    if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
+    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    const body = await readJson(c.req.raw)
+    const code = typeof body.code === 'string' ? body.code.trim() : ''
+    if (!code) return c.json({ error: 'Invitation code is required' }, 400)
+    if (body.maxUses !== undefined && body.maxUses !== null &&
+      (!Number.isInteger(body.maxUses) || Number(body.maxUses) < 1)) {
+      return c.json({ error: 'maxUses must be a positive integer' }, 400)
+    }
+    try {
+      return c.json(await resolved.invitationService.create(
+        resolved.accessToken,
+        {
+          code,
+          ...(typeof body.label === 'string' ? { label: body.label } : {}),
+          ...(body.maxUses === null || typeof body.maxUses === 'number'
+            ? { maxUses: body.maxUses }
+            : {}),
+        },
+      ), 201)
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
+  })
+
+  app.patch('/api/admin/invitations/:id', async c => {
+    const resolved = await resolveInvitationAdmin(c.req.raw)
+    if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
+    if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
+    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    const body = await readJson(c.req.raw)
+    try {
+      return c.json(await resolved.invitationService.update(
+        resolved.accessToken,
+        {
+          id: c.req.param('id'),
+          ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+          ...(typeof body.label === 'string' ? { label: body.label } : {}),
+          ...(body.maxUses === null || typeof body.maxUses === 'number'
+            ? { maxUses: body.maxUses }
+            : {}),
+          ...(body.clearMaxUses === true ? { clearMaxUses: true } : {}),
+        },
+      ))
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
+  })
+
+  app.delete('/api/admin/invitations/:id', async c => {
+    const resolved = await resolveInvitationAdmin(c.req.raw)
+    if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
+    if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
+    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    try {
+      return c.json({
+        deleted: await resolved.invitationService.delete(
+          resolved.accessToken,
+          c.req.param('id'),
+        ),
+      })
+    } catch (error) {
+      return invitationRouteError(c, error)
+    }
   })
 
   app.delete('/api/current-user', async c => {
@@ -992,37 +1161,23 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/usage/events', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const projectId = c.req.query('projectId')?.trim()
-    const window = parseUsageWindow(c.req.query('from'), c.req.query('to'))
-    if (window.error) return c.json({ error: window.error }, 400)
-    return c.json(
-      await dashboardRepository.listUsageEvents(c.req.raw, user, {
-        ...(projectId ? { projectId } : {}),
-        ...(window.from ? { from: window.from } : {}),
-        ...(window.to ? { to: window.to } : {}),
-      }),
+    return proxyBillingRequest(
+      c.req.raw,
+      `/api/usage/events${new URL(c.req.url).search}`,
     )
   })
 
   app.get('/api/usage/summary', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const projectId = c.req.query('projectId')?.trim()
-    const window = parseUsageWindow(c.req.query('from'), c.req.query('to'))
-    if (window.error) return c.json({ error: window.error }, 400)
-    return c.json(
-      await dashboardRepository.summarizeUsage(c.req.raw, user, {
-        ...(projectId ? { projectId } : {}),
-        ...(window.from ? { from: window.from } : {}),
-        ...(window.to ? { to: window.to } : {}),
-      }),
+    return proxyBillingRequest(
+      c.req.raw,
+      `/api/usage/summary${new URL(c.req.url).search}`,
     )
   })
 
   app.get('/api/usage-wallet', async c => {
-    const user = getCurrentUser(c.req.raw)
-    return c.json(
-      await dashboardRepository.getRealtimeUsageWallet(c.req.raw, user),
+    return proxyBillingRequest(
+      c.req.raw,
+      '/api/usage-wallet',
     )
   })
 
@@ -1392,10 +1547,10 @@ export function createAgentWorkflowApp(
       ROUTE_PERMISSION.userSkills,
     )
     if (forbidden) return c.json(forbidden, 403)
-    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
+    if (!proxySkillsRequest)
+      return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxyBeeGameSkillsRequest(
-        skillsConfig,
+      return await proxySkillsRequest(
         c.req.raw,
         '/api/user-skills',
       )
@@ -1410,10 +1565,10 @@ export function createAgentWorkflowApp(
       ROUTE_PERMISSION.userSkills,
     )
     if (forbidden) return c.json(forbidden, 403)
-    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
+    if (!proxySkillsRequest)
+      return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxyBeeGameSkillsRequest(
-        skillsConfig,
+      return await proxySkillsRequest(
         c.req.raw,
         '/api/user-skills/import',
       )
@@ -1442,10 +1597,10 @@ export function createAgentWorkflowApp(
       ROUTE_PERMISSION.userSkills,
     )
     if (forbidden) return c.json(forbidden, 403)
-    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
+    if (!proxySkillsRequest)
+      return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxyBeeGameSkillsRequest(
-        skillsConfig,
+      return await proxySkillsRequest(
         c.req.raw,
         `/api/user-skills/${encodeURIComponent(c.req.param('id'))}/enabled`,
       )
@@ -1460,10 +1615,10 @@ export function createAgentWorkflowApp(
       ROUTE_PERMISSION.userSkills,
     )
     if (forbidden) return c.json(forbidden, 403)
-    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
+    if (!proxySkillsRequest)
+      return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxyBeeGameSkillsRequest(
-        skillsConfig,
+      return await proxySkillsRequest(
         c.req.raw,
         `/api/user-skills/${encodeURIComponent(c.req.param('id'))}`,
       )
@@ -1524,13 +1679,28 @@ export function createAgentWorkflowApp(
         elementId: string
         status?: string
       }> = []
+      const unreadableProjects: Array<{
+        projectId: string
+        projectName: string
+        reason: string
+      }> = []
       for (const project of projects) {
         if (!project.root_path) continue
-        const workspacePath = await resolveSessionWorkspacePath(
-          project.root_path,
-          options.defaultWorkspacePath,
-        )
-        const manifest = await readBeeGameAssetManifest(workspacePath)
+        let manifest: Awaited<ReturnType<typeof readBeeGameAssetManifest>>
+        try {
+          const workspacePath = await resolveSessionWorkspacePath(
+            project.root_path,
+            options.defaultWorkspacePath,
+          )
+          manifest = await readBeeGameAssetManifest(workspacePath)
+        } catch (error) {
+          unreadableProjects.push({
+            projectId: project.id,
+            projectName: project.name,
+            reason: toErrorMessage(error),
+          })
+          continue
+        }
         for (const resourceImport of manifest.imports ?? []) {
           if (
             resourceImport.source.type !== 'resource-library' ||
@@ -1551,11 +1721,38 @@ export function createAgentWorkflowApp(
         packId,
         references: impacts,
         projectCount: new Set(impacts.map(item => item.projectId)).size,
+        unreadableProjects,
       })
     } catch (err) {
       return tracedRouteError(c, 'resource-pack.impact', err)
     }
   })
+
+  const handleResourceLibraryProxy = async (c: Context) => {
+    const forbidden = requirePermission(
+      getCurrentUser(c.req.raw),
+      ROUTE_PERMISSION.resourceLibrary,
+    )
+    if (forbidden) return c.json(forbidden, 403)
+    if (!proxyResourceRequest) {
+      return c.json(
+        {
+          error: {
+            code: 'resource_service_unavailable',
+            message: 'Resource service is unavailable',
+          },
+        },
+        503,
+      )
+    }
+    const url = new URL(c.req.url)
+    return proxyResourceRequest(
+      c.req.raw,
+      `${url.pathname}${url.search}`,
+    )
+  }
+  app.all('/api/resource-packs', handleResourceLibraryProxy)
+  app.all('/api/resource-packs/*', handleResourceLibraryProxy)
 
   app.post('/api/projects', async c => {
     const forbidden = requirePermission(
@@ -1981,6 +2178,39 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
+      const workflowWorkspacePath = project.root_path
+      const workflowStore = workflowWorkspacePath
+        ? createRunStore(workflowWorkspacePath, user.id)
+        : undefined
+      const workflowRun = await workflowStore?.load()
+      if (
+        workflowWorkspacePath &&
+        workflowStore &&
+        workflowRun?.status === 'running'
+      ) {
+        const controller = getDeliveryController({
+          request: c.req.raw,
+          user,
+          projectId: workflowRun.projectId,
+          workspacePath: workflowWorkspacePath,
+        })
+        await stopRun({
+          store: workflowStore,
+          runId: workflowRun.runId,
+          reason: 'user stopped workflow',
+          sessionIsOpen: async dispatch => {
+            try {
+              return await controller.dispatcher.workerIsOpen(
+                dispatch.dispatchId,
+              )
+            } catch {
+              return false
+            }
+          },
+          stopDispatch: (dispatchId, stopReason) =>
+            controller.dispatcher.stop(dispatchId, stopReason),
+        })
+      }
       const sessionRef = await resolveBeeGameProjectSessionReference({
         request: c.req.raw,
         user,
@@ -1989,7 +2219,17 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      if (!sessionRef) {
+        if (workflowRun && workflowWorkspacePath) {
+          return c.json({
+            id: workflowRun.runId,
+            cwd: workflowWorkspacePath,
+            status: 'stopped',
+            turnStatus: 'idle',
+          })
+        }
+        return c.json({ error: 'Session not found' }, 404)
+      }
       if (!sessionRef.live) {
         return c.json({
           id: sessionRef.sessionId,
@@ -2091,7 +2331,7 @@ export function createAgentWorkflowApp(
       return c.json({
         workflow: run
           ? workflowViewForDisplay(run, undefined, workspacePath)
-          : createUnmanagedWorkflowView(),
+          : null,
         events,
       })
     } catch (err) {
@@ -2937,8 +3177,6 @@ export function createAgentWorkflowApp(
       join(getCurrentUserDataRoot(request), 'attachment-analysis-'),
     )
     const recordModelUsage = createUsageRecorder({
-      dataDir: getCurrentUserDataRoot(request),
-      userId: user.id,
       sessionId: `attachment-analysis:${clientRequestId ?? randomUUID()}`,
       record: input => dashboardRepository.recordUsage(request, user, input),
       debit: input =>
@@ -2984,8 +3222,6 @@ export function createAgentWorkflowApp(
     )
     const clientRequestId = getBeeGameClientRequestId(body)
     const recordModelUsage = createUsageRecorder({
-      dataDir: getCurrentUserDataRoot(request),
-      userId: user.id,
       sessionId: `idea-intake:${clientRequestId ?? randomUUID()}`,
       record: input => dashboardRepository.recordUsage(request, user, input),
       debit: input =>
@@ -3234,94 +3470,6 @@ export function createAgentWorkflowApp(
         ),
     },
   )
-  registerBeeGameSessionRoutes(
-    app,
-    '/api/console/sessions',
-    beeGameSessions,
-    beeGamePreviews,
-    undefined,
-    {
-      defaultWorkspacePath: options.defaultWorkspacePath,
-      assertPermittedModelConfigRuntime,
-      getCurrentUser,
-      getAuthToken: getRequestAuthToken,
-      getUserDataRoot: getCurrentUserDataRoot,
-      appendAuditEvent: (request, input) =>
-        dashboardRepository.appendAuditEvent(
-          request,
-          getCurrentUser(request),
-          input,
-        ),
-      persistSessionMetadata: (request, metadata) =>
-        dashboardRepository.upsertSessionMetadata(
-          request,
-          getCurrentUser(request),
-          metadata,
-        ),
-      deleteSessionMetadata: (request, metadata, sessionId) =>
-        dashboardRepository.deleteSessionMetadata(
-          request,
-          getCurrentUser(request),
-          metadata,
-          sessionId,
-        ),
-      persistPreviewSnapshot: (request, metadata, snapshot) =>
-        dashboardRepository.upsertPreviewSnapshot(
-          request,
-          getCurrentUser(request),
-          metadata,
-          snapshot,
-        ),
-      issuePreviewCookie: (request, sessionId, userId) =>
-        previewCapabilities.issueCookie(request, sessionId, userId),
-      issuePreviewUrl: (url, sessionId, userId) =>
-        previewCapabilities.issueUrl(url, sessionId, userId),
-      revokePreviewCapability: sessionId =>
-        previewCapabilities.revokeSession(sessionId),
-      modelConfigExists: (request, user, id) =>
-        dashboardRepository.modelConfigExists(request, user, id),
-      listModelConfigs: (request, user) =>
-        dashboardRepository.listModelConfigs(request, user),
-      getProjectWorkspacePath: async (request, user, projectId) => {
-        try {
-          const projects = await dashboardRepository.listProjects(request, user)
-          return projects.find(project => project.id === projectId)?.root_path
-        } catch {
-          return undefined
-        }
-      },
-      startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
-      resumeDeliveryWorkflow: async input => {
-        const store = createRunStore(input.workspacePath, input.user.id)
-        const controller = getDeliveryController(input)
-        const reconciled = await reconcileRunOnStartup({
-          store,
-          sessionIsOpen: async dispatch => {
-            try {
-              return await controller.dispatcher.workerIsOpen(
-                dispatch.dispatchId,
-              )
-            } catch {
-              return false
-            }
-          },
-        })
-        await controller.resume(reconciled ?? input.run)
-        return (await store.load()) ?? reconciled ?? input.run
-      },
-      requestDeliveryChange: async input => {
-        const controller = getDeliveryController(input)
-        return controller.requestChange(input.run, input.message)
-      },
-      ownsProjectWorkspacePath: (request, user, workspacePath) =>
-        dashboardRepository.ownsProjectWorkspacePath(
-          request,
-          user,
-          workspacePath,
-        ),
-    },
-  )
-
   return app
 }
 
@@ -3465,6 +3613,25 @@ function requirePermission(
   return hasBeeGamePermission(user, permission)
     ? undefined
     : { error: 'Forbidden' }
+}
+
+function invitationRouteError(_c: Context, error: unknown): Response {
+  const upstreamStatus = error instanceof InvitationServiceError
+    ? error.status
+    : 502
+  const status = [400, 401, 403, 404].includes(upstreamStatus)
+    ? upstreamStatus
+    : 502
+  const message = error instanceof Error
+    ? error.message
+    : 'Invitation service request failed'
+  return Response.json(
+    { error: message, message },
+    {
+      status,
+      headers: { 'content-type': 'application/json' },
+    },
+  )
 }
 
 function privilegedRouteError(
@@ -3750,21 +3917,6 @@ async function requireOwnedModelConfigId(
   return modelConfigId
 }
 
-function parseUsageWindow(
-  fromValue: string | undefined,
-  toValue: string | undefined,
-): { from?: Date; to?: Date; error?: string } {
-  const from = fromValue ? new Date(fromValue) : undefined
-  const to = toValue ? new Date(toValue) : undefined
-  if (from && !Number.isFinite(from.getTime()))
-    return { error: 'Invalid from timestamp' }
-  if (to && !Number.isFinite(to.getTime()))
-    return { error: 'Invalid to timestamp' }
-  if (from && to && from > to)
-    return { error: 'from timestamp must be before to timestamp' }
-  return { ...(from ? { from } : {}), ...(to ? { to } : {}) }
-}
-
 async function generateBeeGameModelWithUsage(
   host: BeeGameModelRuntimeHost,
   input: BeeGameModelGenerateInput,
@@ -3787,11 +3939,9 @@ async function generateBeeGameModelWithUsage(
 }
 
 function createUsageRecorder(input: {
-  dataDir: string
-  userId: string
   sessionId: string
   projectId?: string
-  record?: (input: {
+  record: (input: {
     sessionId: string
     projectId?: string
     usage: {
@@ -3805,7 +3955,7 @@ function createUsageRecorder(input: {
     metadata?: Record<string, unknown>
     usageSource?: 'runtime_snapshot' | 'model_runtime_host'
   }) => Promise<unknown>
-  debit?: (input: {
+  debit: (input: {
     sessionId: string
     projectId?: string
     usage: {
@@ -3832,8 +3982,6 @@ function createUsageRecorder(input: {
       .update(JSON.stringify({ querySource, usage: normalizedUsage }))
       .digest('hex')}`
     const recordInput = {
-      dataDir: input.dataDir,
-      userId: input.userId,
       sessionId: input.sessionId,
       ...(input.projectId ? { projectId: input.projectId } : {}),
       usage: normalizedUsage,
@@ -3844,12 +3992,8 @@ function createUsageRecorder(input: {
       },
       usageSource: 'model_runtime_host' as const,
     }
-    if (input.record) {
-      await input.record(recordInput)
-      if (input.debit) await input.debit(recordInput)
-      return
-    }
-    recordUsage(recordInput)
+    await input.record(recordInput)
+    await input.debit(recordInput)
   }
 }
 
@@ -4686,7 +4830,7 @@ async function getBeeGameProjectRuntimeState(input: {
       ...(usage ? { context: { token_budget: usage } } : {}),
       workflow: workflow
         ? workflowViewForDisplay(workflow, usage, input.project.root_path)
-        : createUnmanagedWorkflowView(),
+        : null,
     }
   }
   const events = await getProjectRuntimeEvents({
@@ -4757,9 +4901,6 @@ async function getBeeGameProjectRuntimeState(input: {
   const acceptance = workflowSnapshot
     ? toProjectAcceptanceStateFromWorkflow(workflowSnapshot)
     : { status: 'not_run' }
-  const deliveryEvidence = workflowSnapshot
-    ? toProjectDeliveryEvidenceFromWorkflow(workflowSnapshot)
-    : null
   const workflowUsage = workflowSnapshot
     ? workflowUsageForView(
         workflowSnapshot,
@@ -4774,7 +4915,7 @@ async function getBeeGameProjectRuntimeState(input: {
         workflowUsage,
         sessionRef.workspacePath,
       )
-    : createUnmanagedWorkflowView()
+    : null
   const context = deriveBeeGameContextVisibility(events, snapshot) ?? {}
   if (workflowUsage && workflowUsage.total_tokens > 0) {
     // A managed project uses the workflow run ledger as its token authority;
@@ -4799,7 +4940,6 @@ async function getBeeGameProjectRuntimeState(input: {
       (runtime.agentStatus === 'failed' ? runtime.nextAction : null),
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
-    approval_required: pending.length > 0,
     next_action: runtime.nextAction,
     context,
     project_target: assetManifest.project_target ?? null,
@@ -4813,9 +4953,7 @@ async function getBeeGameProjectRuntimeState(input: {
           ),
         })
       : null,
-    review_status: null,
     acceptance,
-    delivery_evidence: deliveryEvidence,
     workflow,
     model_config_id:
       sessionRef.live?.modelConfigId ??
@@ -4868,9 +5006,57 @@ async function readBeeGameWorkflowSnapshot(
       }
       reconciled = await store.load()
     }
-    return reconciled ? (reconciled as unknown as JsonObject) : null
+    if (!reconciled) return null
+    const timing = workflowElapsedTiming(
+      await store.readEvents(),
+      reconciled as DeliveryRun,
+    )
+    return {
+      ...(reconciled as unknown as JsonObject),
+      ...timing,
+    }
   } catch (error) {
     return createWorkflowStateErrorView(error)
+  }
+}
+
+function workflowElapsedTiming(
+  events: WorkflowEvent[],
+  run: DeliveryRun,
+): { elapsedMs: number; activeSince?: string } {
+  const runEvents = events.filter(event => event.runId === run.runId)
+  let elapsedMs = 0
+  let activeSinceMs: number | undefined
+  for (const event of runEvents) {
+    const eventAt = Date.parse(event.createdAt)
+    if (!Number.isFinite(eventAt)) continue
+    if (event.status === 'running') {
+      activeSinceMs ??= eventAt
+      continue
+    }
+    if (activeSinceMs !== undefined) {
+      elapsedMs += Math.max(0, eventAt - activeSinceMs)
+      activeSinceMs = undefined
+    }
+  }
+
+  const createdAt = Date.parse(run.createdAt)
+  const updatedAt = Date.parse(run.updatedAt)
+  if (run.status === 'running') {
+    activeSinceMs ??= Number.isFinite(createdAt) ? createdAt : updatedAt
+  } else if (activeSinceMs !== undefined) {
+    const stoppedAt = Number.isFinite(updatedAt) ? updatedAt : activeSinceMs
+    elapsedMs += Math.max(0, stoppedAt - activeSinceMs)
+    activeSinceMs = undefined
+  } else if (runEvents.length === 0 && Number.isFinite(createdAt)) {
+    elapsedMs = Math.max(0, (Number.isFinite(updatedAt) ? updatedAt : createdAt) - createdAt)
+  }
+
+  return {
+    elapsedMs,
+    ...(activeSinceMs !== undefined
+      ? { activeSince: new Date(activeSinceMs).toISOString() }
+      : {}),
   }
 }
 
@@ -5110,42 +5296,14 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     blocked_reason: null,
     active_agents: [],
     updated_at: updatedAt,
-    approval_required: false,
     next_action: 'Ready for next request',
     context: null,
     project_target: null,
     build_report: null,
-    review_status: null,
     acceptance: { status: 'not_run' },
-    delivery_evidence: null,
     workflow: null,
     model_config_id: null,
     pending_permissions: [],
-  }
-}
-
-function createUnmanagedWorkflowView(): JsonObject {
-  return {
-    status: 'unmanaged',
-    phase: 'UNMANAGED',
-    tasks: [],
-    evidence: {},
-    blockedReason:
-      'This project has no BeeGame delivery run. Start a new delivery workflow before changing files.',
-    // Leave the localized copy to the dashboard. A server-side English
-    // fallback would override the user's selected language.
-    message: '',
-    messageKey: 'workflow.unmanaged',
-    thinking: 'idle',
-    completedTaskCount: 0,
-    totalTaskCount: 0,
-    usage: {
-      input_tokens: 0,
-      cache_read_tokens: 0,
-      cache_creation_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    },
   }
 }
 
@@ -5340,6 +5498,12 @@ function workflowViewForDisplay(
     ...(typeof workflow.updatedAt === 'string'
       ? { updatedAt: workflow.updatedAt }
       : {}),
+    ...(Number.isFinite(Number(workflow.elapsedMs))
+      ? { elapsedMs: Number(workflow.elapsedMs) }
+      : {}),
+    ...(typeof workflow.activeSince === 'string'
+      ? { activeSince: workflow.activeSince }
+      : {}),
     ...(usage ? { usage } : {}),
     // Only a persisted worker response is allowed to override the localized
     // phase/status copy. Do not synthesize an English stage message here.
@@ -5406,27 +5570,6 @@ function toProjectAcceptanceStateFromWorkflow(
     ...(typeof acceptance?.observedAt === 'string'
       ? { validated_at: acceptance.observedAt }
       : {}),
-  }
-}
-
-function toProjectDeliveryEvidenceFromWorkflow(
-  workflow: JsonObject,
-): JsonObject {
-  const evidence = isObject(workflow.evidence) ? workflow.evidence : {}
-  const mapEvidence = (key: string): JsonObject => {
-    const value = isObject(evidence[key]) ? evidence[key] : undefined
-    return {
-      status: typeof value?.status === 'string' ? value.status : 'not_run',
-      ...(typeof value?.path === 'string' ? { summary: value.path } : {}),
-      ...(typeof value?.observedAt === 'string'
-        ? { observed_at: value.observedAt }
-        : {}),
-    }
-  }
-  return {
-    document_review: mapEvidence('documentReview'),
-    implementation_audit: mapEvidence('implementationAudit'),
-    runtime_acceptance: mapEvidence('acceptance'),
   }
 }
 
@@ -5693,11 +5836,7 @@ function deriveBeeGameContextVisibility(
       total_tokens: usage.total_tokens,
       role_tokens: snapshot?.roleTokens ?? {
         mainAgent: usage.total_tokens,
-        reviewer: 0,
-        auditor: 0,
-        validator: 0,
         otherSubagents: 0,
-        waiting: 0,
       },
     },
     counters: {
@@ -6022,33 +6161,11 @@ function registerBeeGameSessionRoutes(
   const getSessionWorkspacePath = async (
     request: Request,
     sessionId: string,
-    legacyWorkspacePath?: string,
   ): Promise<string> => {
     const metadata = beeGameSessions.metadata(sessionId)
-    if (metadata?.workspacePath) {
-      if (checkSession(request, sessionId)) throw new Error('Session not found')
-      return metadata.workspacePath
-    }
-    if (!legacyWorkspacePath) throw new Error('Session not found')
-    const resolvedWorkspace = await resolveSessionWorkspacePath(
-      legacyWorkspacePath,
-      defaultWorkspacePath,
-    )
-    const user = options.getCurrentUser(request)
-    if (user.id === DEFAULT_LOCAL_USER_ID) return resolvedWorkspace
-    if (
-      await options.ownsProjectWorkspacePath(request, user, resolvedWorkspace)
-    ) {
-      return resolvedWorkspace
-    }
-    const userDataRoot = resolve(options.getUserDataRoot(request))
-    const relativeToUserRoot = relative(userDataRoot, resolvedWorkspace)
-    if (relativeToUserRoot.startsWith('..') || isAbsolute(relativeToUserRoot)) {
-      throw new Error(
-        'Workspace path must stay inside the current user workspace',
-      )
-    }
-    return resolvedWorkspace
+    if (!metadata?.workspacePath || checkSession(request, sessionId))
+      throw new Error('Session not found')
+    return metadata.workspacePath
   }
   app.get(basePath, c => {
     const forbidden = check(c.req.raw, 'project.read')
@@ -6130,40 +6247,7 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) {
-      // A development-server restart drops the in-memory session manager but
-      // does not invalidate a project's persisted transcript. Validate the
-      // supplied workspace before recovering it; do not let the early owner
-      // check make the recovery branch below unreachable.
-      const legacyWorkspacePath = getWorkspacePathHint(
-        c.req.query('workspacePath'),
-        { workspacePath: c.req.header('x-beegame-workspace-path') },
-      )
-      if (
-        sessionForbidden.error === 'Session not found' &&
-        legacyWorkspacePath
-      ) {
-        try {
-          const after = Number.parseInt(c.req.query('after') || '0', 10)
-          const workspacePath = await getSessionWorkspacePath(
-            c.req.raw,
-            c.req.param('id'),
-            legacyWorkspacePath,
-          )
-          return await readTranscriptFromWorkspace(
-            c.req.param('id'),
-            workspacePath,
-            defaultWorkspacePath,
-            getDashboardDataRoot(defaultWorkspacePath),
-            after,
-          )
-        } catch {
-          // Preserve the deliberately opaque 404 response for an invalid
-          // session/workspace combination.
-        }
-      }
-      return c.json(sessionForbidden, 404)
-    }
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       beeGameSessions.updateAuthToken(
@@ -6172,28 +6256,6 @@ function registerBeeGameSessionRoutes(
       )
       return c.json(beeGameSessions.events(c.req.param('id'), after))
     } catch (err) {
-      const workspacePath = getWorkspacePathHint(c.req.query('workspacePath'), {
-        workspacePath: c.req.header('x-beegame-workspace-path'),
-      })
-      if (toErrorMessage(err) === 'Session not found' && workspacePath) {
-        const after = Number.parseInt(c.req.query('after') || '0', 10)
-        try {
-          const resolvedWorkspace = await getSessionWorkspacePath(
-            c.req.raw,
-            c.req.param('id'),
-            workspacePath,
-          )
-          return readTranscriptFromWorkspace(
-            c.req.param('id'),
-            resolvedWorkspace,
-            defaultWorkspacePath,
-            getDashboardDataRoot(defaultWorkspacePath),
-            after,
-          )
-        } catch {
-          // Fall through to the opaque route error below.
-        }
-      }
       return publicSessionRouteError(c, 'beegame-session.events', err, 404, [
         'Session not found',
       ])
@@ -6206,9 +6268,10 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
-      const workspacePath = getWorkspacePathHint(c.req.query('workspacePath'), {
-        workspacePath: c.req.header('x-beegame-workspace-path'),
-      })
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+      )
       return c.json(
         beeGameSessions.runtimeSnapshot(c.req.param('id'), workspacePath),
       )
@@ -6237,37 +6300,7 @@ function registerBeeGameSessionRoutes(
           }
         : undefined
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) {
-      const legacyWorkspacePath = getWorkspacePathHint(
-        c.req.query('workspacePath'),
-        { workspacePath: c.req.header('x-beegame-workspace-path') },
-      )
-      if (
-        sessionForbidden.error === 'Session not found' &&
-        legacyWorkspacePath
-      ) {
-        try {
-          const workspacePath = await getSessionWorkspacePath(
-            c.req.raw,
-            c.req.param('id'),
-            legacyWorkspacePath,
-          )
-          return await readTranscriptFromWorkspace(
-            c.req.param('id'),
-            workspacePath,
-            defaultWorkspacePath,
-            getDashboardDataRoot(defaultWorkspacePath),
-            0,
-            chatHistoryView,
-            pagination,
-          )
-        } catch {
-          // Keep the session/workspace relationship opaque when ownership or
-          // path validation fails.
-        }
-      }
-      return c.json(sessionForbidden, 404)
-    }
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const transcript = beeGameSessions.transcript(c.req.param('id'))
       const visibleTranscript = chatHistoryView
@@ -6279,18 +6312,6 @@ function registerBeeGameSessionRoutes(
           : visibleTranscript,
       )
     } catch (err) {
-      const workspacePath = c.req.query('workspacePath')
-      if (toErrorMessage(err) === 'Session not found' && workspacePath) {
-        return readTranscriptFromWorkspace(
-          c.req.param('id'),
-          workspacePath,
-          defaultWorkspacePath,
-          getDashboardDataRoot(defaultWorkspacePath),
-          0,
-          chatHistoryView,
-          pagination,
-        )
-      }
       return publicSessionRouteError(
         c,
         'beegame-session.transcript',
@@ -6310,7 +6331,6 @@ function registerBeeGameSessionRoutes(
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        c.req.query('workspacePath'),
       )
       if (!beeGameSessions.get(c.req.param('id'))) {
         return c.json(await readBeeGameProjectArtifact(workspacePath, path))
@@ -6340,7 +6360,6 @@ function registerBeeGameSessionRoutes(
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        c.req.query('workspacePath'),
       )
       return c.json(await discoverBeeGameProjectArtifacts(workspacePath))
     } catch (err) {
@@ -6366,7 +6385,6 @@ function registerBeeGameSessionRoutes(
         await getSessionWorkspacePath(
           c.req.raw,
           c.req.param('id'),
-          c.req.query('workspacePath'),
         ),
       )
       const body = projectPackage.data.buffer.slice(
@@ -6392,12 +6410,10 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const body = await readOptionalJson(c.req.raw)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
       const sessionId = c.req.param('id')
       c.header(
@@ -6433,12 +6449,10 @@ function registerBeeGameSessionRoutes(
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
-    const body = await readOptionalJson(c.req.raw)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
       const snapshot = await beeGamePreviews.start({
         sessionId: c.req.param('id'),
@@ -6482,12 +6496,10 @@ function registerBeeGameSessionRoutes(
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
-    const body = await readOptionalJson(c.req.raw)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
       const snapshot = await beeGamePreviews.restart({
         sessionId: c.req.param('id'),
@@ -6528,7 +6540,6 @@ function registerBeeGameSessionRoutes(
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
         c.req.param('id'),
-        c.req.query('workspacePath'),
       )
       const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
       options.revokePreviewCapability(c.req.param('id'))
@@ -6569,12 +6580,10 @@ function registerBeeGameSessionRoutes(
       } catch (err) {
         return c.json({ error: toErrorMessage(err) }, 409)
       }
-      const body = await readOptionalJson(c.req.raw)
       try {
         const workspacePath = await getSessionWorkspacePath(
           c.req.raw,
           c.req.param('id'),
-          getWorkspacePathHint(c.req.query('workspacePath'), body),
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
@@ -6746,20 +6755,6 @@ function registerBeeGameSessionRoutes(
         return uploadPolicyResponse(err)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
-  })
-
-  app.post(`${basePath}/:id/idea`, async c => {
-    const forbidden = check(c.req.raw, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
-    return c.json(
-      {
-        error:
-          'Direct idea construction has been removed. Confirm an intake option and submit a production brief.',
-      },
-      410,
-    )
   })
 
   app.post(`${basePath}/:id/confirmed-brief`, async c => {
@@ -7440,7 +7435,6 @@ function buildConfirmedBriefPrompt(
   )
   return [
     'Build and deliver the confirmed game project below.',
-    'Before planning or modifying project files, use the native beegame-game-delivery Skill and follow its new-project or existing-project contract as applicable.',
     '',
     `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`,
     `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`,
@@ -7448,8 +7442,8 @@ function buildConfirmedBriefPrompt(
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another. New projects require an implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
-    'A delivery claim requires independent native document review, implementation audit, and runtime acceptance evidence for the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene composition strategy.',
-    'BeeGame Studio Workflow owns phase transitions, worker dispatch, evidence validation, implementation ordering, verification, and repair decisions. The delivery Skill defines product acceptance requirements; workers choose the concrete tools and implementation details within the current contract.',
+    'A delivery claim requires the workflow document review, implementation audit, and acceptance stages to pass against the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene composition strategy.',
+    'BeeGame Studio Workflow owns phase transitions, worker dispatch, evidence validation, implementation ordering, verification, and repair decisions. Workers choose concrete tools and implementation details within their phase contracts.',
     '',
     'Confirmed brief:',
     confirmedBrief,
@@ -7585,14 +7579,6 @@ async function readOptionalJson(request: Request): Promise<JsonObject> {
   } catch {
     return {}
   }
-}
-
-function getWorkspacePathHint(
-  queryValue: string | undefined,
-  body: JsonObject,
-): string | undefined {
-  if (queryValue) return queryValue
-  return typeof body.workspacePath === 'string' ? body.workspacePath : undefined
 }
 
 function getBeeGameClientRequestId(body: JsonObject): string | undefined {

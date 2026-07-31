@@ -8,12 +8,12 @@ let latestWebSocketOptions: {
 } = {};
 const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock, systemStoreState } = vi.hoisted(() => {
   const state = {
-    pendingReviews: [] as any[],
+    pendingPermissions: [] as any[],
     projectStatus: null as any,
-    removePendingReview: vi.fn(),
-    upsertPendingReview: vi.fn(),
+    removePendingPermission: vi.fn(),
+    upsertPendingPermission: vi.fn(),
     loadProjectStatus: vi.fn().mockResolvedValue(undefined),
-    loadPendingReviews: vi.fn().mockResolvedValue(undefined),
+    loadPendingPermissions: vi.fn().mockResolvedValue(undefined),
     loadProjectRuntimeState: vi.fn().mockResolvedValue(undefined),
   };
   const chatState = {
@@ -31,17 +31,11 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
   const systemState = {
     updateTokenUsage: vi.fn(),
     updateLastP2PRoute: vi.fn(),
-    loadTasks: vi.fn().mockResolvedValue(undefined),
-    loadActivities: vi.fn().mockResolvedValue(undefined),
     loadPhases: vi.fn().mockResolvedValue(undefined),
-    loadAgents: vi.fn().mockResolvedValue(undefined),
     loadTokenUsage: vi.fn().mockResolvedValue(undefined),
     loadCurrentUser: vi.fn().mockResolvedValue(null),
     authenticationStatus: 'authenticated' as const,
-    setAgentStatus: vi.fn(),
-    refreshAgents: vi.fn().mockResolvedValue(undefined),
     setIsSyncing: vi.fn(),
-    tasks: [] as any[],
   };
   const chatHook = Object.assign(() => chatState, {
     getState: () => chatState,
@@ -61,8 +55,8 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
   };
 });
 
-vi.mock('./useWebSocket', () => ({
-  useWebSocket: (options: { onMessage?: (message: any) => void }) => {
+vi.mock('./useProjectEventPolling', () => ({
+  useProjectEventPolling: (options: { onMessage?: (message: any) => void }) => {
     latestWebSocketOptions = options;
     return {
       state: 'connected',
@@ -90,14 +84,9 @@ vi.mock('../services/api', () => ({
     continueTask: vi.fn(),
     sendMessage: vi.fn(),
     stopTask: vi.fn(),
-    approvePlan: vi.fn(),
-    uploadManifestCsv: vi.fn(),
-    approveManifest: vi.fn(),
-    reviseManifest: vi.fn(),
+    resolveToolPermission: vi.fn(),
     getChatHistory: vi.fn().mockResolvedValue([]),
   },
-  normalizeApprovePlanPayload: (payload: unknown) => payload,
-  normalizeReviewBindingPayload: (payload: unknown) => payload,
 }));
 
 vi.mock('../services/beeGameAdapter', () => ({
@@ -117,12 +106,12 @@ import { useChat } from './useChat';
 describe('useChat clarification gate handling', () => {
   beforeEach(() => {
     latestWebSocketOptions = {};
-    projectStoreState.pendingReviews = [];
+    projectStoreState.pendingPermissions = [];
     projectStoreState.projectStatus = null;
-    projectStoreState.removePendingReview.mockClear();
-    projectStoreState.upsertPendingReview.mockClear();
+    projectStoreState.removePendingPermission.mockClear();
+    projectStoreState.upsertPendingPermission.mockClear();
     projectStoreState.loadProjectStatus.mockClear();
-    projectStoreState.loadPendingReviews.mockClear();
+    projectStoreState.loadPendingPermissions.mockClear();
     projectStoreState.loadProjectRuntimeState.mockReset();
     projectStoreState.loadProjectRuntimeState.mockResolvedValue(undefined);
     Object.values(chatStoreState).forEach((value) => {
@@ -169,15 +158,15 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.isStopping).toBe(false);
   });
 
-  it('does not expose clarification gates as generic continue state and refreshes pending approvals', async () => {
+  it('refreshes project state when a permission gate event arrives', async () => {
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
     act(() => {
       latestWebSocketOptions.onMessage?.({
         type: 'human_gate',
-        gate: 'INTENT_CLARIFICATION',
+        gate: 'BEEGAME_PERMISSION',
         project_id: 'proj_1',
-        message: '需要你确认需求澄清',
+        message: 'Tool permission required',
       });
     });
 
@@ -305,9 +294,12 @@ describe('useChat clarification gate handling', () => {
         blocked: false,
         active_agents: ['beegame'],
         updated_at: '2026-07-05T00:00:00.000Z',
-        approval_required: false,
         next_action: 'BeeGame is building',
-        review_status: null,
+        workflow: {
+          runId: 'run_reconnected',
+          status: 'running',
+          currentPhase: 'IMPLEMENTATION',
+        },
       };
     });
 
@@ -328,6 +320,10 @@ describe('useChat clarification gate handling', () => {
       project_id: 'proj_1',
       phase: 'running',
       blocked: false,
+      workflow: {
+        runId: 'run_project_1',
+        status: 'running',
+      },
     };
     const { result, rerender } = renderHook(
       ({ projectId }) => useChat({ projectId }),
@@ -349,6 +345,10 @@ describe('useChat clarification gate handling', () => {
       project_id: 'proj_1',
       phase: 'running',
       blocked: false,
+      workflow: {
+        runId: 'run_interrupted',
+        status: 'running',
+      },
     };
     const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
@@ -359,6 +359,11 @@ describe('useChat clarification gate handling', () => {
       phase: 'paused',
       blocked: true,
       blocked_reason: 'Previous turn was interrupted.',
+      workflow: {
+        runId: 'run_interrupted',
+        status: 'failed',
+        blockedReason: 'Previous turn was interrupted.',
+      },
     };
     rerender();
 
@@ -371,6 +376,10 @@ describe('useChat clarification gate handling', () => {
       project_id: 'proj_1',
       phase: 'running',
       blocked: false,
+      workflow: {
+        runId: 'run_transport_reconnect',
+        status: 'running',
+      },
     };
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
@@ -414,7 +423,7 @@ describe('useChat clarification gate handling', () => {
     }));
     expect(onTaskEvent).toHaveBeenCalledWith('tool_start', expect.any(Object));
     expect(projectStoreState.loadProjectStatus).not.toHaveBeenCalled();
-    expect(projectStoreState.loadPendingReviews).not.toHaveBeenCalled();
+    expect(projectStoreState.loadPendingPermissions).not.toHaveBeenCalled();
   });
 
   it('stores structured tool card metadata from tool events', async () => {
@@ -475,21 +484,16 @@ describe('useChat clarification gate handling', () => {
     expect(onTaskEvent).toHaveBeenCalledWith('status_failed', expect.any(Object));
   });
 
-  it('blocks sendMessage while waiting for an explicit review action', async () => {
+  it('blocks sendMessage while waiting for a tool permission decision', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',
-      phase: 'DESIGN_IN_PROGRESS',
+      phase: 'IMPLEMENTATION',
       blocked: false,
-      review_status: {
-        workflow_id: 'review_flow',
-        lane_id: 'internal_board_review',
-        lane_status: 'awaiting_approval',
-        decision_status: 'awaiting_user',
-        message: { message_key: 'review.awaiting_user' },
-        requires_user_action: true,
-        user_action_kind: 'approve',
-      },
     };
+    projectStoreState.pendingPermissions = [{
+      gate_id: 'permission-1',
+      type: 'BEEGAME_PERMISSION',
+    }];
     const onError = vi.fn();
     const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError }));
 
@@ -501,7 +505,7 @@ describe('useChat clarification gate handling', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sender: 'system',
-      content: 'Internal review passed and is waiting for user approval.',
+      content: 'BeeGame 正在等待工具权限决定。',
       type: 'error',
     }));
   });
@@ -645,28 +649,31 @@ describe('useChat clarification gate handling', () => {
     expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
   });
 
-  it('removes the pending review immediately after a successful approve submission', async () => {
-    projectStoreState.pendingReviews = [
+  it('removes the pending permission immediately after a successful decision', async () => {
+    projectStoreState.pendingPermissions = [
       {
         gate_id: 'gate_approval',
-        artifact_id: 'art_1',
-        binding: { artifact_id: 'art_1' },
+        type: 'BEEGAME_PERMISSION',
       },
     ];
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
     await act(async () => {
-      await result.current.approvePlan({
+      await result.current.resolveToolPermission({
         gate_id: 'gate_approval',
-        artifact_id: 'art_1',
-      } as any);
+      }, 'allow');
     });
 
-    expect(api.approvePlan).toHaveBeenCalledTimes(1);
-    expect(projectStoreState.removePendingReview).toHaveBeenCalledWith('gate_approval');
+    expect(api.resolveToolPermission).toHaveBeenCalledWith({
+      project_id: 'proj_1',
+      gate_id: 'gate_approval',
+      decision: 'allow',
+      scope: 'once',
+    });
+    expect(projectStoreState.removePendingPermission).toHaveBeenCalledWith('gate_approval');
     expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
-    expect(projectStoreState.upsertPendingReview).not.toHaveBeenCalled();
-    expect(result.current.approvalState).toEqual({
+    expect(projectStoreState.upsertPendingPermission).not.toHaveBeenCalled();
+    expect(result.current.permissionState).toEqual({
       gateId: null,
       action: null,
       phase: 'idle',
@@ -674,45 +681,24 @@ describe('useChat clarification gate handling', () => {
     });
   });
 
-  it('refreshes project visibility after successful manifest approval and revision actions', async () => {
-    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
-
-    await act(async () => {
-      await result.current.approveManifest({
-        gate_id: 'gate_manifest',
-        artifact_id: 'art_1',
-      } as any);
-    });
-
-    await act(async () => {
-      await result.current.reviseManifest('gate_manifest', 'needs edits');
-    });
-
-    expect(api.approveManifest).toHaveBeenCalledTimes(1);
-    expect(api.reviseManifest).toHaveBeenCalledTimes(1);
-    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledTimes(2);
-    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenNthCalledWith(1, 'proj_1');
-  });
-
-  it('restores the pending review when approve submission fails', async () => {
+  it('restores the pending permission when resolution fails', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const review = {
       gate_id: 'gate_approval',
-      artifact_id: 'art_1',
-      binding: { artifact_id: 'art_1' },
+      type: 'BEEGAME_PERMISSION',
     };
-    projectStoreState.pendingReviews = [review];
-    vi.mocked(api.approvePlan).mockRejectedValueOnce(new Error('approve failed'));
+    projectStoreState.pendingPermissions = [review];
+    vi.mocked(api.resolveToolPermission).mockRejectedValueOnce(new Error('permission failed'));
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
     await act(async () => {
-      await result.current.approvePlan(review as any);
+      await result.current.resolveToolPermission(review as any);
     });
 
-    expect(projectStoreState.removePendingReview).not.toHaveBeenCalled();
-    expect(projectStoreState.upsertPendingReview).toHaveBeenCalledWith(review);
-    expect(result.current.approvalState.phase).toBe('failed');
-    expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to approve plan:', expect.any(Error));
+    expect(projectStoreState.removePendingPermission).not.toHaveBeenCalled();
+    expect(projectStoreState.upsertPendingPermission).toHaveBeenCalledWith(review);
+    expect(result.current.permissionState.phase).toBe('failed');
+    expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to resolve tool permission:', expect.any(Error));
     errorLog.mockRestore();
   });
 });

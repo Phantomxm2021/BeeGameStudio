@@ -15,6 +15,10 @@ export type BeeGameBillingUserContext = {
 export type BillingRouteDeps = {
   billingConfig: BeeGameBillingConfig
   dashboardRepository: BeeGameBillingRouteRepository
+  proxyRemoteBillingRequest?: (
+    request: Request,
+    path: string,
+  ) => Promise<Response>
   getCurrentUser: (request?: Request) => BeeGameBillingUserContext
   hasPermission: (
     user: BeeGameBillingUserContext,

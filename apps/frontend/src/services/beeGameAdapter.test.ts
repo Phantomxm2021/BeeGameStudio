@@ -223,49 +223,6 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
-  it('does not probe a stale project session while loading global agents on the homepage', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: 'project_stale',
-      sessionId: 'beegame_stale',
-      workspacePath: '/tmp/beegame-projects/stale',
-    }]));
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getAgents()).resolves.toEqual([
-      { id: 'beegame', name: 'BeeGame', status: 'idle' },
-    ]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('removes the obsolete browser session-binding cache when projects load', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
-      { projectId: 'project_removed', sessionId: 'beegame_removed', workspacePath: '/tmp/removed' },
-    ]));
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([
-      { id: 'project_kept', name: 'Kept', created_at: 1710000000000 },
-    ])));
-
-    await beeGameAdapter.getProjects();
-
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
-  });
-
-  it('does not retain obsolete bindings during a transient empty project response', async () => {
-    const binding = {
-      projectId: 'project_recoverable',
-      sessionId: 'beegame_recoverable',
-      workspacePath: '/tmp/recoverable',
-    };
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([binding]));
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
-
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
-  });
-
   it('stops the current project without resolving a browser session binding', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/projects/project_local/stop' && init?.method === 'POST') {
@@ -841,7 +798,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(result.project.name).toBe('移动与瞄准训练');
   });
 
-  it('delegates legacy project session recovery to the backend ensure endpoint', async () => {
+  it('delegates project session recovery to the backend ensure endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -881,12 +838,6 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { project: legacyProject } = seedBoundProject('beegame_legacy', '/tmp/beegame-projects');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: legacyProject.id,
-      sessionId: 'beegame_legacy',
-      workspacePath: '/tmp/beegame-projects',
-    }]));
-
     await beeGameAdapter.sendMessage({
       project_id: legacyProject.id,
       content: '修复蛇会自动增长的问题',
@@ -900,7 +851,6 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     expect(ensureCall).toBeTruthy();
     expect(inputCall).toBeTruthy();
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
   it('loads chat history from a persisted transcript after the backend restarts', async () => {
@@ -1460,7 +1410,6 @@ describe('beeGameAdapter prompt rules', () => {
           blocked: false,
           active_agents: ['beegame'],
           updated_at: '2026-06-21T00:00:04.000Z',
-          approval_required: false,
           next_action: 'BeeGame is processing',
           context: {
             phase: 'running',
@@ -1472,7 +1421,6 @@ describe('beeGameAdapter prompt rules', () => {
             },
           },
           build_report: null,
-          review_status: null,
           model_config_id: 'model_default',
         });
       }
@@ -1494,7 +1442,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const statusPromise = beeGameAdapter.getProjectStatus('project_shared_runtime');
-    const reviewsPromise = beeGameAdapter.getPendingUserReviews('project_shared_runtime');
+    const reviewsPromise = beeGameAdapter.getPendingToolPermissions('project_shared_runtime');
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     resolveResponse(jsonResponse({
@@ -2028,7 +1976,6 @@ describe('beeGameAdapter prompt rules', () => {
         return jsonResponse(projectRuntimeState(path.split('/')[3], {
           phase: 'waiting_approval',
           blocked: true,
-          approval_required: true,
           next_action: 'Review BeeGame permission request',
           active_agents: ['beegame'],
           pending_permissions: [{
@@ -2057,7 +2004,7 @@ describe('beeGameAdapter prompt rules', () => {
 
     const result = seedBoundProject('beegame_question', '/tmp/beegame-projects');
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const reviews = await beeGameAdapter.getPendingUserReviews(result.project.id);
+    const reviews = await beeGameAdapter.getPendingToolPermissions(result.project.id);
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
 
     expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
@@ -2067,15 +2014,13 @@ describe('beeGameAdapter prompt rules', () => {
         gate_id: 'tool_question',
         task_id: 'beegame_question',
         type: 'BEEGAME_PERMISSION',
-        gate_kind: 'beegame_permission',
         title: 'AskUserQuestion permission',
-        status: 'awaiting_approval',
+        permission_tool_name: 'AskUserQuestion',
         artifact: expect.objectContaining({
-          title: 'AskUserQuestion permission',
+          content: '游戏模式',
         }),
       }),
     ]);
-    expect(status.approval_required).toBe(true);
     expect(status.phase).toBe('waiting_approval');
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/api/beegame-sessions/beegame_question/events?after=0',
@@ -2083,7 +2028,7 @@ describe('beeGameAdapter prompt rules', () => {
     );
   });
 
-  it('approves BeeGame permission requests through the project scoped endpoint', async () => {
+  it('resolves BeeGame permission requests through the project scoped endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/projects/project_permission/permissions/tool_question' && init?.method === 'POST') {
@@ -2096,10 +2041,11 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.approvePlan({
+    await expect(beeGameAdapter.resolveToolPermission({
       project_id: 'project_permission',
       gate_id: 'tool_question',
-      action: 'approve',
+      decision: 'allow',
+      scope: 'once',
     })).resolves.toEqual({ ok: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -2982,7 +2928,6 @@ describe('beeGameAdapter prompt rules', () => {
         return jsonResponse(projectRuntimeState(path.split('/')[3], {
           phase: 'waiting_approval',
           blocked: true,
-          approval_required: true,
           next_action: 'Review BeeGame permission request',
           active_agents: ['beegame'],
         }));
@@ -3006,7 +2951,6 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
     expect(status.phase).toBe('waiting_approval');
     expect(status.next_action).toBe('Review BeeGame permission request');
-    expect(status.approval_required).toBe(true);
   });
 
   it('delegates project and runtime cleanup to the project-scoped delete endpoint', async () => {
@@ -3101,44 +3045,6 @@ describe('beeGameAdapter prompt rules', () => {
 
     await expect(beeGameAdapter.deleteProject(result.project.id)).resolves.toEqual({ ok: true });
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-  });
-
-  it('deletes stale local project records when their old workspace is outside the current default workspace', async () => {
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
-      {
-        id: 'project_legacy_path',
-        name: 'Legacy Path',
-        root_path: '/app/Projects/legacy-path',
-        created_at: 1710000000000,
-        updated_at: 1710000000000,
-      },
-    ]));
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_legacy_path',
-        sessionId: 'beegame_legacy_path',
-        workspacePath: '/app/Projects/legacy-path',
-      },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (
-        path === '/api/beegame-sessions/beegame_legacy_path?deleteArtifacts=1&workspacePath=%2Fapp%2FProjects%2Flegacy-path' &&
-        init?.method === 'DELETE'
-      ) {
-        return jsonResponse({
-          error: 'Workspace path must stay inside the default Projects directory: /srv/beegame/projects',
-        }, 400);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.deleteProject('project_legacy_path')).resolves.toEqual({ ok: true });
-
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
   });
 
   it('lists only docs markdown files plus an on-demand project package artifact', async () => {
@@ -3554,11 +3460,9 @@ function projectRuntimeState(
     blocked_reason: null,
     active_agents: [],
     updated_at: '2026-06-21T00:00:00.000Z',
-    approval_required: false,
     next_action: 'Ready for next request',
     context: null,
     build_report: null,
-    review_status: null,
     model_config_id: null,
     ...overrides,
   };

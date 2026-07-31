@@ -1,4 +1,4 @@
-import { resolveAuthTokenAsync } from './apiClient'
+import { authenticatedFetch, buildApiUrl } from './apiClient'
 
 export type ResourcePackPrimaryCategory =
   | '2d-art'
@@ -113,23 +113,14 @@ export class ResourceLibraryApiError extends Error {
 
 type ResourceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-/**
- * The resource service intentionally runs on its own origin in local
- * development. It is nevertheless a configured first-party service, so its
- * requests must carry the logged-in Supabase bearer token. We keep this
- * scoped to this client instead of allowing auth headers on arbitrary URLs.
- */
 const authenticatedResourceFetch: ResourceFetch = async (input, init = {}) => {
-  const headers = new Headers(init.headers)
-  const token = await resolveAuthTokenAsync()
-  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
-  return fetch(input, { ...init, headers })
+  return authenticatedFetch(input, init)
 }
 
 export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticatedResourceFetch) {
-  const baseUrl = String(import.meta.env.VITE_RESOURCE_API_BASE_URL ?? '').replace(/\/+$/, '')
+  const resourceUrl = (path: string): string => buildApiUrl(path)
   const request = async <T>(path: string): Promise<T> => {
-    const response = await fetchImpl(`${baseUrl}${path}`)
+    const response = await fetchImpl(resourceUrl(path))
     const body = await response.json().catch(() => undefined) as T | { error?: { code?: string; message?: string } } | undefined
     if (!response.ok) {
       const error = body && typeof body === 'object' && 'error' in body ? body.error : undefined
@@ -143,19 +134,19 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
   }
   return {
     async createPack(input: CreateResourcePackInput): Promise<ResourcePackSummary> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const response = await fetchImpl(resourceUrl('/api/resource-packs'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack creation failed (${response.status})`, response.status, result.error?.code || 'resource_pack_create_failed')
       return result.pack
     },
     async updatePack(packId: string, body: UpdateResourcePackInput): Promise<ResourcePackSummary> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}`), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Resource update failed (${response.status})`, response.status, result.error?.code || 'resource_update_failed')
       return result.pack
     },
     async deletePack(packId: string): Promise<void> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}`, { method: 'DELETE' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}`), { method: 'DELETE' })
       if (response.status === 204) return
       const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
       throw new ResourceLibraryApiError(result?.error?.message || `Pack deletion failed (${response.status})`, response.status, result?.error?.code || 'resource_pack_delete_failed')
@@ -163,19 +154,19 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     async uploadPackCover(packId: string, file: File): Promise<ResourcePackSummary> {
       const form = new FormData()
       form.set('file', file)
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/cover`, { method: 'POST', body: form })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/cover`), { method: 'POST', body: form })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack cover upload failed (${response.status})`, response.status, result.error?.code || 'resource_pack_cover_upload_failed')
       return result.pack
     },
     async publishPack(packId: string): Promise<ResourcePackSummary> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/publish`, { method: 'POST' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/publish`), { method: 'POST' })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack publish failed (${response.status})`, response.status, result.error?.code || 'resource_publish_failed')
       return result.pack
     },
     async archivePack(packId: string): Promise<ResourcePackSummary> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/archive`, { method: 'POST' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/archive`), { method: 'POST' })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack archive failed (${response.status})`, response.status, result.error?.code || 'resource_archive_failed')
       return result.pack
@@ -186,7 +177,7 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     },
     async addElement(packId: string, file: File, category: string, folderPath?: string, options?: ResourceElementUploadOptions): Promise<ResourceElement> {
       const form = new FormData(); form.set('file', file); form.set('category', category); if (folderPath) form.set('folderPath', folderPath)
-      const url = `${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`
+      const url = resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/elements`)
       if (options && typeof XMLHttpRequest !== 'undefined' && fetchImpl === authenticatedResourceFetch) {
         return uploadElementWithProgress(url, form, options)
       }
@@ -208,19 +199,19 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       return result.folders
     },
     async createFolder(packId: string, input: { id?: string; name: string; parentId?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/folders`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
       return result.folder
     },
     async updateFolder(packId: string, folderId: string, input: { name?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder update failed (${response.status})`, response.status, result.error?.code || 'resource_folder_update_failed')
       return result.folder
     },
     async deleteFolder(packId: string, folderId: string): Promise<void> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`), { method: 'DELETE' })
       if (response.status === 204) return
       const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
       throw new ResourceLibraryApiError(result?.error?.message || `Folder deletion failed (${response.status})`, response.status, result?.error?.code || 'resource_folder_delete_failed')
@@ -248,19 +239,19 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       return result.url
     },
     async updateElement(packId: string, elementId: string, body: Partial<ResourceElement>): Promise<ResourceElement> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element update failed (${response.status})`, response.status, result.error?.code || 'element_update_failed')
       return result.element
     },
     async inspectElement(packId: string, elementId: string): Promise<ResourceElement> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}/inspection`, { method: 'POST' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}/inspection`), { method: 'POST' })
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element inspection failed (${response.status})`, response.status, result.error?.code || 'element_inspection_failed')
       return result.element
     },
     async startProcessingJob(packId: string, elementIds?: string[]): Promise<ResourceProcessingJob> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(elementIds?.length ? { elementIds } : {}) }) })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(elementIds?.length ? { elementIds } : {}) }) })
       const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
       if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing failed (${response.status})`, response.status, result.error?.code || 'resource_processing_failed')
       return result.job
@@ -274,19 +265,19 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       return result.job
     },
     async retryProcessingJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}/retry`), { method: 'POST' })
       const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
       if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing retry failed (${response.status})`, response.status, result.error?.code || 'resource_processing_retry_failed')
       return result.job
     },
     async cancelProcessingJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}`), { method: 'DELETE' })
       const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
       if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing cancellation failed (${response.status})`, response.status, result.error?.code || 'resource_processing_cancel_failed')
       return result.job
     },
     async deleteElement(packId: string, elementId: string): Promise<void> {
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'DELETE' })
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`), { method: 'DELETE' })
       if (response.status === 204) return
       const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
       throw new ResourceLibraryApiError(result?.error?.message || `Element deletion failed (${response.status})`, response.status, result?.error?.code || 'element_delete_failed')
@@ -299,12 +290,11 @@ async function uploadElementWithProgress(
   form: FormData,
   options: ResourceElementUploadOptions,
 ): Promise<ResourceElement> {
-  const token = await resolveAuthTokenAsync()
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest()
     const abort = () => request.abort()
     request.open('POST', url)
-    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`)
+    request.withCredentials = true
     request.responseType = 'json'
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) options.onProgress?.(event.loaded, event.total)

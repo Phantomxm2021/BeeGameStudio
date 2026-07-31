@@ -1,9 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import type {
-  BeeGameUsageBillingEvent,
-  BeeGameUsageBillingRecordInput,
-  BeeGameUsageBillingRecordResult,
-} from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import {
   decryptSecret,
   encryptSecret,
@@ -15,11 +10,6 @@ import type {
   ModelConfigUpdate,
   PublicModelConfig,
 } from '@bee-game-studio/agent-workflow'
-import {
-  type CreditBalance,
-  type CreditGrant,
-  type RealtimeUsageWallet,
-} from './realtime-usage-wallet'
 import type {
   McpServerConfig,
   McpServerEnvVar,
@@ -147,40 +137,6 @@ export type BeeGameSessionMetadata = {
   createdAt: Date
   updatedAt: Date
 }
-
-type SupabaseUsageBillingResult = {
-  duplicate?: boolean
-  event: {
-    id: string
-    idempotency_key: string
-    user_id: string
-    session_id: string
-    turn_id: string | null
-    project_id: string | null
-    pricing_version: string
-    usage_source: 'runtime_snapshot' | 'model_runtime_host'
-    prompt_tokens: number
-    completion_tokens: number
-    cache_read_tokens: number
-    cache_creation_tokens: number
-    total_tokens: number
-    prompt_tokens_delta: number
-    completion_tokens_delta: number
-    cache_read_tokens_delta: number
-    cache_creation_tokens_delta: number
-    total_tokens_delta: number
-    weighted_tokens: number
-    weighted_tokens_delta: number
-    credits_micro: number
-    created_at: string
-    metadata: JsonObject
-  }
-  cumulative_usage: BeeGameUsageBillingRecordInput['usage']
-  cumulative_weighted_tokens: number
-  credits_micro: number
-}
-
-type SupabaseUsageBillingEventRow = SupabaseUsageBillingResult['event']
 
 export type BeeGameBillingCreditPack = {
   provider: 'stripe'
@@ -322,33 +278,6 @@ export function createSupabaseDashboardStoreFromEnv(
   return new SupabaseDashboardStore({
     url,
     anonKey,
-    assetBucket:
-      (
-        env.BEEGAME_SUPABASE_ASSET_BUCKET ??
-        env.SUPABASE_ASSET_BUCKET ??
-        ''
-      ).trim() || undefined,
-  })
-}
-
-export function createSupabasePaymentProviderGrantStoreFromEnv(
-  env: Env = process.env,
-): SupabaseDashboardStore | undefined {
-  const url = (
-    env.BEEGAME_SUPABASE_URL ??
-    env.SUPABASE_URL ??
-    env.VITE_SUPABASE_URL ??
-    ''
-  ).trim()
-  const serviceRoleKey = (
-    env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
-    env.SUPABASE_SERVICE_ROLE_KEY ??
-    ''
-  ).trim()
-  if (!url || !serviceRoleKey) return undefined
-  return new SupabaseDashboardStore({
-    url,
-    anonKey: serviceRoleKey,
     assetBucket:
       (
         env.BEEGAME_SUPABASE_ASSET_BUCKET ??
@@ -936,143 +865,6 @@ export class SupabaseDashboardStore {
       owner_id: ownerId,
       project_id: projectId,
     })
-  }
-
-  async getCreditBalance(ownerId: string): Promise<CreditBalance> {
-    return toCreditBalance(await this.getRealtimeUsageWallet(ownerId))
-  }
-
-  async recordUsage(
-    ownerId: string,
-    input: BeeGameUsageBillingRecordInput,
-  ): Promise<BeeGameUsageBillingRecordResult> {
-    const result = await this.rpc<SupabaseUsageBillingResult>(
-      'beegame_record_usage',
-      {
-        p_user_id: ownerId,
-        p_session_id: input.sessionId,
-        p_turn_id: input.turnId ?? null,
-        p_project_id: input.projectId ?? null,
-        p_idempotency_key: input.idempotencyKey,
-        p_usage: input.usage,
-        p_metadata: input.metadata ?? {},
-        p_pricing_version: input.pricingVersion ?? 'weighted-v1',
-        p_usage_source: input.usageSource ?? 'runtime_snapshot',
-      },
-    )
-    return toUsageBillingRecordResult(result)
-  }
-
-  async debitRealTimeUsage(
-    ownerId: string,
-    input: BeeGameUsageBillingRecordInput,
-  ): Promise<BeeGameUsageBillingRecordResult> {
-    const result = await this.rpc<SupabaseUsageBillingResult>(
-      'beegame_debit_realtime_usage',
-      {
-        p_user_id: ownerId,
-        p_session_id: input.sessionId,
-        p_turn_id: input.turnId ?? null,
-        p_project_id: input.projectId ?? null,
-        p_idempotency_key: input.idempotencyKey,
-        p_usage: input.usage,
-        p_metadata: input.metadata ?? {},
-        p_pricing_version: input.pricingVersion ?? 'weighted-v1',
-        p_usage_source: input.usageSource ?? 'runtime_snapshot',
-      },
-    )
-    return toUsageBillingRecordResult(result)
-  }
-
-  async getRealtimeUsageWallet(ownerId: string): Promise<RealtimeUsageWallet> {
-    type UsageWalletRow = {
-      user_id: string
-      included_credits_micro: number
-      consumed_credits_micro: number
-    }
-    const rows = await this.rest<UsageWalletRow[]>(
-      `/rest/v1/beegame_usage_wallets?user_id=eq.${q(ownerId)}&select=user_id,included_credits_micro,consumed_credits_micro&limit=1`,
-    )
-    const row = rows[0]
-    if (!row) {
-      return {
-        userId: ownerId,
-        includedCreditsMicro: 300_000_000,
-        consumedCreditsMicro: 0,
-        balanceCreditsMicro: 300_000_000,
-      }
-    }
-    return {
-      userId: row.user_id,
-      includedCreditsMicro: row.included_credits_micro,
-      consumedCreditsMicro: row.consumed_credits_micro,
-      balanceCreditsMicro: Math.max(
-        0,
-        row.included_credits_micro - row.consumed_credits_micro,
-      ),
-    }
-  }
-
-  async listUsageEvents(
-    ownerId: string,
-    projectId?: string,
-  ): Promise<BeeGameUsageBillingEvent[]> {
-    const projectFilter = projectId ? `&project_id=eq.${q(projectId)}` : ''
-    const rows = await this.rest<SupabaseUsageBillingEventRow[]>(
-      `/rest/v1/beegame_usage_events?user_id=eq.${q(ownerId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
-    )
-    return rows.map(rowToUsageBillingEvent)
-  }
-
-  async grantCredits(
-    ownerId: string,
-    options: {
-      credits: number
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<CreditGrant> {
-    return this.grantRealtimeCredits(ownerId, options)
-  }
-
-  async grantPaymentProviderCredits(
-    ownerId: string,
-    options: {
-      credits: number
-      metadata?: Record<string, unknown>
-    },
-  ): Promise<CreditGrant> {
-    return this.grantRealtimeCredits(ownerId, options)
-  }
-
-  private async grantRealtimeCredits(
-    ownerId: string,
-    options: { credits: number; metadata?: Record<string, unknown> },
-  ): Promise<CreditGrant> {
-    const wallet = await this.getRealtimeUsageWallet(ownerId)
-    const grantedCredits = normalizePositiveInteger(options.credits)
-    const row = await this.upsert<{ user_id: string; included_credits_micro: number; consumed_credits_micro: number }>(
-      'beegame_usage_wallets',
-      {
-        user_id: ownerId,
-        included_credits_micro:
-          wallet.includedCreditsMicro + grantedCredits * 1_000_000,
-        consumed_credits_micro: wallet.consumedCreditsMicro,
-        updated_at: new Date().toISOString(),
-      },
-      'user_id',
-    )
-    return {
-      grantedCredits,
-      balance: toCreditBalance({
-        userId: row.user_id,
-        includedCreditsMicro: row.included_credits_micro,
-        consumedCreditsMicro: row.consumed_credits_micro,
-        balanceCreditsMicro: Math.max(
-          0,
-          row.included_credits_micro - row.consumed_credits_micro,
-        ),
-      }),
-    }
   }
 
   async listBillingCreditPacks(
@@ -1946,20 +1738,6 @@ function rowToSessionMetadata(row: SupabaseSessionRow): BeeGameSessionMetadata {
   }
 }
 
-function toCreditBalance(wallet: RealtimeUsageWallet): CreditBalance {
-  const includedCredits = wallet.includedCreditsMicro / 1_000_000
-  const consumedCredits = wallet.consumedCreditsMicro / 1_000_000
-  return {
-    ...wallet,
-    plan: 'free',
-    balanceCredits: wallet.balanceCreditsMicro / 1_000_000,
-    includedCredits,
-    consumedCredits,
-    creditUnitWeightedTokens: 10_000,
-    estimates: {},
-  }
-}
-
 function rowToBillingCreditPack(
   row: SupabaseBillingCreditPackRow,
 ): BeeGameBillingCreditPack {
@@ -2123,107 +1901,6 @@ function normalizeDeploymentStatus(
     value === 'failed'
     ? value
     : 'failed'
-}
-
-function toUsageBillingRecordResult(
-  result: SupabaseUsageBillingResult,
-): BeeGameUsageBillingRecordResult {
-  const event = result.event
-  return {
-    duplicate: result.duplicate === true,
-    event: {
-      id: event.id,
-      idempotencyKey: event.idempotency_key,
-      userId: event.user_id,
-      sessionId: event.session_id,
-      ...(event.turn_id ? { turnId: event.turn_id } : {}),
-      ...(event.project_id ? { projectId: event.project_id } : {}),
-      pricingVersion: event.pricing_version,
-      usageSource: event.usage_source,
-      usage: {
-        prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens),
-        completion_tokens: normalizeNonNegativeInteger(event.completion_tokens),
-        cache_read_tokens: normalizeNonNegativeInteger(event.cache_read_tokens),
-        cache_creation_tokens: normalizeNonNegativeInteger(
-          event.cache_creation_tokens,
-        ),
-        total_tokens: normalizeNonNegativeInteger(event.total_tokens),
-      },
-      delta: {
-        prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens_delta),
-        completion_tokens: normalizeNonNegativeInteger(
-          event.completion_tokens_delta,
-        ),
-        cache_read_tokens: normalizeNonNegativeInteger(
-          event.cache_read_tokens_delta,
-        ),
-        cache_creation_tokens: normalizeNonNegativeInteger(
-          event.cache_creation_tokens_delta,
-        ),
-        total_tokens: normalizeNonNegativeInteger(event.total_tokens_delta),
-      },
-      weightedTokens: normalizeNonNegativeInteger(event.weighted_tokens),
-      weightedTokensDelta: normalizeNonNegativeInteger(
-        event.weighted_tokens_delta,
-      ),
-      creditsMicro: normalizeNonNegativeInteger(
-        event.credits_micro,
-      ),
-      createdAt: event.created_at,
-      metadata: isObject(event.metadata) ? event.metadata : {},
-    },
-    cumulativeUsage: result.cumulative_usage,
-    cumulativeWeightedTokens: normalizeNonNegativeInteger(
-      result.cumulative_weighted_tokens,
-    ),
-    creditsMicro: normalizeNonNegativeInteger(
-      result.credits_micro,
-    ),
-  }
-}
-
-function rowToUsageBillingEvent(
-  event: SupabaseUsageBillingEventRow,
-): BeeGameUsageBillingEvent {
-  return {
-    id: event.id,
-    idempotencyKey: event.idempotency_key,
-    userId: event.user_id,
-    sessionId: event.session_id,
-    ...(event.turn_id ? { turnId: event.turn_id } : {}),
-    ...(event.project_id ? { projectId: event.project_id } : {}),
-    pricingVersion: event.pricing_version,
-    usageSource: event.usage_source,
-    usage: {
-      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens),
-      completion_tokens: normalizeNonNegativeInteger(event.completion_tokens),
-      cache_read_tokens: normalizeNonNegativeInteger(event.cache_read_tokens),
-      cache_creation_tokens: normalizeNonNegativeInteger(
-        event.cache_creation_tokens,
-      ),
-      total_tokens: normalizeNonNegativeInteger(event.total_tokens),
-    },
-    delta: {
-      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens_delta),
-      completion_tokens: normalizeNonNegativeInteger(
-        event.completion_tokens_delta,
-      ),
-      cache_read_tokens: normalizeNonNegativeInteger(
-        event.cache_read_tokens_delta,
-      ),
-      cache_creation_tokens: normalizeNonNegativeInteger(
-        event.cache_creation_tokens_delta,
-      ),
-      total_tokens: normalizeNonNegativeInteger(event.total_tokens_delta),
-    },
-    weightedTokens: normalizeNonNegativeInteger(event.weighted_tokens),
-    weightedTokensDelta: normalizeNonNegativeInteger(
-      event.weighted_tokens_delta,
-    ),
-    creditsMicro: normalizeNonNegativeInteger(event.credits_micro),
-    createdAt: event.created_at,
-    metadata: isObject(event.metadata) ? event.metadata : {},
-  }
 }
 
 function normalizeNonNegativeInteger(value: unknown, fallback = 0): number {

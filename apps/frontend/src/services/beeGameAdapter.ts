@@ -5,7 +5,7 @@ import type {
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
   ContinueTaskResponse,
-  PendingUserReviewItem,
+  PendingToolPermissionItem,
   ProjectBaselineStatusPayload,
   ProjectRuntimeStatePayload,
   SendMessageResponse,
@@ -13,7 +13,7 @@ import type {
   ChatAttachmentPayload,
 } from './api';
 import type { Project } from '../types/project';
-import type { WebSocketMessage } from '../types/message';
+import type { ProjectEventMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
 import { normalizeAttachmentBuildAnalysis, type AttachmentBuildAnalysis } from './attachmentBuild';
 import { getSupabaseSessionUser } from './supabaseAuthApi';
@@ -238,7 +238,6 @@ export type BeeGameBuildBrief = {
 };
 
 const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
-const LEGACY_BINDINGS_KEY = 'beegame-adapter-bindings';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
@@ -281,7 +280,6 @@ export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSetti
 
 export const beeGameAdapter = {
   async getProjects(): Promise<Project[]> {
-    clearLegacyProjectSessionBindings();
     return getJson<Project[]>('/api/projects');
   },
 
@@ -485,7 +483,7 @@ export const beeGameAdapter = {
 
   async pollMessages(projectId: string, afterEventId: number): Promise<{
     lastEventId: number;
-    messages: WebSocketMessage[];
+    messages: ProjectEventMessage[];
   }> {
     const historyCursor = chatHistoryCursorByProject.get(projectId);
     const effectiveAfterEventId = afterEventId === 0
@@ -507,7 +505,7 @@ export const beeGameAdapter = {
     return {
       lastEventId,
       messages: normalizedEvents
-        .flatMap(event => eventToWebSocketMessages(projectId, event, eventResult.workspacePath))
+        .flatMap(event => eventToProjectEventMessages(projectId, event, eventResult.workspacePath))
         // Chat history already renders persisted terminal failures. Replaying
         // them through the live channel would invoke onError again on every
         // dashboard mount and make a historical failure look current.
@@ -526,11 +524,11 @@ export const beeGameAdapter = {
       : [];
     return {
       status: runtimeState,
-      pendingReviews: pendingPermissions.map(permission => pendingPermissionToReview(projectId, permission)),
+      pendingPermissions: pendingPermissions.map(permission => pendingPermissionToReview(projectId, permission)),
     };
   },
 
-  async getPendingUserReviews(projectId: string): Promise<{ items: PendingUserReviewItem[] }> {
+  async getPendingToolPermissions(projectId: string): Promise<{ items: PendingToolPermissionItem[] }> {
     const runtimeState = await fetchProjectRuntimeState(projectId);
     const pendingPermissions = Array.isArray(runtimeState.pending_permissions)
       ? runtimeState.pending_permissions
@@ -540,44 +538,20 @@ export const beeGameAdapter = {
     };
   },
 
-  async approvePlan(data: {
+  async resolveToolPermission(data: {
     project_id: string;
     gate_id: string;
-    action: 'approve' | 'revise' | 'reject';
-    feedback?: string;
-    permission_scope?: 'once' | 'session';
+    decision: 'allow' | 'deny';
+    message?: string;
+    scope?: 'once' | 'session';
   }): Promise<{ ok: boolean }> {
-    const decision = data.action === 'approve' ? 'allow' : 'deny';
     await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`, {
-      decision,
+      decision: data.decision,
       remember: false,
-      scope: data.permission_scope ?? 'once',
-      ...(data.feedback ? { message: data.feedback } : {}),
+      scope: data.scope ?? 'once',
+      ...(data.message ? { message: data.message } : {}),
     });
     return { ok: true };
-  },
-
-  async getStatus(): Promise<Record<string, unknown>> {
-    return { status: 'running', backend: 'beegame' };
-  },
-
-  async getSystemReadiness(): Promise<Record<string, unknown>> {
-    return { status: 'ready', modules: {} };
-  },
-
-  async getAgents(): Promise<Array<Record<string, unknown>>> {
-    // Agent activity is project-scoped and comes from /projects/:id/runtime-state.
-    // Probing the most recent local binding here made the account homepage call
-    // stale in-memory session IDs after a refresh or backend restart.
-    return [{ id: 'beegame', name: 'BeeGame', status: 'idle' }];
-  },
-
-  async getActivity(): Promise<unknown[]> {
-    return [];
-  },
-
-  async getTasks(): Promise<unknown[]> {
-    return [];
   },
 
   async getArtifacts(projectId: string): Promise<BeeGameArtifact[]> {
@@ -749,14 +723,7 @@ function scopedAdapterCacheKey(baseKey: string): string {
   return `${baseKey}:${encodeURIComponent(userId)}`;
 }
 
-function clearLegacyProjectSessionBindings(): void {
-  localStorage.removeItem(LEGACY_BINDINGS_KEY);
-  const scopedKey = scopedAdapterCacheKey(LEGACY_BINDINGS_KEY);
-  if (scopedKey !== LEGACY_BINDINGS_KEY) localStorage.removeItem(scopedKey);
-}
-
 async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHandle> {
-  clearLegacyProjectSessionBindings();
   const response = await postJson<{
     session: BeeGameSession;
     binding?: ProjectSessionBinding;
@@ -919,7 +886,7 @@ async function fetchProjectTranscriptPageIfAvailable(
 function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePath = ''): unknown[] {
   const normalizedEvents = normalizeDisplayEvents(events);
   const messages = normalizedEvents
-    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath))
+    .flatMap(event => eventToProjectEventMessages(projectId, event, workspacePath))
     .filter(message => message.type !== 'think_start' && message.type !== 'think_end');
   return messages.map(message => ({
     id: message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
@@ -943,14 +910,14 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
   }));
 }
 
-function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = ''): WebSocketMessage[] {
+function eventToProjectEventMessages(projectId: string, event: BeeGameEvent, workspacePath = ''): ProjectEventMessage[] {
   const taskId = event.sessionId;
   switch (event.type) {
     case 'user.message':
       return [baseMessage('agent_message', { ...event, text: resolveUserMessageDisplayText(event) }, projectId, 'user')];
     case 'turn.started':
       return [
-        { type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage,
+        { type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as ProjectEventMessage,
       ];
     case 'system.status':
       return [];
@@ -968,7 +935,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
             sender: 'beegame',
             message_id: thinkingMessageId,
             timestamp: Date.parse(event.createdAt) || Date.now(),
-          } as WebSocketMessage];
+          } as ProjectEventMessage];
         }
         return [{
           type: 'think_start',
@@ -979,7 +946,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
           task_kind: 'assistant_thinking',
           message_id: thinkingMessageId,
           timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as WebSocketMessage];
+        } as ProjectEventMessage];
       }
     case 'assistant.message': {
       const usage = getUsageFromEventPayload(event.payload);
@@ -991,7 +958,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
           project_id: projectId,
           usage,
           timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as WebSocketMessage] : []),
+        } as ProjectEventMessage] : []),
       ];
     }
     case 'result': {
@@ -1002,7 +969,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         project_id: projectId,
         usage,
         timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage] : [];
+      } as ProjectEventMessage] : [];
     }
     case 'tool.started':
       if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return [];
@@ -1024,7 +991,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         artifact_path: startedArtifactPath ? toWorkspaceRelativePath(startedArtifactPath, workspacePath) : undefined,
         is_subagent_tool: startedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage];
+      } as ProjectEventMessage];
     case 'tool.progress': {
       const progressInput = getPayloadRecord(event, 'input');
       const progressTool = getPayloadString(event, 'toolName') || event.text;
@@ -1046,7 +1013,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         artifact_path: progressArtifactPath ? toWorkspaceRelativePath(progressArtifactPath, workspacePath) : undefined,
         is_subagent_tool: progressInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage];
+      } as ProjectEventMessage];
     }
     case 'tool.completed':
     case 'tool.failed': {
@@ -1071,7 +1038,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         artifact_path: finishedArtifactPath ? toWorkspaceRelativePath(finishedArtifactPath, workspacePath) : undefined,
         is_subagent_tool: finishedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage];
+      } as ProjectEventMessage];
     }
     case 'permission.requested':
       return [{
@@ -1084,7 +1051,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         task_kind: 'permission_request',
         requires_user_action: true,
         timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage];
+      } as ProjectEventMessage];
     case 'permission.resolved': {
       const decision = getPayloadString(event, 'decision');
       if (decision !== 'deny') return [];
@@ -1094,18 +1061,18 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       }, projectId, 'system')];
     }
     case 'turn.completed': {
-      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as ProjectEventMessage];
     }
     case 'turn.empty':
       return [
         baseMessage('agent_message', event, projectId, 'system'),
-        { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
+        { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as ProjectEventMessage,
       ];
     case 'session.stopped':
-      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'stopped' } as WebSocketMessage];
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'stopped' } as ProjectEventMessage];
     case 'turn.failed':
     case 'session.failed':
-      return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as WebSocketMessage];
+      return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as ProjectEventMessage];
     default:
       return [];
   }
@@ -1311,7 +1278,7 @@ function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGam
   });
 }
 
-function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, projectId: string, sender: string): WebSocketMessage {
+function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, projectId: string, sender: string): ProjectEventMessage {
   const clientMessageId = sender === 'user'
     ? getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id')
     : '';
@@ -1331,7 +1298,7 @@ function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, proje
     ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
     ...(supersedesMessageId ? { supersedes_message_id: supersedesMessageId } : {}),
     timestamp: Date.parse(event.createdAt) || Date.now(),
-  } as WebSocketMessage;
+  } as ProjectEventMessage;
 }
 
 function describePermissionResolution(event: BeeGameEvent): string {
@@ -1679,7 +1646,7 @@ function decodeArtifactId(artifactId: string): { projectId: string; sessionId: s
   };
 }
 
-function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {
+function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingToolPermissionItem {
   const toolUseID = getPayloadString(event, 'toolUseID');
   const toolName = getPayloadString(event, 'toolName') || 'BeeGame tool';
   const input = event.payload?.input && typeof event.payload.input === 'object'
@@ -1690,18 +1657,10 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
     gate_id: toolUseID,
     task_id: binding.sessionId,
     type: 'BEEGAME_PERMISSION',
-    gate_kind: 'beegame_permission',
-    user_action_kind: 'approve',
     title: summary.title,
     permission_tool_name: toolName,
-    status: 'awaiting_approval',
-    artifact_type: 'beegame_permission',
-    ready_for_user_approval: true,
-    ready_for_promotion: true,
     created_at: event.createdAt,
     artifact: {
-      title: summary.title,
-      artifact_type: 'beegame_permission',
       content: summary.description,
       input,
     },
@@ -1709,27 +1668,13 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
       block_reason: summary.blockReason,
       next_action: summary.nextAction,
     },
-    binding: {
-      workspace_path: binding.workspacePath,
-      workspace_ref: binding.workspacePath,
-    },
-    review_status: {
-      workflow_id: 'beegame',
-      lane_id: 'permission',
-      lane_status: 'awaiting_approval',
-      decision_status: 'awaiting_user',
-      user_action_kind: 'approve',
-      requires_user_action: true,
-      pending_issue_count: 1,
-      blocking_issue_count: 1,
-    },
   };
 }
 
 function pendingPermissionToReview(
   projectId: string,
   permission: BeeGamePendingPermissionPayload,
-): PendingUserReviewItem {
+): PendingToolPermissionItem {
   const sessionId = String(permission.session_id || projectId);
   const toolUseID = String(permission.id || permission.event_id || '');
   const toolName = String(permission.tool_name || 'BeeGame tool');

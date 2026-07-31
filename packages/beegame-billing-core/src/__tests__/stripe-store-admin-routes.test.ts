@@ -35,6 +35,7 @@ function createRepository(
 function createApp(
   repository: BeeGameBillingRouteRepository,
   hasPermission: BillingRouteDeps['hasPermission'] = () => true,
+  overrides: Partial<BillingRouteDeps> = {},
 ): Hono {
   const app = new Hono()
   registerBeeGameStripeStoreRoutes(app, {
@@ -42,6 +43,7 @@ function createApp(
     dashboardRepository: repository,
     getCurrentUser: () => ({ id: 'admin-user' }),
     hasPermission,
+    ...overrides,
   })
   return app
 }
@@ -53,6 +55,35 @@ afterEach(() => {
 const originalWarn = console.warn
 
 describe('stripe store admin routes', () => {
+  test('uses the host authenticated proxy for remote billing routes', async () => {
+    const proxied: Array<{ path: string; authorization: string | null }> = []
+    const app = createApp(createRepository(), () => true, {
+      billingConfig: {
+        mode: 'remote',
+        usageBillingMode: 'realtime',
+        remoteApiBaseUrl: 'https://billing.beegame.test',
+      },
+      proxyRemoteBillingRequest: async (request, path) => {
+        proxied.push({
+          path,
+          authorization: request.headers.get('authorization'),
+        })
+        return Response.json({ packs: [] })
+      },
+    })
+
+    const response = await app.request('/api/payments/stripe/credit-packs', {
+      headers: { authorization: 'Bearer browser-token' },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ packs: [] })
+    expect(proxied).toEqual([{
+      path: '/api/payments/stripe/credit-packs',
+      authorization: 'Bearer browser-token',
+    }])
+  })
+
   test('redacts and traces credit-pack repository failures', async () => {
     const failure = new Error('database secret')
     const warnings: unknown[] = []

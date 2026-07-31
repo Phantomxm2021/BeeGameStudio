@@ -16,7 +16,7 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace)).toMatchObject({ present: false, valid: true })
   })
 
-  test('rejects legacy slots manifests instead of silently validating a second contract', async () => {
+  test('rejects noncanonical manifests through the sole canonical parser', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-missing-'))
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
@@ -33,9 +33,9 @@ describe('asset contract audit', () => {
     const audit = auditAssetContract(workspace)
     expect(audit.valid).toBe(false)
     expect(audit.requirements).toEqual([])
-    expect(audit.issues).toEqual([
-      'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
-    ])
+    expect(audit.issues).toContain('version must be 5.')
+    expect(audit.issues).toContain('requirements must be an array.')
+    expect(audit.issues).toContain('imports must be an array.')
   })
 
   test('reports exact canonical manifest shape errors instead of treating legacy maps as missing fields', async () => {
@@ -46,9 +46,10 @@ describe('asset contract audit', () => {
       slots: { character: { target: { path: 'assets/character.glb' } } },
     }))
 
-    expect(auditAssetContract(workspace).issues).toEqual([
-      'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
-    ])
+    const issues = auditAssetContract(workspace).issues
+    expect(issues).toContain('version must be 5.')
+    expect(issues).toContain('requirements must be an array.')
+    expect(issues).toContain('imports must be an array.')
   })
 
   test('rejects a stale canonical schema version explicitly', async () => {
@@ -62,7 +63,25 @@ describe('asset contract audit', () => {
       compositions: [],
     }))
 
-    expect(auditAssetContract(workspace).issues).toContain('version must be 5; received 4.')
+    expect(auditAssetContract(workspace).issues).toContain('version must be 5.')
+  })
+
+  test('uses the canonical parser as the single shape gate for unknown fields', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-unknown-fields-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      source_decisions: {},
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [{ id: 'requirement-1', import_budget: 1 }],
+      imports: [],
+      compositions: [],
+    }))
+
+    const audit = auditAssetContract(workspace)
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain('root contains unknown fields: source_decisions.')
+    expect(audit.issues).toContain('requirements[0] contains unknown fields: import_budget.')
   })
 
   test('rejects an invented resource library usage without inferring it from the platform', async () => {
@@ -80,7 +99,7 @@ describe('asset contract audit', () => {
     }))
 
     expect(auditAssetContract(workspace).issues).toEqual([
-      'project_target.resource_library_usage must be one of optional, preferred, required; received "web-assets".',
+      'project_target.resource_library_usage must be one of optional, preferred, required.',
     ])
   })
 
@@ -103,9 +122,43 @@ describe('asset contract audit', () => {
     }))
 
     const issue = auditAssetContract(workspace).issues.find(value =>
-      value.startsWith('feedback-audio: Unbound resource_requirement.tags contains unsupported usage tags:'),
+      value.startsWith('requirements[0].resource_requirement.tags must contain only'),
     )
-    expect(issue).toContain('Allowed canonical values:')
+    expect(issue).toContain('ui')
+  })
+
+  test('rejects a source decision that leaves two resource sourcing lanes active', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-source-lanes-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 5,
+        project_target: { asset_format_capabilities: ['glb'] },
+        requirements: [
+          {
+            id: 'scene-responsibility',
+            status: 'planned',
+            resource_requirement: {
+              accepted_formats: ['glb'],
+              import_budget: 1,
+              no_match: 'runtime-generated',
+            },
+            source_decision: {
+              type: 'runtime-generated',
+              reasons: ['No catalog candidate fulfilled the approved purpose.'],
+              decided_at: new Date().toISOString(),
+            },
+          },
+        ],
+        imports: [],
+        compositions: [],
+      }),
+    )
+
+    expect(auditAssetContract(workspace).issues).toContain(
+      'requirements[0].source_decision cannot keep a resource_requirement selection lane after a final source decision.',
+    )
   })
 
   test('accepts reusable imports composed by target-native project code', async () => {
@@ -199,6 +252,31 @@ describe('asset contract audit', () => {
     )
   })
 
+  test('rejects an imported root format that the project target cannot consume', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-import-format-'))
+    await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'library', 'model.fbx'), 'fbx')
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [],
+      imports: [{
+        id: 'model',
+        source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'model', element_path: 'model.fbx' },
+        status: 'available',
+        root_path: 'assets/library/model.fbx',
+        local_files: ['assets/library/model.fbx'],
+        selected_at: 'now',
+        selection_reason: ['Selected logical root'],
+      }],
+      compositions: [],
+    }))
+
+    expect(auditAssetContract(workspace).issues).toContain(
+      'model: Imported root format fbx is not supported by project_target.asset_format_capabilities.',
+    )
+  })
+
   test('does not let a copied library element satisfy a game requirement by itself', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-canonical-copy-is-not-use-'))
     await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
@@ -251,6 +329,6 @@ describe('asset contract audit', () => {
 
     manifest.imports[0]!.technical_facts = { boundsSizeY: { guessedScale: 0.2 } } as unknown as typeof manifest.imports[0]['technical_facts']
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify(manifest))
-    expect(auditAssetContract(workspace).issues).toContain('root: technical_facts must contain only finite primitive source-file facts.')
+    expect(auditAssetContract(workspace).issues).toContain('imports[0].technical_facts must contain only finite string, number, or boolean values.')
   })
 })

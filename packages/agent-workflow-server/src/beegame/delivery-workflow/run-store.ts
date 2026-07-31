@@ -165,35 +165,6 @@ async function durableAppend(path: string, content: string): Promise<void> {
   }
 }
 
-function blockedRecovery(
-  workspacePath: string,
-  ownerId: string,
-  reason: string,
-): DeliveryRun {
-  const timestamp = now()
-  const projectId =
-    resolve(workspacePath).split('/').filter(Boolean).pop() ??
-    'unmanaged-project'
-  return {
-    schemaVersion: 1,
-    runId: `recovery-${randomUUID()}`,
-    projectId,
-    ownerId,
-    confirmedBriefDigest: 'recovery-invalid-snapshot',
-    phase: 'BRIEF_CONFIRMED',
-    status: 'needs_action',
-    revision: {
-      document: 'recovery-invalid-snapshot',
-      workspace: 'recovery-invalid-snapshot',
-    },
-    tasks: [],
-    evidence: {},
-    blockedReason: reason,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }
-}
-
 export function createInitialDeliveryRun(input: {
   runId?: string
   projectId: string
@@ -280,43 +251,25 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     let value: unknown
     try {
       value = JSON.parse(snapshotText) as unknown
-    } catch {
-      const recovered = blockedRecovery(
-        workspacePath,
-        ownerId,
-        'workflow snapshot is missing or invalid; explicit recovery is required',
+    } catch (error) {
+      throw new WorkflowStoreError(
+        `workflow snapshot JSON is invalid at ${filePaths.snapshot}: ${error instanceof Error ? error.message : String(error)}`,
+        'invalid',
       )
-      await saveUnlocked(recovered)
-      await appendEventUnlocked({
-        runId: recovered.runId,
-        type: 'run.recovery.needs_action',
-        phase: recovered.phase,
-        status: recovered.status,
-        revision: recovered.revision,
-      })
-      return recovered
     }
     let run: DeliveryRun
     try {
       run = parseDeliveryRun(value)
-    } catch {
-      const recovered = blockedRecovery(
-        workspacePath,
-        ownerId,
-        'workflow snapshot is missing or invalid; explicit recovery is required',
+    } catch (error) {
+      throw new WorkflowStoreError(
+        `workflow snapshot schema is invalid at ${filePaths.snapshot}: ${error instanceof Error ? error.message : String(error)}`,
+        'invalid',
       )
-      await saveUnlocked(recovered)
-      await appendEventUnlocked({
-        runId: recovered.runId,
-        type: 'run.recovery.needs_action',
-        phase: recovered.phase,
-        status: recovered.status,
-        revision: recovered.revision,
-      })
-      return recovered
     }
     if (run.ownerId !== ownerId)
       throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
+    let shouldRewriteCanonicalSnapshot =
+      JSON.stringify(value) !== JSON.stringify(run)
     if (run.pendingEvent) {
       // Journal replay failures are operational failures, not malformed
       // snapshots. Keep the marker so the next load can retry safely.
@@ -327,7 +280,13 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         `${JSON.stringify(withoutPendingEvent, null, 2)}\n`,
       )
       run = withoutPendingEvent
+      shouldRewriteCanonicalSnapshot = false
     }
+    if (shouldRewriteCanonicalSnapshot)
+      await durableWrite(
+        filePaths.snapshot,
+        `${JSON.stringify(run, null, 2)}\n`,
+      )
     return run
   }
 
@@ -612,6 +571,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       workerType?: string
       dispatchId?: string
       currentItemId?: string | null
+      /** False for UI activity that did not change durable workflow facts. */
+      durable?: boolean
     },
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
@@ -627,7 +588,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         : ''
       const next = {
         ...run,
-        lastProgressAt: now(),
+        ...(progress.durable === false ? {} : { lastProgressAt: now() }),
         ...(message ? { currentMessage: message } : {}),
         ...(progress.thinking ? { thinking: progress.thinking } : {}),
         ...(progress.currentItemId === null
@@ -648,6 +609,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         ...(progress.dispatchId ? { dispatchId: progress.dispatchId } : {}),
         ...(progress.currentItemId !== undefined
           ? { currentItemId: progress.currentItemId }
+          : {}),
+        ...(progress.durable !== undefined
+          ? { durableProgress: progress.durable }
           : {}),
       })
     })

@@ -37,6 +37,7 @@ describe('resource delivery readiness', () => {
         status: 'referenced',
         root_path: 'assets/library/module.glb',
         local_files: ['assets/library/module.glb'],
+        selected_at: '2026-07-30T00:00:00.000Z',
         selection_reason: ['Selected by the native agent'],
         usage_evidence: { references: ['src/world.ts'] },
       }],
@@ -83,6 +84,101 @@ describe('resource delivery readiness', () => {
     expect(readiness.integrationReady).toBe(false)
     expect(readiness.issues.join(' ')).toContain('unresolved failed native actions')
     expect(readiness.integrationIssues.join(' ')).toContain('1 explicitly requested imports remain unresolved')
+  })
+
+  test('accepts a preferred plan with no imports after every required source decision is durable', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 5,
+      project_target: {
+        resource_library_usage: 'preferred',
+        asset_format_capabilities: ['png'],
+        runtime_asset_root: 'public/assets',
+      },
+      requirements: [{
+        id: 'primary-art',
+        purpose: 'Provide the approved primary art responsibility.',
+        required: true,
+        status: 'planned',
+        source_decision: {
+          type: 'authored-asset',
+          basis: 'catalog-no-match',
+          reasons: ['No compatible catalog candidate fulfilled the approved purpose.'],
+          decided_at: new Date().toISOString(),
+          discovery_receipt: {
+            version: 1,
+            query_digest: 'query-digest',
+            candidate_digest: 'candidate-digest',
+            candidate_ids: [],
+            inspected_pack_ids: [],
+            represented_pack_ids: [],
+            candidate_count: 0,
+            total_compatible: 0,
+            structured_constraint_count: 2,
+            decision_ready: true,
+          },
+        },
+      }],
+      imports: [],
+      compositions: [],
+    }))
+
+    const readiness = auditResourceDeliveryReadiness({
+      workspacePath: workspace,
+      confirmedPolicy: 'preferred',
+      resourceEvidence: {
+        state: 'current',
+        actions: ['browse_packs', 'inspect_pack', 'index_pack_elements'],
+        failedActions: ['inspect_pack'],
+        successfulImportCount: 0,
+        failedImportCount: 0,
+        observedAt: new Date().toISOString(),
+      },
+    })
+
+    expect(readiness.valid).toBe(true)
+    expect(readiness.issues).toEqual([])
+  })
+
+  test('rejects preferred zero-import plans backed only by free-form no-match prose', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 5,
+        project_target: {
+          resource_library_usage: 'preferred',
+          asset_format_capabilities: ['png'],
+          runtime_asset_root: 'public/assets',
+        },
+        requirements: [
+          {
+            id: 'primary-art',
+            required: true,
+            status: 'planned',
+            source_decision: {
+              type: 'authored-asset',
+              reasons: ['No candidate was selected.'],
+              decided_at: new Date().toISOString(),
+            },
+          },
+        ],
+        imports: [],
+        compositions: [],
+      }),
+    )
+
+    const readiness = auditResourceDeliveryReadiness({
+      workspacePath: workspace,
+      confirmedPolicy: 'preferred',
+    })
+
+    expect(readiness.valid).toBe(false)
+    expect(readiness.issues.join(' ')).toContain(
+      'zero imports without complete structured no-match receipts',
+    )
   })
 
   test('does not let a preferred library plan proceed without a target-native asset root', async () => {

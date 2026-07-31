@@ -20,6 +20,20 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
+function idMismatch(
+  actual: readonly string[],
+  expected: readonly string[],
+): string {
+  const actualIds = new Set(actual)
+  const expectedIds = new Set(expected)
+  const missing = [...expectedIds].filter(id => !actualIds.has(id)).sort()
+  const unexpected = [...actualIds].filter(id => !expectedIds.has(id)).sort()
+  return [
+    ...(missing.length ? [`missing: ${missing.join(', ')}`] : []),
+    ...(unexpected.length ? [`unexpected: ${unexpected.join(', ')}`] : []),
+  ].join('; ')
+}
+
 function assertExistingPaths(workspacePath: string, paths: string[]): void {
   for (const path of paths) {
     const resolved = resolveWorkspaceRelativePath(workspacePath, path)
@@ -32,6 +46,21 @@ function appendUnique(left: string[] | undefined, right: string[]): string[] {
   return [...new Set([...(left ?? []), ...right])]
 }
 
+function scopesPath(scope: string, target: string): boolean {
+  const normalize = (value: string): string => {
+    let normalized = value.replaceAll('\\', '/')
+    while (normalized.startsWith('./')) normalized = normalized.slice(2)
+    while (normalized.endsWith('/')) normalized = normalized.slice(0, -1)
+    return normalized
+  }
+  const normalizedScope = normalize(scope)
+  const normalizedTarget = normalize(target)
+  return (
+    normalizedTarget === normalizedScope ||
+    normalizedTarget.startsWith(`${normalizedScope}/`)
+  )
+}
+
 function validateBindings(
   workspacePath: string,
   task: AtomicTask,
@@ -42,7 +71,11 @@ function validateBindings(
   const expectedCompositions = task.resourceCompositionIds ?? []
   const expectedRequirements = manifest.requirements
     .map(requirement => requirement.id)
-    .filter(id => task.sourceRequirementIds.includes(id))
+    .filter(id => task.resourceRequirementIds.includes(id))
+  const requirementsById = new Map(
+    manifest.requirements.map(requirement => [requirement.id, requirement]),
+  )
+  const runtimeAssetRoot = manifest.project_target?.runtime_asset_root
 
   if (
     !sameIds(
@@ -51,7 +84,10 @@ function validateBindings(
     )
   )
     throw new Error(
-      'implementation resource references do not match the active task import IDs',
+      `implementation resource references do not match the active task import IDs (${idMismatch(
+        terminal.resourceReferences.map(reference => reference.importId),
+        expectedImports,
+      )})`,
     )
   if (
     !sameIds(
@@ -60,7 +96,10 @@ function validateBindings(
     )
   )
     throw new Error(
-      'implementation composition integrations do not match the active task composition IDs',
+      `implementation composition integrations do not match the active task composition IDs (${idMismatch(
+        terminal.compositionIntegrations.map(value => value.compositionId),
+        expectedCompositions,
+      )})`,
     )
   if (
     !sameIds(
@@ -69,7 +108,10 @@ function validateBindings(
     )
   )
     throw new Error(
-      'implementation requirement satisfactions do not match the active task manifest requirements',
+      `implementation requirement satisfactions do not match the active task manifest requirements (${idMismatch(
+        terminal.requirementSatisfactions.map(value => value.requirementId),
+        expectedRequirements,
+      )})`,
     )
 
   const manifestImportIds = new Set(
@@ -96,6 +138,11 @@ function validateBindings(
     ])
   }
   for (const satisfaction of terminal.requirementSatisfactions) {
+    const requirement = requirementsById.get(satisfaction.requirementId)
+    if (!requirement?.source_decision)
+      throw new Error(
+        `requirement ${satisfaction.requirementId} has no final source decision`,
+      )
     if (satisfaction.importIds.some(id => !expectedImports.includes(id)))
       throw new Error(
         `requirement ${satisfaction.requirementId} references an import outside the active task`,
@@ -105,6 +152,35 @@ function validateBindings(
     )
       throw new Error(
         `requirement ${satisfaction.requirementId} references a composition outside the active task`,
+      )
+    if (
+      satisfaction.projectReferences.some(
+        path => !task.expectedArtifacts.includes(path),
+      )
+    )
+      throw new Error(
+        `requirement ${satisfaction.requirementId} cites a project reference outside the active task expected artifacts`,
+      )
+    const runtimeReferences = runtimeAssetRoot
+      ? satisfaction.projectReferences.filter(path =>
+          scopesPath(runtimeAssetRoot, path),
+        )
+      : []
+    if (
+      requirement.source_decision.type === 'authored-asset' &&
+      !runtimeReferences.length
+    )
+      throw new Error(
+        `requirement ${satisfaction.requirementId} requires an authored asset under the canonical runtime asset root`,
+      )
+    if (
+      ['runtime-generated', 'system-provided', 'silent'].includes(
+        requirement.source_decision.type,
+      ) &&
+      runtimeReferences.length
+    )
+      throw new Error(
+        `requirement ${satisfaction.requirementId} cannot cite asset files for ${requirement.source_decision.type} fulfillment`,
       )
     assertExistingPaths(workspacePath, satisfaction.projectReferences)
   }
@@ -119,7 +195,7 @@ export async function applyImplementationResourceBindings(input: {
   workspacePath: string
   task: AtomicTask
   terminal: ImplementationTerminal
-}): Promise<void> {
+}): Promise<() => Promise<void>> {
   const original = await readBeeGameAssetManifest(input.workspacePath)
   validateBindings(input.workspacePath, input.task, input.terminal, original)
   const updated: BeeGameAssetManifest = structuredClone(original)
@@ -257,7 +333,8 @@ export async function applyImplementationResourceBindings(input: {
 
   await writeBeeGameAssetManifest(input.workspacePath, updated)
   const audit = auditAssetContract(input.workspacePath)
-  if (audit.valid) return
+  if (audit.valid)
+    return () => writeBeeGameAssetManifest(input.workspacePath, original)
   await writeBeeGameAssetManifest(input.workspacePath, original)
   throw new Error(
     `resource integration update failed canonical audit: ${audit.issues.join('; ')}`,

@@ -41,12 +41,13 @@ const smokeId = `smoke_${Date.now().toString(36)}`
 
 const currentUser = await rpc<JsonObject>('beegame_current_user_context', {})
 assertCurrentUser(currentUser)
-const accountId = stringField(currentUser.accountId) ||
+const accountId =
+  stringField(currentUser.accountId) ||
   stringField(currentUser.account_id) ||
   userId
 
-const workspaceId = stringField(currentUser.workspaceId) ||
-  stringField(currentUser.workspace_id)
+const workspaceId =
+  stringField(currentUser.workspaceId) || stringField(currentUser.workspace_id)
 if (!workspaceId) {
   throw new Error(
     'beegame_current_user_context did not return a workspaceId. Re-run the Supabase schema or check the user trigger.',
@@ -65,29 +66,35 @@ try {
   await upsertSmokeAssetManifest(projectId)
   avatarObjectPath = await uploadSmokeAvatarObject()
   storageObjectPath = await uploadSmokeAssetObject(projectId)
-  const creditReservation = await rpc<JsonObject>('beegame_reserve_credits', {
+  const usageDebitRequest = {
     p_user_id: accountId,
-    p_credits: 1,
-    p_kind: 'supabase_smoke',
+    p_session_id: `supabase-smoke-${smokeId}`,
+    p_turn_id: `turn-${smokeId}`,
     p_project_id: projectId,
+    p_idempotency_key: `supabase-smoke:${smokeId}`,
+    p_usage: {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      total_tokens: 0,
+    },
     p_metadata: {
       smoke: true,
       script: 'scripts/smoke-beegame-supabase.ts',
     },
-  })
-  await rpc<JsonObject>('beegame_refund_credit_reservation', {
-    p_user_id: accountId,
-    p_reservation_id: requireStringField(
-      creditReservation,
-      'reservation_id',
-      'beegame_reserve_credits response',
-    ),
-    p_project_id: projectId,
-    p_metadata: {
-      smoke: true,
-      reason: 'supabase_smoke_cleanup',
-    },
-  })
+    p_pricing_version: 'weighted-v1',
+    p_usage_source: 'runtime_snapshot',
+  }
+  const usageDebit = await rpc<JsonObject>(
+    'beegame_debit_realtime_usage',
+    usageDebitRequest,
+  )
+  const duplicateUsageDebit = await rpc<JsonObject>(
+    'beegame_debit_realtime_usage',
+    usageDebitRequest,
+  )
+  assertZeroUsageDebit(usageDebit, duplicateUsageDebit)
 
   runtimeEnv = await rpc<JsonObject>('beegame_runtime_env', {
     p_user_id: userId,
@@ -105,46 +112,55 @@ if (!runtimeEnv) {
   throw new Error('beegame_runtime_env smoke check did not return a payload')
 }
 assertSmokeRuntimeEnv(runtimeEnv, {
-  modelConfigOwnerId: stringField(currentUser.modelConfigOwnerId) ||
+  modelConfigOwnerId:
+    stringField(currentUser.modelConfigOwnerId) ||
     stringField(currentUser.model_config_owner_id),
 })
 
-console.log(JSON.stringify({
-  ok: true,
-  currentUser: {
-    id: currentUser.id,
-    accountId,
-    role: currentUser.role,
-    workspaceId,
-    modelConfigOwnerId: stringField(currentUser.modelConfigOwnerId) ||
-      stringField(currentUser.model_config_owner_id),
-    permissionsCount: Array.isArray(currentUser.permissions)
-      ? currentUser.permissions.length
-      : 0,
-  },
-  projectMetadata: {
-    inserted: true,
-    deleted: true,
-  },
-  assetManifest: {
-    upserted: true,
-  },
-  assetStorage: {
-    bucket: assetBucket,
-    uploaded: true,
-    deleted: true,
-  },
-  avatarStorage: {
-    bucket: avatarBucket,
-    uploaded: true,
-    deleted: true,
-  },
-  credits: {
-    reserved: 1,
-    refunded: true,
-  },
-  runtimeEnv: summarizeRuntimeEnv(runtimeEnv),
-}, null, 2))
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      currentUser: {
+        id: currentUser.id,
+        accountId,
+        role: currentUser.role,
+        workspaceId,
+        modelConfigOwnerId:
+          stringField(currentUser.modelConfigOwnerId) ||
+          stringField(currentUser.model_config_owner_id),
+        permissionsCount: Array.isArray(currentUser.permissions)
+          ? currentUser.permissions.length
+          : 0,
+      },
+      projectMetadata: {
+        inserted: true,
+        deleted: true,
+      },
+      assetManifest: {
+        upserted: true,
+      },
+      assetStorage: {
+        bucket: assetBucket,
+        uploaded: true,
+        deleted: true,
+      },
+      avatarStorage: {
+        bucket: avatarBucket,
+        uploaded: true,
+        deleted: true,
+      },
+      usageBilling: {
+        debitRecorded: true,
+        idempotencyVerified: true,
+        creditsMicro: 0,
+      },
+      runtimeEnv: summarizeRuntimeEnv(runtimeEnv),
+    },
+    null,
+    2,
+  ),
+)
 
 async function rpc<T>(name: string, payload: JsonObject): Promise<T> {
   const response = await fetch(
@@ -165,25 +181,19 @@ async function rpc<T>(name: string, payload: JsonObject): Promise<T> {
       `${name} failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
     )
   }
-  return await response.json() as T
+  return (await response.json()) as T
 }
 
-async function rest<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(
-    `${supabaseUrl.replace(/\/+$/, '')}${path}`,
-    {
-      ...init,
-      headers: {
-        apikey: anonKey,
-        authorization: `Bearer ${authToken}`,
-        'content-type': 'application/json',
-        ...(init.headers ?? {}),
-      },
+async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}${path}`, {
+    ...init,
+    headers: {
+      apikey: anonKey,
+      authorization: `Bearer ${authToken}`,
+      'content-type': 'application/json',
+      ...(init.headers ?? {}),
     },
-  )
+  })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     throw new Error(
@@ -240,12 +250,14 @@ async function resolveSmokeAuthContext(): Promise<{
       `Supabase password sign-in failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}.${hint}`,
     )
   }
-  const payload = await response.json() as JsonObject
+  const payload = (await response.json()) as JsonObject
   const token = stringField(payload.access_token)
   const user = isRecord(payload.user) ? payload.user : undefined
   const id = user ? stringField(user.id) : undefined
   if (!token || !id) {
-    throw new Error('Supabase password sign-in did not return access_token and user.id')
+    throw new Error(
+      'Supabase password sign-in did not return access_token and user.id',
+    )
   }
   return {
     authToken: token,
@@ -275,36 +287,43 @@ async function createSmokeProject(
     }),
   })
   if (!Array.isArray(rows) || rows[0]?.id !== projectId) {
-    throw new Error('Project metadata insert did not return the smoke project row')
+    throw new Error(
+      'Project metadata insert did not return the smoke project row',
+    )
   }
 }
 
 async function upsertSmokeAssetManifest(projectId: string): Promise<void> {
-  const rows = await rest<JsonObject[]>('/rest/v1/beegame_assets?select=project_id', {
-    method: 'POST',
-    headers: {
-      Prefer: 'resolution=merge-duplicates,return=representation',
-    },
-    body: JSON.stringify({
-      id: projectId,
-      project_id: projectId,
-      owner_id: userId,
-      manifest: {
-        version: 1,
-        project: projectId,
-        slots: [
-          {
-            id: 'smoke_asset',
-            name: 'Smoke asset',
-            type: 'data',
-            status: 'placeholder',
-          },
-        ],
+  const rows = await rest<JsonObject[]>(
+    '/rest/v1/beegame_assets?select=project_id',
+    {
+      method: 'POST',
+      headers: {
+        Prefer: 'resolution=merge-duplicates,return=representation',
       },
-    }),
-  })
+      body: JSON.stringify({
+        id: projectId,
+        project_id: projectId,
+        owner_id: userId,
+        manifest: {
+          version: 1,
+          project: projectId,
+          slots: [
+            {
+              id: 'smoke_asset',
+              name: 'Smoke asset',
+              type: 'data',
+              status: 'placeholder',
+            },
+          ],
+        },
+      }),
+    },
+  )
   if (!Array.isArray(rows) || rows[0]?.project_id !== projectId) {
-    throw new Error('Asset manifest upsert did not return the smoke project row')
+    throw new Error(
+      'Asset manifest upsert did not return the smoke project row',
+    )
   }
 }
 
@@ -459,14 +478,13 @@ function assertCurrentUser(currentUser: JsonObject): void {
   }
 }
 
-function requireStringField(
-  value: JsonObject,
-  field: string,
-  context: string,
-): string {
-  const normalized = stringField(value[field])
-  if (!normalized) throw new Error(`${context} did not include ${field}`)
-  return normalized
+function assertZeroUsageDebit(first: JsonObject, duplicate: JsonObject): void {
+  if (first.duplicate !== false || duplicate.duplicate !== true) {
+    throw new Error('Realtime usage debit did not enforce idempotency')
+  }
+  if (first.credits_micro !== 0 || duplicate.credits_micro !== 0) {
+    throw new Error('Zero-token realtime usage smoke check consumed credits')
+  }
 }
 
 function requireEnv(...names: string[]): string {

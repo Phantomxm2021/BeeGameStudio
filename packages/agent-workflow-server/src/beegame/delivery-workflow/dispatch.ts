@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { parseDispatchRecord } from './schema'
+import { parseDispatchRecord, parseResourceRemediation } from './schema'
 import {
   parseWorkerTerminalResult,
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { buildWorkerPrompt } from './worker-prompts'
-import { isWorkflowEvidenceFile } from './evidence'
+import {
+  isWorkflowEvidenceFile,
+  persistImplementationEvidence,
+} from './evidence'
 import type {
   DeliveryWorkerPort,
   DispatchRecord,
@@ -26,6 +29,9 @@ export type DispatchCredits = {
 
 const DEFAULT_IDLE_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
 const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
+const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
+const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
+const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
@@ -55,6 +61,20 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function usageBudgetTokens(usage: {
+  input_tokens: number
+  cache_creation_tokens: number
+  completion_tokens: number
+} | undefined): number {
+  if (!usage) return 0
+  return Math.max(
+    0,
+    usage.input_tokens +
+      usage.cache_creation_tokens +
+      usage.completion_tokens,
+  )
+}
+
 function terminalEvidencePath(
   result: WorkerTerminalResult,
 ): string | undefined {
@@ -69,32 +89,26 @@ function workerRequiresEvidence(
   return workerType !== 'document-author'
 }
 
-function retainTerminalOutput(value: unknown): string | undefined {
-  const serialized =
-    typeof value === 'string'
-      ? value
-      : (() => {
-          try {
-            return JSON.stringify(value)
-          } catch {
-            return undefined
-          }
-        })()
-  if (!serialized?.trim()) return undefined
-  return serialized.length > 20_000 ? serialized.slice(0, 20_000) : serialized
-}
-
 export function createDeliveryDispatcher(options: {
   store: RunStore
   workerPort: DeliveryWorkerPort
   credits?: DispatchCredits
   /** Maximum time without durable worker progress before recovery is needed. */
   idleProgressTimeoutMs?: number
+  /** Resource-only no-mutation limit; does not change stable worker lanes. */
+  resourceIdleProgressTimeoutMs?: number
   progressPollIntervalMs?: number
+  resourceMaxDurationMs?: number
+  resourceMaxTokens?: number
   onTerminal?: (
     record: DispatchRecord,
     result: WorkerTerminalResult,
     request?: WorkerDispatchRequest,
+  ) => Promise<void>
+  /** Continue a resource stage in a fresh bounded worker after durable progress. */
+  onResourceBudgetYield?: (
+    record: DispatchRecord,
+    reason: string,
   ) => Promise<void>
 }) {
   const byKey = new Map<string, DispatchRecord>()
@@ -106,6 +120,15 @@ export function createDeliveryDispatcher(options: {
     options.idleProgressTimeoutMs ?? DEFAULT_IDLE_PROGRESS_TIMEOUT_MS
   const progressPollIntervalMs =
     options.progressPollIntervalMs ?? DEFAULT_PROGRESS_POLL_INTERVAL_MS
+  const resourceIdleProgressTimeoutMs =
+    options.resourceIdleProgressTimeoutMs ??
+    (options.idleProgressTimeoutMs !== undefined
+      ? options.idleProgressTimeoutMs
+      : DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS)
+  const resourceMaxDurationMs =
+    options.resourceMaxDurationMs ?? DEFAULT_RESOURCE_MAX_DURATION_MS
+  const resourceMaxTokens =
+    options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -218,6 +241,7 @@ export function createDeliveryDispatcher(options: {
     }
     const dispatchId = randomUUID()
     const dispatchRequest = { ...request, dispatchId }
+    const resourceRemediation = resourceRemediationFromRequest(request)
     const record = parseDispatchRecord({
       dispatchId,
       workerType: request.workerType,
@@ -225,6 +249,8 @@ export function createDeliveryDispatcher(options: {
       ...(request.taskId ? { taskId: request.taskId } : {}),
       revision: request.revision,
       status: 'running',
+      startingUsageTotalTokens: Math.max(0, run.usage?.total_tokens ?? 0),
+      startingUsageBudgetTokens: usageBudgetTokens(run.usage),
       startedAt: now(),
       request: dispatchRequest,
     })
@@ -238,9 +264,9 @@ export function createDeliveryDispatcher(options: {
           activeDispatch: record,
           lastProgressAt: record.startedAt,
           currentMessage: undefined,
-          currentMessageKey: undefined,
           currentItemId: undefined,
           thinking: 'working',
+          ...(resourceRemediation ? { resourceRemediation } : {}),
         },
         {
           runId: run.runId,
@@ -278,7 +304,11 @@ export function createDeliveryDispatcher(options: {
       void options.workerPort
         .waitForTerminal(record.dispatchId)
         .then(terminal => thisComplete(terminal))
-        .catch(error => thisFail(error))
+        .catch(error =>
+          isWorkerNeedsActionError(error)
+            ? thisNeedsAction(error.message)
+            : thisFail(error),
+        )
     }
     void monitorIdleProgress(record.dispatchId).catch(() => undefined)
     return record
@@ -293,10 +323,21 @@ export function createDeliveryDispatcher(options: {
           : 'worker did not produce a terminal result'
       void markDispatchFailed(record.dispatchId, reason).catch(() => undefined)
     }
+    function thisNeedsAction(reason: string): void {
+      void markDispatchNeedsAction(record.dispatchId, reason).catch(
+        () => undefined,
+      )
+    }
   }
 
   async function monitorIdleProgress(dispatchId: string): Promise<void> {
-    if (idleProgressTimeoutMs <= 0) return
+    if (
+      idleProgressTimeoutMs <= 0 &&
+      resourceIdleProgressTimeoutMs <= 0 &&
+      resourceMaxDurationMs <= 0 &&
+      resourceMaxTokens <= 0
+    )
+      return
     while (true) {
       await new Promise(resolve => setTimeout(resolve, progressPollIntervalMs))
       const run = await options.store.load()
@@ -310,7 +351,66 @@ export function createDeliveryDispatcher(options: {
       const lastProgress = Date.parse(
         run.lastProgressAt ?? run.activeDispatch.startedAt,
       )
+      const isResourceWorker =
+        run.activeDispatch.workerType === 'resource-preparer'
+      const resourceMutationInFlight =
+        isResourceWorker &&
+        (await options.workerPort
+          .hasInFlightMutation?.(dispatchId)
+          .catch(() => false))
       if (
+        isResourceWorker &&
+        !resourceMutationInFlight &&
+        resourceIdleProgressTimeoutMs > 0 &&
+        Number.isFinite(lastProgress) &&
+        Date.now() - lastProgress >= resourceIdleProgressTimeoutMs
+      ) {
+        await markDispatchNeedsAction(
+          dispatchId,
+          `resource worker produced no durable resource mutation for ${resourceIdleProgressTimeoutMs}ms`,
+        )
+        return
+      }
+      if (
+        isResourceWorker &&
+        !resourceMutationInFlight &&
+        resourceMaxDurationMs > 0
+      ) {
+        const startedAt = Date.parse(run.activeDispatch.startedAt)
+        if (
+          Number.isFinite(startedAt) &&
+          Date.now() - startedAt >= resourceMaxDurationMs
+        ) {
+          const reason = `resource worker exceeded its ${resourceMaxDurationMs}ms wall-clock limit`
+          if (hasDurableProgressSinceDispatch(run))
+            await yieldResourceDispatch(dispatchId, reason)
+          else await markDispatchNeedsAction(dispatchId, reason)
+          return
+        }
+      }
+      if (
+        isResourceWorker &&
+        !resourceMutationInFlight &&
+        resourceMaxTokens > 0
+      ) {
+        const consumed = Math.max(0,
+          run.activeDispatch.startingUsageBudgetTokens === undefined
+            ? (run.usage?.total_tokens ?? 0) -
+                (run.activeDispatch.startingUsageTotalTokens ?? 0)
+            : usageBudgetTokens(run.usage) -
+                run.activeDispatch.startingUsageBudgetTokens,
+        )
+        if (consumed >= resourceMaxTokens) {
+          const reason = `resource worker exceeded its ${resourceMaxTokens} token limit`
+          if (hasDurableProgressSinceDispatch(run))
+            await yieldResourceDispatch(dispatchId, reason)
+          else await markDispatchNeedsAction(dispatchId, reason)
+          return
+        }
+      }
+      if (
+        !isResourceWorker &&
+        idleProgressTimeoutMs > 0 &&
         Number.isFinite(lastProgress) &&
         Date.now() - lastProgress >= idleProgressTimeoutMs
       ) {
@@ -321,6 +421,37 @@ export function createDeliveryDispatcher(options: {
         return
       }
     }
+  }
+
+  function hasDurableProgressSinceDispatch(run: {
+    lastProgressAt?: string
+    activeDispatch?: DispatchRecord
+  }): boolean {
+    if (!run.activeDispatch || !run.lastProgressAt) return false
+    const startedAt = Date.parse(run.activeDispatch.startedAt)
+    const lastProgressAt = Date.parse(run.lastProgressAt)
+    return (
+      Number.isFinite(startedAt) &&
+      Number.isFinite(lastProgressAt) &&
+      lastProgressAt > startedAt
+    )
+  }
+
+  function resourceRemediationFromRequest(request: WorkerDispatchRequest) {
+    if (
+      request.workerType !== 'resource-preparer' ||
+      request.contract.remediation === undefined
+    )
+      return undefined
+    try {
+      return parseResourceRemediation(request.contract.remediation)
+    } catch {
+      return undefined
+    }
+  }
+
+  function isWorkerNeedsActionError(error: unknown): error is Error {
+    return error instanceof Error && error.name === 'WorkerNeedsActionError'
   }
 
   async function completeDispatch(
@@ -336,17 +467,35 @@ export function createDeliveryDispatcher(options: {
     let result: WorkerTerminalResult
     try {
       result = parseWorkerTerminalResult(terminalValue)
+      if (result.workerType === 'implementation-worker') {
+        const evidencePath = `.beegame/workflow/evidence/implementation-${dispatchId}.json`
+        result = {
+          ...result,
+          evidencePath,
+          evidenceRefs: [evidencePath],
+        }
+      }
       const resultRevision = 'revision' in result ? result.revision : undefined
       if (
         request &&
         (result.workerType !== request.workerType ||
-          (result.workerType !== 'implementation-worker' &&
-            resultRevision !== undefined &&
-            resultRevision !== request.revision))
+          (resultRevision !== undefined &&
+            resultRevision !== request.revision) ||
+          (result.workerType === 'implementation-worker' &&
+            result.taskId !== request.taskId))
       )
         throw new Error(
           'worker terminal result does not match dispatch contract',
         )
+      if (request && result.workerType === 'implementation-worker')
+        await persistImplementationEvidence({
+          workspacePath: request.workspacePath,
+          evidencePath: result.evidencePath,
+          taskId: result.taskId,
+          revision: result.revision,
+          verifiedArtifacts: result.verifiedArtifacts,
+          verificationResults: result.verificationResults,
+        })
       const evidencePath = terminalEvidencePath(result)
       if (
         request &&
@@ -363,13 +512,11 @@ export function createDeliveryDispatcher(options: {
         error instanceof Error
           ? error.message
           : 'invalid worker terminal result'
-      const rawOutput = retainTerminalOutput(terminalValue)
       const invalid = parseDispatchRecord({
         ...run.activeDispatch,
         status: 'invalid' as const,
         finishedAt: now(),
         failureReason: reason,
-        ...(rawOutput ? { terminalOutput: rawOutput } : {}),
       })
       await options.store.commit(
         {
@@ -635,6 +782,43 @@ export function createDeliveryDispatcher(options: {
       },
     )
     releaseDispatch(dispatchId, { stopReason: reason })
+    return saved.activeDispatch ?? interrupted
+  }
+
+  async function yieldResourceDispatch(
+    dispatchId: string,
+    reason: string,
+  ): Promise<DispatchRecord> {
+    const run = await options.store.load()
+    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
+      throw new DispatchError('not_found', 'dispatch is not active')
+    if (run.activeDispatch.status !== 'running') return run.activeDispatch
+    const interrupted = parseDispatchRecord({
+      ...run.activeDispatch,
+      status: 'interrupted',
+      finishedAt: now(),
+      failureReason: reason,
+    })
+    const saved = await options.store.commit(
+      {
+        ...run,
+        status: 'running',
+        blockedReason: undefined,
+        activeDispatch: interrupted,
+        thinking: 'idle',
+      },
+      {
+        runId: run.runId,
+        type: 'dispatch.resource_budget_yielded',
+        phase: run.phase,
+        status: 'running',
+        revision: run.revision,
+        dispatchId,
+        reason,
+      },
+    )
+    releaseDispatch(dispatchId, { stopReason: reason })
+    await options.onResourceBudgetYield?.(interrupted, reason)
     return saved.activeDispatch ?? interrupted
   }
 

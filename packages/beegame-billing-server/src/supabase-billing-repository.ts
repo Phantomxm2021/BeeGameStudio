@@ -9,6 +9,7 @@ import type {
   BeeGameManualCreditGrantInput,
 } from '@bee-game-studio/beegame-billing-core/billing-ports'
 import type {
+  BeeGameUsageBillingEvent,
   BeeGameUsageBillingRecordInput,
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
@@ -26,6 +27,24 @@ type SupabaseUsageWalletRow = {
   included_credits_micro: number
   consumed_credits_micro: number
   updated_at: string
+}
+
+type SupabaseUsageBillingEventRow = SupabaseUsageBillingResult['event']
+
+export type BeeGameUsageWallet = {
+  userId: string
+  includedCreditsMicro: number
+  consumedCreditsMicro: number
+  balanceCreditsMicro: number
+}
+
+export interface BeeGameBillingServerRepository
+  extends BeeGameBillingRouteRepository {
+  listUsageEventsForUser(
+    userId: string,
+    projectId?: string,
+  ): Promise<BeeGameUsageBillingEvent[]>
+  getUsageWalletForUser(userId: string): Promise<BeeGameUsageWallet>
 }
 
 type SupabaseBillingCreditPackRow = {
@@ -91,7 +110,7 @@ type SupabaseUsageBillingResult = {
 
 export function createBeeGameSupabaseBillingRepositoryFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-): BeeGameBillingRouteRepository {
+): BeeGameBillingServerRepository {
   const url = trimString(
     env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL ?? env.VITE_SUPABASE_URL,
   )
@@ -102,7 +121,7 @@ export function createBeeGameSupabaseBillingRepositoryFromEnv(
   return new SupabaseBillingRepository({ url, serviceRoleKey })
 }
 
-class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
+class SupabaseBillingRepository implements BeeGameBillingServerRepository {
   private readonly baseUrl: string
   private readonly serviceRoleKey: string
   private readonly fetchImpl: typeof fetch
@@ -155,16 +174,51 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
     return toUsageBillingRecordResult(result)
   }
 
+  async listUsageEventsForUser(
+    userId: string,
+    projectId?: string,
+  ): Promise<BeeGameUsageBillingEvent[]> {
+    const projectFilter = projectId
+      ? `&project_id=eq.${encodeURIComponent(projectId)}`
+      : ''
+    const rows = await this.rest<SupabaseUsageBillingEventRow[]>(
+      `/rest/v1/beegame_usage_events?user_id=eq.${encodeURIComponent(userId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
+    )
+    return rows.map(toUsageBillingEvent)
+  }
+
+  async getUsageWalletForUser(userId: string): Promise<BeeGameUsageWallet> {
+    const rows = await this.rest<SupabaseUsageWalletRow[]>(
+      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(userId)}&select=user_id,included_credits_micro,consumed_credits_micro,updated_at&limit=1`,
+    )
+    const row = rows[0] ?? {
+      user_id: userId,
+      included_credits_micro: 300_000_000,
+      consumed_credits_micro: 0,
+      updated_at: new Date().toISOString(),
+    }
+    return {
+      userId: row.user_id,
+      includedCreditsMicro: normalizeNonNegativeInteger(
+        row.included_credits_micro,
+      ),
+      consumedCreditsMicro: normalizeNonNegativeInteger(
+        row.consumed_credits_micro,
+      ),
+      balanceCreditsMicro: Math.max(
+        0,
+        normalizeNonNegativeInteger(row.included_credits_micro) -
+          normalizeNonNegativeInteger(row.consumed_credits_micro),
+      ),
+    }
+  }
+
   grantPaymentProviderCredits(
     _request: Request,
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
-    return this.grantCreditsWithRpc(
-      targetUserId,
-      input,
-      { source: 'payment_provider' },
-    )
+    return this.grantCreditsWithRpc(targetUserId, input)
   }
 
   grantCredits(
@@ -172,11 +226,7 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
-    return this.grantCreditsWithRpc(
-      targetUserId,
-      input,
-      { source: 'manual' },
-    )
+    return this.grantCreditsWithRpc(targetUserId, input)
   }
 
   async listBillingCreditPacks(
@@ -245,7 +295,6 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
   private async grantCreditsWithRpc(
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
-    _fallbackMetadata: JsonObject,
   ): Promise<BeeGameCreditGrant> {
     const rows = await this.rest<SupabaseUsageWalletRow[]>(
       `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(targetUserId)}&select=*&limit=1`,
@@ -337,8 +386,15 @@ class SupabaseBillingRepository implements BeeGameBillingRouteRepository {
 }
 
 class MissingSupabaseBillingRepository
-  implements BeeGameBillingRouteRepository
+  implements BeeGameBillingServerRepository
 {
+  listUsageEventsForUser(): Promise<BeeGameUsageBillingEvent[]> {
+    return Promise.reject(missingSupabaseError())
+  }
+
+  getUsageWalletForUser(): Promise<BeeGameUsageWallet> {
+    return Promise.reject(missingSupabaseError())
+  }
   debitRealTimeUsageForUser(): Promise<BeeGameUsageBillingRecordResult> {
     return Promise.reject(missingSupabaseError())
   }
@@ -395,6 +451,50 @@ function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
       standardGame: { minCredits: 200, maxCredits: 600 },
       complexGame: { minCredits: 600, maxCredits: 1500 },
     },
+  }
+}
+
+function toUsageBillingEvent(
+  event: SupabaseUsageBillingEventRow,
+): BeeGameUsageBillingEvent {
+  return {
+    id: event.id,
+    idempotencyKey: event.idempotency_key,
+    userId: event.user_id,
+    sessionId: event.session_id,
+    ...(event.turn_id ? { turnId: event.turn_id } : {}),
+    ...(event.project_id ? { projectId: event.project_id } : {}),
+    pricingVersion: event.pricing_version,
+    usageSource: event.usage_source,
+    usage: {
+      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens),
+      completion_tokens: normalizeNonNegativeInteger(event.completion_tokens),
+      cache_read_tokens: normalizeNonNegativeInteger(event.cache_read_tokens),
+      cache_creation_tokens: normalizeNonNegativeInteger(
+        event.cache_creation_tokens,
+      ),
+      total_tokens: normalizeNonNegativeInteger(event.total_tokens),
+    },
+    delta: {
+      prompt_tokens: normalizeNonNegativeInteger(event.prompt_tokens_delta),
+      completion_tokens: normalizeNonNegativeInteger(
+        event.completion_tokens_delta,
+      ),
+      cache_read_tokens: normalizeNonNegativeInteger(
+        event.cache_read_tokens_delta,
+      ),
+      cache_creation_tokens: normalizeNonNegativeInteger(
+        event.cache_creation_tokens_delta,
+      ),
+      total_tokens: normalizeNonNegativeInteger(event.total_tokens_delta),
+    },
+    weightedTokens: normalizeNonNegativeInteger(event.weighted_tokens),
+    weightedTokensDelta: normalizeNonNegativeInteger(
+      event.weighted_tokens_delta,
+    ),
+    creditsMicro: normalizeNonNegativeInteger(event.credits_micro),
+    createdAt: event.created_at,
+    metadata: isObject(event.metadata) ? event.metadata : {},
   }
 }
 

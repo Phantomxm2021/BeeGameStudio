@@ -19,8 +19,6 @@ export type MessageType =
   | 'document'
   | 'thought'
   | 'artifact_card'
-  | 'approval_request'
-  | 'revision_request'
   | 'system_status'
   | 'structured_output';
 
@@ -60,6 +58,10 @@ export interface WorkflowCardPayload {
   completedAt?: string;
   updatedAt?: string;
   stageStartedAt?: string;
+  /** Accumulated active execution time before the current active interval. */
+  elapsedMs?: number;
+  /** Start of the current active interval; absent while paused or terminal. */
+  activeSince?: string;
   nextAction?: 'resume' | 'retry';
   block?: {
     message: string;
@@ -173,7 +175,7 @@ export interface Message {
  * WebSocket message type enumeration
  * Defines the different types of messages received via WebSocket
  */
-export type WebSocketMessageType =
+export type ProjectEventMessageType =
   | 'token'         // Streaming token for real-time response
   | 'agent_message' // Agent final message
   | 'thought'       // Streaming thought/reasoning token
@@ -187,7 +189,6 @@ export type WebSocketMessageType =
   | 'error'         // Runtime error event
   | 'p2p_route'     // Peer-to-peer routing event
   | 'error_paused'  // Error occurred, task paused
-  | 'plan_approved' // Plan approval event
   | 'artifact_created' // Real-time artifact created event
   | 'context_update' // Context bundle visibility event
   | 'project_renamed' // Project renamed event (AI auto-naming)
@@ -209,9 +210,9 @@ export interface RuntimeContextEvidence {
  * WebSocket message interface
  * Represents a message received from the backend via WebSocket
  */
-export interface WebSocketMessage {
+export interface ProjectEventMessage {
   /** Type of the WebSocket message */
-  type: WebSocketMessageType;
+  type: ProjectEventMessageType;
 
   event_id?: string;
   sequence?: number;
@@ -221,7 +222,7 @@ export interface WebSocketMessage {
   /** Message content (optional, used for token and error_paused types) */
   content?: string;
 
-  /** Task ID associated with this message (optional for system events like plan_approved) */
+  /** Task ID associated with this message */
   task_id: string;
 
   /** Project ID associated with this message (optional) */

@@ -24,10 +24,12 @@ describe('BeeGame user context', () => {
 
     expect(hasBeeGamePermission(owner, 'credits.admin')).toBe(true)
     expect(hasBeeGamePermission(owner, 'lifecycle.admin')).toBe(true)
+    expect(hasBeeGamePermission(owner, 'resources.manage')).toBe(true)
     expect(listBeeGamePermissions(owner)).toEqual(expect.arrayContaining([
       'audit.read',
       'credits.admin',
       'lifecycle.admin',
+      'resources.manage',
     ]))
   })
 

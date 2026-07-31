@@ -7,10 +7,12 @@ import {
   RESOURCE_COMPOSITION_KINDS,
   RESOURCE_EMBEDDED_COMPONENT_KINDS,
   RESOURCE_RELATION_KINDS,
-  RESOURCE_LIBRARY_USAGE,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
-import { CURRENT_ASSET_MANIFEST_VERSION } from './asset-contracts'
+import {
+  BeeGameAssetManifestError,
+  parseCanonicalBeeGameAssetManifest,
+} from './asset-contracts'
 
 export type AssetIntegrationStage =
   | 'declared'
@@ -43,6 +45,7 @@ export type AssetImportAudit = {
   id: string
   status: string
   rootPath: string
+  targetFormatSupported?: boolean
   files: string[]
   issues: string[]
 }
@@ -66,18 +69,21 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     if (!isRecord(manifest)) {
       return { present: true, valid: false, manifestPath, requirements: [], compositions: [], issues: ['Manifest root must be a JSON object.'] }
     }
-    if (!Array.isArray(manifest.requirements)) {
-      return {
-        present: true,
-        valid: false,
-        manifestPath,
-        requirements: [],
-        imports: [],
-        compositions: [],
-        issues: [
-          'requirements must be an array. Legacy slots manifests are not accepted; migrate inventory to imports and game responsibilities to requirements/compositions.',
-        ],
+    try {
+      parseCanonicalBeeGameAssetManifest(manifest)
+    } catch (error) {
+      if (error instanceof BeeGameAssetManifestError) {
+        return {
+          present: true,
+          valid: false,
+          manifestPath,
+          requirements: [],
+          imports: [],
+          compositions: [],
+          issues: error.issues,
+        }
       }
+      throw error
     }
     return auditCanonicalAssetContract(manifest, workspace, manifestPath)
   } catch (error) {
@@ -98,26 +104,7 @@ function auditCanonicalAssetContract(
   manifestPath: string,
 ): AssetContractAudit {
   const issues: string[] = []
-  const legacyRootFields = ['slots', 'confirmedResourceLibraryUsage', 'asset_contract'].filter(field => manifest[field] !== undefined)
-  if (legacyRootFields.length) issues.push(`Legacy manifest root fields are not accepted: ${legacyRootFields.join(', ')}.`)
-  if (manifest.version !== CURRENT_ASSET_MANIFEST_VERSION) {
-    issues.push(`version must be ${CURRENT_ASSET_MANIFEST_VERSION}; received ${JSON.stringify(manifest.version)}.`)
-  }
-  if (!isRecord(manifest.project_target)) issues.push(`project_target must be an object; received ${jsonType(manifest.project_target)}.`)
-  if (!Array.isArray(manifest.imports)) issues.push(`imports must be an array; received ${jsonType(manifest.imports)}.`)
-  if (manifest.compositions !== undefined && !Array.isArray(manifest.compositions)) issues.push(`compositions must be an array; received ${jsonType(manifest.compositions)}.`)
-  if (issues.length) return { present: true, valid: false, manifestPath, requirements: [], imports: [], compositions: [], issues }
-
   const target = manifest.project_target as Record<string, unknown>
-  const legacyTargetFields = ['kind', 'engine', 'supported_asset_formats', 'resource_sourcing_policy']
-    .filter(field => target[field] !== undefined)
-  if (legacyTargetFields.length) issues.push(`Legacy project_target fields are not accepted: ${legacyTargetFields.join(', ')}.`)
-  if (!Array.isArray(target.asset_format_capabilities) || !stringArray(target.asset_format_capabilities).length) {
-    issues.push(`project_target.asset_format_capabilities must be a non-empty array of strings; received ${jsonType(target.asset_format_capabilities)}.`)
-  }
-  if (target.resource_library_usage !== undefined && !RESOURCE_LIBRARY_USAGE.includes(target.resource_library_usage as never)) {
-    issues.push(`project_target.resource_library_usage must be one of ${RESOURCE_LIBRARY_USAGE.join(', ')}; received ${JSON.stringify(target.resource_library_usage)}.`)
-  }
   const resourcePolicy = normalizedString(target.resource_library_usage)
   const runtimeAssetRoot = normalizedString(target.runtime_asset_root)
   if (resourcePolicy === 'preferred' || resourcePolicy === 'required') {
@@ -137,7 +124,9 @@ function auditCanonicalAssetContract(
   }
 
   const importIds = new Set<string>()
-  const imports = (manifest.imports as unknown[]).map((value, index) => auditCanonicalImport(value, index, workspace, importIds))
+  const imports = (manifest.imports as unknown[]).map((value, index) =>
+    auditCanonicalImport(value, index, workspace, capabilities, importIds),
+  )
   for (const resourceImport of imports) issues.push(...resourceImport.issues.map(issue => `${resourceImport.id}: ${issue}`))
   if (runtimeAssetRoot && isWorkspaceRelativePath(workspace, runtimeAssetRoot)) {
     const absoluteRuntimeAssetRoot = resolve(workspace, runtimeAssetRoot)
@@ -200,18 +189,50 @@ function auditCanonicalRequirement(value: unknown, index: number, workspace: str
   if (!normalizedString(value.id)) issues.push('Stable id is required.')
   if (ids.has(id)) issues.push('Stable id is duplicated.')
   ids.add(id)
-  const legacyFields = [
-    'slot_id', 'type', 'description', 'placeholder', 'placeholder_status',
-    'accepted_formats', 'recommended_specs', 'target', 'target_path',
-    'integration_provider', 'uploaded_files', 'uploaded_urls',
-    'resource_binding', 'integration_evidence', 'integration_error',
-    'replacement', 'updated_at',
-  ].filter(field => value[field] !== undefined)
-  if (legacyFields.length) {
-    issues.push(`Legacy slot fields are not accepted in a canonical requirement: ${legacyFields.join(', ')}.`)
-  }
   if (value.resource_requirement !== undefined && !isRecord(value.resource_requirement)) issues.push('resource_requirement must be an object when present.')
   else if (isRecord(value.resource_requirement)) auditResourceExplorationRequirement(value.resource_requirement, capabilities, issues)
+  if (value.source_decision !== undefined) {
+    if (!isRecord(value.source_decision))
+      issues.push('source_decision must be an object when present.')
+    else {
+      const type = normalizedString(value.source_decision.type)
+      if (
+        ![
+          'resource-library',
+          'authored-asset',
+          'runtime-generated',
+          'system-provided',
+          'silent',
+          'unavailable',
+        ].includes(type)
+      )
+        issues.push('source_decision.type is invalid.')
+      if (!stringArray(value.source_decision.reasons).length)
+        issues.push('source_decision.reasons must contain at least one reason.')
+      if (!normalizedString(value.source_decision.decided_at))
+        issues.push('source_decision.decided_at is required.')
+      if (
+        type !== 'resource-library' &&
+        value.resource_requirement !== undefined
+      )
+        issues.push(
+          'A final source_decision cannot keep a resource_requirement selection lane.',
+        )
+      if (
+        type === 'resource-library' &&
+        !stringArray(
+          isRecord(value.satisfied_by)
+            ? value.satisfied_by.import_ids
+            : undefined,
+        ).length
+      )
+        issues.push(
+          'A resource-library source_decision must reference at least one imported ID.',
+        )
+      if (type === 'unavailable' && value.status !== 'blocked')
+        issues.push('An unavailable source_decision must have blocked status.')
+    }
+  }
   if (!['planned', 'satisfied', 'blocked'].includes(normalizedString(value.status) || 'planned')) issues.push('status must be planned, satisfied, or blocked.')
   const satisfiedBy = isRecord(value.satisfied_by) ? value.satisfied_by : undefined
   const files = stringArray(satisfiedBy?.project_references)
@@ -220,7 +241,13 @@ function auditCanonicalRequirement(value: unknown, index: number, workspace: str
   return { id, required: value.required !== false, deliveryMode: 'requirement', stage: status === 'satisfied' ? 'referenced' : status === 'blocked' ? 'failed' : 'declared', issues, files, runtimeEventIds: [] }
 }
 
-function auditCanonicalImport(value: unknown, index: number, workspace: string, ids: Set<string>): AssetImportAudit {
+function auditCanonicalImport(
+  value: unknown,
+  index: number,
+  workspace: string,
+  capabilities: ReadonlySet<string>,
+  ids: Set<string>,
+): AssetImportAudit {
   if (!isRecord(value)) return { id: `import-${index}`, status: 'failed', rootPath: '', files: [], issues: ['Import must be an object.'] }
   const id = normalizedString(value.id) || `import-${index}`
   const status = normalizedString(value.status) || 'available'
@@ -237,6 +264,15 @@ function auditCanonicalImport(value: unknown, index: number, workspace: string, 
   if (value.technical_facts !== undefined && !isPrimitiveRecord(value.technical_facts)) issues.push('technical_facts must contain only finite primitive source-file facts.')
   if (!['available', 'referenced', 'failed'].includes(status)) issues.push('status must be available, referenced, or failed.')
   if (!rootPath) issues.push('root_path is required.')
+  const rootFormat = normalizeFormat(extname(rootPath))
+  const targetFormatSupported = rootFormat
+    ? capabilities.has(rootFormat)
+    : undefined
+  if (targetFormatSupported === false) {
+    issues.push(
+      `Imported root format ${rootFormat} is not supported by project_target.asset_format_capabilities.`,
+    )
+  }
   if (!files.length) issues.push('local_files must contain the imported root.')
   if (rootPath && !files.includes(rootPath)) issues.push('local_files must include root_path.')
   for (const path of files) {
@@ -262,7 +298,14 @@ function auditCanonicalImport(value: unknown, index: number, workspace: string, 
   const runtimeEventIds = stringArray(evidence?.runtime_event_ids)
   for (const reference of evidenceReferences) if (!isWorkspaceRelativePath(workspace, reference) || !existsSync(resolve(workspace, reference))) issues.push(`Usage reference does not exist in the project: ${reference}`)
   if (status === 'referenced' && !evidenceReferences.length && !runtimeEventIds.length) issues.push('A referenced import must include usage_evidence.')
-  return { id, status, rootPath, files, issues }
+  return {
+    id,
+    status,
+    rootPath,
+    ...(targetFormatSupported !== undefined ? { targetFormatSupported } : {}),
+    files,
+    issues,
+  }
 }
 
 function inspectImportedArtifact(path: string): 'valid' | 'missing' | 'not-file' | 'empty' {
@@ -360,6 +403,20 @@ function auditResourceExplorationRequirement(
   capabilities: ReadonlySet<string>,
   issues: string[],
 ): void {
+  const noMatch = normalizedString(requirement.no_match)
+  if (
+    ![
+      'authored-asset',
+      'runtime-generated',
+      'system-provided',
+      'silent',
+      'blocked',
+    ].includes(noMatch)
+  ) {
+    issues.push(
+      'Unbound resource_requirement.no_match must declare one exact fulfillment outcome or blocked.',
+    )
+  }
   const category = normalizedString(requirement.category)
   if (category && !(RESOURCE_CATEGORIES as readonly string[]).includes(category)) {
     issues.push(`Unbound resource_requirement.category is not canonical: ${category}`)

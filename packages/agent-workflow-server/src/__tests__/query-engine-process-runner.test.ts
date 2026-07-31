@@ -5,8 +5,33 @@ import { join } from 'node:path'
 import {
   createProcessIsolatedQueryEngineRunner,
 } from '../beegame/query-engine-process-runner'
+import {
+  deserializeQueryEngineStartInput,
+  serializeQueryEngineStartInput,
+} from '../beegame/query-engine-process-input'
 
 describe('process-isolated QueryEngine runner', () => {
+  test('preserves workflow permission identity across process serialization', () => {
+    const serialized = serializeQueryEngineStartInput({
+      sessionId: 'resource-worker',
+      deliveryEvidenceDataRoot: '/tmp/evidence',
+      cwd: '/tmp/project',
+      env: {},
+      approvedOutboundTargets: {},
+      workflowWorker: true,
+      workflowWorkerType: 'resource-preparer',
+      workflowResourceAttemptMode: 'repair',
+    })
+
+    expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
+      sessionId: 'resource-worker',
+      deliveryEvidenceDataRoot: '/tmp/evidence',
+      workflowWorker: true,
+      workflowWorkerType: 'resource-preparer',
+      workflowResourceAttemptMode: 'repair',
+    })
+  })
+
   test('starts independent session workers without sharing the server process', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'beegame-runtime-worker-'))
     const firstWorkspace = join(cwd, 'user-a', 'project')

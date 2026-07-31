@@ -1,14 +1,14 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
-import { api, type BeeGameAssetManifestPayload, type ReviewBindingPayload } from '../../services/api';
+import { api, type BeeGameAssetManifestPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/documentProgress';
-import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
-import type { WaitingApprovalState } from '../../utils/waitingApproval';
-import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../viewModels/displayModels';
+import { isBeeGamePermission } from './Sidebar/SidebarUtils';
+import type { WaitingPermissionState } from '../../utils/waitingPermission';
+import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
 import { normalizeChatHistory } from '../../utils/chatHistory';
 
@@ -45,22 +45,20 @@ interface RightSidebarProps {
     onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
-    onApprovePlan?: (
-        review: ReviewBindingPayload & { gate_id: string },
-        feedback?: string,
-        action?: 'approve' | 'revise' | 'reject'
+    onResolveToolPermission?: (
+        permission: { gate_id: string },
+        decision?: 'allow' | 'deny',
+        scope?: 'once' | 'session'
     ) => Promise<void>;
-    approvalState?: {
+    permissionState?: {
         gateId: string | null;
-        action: 'approve' | 'revise' | 'reject' | null;
+        action: 'allow' | 'deny' | null;
         phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed';
         message: string;
     };
-    pendingReviews?: ReviewDisplayModel[];
+    pendingPermissions?: PermissionDisplayModel[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
-    onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
-    onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
-    waitingApproval: WaitingApprovalState;
+    waitingPermission: WaitingPermissionState;
     canSendMessage?: boolean;
     canApproveTool?: boolean;
     canUploadAssets?: boolean;
@@ -80,13 +78,11 @@ export function RightSidebar({
     onWorkflowAction,
     isStopping = false,
     isRuntimeBusy = false,
-    onApprovePlan,
-    approvalState = { gateId: null, action: null, phase: 'idle', message: '' },
-    pendingReviews = [],
+    onResolveToolPermission,
+    permissionState = { gateId: null, action: null, phase: 'idle', message: '' },
+    pendingPermissions = [],
     projectStatus,
-    onUploadManifestCsv,
-    onApproveManifest,
-    waitingApproval,
+    waitingPermission,
     canSendMessage = true,
     canApproveTool = true,
     canUploadAssets = true,
@@ -174,26 +170,16 @@ export function RightSidebar({
     }, [projectId]);
 
     // Derived Data
-    const structuredApprovalReview = useMemo(() =>
-        pendingReviews.find((review: ReviewDisplayModel) => (
-            isStructuredDocumentApprovalReview(review) &&
-            isReviewAwaitingUserAction(review) &&
-            Boolean(review?.gate_id) &&
-            !review?.history_only
-        )),
-    [pendingReviews]);
     const beeGamePermissionReview = useMemo(() =>
-        pendingReviews.find((review: ReviewDisplayModel) => (
-            isBeeGamePermissionReview(review) &&
-            isReviewAwaitingUserAction(review) &&
-            Boolean(review?.gate_id) &&
-            !review?.history_only
+        pendingPermissions.find((permission: PermissionDisplayModel) => (
+            isBeeGamePermission(permission) &&
+            Boolean(permission?.gate_id)
         )),
-    [pendingReviews]);
+    [pendingPermissions]);
 
     // Handlers
     const handleSend = () => {
-        if (!canSendMessage || (!chatInput.trim() && attachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
+        if (!canSendMessage || (!chatInput.trim() && attachments.length === 0) || isComposerLocked || waitingPermission.isBlockingChat) return;
         onSendMessage(chatInput, attachments, editingMessageId || undefined);
         setChatInput('');
         setAttachments([]);
@@ -291,7 +277,7 @@ export function RightSidebar({
     }, [chatInput]);
 
     // Load project artifacts. Native Reviewer evidence is part of project
-    // runtime state; there is no second per-artifact review transport.
+    // runtime state; there is no second per-artifact permission transport.
     useEffect(() => {
         if (activeTab === 'artifacts') {
             const fetchData = async () => {
@@ -301,7 +287,7 @@ export function RightSidebar({
                     setArtifacts(fetchedArtifacts);
                     setIsArtifactsLoading(false);
                 } catch (err) {
-                    console.error('Failed to load artifacts/reviews:', err);
+                    console.error('Failed to load artifacts/permissions:', err);
                     setIsArtifactsLoading(false);
                 }
             };
@@ -402,13 +388,11 @@ export function RightSidebar({
                                 scrollContainerRef={scrollContainerRef}
                                 isComposing={isComposing}
                                 setIsComposing={setIsComposing}
-                                onApprovePlan={canApproveTool ? onApprovePlan : undefined}
-                approvalState={approvalState}
-                actionReview={beeGamePermissionReview || structuredApprovalReview}
-                            pendingReviews={pendingReviews}
-                            onUploadManifestCsv={onUploadManifestCsv}
-                            onApproveManifest={onApproveManifest}
-                                waitingApproval={waitingApproval}
+                                onResolveToolPermission={canApproveTool ? onResolveToolPermission : undefined}
+                permissionState={permissionState}
+                actionPermission={beeGamePermissionReview}
+                            pendingPermissions={pendingPermissions}
+                                waitingPermission={waitingPermission}
                                 projectStatus={projectStatus}
                                 canSendMessage={canSendMessage}
                                 lang={lang}

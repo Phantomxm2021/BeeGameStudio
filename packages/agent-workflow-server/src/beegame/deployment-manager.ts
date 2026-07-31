@@ -10,9 +10,8 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
-import { digestWorkspace } from './native-acceptance-evidence'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { computeWorkspaceRevision } from './delivery-workflow/revision'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -104,7 +103,6 @@ export type BeeGameDeploymentManagerOptions = {
   runner?: BeeGameDeploymentRunner
   outputCandidates?: string[]
   publisher?: BeeGameDeploymentPublisher
-  requireAcceptedDelivery?: boolean
 }
 
 type PackageManifest = {
@@ -143,7 +141,6 @@ export class BeeGameDeploymentManager {
   private readonly runner: BeeGameDeploymentRunner
   private readonly outputCandidates: string[]
   private readonly publisher?: BeeGameDeploymentPublisher
-  private readonly requireAcceptedDelivery: boolean
 
   constructor(options: BeeGameDeploymentManagerOptions) {
     this.deploymentsRoot = join(options.dataRoot, 'deployments')
@@ -152,7 +149,6 @@ export class BeeGameDeploymentManager {
     this.runner = options.runner ?? runDeploymentCommand
     this.outputCandidates = options.outputCandidates ?? DEFAULT_OUTPUT_CANDIDATES
     this.publisher = options.publisher
-    this.requireAcceptedDelivery = options.requireAcceptedDelivery ?? false
   }
 
   async list(sessionId?: string): Promise<BeeGameDeploymentRecord[]> {
@@ -254,21 +250,7 @@ export class BeeGameDeploymentManager {
     await this.saveRecord(record)
 
     try {
-      const acceptedWorkspaceDigest = digestWorkspace(workspacePath)
-      if (this.requireAcceptedDelivery) {
-        const acceptance = evaluatePersistedDeliveryAcceptance(workspacePath, {
-          dataRoot: dirname(this.deploymentsRoot),
-          sessionId: input.sessionId,
-        })
-        if (!acceptance.allowed || acceptance.outcome !== 'passed') {
-          record = this.fail(
-            record,
-            formatAcceptanceIssues(acceptance.issues),
-          )
-          await this.saveRecord(record)
-          return record
-        }
-      }
+      const acceptedWorkspaceRevision = await computeWorkspaceRevision(workspacePath)
       const plan = createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)
@@ -298,10 +280,13 @@ export class BeeGameDeploymentManager {
         await this.saveRecord(record)
         return record
       }
-      if (digestWorkspace(workspacePath) !== acceptedWorkspaceDigest) {
+      if (
+        (await computeWorkspaceRevision(workspacePath)) !==
+        acceptedWorkspaceRevision
+      ) {
         record = this.fail(
           { ...record, buildLog },
-          'Project source changed after acceptance or during the deployment build. Re-run native acceptance for the new revision.',
+          'Project source changed during the deployment build. Re-run the delivery workflow for the new revision.',
         )
         await this.saveRecord(record)
         return record
@@ -322,7 +307,6 @@ export class BeeGameDeploymentManager {
       await rm(artifactPath, { recursive: true, force: true })
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
-      await injectDeploymentAssetPathCompatibility(artifactPath)
       await validateDeploymentArtifact(artifactPath)
       const artifactHash = await hashDirectory(artifactPath)
       const published = this.publisher
@@ -500,17 +484,6 @@ export class BeeGameDeploymentManager {
     await rm(resolve(this.deploymentsRoot, record.id), { recursive: true, force: true })
     return true
   }
-}
-
-function formatAcceptanceIssues(issues: string[]): string {
-  if (issues.length === 0) return 'Deployment requires a passed native acceptance result.'
-  const visible = issues.slice(0, 12)
-  const remaining = issues.length - visible.length
-  return [
-    'Deployment acceptance failed:',
-    ...visible.map(issue => `- ${issue}`),
-    ...(remaining > 0 ? [`- …and ${remaining} more issue${remaining === 1 ? '' : 's'}.`] : []),
-  ].join('\n')
 }
 
 export function createSupabaseStorageDeploymentPublisher(options: {
@@ -733,70 +706,6 @@ async function validateDeploymentArtifact(artifactPath: string): Promise<void> {
       throw new Error(`Deployment artifact contains an invalid GLB: ${relative(artifactPath, file)}`)
     }
   }
-}
-
-/**
- * Web deployments may live under a storage or application prefix. This
- * deployment-only adapter keeps historical projects that use root-relative
- * media URLs inside the current artifact without changing project source.
- */
-async function injectDeploymentAssetPathCompatibility(outputDir: string): Promise<void> {
-  const files = await listFiles(outputDir)
-  await Promise.all(files
-    .filter(file => extname(file).toLowerCase() === '.html')
-    .map(async file => {
-      const html = await readFile(file, 'utf8')
-      if (html.includes('data-beegame-deployment-asset-base')) return
-      const bridge = deploymentAssetPathCompatibilityBridge()
-      const headClose = html.indexOf('</head>')
-      const patched = headClose >= 0
-        ? `${html.slice(0, headClose)}${bridge}${html.slice(headClose)}`
-        : `${bridge}${html}`
-      await writeFile(file, patched, 'utf8')
-    }))
-}
-
-function deploymentAssetPathCompatibilityBridge(): string {
-  return `<script data-beegame-deployment-asset-base>
-(() => {
-  const supportedExtensions = new Set(['glb','gltf','fbx','obj','mtl','png','jpg','jpeg','webp','gif','svg','mp3','ogg','wav','m4a','mp4','webm','ttf','otf','woff','woff2','wasm','bin']);
-  const rewrite = (value) => {
-    if (typeof value !== 'string') return value;
-    let requested;
-    try { requested = new URL(value, window.location.href); } catch { return value; }
-    if (requested.origin !== window.location.origin) return value;
-    const base = new URL('.', window.location.href);
-    if (requested.pathname.startsWith(base.pathname)) return value;
-    const segment = requested.pathname.slice(requested.pathname.lastIndexOf('/') + 1);
-    const extension = segment.includes('.') ? segment.split('.').pop().toLowerCase() : '';
-    if (!supportedExtensions.has(extension)) return value;
-    return new URL(requested.pathname.slice(1) + requested.search + requested.hash, base).toString();
-  };
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    if (typeof input === 'string') return originalFetch(rewrite(input), init);
-    if (input instanceof Request) {
-      const url = rewrite(input.url);
-      return originalFetch(url === input.url ? input : new Request(url, input), init);
-    }
-    return originalFetch(input, init);
-  };
-  const originalOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-    return originalOpen.call(this, method, rewrite(String(url)), ...rest);
-  };
-  for (const prototype of [HTMLImageElement.prototype, HTMLMediaElement.prototype]) {
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'src');
-    if (!descriptor || !descriptor.set || !descriptor.get) continue;
-    Object.defineProperty(prototype, 'src', {
-      configurable: true,
-      enumerable: descriptor.enumerable,
-      get: descriptor.get,
-      set(value) { descriptor.set.call(this, rewrite(String(value))); },
-    });
-  }
-})();
-</script>`
 }
 
 async function listFiles(path: string): Promise<string[]> {

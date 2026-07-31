@@ -91,7 +91,6 @@ export interface AgentTaskLifecycle {
   claimability_reason?: string;
   candidate_agents?: TaskCandidateAgent[];
   suggested_agents?: string[];
-  review_stage?: string | null;
   verification_stage?: string | null;
   invalidated_reason?: string | null;
   artifact_versions?: Array<{

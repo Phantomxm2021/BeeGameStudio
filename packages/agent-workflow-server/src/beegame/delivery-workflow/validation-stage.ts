@@ -1,6 +1,5 @@
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
-import { WORKFLOW_EVIDENCE_DIRECTORY } from './types'
 import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 import type { ResourceDeliveryReadiness } from '../resource-delivery-readiness'
@@ -51,9 +50,14 @@ export async function startImplementationAudit(input: {
     workerType: 'implementation-auditor',
     phase: 'IMPLEMENTATION_AUDIT',
     revision: currentImplementationRevision(input.run),
-    allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
+    allowedPaths: [],
     contract: {
       taskIds: input.run.tasks.map(task => task.id),
+      tasks: input.run.tasks.map(task => ({
+        id: task.id,
+        allowedPaths: task.allowedPaths,
+        checklistIds: task.checklistIds,
+      })),
       checklistIds: input.expectedChecklistIds,
       importIds: input.expectedImportIds,
       compositionIds: input.expectedCompositionIds,
@@ -127,6 +131,13 @@ export function reconcileImplementationAudit(input: {
     input.terminal.compositionIds,
     'composition',
   )
+  const knownTaskIds = new Set(expected)
+  if (
+    input.terminal.findings.some(finding =>
+      finding.taskIds.some(taskId => !knownTaskIds.has(taskId)),
+    )
+  )
+    throw new Error('implementation audit finding references an unknown task')
   const status =
     input.terminal.status === 'passed'
       ? 'passed'
@@ -175,9 +186,14 @@ export async function startAcceptance(input: {
     workerType: 'acceptance-validator',
     phase: 'ACCEPTANCE',
     revision: currentImplementationRevision(input.run),
-    allowedPaths: [WORKFLOW_EVIDENCE_DIRECTORY],
+    allowedPaths: [],
     contract: {
       taskIds: input.run.tasks.map(task => task.id),
+      tasks: input.run.tasks.map(task => ({
+        id: task.id,
+        allowedPaths: task.allowedPaths,
+        checklistIds: task.checklistIds,
+      })),
       checklistIds: input.expectedChecklistIds,
       importIds: input.expectedImportIds,
       compositionIds: input.expectedCompositionIds,
@@ -226,12 +242,24 @@ export function reconcileAcceptance(input: {
       throw new Error(`acceptance does not cover every ${label}`)
   }
   exact(input.expectedChecklistIds, input.terminal.checklistIds, 'checklist')
+  exact(
+    input.run.tasks.map(task => task.id),
+    input.terminal.validatedTaskIds,
+    'task',
+  )
   exact(input.expectedImportIds, input.terminal.importIds, 'import')
   exact(
     input.expectedCompositionIds,
     input.terminal.compositionIds,
     'composition',
   )
+  const knownTaskIds = new Set(input.run.tasks.map(task => task.id))
+  if (
+    input.terminal.findings.some(finding =>
+      finding.taskIds.some(taskId => !knownTaskIds.has(taskId)),
+    )
+  )
+    throw new Error('acceptance finding references an unknown task')
   const status =
     input.terminal.status === 'passed'
       ? 'passed'

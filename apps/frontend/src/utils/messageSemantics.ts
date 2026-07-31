@@ -1,10 +1,8 @@
-import type { Message, MessageType, RenderHint, WebSocketMessage } from '../types/message';
+import type { Message, MessageType, RenderHint, ProjectEventMessage } from '../types/message';
 
 export type CanonicalChatMessageType =
   | 'text'
   | 'artifact_card'
-  | 'approval_request'
-  | 'revision_request'
   | 'system_status'
   | 'error'
   | 'tool'
@@ -13,15 +11,13 @@ export type CanonicalChatMessageType =
 const CANONICAL_TYPES = new Set<CanonicalChatMessageType>([
   'text',
   'artifact_card',
-  'approval_request',
-  'revision_request',
   'system_status',
   'error',
   'tool',
   'structured_output',
 ]);
 
-const LEGACY_MAP: Record<string, CanonicalChatMessageType> = {
+const TRANSPORT_TYPE_MAP: Record<string, CanonicalChatMessageType> = {
   normal: 'text',
   document: 'artifact_card',
   thought: 'text',
@@ -41,12 +37,10 @@ export const normalizeCanonicalMessageType = ({
   type,
   renderHint,
   isDocument,
-  taskKind,
-  nextAction,
   requiresUserAction,
 }: SemanticResolverInput): CanonicalChatMessageType => {
   const normalizedType = String(type || '').trim().toLowerCase();
-  const mappedType = LEGACY_MAP[normalizedType] || normalizedType;
+  const mappedType = TRANSPORT_TYPE_MAP[normalizedType] || normalizedType;
   if (
     CANONICAL_TYPES.has(mappedType as CanonicalChatMessageType) &&
     !(mappedType === 'text' && requiresUserAction)
@@ -65,14 +59,7 @@ export const normalizeCanonicalMessageType = ({
     return 'structured_output';
   }
 
-  const action = String(nextAction || '').trim().toLowerCase();
-  const kind = String(taskKind || '').trim().toLowerCase();
-  if (requiresUserAction) {
-    if (action === 'revise' || action === 'upload_manifest' || action === 'clarify' || kind.includes('revision') || kind.includes('clarification')) {
-      return 'revision_request';
-    }
-    return 'approval_request';
-  }
+  if (requiresUserAction) return 'system_status';
   return 'text';
 };
 
@@ -91,7 +78,7 @@ export const normalizeMessageSemanticFields = <T extends {
   };
 };
 
-export const normalizeWebSocketSemanticType = (message: WebSocketMessage): CanonicalChatMessageType =>
+export const normalizeProjectEventSemanticType = (message: ProjectEventMessage): CanonicalChatMessageType =>
   normalizeCanonicalMessageType({
     type: message.message_type,
     renderHint: message.render_hint,

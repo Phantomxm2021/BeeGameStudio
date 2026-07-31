@@ -6,18 +6,15 @@ import {
     MessageScroller,
     MessageScrollerButton,
     MessageScrollerContent,
-    MessageScrollerItem,
     MessageScrollerOutline,
     MessageScrollerProvider,
     MessageScrollerViewport,
 } from '../../ui/message-scroller';
-import type { ReviewBindingPayload } from '../../../services/api';
 import type { ChatAttachmentPayload } from '../../../services/api';
 import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments, isSupportedChatFile } from '../../../services/chatAttachments';
-import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
-import type { WaitingApprovalState } from '../../../utils/waitingApproval';
-import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
-import { getWorkflowControlState, type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type ReviewDisplayModel } from '../../../viewModels/displayModels';
+import { formatPermissionSummary, isBeeGamePermission } from './SidebarUtils';
+import type { WaitingPermissionState } from '../../../utils/waitingPermission';
+import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
@@ -43,24 +40,21 @@ interface ChatPanelProps {
     isComposing: boolean;
     setIsComposing: (val: boolean) => void;
 
-    // Approval Props
-    onApprovePlan?: (
-        review: ReviewBindingPayload & { gate_id: string },
-        feedback?: string,
-        action?: 'approve' | 'revise' | 'reject',
-        permissionScope?: 'once' | 'session'
+    // Tool permission controls
+    onResolveToolPermission?: (
+        permission: { gate_id: string },
+        decision?: 'allow' | 'deny',
+        scope?: 'once' | 'session'
     ) => Promise<void>;
-    approvalState: {
+    permissionState: {
         gateId: string | null;
-        action: 'approve' | 'revise' | 'reject' | null;
+        action: 'allow' | 'deny' | null;
         phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed';
         message: string;
     };
-    actionReview?: ReviewDisplayModel;
-    pendingReviews: ReviewDisplayModel[];
-    onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
-    onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
-    waitingApproval: WaitingApprovalState;
+    actionPermission?: PermissionDisplayModel;
+    pendingPermissions: PermissionDisplayModel[];
+    waitingPermission: WaitingPermissionState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
@@ -73,12 +67,9 @@ interface ChatPanelProps {
     onLoadOlderHistory?: () => void | Promise<void>;
 }
 
-const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
-    if (review.raw) {
-        return review.raw;
-    }
-    return review as unknown as ReviewBindingPayload & { gate_id: string };
-};
+const toPermissionPayload = (permission: PermissionDisplayModel): { gate_id: string } => ({
+    gate_id: permission.gate_id,
+});
 
 const dedupeImageFiles = (files: File[]): File[] => {
     const seen = new Set<string>();
@@ -116,17 +107,17 @@ const getObjectField = (value: unknown, key: string): unknown => {
     return (value as Record<string, unknown>)[key];
 };
 
-const getBeeGamePermissionCommand = (review: ReviewDisplayModel | undefined | null): string => {
-    const artifact = getObjectField(review, 'artifact');
+const getBeeGamePermissionCommand = (permission: PermissionDisplayModel | undefined | null): string => {
+    const artifact = getObjectField(permission, 'artifact');
     const input = getObjectField(artifact, 'input');
     const command = getObjectField(input, 'command');
     return typeof command === 'string' ? command.trim() : '';
 };
 
-const getBeeGamePermissionTarget = (review: ReviewDisplayModel | undefined | null): string => {
-    const artifact = getObjectField(review, 'artifact');
+const getBeeGamePermissionTarget = (permission: PermissionDisplayModel | undefined | null): string => {
+    const artifact = getObjectField(permission, 'artifact');
     const input = getObjectField(artifact, 'input');
-    if (review?.permission_tool_name === 'SandboxNetworkAccess') {
+    if (permission?.permission_tool_name === 'SandboxNetworkAccess') {
         const host = getObjectField(input, 'host');
         const port = getObjectField(input, 'port');
         if (typeof host === 'string' && host.trim()) {
@@ -143,28 +134,28 @@ const getPermissionFileName = (path: string): string => {
 };
 
 interface BeeGamePermissionPanelProps {
-    review: ReviewDisplayModel;
+    permission: PermissionDisplayModel;
     text: Record<string, string>;
-    approvalState: ChatPanelProps['approvalState'];
-    onApprovePlan?: ChatPanelProps['onApprovePlan'];
+    permissionState: ChatPanelProps['permissionState'];
+    onResolveToolPermission?: ChatPanelProps['onResolveToolPermission'];
 }
 
 const BeeGamePermissionPanel = ({
-    review,
+    permission,
     text,
-    approvalState,
-    onApprovePlan,
+    permissionState,
+    onResolveToolPermission,
 }: BeeGamePermissionPanelProps) => {
-    const command = getBeeGamePermissionCommand(review);
-    const filePath = getBeeGamePermissionTarget(review);
+    const command = getBeeGamePermissionCommand(permission);
+    const filePath = getBeeGamePermissionTarget(permission);
     const target = command
         || (filePath ? getPermissionFileName(filePath) : '')
-        || review.title
-        || formatReviewSummary(review);
-    const isAllowPending = isApprovalActionPending(approvalState, review.gate_id, 'approve');
-    const isDenyPending = isApprovalActionPending(approvalState, review.gate_id, 'revise');
-    const isNetworkPermission = review.permission_tool_name === 'SandboxNetworkAccess';
-    const supportsSessionPermission = isNetworkPermission || review.permission_tool_name === 'ResourceLibrary';
+        || permission.title
+        || formatPermissionSummary(permission);
+    const isAllowPending = permissionState.gateId === permission.gate_id && permissionState.action === 'allow' && permissionState.phase === 'submitting';
+    const isDenyPending = permissionState.gateId === permission.gate_id && permissionState.action === 'deny' && permissionState.phase === 'submitting';
+    const isNetworkPermission = permission.permission_tool_name === 'SandboxNetworkAccess';
+    const supportsSessionPermission = isNetworkPermission || permission.permission_tool_name === 'ResourceLibrary';
 
     return (
         <section
@@ -203,7 +194,7 @@ const BeeGamePermissionPanel = ({
             <div className={`grid gap-2 border-t border-white/10 px-5 pb-5 pt-1 ${supportsSessionPermission ? 'min-[520px]:grid-cols-3' : 'min-[420px]:grid-cols-2'}`}>
                 <button
                     type="button"
-                    onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'revise')}
+                    onClick={() => onResolveToolPermission?.(toPermissionPayload(permission), 'deny')}
                     disabled={isDenyPending}
                     className="type-button flex min-h-11 items-center justify-center rounded-2xl bg-white text-zinc-950 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-55"
                 >
@@ -211,7 +202,7 @@ const BeeGamePermissionPanel = ({
                 </button>
                 <button
                     type="button"
-                    onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'approve', 'once')}
+                    onClick={() => onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'once')}
                     disabled={isAllowPending}
                     className="type-button flex min-h-11 items-center justify-center rounded-2xl bg-emerald-600 text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
                 >
@@ -220,7 +211,7 @@ const BeeGamePermissionPanel = ({
                 {supportsSessionPermission ? (
                     <button
                         type="button"
-                        onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'approve', 'session')}
+                        onClick={() => onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'session')}
                         disabled={isAllowPending}
                         className="type-button flex min-h-11 items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-400/10 px-3 text-emerald-200 transition-colors hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-55"
                     >
@@ -252,13 +243,11 @@ export const ChatPanel = memo(({
     scrollContainerRef,
     isComposing,
     setIsComposing,
-    onApprovePlan,
-    approvalState,
-    actionReview,
-    pendingReviews,
-    onUploadManifestCsv,
-    onApproveManifest,
-    waitingApproval,
+    onResolveToolPermission,
+    permissionState,
+    actionPermission,
+    pendingPermissions,
+    waitingPermission,
     projectStatus,
     isComposerLocked = false,
     canSendMessage = true,
@@ -271,52 +260,15 @@ export const ChatPanel = memo(({
     onLoadOlderHistory,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
-    const composerPlaceholder = text.chatPlaceholder || waitingApproval.placeholder;
+    const composerPlaceholder = text.chatPlaceholder || waitingPermission.placeholder;
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
-    const reviewActionLabel = (
-        review: ReviewDisplayModel,
-        action: 'approve' | 'revise' | 'reject',
-    ): string => {
-        if (!review?.gate_id) {
-            if (action === 'approve') return text.approve;
-            if (action === 'revise') return text.revise;
-            return text.reject;
-        }
-        if (isApprovalActionPending(approvalState, review.gate_id, action)) {
-            if (action === 'approve') {
-                return approvalState.phase === 'submitting' ? text.submitting : text.starting;
-            }
-            return approvalState.phase === 'submitting' ? text.submitting : text.refreshing;
-        }
-        if (action === 'approve') {
-            if (isBeeGamePermissionReview(review)) return text.allow;
-            return review?.type === 'INTENT_CLARIFICATION' ? text.continue : text.approve;
-        }
-        if (action === 'revise') {
-            if (isBeeGamePermissionReview(review)) return text.deny;
-            return text.revise;
-        }
-        return text.reject;
-    };
-
-    const reviewApproveLabel = (review: ReviewDisplayModel): string => {
-        return reviewActionLabel(review, 'approve');
-    };
-
-    const reviewReviseLabel = (review: ReviewDisplayModel): string => {
-        return reviewActionLabel(review, 'revise');
-    };
-
-    const clarificationReview = pendingReviews.find((review: ReviewDisplayModel) => review?.type === 'INTENT_CLARIFICATION' && Boolean(review?.gate_id));
-    const reviewReadyForUserApproval = isReviewAwaitingUserAction(actionReview);
-    const beeGamePermission = isBeeGamePermissionReview(actionReview);
-    const projectFailed = getWorkflowControlState(projectStatus)?.status === 'failed';
-    const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || actionReview);
-    const activeBeeGamePermissionReview = activeComposerReview && isBeeGamePermissionReview(activeComposerReview)
-        ? activeComposerReview
-        : undefined;
-    const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview && !activeBeeGamePermissionReview);
-    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
+    const workflowIsTerminal = ['completed', 'failed', 'cancelled', 'stale']
+        .includes(String(projectStatus?.workflow?.status || ''));
+    const activeBeeGamePermission = workflowIsTerminal
+        ? undefined
+        : pendingPermissions.find(isBeeGamePermission)
+            ?? (actionPermission && isBeeGamePermission(actionPermission) ? actionPermission : undefined);
+    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingPermission.isBlockingChat || Boolean(activeBeeGamePermission);
     const canSubmitComposer = Boolean(chatInput.trim() || attachments.length > 0);
     const messageOutlineItems = useMemo(
         () => messages
@@ -338,7 +290,7 @@ export const ChatPanel = memo(({
     const normalComposerClassName = 'glass-control group flex min-h-[60px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl';
     const textareaClassName = 'type-input scrollbar-hide w-full bg-transparent px-5 py-3 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[56px] max-h-[150px] resize-none overflow-y-auto outline-none';
     const sendButtonClassName = 'primary-pill flex h-8 w-8 shrink-0 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35';
-    const effectiveComposerPlaceholder = activeBeeGamePermissionReview
+    const effectiveComposerPlaceholder = activeBeeGamePermission
         ? text.permissionPendingPlaceholder
         : isComposerLocked || isLoading
             ? text.aiProcessing
@@ -395,65 +347,6 @@ export const ChatPanel = memo(({
                                     onEditMessage={onEditMessage}
                                     onWorkflowAction={onWorkflowAction}
                                 />
-                                {pendingReviews.map((review: ReviewDisplayModel) => {
-                                    const isManifestReview = review?.type === 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
-                                    if (!isManifestReview) return null;
-
-                                    return (
-                                        <MessageScrollerItem
-                                            key={review.gate_id}
-                                            messageId={`review-${review.gate_id}`}
-                                            className="mt-3"
-                                        >
-                                            <div className="glass-control w-full space-y-4 rounded-3xl border border-white/15 bg-black/25 p-6 backdrop-blur-2xl">
-                                                <div className="flex items-start space-x-3">
-                                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-zinc-300" />
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="type-caption-1 mb-1 text-zinc-100">{text.actionRequired}</div>
-                                                        <div className="type-callout mb-2 text-zinc-200 opacity-80">
-                                                            {text.resourceManifestDescription}
-                                                        </div>
-                                                        <div className="flex space-x-3 mt-4">
-                                                            <button
-                                                                onClick={() => onApproveManifest && onApproveManifest(toApprovalPayload(review))}
-                                                                disabled={isLoading}
-                                                                className="type-button flex flex-1 items-center justify-center space-x-2 rounded-xl bg-white py-2 text-zinc-950 shadow-sm transition-colors hover:bg-zinc-200 disabled:opacity-50"
-                                                            >
-                                                                <span>{text.skip}</span>
-                                                            </button>
-
-                                                            <div className="flex-1">
-                                                                <input
-                                                                    type="file"
-                                                                    accept=".csv"
-                                                                    onChange={(e) => {
-                                                                        const file = e.target.files?.[0];
-                                                                        if (file && onUploadManifestCsv) {
-                                                                            const reader = new FileReader();
-                                                                            reader.onload = (e) => {
-                                                                                const content = e.target?.result as string;
-                                                                                onUploadManifestCsv(review.gate_id, content, true);
-                                                                            };
-                                                                            reader.readAsText(file);
-                                                                        }
-                                                                    }}
-                                                                    className="hidden"
-                                                                    id={`upload-csv-${review.gate_id}`}
-                                                                />
-                                                                <label
-                                                                    htmlFor={`upload-csv-${review.gate_id}`}
-                                                                    className={`type-button w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
-                                                                >
-                                                                    <span>{text.upload}</span>
-                                                                </label>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </MessageScrollerItem>
-                                    );
-                                })}
                             </MessageScrollerContent>
                         </MessageScrollerViewport>
                         <MessageScrollerOutline items={messageOutlineItems} />
@@ -462,83 +355,15 @@ export const ChatPanel = memo(({
                 </MessageScrollerProvider>
             }
             <div className={composerShellClassName}>
-                {activeBeeGamePermissionReview ? (
+                {activeBeeGamePermission ? (
                     <BeeGamePermissionPanel
-                        review={activeBeeGamePermissionReview}
+                        permission={activeBeeGamePermission}
                         text={text}
-                        approvalState={approvalState}
-                        onApprovePlan={onApprovePlan}
+                        permissionState={permissionState}
+                        onResolveToolPermission={onResolveToolPermission}
                     />
                 ) : null}
-                {shouldShowApprovalBar && activeComposerReview ? (
-                    <div
-                        key={`approval-bar-${activeComposerReview.gate_id}`}
-                        className="pointer-events-auto"
-                    >
-                        <ApprovalActionCard
-                            gateId={activeComposerReview.gate_id}
-                            title={
-                                beeGamePermission
-                                    ? text.permissionRequired
-                                    : activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                        ? text.clarificationRequired
-                                        : reviewReadyForUserApproval
-                                            ? text.approvalRequired
-                                            : text.revisionRequired
-                            }
-                            description={
-                                activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                    ? text.clarificationDescription
-                                    : formatReviewSummary(activeComposerReview)
-                            }
-                            tone={
-                                beeGamePermission
-                                    ? 'clarification'
-                                    : activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                    ? 'clarification'
-                                    : reviewReadyForUserApproval
-                                        ? 'approval'
-                                        : 'revision'
-                            }
-                            approvalState={approvalState}
-                            className="glass-control rounded-3xl px-3 py-3 text-zinc-100 backdrop-blur-2xl"
-                            actions={[
-                                ...(activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                    ? [{
-                                        action: 'approve' as const,
-                                        label: reviewApproveLabel(activeComposerReview),
-                                        onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview)),
-                                    }, {
-                                        action: 'reject' as const,
-                                        label: reviewActionLabel(activeComposerReview, 'reject'),
-                                        onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview), undefined, 'reject'),
-                                    }]
-                                    : beeGamePermission
-                                        ? [{
-                                            action: 'approve' as const,
-                                            label: reviewApproveLabel(activeComposerReview),
-                                            onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview)),
-                                        }, {
-                                            action: 'revise' as const,
-                                            label: reviewReviseLabel(activeComposerReview),
-                                            tone: 'reject' as const,
-                                            onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview), undefined, 'revise'),
-                                        }]
-                                    : [...(reviewReadyForUserApproval ? [{
-                                        action: 'approve' as const,
-                                        label: reviewApproveLabel(activeComposerReview),
-                                        onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview)),
-                                    }] : []), {
-                                        action: 'revise' as const,
-                                        label: reviewReviseLabel(activeComposerReview),
-                                        onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview), undefined, 'revise'),
-                                    }]),
-                            ]}
-                            pendingMessage={approvalState.message}
-                            failedMessage={approvalState.message}
-                        />
-                    </div>
-                ) : (
+                {(
                     <div className={normalComposerClassName} data-testid="beegame-chat-composer">
                         {attachments.length > 0 ? (
                             <div

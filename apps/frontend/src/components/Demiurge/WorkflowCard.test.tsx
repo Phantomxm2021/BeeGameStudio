@@ -2,8 +2,20 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowCard } from './WorkflowCard';
 
+const toast = vi.hoisted(() => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+}));
+
+vi.mock('../../contexts/ToastContext', () => ({
+  useToastContext: () => toast,
+}));
+
 describe('WorkflowCard', () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
 
   it('renders the stage, durable message, execution detail and task progress', () => {
     render(
@@ -28,6 +40,8 @@ describe('WorkflowCard', () => {
     );
 
     expect(screen.getByText('基础文档审计')).toBeInTheDocument();
+    expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-icon', 'grip');
+    expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
     expect(screen.getByText(/Document Reviewer · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
@@ -36,8 +50,13 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
-  it('shows an accessible failure detail and invokes retry', async () => {
+  it('shows a red failure control, copies the error detail and invokes retry', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     render(
       <WorkflowCard
         workflow={{
@@ -51,10 +70,171 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getByLabelText('查看错误详情')).toBeInTheDocument();
+    const failureControl = screen.getByRole('button', { name: '复制错误信息' });
+    expect(failureControl).toHaveClass('text-rose-400');
     expect(screen.getByRole('tooltip')).toHaveTextContent('文档整改超过最大自动重试次数。');
+    fireEvent.click(failureControl);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('文档整改超过最大自动重试次数。'));
+    expect(toast.showSuccess).toHaveBeenCalledWith('错误信息已复制');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
+  });
+
+  it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('Clipboard permission denied'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    });
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_copy_fallback',
+          status: 'failed',
+          currentPhase: 'IMPLEMENTATION',
+          block: { message: '完整错误信息' },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '复制错误信息' }));
+
+    await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+    expect(toast.showSuccess).toHaveBeenCalledWith('错误信息已复制');
+  });
+
+  it('keeps message and long task lists in separate scroll regions', () => {
+    const tasks = Array.from({ length: 13 }, (_, index) => ({
+      id: `task-${index + 1}`,
+      title: `任务 ${index + 1}`,
+      status: 'pending' as const,
+    }));
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_many_tasks',
+          status: 'running',
+          currentPhase: 'IMPLEMENTATION',
+          thinking: '正在处理任务列表。',
+          tasks,
+        }}
+      />,
+    );
+
+    const messageRegion = screen.getByTestId('workflow-card-message-region');
+    const taskRegion = screen.getByTestId('workflow-card-task-region');
+    expect(messageRegion).toHaveClass('scrollbar-premium', 'max-h-20', 'overflow-y-auto');
+    expect(messageRegion).not.toHaveClass('scroll-fade');
+    expect(taskRegion).toHaveClass('scroll-fade', 'scroll-fade-y', 'scroll-fade-6', 'scrollbar-premium', 'max-h-[17.5rem]', 'overflow-y-auto');
+    expect(screen.getByText('正在处理任务列表。')).toHaveClass('text-xs');
+    expect(screen.getByText('任务 13')).toBeInTheDocument();
+  });
+
+  it('does not make a task list of twelve items scroll', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_twelve_tasks',
+          status: 'running',
+          currentPhase: 'IMPLEMENTATION',
+          tasks: Array.from({ length: 12 }, (_, index) => ({
+            id: `task-${index + 1}`,
+            title: `任务 ${index + 1}`,
+            status: 'pending' as const,
+          })),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('workflow-card-task-region')).not.toHaveClass('scroll-fade', 'overflow-y-auto');
+  });
+
+  it('only shows the message fade while its content actually overflows', async () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_long_message',
+          status: 'running',
+          currentPhase: 'IMPLEMENTATION',
+          thinking: '一段需要滚动查看的长消息。',
+        }}
+      />,
+    );
+    const messageRegion = screen.getByTestId('workflow-card-message-region');
+    Object.defineProperties(messageRegion, {
+      clientHeight: { configurable: true, value: 80 },
+      scrollHeight: { configurable: true, value: 160 },
+    });
+
+    fireEvent(window, new Event('resize'));
+
+    await waitFor(() => expect(messageRegion).toHaveClass('scroll-fade'));
+  });
+
+  it('renders the workflow message as compact markdown', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_markdown_message',
+          status: 'running',
+          currentPhase: 'IMPLEMENTATION',
+          thinking: '**正在执行**\n\n- 子任务 A\n- 子任务 B',
+        }}
+      />,
+    );
+
+    const messageRegion = screen.getByTestId('workflow-card-message-region');
+    expect(screen.getByText('正在执行').tagName).toBe('STRONG');
+    expect(screen.getByText('子任务 A').closest('ul')).toBeInTheDocument();
+    expect(messageRegion.querySelector('p')).toHaveClass('text-xs');
+    expect(messageRegion).not.toHaveTextContent('**正在执行**');
+  });
+
+  it('does not present a user pause as an error', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_paused',
+          status: 'cancelled',
+          currentPhase: 'DOCUMENT_REVIEW',
+          block: { message: 'user stopped workflow' },
+          nextAction: 'resume',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('已暂停')).toBeInTheDocument();
+    expect(screen.getByLabelText('工作流状态：已暂停')).toHaveAttribute('data-icon', 'pause');
+    expect(screen.queryByLabelText('复制错误信息')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['draft', '准备中', 'hourglass'],
+    ['running', '执行中', 'grip'],
+    ['blocked', '需要处理', 'badge-alert'],
+    ['verifying', '验证中', 'scan-text'],
+    ['completed', '已完成', 'circle-check'],
+    ['failed', '失败', 'x'],
+    ['cancelled', '已暂停', 'pause'],
+    ['stale', '已过期', 'clock'],
+  ] as const)('uses the %s workflow status icon', (status, label, icon) => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: `run_status_${status}`,
+          status,
+          currentPhase: 'IMPLEMENTATION',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText(`工作流状态：${label}`)).toHaveAttribute('data-icon', icon);
+    expect(screen.getByLabelText(`工作流状态：${label}`)).toHaveAttribute('data-animation', status === 'running' ? 'loop' : 'once');
   });
 
   it('does not render token usage in the workflow card', () => {
@@ -155,6 +335,27 @@ describe('WorkflowCard', () => {
           currentPhase: 'DOCUMENT_REVIEW',
           createdAt: '2026-07-28T00:00:00.000Z',
           updatedAt: '2026-07-28T00:00:55.000Z',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('00:01:00')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('00:01:02')).toBeInTheDocument();
+  });
+
+  it('resumes from accumulated active time without counting the paused interval', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:10:00.000Z'));
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_resumed',
+          status: 'running',
+          currentPhase: 'RESOURCE_PREPARATION',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          elapsedMs: 60_000,
+          activeSince: '2026-07-28T00:10:00.000Z',
         }}
       />,
     );

@@ -9,7 +9,7 @@ const loadPhases = vi.fn().mockResolvedValue(undefined);
 const loadTokenUsage = vi.fn().mockResolvedValue(undefined);
 const loadAgents = vi.fn().mockResolvedValue(undefined);
 const loadTasks = vi.fn().mockResolvedValue(undefined);
-const loadPendingReviews = vi.fn().mockResolvedValue(undefined);
+const loadPendingPermissions = vi.fn().mockResolvedValue(undefined);
 const loadProjectStatus = vi.fn().mockResolvedValue(undefined);
 const loadSystemReadiness = vi.fn().mockResolvedValue(undefined);
 const loadCurrentUser = vi.fn().mockResolvedValue(undefined);
@@ -108,11 +108,7 @@ let mockedProjectStatus: ProjectBaselineStatusPayload = {
   project_id: 'proj_1',
   phase: 'DESIGN_IN_PROGRESS',
   blocked: true,
-  approval_required: true,
   project_target: { platform: 'web', runtime: 'Web' },
-  baseline: {
-    artifact_id: 'art_1',
-  },
 };
 let mockedProjects: Array<{ id: string; name: string; root_path?: string; created_at: number }> = [];
 let mockedHasPermission = vi.fn(() => true);
@@ -165,22 +161,14 @@ vi.mock('../../store/projectStore', () => ({
   useProjectStore: Object.assign(
     () => ({
       projects: mockedProjects,
-      pendingReviews: [
-        {
-          gate_id: 'gate_human_review',
-          type: 'DOCUMENT_APPROVAL_REVIEW',
-          review_status: {
-            workflow_id: 'review_flow',
-          },
-        },
-      ],
+      pendingPermissions: [],
       projectStatus: mockedProjectStatus,
       runtimeReadiness: null,
       isOpeningProject: mockedIsOpeningProject,
-      loadPendingReviews,
+      loadPendingPermissions,
       loadProjectStatus,
       loadProjectRuntimeState: async (projectId: string) => {
-        await Promise.all([loadPendingReviews(projectId), loadProjectStatus(projectId)]);
+        await Promise.all([loadPendingPermissions(projectId), loadProjectStatus(projectId)]);
       },
       loadSystemReadiness,
     }),
@@ -207,10 +195,7 @@ vi.mock('../../hooks/useChat', () => ({
       sendMessage,
       stopTask,
       continueTask: vi.fn(),
-      approvePlan: vi.fn(),
-      uploadManifestCsv: vi.fn(),
-      approveManifest: vi.fn(),
-      approvalState: {
+      permissionState: {
         gateId: null,
         action: null,
         phase: 'idle',
@@ -317,11 +302,7 @@ describe('DashboardView runtime loading', () => {
       project_id: 'proj_1',
       phase: 'DESIGN_IN_PROGRESS',
       blocked: true,
-      approval_required: true,
       project_target: { platform: 'web', runtime: 'Web' },
-      baseline: {
-        artifact_id: 'art_1',
-      },
     };
     mockedProjects = [];
     mockedHasPermission = vi.fn(() => true);
@@ -336,7 +317,7 @@ describe('DashboardView runtime loading', () => {
     setActiveProject.mockResolvedValue(undefined);
     setIsSyncing.mockReset();
     showWarning.mockReset();
-    loadPendingReviews.mockResolvedValue(undefined);
+    loadPendingPermissions.mockResolvedValue(undefined);
     loadProjectStatus.mockResolvedValue(undefined);
     loadSystemReadiness.mockResolvedValue(undefined);
     apiMocks.getProjectPreviewAccess.mockImplementation(async () => ({
@@ -352,7 +333,7 @@ describe('DashboardView runtime loading', () => {
 
     await act(async () => Promise.resolve());
     expect(loadProjectStatus).not.toHaveBeenCalled();
-    expect(loadPendingReviews).not.toHaveBeenCalled();
+    expect(loadPendingPermissions).not.toHaveBeenCalled();
   });
 
   it('loads runtime status immediately when mounted', async () => {
@@ -360,7 +341,7 @@ describe('DashboardView runtime loading', () => {
 
     await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
 
-    expect(loadPendingReviews).toHaveBeenCalledWith('proj_1');
+    expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
     expect(loadPhases).not.toHaveBeenCalled();
     expect(loadTasks).not.toHaveBeenCalled();
     expect(loadAgents).not.toHaveBeenCalled();
@@ -383,7 +364,6 @@ describe('DashboardView runtime loading', () => {
       await act(async () => Promise.resolve());
       expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
       expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(2);
-
     } finally {
       vi.useRealTimers();
     }
@@ -428,7 +408,7 @@ describe('DashboardView runtime loading', () => {
   it('refreshes the workflow snapshot immediately after a retry succeeds', async () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
     await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
-    loadPendingReviews.mockClear();
+    loadPendingPermissions.mockClear();
     loadProjectStatus.mockClear();
 
     await act(async () => {
@@ -436,7 +416,7 @@ describe('DashboardView runtime loading', () => {
     });
 
     expect(apiMocks.retryWorkflow).toHaveBeenCalledWith('proj_1');
-    expect(loadPendingReviews).toHaveBeenCalledWith('proj_1');
+    expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
     expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
   });
 
@@ -445,7 +425,6 @@ describe('DashboardView runtime loading', () => {
       ...mockedProjectStatus,
       phase: 'starting',
       blocked: false,
-      approval_required: false,
     };
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
@@ -540,6 +519,11 @@ describe('DashboardView runtime loading', () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       phase: 'running',
+      workflow: {
+        runId: 'run_turn_state',
+        status: 'running',
+        currentPhase: 'IMPLEMENTATION',
+      },
     };
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
@@ -559,7 +543,6 @@ describe('DashboardView runtime loading', () => {
       ...mockedProjectStatus,
       phase: 'idle',
       blocked: false,
-      approval_required: false,
       acceptance: {
         status: 'failed',
         summary: 'The current revision did not pass native acceptance.',
@@ -584,6 +567,11 @@ describe('DashboardView runtime loading', () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       phase: 'running',
+      workflow: {
+        runId: 'run_localized_turn_state',
+        status: 'running',
+        currentPhase: 'IMPLEMENTATION',
+      },
     };
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
@@ -633,6 +621,45 @@ describe('DashboardView runtime loading', () => {
     expect(within(hint).getByText('63')).toBeInTheDocument();
     expect(within(hint).getByText('89')).toBeInTheDocument();
     expect(within(hint).getByText('1,386')).toBeInTheDocument();
+  });
+
+  it('shows the live durable workflow usage ahead of a trailing billing summary', async () => {
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      workflow: {
+        runId: 'run-live-usage',
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        usage: {
+          input_tokens: 4_530_369,
+          cache_read_tokens: 36_931_943,
+          cache_creation_tokens: 0,
+          completion_tokens: 569_805,
+          total_tokens: 42_032_117,
+        },
+      },
+    };
+    apiMocks.getCreditSummary.mockResolvedValueOnce({
+      entriesCount: 4,
+      inputTokens: 3_465_858,
+      cacheReadTokens: 31_158_631,
+      cacheCreationTokens: 0,
+      outputTokens: 473_421,
+      totalTokens: 35_097_910,
+      consumedCredits: 895,
+      weightedTokens: 35_097_910,
+    });
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
+    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    const hint = screen.getByTestId('beegame-project-hint');
+    expect(within(hint).getByText('4,530,369')).toBeInTheDocument();
+    expect(within(hint).getByText('36,931,943')).toBeInTheDocument();
+    expect(within(hint).getByText('569,805')).toBeInTheDocument();
+    expect(within(hint).getByText('42,032,117')).toBeInTheDocument();
+    expect(within(hint).queryByText('35,097,910')).not.toBeInTheDocument();
   });
 
   it('does not use the runtime transcript snapshot as project accounting authority', async () => {
@@ -1001,7 +1028,11 @@ describe('DashboardView runtime loading', () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       phase: 'finished',
-      next_action: 'running',
+      workflow: {
+        runId: 'run_active_preview_lock',
+        status: 'running',
+        currentPhase: 'IMPLEMENTATION',
+      },
       build_report: null,
     };
 
@@ -1074,6 +1105,11 @@ describe('DashboardView runtime loading', () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       phase: 'finished',
+      workflow: {
+        runId: 'run_completed_preview',
+        status: 'completed',
+        currentPhase: 'DELIVERED',
+      },
       build_report: {
         status: 'stopped',
         summary: 'Preview stopped',
@@ -1390,12 +1426,5 @@ describe('DashboardView runtime loading', () => {
     await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
     expect(capturedSideMenuProps).toBeNull();
-  });
-
-  it('does not expose the retired client-side credit reservation quote flow', async () => {
-    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-
-    await waitFor(() => expect(capturedUseChatOptions).not.toBeNull());
-    expect(capturedUseChatOptions?.confirmCreditQuote).toBeUndefined();
   });
 });

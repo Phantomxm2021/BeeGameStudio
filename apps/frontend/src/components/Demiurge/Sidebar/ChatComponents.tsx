@@ -86,57 +86,10 @@ const tryParseStructuredJson = (input: string): unknown | null => {
     }
 };
 
-const isReviewerSummaryPayload = (value: unknown): boolean => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-    const payload = value as Record<string, unknown>;
-    if (typeof payload.verdict !== 'string' || typeof payload.summary !== 'string') return false;
-    return (
-        Array.isArray(payload.issues) ||
-        Array.isArray(payload.blockers) ||
-        Array.isArray(payload.affected_sections) ||
-        Boolean(payload.issue_resolutions_by_id && typeof payload.issue_resolutions_by_id === 'object')
-    );
-};
-
-const reviewerSummaryToMarkdown = (payload: Record<string, unknown>): string => {
-    const verdict = String(payload.verdict || '').trim();
-    const summary = String(payload.summary || '').trim();
-    const blockers = Array.isArray(payload.blockers)
-        ? payload.blockers.map((item) => String(item).trim()).filter(Boolean)
-        : [];
-    const improvements = Array.isArray(payload.improvements)
-        ? payload.improvements.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
-        : [];
-    const affectedSections = Array.isArray(payload.affected_sections)
-        ? payload.affected_sections.map((item) => String(item).trim()).filter(Boolean).slice(0, 5)
-        : [];
-
-    const lines: string[] = [];
-    if (verdict) lines.push(`**Verdict:** ${verdict}`);
-    if (summary) lines.push(summary);
-    lines.push(`**Blocking issues:** ${blockers.length}`);
-
-    if (improvements.length > 0) {
-        lines.push('');
-        lines.push('**Improvements**');
-        improvements.forEach((item) => lines.push(`- ${item}`));
-    }
-
-    if (affectedSections.length > 0) {
-        lines.push('');
-        lines.push(`**Affected sections:** ${affectedSections.join(', ')}`);
-    }
-
-    return lines.join('\n');
-};
-
 const structuredJsonToMarkdown = (value: unknown): string | null => {
     if (Array.isArray(value)) return null;
     if (!value || typeof value !== 'object') return null;
     const payload = value as Record<string, unknown>;
-    if (isReviewerSummaryPayload(payload)) {
-        return reviewerSummaryToMarkdown(payload);
-    }
     const userFacingTextCandidates = [payload.final, payload.final_output, payload.summary, payload.message];
     for (const candidate of userFacingTextCandidates) {
         if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();

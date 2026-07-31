@@ -71,16 +71,6 @@ function assertTaskGraph(tasks: AtomicTask[]): void {
         `duplicate atomic task id: ${task.id}`,
       )
     ids.add(task.id)
-    if (!task.sourceRequirementIds.length)
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `task ${task.id} has no source requirements`,
-      )
-    if (task.sourceRequirementIds.length !== 1)
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `task ${task.id} must map to exactly one source requirement`,
-      )
     if (!task.expectedArtifacts.length)
       throw new WorkflowTransitionError(
         'invariant_violation',
@@ -270,6 +260,7 @@ export function transitionDeliveryRun(
         documentStep: 'CHECKLIST_REVIEW',
         status: 'running',
         blockedReason: undefined,
+        documentRemediation: undefined,
         resourceRemediation: undefined,
       }
       break
@@ -496,6 +487,16 @@ export function transitionDeliveryRun(
       next = {
         ...run,
         status: 'stopped',
+        ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
+          ? {
+              activeTaskId: undefined,
+              tasks: run.tasks.map(task =>
+                task.id === run.activeTaskId && task.status === 'running'
+                  ? { ...task, status: 'pending' as const }
+                  : task,
+              ),
+            }
+          : {}),
         blockedReason: event.reason,
         updatedAt: timestamp(),
       }
@@ -519,6 +520,16 @@ export function transitionDeliveryRun(
       next = {
         ...run,
         status: 'running',
+        ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
+          ? {
+              activeTaskId: undefined,
+              tasks: run.tasks.map(task =>
+                task.id === run.activeTaskId && task.status === 'running'
+                  ? { ...task, status: 'pending' as const }
+                  : task,
+              ),
+            }
+          : {}),
         blockedReason: undefined,
         updatedAt: timestamp(),
       }

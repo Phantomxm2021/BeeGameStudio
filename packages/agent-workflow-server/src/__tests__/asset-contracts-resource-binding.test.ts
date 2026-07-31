@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import {
   effectiveAssetFormats,
   importBeeGameLibraryResourceInWorkspace,
-  normalizeBeeGameAssetManifest,
   parseCanonicalBeeGameAssetManifest,
   readBeeGameAssetManifest,
   uploadBeeGameAsset,
@@ -14,53 +13,66 @@ import {
 
 describe('BeeGame canonical resource contract', () => {
   test('intersects explicit requirement formats with the target runtime format contract', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
+    const manifest = parseCanonicalBeeGameAssetManifest({
+      version: 5,
       project_target: { asset_format_capabilities: ['glb', 'png', 'ogg'] },
-      requirements: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['fbx', 'glb'] } }],
+      requirements: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['fbx', 'glb'], no_match: 'authored-asset' } }],
+      imports: [],
+      compositions: [],
     })
     expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual(['glb'])
   })
 
   test('does not claim technical compatibility without project target capabilities', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
-      requirements: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['glb'] } }],
-    })
-    expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual([])
+    expect(effectiveAssetFormats(
+      { resource_requirement: { accepted_formats: ['glb'], no_match: 'authored-asset' } },
+      {},
+    )).toEqual([])
   })
 
   test('preserves structured requirements without inferring semantics from an id or label', () => {
-    const manifest = normalizeBeeGameAssetManifest({
+    const manifest = parseCanonicalBeeGameAssetManifest({
       version: 5,
+      project_target: { asset_format_capabilities: ['glb', 'fbx'] },
       requirements: [{
         id: 'requirement-1', name: 'Display label',
         resource_requirement: {
           category: 'models', dimension: '3D', accepted_formats: ['glb', 'fbx'],
-          styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle',
+          styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle', no_match: 'authored-asset',
         },
       }],
       imports: [], compositions: [],
     })
     expect(manifest.requirements[0]?.resource_requirement).toEqual({
       category: 'models', dimension: '3D', accepted_formats: ['glb', 'fbx'],
-      styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle',
+      styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle', no_match: 'authored-asset',
     })
   })
 
-  test('keeps only canonical resource usage tags in a project requirement', () => {
-    const manifest = normalizeBeeGameAssetManifest({
+  test('rejects non-canonical resource usage tags', () => {
+    expect(() => parseCanonicalBeeGameAssetManifest({
       version: 5,
-      requirements: [{ id: 'requirement-1', resource_requirement: { category: 'models', tags: ['character', 'free-text'] } }],
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [{ id: 'requirement-1', resource_requirement: { category: 'models', tags: ['character', 'free-text'], no_match: 'authored-asset' } }],
       imports: [], compositions: [],
-    })
-    expect(manifest.requirements[0]?.resource_requirement).toEqual({ category: 'models', accepted_formats: [], styles: [], game_types: [], tags: ['character'], purpose: undefined })
+    })).toThrow('requirements[0].resource_requirement.tags must contain only')
+  })
+
+  test('rejects MIME types where the manifest requires file extensions', () => {
+    expect(() => parseCanonicalBeeGameAssetManifest({
+      version: 5,
+      project_target: { asset_format_capabilities: ['model/gltf-binary'] },
+      requirements: [{
+        id: 'requirement-1',
+        resource_requirement: { accepted_formats: ['audio/ogg'] },
+      }],
+      imports: [],
+      compositions: [],
+    })).toThrow('must contain file extensions such as glb or ogg, not MIME types')
   })
 
   test('rejects legacy slot structures instead of silently migrating uncertain semantics', () => {
-    expect(() => normalizeBeeGameAssetManifest({ version: 4, slots: [] })).toThrow(
-      'legacy slots manifests require explicit migration',
-    )
+    expect(() => parseCanonicalBeeGameAssetManifest({ version: 4, slots: [] })).toThrow('version must be 5')
   })
 
   test('rejects malformed current manifests instead of silently dropping entries', () => {
@@ -71,6 +83,36 @@ describe('BeeGame canonical resource contract', () => {
       imports: [{ id: 'broken' }],
       compositions: [],
     })).toThrow('requirements[1].id must be a trimmed non-empty string')
+  })
+
+  test('rejects invented root and target fields instead of silently discarding them', () => {
+    expect(() => parseCanonicalBeeGameAssetManifest({
+      version: 5,
+      manifest_version: '1.0.0',
+      source_decisions: {},
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        engines: ['ExampleEngine'],
+      },
+      requirements: [],
+      imports: [],
+      compositions: [],
+    })).toThrow('root contains unknown fields: manifest_version, source_decisions')
+  })
+
+  test('rejects resource selection fields placed outside resource_requirement', () => {
+    expect(() => parseCanonicalBeeGameAssetManifest({
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [{
+        id: 'requirement-1',
+        category: 'models',
+        import_budget: 1,
+        no_match: { outcome: 'runtime-generated' },
+      }],
+      imports: [],
+      compositions: [],
+    })).toThrow('requirements[0] contains unknown fields: category, import_budget, no_match')
   })
 
   test('reports invalid manifest JSON without rewriting the project file', async () => {
@@ -105,7 +147,7 @@ describe('BeeGame canonical resource contract', () => {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
         version: 5,
         project_target: { asset_format_capabilities: ['png'], runtime_asset_root: 'public/assets' },
-        requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'] } }],
+        requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'], no_match: 'authored-asset' } }],
         imports: [], compositions: [],
       }))
       const result = await uploadBeeGameAsset(workspace, 'title-art', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'title.png'))
@@ -125,7 +167,7 @@ describe('BeeGame canonical resource contract', () => {
     const original = JSON.stringify({
       version: 5,
       project_target: { asset_format_capabilities: ['png'], runtime_asset_root: 'public/assets' },
-      requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'] } }],
+      requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'], no_match: 'authored-asset' } }],
       imports: [], compositions: [],
     })
     try {

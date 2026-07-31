@@ -31,6 +31,12 @@ function withResourceRemediation(run: DeliveryRun): DeliveryRun {
         run.evidence.resourcePreparation?.revision ?? run.revision.document,
       attempt: (run.resourceRemediation?.attempt ?? 0) + 1,
       issues: [run.blockedReason],
+      // A remediation snapshot is diagnostic history, not execution intent.
+      // Resource preparation re-derives repair/reselection/selection from the
+      // current canonical manifest on every dispatch. Carrying an old
+      // reselection mode or removed import IDs here traps otherwise-valid
+      // partial inventory in an obsolete retry lane.
+      mode: 'repair',
       preserveImportIds: terminalIds(run, 'importIds'),
       preserveCompositionIds: terminalIds(run, 'compositionIds'),
     },

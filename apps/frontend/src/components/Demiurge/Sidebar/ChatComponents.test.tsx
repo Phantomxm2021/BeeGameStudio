@@ -3,41 +3,6 @@ import { render, screen } from '@testing-library/react';
 import { MarkdownRenderer } from './ChatComponents';
 
 describe('MarkdownRenderer structured output', () => {
-    it('renders reviewer payload JSON as a compact user-facing summary', () => {
-        const content = JSON.stringify({
-            verdict: 'APPROVED',
-            blockers: [],
-            improvements: [
-                '移动端虚拟摇杆的布局细节可进一步细化以确保不同屏幕尺寸下的适配性，但属于非阻塞性优化。'
-            ],
-            affected_sections: [
-                'core_loop',
-                'gameplay_systems'
-            ],
-            summary: '所有列出的阻塞性问题均已通过修订解决。',
-            issue_resolutions_by_id: {
-                gdd_issue_1: {
-                    resolution: 'closed',
-                    supporting_quotes: ['internal quote'],
-                },
-            },
-            protocol_valid: false,
-        });
-
-        const { container } = render(<MarkdownRenderer content={content} isUser={false} />);
-        const text = container.textContent || '';
-
-        expect(text).toContain('Verdict: APPROVED');
-        expect(text).toContain('所有列出的阻塞性问题均已通过修订解决。');
-        expect(text).toContain('Blocking issues: 0');
-        expect(screen.getByText('Improvements')).not.toBeNull();
-        expect(screen.getByText('移动端虚拟摇杆的布局细节可进一步细化以确保不同屏幕尺寸下的适配性，但属于非阻塞性优化。')).not.toBeNull();
-        expect(text).toContain('Affected sections: core_loop, gameplay_systems');
-        expect(screen.queryByText('issue_resolutions_by_id')).toBeNull();
-        expect(screen.queryByText('supporting_quotes')).toBeNull();
-        expect(screen.queryByText('protocol_valid')).toBeNull();
-    });
-
     it('renders only the explicit user-facing text from a generic JSON payload', () => {
         const content = JSON.stringify({
             verdict: 'APPROVED',

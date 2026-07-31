@@ -16,6 +16,7 @@ import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { parseWorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
+import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -116,6 +117,58 @@ describe('delivery workflow document ordering', () => {
         resourcePreparation: { status: 'passed' },
         documentReview: { status: 'ready', revision: resourceRevision },
       },
+    })
+
+    const planned = transitionDeliveryRun(comprehensivelyReviewed, {
+      type: 'tasks_planned',
+      tasks: [
+        {
+          id: 'support-state',
+          title: 'Create state required by gameplay',
+          resourceRequirementIds: [],
+          checklistIds: [],
+          dependsOn: [],
+          allowedPaths: ['src/state/'],
+          expectedArtifacts: ['src/state/store.ts'],
+          verification: [
+            {
+              kind: 'test',
+              commandOrAction: 'run state tests',
+              expectedResult: 'state tests pass',
+            },
+          ],
+          status: 'pending',
+          attempt: 0,
+          evidenceRefs: [],
+        },
+        {
+          id: 'owned-gameplay',
+          title: 'Implement observable gameplay',
+          resourceRequirementIds: [],
+          checklistIds: ['check-1'],
+          dependsOn: ['support-state'],
+          allowedPaths: ['src/game/'],
+          expectedArtifacts: ['src/game/runtime.ts'],
+          verification: [
+            {
+              kind: 'test',
+              commandOrAction: 'run gameplay tests',
+              expectedResult: 'gameplay tests pass',
+            },
+          ],
+          status: 'pending',
+          attempt: 0,
+          evidenceRefs: [],
+        },
+      ],
+    })
+
+    expect(planned).toMatchObject({
+      phase: 'IMPLEMENTATION',
+      tasks: [
+        { id: 'support-state', checklistIds: [] },
+        { id: 'owned-gameplay', checklistIds: ['check-1'] },
+      ],
     })
   })
 
@@ -361,6 +414,7 @@ describe('delivery workflow document ordering', () => {
             code: 'RUNTIME-BEHAVIOR-CONFLICT',
             severity: 'blocking',
             category: 'cross_document_conflict',
+            remediationTarget: 'foundation',
             documents: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
             description: 'The documents define incompatible runtime behavior.',
             requiredAction: 'Reconcile the behavior into one canonical rule.',
@@ -369,6 +423,7 @@ describe('delivery workflow document ordering', () => {
             code: 'CAMERA-BASELINE-ADVISORY',
             severity: 'non_blocking',
             category: 'missing_spec',
+            remediationTarget: 'foundation',
             documents: ['docs/TECHNICAL_DESIGN.md'],
             description: 'The default camera baseline can be more explicit.',
             requiredAction: 'Record the final baseline before delivery.',
@@ -515,6 +570,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'non_blocking',
             category: 'missing_spec',
+            remediationTarget: 'resource',
             documents: [CANONICAL_ASSET_MANIFEST],
             description: 'Implementation-time icon provenance is pending.',
             requiredAction:
@@ -523,6 +579,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'non_blocking',
             category: 'cross_document_conflict',
+            remediationTarget: 'foundation',
             documents: ['docs/ASSET_PLAN.md'],
             description: 'A referenced metadata version is stale.',
             requiredAction: 'Refresh the metadata version before delivery.',
@@ -585,6 +642,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'blocking',
             category: 'missing_spec',
+            remediationTarget: 'foundation',
             documents: ['docs/GDD.md'],
             description: 'A required behavior is absent.',
             requiredAction: 'Define the behavior.',
@@ -650,6 +708,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'blocking',
             category: 'missing_spec',
+            remediationTarget: 'checklist',
             documents: ['docs/acceptance/gameplay-checklist.md'],
             description: 'A required acceptance definition is absent.',
             requiredAction: 'Add the observable acceptance definition.',
@@ -676,6 +735,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'blocking',
             category: 'cross_document_conflict',
+            remediationTarget: 'resource',
             documents: [CANONICAL_ASSET_MANIFEST],
             description: 'The manifest contradicts the approved asset plan.',
             requiredAction: 'Align the manifest with the approved asset plan.',
@@ -692,6 +752,164 @@ describe('delivery workflow document ordering', () => {
         issues: ['Align the manifest with the approved asset plan.'],
       },
       revision: { resource: undefined },
+    })
+  })
+
+  test('gives a remediation worker only findings owned by its writable domain', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-mixed-routing-'))
+    const evidencePath = '.beegame/workflow/evidence/mixed-review.md'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '# Review evidence\n')
+    const baseRun = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      revision: {
+        document: 'document-revision-1',
+        resource: 'resource-revision-1',
+        workspace: 'workspace-revision-1',
+      },
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run: baseRun,
+      workspacePath: workspace,
+      currentDocumentRevision: baseRun.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: baseRun.revision.resource,
+        verdict: 'NEEDS_REVISION',
+        reviewedDocumentPaths: [
+          ...CANONICAL_PROJECT_DOCUMENTS,
+          CANONICAL_ASSET_MANIFEST,
+        ],
+        checklistIds: [],
+        evidencePath,
+        findings: [
+          {
+            code: 'DOCUMENT-CONFLICT',
+            severity: 'blocking',
+            category: 'cross_document_conflict',
+            remediationTarget: 'foundation',
+            documents: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+            description: 'Two foundation documents conflict.',
+            requiredAction: 'Reconcile the two foundation documents.',
+          },
+          {
+            code: 'RESOURCE-SOURCE-MISSING',
+            severity: 'blocking',
+            category: 'missing_spec',
+            remediationTarget: 'resource',
+            documents: [CANONICAL_ASSET_MANIFEST, 'docs/ASSET_PLAN.md'],
+            description: 'A required resource source decision is missing.',
+            requiredAction: 'Record the source decision in the manifest.',
+          },
+        ],
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      phase: 'DOCUMENT_DRAFTING',
+      documentRemediation: {
+        findings: [{ code: 'DOCUMENT-CONFLICT' }],
+      },
+    })
+    expect(reconciled.documentRemediation?.findings).toHaveLength(1)
+
+    const requests: WorkerDispatchRequest[] = []
+    await startDocumentStage({
+      run: reconciled,
+      workspacePath: workspace,
+      dispatcher: {
+        dispatch: async request => {
+          requests.push(request)
+          return request
+        },
+      },
+    })
+    expect(
+      (
+        requests[0]?.contract.remediation as {
+          findings: Array<{ code?: string }>
+        }
+      ).findings,
+    ).toEqual([expect.objectContaining({ code: 'DOCUMENT-CONFLICT' })])
+  })
+
+  test('defers a resource-only follow-up until after foundation review and checklist drafting', async () => {
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-deferred-resource-review-'),
+    )
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+    const evidencePath = '.beegame/workflow/evidence/foundation-resource.json'
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, evidencePath), '{}\n')
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.document,
+        verdict: 'NEEDS_REVISION',
+        reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        checklistIds: [],
+        evidencePath,
+        findings: [
+          {
+            code: 'RESOURCE-SOURCE-MISSING',
+            severity: 'blocking',
+            category: 'missing_spec',
+            remediationTarget: 'resource',
+            resourceAction: 'reselection',
+            resourceImportIds: ['import-audio-1'],
+            documents: [CANONICAL_ASSET_MANIFEST, 'docs/ASSET_PLAN.md'],
+            description:
+              'The document correction is complete but the manifest is not.',
+            requiredAction:
+              'Record the missing source decision in the manifest.',
+          },
+        ],
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      status: 'running',
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      documentRemediation: undefined,
+      resourceRemediation: {
+        mode: 'reselection',
+        reselectImportIds: ['import-audio-1'],
+        issues: ['Record the missing source decision in the manifest.'],
+      },
     })
   })
 
@@ -772,6 +990,7 @@ describe('delivery workflow document ordering', () => {
             id: 'review-existing',
             severity: 'blocking' as const,
             category: 'missing_spec' as const,
+            remediationTarget: 'foundation' as const,
             documents: ['docs/UI_UX_SPEC.md'],
             description: 'A required interaction remains unspecified.',
             requiredAction: 'Specify the interaction.',
@@ -796,6 +1015,7 @@ describe('delivery workflow document ordering', () => {
           {
             severity: 'blocking',
             category: 'missing_spec',
+            remediationTarget: 'foundation',
             documents: ['docs/UI_UX_SPEC.md'],
             description: 'A required interaction remains unspecified.',
             requiredAction: 'Specify the interaction.',
@@ -874,7 +1094,7 @@ describe('delivery workflow document ordering', () => {
     )
   })
 
-  test('document author contract uses server-computed revisions and accepts retained legacy output', () => {
+  test('document author contract uses server-computed revisions and accepts canonical output', () => {
     const request: WorkerDispatchRequest = {
       runId: 'run-1',
       ownerId: 'owner-1',
@@ -887,16 +1107,22 @@ describe('delivery workflow document ordering', () => {
       contract: { documentSet: 'foundation' },
     }
     const prompt = buildWorkerPrompt(request)
-    const terminalContract = prompt
-      .split('\n')
-      .find(line => line.startsWith('Terminal JSON contract'))
 
-    expect(terminalContract).not.toContain('"revision"')
+    expect(prompt).toContain('SubmitDocumentAuthorResult exactly once')
+    expect(prompt).not.toContain('Terminal JSON contract')
+    expect(prompt).toContain(
+      'Model the smallest reusable set of asset responsibilities',
+    )
+    expect(prompt).toContain(
+      'it is not one requirement per event, variant, screen, destination file, or runtime call site',
+    )
+    expect(prompt).toContain(
+      'one canonical responsibility registry and a separate runtime-use mapping',
+    )
     expect(
       parseWorkerTerminalResult({
         workerType: 'document-author',
         status: 'completed',
-        revision: request.runId,
         writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
         resolvedFindingIds: [],
       }),
@@ -906,6 +1132,239 @@ describe('delivery workflow document ordering', () => {
       writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       resolvedFindingIds: [],
     })
+  })
+
+  test('atomic planner prompt defines the executable task schema and avoids a duplicate terminal graph', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'atomic-task-planner',
+      phase: 'ATOMIC_TASK_PLANNING',
+      revision: 'revision-1',
+      allowedPaths: ['.beegame/workflow/evidence/'],
+      contract: {},
+    })
+
+    expect(prompt).toContain('SubmitAtomicTaskPlan')
+    expect(prompt).toContain('ownership maps')
+    expect(prompt).toContain(
+      'never attach an unrelated gameplay or infrastructure task',
+    )
+    expect(prompt).toContain('"allowedPaths"')
+    expect(prompt).toContain('"verification"')
+    expect(prompt).toContain('contract.resourceBindings')
+    expect(prompt).toContain(
+      'not disposable outputs produced by build, test, coverage, packaging, cache, or preview commands',
+    )
+    expect(prompt).toContain(
+      'record those derived outputs only as verification observations',
+    )
+    expect(prompt).toContain(
+      'tooling already declared by the project dependency manifest',
+    )
+    expect(prompt).toContain('Do not write execution-state or legacy fields')
+    expect(prompt).toContain(
+      'Group responsibilities by implementation artifact boundary and submit one graph immediately',
+    )
+    expect(prompt).toContain(
+      'Never introduce an implementation mechanism, framework primitive, storage pattern, class shape, or architecture term',
+    )
+    expect(prompt).toContain(
+      'Do not draft alternate graphs, enumerate coverage in reasoning',
+    )
+    expect(prompt).toContain('do not duplicate the graph in the response')
+    expect(prompt).not.toContain(
+      'Return exactly one strict JSON terminal object',
+    )
+  })
+
+  test('resource preparer receives the canonical Resource Library manifest vocabulary', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'resource-preparer',
+      phase: 'RESOURCE_PREPARATION',
+      revision: 'revision-1',
+      allowedPaths: ['assets/asset-manifest.json', 'assets/runtime/'],
+      contract: {
+        resourceAttemptMode: 'selection',
+        selectionPlan: [
+          {
+            responsibilities: [
+              {
+                requirementId: 'resource-responsibility',
+                purpose: 'Provide the approved reusable responsibility.',
+                remainingImportBudget: 1,
+              },
+            ],
+            acceptedFormats: ['png'],
+            resourceRequirement: { accepted_formats: ['png'] },
+          },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('Canonical Resource Library manifest vocabulary')
+    expect(prompt).toContain(
+      'category is zero or one enum string, never an array',
+    )
+    expect(prompt).toContain('"usageTags"')
+    expect(prompt).toContain('"assetKinds"')
+    expect(prompt).toContain('"capabilities"')
+    expect(prompt).toContain('Semantic suitability is mandatory')
+    expect(prompt).toContain('Never reinterpret an unrelated shape')
+    expect(prompt).toContain(
+      'use the returned facets to correct unsupported manifest constraints once',
+    )
+    expect(prompt).toContain(
+      'One import_elements selection may list multiple requirement_ids',
+    )
+    expect(prompt).toContain(
+      'one canonical requirement per approved reusable semantic responsibility',
+    )
+    expect(prompt).toContain(
+      'only from the canonical responsibility registry in docs/ASSET_PLAN.md',
+    )
+  })
+
+  test('implementation prompt requires exact satisfaction coverage for non-library responsibilities', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'implementation-worker',
+      phase: 'IMPLEMENTATION',
+      taskId: 'task-1',
+      revision: 'revision-1',
+      allowedPaths: ['src/', '.beegame/workflow/evidence/'],
+      contract: {
+        task: {
+          resourceRequirementIds: ['requirement-authored'],
+          resourceImportIds: [],
+          resourceCompositionIds: [],
+        },
+      },
+    })
+
+    expect(prompt).toContain(
+      'requirementSatisfactions must contain exactly one entry for every requirementId in ["requirement-authored"]',
+    )
+    expect(prompt).toContain(
+      'its importIds and compositionIds may be empty for authored-asset, runtime-generated, system-provided, or silent fulfillment',
+    )
+    expect(prompt).toContain('resourceReferences must cover exactly []')
+    expect(prompt).toContain(
+      'Never author workflow evidence; the workflow service creates one canonical dispatch-scoped evidence file',
+    )
+    expect(prompt).toContain(
+      'Treat each verification as an observable acceptance condition, not permission to invent an additional architecture',
+    )
+    expect(prompt).toContain('Workspace root: /workspace')
+    expect(prompt).toContain(
+      'do not reread canonical design documents, workflow logs, transcripts, or historical evidence',
+    )
+    expect(prompt).toContain(
+      'append the workspace-relative path without reconstructing, abbreviating, or duplicating any directory segment',
+    )
+    expect(prompt).toContain(
+      'Once every expected artifact exists and every active deterministic verification has concrete evidence, submit immediately',
+    )
+    expect(prompt).toContain('Do not create substitute temporary test scripts')
+    expect(prompt).not.toContain(
+      'Return exactly one strict JSON terminal object',
+    )
+    expect(() =>
+      parseWorkerTerminalResult({
+        workerType: 'implementation-worker',
+        taskId: 'task-1',
+        status: 'completed',
+        revision: 'revision-1',
+        changedPaths: ['src/runtime.ts'],
+      }),
+    ).toThrow('resourceReferences')
+    expect(
+      parseWorkerTerminalResult({
+        workerType: 'implementation-worker',
+        taskId: 'task-1',
+        status: 'completed',
+        revision: 'revision-1',
+        changedPaths: ['src/runtime.ts'],
+        verifiedArtifacts: ['src/runtime.ts'],
+        verificationResults: [
+          {
+            verificationIndex: 0,
+            status: 'passed',
+            observations: ['The runtime file exists.'],
+          },
+        ],
+        resourceReferences: [],
+        compositionIntegrations: [],
+        requirementSatisfactions: [
+          {
+            requirementId: 'requirement-authored',
+            importIds: [],
+            compositionIds: [],
+            projectReferences: ['src/runtime.ts'],
+          },
+        ],
+        evidenceRefs: ['.beegame/workflow/evidence/implementation-1.json'],
+        evidencePath: '.beegame/workflow/evidence/implementation-1.json',
+      }),
+    ).toMatchObject({
+      evidenceRefs: ['.beegame/workflow/evidence/implementation-1.json'],
+      evidencePath: '.beegame/workflow/evidence/implementation-1.json',
+    })
+  })
+
+  test('accepts an explicitly continued reviewer finding and rejects retired summary output', () => {
+    const terminal = {
+      workerType: 'document-reviewer',
+      revision: 'document-revision-1',
+      verdict: 'NEEDS_REVISION',
+      reviewedDocumentPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+      checklistIds: [],
+      findings: [
+        {
+          code: 'RESOURCE-SOURCE-MISSING',
+          severity: 'blocking',
+          category: 'missing_spec',
+          remediationTarget: 'resource',
+          priorFindingId: 'review-prior-1',
+          documents: [CANONICAL_ASSET_MANIFEST],
+          description: 'The resource source remains unresolved.',
+          requiredAction: 'Record the durable source decision.',
+        },
+      ],
+      evidencePath: '.beegame/workflow/evidence/review.json',
+    }
+
+    expect(parseWorkerTerminalResult(terminal)).toMatchObject({
+      findings: [{ priorFindingId: 'review-prior-1' }],
+    })
+    expect(() =>
+      parseWorkerTerminalResult({
+        ...terminal,
+        findings: [
+          {
+            ...terminal.findings[0],
+            description: undefined,
+            requiredAction: undefined,
+            summary: 'Current evidence and its required correction.',
+          },
+        ],
+      }),
+    ).toThrow('description')
+    expect(() =>
+      parseWorkerTerminalResult({
+        ...terminal,
+        findings: [{ ...terminal.findings[0], unsupportedKey: true }],
+      }),
+    ).toThrow('unsupportedKey')
   })
 
   test('checklist author prompt requires canonical checkbox task lines', () => {
@@ -935,6 +1394,212 @@ describe('delivery workflow document ordering', () => {
       'Tables may supplement these tasks but must not replace the checkbox task lines.',
     )
     expect(prompt).toContain('bounded checklist-structure remediation pass')
+  })
+
+  test('comprehensive reviewer keeps implementation outputs out of resource preparation', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'resource-revision-1',
+      allowedPaths: ['.beegame/workflow/evidence/'],
+      contract: { reviewScope: 'complete' },
+    })
+
+    expect(prompt).toContain('final pre-implementation comprehensive review')
+    expect(prompt).toContain('cannot override the current manifest')
+    expect(prompt).toContain(
+      'never require the resource worker to run shell conversion',
+    )
+    expect(prompt).toContain('resourceRequirementIds')
+    expect(prompt).toContain(
+      'Do not continue a prior finding after the current canonical manifest has resolved it.',
+    )
+  })
+
+  test('does not recycle a stale resource finding after the canonical manifest resolved it', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-resource-review-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    const evidencePath = '.beegame/workflow/evidence/stale-resource-review.json'
+    await writeFile(join(workspace, evidencePath), '{}\n')
+    await writeBeeGameAssetManifest(workspace, {
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['.glb'],
+        resource_library_usage: 'preferred',
+        runtime_asset_root: 'public/assets',
+      },
+      requirements: [
+        {
+          id: 'requirement-authored',
+          required: true,
+          status: 'planned',
+          source_decision: {
+            type: 'runtime-generated',
+            reasons: ['The approved plan assigns this to implementation.'],
+            decided_at: new Date().toISOString(),
+          },
+        },
+      ],
+      imports: [],
+      compositions: [],
+    })
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+        workspaceRevision: 'workspace-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      revision: {
+        document: 'document-revision-1',
+        resource: 'resource-revision-1',
+        workspace: 'workspace-revision-1',
+      },
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.resource,
+        verdict: 'NEEDS_REVISION',
+        reviewedDocumentPaths: [
+          ...CANONICAL_PROJECT_DOCUMENTS,
+          CANONICAL_ASSET_MANIFEST,
+        ],
+        checklistIds: [],
+        evidencePath,
+        findings: [
+          {
+            code: 'STALE-RESOURCE-FINDING',
+            severity: 'blocking',
+            category: 'missing_spec',
+            remediationTarget: 'resource',
+            resourceAction: 'repair',
+            resourceRequirementIds: ['requirement-authored'],
+            priorFindingId: 'review-prior-resource',
+            documents: [CANONICAL_ASSET_MANIFEST],
+            description:
+              'The prior review claimed that the source decision was missing.',
+            requiredAction: 'Add the source decision again.',
+          },
+        ],
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      status: 'running',
+      phase: 'ATOMIC_TASK_PLANNING',
+      documentRemediation: undefined,
+      documentAdvisories: [
+        {
+          id: 'review-prior-resource',
+          severity: 'non_blocking',
+          resourceRequirementIds: ['requirement-authored'],
+        },
+      ],
+    })
+    expect(reconciled.resourceRemediation).toBeUndefined()
+  })
+
+  test('keeps a resource repair finding when the current manifest responsibility is unresolved', async () => {
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-current-resource-review-'),
+    )
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await mkdir(join(workspace, '.beegame', 'workflow', 'evidence'), {
+      recursive: true,
+    })
+    const evidencePath =
+      '.beegame/workflow/evidence/current-resource-review.json'
+    await writeFile(join(workspace, evidencePath), '{}\n')
+    await writeBeeGameAssetManifest(workspace, {
+      version: 5,
+      project_target: {
+        asset_format_capabilities: ['.glb'],
+        resource_library_usage: 'preferred',
+        runtime_asset_root: 'public/assets',
+      },
+      requirements: [
+        {
+          id: 'requirement-unresolved',
+          required: true,
+          status: 'planned',
+        },
+      ],
+      imports: [],
+      compositions: [],
+    })
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-1',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      revision: {
+        document: 'document-revision-1',
+        resource: 'resource-revision-1',
+        workspace: 'workspace-revision-1',
+      },
+    }
+
+    const reconciled = await reconcileDocumentReview({
+      run,
+      workspacePath: workspace,
+      currentDocumentRevision: run.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+      terminal: {
+        workerType: 'document-reviewer',
+        revision: run.revision.resource,
+        verdict: 'NEEDS_REVISION',
+        reviewedDocumentPaths: [
+          ...CANONICAL_PROJECT_DOCUMENTS,
+          CANONICAL_ASSET_MANIFEST,
+        ],
+        checklistIds: [],
+        evidencePath,
+        findings: [
+          {
+            code: 'CURRENT-RESOURCE-FINDING',
+            severity: 'blocking',
+            category: 'missing_spec',
+            remediationTarget: 'resource',
+            resourceAction: 'repair',
+            resourceRequirementIds: ['requirement-unresolved'],
+            documents: [CANONICAL_ASSET_MANIFEST],
+            description: 'The current responsibility has no source.',
+            requiredAction: 'Record its current source decision.',
+          },
+        ],
+      },
+    })
+
+    expect(reconciled).toMatchObject({
+      status: 'running',
+      phase: 'RESOURCE_PREPARATION',
+      resourceRemediation: {
+        mode: 'repair',
+        issues: ['Record its current source decision.'],
+      },
+    })
   })
 
   test('controller immediately dispatches a scoped checklist correction after structural rejection', async () => {
@@ -1022,7 +1687,7 @@ describe('delivery workflow document ordering', () => {
     )
   })
 
-  test('retry salvages a valid retained document-author completion without reauthoring', async () => {
+  test('retry starts a fresh document author instead of replaying invalid legacy output', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-author-recovery-'))
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
@@ -1062,13 +1727,6 @@ describe('delivery workflow document ordering', () => {
         revision: request.revision,
         status: 'invalid' as const,
         request,
-        terminalOutput: JSON.stringify({
-          workerType: 'document-author',
-          status: 'completed',
-          revision: running.runId,
-          writtenPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
-          resolvedFindingIds: [],
-        }),
         startedAt: '2026-07-28T00:00:00.000Z',
         finishedAt: '2026-07-28T00:01:00.000Z',
       },
@@ -1106,12 +1764,11 @@ describe('delivery workflow document ordering', () => {
 
     const recovered = await controller.store.load()
     expect(started).toHaveLength(1)
-    expect(started[0]?.workerType).toBe('document-reviewer')
+    expect(started[0]?.workerType).toBe('document-author')
     expect(recovered).toMatchObject({
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
+      phase: 'DOCUMENT_DRAFTING',
       status: 'running',
-      activeDispatch: { workerType: 'document-reviewer', status: 'running' },
+      activeDispatch: { workerType: 'document-author', status: 'running' },
     })
     await controller.dispatcher.stop(
       recovered!.activeDispatch!.dispatchId,
@@ -1140,6 +1797,7 @@ describe('delivery workflow document ordering', () => {
             id: 'review-1',
             severity: 'blocking' as const,
             category: 'missing_spec' as const,
+            remediationTarget: 'foundation' as const,
             documents: ['docs/UI_UX_SPEC.md'],
             description: 'A required interaction was unspecified.',
             requiredAction: 'Specify the interaction.',
@@ -1190,6 +1848,79 @@ describe('delivery workflow document ordering', () => {
         },
       },
     })
+    const active = await controller.store.load()
+    await controller.dispatcher.stop(
+      active!.activeDispatch!.dispatchId,
+      'test cleanup',
+    )
+  })
+
+  test('does not pollute a complete review with historical remediation', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-complete-review-'))
+    const run = {
+      ...createInitialDeliveryRun({
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        confirmedBriefDigest: 'brief-1',
+        documentRevision: 'document-revision-2',
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_REVIEW' as const,
+      documentRemediation: {
+        sourceRevision: 'document-revision-1',
+        evidencePath: '.beegame/workflow/evidence/review-1.md',
+        attempt: 1,
+        resolvedFindingIds: ['review-1'],
+        findings: [
+          {
+            id: 'review-1',
+            severity: 'blocking' as const,
+            category: 'missing_spec' as const,
+            remediationTarget: 'foundation' as const,
+            documents: ['docs/UI_UX_SPEC.md'],
+            description: 'A historical finding from the foundation review.',
+            requiredAction: 'Recheck the current canonical documents.',
+          },
+        ],
+      },
+    }
+    await createRunStore(workspace, run.ownerId).save(run)
+    const started: WorkerDispatchRequest[] = []
+    const workerPort: DeliveryWorkerPort = {
+      start: async request => {
+        started.push(request)
+        return {
+          sessionId: request.dispatchId!,
+          dispatchId: request.dispatchId!,
+        }
+      },
+      submit: async () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+      status: async dispatchId => {
+        const active = await createRunStore(workspace, run.ownerId).load()
+        if (
+          !active?.activeDispatch ||
+          active.activeDispatch.dispatchId !== dispatchId
+        )
+          throw new Error('dispatch is not active')
+        return active.activeDispatch
+      },
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: run.ownerId,
+      workerPort,
+    })
+
+    await controller.ensureProgress(run)
+
+    expect(started).toHaveLength(1)
+    expect(started[0]).toMatchObject({
+      workerType: 'document-reviewer',
+      contract: { reviewScope: 'complete' },
+    })
+    expect(started[0]?.contract).not.toHaveProperty('priorRemediation')
     const active = await controller.store.load()
     await controller.dispatcher.stop(
       active!.activeDispatch!.dispatchId,

@@ -11,7 +11,7 @@
  */
 
 import { create } from 'zustand';
-import type { Agent, SystemStatus, Activity, TaskCandidateAgent } from '../types/agent';
+import type { TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
 import { isAuthenticationServiceUnavailable } from '../services/apiClient';
@@ -48,7 +48,6 @@ export interface ProjectTask {
   claimability_reason?: string | null;
   candidate_agents?: TaskCandidateAgent[];
   suggested_agents?: string[];
-  review_stage?: string | null;
   verification_stage?: string | null;
   invalidated_reason?: string | null;
   artifact_versions?: Array<{
@@ -67,15 +66,6 @@ export interface ProjectTask {
  * System store state interface
  */
 interface SystemState {
-  /** Current system status information */
-  status: SystemStatus | null;
-
-  /** List of all agents in the system */
-  agents: Agent[];
-
-  /** List of activity records (artifacts) */
-  activities: Activity[];
-
   /** Token usage statistics per project */
   tokenUsage: Record<string, TokenUsage>;
 
@@ -97,14 +87,6 @@ interface SystemState {
   /** Team OS telemetry phase tracking */
   phaseInfo: PhaseInfo | null;
 
-  /** List of all work packages/tasks for the project */
-  tasks: ProjectTask[];
-
-  /**
-   * Load system status from the backend
-   */
-  loadStatus: () => Promise<void>;
-
   /**
    * Load current BeeGame user and role permissions.
    */
@@ -118,24 +100,9 @@ interface SystemState {
   hasPermission: (permission: BeeGamePermission) => boolean;
 
   /**
-   * Load all agents and their current status from the backend
-   */
-  loadAgents: () => Promise<void>;
-
-  /**
-   * Load activity records from the backend
-   */
-  loadActivities: () => Promise<void>;
-
-  /**
    * Load phase history from backend (Team OS Telemetry)
    */
   loadPhases: (projectId: string) => Promise<void>;
-
-  /**
-   * Load all tasks for a project
-   */
-  loadTasks: (projectId: string) => Promise<void>;
 
   /**
    * Load cumulative token usage for a project
@@ -164,16 +131,6 @@ interface SystemState {
   setIsSyncing: (isSyncing: boolean) => void;
 
   /**
-   * Manually set an agent's status (used for real-time WebSocket updates)
-   */
-  setAgentStatus: (agentId: string, status: 'idle' | 'working', currentTask?: string) => void;
-
-  /**
-   * Refreshes the agent list from the backend (alias for loadAgents)
-   */
-  refreshAgents: () => Promise<void>;
-
-  /**
    * Toggle global theme
    */
   toggleTheme: () => void;
@@ -185,16 +142,12 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 export const useSystemStore = create<SystemState>()(
   persist(
     (set, get) => ({
-      status: null,
-      agents: [],
-      activities: [],
       tokenUsage: {},
       isLoading: false,
       isSyncing: false,
       phaseInfo: null,
       isDark: true, // Default to dark mode
 
-      tasks: [],
       taskUsage: {},
       currentUser: null,
       authenticationStatus: 'initializing',
@@ -231,42 +184,6 @@ export const useSystemStore = create<SystemState>()(
         Boolean(get().currentUser?.permissions.includes(permission))
       ),
 
-      loadStatus: async () => {
-        try {
-          set({ isLoading: true });
-          const status = (await api.getStatus()) as unknown as SystemStatus;
-          set({ status, isLoading: false });
-        } catch (error) {
-          console.error('Failed to load system status:', error);
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      loadAgents: async () => {
-        try {
-          set({ isLoading: true });
-          const agents = (await api.getAgents()) as unknown as Agent[];
-          set({ agents, isLoading: false });
-        } catch (error) {
-          console.error('Failed to load agents:', error);
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      loadActivities: async () => {
-        try {
-          set({ isLoading: true });
-          const activities = (await api.getActivity()) as unknown as Activity[];
-          set({ activities, isLoading: false });
-        } catch (error) {
-          console.error('Failed to load activities:', error);
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
       loadPhases: async (projectId: string) => {
         if (!projectId) return;
         try {
@@ -274,16 +191,6 @@ export const useSystemStore = create<SystemState>()(
           set({ phaseInfo: phases });
         } catch (error) {
           console.error('Failed to load telemetry phases:', error);
-        }
-      },
-
-      loadTasks: async (projectId: string) => {
-        if (!projectId) return;
-        try {
-          const tasks = (await api.getTasks()) as unknown as ProjectTask[];
-          set({ tasks });
-        } catch (error) {
-          console.error('Failed to load project tasks:', error);
         }
       },
 
@@ -355,21 +262,6 @@ export const useSystemStore = create<SystemState>()(
 
       setIsSyncing: (isSyncing: boolean) => {
         set({ isSyncing });
-      },
-
-      setAgentStatus: (agentId: string, status: 'idle' | 'working', currentTask?: string) => {
-        set((state) => ({
-          agents: state.agents.map((agent) =>
-            agent.id.toLowerCase() === agentId.toLowerCase()
-              ? { ...agent, status, current_task: currentTask || agent.current_task }
-              : agent
-          ),
-        }));
-      },
-
-      refreshAgents: async () => {
-        const { loadAgents } = useSystemStore.getState();
-        await loadAgents();
       },
 
       toggleTheme: () => {

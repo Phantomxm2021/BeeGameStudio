@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react';
-import type { PendingUserReviewItem } from '../services/api';
+import type { PendingToolPermissionItem } from '../services/api';
 
 export const countPendingToolPermissions = (
-  reviews: PendingUserReviewItem[],
-): number => reviews.filter(review => {
-  const status = review?.review_status;
-  return String(status?.lane_id || '') === 'permission'
-    && Boolean(status?.requires_user_action);
+  permissions: PendingToolPermissionItem[],
+): number => permissions.filter(permission => {
+  return permission.type === 'BEEGAME_PERMISSION' && Boolean(permission.gate_id);
 }).length;
 
 export const formatPermissionTabTitle = (

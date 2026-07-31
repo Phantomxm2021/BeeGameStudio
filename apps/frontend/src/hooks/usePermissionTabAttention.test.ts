@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { PendingUserReviewItem } from '../services/api';
+import type { PendingToolPermissionItem } from '../services/api';
 import {
   countPendingToolPermissions,
   formatPermissionTabTitle,
@@ -23,26 +23,13 @@ describe('usePermissionTabAttention', () => {
     expect(countPendingToolPermissions([
       {
         gate_id: 'permission-1',
-        review_status: {
-          lane_id: 'permission',
-          requires_user_action: true,
-        },
+        type: 'BEEGAME_PERMISSION',
       },
       {
-        gate_id: 'document-review',
-        review_status: {
-          lane_id: 'internal_board_review',
-          requires_user_action: true,
-        },
+        gate_id: '',
+        type: 'BEEGAME_PERMISSION',
       },
-      {
-        gate_id: 'resolved-permission',
-        review_status: {
-          lane_id: 'permission',
-          requires_user_action: false,
-        },
-      },
-    ] as PendingUserReviewItem[])).toBe(1);
+    ] as PendingToolPermissionItem[])).toBe(1);
   });
 
   it('shows pending permission count and restores the original title', () => {

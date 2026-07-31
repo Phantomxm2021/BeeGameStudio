@@ -10,19 +10,19 @@ describe('message semantics', () => {
     })).toBe('artifact_card');
   });
 
-  it('maps explicit revision requests into revision_request', () => {
+  it('does not revive removed revision-request semantics from generic fields', () => {
     expect(normalizeCanonicalMessageType({
       requiresUserAction: true,
       nextAction: 'revise',
       content: '需要修订',
-    })).toBe('revision_request');
+    })).toBe('system_status');
   });
 
-  it('maps generic user-action requests into approval_request', () => {
+  it('does not revive removed approval semantics from generic fields', () => {
     expect(normalizeCanonicalMessageType({
       requiresUserAction: true,
       content: '需要确认',
-    })).toBe('approval_request');
+    })).toBe('system_status');
   });
 
   it('does not infer artifact cards from document-like content without explicit protocol fields', () => {

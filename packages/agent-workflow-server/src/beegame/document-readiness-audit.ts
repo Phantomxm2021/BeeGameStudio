@@ -1,16 +1,9 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
+import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
 
-export const REQUIRED_PROJECT_DOCUMENTS = [
-  'docs/GDD.md',
-  'docs/TECHNICAL_DESIGN.md',
-  'docs/ART_DIRECTION.md',
-  'docs/UI_UX_SPEC.md',
-  'docs/AUDIO_DESIGN.md',
-  'docs/ASSET_PLAN.md',
-  'docs/acceptance/gameplay-checklist.md',
-] as const
+export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
 
 export type DocumentReadinessAudit = {
   valid: boolean

@@ -30,9 +30,9 @@ export function registerBeeGameStripeStoreRoutes(
   app.get('/api/payments/stripe/credit-packs', async c => {
     try {
       if (deps.billingConfig.mode === 'remote') {
-        return proxyBeeGameBillingRequest(
+        return proxyRemoteBillingRequest(
+          deps,
           c.req.raw,
-          deps.billingConfig,
           '/api/payments/stripe/credit-packs',
         )
       }
@@ -71,9 +71,9 @@ export function registerBeeGameStripeStoreRoutes(
     const user = deps.getCurrentUser(c.req.raw)
     try {
       if (deps.billingConfig.mode === 'remote') {
-        return proxyBeeGameBillingRequest(
+        return proxyRemoteBillingRequest(
+          deps,
           c.req.raw,
-          deps.billingConfig,
           '/api/payments/stripe/checkout-session',
         )
       }
@@ -179,9 +179,9 @@ export function registerBeeGameStripeStoreRoutes(
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
-      return proxyBeeGameBillingRequest(
+      return proxyRemoteBillingRequest(
+        deps,
         c.req.raw,
-        deps.billingConfig,
         '/api/admin/billing/events',
       )
     }
@@ -200,9 +200,9 @@ export function registerBeeGameStripeStoreRoutes(
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
-      return proxyBeeGameBillingRequest(
+      return proxyRemoteBillingRequest(
+        deps,
         c.req.raw,
-        deps.billingConfig,
         '/api/admin/billing/credit-packs',
       )
     }
@@ -221,9 +221,9 @@ export function registerBeeGameStripeStoreRoutes(
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
-      return proxyBeeGameBillingRequest(
+      return proxyRemoteBillingRequest(
+        deps,
         c.req.raw,
-        deps.billingConfig,
         '/api/admin/billing/credit-packs',
       )
     }
@@ -252,9 +252,9 @@ export function registerBeeGameStripeStoreRoutes(
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
-      return proxyBeeGameBillingRequest(
+      return proxyRemoteBillingRequest(
+        deps,
         c.req.raw,
-        deps.billingConfig,
         '/api/admin/credits/grants',
       )
     }
@@ -292,6 +292,16 @@ export function registerBeeGameStripeStoreRoutes(
       return tracedRouteError(c, 'admin.credits.grants', error)
     }
   })
+}
+
+function proxyRemoteBillingRequest(
+  deps: BillingRouteDeps,
+  request: Request,
+  path: string,
+): Promise<Response> {
+  return deps.proxyRemoteBillingRequest
+    ? deps.proxyRemoteBillingRequest(request, path)
+    : proxyBeeGameBillingRequest(request, deps.billingConfig, path)
 }
 
 function tracedRouteError(c: Context, route: string, error: unknown): Response {

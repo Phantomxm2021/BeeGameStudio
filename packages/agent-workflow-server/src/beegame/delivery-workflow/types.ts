@@ -99,6 +99,10 @@ export type DocumentReviewFinding = {
   code?: string
   severity: 'blocking' | 'non_blocking'
   category: 'cross_document_conflict' | 'missing_spec' | 'calculation' | 'other'
+  remediationTarget: 'foundation' | 'checklist' | 'resource'
+  resourceAction?: 'repair' | 'reselection'
+  resourceRequirementIds?: string[]
+  resourceImportIds?: string[]
   documents: string[]
   description: string
   requiredAction: string
@@ -122,8 +126,10 @@ export type ResourceRemediation = {
   sourceRevision: string
   attempt: number
   issues: string[]
+  mode: 'repair' | 'reselection'
   preserveImportIds: string[]
   preserveCompositionIds: string[]
+  reselectImportIds?: string[]
 }
 
 export type Revision = {
@@ -142,7 +148,7 @@ export type TaskVerification = {
 export type AtomicTask = {
   id: string
   title: string
-  sourceRequirementIds: string[]
+  resourceRequirementIds: string[]
   checklistIds: string[]
   dependsOn: string[]
   allowedPaths: string[]
@@ -166,10 +172,12 @@ export type DispatchRecord = {
   status: DispatchStatus
   terminalEvidencePath?: string
   failureReason?: string
-  /** Raw worker output retained when parsing/contract validation fails. */
-  terminalOutput?: string
   request?: WorkerDispatchRequest
   terminalResult?: Record<string, unknown>
+  /** Cumulative run usage captured before this worker starts. */
+  startingUsageTotalTokens?: number
+  /** Cumulative non-cache work tokens captured before this worker starts. */
+  startingUsageBudgetTokens?: number
   startedAt: string
   finishedAt?: string
 }
@@ -261,7 +269,6 @@ export type DeliveryRun = {
   resourceEvidence?: ResourceEvidenceSnapshot
   /** Latest durable progress text for the workflow card. */
   currentMessage?: string
-  currentMessageKey?: string
   thinking?: 'working' | 'waiting' | 'idle'
   /** Last worker activity observed by the durable progress channel. */
   lastProgressAt?: string
@@ -298,5 +305,7 @@ export type DeliveryWorkerPort = {
   stop(dispatchId: string, reason: string): Promise<void>
   close?(dispatchId: string): Promise<void>
   status(dispatchId: string): Promise<DispatchRecord>
+  /** True while a write or Resource Library import is still in flight. */
+  hasInFlightMutation?(dispatchId: string): Promise<boolean>
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }

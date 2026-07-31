@@ -28,9 +28,12 @@ import {
   type ResourceLibraryAction,
 } from './native-resource-library-call'
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
-import { createNativeDeliveryContractTool } from './native-delivery-contract-tool'
+import { createNativeAtomicTaskPlanTool } from './native-atomic-task-plan-tool'
+import { createNativeAssetManifestTool } from './native-asset-manifest-tool'
+import { createNativeImplementationResultTool } from './native-implementation-result-tool'
+import { createNativeValidationResultTool } from './native-validation-result-tool'
+import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
 import { createResourceSelectionClient } from './resource-selection-client'
-import { getObservedNativeResourceLibraryEvidence } from './native-resource-library-evidence'
 
 export { parseNativeTerminalTaskNotification } from './native-task-notification'
 
@@ -95,7 +98,9 @@ export type MutableAppState = Record<string, unknown> & {
   tasks?: Record<string, unknown>
 }
 
-type SetMutableAppState = (updater: (prev: MutableAppState) => MutableAppState) => void
+type SetMutableAppState = (
+  updater: (prev: MutableAppState) => MutableAppState,
+) => void
 type KillShellTaskFn = (taskId: string, setAppState: SetMutableAppState) => void
 
 type PermissionDecision = {
@@ -141,6 +146,99 @@ const PRODUCTION_INSTALL_ENV_KEYS = [
   'pnpm_config_prod',
 ] as const
 
+const WORKFLOW_FILE_MUTATION_TOOLS = new Set([
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+])
+
+const WORKFLOW_EXTERNAL_WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
+
+const RESOURCE_CATALOG_READ_ACTIONS = new Set([
+  'browse_packs',
+  'inspect_pack',
+  'index_pack_elements',
+])
+
+export class ResourceCatalogTurnGate {
+  private readonly turnsWithCatalogRead = new WeakSet<object>()
+
+  issue(input: {
+    workerType?: string
+    toolName: string
+    toolInput: Record<string, unknown>
+    assistantMessage: unknown
+    toolUseContext: unknown
+  }): string | undefined {
+    if (
+      input.workerType !== 'resource-preparer' ||
+      input.toolName !== 'ResourceLibrary' ||
+      !RESOURCE_CATALOG_READ_ACTIONS.has(String(input.toolInput.action ?? ''))
+    )
+      return undefined
+    const turn =
+      input.assistantMessage && typeof input.assistantMessage === 'object'
+        ? input.assistantMessage
+        : input.toolUseContext && typeof input.toolUseContext === 'object'
+          ? input.toolUseContext
+          : undefined
+    if (!turn) {
+      return 'ResourceLibrary catalog reads require an identifiable model turn.'
+    }
+    if (this.turnsWithCatalogRead.has(turn)) {
+      return 'Only one ResourceLibrary catalog read is allowed per model turn. Use the completed result before choosing the next read or import.'
+    }
+    this.turnsWithCatalogRead.add(turn)
+    return undefined
+  }
+}
+
+const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
+  'Agent',
+  'Bash',
+  'Glob',
+  'Grep',
+  'LS',
+  'NotebookRead',
+  'Read',
+  'Task',
+])
+
+export function requiresBeeGameWorkflowBoundaryCheck(
+  input: Pick<
+    BeeGameSessionRunnerStartInput,
+    'workflowWorker' | 'workflowWorkerType'
+  >,
+  toolName: string,
+): boolean {
+  if (input.workflowWorker !== true) return false
+  if (WORKFLOW_FILE_MUTATION_TOOLS.has(toolName)) return true
+  if (WORKFLOW_EXTERNAL_WEB_TOOLS.has(toolName)) return true
+  if (
+    input.workflowWorkerType === 'implementation-worker' &&
+    (toolName === 'Read' || toolName === 'Bash')
+  ) {
+    return true
+  }
+  if (input.workflowWorkerType === 'resource-preparer' && toolName === 'Bash') {
+    return true
+  }
+  return (
+    input.workflowWorkerType === 'atomic-task-planner' &&
+    ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS.has(toolName)
+  )
+}
+
+export function getBeeGameWorkflowThinkingConfig(
+  workerType?: BeeGameSessionRunnerStartInput['workflowWorkerType'],
+): { type: 'disabled' } | undefined {
+  return workerType === 'atomic-task-planner' ||
+    workerType === 'implementation-worker'
+    ? { type: 'disabled' }
+    : undefined
+}
+
 export function createQueryEngineRunner(): BeeGameSessionRunner {
   return {
     async start(input) {
@@ -158,11 +256,13 @@ export function createBeeGameToolPermissionContext(
     ? base.alwaysAllowRules
     : {}
   const existingSessionRules = Array.isArray(existingRules.session)
-    ? existingRules.session.filter((value): value is string => typeof value === 'string')
+    ? existingRules.session.filter(
+        (value): value is string => typeof value === 'string',
+      )
     : []
-  const skillReadRules = (Array.isArray(skillReadRoots)
-    ? skillReadRoots
-    : [skillReadRoots])
+  const skillReadRules = (
+    Array.isArray(skillReadRoots) ? skillReadRoots : [skillReadRoots]
+  )
     .filter(Boolean)
     .map(root => `Read(${resolve(root)}/**)`)
   return {
@@ -198,9 +298,13 @@ export async function initializeBeeGameNativeSandbox(
   const unavailableReason = sandboxManager.getSandboxUnavailableReason()
   if (unavailableReason) {
     if (sandboxManager.isSandboxRequired()) {
-      throw new Error(`Claude Code native sandbox is required but unavailable: ${unavailableReason}`)
+      throw new Error(
+        `Claude Code native sandbox is required but unavailable: ${unavailableReason}`,
+      )
     }
-    console.warn(`[BeeGame] Claude Code native sandbox is unavailable: ${unavailableReason}`)
+    console.warn(
+      `[BeeGame] Claude Code native sandbox is unavailable: ${unavailableReason}`,
+    )
     return
   }
   if (!sandboxManager.isSandboxingEnabled()) return
@@ -244,33 +348,33 @@ export class NativeSandboxNetworkPermissionBroker {
         host,
         ...(hostPattern.port !== undefined ? { port: hostPattern.port } : {}),
       },
-    }).then(decision => {
-      const allowed = decision.behavior === 'allow'
-      if (allowed && decision.scope === 'session') {
-        this.allowedForSession.add(key)
-      }
-      return allowed
-    }).finally(() => {
-      this.inFlight.delete(key)
     })
+      .then(decision => {
+        const allowed = decision.behavior === 'allow'
+        if (allowed && decision.scope === 'session') {
+          this.allowedForSession.add(key)
+        }
+        return allowed
+      })
+      .finally(() => {
+        this.inFlight.delete(key)
+      })
 
     this.inFlight.set(key, request)
     return request
   }
 }
 
-type DelegatedResourceLibraryCall = {
+type NativeResourceLibraryCall = {
   action: ResourceLibraryAction
   input: Record<string, unknown>
 }
 
 /**
- * Restores the target tool's permission semantics when Claude Code invokes a
- * deferred ResourceLibrary tool through ExecuteExtraTool. A session grant is
- * intentionally scoped to ResourceLibrary mutations in this worker and never
- * grants the ExecuteExtraTool wrapper itself.
+ * Applies mutation permission semantics to the one native ResourceLibrary
+ * tool. Session grants are scoped to one exact ResourceLibrary action.
  */
-export class NativeExtraToolPermissionBroker {
+export class NativeResourceLibraryPermissionBroker {
   private readonly allowedForSession = new Set<string>()
   private readonly inFlight = new Map<string, Promise<PermissionDecision>>()
 
@@ -285,7 +389,10 @@ export class NativeExtraToolPermissionBroker {
     toolInput: Record<string, unknown>
     toolUseID: string
   }): Promise<PermissionDecision | undefined> {
-    const normalized = normalizeResourceLibraryCall(input.toolName, input.toolInput)
+    const normalized = normalizeResourceLibraryCall(
+      input.toolName,
+      input.toolInput,
+    )
     if (!normalized) return Promise.resolve(undefined)
     if (!normalized.validAction) {
       const received = normalized.action ? ` "${normalized.action}"` : ''
@@ -299,11 +406,14 @@ export class NativeExtraToolPermissionBroker {
         toolUseID: input.toolUseID,
       })
     }
-    const delegated: DelegatedResourceLibraryCall = {
+    const delegated: NativeResourceLibraryCall = {
       action: normalized.validAction,
       input: normalized.input,
     }
-    if (delegated.action !== 'import_elements') {
+    const mutationAction =
+      delegated.action === 'import_elements' ||
+      delegated.action === 'refresh_import_metadata'
+    if (!mutationAction) {
       return Promise.resolve({
         behavior: 'allow',
         updatedInput: input.toolInput,
@@ -315,7 +425,7 @@ export class NativeExtraToolPermissionBroker {
       })
     }
 
-    const capabilityKey = 'ResourceLibrary:project-mutation'
+    const capabilityKey = `ResourceLibrary:${delegated.action}`
     if (this.allowedForSession.has(capabilityKey)) {
       return Promise.resolve({
         behavior: 'allow',
@@ -329,7 +439,11 @@ export class NativeExtraToolPermissionBroker {
     }
 
     const pending = this.inFlight.get(capabilityKey)
-    if (pending) return pending.then(decision => ({ ...decision, toolUseID: input.toolUseID }))
+    if (pending)
+      return pending.then(decision => ({
+        ...decision,
+        toolUseID: input.toolUseID,
+      }))
     const requestPermission = this.getRequestPermission()
     if (!requestPermission) {
       return Promise.resolve({
@@ -346,35 +460,40 @@ export class NativeExtraToolPermissionBroker {
     const request = requestPermission({
       toolUseID: input.toolUseID,
       toolName: 'ResourceLibrary',
-      message: `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} explicitly selected Resource Library element(s) to be copied into this project?`,
+      message:
+        delegated.action === 'refresh_import_metadata'
+          ? 'Allow objective metadata for existing Resource Library imports to be refreshed from their pinned Pack versions?'
+          : `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} explicitly selected Resource Library element(s) to be copied into this project?`,
       input: delegated.input,
-    }).then(decision => {
-      if (decision.behavior === 'allow' && decision.scope === 'session') {
-        this.allowedForSession.add(capabilityKey)
-      }
-      if (decision.behavior === 'allow') {
+    })
+      .then(decision => {
+        if (decision.behavior === 'allow' && decision.scope === 'session') {
+          this.allowedForSession.add(capabilityKey)
+        }
+        if (decision.behavior === 'allow') {
+          return {
+            behavior: 'allow' as const,
+            updatedInput: input.toolInput,
+            decisionReason: {
+              type: 'other',
+              reason: 'dashboard_permission_approved',
+            },
+            toolUseID: input.toolUseID,
+          }
+        }
         return {
-          behavior: 'allow' as const,
-          updatedInput: input.toolInput,
+          behavior: 'deny' as const,
+          message: decision.message ?? 'Denied from dashboard',
           decisionReason: {
             type: 'other',
-            reason: 'dashboard_permission_approved',
+            reason: 'dashboard_permission_denied',
           },
           toolUseID: input.toolUseID,
         }
-      }
-      return {
-        behavior: 'deny' as const,
-        message: decision.message ?? 'Denied from dashboard',
-        decisionReason: {
-          type: 'other',
-          reason: 'dashboard_permission_denied',
-        },
-        toolUseID: input.toolUseID,
-      }
-    }).finally(() => {
-      this.inFlight.delete(capabilityKey)
-    })
+      })
+      .finally(() => {
+        this.inFlight.delete(capabilityKey)
+      })
     this.inFlight.set(capabilityKey, request)
     return request
   }
@@ -388,10 +507,9 @@ export async function resolveBeeGameSkillReadRoots(
     env.BEEGAME_CONFIG_DIR ?? join(homedir(), '.beegame'),
     'skills',
   )
-  const canonicalRoots = await Promise.all([
-    runtimeSkillsRoot,
-    builtinSkillsRoot,
-  ].map(root => realpath(root)))
+  const canonicalRoots = await Promise.all(
+    [runtimeSkillsRoot, builtinSkillsRoot].map(root => realpath(root)),
+  )
   return [...new Set(canonicalRoots)]
 }
 
@@ -504,21 +622,17 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       flushProgress: () => this.flushNativeSdkEvents(input),
       onTerminalNotification: notification => {
         this.backgroundTaskLedger.settleNotification(notification)
-        ;(this.input.onNativeTaskNotification ?? input.onNativeTaskNotification)?.(
-          notification,
-        )
+        ;(
+          this.input.onNativeTaskNotification ?? input.onNativeTaskNotification
+        )?.(notification)
       },
-      runNotification: notification => this.runNativeTurn(
-        engine,
-        notification.value,
-        input,
-        {
+      runNotification: notification =>
+        this.runNativeTurn(engine, notification.value, input, {
           ...(notification.uuid ? { uuid: notification.uuid } : {}),
           ...(notification.isMeta !== undefined
             ? { isMeta: notification.isMeta }
             : {}),
-        },
-      ),
+        }),
       consumedNotificationKeys: this.consumedTaskNotifications,
     })
   }
@@ -588,56 +702,103 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
     const skillReadRoots = await resolveBeeGameSkillReadRoots(this.input.env)
     const permissionContext = createBeeGameToolPermissionContext(
-      call(
-        toolModule,
-        'getEmptyToolPermissionContext',
-      ) as Record<string, unknown>,
+      call(toolModule, 'getEmptyToolPermissionContext') as Record<
+        string,
+        unknown
+      >,
       skillReadRoots,
       this.input.cwd,
     )
-    const nativeTools = call(toolsModule, 'getTools', permissionContext) as unknown[]
-    const deliveryContractTool = createNativeDeliveryContractTool({
-      buildTool: definition => call(toolModule, 'buildTool', definition),
-      workspacePath: this.input.cwd,
-      getConfirmedBriefContext: () => this.confirmedBriefContext,
-      ...(this.input.deliveryEvidenceDataRoot
-        ? {
-            getResourceLibraryEvidence: () =>
-              getObservedNativeResourceLibraryEvidence({
-                dataRoot: this.input.deliveryEvidenceDataRoot!,
-                sessionId: this.input.sessionId,
-                workspacePath: this.input.cwd,
-              }),
-          }
-        : {}),
-    })
-    const resourceTool = this.input.resourceSelectionConfig
-      ? createNativeResourceLibraryTool({
-          buildTool: definition => call(toolModule, 'buildTool', definition),
-          workspacePath: this.input.cwd,
-          client: createResourceSelectionClient({
-            ...this.input.resourceSelectionConfig,
+    const nativeTools = selectBeeGameWorkerTools(
+      call(toolsModule, 'getTools', permissionContext) as unknown[],
+      this.input.workflowWorkerType,
+      this.input.workflowResourceAttemptMode,
+    )
+    const assetManifestTool =
+      this.input.workflowWorkerType === 'resource-preparer' &&
+      this.input.workflowResourceAttemptMode === 'fresh'
+        ? createNativeAssetManifestTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+          })
+        : undefined
+    const resourceTool =
+      this.input.resourceSelectionConfig &&
+      this.input.workflowResourceAttemptMode !== 'fresh'
+        ? createNativeResourceLibraryTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+            client: createResourceSelectionClient({
+              ...this.input.resourceSelectionConfig,
+              fetchImpl: PLATFORM_SERVICE_FETCH,
+            }),
             fetchImpl: PLATFORM_SERVICE_FETCH,
-          }),
-          fetchImpl: PLATFORM_SERVICE_FETCH,
-        })
-      : undefined
-    const tools = resourceTool
-      ? [...nativeTools, deliveryContractTool, resourceTool]
-      : [...nativeTools, deliveryContractTool]
+            catalogReadLimit: this.input.workflowResourceCatalogReadLimit ?? 12,
+          })
+        : undefined
+    const atomicTaskPlanTool =
+      this.input.workflowWorkerType === 'atomic-task-planner'
+        ? createNativeAtomicTaskPlanTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+          })
+        : undefined
+    const implementationResultTool =
+      this.input.workflowWorkerType === 'implementation-worker'
+        ? createNativeImplementationResultTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+          })
+        : undefined
+    const validationResultTool =
+      this.input.workflowWorkerType === 'implementation-auditor' ||
+      this.input.workflowWorkerType === 'acceptance-validator'
+        ? createNativeValidationResultTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workerType: this.input.workflowWorkerType,
+          })
+        : undefined
+    const workflowResultTool =
+      this.input.workflowWorkerType === 'document-author' ||
+      this.input.workflowWorkerType === 'document-reviewer' ||
+      this.input.workflowWorkerType === 'change-impact-analyzer' ||
+      this.input.workflowWorkerType === 'question-answerer'
+        ? createNativeWorkflowResultTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workerType: this.input.workflowWorkerType,
+          })
+        : undefined
+    const workflowTools = [
+      assetManifestTool,
+      resourceTool,
+      atomicTaskPlanTool,
+      implementationResultTool,
+      validationResultTool,
+      workflowResultTool,
+    ].filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
+    const tools = [...nativeTools, ...workflowTools]
     const [commands, discoveredAgentDefinitions] = await Promise.all([
       callAsync(commandsModule, 'getCommands', this.input.cwd),
-      callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
+      callAsync(
+        agentsModule,
+        'getAgentDefinitionsWithOverrides',
+        this.input.cwd,
+      ),
     ])
-    const appState = installInheritedBeeGameTools({
-      ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
-      agentDefinitions: discoveredAgentDefinitions,
-      toolPermissionContext: permissionContext,
-    }, resourceTool ? [deliveryContractTool, resourceTool] : [deliveryContractTool])
-    this.appState = appState
-    const extraToolPermissionBroker = new NativeExtraToolPermissionBroker(
-      () => this.input.requestPermission ?? this.currentSubmitInput?.requestPermission,
+    const appState = installInheritedBeeGameTools(
+      {
+        ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
+        agentDefinitions: discoveredAgentDefinitions,
+        toolPermissionContext: permissionContext,
+      },
+      workflowTools,
     )
+    this.appState = appState
+    const resourceLibraryPermissionBroker =
+      new NativeResourceLibraryPermissionBroker(
+        () =>
+          this.input.requestPermission ??
+          this.currentSubmitInput?.requestPermission,
+      )
+    const resourceCatalogTurnGate = new ResourceCatalogTurnGate()
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -647,11 +808,67 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
       const toolName = getToolName(tool)
-      const delegatedDecision = await extraToolPermissionBroker.authorize({
+      const catalogTurnIssue = resourceCatalogTurnGate.issue({
+        workerType: this.input.workflowWorkerType,
         toolName,
         toolInput,
-        toolUseID,
+        assistantMessage,
+        toolUseContext,
       })
+      if (catalogTurnIssue) {
+        return {
+          behavior: 'deny',
+          message: catalogTurnIssue,
+          decisionReason: {
+            type: 'other',
+            reason: 'resource_catalog_turn_limit',
+          },
+          toolUseID,
+        }
+      }
+      const requestPermission =
+        this.input.requestPermission ??
+        this.currentSubmitInput?.requestPermission
+      const requiresWorkflowBoundaryCheck =
+        requiresBeeGameWorkflowBoundaryCheck(this.input, toolName)
+      if (requiresWorkflowBoundaryCheck) {
+        if (!requestPermission) {
+          return {
+            behavior: 'deny',
+            message: 'Workflow permission boundary is unavailable.',
+            decisionReason: {
+              type: 'other',
+              reason: 'workflow_permission_context_missing',
+            },
+            toolUseID,
+          }
+        }
+        const boundaryDecision = await requestPermission({
+          toolUseID,
+          toolName,
+          message: 'Workflow phase scope validation is required.',
+          input: toolInput,
+        })
+        if (boundaryDecision.behavior === 'deny') {
+          return {
+            behavior: 'deny',
+            message:
+              boundaryDecision.message ?? 'Denied by workflow phase scope.',
+            decisionReason: {
+              type: 'other',
+              reason: 'workflow_phase_scope_denied',
+            },
+            toolUseID,
+          }
+        }
+      }
+      const delegatedDecision = await resourceLibraryPermissionBroker.authorize(
+        {
+          toolName,
+          toolInput,
+          toolUseID,
+        },
+      )
       if (delegatedDecision) return delegatedDecision
       const result = (await callAsync(
         permissionsModule,
@@ -668,8 +885,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           ? { ...result, updatedInput: result.updatedInput ?? toolInput }
           : result
       }
-      const requestPermission = this.input.requestPermission
-        ?? this.currentSubmitInput?.requestPermission
       if (!requestPermission) {
         return {
           behavior: 'deny',
@@ -713,10 +928,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       queryEngineModule,
       'QueryEngine',
     )
-    const FileStateCache = getConstructor<new (
-      maxEntries: number,
-      maxBytes: number,
-    ) => unknown>(cacheModule, 'FileStateCache')
+    const FileStateCache = getConstructor<
+      new (
+        maxEntries: number,
+        maxBytes: number,
+      ) => unknown
+    >(cacheModule, 'FileStateCache')
     const activeAgents = getField<Record<string, unknown>[]>(
       discoveredAgentDefinitions,
       'activeAgents',
@@ -727,6 +944,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.resumeSessionId,
     )
 
+    const thinkingConfig = getBeeGameWorkflowThinkingConfig(
+      this.input.workflowWorkerType,
+    )
     this.engine = new QueryEngine({
       cwd: this.input.cwd,
       tools,
@@ -753,6 +973,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
+      ...(thinkingConfig ? { thinkingConfig } : {}),
       ...(getBeeGameResponseLanguageInstruction(this.input.language)
         ? {
             appendSystemPrompt: getBeeGameResponseLanguageInstruction(
@@ -891,7 +1112,9 @@ export async function consumeNativeMessageStream({
 }
 
 export function ensureBeeGameMacroGlobals(): void {
-  const target = globalThis as typeof globalThis & { MACRO?: BeeGameMacroGlobals }
+  const target = globalThis as typeof globalThis & {
+    MACRO?: BeeGameMacroGlobals
+  }
   if (target.MACRO) return
   target.MACRO = Object.fromEntries(
     Object.entries(getMacroDefines()).map(([key, value]) => [
@@ -908,7 +1131,7 @@ export async function stopRunningLocalShellTasks(
 ): Promise<string[]> {
   const taskIds = collectRunningLocalShellTaskIds(appState)
   if (taskIds.length === 0) return []
-  const killTask = killTaskFn ?? await loadKillShellTask()
+  const killTask = killTaskFn ?? (await loadKillShellTask())
   for (const taskId of taskIds) {
     killTask(taskId, setAppState)
   }
@@ -939,9 +1162,10 @@ export function createNativeNotificationQueue(
   }
   return {
     takeMainThreadTaskNotifications() {
-      return (dequeueAllMatching((command: NativeQueuedCommand) =>
-        command.agentId === undefined && command.mode === 'task-notification'
-      ) as NativeQueuedCommand[])
+      return dequeueAllMatching(
+        (command: NativeQueuedCommand) =>
+          command.agentId === undefined && command.mode === 'task-notification',
+      ) as NativeQueuedCommand[]
     },
   }
 }
@@ -1045,14 +1269,15 @@ export function getCompletedNativeTaskOutputTaskId(
     status !== 'failed' &&
     status !== 'stopped' &&
     status !== 'killed'
-  ) return undefined
+  )
+    return undefined
   const taskId = task.task_id
-  return typeof taskId === 'string' && taskId.trim()
-    ? taskId.trim()
-    : undefined
+  return typeof taskId === 'string' && taskId.trim() ? taskId.trim() : undefined
 }
 
-async function waitForNativeBackgroundProgress(signal: AbortSignal): Promise<void> {
+async function waitForNativeBackgroundProgress(
+  signal: AbortSignal,
+): Promise<void> {
   if (signal.aborted) return
   await new Promise<void>(resolveWait => {
     const timer = setTimeout(finish, 100)
@@ -1066,7 +1291,9 @@ async function waitForNativeBackgroundProgress(signal: AbortSignal): Promise<voi
   })
 }
 
-async function waitForNativeTaskRegistration(signal: AbortSignal): Promise<void> {
+async function waitForNativeTaskRegistration(
+  signal: AbortSignal,
+): Promise<void> {
   if (signal.aborted) return
   await new Promise<void>(resolveWait => {
     const timer = setTimeout(finish, 10)
@@ -1114,7 +1341,9 @@ async function stopRunningNativeBackgroundTasks(
   return taskIds
 }
 
-function collectRunningLocalShellTaskIds(appState: MutableAppState | null): string[] {
+function collectRunningLocalShellTaskIds(
+  appState: MutableAppState | null,
+): string[] {
   const tasks = appState?.tasks
   if (!tasks || typeof tasks !== 'object') return []
   return Object.entries(tasks)
@@ -1143,12 +1372,12 @@ async function loadInitialMessagesForResume(
 ): Promise<unknown[]> {
   if (!sessionId) return []
   try {
-    const result = await callAsync(
+    const result = (await callAsync(
       conversationRecoveryModule,
       'loadConversationForResume',
       sessionId,
       undefined,
-    ) as BeeGameResumeConversation | null
+    )) as BeeGameResumeConversation | null
     return Array.isArray(result?.messages) ? result.messages : []
   } catch {
     return []
@@ -1193,8 +1422,33 @@ function getToolName(tool: unknown): string {
     tool !== null &&
     'name' in tool &&
     typeof tool.name === 'string'
-  ) return tool.name
+  )
+    return tool.name
   return 'Tool'
+}
+
+/**
+ * Resource preparation owns a first-class ResourceLibrary tool. Keeping the
+ * deferred-tool discovery/wrapper pair in that worker creates a second call
+ * lane: models search for an already-loaded tool, then try to invoke it
+ * indirectly. Remove only that redundant lane for this business worker; all
+ * other native tools and all other Agents remain unchanged.
+ */
+export function selectBeeGameWorkerTools(
+  tools: unknown[],
+  workflowWorkerType?: string,
+  resourceAttemptMode?: string,
+): unknown[] {
+  if (workflowWorkerType === 'atomic-task-planner') {
+    return []
+  }
+  if (workflowWorkerType !== 'resource-preparer') return tools
+  const redundantToolNames = new Set(['SearchExtraTools', 'ExecuteExtraTool'])
+  if (resourceAttemptMode === 'fresh') {
+    for (const toolName of WORKFLOW_FILE_MUTATION_TOOLS)
+      redundantToolNames.add(toolName)
+  }
+  return tools.filter(tool => !redundantToolNames.has(getToolName(tool)))
 }
 
 async function withRuntimeEnvironment(
@@ -1206,7 +1460,10 @@ async function withRuntimeEnvironment(
   const previousCwd = process.cwd()
   const previousEnv = new Map<string, string | undefined>()
   const previousFetch = globalThis.fetch
-  const pinnedFetch = createBeeGamePinnedFetch(previousFetch, approvedOutboundTargets)
+  const pinnedFetch = createBeeGamePinnedFetch(
+    previousFetch,
+    approvedOutboundTargets,
+  )
 
   const runtimeEnv = getBeeGameRuntimeEnvironment(env)
   for (const key of [
@@ -1248,7 +1505,9 @@ type RuntimeDispatcher = {
   destroy?: () => Promise<void> | void
 }
 
-export async function closeBeeGameRuntimeDispatcher(dispatcher: RuntimeDispatcher): Promise<void> {
+export async function closeBeeGameRuntimeDispatcher(
+  dispatcher: RuntimeDispatcher,
+): Promise<void> {
   if (typeof dispatcher.close === 'function') {
     await dispatcher.close()
     return
@@ -1262,14 +1521,23 @@ export function createBeeGamePinnedFetch(
   baseFetch: typeof fetch,
   approvedOutboundTargets: Record<string, ApprovedOutboundTarget>,
 ): PinnedRuntimeFetch {
-  const dispatchers = new Map<string, ReturnType<typeof createPinnedUndiciDispatcher>>()
+  const dispatchers = new Map<
+    string,
+    ReturnType<typeof createPinnedUndiciDispatcher>
+  >()
   for (const target of Object.values(approvedOutboundTargets)) {
-    if (!target.trustedDevelopmentProxy && !dispatchers.has(target.url.origin)) {
+    if (
+      !target.trustedDevelopmentProxy &&
+      !dispatchers.has(target.url.origin)
+    ) {
       dispatchers.set(target.url.origin, createPinnedUndiciDispatcher(target))
     }
   }
   const approvedOrigins = new Map(
-    Object.values(approvedOutboundTargets).map(target => [target.url.origin, target]),
+    Object.values(approvedOutboundTargets).map(target => [
+      target.url.origin,
+      target,
+    ]),
   )
 
   const pinnedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1282,13 +1550,19 @@ export function createBeeGamePinnedFetch(
       throw new Error('Outbound URL is not permitted')
     }
     return dispatcher
-      ? baseFetch(input, { ...init, redirect: 'error', dispatcher } as RequestInit)
+      ? baseFetch(input, {
+          ...init,
+          redirect: 'error',
+          dispatcher,
+        } as RequestInit)
       : approvedTarget
         ? baseFetch(input, { ...init, redirect: 'error' })
         : baseFetch(input, init)
   }) as PinnedRuntimeFetch
   pinnedFetch.close = async () => {
-    await Promise.all([...dispatchers.values()].map(closeBeeGameRuntimeDispatcher))
+    await Promise.all(
+      [...dispatchers.values()].map(closeBeeGameRuntimeDispatcher),
+    )
   }
   return pinnedFetch
 }
@@ -1324,9 +1598,10 @@ function getBeeGameRuntimeEnvironment(
   }
   return {
     ...runtimeEnv,
-    NODE_ENV: runtimeEnv.NODE_ENV === 'production'
-      ? 'development'
-      : (runtimeEnv.NODE_ENV ?? 'development'),
+    NODE_ENV:
+      runtimeEnv.NODE_ENV === 'production'
+        ? 'development'
+        : (runtimeEnv.NODE_ENV ?? 'development'),
     NPM_CONFIG_PRODUCTION: 'false',
     npm_config_production: 'false',
     NPM_CONFIG_OMIT: '',
