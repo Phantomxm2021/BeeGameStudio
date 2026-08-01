@@ -775,16 +775,6 @@ export const useChat = ({
   ])
 
   /**
-   * Handle WebSocket errors
-   */
-  const handleWebSocketError = useCallback((error: Event) => {
-    // Browser WebSocket error events do not expose actionable diagnostics.
-    // Treat close/failure state as the source of truth and avoid surfacing
-    // transient reconnect noise as a fatal UI error.
-    console.warn('[useChat] WebSocket transport error event:', error)
-  }, [])
-
-  /**
    * Handle WebSocket close
    */
   const handleWebSocketClose = useCallback(() => {
@@ -815,7 +805,6 @@ export const useChat = ({
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
     onMessage: handleProjectEventMessage,
-    onError: handleWebSocketError,
     onClose: handleWebSocketClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
     showToastError,

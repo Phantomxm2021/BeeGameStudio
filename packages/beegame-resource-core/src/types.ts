@@ -17,10 +17,6 @@ export const RESOURCE_CATEGORIES = [
   'audio',
   'textures',
   'scenes',
-  // Legacy imports remain readable while new Packs use the canonical set.
-  'characters',
-  'environment',
-  'tiles',
 ] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
@@ -132,69 +128,36 @@ export type ResourceRelationRequirement = {
   role?: string
 }
 
-/**
- * A composition describes how independently imported logical asset roots
- * form one game-facing unit. It is intentionally engine-neutral: an adapter or
- * the generated project decides whether that unit becomes a prefab, scene,
- * blueprint, node tree, or ordinary runtime data.
- */
-export const RESOURCE_COMPOSITION_KINDS = [
-  'character',
-  'scene',
-  'scene-kit',
-  'ui-screen',
-  'ui-kit',
-  'vfx',
-  'audio-cue',
-  'sprite-animation',
-  'tileset',
-  'tilemap',
-  'physics-profile',
-  'input-profile',
-  'generic',
-] as const
-export type ResourceCompositionKind = (typeof RESOURCE_COMPOSITION_KINDS)[number]
-
 /** Single machine-readable vocabulary used by manifest authors and auditors. */
 export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
-  version: 5,
-  rootFields: ['version', 'project_target', 'requirements', 'imports', 'compositions'],
+  version: 7,
+  rootFields: ['version', 'project_target', 'requirements', 'resources'],
   projectTargetFields: [
     'platform',
     'runtime',
-    'integration_mode',
-    'mcp_server',
     'asset_format_capabilities',
     'resource_library_usage',
+    'runtime_asset_root',
+    'content_root',
+    'generated_asset_root',
   ],
   projectTargetFieldShapes: {
     asset_format_capabilities: 'string[]',
     resource_library_usage: 'optional | preferred | required',
   },
-  requirementFields: [
-    'id',
-    'required',
-    'resource_requirement',
-    'satisfied_by',
-    'status',
+  requirementFields: ['id', 'name', 'purpose', 'required'],
+  resourceFields: ['id', 'source', 'status', 'root_path',
+    'file_paths',
+    'local_file_hashes',
+    'provisional',
+    'selected_at', 'selection_reason', 'asset_kind', 'capabilities', 'content_profile', 'technical_facts', 'dependencies',
+    'error',
   ],
-  importFields: ['id', 'source', 'status', 'root_path', 'local_files', 'selected_at', 'selection_reason', 'asset_kind', 'capabilities', 'content_profile', 'technical_facts', 'dependencies', 'usage_evidence'],
-  importSourceFields: ['type', 'pack_id', 'pack_version', 'element_id', 'element_path'],
-  resourceRequirementFields: [
-    'category',
-    'dimension',
-    'accepted_formats',
-    'tags',
-    'asset_kinds',
-    'capabilities',
-    'subresources',
-    'relations',
+  resourceSourceFields: ['type', 'pack_id', 'pack_version', 'element_id', 'element_path',
+    'created_at',
+    'reason',
+    'filename',
   ],
-  integrationEvidenceFields: ['references', 'runtime_event_ids'],
-  subresourceRequirementFields: ['kind', 'role', 'skeleton_signature'],
-  compositionFields: ['id', 'kind', 'required', 'assembly_mode', 'members', 'recipe', 'status', 'integration_evidence'],
-  compositionMemberFields: ['import_id', 'requirement_id', 'composition_id', 'role', 'required'],
-  compositionRecipeFields: ['path', 'notes'],
   resourceLibraryUsage: RESOURCE_LIBRARY_USAGE,
   dimensions: RESOURCE_DIMENSIONS,
   categories: RESOURCE_CATEGORIES,
@@ -203,7 +166,6 @@ export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
   capabilities: RESOURCE_CAPABILITIES,
   embeddedComponentKinds: RESOURCE_EMBEDDED_COMPONENT_KINDS,
   relationKinds: RESOURCE_RELATION_KINDS,
-  compositionKinds: RESOURCE_COMPOSITION_KINDS,
 } as const
 
 export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
@@ -220,7 +182,8 @@ export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
 export type ResourcePackPrimaryCategory = (typeof RESOURCE_PACK_PRIMARY_CATEGORIES)[number]
 
 export type ResourcePackStatus = 'draft' | 'published' | 'archived'
-export type ResourceElementStatus = 'queued' | 'uploading' | 'ready' | 'failed' | 'hidden' | 'archived'
+export type ResourceElementStatus =
+  | 'queued' | 'uploading' | 'ready' | 'failed' | 'hidden' | 'archived'
 
 /**
  * Explicit authoring policy inherited by logical assets. Only semantic fields
@@ -246,9 +209,7 @@ export type ResourceFolder = {
 export type ResourcePack = {
   id: string
   name: string
-  style: string
-  /** Canonical style taxonomy. style is the legacy display projection. */
-  styles?: readonly string[]
+  styles: readonly string[]
   gameTypes: readonly string[]
   dimension: ResourceDimension
   primaryCategory: ResourcePackPrimaryCategory
@@ -338,7 +299,7 @@ export type ResourceResolvedElement = {
   packId: string
   packVersion: string
   packName?: string
-  packStyle?: string
+  packStyles?: readonly string[]
   packGameTypes?: readonly string[]
   elementId: string
   elementName?: string
@@ -358,7 +319,7 @@ export type ResourceResolvedElement = {
  * Exact, structured filters for browsing a large Resource Library. These are
  * deliberately not tied to project requirements or authored roles: an Agent
  * may browse broadly, refine the catalog, and choose any reusable collection
- * of elements for its own target-native composition.
+ * of elements for its project-local resource and content definitions.
  */
 export type ResourceCatalogFilter = {
   packIds?: readonly string[]
@@ -398,7 +359,6 @@ export type ResourceCatalogPack = {
   packId: string
   packVersion: string
   packName: string
-  style: string
   styles: readonly string[]
   gameTypes: readonly string[]
   dimension: ResourceDimension
@@ -421,7 +381,6 @@ export type ResourceCatalogElement = {
   packId: string
   packVersion: string
   packName: string
-  packStyle: string
   packStyles: readonly string[]
   packGameTypes: readonly string[]
   elementId: string

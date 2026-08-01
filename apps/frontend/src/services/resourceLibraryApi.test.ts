@@ -8,7 +8,8 @@ describe('resource library API', () => {
       requests.push({ url: String(input), init })
       return new Response(JSON.stringify({ pack: { id: 'pack-1', name: 'Forest', status: 'draft', elementCount: 0 } }), { status: 201 })
     })
-    await expect(api.createPack({ name: 'Forest', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'ui-kit', gameTypes: ['adventure'], categories: [] })).resolves.toMatchObject({ id: 'pack-1' })
+    await expect(api.createPack({ name: 'Forest',
+        styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'ui-kit', gameTypes: ['adventure'], categories: [] })).resolves.toMatchObject({ id: 'pack-1' })
     expect(requests[0].url).toBe('/api/resource-packs')
     expect(requests[0].init?.method).toBe('POST')
     expect(JSON.parse(String(requests[0].init?.body))).toMatchObject({ primaryCategory: 'ui-kit', categories: [] })
@@ -30,8 +31,10 @@ describe('resource library API', () => {
       requests.push(String(input))
       return new Response(JSON.stringify({ elements: [] }), { status: 200 })
     })
-    await api.listElements('pack/1', 'characters')
-    expect(requests[0]).toBe('/api/resource-packs/pack%2F1/elements?category=characters')
+    await api.listElements('pack/1', 'sprites')
+    expect(requests[0]).toBe(
+      '/api/resource-packs/pack%2F1/elements?category=sprites',
+    )
   })
 
   test('encodes folder path filters separately from category', async () => {
@@ -50,9 +53,9 @@ describe('resource library API', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const api = createResourceLibraryApi(async (input, init) => {
       requests.push({ url: String(input), init })
-      return new Response(JSON.stringify({ element: { id: 'element-1', packId: 'pack-1', name: 'Tree', path: 'Environment/Tree.glb', category: 'environment', kind: 'model', specs: {}, dependencies: [], status: 'ready' } }), { status: 200 })
+      return new Response(JSON.stringify({ element: { id: 'element-1', packId: 'pack-1', name: 'Tree', path: 'Models/Tree.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' } }), { status: 200 })
     })
-    await api.updateElement('pack-1', 'element-1', { category: 'environment', kind: 'model' })
+    await api.updateElement('pack-1', 'element-1', { category: 'models', kind: 'model' })
     expect(requests[0].url).toBe('/api/resource-packs/pack-1/elements/element-1')
     expect(requests[0].init?.method).toBe('PATCH')
   })

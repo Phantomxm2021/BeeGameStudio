@@ -151,7 +151,8 @@ type BeeGameArtifact = {
   package_download?: boolean;
 };
 
-type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'it' | 'pt';
+type BeeGameLanguage =
+  | 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'it' | 'pt';
 
 type BeeGameIdeaIntakeRequest = {
   idea: string;
@@ -487,8 +488,7 @@ export const beeGameAdapter = {
   }> {
     const historyCursor = chatHistoryCursorByProject.get(projectId);
     const effectiveAfterEventId = afterEventId === 0
-      ? historyCursor?.latestEventId ?? 0
-      : afterEventId;
+      ? (historyCursor?.latestEventId ?? 0) : afterEventId;
     let eventResult: BeeGameProjectEvents;
     try {
       eventResult = await fetchProjectEvents(projectId, effectiveAfterEventId);
@@ -651,13 +651,13 @@ export const beeGameAdapter = {
 
   async uploadProjectAsset(
     projectId: string,
-    requirementId: string,
+    resourceId: string,
     file: File,
   ): Promise<BeeGameAssetUploadPayload> {
     const form = new FormData();
     form.set('file', file);
     return postForm<BeeGameAssetUploadPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(requirementId)}/upload`,
+      `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/upload`,
       form,
     );
   },
@@ -682,7 +682,9 @@ function getLatestBeeGameEventId(events: BeeGameEvent[]): number {
 }
 
 function getBriefDisplayTitle(brief: BeeGameBuildBrief): string {
-  return (brief.title || brief.option.title || summarizeTitle(brief.idea)).trim() || 'BeeGame Project';
+  return (
+    (brief.title || brief.option.title || summarizeTitle(brief.idea)).trim() || 'BeeGame Project'
+  )
 }
 
 function getBriefFolderName(brief: BeeGameBuildBrief, displayTitle: string): string {
@@ -1248,18 +1250,21 @@ function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
 }
 
 function isTurnTerminalEvent(event: BeeGameEvent): boolean {
-  return event.type === 'turn.completed' ||
+  return (
+    event.type === 'turn.completed' ||
     event.type === 'turn.empty' ||
     event.type === 'turn.failed' ||
     event.type === 'session.stopped' ||
-    event.type === 'session.failed';
+    event.type === 'session.failed'
+  )
 }
 
 function isLateRuntimeEvent(event: BeeGameEvent, terminalEventByTurn: Map<string, number>): boolean {
   if (!event.turnId) return false;
   const terminalId = terminalEventByTurn.get(event.turnId);
   if (terminalId === undefined || event.id <= terminalId) return false;
-  return event.type === 'assistant.partial' ||
+  return (
+    event.type === 'assistant.partial' ||
     event.type === 'assistant.thinking' ||
     event.type === 'assistant.message' ||
     event.type === 'tool.started' ||
@@ -1268,7 +1273,8 @@ function isLateRuntimeEvent(event: BeeGameEvent, terminalEventByTurn: Map<string
     event.type === 'tool.failed' ||
     event.type === 'permission.requested' ||
     event.type === 'permission.resolved' ||
-    event.type === 'result';
+    event.type === 'result'
+  )
 }
 
 function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGameEvent[] {
@@ -1350,7 +1356,7 @@ function getToolDisplayInfo(
   const description = String(input.description || '').trim();
   const subagentType = String(input.subagent_type || input.agent_type || '').trim();
   const prompt = String(input.prompt || '').trim();
-  const name = isSubagent ? (description || toolName) : toolName;
+  const name = isSubagent ? description || toolName : toolName;
   const details: string[] = [];
   if (isSubagent && subagentType) {
     details.push(`Type: ${subagentType}`);
@@ -1524,7 +1530,9 @@ function getCurrentUiLanguage(): BeeGameLanguage {
 
 function resolveSentDisplayText(sessionId: string, transportText: string): string {
   const values = readJson<Record<string, string>>(scopedAdapterCacheKey(SENT_DISPLAY_KEY), {});
-  return values[`${sessionId}:${stableTextHash(transportText)}`] || transportText;
+  return (
+    values[`${sessionId}:${stableTextHash(transportText)}`] || transportText
+  )
 }
 
 function resolveUserMessageDisplayText(event: BeeGameEvent): string {
@@ -1587,7 +1595,9 @@ function discoveredArtifactToPanelArtifact(
 function isInternalRuntimeArtifact(artifact: BeeGameDiscoveredArtifact): boolean {
   const artifactType = String(artifact.artifact_type || '').toLowerCase();
   const normalizedPath = artifact.path.split('\\').join('/').replace(/^\.\/+/, '');
-  return artifactType === 'transcript' || normalizedPath.startsWith('transcripts/');
+  return (
+    artifactType === 'transcript' || normalizedPath.startsWith('transcripts/')
+  )
 }
 
 function mergeArtifactsByPath(artifacts: BeeGameArtifact[]): BeeGameArtifact[] {
@@ -1650,8 +1660,8 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
   const toolUseID = getPayloadString(event, 'toolUseID');
   const toolName = getPayloadString(event, 'toolName') || 'BeeGame tool';
   const input = event.payload?.input && typeof event.payload.input === 'object'
-    ? event.payload.input as Record<string, unknown>
-    : {};
+    ? (event.payload.input as Record<string, unknown>)
+      : {};
   const summary = summarizePermissionRequest(toolName, event.text, input);
   return {
     gate_id: toolUseID,
@@ -1688,8 +1698,8 @@ function pendingPermissionToReview(
       toolUseID,
       toolName,
       input: permission.input && typeof permission.input === 'object' && !Array.isArray(permission.input)
-        ? permission.input as Record<string, unknown>
-        : {},
+        ? (permission.input as Record<string, unknown>)
+          : {},
     },
     createdAt: String(permission.created_at || new Date().toISOString()),
   };
@@ -1736,7 +1746,7 @@ function getPayloadBoolean(event: BeeGameEvent, field: string): boolean {
 function getPayloadRecord(event: BeeGameEvent, field: string): Record<string, unknown> {
   const value = event.payload?.[field];
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -1778,9 +1788,8 @@ async function runIdeaIntakeJob(requestBody: BeeGameIdeaIntakeRequest): Promise<
   });
   const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);
   let retryIntervalMs = BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS;
-  const deadlineAt = Date.now() + (
+  const deadlineAt = Date.now() +
     BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS * BEEGAME_INTAKE_JOB_MAX_POLLS
-  );
   for (let index = 0; index < BEEGAME_INTAKE_JOB_MAX_POLLS; index += 1) {
     if (Date.now() >= deadlineAt) break;
     let response: Response;
@@ -1851,12 +1860,12 @@ async function readResponse<T>(response: Response): Promise<T> {
     const body = await response.json().catch(() => ({}));
     const message = getJsonErrorMessage(body) || response.statusText;
     const payload = body && typeof body === 'object'
-      ? body as {
+      ? (body as {
           code?: unknown;
           recoverable?: unknown;
           retry_after_ms?: unknown;
-        }
-      : {};
+        })
+        : {};
     const error = new Error(message) as Error & {
       status?: number;
       code?: string;

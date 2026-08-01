@@ -17,7 +17,7 @@ import type {
 import { normalizeResourceTechnicalFacts } from './technical-facts'
 
 /**
- * Browse published Packs without first inventing requirement slots or roles.
+ * Browse published Packs without assigning project-specific game roles.
  * Filtering is exact and metadata-driven; free-form intent remains Claude
  * Code's reasoning input and is never interpreted here with name heuristics.
  */
@@ -26,6 +26,7 @@ export function browseResourceCatalogPacks(
   elements: readonly ResourceElement[],
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogPack> {
+  const catalogRequest = resolveCatalogRequest(request, 'packs')
   const published = packs.filter(pack => pack.status === 'published')
   const readyIds = readyDependencyIds(elements)
   const readyByPack = new Map<string, ResourceElement[]>()
@@ -38,10 +39,10 @@ export function browseResourceCatalogPacks(
   const available = published
     .map(pack => ({ pack, elements: readyByPack.get(pack.id) ?? [] }))
   const filtered = available
-    .filter(entry => packMatches(entry.pack, entry.elements, request.filters))
+    .filter(entry => packMatches(entry.pack, entry.elements, catalogRequest.filters))
     .sort((left, right) => compareText(left.pack.name, right.pack.name) || compareText(left.pack.id, right.pack.id))
   const facets = collectFacets(available.map(entry => entry.pack), available.flatMap(entry => entry.elements))
-  return page(filtered.map(({ pack, elements: packElements }) => summarizePack(pack, packElements)), request, facets, item => item.packId, 'packs')
+  return page(filtered.map(({ pack, elements: packElements }) => summarizePack(pack, packElements)), catalogRequest, facets, item => item.packId)
 }
 
 /** Browse pre-aggregated Pack summaries without loading every element. */
@@ -49,10 +50,11 @@ export function browseResourceCatalogPackSummaries(
   summaries: readonly ResourceCatalogPack[],
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogPack> {
+  const catalogRequest = resolveCatalogRequest(request, 'pack-summaries')
   const filtered = summaries
-    .filter(pack => catalogPackMatches(pack, request.filters))
+    .filter(pack => catalogPackMatches(pack, catalogRequest.filters))
     .sort((left, right) => compareText(left.packName, right.packName) || compareText(left.packId, right.packId))
-  return page(filtered, request, collectSummaryFacets(summaries), item => item.packId, 'pack-summaries')
+  return page(filtered, catalogRequest, collectSummaryFacets(summaries), item => item.packId)
 }
 
 /**
@@ -66,6 +68,10 @@ export function queryResourceCatalogElements(
   request: ResourceCatalogRequest,
   catalogRevision?: string,
 ): ResourceCatalogPage<ResourceCatalogElement> {
+  const catalogRequest = resolveCatalogRequest(
+    request,
+    catalogRevision ? `elements:${catalogRevision}` : 'elements',
+  )
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const readyIds = readyDependencyIds(elements)
@@ -79,7 +85,7 @@ export function queryResourceCatalogElements(
   })
   const eligible = available
     .filter(element =>
-      elementMatches(element, packById.get(element.packId)!, request.filters),
+      elementMatches(element, packById.get(element.packId)!, catalogRequest.filters),
     )
     .sort((left, right) => {
       const leftPack = packById.get(left.packId)!
@@ -94,10 +100,9 @@ export function queryResourceCatalogElements(
     eligible.map(element =>
       summarizeElement(packById.get(element.packId)!, element),
     ),
-    request,
+    catalogRequest,
     collectFacets(published, available),
     item => `${item.packId}/${item.elementId}`,
-    catalogRevision ? `elements:${catalogRevision}` : 'elements',
   )
 }
 
@@ -124,21 +129,24 @@ export function browseResourcePackElements(
   packId: string,
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogElement> {
+  const catalogRequest = resolveCatalogRequest(request, `pack-elements:${packId}`)
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const readyIds = readyDependencyIds(elements)
   const available = elements
     .filter(element => element.packId === packId && element.status === 'ready' && packById.has(element.packId) && hasCompleteDependencyClosure(element, readyIds))
   const eligible = available
-    .filter(element => elementMatches(element, packById.get(element.packId)!, request.filters))
+    .filter(element => elementMatches(element, packById.get(element.packId)!, catalogRequest.filters))
     .sort((left, right) => {
       const leftPack = packById.get(left.packId)!
       const rightPack = packById.get(right.packId)!
-      return compareText(leftPack.name, rightPack.name) || compareText(left.path, right.path) || compareText(left.id, right.id)
+      return (
+        compareText(leftPack.name, rightPack.name) || compareText(left.path, right.path) || compareText(left.id, right.id)
+      )
     })
   const scopedPacks = [...new Map(available.map(element => [element.packId, packById.get(element.packId)!])).values()]
   const facets = collectFacets(scopedPacks, available)
-  return page(eligible.map(element => summarizeElement(packById.get(element.packId)!, element)), request, facets, item => item.elementId, `pack-elements:${packId}`)
+  return page(eligible.map(element => summarizeElement(packById.get(element.packId)!, element)), catalogRequest, facets, item => item.elementId)
 }
 
 function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], filters?: ResourceCatalogFilter): boolean {
@@ -146,7 +154,7 @@ function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], f
   if (filters.packIds?.length && !filters.packIds.includes(pack.id)) return false
   if (filters.dimensions?.length && !filters.dimensions.includes(pack.dimension)) return false
   if (filters.primaryCategories?.length && !filters.primaryCategories.includes(pack.primaryCategory)) return false
-  if (filters.styles?.length && !intersectsNormalized(filters.styles, packStyles(pack))) return false
+  if (filters.styles?.length && !intersectsNormalized(filters.styles, normalizedPackStyles(pack))) return false
   if (filters.gameTypes?.length && !intersectsNormalized(filters.gameTypes, pack.gameTypes)) return false
   if (filters.packTags?.length && !intersectsNormalized(filters.packTags, pack.tags ?? [])) return false
   return (
@@ -162,7 +170,7 @@ function elementMatches(element: ResourceElement, pack: ResourcePack, filters?: 
   if (filters.dimensions?.length && !filters.dimensions.includes(dimension)) return false
   if (filters.primaryCategories?.length && !filters.primaryCategories.includes(pack.primaryCategory)) return false
   if (filters.categories?.length && !filters.categories.includes(element.category)) return false
-  if (filters.styles?.length && !intersectsNormalized(filters.styles, element.styleOverride ? [element.styleOverride] : packStyles(pack))) return false
+  if (filters.styles?.length && !intersectsNormalized(filters.styles, element.styleOverride ? [element.styleOverride] : normalizedPackStyles(pack))) return false
   if (filters.gameTypes?.length && !intersectsNormalized(filters.gameTypes, pack.gameTypes)) return false
   if (filters.packTags?.length && !intersectsNormalized(filters.packTags, pack.tags ?? [])) return false
   if (filters.usageTags?.length && !intersects(filters.usageTags, element.usageTags ?? [])) return false
@@ -177,8 +185,7 @@ function summarizePack(pack: ResourcePack, elements: readonly ResourceElement[])
     packId: pack.id,
     packVersion: pack.version,
     packName: pack.name,
-    style: pack.style,
-    styles: packStyles(pack),
+    styles: normalizedPackStyles(pack),
     gameTypes: [...pack.gameTypes],
     dimension: pack.dimension,
     primaryCategory: pack.primaryCategory,
@@ -233,8 +240,7 @@ function summarizeElement(pack: ResourcePack, element: ResourceElement): Resourc
     packId: pack.id,
     packVersion: pack.version,
     packName: pack.name,
-    packStyle: element.styleOverride ?? pack.style,
-    packStyles: element.styleOverride ? [element.styleOverride] : packStyles(pack),
+    packStyles: element.styleOverride ? [element.styleOverride] : normalizedPackStyles(pack),
     packGameTypes: [...pack.gameTypes],
     elementId: element.id,
     elementName: element.name,
@@ -260,7 +266,7 @@ function collectFacets(packs: readonly ResourcePack[], elements: readonly Resour
     ]),
     primaryCategories: unique<ResourcePackPrimaryCategory>(packs.map(pack => pack.primaryCategory)),
     categories: unique<ResourceCategory>(elements.map(element => element.category)),
-    styles: unique([...packs.flatMap(pack => packStyles(pack)), ...elements.map(element => element.styleOverride).filter((value): value is string => Boolean(value))]),
+    styles: unique([...packs.flatMap(pack => normalizedPackStyles(pack)), ...elements.map(element => element.styleOverride).filter((value): value is string => Boolean(value))]),
     gameTypes: unique(packs.flatMap(pack => [...pack.gameTypes])),
     packTags: unique(packs.flatMap(pack => [...(pack.tags ?? [])])),
     usageTags: unique<ResourceUsageTag>(elements.flatMap(element => [...(element.usageTags ?? [])])),
@@ -270,19 +276,23 @@ function collectFacets(packs: readonly ResourcePack[], elements: readonly Resour
   }
 }
 
-function packStyles(pack: ResourcePack): string[] {
-  if (pack.styles?.length) return unique(pack.styles.map(value => value.trim()).filter(Boolean))
-  return pack.style.split('/').map(value => value.trim()).filter(Boolean)
+function normalizedPackStyles(pack: ResourcePack): string[] {
+  return unique(pack.styles.map(value => value.trim()).filter(Boolean))
 }
 
 export class ResourceCatalogCursorError extends Error {}
 
-function page<T>(items: readonly T[], request: ResourceCatalogRequest, facets: ResourceCatalogFacets, idOf: (item: T) => string, scope: string): ResourceCatalogPage<T> {
-  const cursorScope = `${scope}:${stableFilterKey(request.filters)}`
-  const cursorId = parseCursor(request.cursor, cursorScope)
-  const offset = cursorId
+type ResolvedCatalogRequest = {
+  filters?: ResourceCatalogFilter
+  cursorId?: string
+  limit?: number
+  scope: string
+}
+
+function page<T>(items: readonly T[], request: ResolvedCatalogRequest, facets: ResourceCatalogFacets, idOf: (item: T) => string): ResourceCatalogPage<T> {
+  const offset = request.cursorId
     ? (() => {
-        const index = items.findIndex(item => idOf(item) === cursorId)
+        const index = items.findIndex(item => idOf(item) === request.cursorId)
         if (index < 0) throw new ResourceCatalogCursorError('Resource catalog cursor is stale or invalid')
         return index + 1
       })()
@@ -293,45 +303,116 @@ function page<T>(items: readonly T[], request: ResourceCatalogRequest, facets: R
   return {
     items: pageItems,
     total: items.length,
-    ...(nextOffset < items.length && pageItems.length ? { nextCursor: encodeCursor(cursorScope, idOf(pageItems[pageItems.length - 1]!)) } : {}),
+    ...(nextOffset < items.length && pageItems.length ? { nextCursor: encodeCursor(request.scope, request.filters, idOf(pageItems[pageItems.length - 1]!)) } : {}),
     facets,
   }
 }
 
-function encodeCursor(scope: string, id: string): string {
-  return `v2:${encodeURIComponent(scope)}:${encodeURIComponent(id)}`
+function resolveCatalogRequest(
+  request: ResourceCatalogRequest,
+  scope: string,
+): ResolvedCatalogRequest {
+  if (!request.cursor) {
+    return {
+      ...(request.filters ? { filters: request.filters } : {}),
+      ...(request.limit !== undefined ? { limit: request.limit } : {}),
+      scope,
+    }
+  }
+
+  const parsed = parseCursor(request.cursor)
+  if (parsed.scope !== scope)
+    throw new ResourceCatalogCursorError('Resource catalog cursor does not belong to this catalog')
+  if (
+    request.filters &&
+    canonicalFilterKey(request.filters) !== canonicalFilterKey(parsed.filters)
+  )
+    throw new ResourceCatalogCursorError('Resource catalog cursor does not belong to these filters')
+
+  return {
+    filters: parsed.filters,
+    cursorId: parsed.id,
+    ...(request.limit !== undefined ? { limit: request.limit } : {}),
+    scope,
+  }
 }
 
-function parseCursor(cursor: string | undefined, expectedScope: string): string | undefined {
-  if (!cursor) return undefined
-  const match = /^v2:([^:]+):([^:]+)$/.exec(cursor)
-  if (!match) throw new ResourceCatalogCursorError('Resource catalog cursor is invalid')
+function encodeCursor(
+  scope: string,
+  filters: ResourceCatalogFilter | undefined,
+  id: string,
+): string {
+  const payload = JSON.stringify({ scope, filters: canonicalFilters(filters) })
+  return `v3:${encodeURIComponent(payload)}:${encodeURIComponent(id)}`
+}
+
+function parseCursor(cursor: string): {
+  scope: string
+  filters: ResourceCatalogFilter
+  id: string
+} {
+  if (!cursor.startsWith('v3:'))
+    throw new ResourceCatalogCursorError('Resource catalog cursor is invalid')
+  const body = cursor.slice(3)
+  const separator = body.indexOf(':')
+  if (separator <= 0 || separator === body.length - 1)
+    throw new ResourceCatalogCursorError('Resource catalog cursor is invalid')
   try {
-    const scope = decodeURIComponent(match[1]!)
-    const id = decodeURIComponent(match[2]!)
-    if (!id || scope !== expectedScope)
-      throw new ResourceCatalogCursorError(
-        'Resource catalog cursor does not belong to these filters',
-      )
-    return id
+    const payload = JSON.parse(decodeURIComponent(body.slice(0, separator))) as unknown
+    const id = decodeURIComponent(body.slice(separator + 1))
+    if (!id || !isCursorPayload(payload))
+      throw new ResourceCatalogCursorError('Resource catalog cursor is invalid')
+    return { scope: payload.scope, filters: payload.filters, id }
   } catch (error) {
     if (error instanceof ResourceCatalogCursorError) throw error
     throw new ResourceCatalogCursorError('Resource catalog cursor is invalid')
   }
 }
 
-function stableFilterKey(filters?: ResourceCatalogFilter): string {
-  if (!filters) return '{}'
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(filters)
-        .filter(([, values]) => Array.isArray(values) && values.length > 0)
-        .sort(([left], [right]) => compareText(left, right))
-        .map(([key, values]) => [
-          key,
-          [...(values as readonly string[])].map(normalize).sort(compareText),
-        ]),
-    ),
+function canonicalFilters(filters?: ResourceCatalogFilter): ResourceCatalogFilter {
+  if (!filters) return {}
+  return Object.fromEntries(
+    Object.entries(filters)
+      .filter(([, values]) => Array.isArray(values) && values.length > 0)
+      .sort(([left], [right]) => compareText(left, right))
+      .map(([key, values]) => [
+        key,
+        [...(values as readonly string[])].sort(compareText),
+      ]),
+  ) as ResourceCatalogFilter
+}
+
+function canonicalFilterKey(filters?: ResourceCatalogFilter): string {
+  return JSON.stringify(canonicalFilters(filters))
+}
+
+function isCursorPayload(value: unknown): value is {
+  scope: string
+  filters: ResourceCatalogFilter
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  if (typeof record.scope !== 'string' || !record.scope) return false
+  if (!record.filters || typeof record.filters !== 'object' || Array.isArray(record.filters)) return false
+  const allowedKeys = new Set([
+    'packIds',
+    'dimensions',
+    'primaryCategories',
+    'categories',
+    'styles',
+    'gameTypes',
+    'packTags',
+    'usageTags',
+    'assetKinds',
+    'capabilities',
+    'formats',
+  ])
+  return Object.entries(record.filters as Record<string, unknown>).every(
+    ([key, values]) =>
+      allowedKeys.has(key) &&
+      Array.isArray(values) &&
+      values.length > 0 &&
+      values.every(item => typeof item === 'string' && item.trim().length > 0),
   )
 }
 
@@ -340,9 +421,11 @@ function readyDependencyIds(elements: readonly ResourceElement[]): ReadonlySet<s
 }
 
 function hasCompleteDependencyClosure(element: ResourceElement, readyIds: ReadonlySet<string>): boolean {
-  return element.dependencies.every(dependencyId => readyIds.has(dependencyId)) &&
+  return (
+    element.dependencies.every(dependencyId => readyIds.has(dependencyId)) &&
     (element.dependencyBindings ?? []).every(binding => readyIds.has(binding.dependencyElementId)) &&
     (element.relations ?? []).every(relation => relation.required === false || readyIds.has(relation.targetElementId))
+  )
 }
 
 function includesFormat(formats: readonly string[], path: string): boolean {

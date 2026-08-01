@@ -21,19 +21,8 @@ type StorageObjectRow = {
   metadata: Record<string, unknown> | null
 }
 
-type MigrationJobRow = { source_storage_object_id: string }
-type SourceStorageObjectRow = {
-  provider: string
-  bucket: string
-  object_key: string
-  mime_type: string | null
-  byte_size: number | null
-  checksum_value: string | null
-}
-
 loadEnvFile('.env.local')
 const apply = process.argv.includes('--apply')
-const repairMissing = process.argv.includes('--repair-missing')
 const deepLimit = readPositiveIntegerArgument('--deep-limit') ?? 0
 const requestTimeoutMs =
   readPositiveIntegerArgument('--request-timeout-ms') ?? 120_000
@@ -81,16 +70,6 @@ for (const [index, object] of objects.entries()) {
           head.metadata['beegame-sha256'] !== object.checksum_value
         ? 'checksum_metadata_mismatch'
       : undefined
-  if (issue === 'object_missing' && repairMissing) {
-    const repaired = await repairMissingObject(object, locator)
-    if (repaired) {
-      healthy += 1
-      console.log(`${object.id}: restored from verified Supabase source`)
-      if ((index + 1) % 100 === 0)
-        console.log(`Reconciliation progress: ${index + 1}/${objects.length}.`)
-      continue
-    }
-  }
   if (!issue && deepChecked < deepLimit && object.checksum_value) {
     deepChecked += 1
     const payload = await retryOperation(() => driver.getObject(locator))
@@ -157,68 +136,6 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
 }
 
-async function repairMissingObject(
-  object: StorageObjectRow,
-  destination: {
-    provider: 'r2'
-    bucketRole: ProjectStorageBucketRole
-    bucket: string
-    objectKey: string
-  },
-): Promise<boolean> {
-  const jobs = await rest<MigrationJobRow[]>(
-    `beegame_storage_migration_jobs?destination_storage_object_id=eq.${encodeURIComponent(object.id)}&select=source_storage_object_id&order=created_at.desc&limit=1`,
-  )
-  const sourceId = jobs[0]?.source_storage_object_id
-  if (!sourceId) return false
-  const sources = await rest<SourceStorageObjectRow[]>(
-    `beegame_storage_objects?id=eq.${encodeURIComponent(sourceId)}&provider=eq.supabase&deleted_at=is.null&select=provider,bucket,object_key,mime_type,byte_size,checksum_value&limit=1`,
-  )
-  const source = sources[0]
-  if (!source) return false
-  const response = await retryOperation(async () => {
-    const result = await fetch(
-      `${supabaseUrl}/storage/v1/object/${encodeURIComponent(source.bucket)}/${encodeObjectPath(source.object_key)}`,
-      { headers, signal: AbortSignal.timeout(requestTimeoutMs) },
-    )
-    if (!result.ok)
-      throw new Error(`Supabase recovery download failed (${result.status})`)
-    return result
-  })
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  const checksum = sha256Hex(bytes)
-  if (source.byte_size !== null && bytes.byteLength !== source.byte_size)
-    throw new Error(`Supabase recovery source size mismatch for ${object.id}`)
-  if (source.checksum_value && checksum !== source.checksum_value)
-    throw new Error(`Supabase recovery source checksum mismatch for ${object.id}`)
-  if (object.byte_size !== null && bytes.byteLength !== object.byte_size)
-    throw new Error(`R2 recovery destination size mismatch for ${object.id}`)
-  if (object.checksum_value && checksum !== object.checksum_value)
-    throw new Error(`R2 recovery destination checksum mismatch for ${object.id}`)
-  await retryOperation(() =>
-    driver.putObject(
-      destination,
-      bytes,
-      source.mime_type ||
-        response.headers.get('content-type') ||
-        'application/octet-stream',
-      {
-        'beegame-object-id': object.id,
-        'beegame-sha256': checksum,
-      },
-    ),
-  )
-  const verified = await retryOperation(() => driver.headObject(destination))
-  return Boolean(
-    verified &&
-      verified.byteSize === bytes.byteLength &&
-      verified.metadata['beegame-sha256'] === checksum,
-  )
-}
-
-function encodeObjectPath(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/')
-}
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) throw new Error(`${name} is required`)

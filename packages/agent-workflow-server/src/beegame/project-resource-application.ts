@@ -1,27 +1,21 @@
-import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
 import {
-  effectiveAssetFormats,
-  importBeeGameLibraryResourceInWorkspace,
+  addBeeGameLibraryResourceToWorkspace,
   readBeeGameAssetManifest,
-  refreshBeeGameLibraryImportMetadataInWorkspace,
+  refreshBeeGameLibraryResourceMetadataInWorkspace,
   type BeeGameAssetManifest,
-  type BeeGameResourceImport,
+  type BeeGameProjectResource,
 } from './asset-contracts'
 import type {
-  ResourceCandidatePage,
+  ResourceCatalogBrowsePage,
   ResourceCatalogInput,
   ResourceResolvedSelection,
 } from './resource-selection-client'
 
 export type ProjectResourceSelectionClient = {
-  queryCandidates(
-    input: ResourceCatalogInput,
-  ): Promise<ResourceCandidatePage>
-  resolveSelections(
+  browseCatalog(input: ResourceCatalogInput): Promise<ResourceCatalogBrowsePage>
+  resolveResources(
     selections: Array<{
-      importId: string
+      resourceId: string
       packId: string
       expectedPackVersion: string
       elementId: string
@@ -36,34 +30,34 @@ type ProjectResourceFetch = (
   init?: RequestInit,
 ) => Promise<Response>
 
-export type ProjectResourceImportBatchResult = {
-  manifest: BeeGameAssetManifest
-  results: Array<{
-    importId: string
-    status: 'available' | 'failed'
-    packId: string
-    packVersion: string
-    elementId: string
-    rootPath?: string
-    localFiles?: string[]
-    error?: string
-  }>
+export type ProjectResourceAcquisition = {
+  resourceId: string
+  status: 'verified' | 'failed'
+  packId: string
+  packVersion: string
+  elementId: string
+  rootPath?: string
+  filePaths?: string[]
+  error?: string
 }
 
-const RESOURCE_INVENTORY_POLICY_PATH =
-  '.beegame/resources/inventory-policy.json'
-const MAX_AGENT_CATALOG_PAGE_ITEMS = 16
+export type ProjectResourceAcquisitionResult = {
+  manifest: BeeGameAssetManifest
+  resources: ProjectResourceAcquisition[]
+}
 
 export type ProjectResourceMetadataRefreshResult = {
   manifest: BeeGameAssetManifest
-  refreshedImportIds: string[]
-  unresolvedImportIds: string[]
+  refreshedResourceIds: string[]
+  unresolvedResourceIds: string[]
 }
 
+const MAX_AGENT_CATALOG_PAGE_ITEMS = 64
+
 /**
- * Project-side resource application boundary shared by HTTP/UI and native
- * Claude tools. Candidate search and signed-resource ownership remain exclusively
- * in the existing Resource Library Service.
+ * Project-side boundary for browsing and acquiring Resource Library material.
+ * It deliberately knows nothing about project-specific game responsibilities.
+ * The Agent may browse repeatedly, acquire useful material, and compose it later.
  */
 export class ProjectResourceApplication {
   constructor(
@@ -71,8 +65,8 @@ export class ProjectResourceApplication {
     private readonly fetchImpl: ProjectResourceFetch = fetch,
   ) {}
 
-  queryCandidates(input: ResourceCatalogInput) {
-    return this.client.queryCandidates({
+  browseCatalog(input: ResourceCatalogInput) {
+    return this.client.browseCatalog({
       ...input,
       limit: Math.min(
         Math.max(Math.trunc(input.limit ?? MAX_AGENT_CATALOG_PAGE_ITEMS), 1),
@@ -81,126 +75,59 @@ export class ProjectResourceApplication {
     })
   }
 
-  async importExplicitSelections(
+  async acquireResources(
     workspacePath: string,
     selections: Array<{
-      importId: string
-      requirementIds?: string[]
+      resourceId: string
       packId: string
       expectedPackVersion: string
       elementId: string
       destinationPath: string
       selectionReason: string[]
     }>,
-  ): Promise<ProjectResourceImportBatchResult> {
-    const manifestBeforeImport = await readBeeGameAssetManifest(workspacePath)
-    const targetFormats =
-      manifestBeforeImport.project_target?.asset_format_capabilities?.filter(
-        format => typeof format === 'string' && format.trim(),
-      ) ?? []
-    if (targetFormats.length === 0) {
-      return {
-        manifest: manifestBeforeImport,
-        results: selections.map(selection => ({
-          importId: selection.importId,
-          status: 'failed' as const,
-          packId: selection.packId,
-          packVersion: selection.expectedPackVersion,
-          elementId: selection.elementId,
-          error:
-            'Target runtime project_target.asset_format_capabilities must be recorded in assets/asset-manifest.json before Resource Library import',
-        })),
-      }
-    }
-    const importBudget = manifestBeforeImport.requirements.reduce(
-      (total, requirement) =>
-        total + (requirement.resource_requirement?.import_budget ?? 0),
-      0,
-    )
-    const existingImportIds = new Set(
-      (manifestBeforeImport.imports ?? []).map(
-        resourceImport => resourceImport.id,
-      ),
-    )
-    const requestedNewImportIds = new Set(
-      selections
-        .map(selection => selection.importId)
-        .filter(importId => !existingImportIds.has(importId)),
-    )
-    if (requestedNewImportIds.size > 0 && importBudget <= 0) {
+  ): Promise<ProjectResourceAcquisitionResult> {
+    const before = await readBeeGameAssetManifest(workspacePath)
+    if (!before.project_target?.asset_format_capabilities.length) {
       throw new Error(
-        'Resource import budget must be declared in requirement.resource_requirement.import_budget before importing new inventory',
+        'project_target.asset_format_capabilities must describe the target runtime before resources are acquired',
       )
     }
-    if (requestedNewImportIds.size > 0) {
-      await assertInventoryCeiling(workspacePath, importBudget)
-    }
-    if (
-      (manifestBeforeImport.imports?.length ?? 0) + requestedNewImportIds.size >
-      importBudget
-    ) {
-      throw new Error(
-        `Resource import budget exceeded: ${manifestBeforeImport.imports?.length ?? 0} existing + ${requestedNewImportIds.size} new > ${importBudget}`,
-      )
-    }
-    const resolved = await this.client.resolveSelections(
-      selections.map(selection => ({
-        importId: selection.importId,
-        packId: selection.packId,
-        expectedPackVersion: selection.expectedPackVersion,
-        elementId: selection.elementId,
-        destinationPath: selection.destinationPath,
-        selectionReason: selection.selectionReason,
-      })),
+    const duplicateIds = duplicateValues(
+      selections.map(item => item.resourceId),
     )
+    if (duplicateIds.length)
+      throw new Error(`Resource ids must be unique: ${duplicateIds.join(', ')}`)
+
+    const resolved = await this.client.resolveResources(selections)
     const resolvedById = new Map(
-      resolved.map(selection => [selection.importId, selection]),
+      resolved.map(selection => [selection.resourceId, selection]),
     )
-    const results: ProjectResourceImportBatchResult['results'] = []
-    for (const requested of selections) {
-      const selection = resolvedById.get(requested.importId)
+    const resources: ProjectResourceAcquisition[] = []
+    for (const request of selections) {
+      const selection = resolvedById.get(request.resourceId)
       if (!selection) {
-        results.push({
-          importId: requested.importId,
+        resources.push({
+          resourceId: request.resourceId,
           status: 'failed',
-          packId: requested.packId,
-          packVersion: '',
-          elementId: requested.elementId,
-          error: 'Explicit resource selection could not be resolved',
-        })
-        continue
-      }
-      const requirementIssue = importRequirementIssue(
-        manifestBeforeImport,
-        requested.requirementIds ?? [],
-        selection.elementPath,
-      )
-      if (requirementIssue) {
-        results.push({
-          importId: requested.importId,
-          status: 'failed',
-          packId: requested.packId,
-          packVersion: selection.packVersion,
-          elementId: selection.elementId,
-          error: requirementIssue,
+          packId: request.packId,
+          packVersion: request.expectedPackVersion,
+          elementId: request.elementId,
+          error: 'The selected Resource Library element could not be resolved.',
         })
         continue
       }
       try {
-        const imported = await importBeeGameLibraryResourceInWorkspace(
+        const acquired = await addBeeGameLibraryResourceToWorkspace(
           workspacePath,
           {
-            id: requested.importId,
-            ...(requested.requirementIds?.length
-              ? { requirement_ids: requested.requirementIds }
-              : {}),
-            destination_path: requested.destinationPath,
+            id: request.resourceId,
+            destination_path: request.destinationPath,
             pack_id: selection.packId,
             pack_version: selection.packVersion,
             element_id: selection.elementId,
             element_path: selection.elementPath,
             source_url: selection.sourceUrl,
-            selection_reason: requested.selectionReason,
+            selection_reason: request.selectionReason,
             ...(selection.assetKind ? { asset_kind: selection.assetKind } : {}),
             ...(selection.capabilities?.length
               ? { capabilities: selection.capabilities }
@@ -223,60 +150,52 @@ export class ProjectResourceApplication {
           },
           this.fetchImpl,
         )
-        results.push({
-          importId: imported.resourceImport.id,
-          status: 'available',
+        resources.push({
+          resourceId: acquired.resource.id,
+          status: 'verified',
           packId: selection.packId,
           packVersion: selection.packVersion,
           elementId: selection.elementId,
-          rootPath: imported.resourceImport.root_path,
-          localFiles: imported.resourceImport.local_files,
+          rootPath: acquired.resource.root_path,
+          filePaths: acquired.resource.file_paths,
         })
       } catch (error) {
-        results.push({
-          importId: requested.importId,
+        resources.push({
+          resourceId: request.resourceId,
           status: 'failed',
-          packId: requested.packId,
+          packId: selection.packId,
           packVersion: selection.packVersion,
-          elementId: requested.elementId,
+          elementId: selection.elementId,
           error: toErrorMessage(error),
         })
       }
     }
-    const manifest = await readBeeGameAssetManifest(workspacePath)
-    return { manifest, results }
+    return {
+      manifest: await readBeeGameAssetManifest(workspacePath),
+      resources,
+    }
   }
 
-  async refreshImportedMetadata(
+  async refreshLibraryMetadata(
     workspacePath: string,
   ): Promise<ProjectResourceMetadataRefreshResult> {
     const manifest = await readBeeGameAssetManifest(workspacePath)
-    const libraryImports = (manifest.imports ?? []).filter(
-      resourceImport => resourceImport.source.type === 'resource-library',
+    const libraryResources = manifest.resources.filter(
+      resource => resource.source.type === 'resource-library',
     )
     const resolved: ResourceResolvedSelection[] = []
-    const unresolvedImportIds: string[] = []
-    const importsByPack = new Map<string, typeof libraryImports>()
-    for (const resourceImport of libraryImports) {
-      const packId = resourceImport.source.pack_id!
-      importsByPack.set(packId, [
-        ...(importsByPack.get(packId) ?? []),
-        resourceImport,
-      ])
+    const unresolvedResourceIds: string[] = []
+    for (let start = 0; start < libraryResources.length; start += 64) {
+      const result = await this.resolveRefreshBatch(
+        libraryResources.slice(start, start + 64),
+      )
+      resolved.push(...result.resolved)
+      unresolvedResourceIds.push(...result.unresolvedResourceIds)
     }
-    for (const imports of importsByPack.values()) {
-      for (let start = 0; start < imports.length; start += 64) {
-        const result = await this.resolveRefreshBatchResiliently(
-          imports.slice(start, start + 64),
-        )
-        resolved.push(...result.resolved)
-        unresolvedImportIds.push(...result.unresolvedImportIds)
-      }
-    }
-    const refreshed = await refreshBeeGameLibraryImportMetadataInWorkspace(
+    const refreshed = await refreshBeeGameLibraryResourceMetadataInWorkspace(
       workspacePath,
       resolved.map(selection => ({
-        import_id: selection.importId,
+        resource_id: selection.resourceId,
         pack_id: selection.packId,
         pack_version: selection.packVersion,
         element_id: selection.elementId,
@@ -292,121 +211,66 @@ export class ProjectResourceApplication {
           : {}),
       })),
     )
-    return { ...refreshed, unresolvedImportIds }
+    return { ...refreshed, unresolvedResourceIds }
   }
 
-  private async resolveRefreshBatchResiliently(
-    imports: BeeGameResourceImport[],
+  private async resolveRefreshBatch(
+    resources: BeeGameProjectResource[],
   ): Promise<{
     resolved: ResourceResolvedSelection[]
-    unresolvedImportIds: string[]
+    unresolvedResourceIds: string[]
   }> {
-    if (imports.length === 0) return { resolved: [], unresolvedImportIds: [] }
+    if (!resources.length) return { resolved: [], unresolvedResourceIds: [] }
     try {
-      const result = await this.client.resolveSelections(
-        imports.map(resourceImport => ({
-          importId: resourceImport.id,
-          packId: resourceImport.source.pack_id!,
-          expectedPackVersion: resourceImport.source.pack_version!,
-          elementId: resourceImport.source.element_id!,
-          selectionReason: resourceImport.selection_reason.length
-            ? resourceImport.selection_reason
-            : ['refresh-existing-import-metadata'],
-        })),
+      const result = await this.client.resolveResources(
+        resources.map(resource => {
+          if (resource.source.type !== 'resource-library')
+            throw new Error(`Resource is not library-backed: ${resource.id}`)
+          return {
+            resourceId: resource.id,
+            packId: resource.source.pack_id,
+            expectedPackVersion: resource.source.pack_version,
+            elementId: resource.source.element_id,
+            selectionReason: resource.selection_reason,
+          }
+        }),
       )
-      const returned = new Set(result.map(selection => selection.importId))
+      const returned = new Set(result.map(item => item.resourceId))
       return {
         resolved: result,
-        unresolvedImportIds: imports
-          .filter(resourceImport => !returned.has(resourceImport.id))
-          .map(resourceImport => resourceImport.id),
+        unresolvedResourceIds: resources
+          .filter(resource => !returned.has(resource.id))
+          .map(resource => resource.id),
       }
     } catch {
-      if (imports.length === 1) {
-        return { resolved: [], unresolvedImportIds: [imports[0]!.id] }
-      }
-      const midpoint = Math.ceil(imports.length / 2)
+      if (resources.length === 1)
+        return { resolved: [], unresolvedResourceIds: [resources[0]!.id] }
+      const midpoint = Math.ceil(resources.length / 2)
       const [left, right] = await Promise.all([
-        this.resolveRefreshBatchResiliently(imports.slice(0, midpoint)),
-        this.resolveRefreshBatchResiliently(imports.slice(midpoint)),
+        this.resolveRefreshBatch(resources.slice(0, midpoint)),
+        this.resolveRefreshBatch(resources.slice(midpoint)),
       ])
       return {
         resolved: [...left.resolved, ...right.resolved],
-        unresolvedImportIds: [
-          ...left.unresolvedImportIds,
-          ...right.unresolvedImportIds,
+        unresolvedResourceIds: [
+          ...left.unresolvedResourceIds,
+          ...right.unresolvedResourceIds,
         ],
       }
     }
   }
 }
 
-function importRequirementIssue(
-  manifest: BeeGameAssetManifest,
-  requirementIds: string[],
-  elementPath: string,
-): string | undefined {
-  if (!requirementIds.length) return undefined
-  const extension = elementPath.split('.').at(-1)?.trim().toLowerCase() ?? ''
-  for (const requirementId of requirementIds) {
-    const requirement = manifest.requirements.find(
-      candidate => candidate.id === requirementId,
-    )
-    if (!requirement)
-      return `Resource requirement does not exist: ${requirementId}`
-    if (!requirement.resource_requirement)
-      return `Resource requirement does not accept imported files: ${requirementId}`
-    const formats = effectiveAssetFormats(requirement, manifest.project_target)
-    if (!extension || !formats.includes(extension)) {
-      return `Resource format .${extension || 'unknown'} is not accepted by requirement ${requirementId}`
-    }
+function duplicateValues(values: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const duplicate = new Set<string>()
+  for (const value of values) {
+    if (seen.has(value)) duplicate.add(value)
+    seen.add(value)
   }
-  return undefined
+  return [...duplicate]
 }
-
-async function assertInventoryCeiling(
-  workspacePath: string,
-  declaredBudget: number,
-): Promise<void> {
-  const path = join(resolve(workspacePath), RESOURCE_INVENTORY_POLICY_PATH)
-  if (!existsSync(path)) {
-    await mkdir(dirname(path), { recursive: true })
-    await writeFile(
-      path,
-      JSON.stringify({ version: 1, inventoryCeiling: declaredBudget }),
-      'utf8',
-    )
-    return
-  }
-  let policy: unknown
-  try {
-    policy = JSON.parse(await readFile(path, 'utf8'))
-  } catch {
-    throw new Error(
-      'Resource inventory policy is invalid and must be repaired before importing new inventory',
-    )
-  }
-  const ceiling =
-    policy &&
-    typeof policy === 'object' &&
-    !Array.isArray(policy) &&
-    (policy as Record<string, unknown>).version === 1 &&
-    Number.isInteger((policy as Record<string, unknown>).inventoryCeiling)
-      ? Number((policy as Record<string, unknown>).inventoryCeiling)
-      : undefined
-  if (ceiling === undefined || ceiling < 0) {
-    throw new Error(
-      'Resource inventory policy is invalid and must be repaired before importing new inventory',
-    )
-  }
-  if (declaredBudget > ceiling) {
-    throw new Error(
-      `Resource import budget cannot be increased after inventory selection begins: ${declaredBudget} declared > ${ceiling} locked`,
-    )
-  }
-}
-
 
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Resource operation failed'
+  return error instanceof Error ? error.message : String(error)
 }

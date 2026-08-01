@@ -5,8 +5,8 @@
 Turn the Pack detail page into a fixed asset-workspace for administrators: a
 scrolling file explorer on the left, a fixed preview stage on the right, and a
 deliberate inspector that opens only on request. Pack creation, editing, cover
-upload, publishing, and deletion use real resource-service and Supabase Storage
-operations.
+upload, publishing, and deletion use the resource service with R2 as the sole
+Resource Library binary backend.
 
 ## Workspace layout
 
@@ -41,7 +41,7 @@ field. It saves one Pack update request and reports errors inline.
 
 `删除 Pack` lives in the edit dialog’s danger zone. It requires a typed Pack
 name confirmation. On success it removes Pack metadata, elements, folders,
-cover, and all Storage objects below the Pack prefix, then returns to the Pack
+cover, and all R2 objects below the Pack prefix, then returns to the Pack
 list. The delete endpoint is administrator-only and is idempotent when the
 Pack is already absent.
 
@@ -100,7 +100,7 @@ serializable metrics through the existing element-update path.
 - Extend Pack updates to accept the editable metadata fields only; map frontend
   camelCase to database columns rather than forwarding arbitrary request keys.
 - Add `POST /api/resource-packs/:id/cover` for multipart cover upload.
-- Add `DELETE /api/resource-packs/:id` for Pack deletion and Storage-prefix
+- Add `DELETE /api/resource-packs/:id` for Pack deletion and R2-prefix
   cleanup.
 - Add a signed element-resource URL to element read responses. The URL is
   derived server-side and never exposes a service-role key.

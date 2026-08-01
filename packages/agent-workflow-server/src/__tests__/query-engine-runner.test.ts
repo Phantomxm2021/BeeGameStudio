@@ -76,9 +76,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         'Read',
       ),
     ).toBe(true)
+
   })
 
-  test('preserves the existing workflow mutation and resource Bash boundaries', () => {
+  test('preserves workflow mutation boundaries without exposing resource shell access', () => {
     expect(
       requiresBeeGameWorkflowBoundaryCheck(
         {
@@ -96,7 +97,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         },
         'Bash',
       ),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       requiresBeeGameWorkflowBoundaryCheck(
         {
@@ -135,10 +136,20 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       { name: 'SubmitDocumentAuthorResult' },
     ]
 
+    expect(
+      selectBeeGameWorkerTools(tools, 'document-author').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+    expect(selectBeeGameWorkerTools(tools, 'document-reviewer')).toEqual([])
+
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+
     for (const workerType of [
-      'document-author',
-      'document-reviewer',
-      'resource-preparer',
       'implementation-worker',
       'implementation-auditor',
       'acceptance-validator',
@@ -146,7 +157,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       'question-answerer',
     ]) {
       expect(
-        selectBeeGameWorkerTools(tools, workerType, 'repair').map(
+        selectBeeGameWorkerTools(tools, workerType).map(
           tool => (tool as { name: string }).name,
         ),
       ).toEqual(['Read', 'Task', 'SubmitDocumentAuthorResult'])
@@ -156,35 +167,55 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(selectBeeGameWorkerTools(tools, 'unrelated-agent')).toEqual(tools)
   })
 
-  test('keeps generic manifest mutation tools only for scoped resource repair', () => {
+  test('keeps scoped file tools for resource production', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
       { name: 'Edit' },
       { name: 'MultiEdit' },
       { name: 'NotebookEdit' },
+      { name: 'Bash' },
+      { name: 'TodoWrite' },
     ]
 
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer', 'fresh').map(
+      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
+    ).toEqual(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+  })
+
+  test('gives resource production one scoped file lane without shell or nested agents', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'Write' },
+      { name: 'Glob' },
+      { name: 'Bash' },
+      { name: 'Agent' },
+      { name: 'Task' },
+      { name: 'WebSearch' },
+    ]
+
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer', 'selection').map(
+      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
+    ).toEqual(['Read', 'Write', 'Glob'])
+  })
+
+  test('keeps document writes batchable without the incremental Edit lane', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'Write' },
+      { name: 'Edit' },
+      { name: 'MultiEdit' },
+    ]
+
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer', 'reselection').map(
+      selectBeeGameWorkerTools(tools, 'document-author').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer', 'repair').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual(tools.map(tool => tool.name))
+    ).toEqual(['Read', 'Write', 'MultiEdit'])
   })
 
   test('removes file and exploration lanes from the atomic planner', () => {
@@ -207,7 +238,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const existing = { name: 'existing-mcp-tool' }
     const resourceLibrary = { name: 'ResourceLibrary' }
     const terminalTools = [
-      'SubmitAssetManifest',
+      'AssetManifest',
       'SubmitAtomicTaskPlan',
       'SubmitImplementationResult',
       'SubmitValidationResult',
@@ -347,8 +378,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       },
     )
     const toolInput = {
-      action: 'query_candidates',
-      requirement_ids: ['model'],
+      action: 'browse_catalog',
+      filters: { dimensions: ['3D'] },
     }
 
     expect(
@@ -373,7 +404,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
+        toolInput: {
+          action: 'browse_catalog',
+          filters: { dimensions: ['3D'] },
+        },
         assistantMessage: turn,
         toolUseContext: {},
       }),
@@ -382,7 +416,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
+        toolInput: {
+          action: 'browse_catalog',
+          filters: { dimensions: ['3D'] },
+        },
         assistantMessage: turn,
         toolUseContext: {},
       }),
@@ -391,7 +428,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'import_elements', selections: [] },
+        toolInput: { action: 'import_resources', selections: [] },
         assistantMessage: turn,
         toolUseContext: {},
       }),
@@ -400,7 +437,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       gate.issue({
         workerType: 'resource-preparer',
         toolName: 'ResourceLibrary',
-        toolInput: { action: 'query_candidates', requirement_ids: ['model'] },
+        toolInput: {
+          action: 'browse_catalog',
+          filters: { dimensions: ['3D'] },
+        },
         assistantMessage: {},
         toolUseContext: {},
       }),
@@ -421,7 +461,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         toolName: 'ResourceLibrary',
         toolInput: {
           action: 'match',
-          slot_id: 'primary-character',
         },
         toolUseID: 'invalid-resource-action',
       }),
@@ -429,7 +468,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       expect.objectContaining({
         behavior: 'deny',
         message:
-          'Unsupported ResourceLibrary action "match". Allowed actions: query_candidates, import_elements, record_no_match, refresh_import_metadata.',
+          'Unsupported ResourceLibrary action "match". Allowed actions: browse_catalog, import_resources, refresh_resource_metadata.',
       }),
     )
     expect(requests).toEqual([])
@@ -444,13 +483,15 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       },
     )
     const toolInput = {
-      action: 'import_elements',
+      action: 'import_resources',
       selections: [
         {
-          import_id: 'primary-character',
+          resource_id: 'primary-character',
           pack_id: 'pack-a',
+          expected_pack_version: '1.0.0',
           element_id: 'character-a',
-          destination_path: 'assets/library/character',
+          destination_path: 'assets/runtime/character',
+          selection_reason: ['Observed fit.'],
         },
       ],
     }
@@ -498,7 +539,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(requests).toHaveLength(2)
   })
 
-  test('routes refresh_import_metadata through the ResourceLibrary mutation boundary', async () => {
+  test('routes refresh_resource_metadata through the ResourceLibrary mutation boundary', async () => {
     const requests: Array<Record<string, unknown>> = []
     const broker = new NativeResourceLibraryPermissionBroker(
       () => async request => {
@@ -506,7 +547,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         return { behavior: 'deny' }
       },
     )
-    const toolInput = { action: 'refresh_import_metadata' }
+    const toolInput = { action: 'refresh_resource_metadata' }
 
     expect(
       await broker.authorize({
@@ -532,7 +573,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     )
     await broker.authorize({
       toolName: 'ResourceLibrary',
-      toolInput: { action: 'import_elements', selections: [] },
+      toolInput: { action: 'import_resources', selections: [] },
       toolUseID: 'resource-write',
     })
 

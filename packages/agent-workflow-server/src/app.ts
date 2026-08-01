@@ -122,9 +122,7 @@ import {
   getUserDashboardDataRoot,
   resolveSessionWorkspacePath,
 } from './local-runtime-service'
-import {
-  createSupabaseDashboardStoreFromEnv,
-} from './supabase-dashboard-store'
+import { createSupabaseDashboardStoreFromEnv } from './supabase-dashboard-store'
 import { createSupabaseRuntimeEnvClientFromEnv } from './supabase-runtime-env-client'
 import {
   createInvitationServiceFromEnv,
@@ -133,12 +131,8 @@ import {
 } from './invitation-service'
 import { resolveBeeGameBillingConfig } from '@bee-game-studio/beegame-billing-core/billing-config'
 import { createRemoteUsageBillingClient } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import {
-  registerBeeGameBillingStoreRoutes,
-} from '@bee-game-studio/beegame-billing-core/billing-route-groups'
-import {
-  MAX_SKILL_REQUEST_BYTES,
-} from '@bee-game-studio/beegame-skills-core/client'
+import { registerBeeGameBillingStoreRoutes } from '@bee-game-studio/beegame-billing-core/billing-route-groups'
+import { MAX_SKILL_REQUEST_BYTES } from '@bee-game-studio/beegame-skills-core/client'
 import {
   readRequestBytes,
   RequestBodyLimitError,
@@ -183,7 +177,10 @@ import type {
   DispatchRecord,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import { projectDocumentDisplayTasks } from './beegame/delivery-workflow/document-display-tasks'
+import {
+  projectAssetDisplayTasks,
+  projectDocumentDisplayTasks,
+} from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import {
   getObservedNativeResourceLibraryEvidence,
@@ -427,9 +424,10 @@ export function createAgentWorkflowApp(
   const supabaseRuntimeEnvClient = supabaseStore
     ? createSupabaseRuntimeEnvClientFromEnv()
     : undefined
-  const invitationService = options.invitationService === false
-    ? undefined
-    : (options.invitationService ?? createInvitationServiceFromEnv())
+  const invitationService =
+    options.invitationService === false
+      ? undefined
+      : (options.invitationService ?? createInvitationServiceFromEnv())
   const configuredUserResolver = createConfiguredUserResolver()
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
     sessionStorePath: options.sessionStorePath,
@@ -469,12 +467,7 @@ export function createAgentWorkflowApp(
   }
   const billingConfig = resolveBeeGameBillingConfig()
   const proxyBillingRequest = (request: Request, path: string) =>
-    proxyAuthenticatedBillingRequest(
-      request,
-      billingConfig,
-      path,
-      sessionAuth,
-    )
+    proxyAuthenticatedBillingRequest(request, billingConfig, path, sessionAuth)
   const skillsConfig =
     options.skillsConfig === false
       ? null
@@ -622,10 +615,18 @@ export function createAgentWorkflowApp(
               workspacePath: workspaceKey,
             }),
           )
-        const current = states.filter(state => state.state === 'current')
+        const observed = states.filter(
+          (
+            state,
+          ): state is Exclude<
+            NativeResourceLibraryEvidenceState,
+            { state: 'missing' }
+          > => state.state !== 'missing',
+        )
+        const current = observed.filter(state => state.state === 'current')
         const selected = current.length
           ? current
-          : states.filter(state => state.state === 'stale')
+          : observed.filter(state => state.state === 'stale')
         if (!selected.length) return { state: 'missing' }
         const actions = [...new Set(selected.flatMap(state => state.actions))]
         const latest = selected
@@ -638,10 +639,10 @@ export function createAgentWorkflowApp(
           state: current.length ? 'current' : 'stale',
           actions,
           failedActions: latest.failedActions,
-          successfulImportCount: Math.max(
-            ...selected.map(state => state.successfulImportCount),
+          successfulResourceCount: Math.max(
+            ...selected.map(state => state.successfulResourceCount),
           ),
-          failedImportCount: latest.failedImportCount,
+          failedResourceCount: latest.failedResourceCount,
           observedAt: latest.observedAt,
         } satisfies NativeResourceLibraryEvidenceState
       },
@@ -980,7 +981,10 @@ export function createAgentWorkflowApp(
         },
       }
     }
-    const accessToken = await resolveValidRequestAccessToken(request, sessionAuth)
+    const accessToken = await resolveValidRequestAccessToken(
+      request,
+      sessionAuth,
+    )
     if (!accessToken) return { unauthorized: true }
     return { accessToken, invitationService }
   }
@@ -989,7 +993,11 @@ export function createAgentWorkflowApp(
     const resolved = await resolveInvitationAdmin(c.req.raw)
     if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
     if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
-    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    if ('unauthorized' in resolved)
+      return c.json(
+        { error: 'Unauthorized', message: 'authentication required' },
+        401,
+      )
     try {
       return c.json(await resolved.invitationService.list(resolved.accessToken))
     } catch (error) {
@@ -1001,16 +1009,22 @@ export function createAgentWorkflowApp(
     const resolved = await resolveInvitationAdmin(c.req.raw)
     if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
     if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
-    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    if ('unauthorized' in resolved)
+      return c.json(
+        { error: 'Unauthorized', message: 'authentication required' },
+        401,
+      )
     const body = await readJson(c.req.raw)
     if (typeof body.required !== 'boolean') {
       return c.json({ error: 'required must be a boolean' }, 400)
     }
     try {
-      return c.json(await resolved.invitationService.saveSettings(
-        resolved.accessToken,
-        body.required,
-      ))
+      return c.json(
+        await resolved.invitationService.saveSettings(
+          resolved.accessToken,
+          body.required,
+        ),
+      )
     } catch (error) {
       return invitationRouteError(c, error)
     }
@@ -1020,25 +1034,32 @@ export function createAgentWorkflowApp(
     const resolved = await resolveInvitationAdmin(c.req.raw)
     if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
     if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
-    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    if ('unauthorized' in resolved)
+      return c.json(
+        { error: 'Unauthorized', message: 'authentication required' },
+        401,
+      )
     const body = await readJson(c.req.raw)
     const code = typeof body.code === 'string' ? body.code.trim() : ''
     if (!code) return c.json({ error: 'Invitation code is required' }, 400)
-    if (body.maxUses !== undefined && body.maxUses !== null &&
-      (!Number.isInteger(body.maxUses) || Number(body.maxUses) < 1)) {
+    if (
+      body.maxUses !== undefined &&
+      body.maxUses !== null &&
+      (!Number.isInteger(body.maxUses) || Number(body.maxUses) < 1)
+    ) {
       return c.json({ error: 'maxUses must be a positive integer' }, 400)
     }
     try {
-      return c.json(await resolved.invitationService.create(
-        resolved.accessToken,
-        {
+      return c.json(
+        await resolved.invitationService.create(resolved.accessToken, {
           code,
           ...(typeof body.label === 'string' ? { label: body.label } : {}),
           ...(body.maxUses === null || typeof body.maxUses === 'number'
             ? { maxUses: body.maxUses }
             : {}),
-        },
-      ), 201)
+        }),
+        201,
+      )
     } catch (error) {
       return invitationRouteError(c, error)
     }
@@ -1048,21 +1069,26 @@ export function createAgentWorkflowApp(
     const resolved = await resolveInvitationAdmin(c.req.raw)
     if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
     if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
-    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    if ('unauthorized' in resolved)
+      return c.json(
+        { error: 'Unauthorized', message: 'authentication required' },
+        401,
+      )
     const body = await readJson(c.req.raw)
     try {
-      return c.json(await resolved.invitationService.update(
-        resolved.accessToken,
-        {
+      return c.json(
+        await resolved.invitationService.update(resolved.accessToken, {
           id: c.req.param('id'),
-          ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+          ...(typeof body.enabled === 'boolean'
+            ? { enabled: body.enabled }
+            : {}),
           ...(typeof body.label === 'string' ? { label: body.label } : {}),
           ...(body.maxUses === null || typeof body.maxUses === 'number'
             ? { maxUses: body.maxUses }
             : {}),
           ...(body.clearMaxUses === true ? { clearMaxUses: true } : {}),
-        },
-      ))
+        }),
+      )
     } catch (error) {
       return invitationRouteError(c, error)
     }
@@ -1072,7 +1098,11 @@ export function createAgentWorkflowApp(
     const resolved = await resolveInvitationAdmin(c.req.raw)
     if ('forbidden' in resolved) return c.json(resolved.forbidden, 403)
     if ('unavailable' in resolved) return c.json(resolved.unavailable, 503)
-    if ('unauthorized' in resolved) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    if ('unauthorized' in resolved)
+      return c.json(
+        { error: 'Unauthorized', message: 'authentication required' },
+        401,
+      )
     try {
       return c.json({
         deleted: await resolved.invitationService.delete(
@@ -1175,10 +1205,7 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/usage-wallet', async c => {
-    return proxyBillingRequest(
-      c.req.raw,
-      '/api/usage-wallet',
-    )
+    return proxyBillingRequest(c.req.raw, '/api/usage-wallet')
   })
 
   app.get('/api/model-configs', async c => {
@@ -1550,10 +1577,7 @@ export function createAgentWorkflowApp(
     if (!proxySkillsRequest)
       return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxySkillsRequest(
-        c.req.raw,
-        '/api/user-skills',
-      )
+      return await proxySkillsRequest(c.req.raw, '/api/user-skills')
     } catch (error) {
       return tracedRouteError(c, 'user-skills.list', error)
     }
@@ -1568,10 +1592,7 @@ export function createAgentWorkflowApp(
     if (!proxySkillsRequest)
       return c.json({ error: 'User skills are disabled' }, 503)
     try {
-      return await proxySkillsRequest(
-        c.req.raw,
-        '/api/user-skills/import',
-      )
+      return await proxySkillsRequest(c.req.raw, '/api/user-skills/import')
     } catch (err) {
       const traceId = randomUUID()
       console.warn('[BeeGame] skill import proxy failed', {
@@ -1674,7 +1695,7 @@ export function createAgentWorkflowApp(
       const impacts: Array<{
         projectId: string
         projectName: string
-        importId: string
+        resourceId: string
         packVersion: string
         elementId: string
         status?: string
@@ -1701,19 +1722,19 @@ export function createAgentWorkflowApp(
           })
           continue
         }
-        for (const resourceImport of manifest.imports ?? []) {
+        for (const resource of manifest.resources) {
           if (
-            resourceImport.source.type !== 'resource-library' ||
-            resourceImport.source.pack_id !== packId
+            resource.source.type !== 'resource-library' ||
+            resource.source.pack_id !== packId
           )
             continue
           impacts.push({
             projectId: project.id,
             projectName: project.name,
-            importId: resourceImport.id,
-            packVersion: resourceImport.source.pack_version ?? '',
-            elementId: resourceImport.source.element_id ?? '',
-            status: resourceImport.status,
+            resourceId: resource.id,
+            packVersion: resource.source.pack_version,
+            elementId: resource.source.element_id,
+            status: resource.status,
           })
         }
       }
@@ -1746,10 +1767,7 @@ export function createAgentWorkflowApp(
       )
     }
     const url = new URL(c.req.url)
-    return proxyResourceRequest(
-      c.req.raw,
-      `${url.pathname}${url.search}`,
-    )
+    return proxyResourceRequest(c.req.raw, `${url.pathname}${url.search}`)
   }
   app.all('/api/resource-packs', handleResourceLibraryProxy)
   app.all('/api/resource-packs/*', handleResourceLibraryProxy)
@@ -2411,6 +2429,7 @@ export function createAgentWorkflowApp(
       const resumed = await resumeRun({
         store,
         runId: run.runId,
+        workspacePath: project.root_path,
         sessionIsOpen: async dispatch => {
           try {
             return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
@@ -2453,6 +2472,7 @@ export function createAgentWorkflowApp(
       const retried = await retryRun({
         store,
         runId: run.runId,
+        workspacePath: project.root_path,
         ...(taskId ? { taskId } : {}),
         sessionIsOpen: async dispatch => {
           try {
@@ -2962,10 +2982,9 @@ export function createAgentWorkflowApp(
         if (!project.root_path)
           return c.json({
             contract_state: 'missing',
-            version: 5,
+            version: 7,
             requirements: [],
-            imports: [],
-            compositions: [],
+            resources: [],
           })
         const workspacePath = await resolveSessionWorkspacePath(
           project.root_path,
@@ -3004,7 +3023,7 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/projects/:id/assets/:requirementId/upload', async c => {
+  app.post('/api/projects/:id/assets/resources/:resourceId/upload', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
@@ -3032,7 +3051,7 @@ export function createAgentWorkflowApp(
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
       const result = await uploadBeeGameAsset(
         ensured.binding.workspacePath,
-        c.req.param('requirementId'),
+        c.req.param('resourceId'),
         file,
         {
           persist: async manifest => {
@@ -3616,15 +3635,13 @@ function requirePermission(
 }
 
 function invitationRouteError(_c: Context, error: unknown): Response {
-  const upstreamStatus = error instanceof InvitationServiceError
-    ? error.status
-    : 502
+  const upstreamStatus =
+    error instanceof InvitationServiceError ? error.status : 502
   const status = [400, 401, 403, 404].includes(upstreamStatus)
     ? upstreamStatus
     : 502
-  const message = error instanceof Error
-    ? error.message
-    : 'Invitation service request failed'
+  const message =
+    error instanceof Error ? error.message : 'Invitation service request failed'
   return Response.json(
     { error: message, message },
     {
@@ -4892,10 +4909,9 @@ async function getBeeGameProjectRuntimeState(input: {
   const assetManifest = await readBeeGameAssetManifest(
     sessionRef.workspacePath,
   ).catch(() => ({
-    version: 5 as const,
+    version: 7 as const,
     requirements: [],
-    imports: [],
-    compositions: [],
+    resources: [],
     project_target: undefined,
   }))
   const acceptance = workflowSnapshot
@@ -5049,7 +5065,10 @@ function workflowElapsedTiming(
     elapsedMs += Math.max(0, stoppedAt - activeSinceMs)
     activeSinceMs = undefined
   } else if (runEvents.length === 0 && Number.isFinite(createdAt)) {
-    elapsedMs = Math.max(0, (Number.isFinite(updatedAt) ? updatedAt : createdAt) - createdAt)
+    elapsedMs = Math.max(
+      0,
+      (Number.isFinite(updatedAt) ? updatedAt : createdAt) - createdAt,
+    )
   }
 
   return {
@@ -5307,8 +5326,29 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
   }
 }
 
+const WORKFLOW_STATE_ERROR_TRACE_LIMIT = 100
+const workflowStateErrorTraceByDetail = new Map<string, string>()
+
 function createWorkflowStateErrorView(error: unknown): JsonObject {
   const detail = error instanceof Error ? error.message : String(error)
+  let traceId = workflowStateErrorTraceByDetail.get(detail)
+  if (!traceId) {
+    traceId = randomUUID()
+    if (
+      workflowStateErrorTraceByDetail.size >= WORKFLOW_STATE_ERROR_TRACE_LIMIT
+    ) {
+      const oldestDetail = workflowStateErrorTraceByDetail.keys().next().value
+      if (typeof oldestDetail === 'string') {
+        workflowStateErrorTraceByDetail.delete(oldestDetail)
+      }
+    }
+    workflowStateErrorTraceByDetail.set(detail, traceId)
+    console.warn('[BeeGame] workflow state rejected', {
+      traceId,
+      cause: error instanceof Error ? error.name : 'unknown_error',
+      detail,
+    })
+  }
   const now = new Date().toISOString()
   return {
     runId: 'workflow-state-error',
@@ -5317,9 +5357,9 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
     tasks: [],
     evidence: {},
     workflowStateError: true,
-    blockedReason: `Workflow state could not be read. Explicit recovery is required. (${detail})`,
-    // The card localizes the stable message key. Keep the diagnostic detail
-    // in blockedReason, where it is rendered as an actionable error.
+    blockedReason: `当前项目的工作流状态无效，无法继续运行。请新建项目重新运行。诊断编号：${traceId}`,
+    // Detailed schema diagnostics stay in the server log. The user-facing
+    // workflow card must never render internal JSON validation output.
     message: '',
     messageKey: 'workflow.blocked',
     thinking: 'idle',
@@ -5375,8 +5415,15 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
+  if (workflow.workflowStateError === true) return undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
+  const acceptedReviewIsBounded =
+    workflow.phase === 'DOCUMENT_REVIEW' &&
+    isObject(workflow.documentReviewState) &&
+    isObject(workflow.documentReviewState.activeCycle) &&
+    workflow.documentReviewState.activeCycle.acceptedSemanticResult === true
+  if (status === 'needs_action' && acceptedReviewIsBounded) return undefined
   if (status === 'needs_action' || status === 'blocked' || status === 'failed')
     return 'retry'
   return undefined
@@ -5413,6 +5460,7 @@ function workflowViewForDisplay(
   const documentPhase =
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
+  const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const displayTasks =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -5434,8 +5482,50 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
+          ...(isObject(workflow.documentReviewState) &&
+          isObject(workflow.documentReviewState.activeCycle)
+            ? {
+                reviewCheckIds: Array.isArray(
+                  workflow.documentReviewState.activeCycle.requiredCheckIds,
+                )
+                  ? (workflow.documentReviewState.activeCycle.requiredCheckIds.filter(
+                      (id): id is string => typeof id === 'string',
+                    ) as Parameters<
+                      typeof projectDocumentDisplayTasks
+                    >[0]['reviewCheckIds'])
+                  : undefined,
+                reviewAccepted:
+                  workflow.documentReviewState.activeCycle
+                    .acceptedSemanticResult === true,
+                reviewFindings: Array.isArray(
+                  workflow.documentReviewState.activeCycle.findings,
+                )
+                  ? workflow.documentReviewState.activeCycle.findings.flatMap(
+                      finding =>
+                        isObject(finding) &&
+                        typeof finding.findingId === 'string' &&
+                        typeof finding.requiredAction === 'string'
+                          ? [
+                              {
+                                id: finding.findingId,
+                                title: finding.requiredAction,
+                              },
+                            ]
+                          : [],
+                    )
+                  : undefined,
+              }
+            : {}),
         })
-      : atomicDisplayTasks
+      : assetPhase && workspacePath
+        ? projectAssetDisplayTasks({
+            workspacePath,
+            phase: 'RESOURCE_PREPARATION',
+            workflowStatus: workflowStatus(workflow),
+            thinking: workflowThinkingStatus(workflow),
+            activeDispatch: workflow.activeDispatch,
+          })
+        : atomicDisplayTasks
   const completedTaskCount = displayTasks.filter(
     task => isObject(task) && task.status === 'completed',
   ).length
@@ -5458,7 +5548,6 @@ function workflowViewForDisplay(
   const evidence = isObject(workflow.evidence)
     ? Object.fromEntries(
         [
-          'documentReview',
           'resourcePreparation',
           'implementationAudit',
           'acceptance',
@@ -5475,6 +5564,23 @@ function workflowViewForDisplay(
     phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
+      : {}),
+    ...(isObject(workflow.documentReviewState) &&
+    isObject(workflow.documentReviewState.activeCycle)
+      ? {
+          reviewMode:
+            typeof workflow.documentReviewState.activeCycle.mode === 'string'
+              ? workflow.documentReviewState.activeCycle.mode
+              : undefined,
+          reviewTarget:
+            typeof workflow.documentReviewState.activeCycle.activeTarget ===
+            'string'
+              ? workflow.documentReviewState.activeCycle.activeTarget
+              : undefined,
+          reviewAccepted:
+            workflow.documentReviewState.activeCycle.acceptedSemanticResult ===
+            true,
+        }
       : {}),
     tasks: displayTasks,
     evidence,
@@ -6387,10 +6493,7 @@ function registerBeeGameSessionRoutes(
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
         c.req.param('id'),
-        await getSessionWorkspacePath(
-          c.req.raw,
-          c.req.param('id'),
-        ),
+        await getSessionWorkspacePath(c.req.raw, c.req.param('id')),
       )
       const body = projectPackage.data.buffer.slice(
         projectPackage.data.byteOffset,
@@ -7447,7 +7550,7 @@ function buildConfirmedBriefPrompt(
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another. New projects require an implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
-    'A delivery claim requires the workflow document review, implementation audit, and acceptance stages to pass against the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene composition strategy.',
+    'A delivery claim requires the workflow document review, implementation audit, and acceptance stages to pass against the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene layout strategy.',
     'BeeGame Studio Workflow owns phase transitions, worker dispatch, evidence validation, implementation ordering, verification, and repair decisions. Workers choose concrete tools and implementation details within their phase contracts.',
     '',
     'Confirmed brief:',

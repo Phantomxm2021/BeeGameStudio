@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import type { BeeGameRequirementSourceType } from '../asset-contracts'
 import { parseAtomicTask } from './schema'
 import { isWorkflowEvidenceFile } from './evidence'
 import { resolveWorkspaceRelativePath } from './revision'
@@ -14,20 +13,9 @@ import {
 import type { WorkerTerminalResult } from './worker-contracts'
 
 export type AtomicTaskContractFacts = {
-  resourceRequirementIds: string[]
   checklistIds: string[]
-  importIds?: string[]
-  compositionIds?: string[]
-  runtimeAssetRoot?: string
-  resourceBindings?: Array<{
-    requirementId: string
-    name?: string
-    purpose?: string
-    sourceType: BeeGameRequirementSourceType
-    importIds: string[]
-    compositionIds: string[]
-    projectReferences: string[]
-  }>
+  resourceIds: string[]
+  contentIds: string[]
 }
 
 export type AtomicTaskPlanningDocument = {
@@ -65,31 +53,15 @@ function assertCoverage(
   tasks: AtomicTask[],
   facts: AtomicTaskContractFacts,
 ): void {
-  const knownRequirements = new Set(facts.resourceRequirementIds)
   const knownChecklist = new Set(facts.checklistIds)
-  const knownImports = new Set(facts.importIds ?? [])
-  const knownCompositions = new Set(facts.compositionIds ?? [])
-  const coveredRequirements = new Set(
-    tasks.flatMap(task => task.resourceRequirementIds),
-  )
+  const knownResources = new Set(facts.resourceIds)
+  const knownContent = new Set(facts.contentIds)
   const coveredChecklist = new Set(tasks.flatMap(task => task.checklistIds))
-  for (const id of coveredRequirements)
-    if (!knownRequirements.has(id))
-      throw new AtomicTaskPlanError(
-        'coverage',
-        `atomic task maps an unknown resource requirement: ${id}`,
-      )
   for (const id of coveredChecklist)
     if (!knownChecklist.has(id))
       throw new AtomicTaskPlanError(
         'coverage',
         `atomic task maps an unknown checklist item: ${id}`,
-      )
-  for (const id of facts.resourceRequirementIds)
-    if (!coveredRequirements.has(id))
-      throw new AtomicTaskPlanError(
-        'coverage',
-        `requirement is not mapped to an atomic task: ${id}`,
       )
   for (const id of facts.checklistIds)
     if (!coveredChecklist.has(id))
@@ -97,131 +69,25 @@ function assertCoverage(
         'coverage',
         `checklist item is not mapped to an atomic task: ${id}`,
       )
-  const coveredImports = new Set(
-    tasks.flatMap(task => task.resourceImportIds ?? []),
-  )
-  const coveredCompositions = new Set(
-    tasks.flatMap(task => task.resourceCompositionIds ?? []),
-  )
-  for (const id of coveredImports)
-    if (!knownImports.has(id))
+  const coveredResources = new Set(tasks.flatMap(task => task.resourceIds))
+  const coveredContent = new Set(tasks.flatMap(task => task.contentIds))
+  for (const id of coveredResources)
+    if (!knownResources.has(id))
       throw new AtomicTaskPlanError(
         'coverage',
-        `atomic task maps an unknown resource import: ${id}`,
+        `atomic task maps an unknown resource: ${id}`,
       )
-  for (const id of coveredCompositions)
-    if (!knownCompositions.has(id))
+  for (const id of coveredContent)
+    if (!knownContent.has(id))
       throw new AtomicTaskPlanError(
         'coverage',
-        `atomic task maps an unknown resource composition: ${id}`,
+        `atomic task maps unknown content: ${id}`,
       )
-  for (const id of facts.importIds ?? [])
-    if (!coveredImports.has(id))
-      throw new AtomicTaskPlanError(
-        'coverage',
-        `resource import is not mapped to an atomic task: ${id}`,
-      )
-  for (const id of facts.compositionIds ?? [])
-    if (!coveredCompositions.has(id))
-      throw new AtomicTaskPlanError(
-        'coverage',
-        `resource composition is not mapped to an atomic task: ${id}`,
-      )
-  assertUniqueOwners(tasks, 'resourceRequirementIds', 'resource requirement')
+  for (const id of facts.contentIds)
+    if (!coveredContent.has(id))
+      throw new AtomicTaskPlanError('coverage', `content is not consumed by an atomic task: ${id}`)
   assertUniqueOwners(tasks, 'checklistIds', 'checklist item')
-  assertUniqueOwners(tasks, 'resourceImportIds', 'resource import')
-  assertUniqueOwners(tasks, 'resourceCompositionIds', 'resource composition')
   assertSupportTasksFeedOwnedWork(tasks)
-  const bindings = new Map(
-    (facts.resourceBindings ?? []).map(binding => [
-      binding.requirementId,
-      binding,
-    ]),
-  )
-  for (const task of tasks) {
-    const allowedImports = new Set(
-      task.resourceRequirementIds.flatMap(
-        id => bindings.get(id)?.importIds ?? [],
-      ),
-    )
-    const allowedCompositions = new Set(
-      task.resourceRequirementIds.flatMap(
-        id => bindings.get(id)?.compositionIds ?? [],
-      ),
-    )
-    for (const id of task.resourceImportIds ?? [])
-      if (!allowedImports.has(id))
-        throw new AtomicTaskPlanError(
-          'coverage',
-          `atomic task ${task.id} assigns import ${id} outside its resource requirements`,
-        )
-    for (const id of task.resourceCompositionIds ?? [])
-      if (!allowedCompositions.has(id))
-        throw new AtomicTaskPlanError(
-          'coverage',
-          `atomic task ${task.id} assigns composition ${id} outside its resource requirements`,
-        )
-  }
-  assertResourceFulfillment(tasks, facts)
-}
-
-function assertResourceFulfillment(
-  tasks: AtomicTask[],
-  facts: AtomicTaskContractFacts,
-): void {
-  const bindings = new Map(
-    (facts.resourceBindings ?? []).map(binding => [
-      binding.requirementId,
-      binding,
-    ]),
-  )
-  const runtimeAssetRoot = facts.runtimeAssetRoot
-  const noAssetFileTypes = new Set<BeeGameRequirementSourceType>([
-    'runtime-generated',
-    'system-provided',
-    'silent',
-  ])
-  for (const task of tasks) {
-    const taskBindings = task.resourceRequirementIds.map(id => {
-      const binding = bindings.get(id)
-      if (!binding)
-        throw new AtomicTaskPlanError(
-          'coverage',
-          `atomic task ${task.id} has no canonical resource binding for ${id}`,
-        )
-      return binding
-    })
-    const sourceTypes = new Set(taskBindings.map(binding => binding.sourceType))
-    if (sourceTypes.size > 1)
-      throw new AtomicTaskPlanError(
-        'scope',
-        `atomic task ${task.id} mixes resource fulfillment types: ${[...sourceTypes].join(', ')}`,
-      )
-    if (!runtimeAssetRoot) continue
-    const runtimeArtifacts = task.expectedArtifacts.filter(artifact =>
-      scopesPath(runtimeAssetRoot, artifact),
-    )
-    if (runtimeArtifacts.length && !taskBindings.length)
-      throw new AtomicTaskPlanError(
-        'scope',
-        `atomic task ${task.id} creates runtime assets without owning a resource responsibility`,
-      )
-    const sourceType = taskBindings[0]?.sourceType
-    if (sourceType === 'authored-asset' && !runtimeArtifacts.length)
-      throw new AtomicTaskPlanError(
-        'scope',
-        `atomic task ${task.id} owns authored assets but declares no artifact under ${runtimeAssetRoot}`,
-      )
-    if (
-      sourceType &&
-      noAssetFileTypes.has(sourceType) &&
-      runtimeArtifacts.length
-    )
-      throw new AtomicTaskPlanError(
-        'scope',
-        `atomic task ${task.id} assigns asset files to ${sourceType} fulfillment: ${runtimeArtifacts.join(', ')}`,
-      )
-  }
 }
 
 function assertSupportTasksFeedOwnedWork(tasks: AtomicTask[]): void {
@@ -229,11 +95,7 @@ function assertSupportTasksFeedOwnedWork(tasks: AtomicTask[]): void {
   const ownedTaskIds = new Set(
     tasks
       .filter(
-        task =>
-          task.resourceRequirementIds.length > 0 ||
-          task.checklistIds.length > 0 ||
-          (task.resourceImportIds?.length ?? 0) > 0 ||
-          (task.resourceCompositionIds?.length ?? 0) > 0,
+        task => task.checklistIds.length > 0 || task.contentIds.length > 0,
       )
       .map(task => task.id),
   )
@@ -248,8 +110,7 @@ function assertSupportTasksFeedOwnedWork(tasks: AtomicTask[]): void {
   for (const taskId of ownedTaskIds) visitDependencies(taskId)
   const detached = tasks
     .filter(
-      task =>
-        !ownedTaskIds.has(task.id) && !requiredSupportIds.has(task.id),
+      task => !ownedTaskIds.has(task.id) && !requiredSupportIds.has(task.id),
     )
     .map(task => task.id)
   if (detached.length)
@@ -261,11 +122,7 @@ function assertSupportTasksFeedOwnedWork(tasks: AtomicTask[]): void {
 
 function assertUniqueOwners(
   tasks: AtomicTask[],
-  field:
-    | 'resourceRequirementIds'
-    | 'checklistIds'
-    | 'resourceImportIds'
-    | 'resourceCompositionIds',
+  field: 'checklistIds',
   label: string,
 ): void {
   const owners = new Map<string, string[]>()
@@ -306,8 +163,7 @@ function assertGraph(tasks: AtomicTask[]): void {
         `atomic task ${task.id} must declare at least one expected artifact`,
       )
     const unreachableArtifact = task.expectedArtifacts.find(
-      artifact =>
-        !task.allowedPaths.some(scope => scopesPath(scope, artifact)),
+      artifact => !task.allowedPaths.some(scope => scopesPath(scope, artifact)),
     )
     if (unreachableArtifact)
       throw new AtomicTaskPlanError(
@@ -351,8 +207,13 @@ function assertGraph(tasks: AtomicTask[]): void {
       )
     }
   }
-  const dependsTransitively = (taskId: string, dependencyId: string): boolean => {
-    const pending = [...(tasks.find(task => task.id === taskId)?.dependsOn ?? [])]
+  const dependsTransitively = (
+    taskId: string,
+    dependencyId: string,
+  ): boolean => {
+    const pending = [
+      ...(tasks.find(task => task.id === taskId)?.dependsOn ?? []),
+    ]
     const visitedDependencies = new Set<string>()
     while (pending.length) {
       const candidate = pending.pop()!

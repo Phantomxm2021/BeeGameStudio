@@ -14,275 +14,207 @@ describe('native Resource Library evidence', () => {
     if (dataRoot) await rm(dataRoot, { recursive: true, force: true })
   })
 
-  test('records passive provenance without evaluating or controlling the call', async () => {
+  test('records canonical catalog exploration without semantic policy', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-      turnId: 'turn-a',
-      eventType: 'tool.completed',
-      payload: {
-        toolName: 'ResourceLibrary',
-        toolUseID: 'tool-a',
-        input: {
-          action: 'query_candidates',
-          filters: { dimensions: ['3D'], formats: ['glb'] },
-        },
-        output: JSON.stringify({ items: [], total: 0 }),
-      },
-      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+    observe({
+      toolUseID: 'catalog',
+      input: { action: 'browse_catalog', filters: { dimensions: ['3D'] } },
+      output: JSON.stringify({ data: { items: [], total: 0 } }),
     })
 
-    const line = JSON.parse(await readFile(
-      join(dataRoot, 'beegame-resource-library-evidence', 'session-a.jsonl'),
-      'utf8',
-    ))
-    expect(line).toEqual(expect.objectContaining({
-      version: 4,
-      phase: 'completed',
-      action: 'query_candidates',
-      outcome: 'succeeded',
-      sessionId: 'session-a',
-      turnId: 'turn-a',
-    }))
+    const line = JSON.parse(
+      await readFile(
+        join(dataRoot, 'beegame-resource-library-evidence/session-a.jsonl'),
+        'utf8',
+      ),
+    )
+    expect(line).toEqual(
+      expect.objectContaining({
+        version: 1,
+        phase: 'completed',
+        action: 'browse_catalog',
+        outcome: 'succeeded',
+      }),
+    )
     expect(line).not.toHaveProperty('selection')
     expect(line).not.toHaveProperty('policy')
   })
 
-  test('does not count a completed import call when every requested artifact failed', async () => {
+  test('records exactly which requested resources were acquired or failed', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-      eventType: 'tool.completed',
-      payload: {
-        toolName: 'ResourceLibrary',
-        toolUseID: 'tool-import',
-        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }] },
-        output: JSON.stringify({
-          data: {
-            result: 'failed',
-            requested_count: 1,
-            imported_count: 0,
-            failed_count: 1,
-            imported: [],
-            failures: [{ error: 'download failed', import_ids: ['asset-a'] }],
-          },
-        }),
+    observe({
+      toolUseID: 'acquire',
+      input: {
+        action: 'import_resources',
+        selections: [
+          { resource_id: 'resource-a' },
+          { resource_id: 'resource-b' },
+        ],
       },
-      createdAt: new Date('2026-07-19T00:00:00.000Z'),
-    })
-
-    expect(getObservedNativeResourceLibraryEvidence({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-    })).toMatchObject({
-      state: 'current',
-      actions: [],
-      failedActions: ['import_elements'],
-      successfulImportCount: 0,
-      failedImportCount: 1,
-    })
-  })
-
-  test('keeps a native failed import call as persistent failed evidence', async () => {
-    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-      eventType: 'tool.failed',
-      payload: {
-        toolName: 'ResourceLibrary',
-        toolUseID: 'tool-import',
-        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }] },
-      },
-      createdAt: new Date('2026-07-19T00:00:00.000Z'),
-    })
-
-    expect(getObservedNativeResourceLibraryEvidence({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-    })).toMatchObject({
-      state: 'current',
-      actions: [],
-      failedActions: ['import_elements'],
-      successfulImportCount: 0,
-    })
-  })
-
-  test('clears an unresolved action failure after a later native retry succeeds', async () => {
-    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
-      eventType: 'tool.failed',
-      payload: { toolName: 'ResourceLibrary', toolUseID: 'failed-import', input: { action: 'import_elements' } },
-      createdAt: new Date('2026-07-19T00:00:00.000Z'),
-    })
-    observeNativeResourceLibraryToolEvent({
-      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
-      eventType: 'tool.completed',
-      payload: {
-        toolName: 'ResourceLibrary', toolUseID: 'successful-import',
-        input: { action: 'import_elements' },
-        output: JSON.stringify({ data: {
-          result: 'imported', requested_count: 1, imported_count: 1, failed_count: 0,
-          imported: [{ import_id: 'asset-a', local_files: ['assets/library/a.glb'] }], failures: [],
-        } }),
-      },
-      createdAt: new Date('2026-07-19T00:01:00.000Z'),
-    })
-
-    expect(getObservedNativeResourceLibraryEvidence({
-      dataRoot, sessionId: 'session-a', workspacePath: '/workspace',
-    })).toMatchObject({
-      state: 'current', actions: ['import_elements'], failedActions: [], successfulImportCount: 1,
-    })
-  })
-
-  test('records only the artifacts actually copied by a partial import', async () => {
-    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-      eventType: 'tool.completed',
-      payload: {
-        toolName: 'ResourceLibrary',
-        toolUseID: 'tool-import',
-        input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }, { import_id: 'asset-b' }] },
-        output: JSON.stringify({ data: {
-          result: 'partially_imported',
-          requested_count: 2,
-          imported_count: 1,
-          failed_count: 1,
-          imported: [{ import_id: 'asset-a', local_files: ['assets/library/a.glb'] }],
-          failures: [{ error: 'download failed', import_ids: ['asset-b'] }],
-        } }),
-      },
-      createdAt: new Date('2026-07-19T00:00:00.000Z'),
-    })
-
-    expect(getObservedNativeResourceLibraryEvidence({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-    })).toMatchObject({
-      actions: ['import_elements'],
-      failedActions: ['import_elements'],
-      successfulImportCount: 1,
-      failedImportCount: 1,
-    })
-  })
-
-  test('clears only the failed import ids that a later retry actually imports', async () => {
-    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    const observeImport = (toolUseID: string, data: Record<string, unknown>, createdAt: string) =>
-      observeNativeResourceLibraryToolEvent({
-        dataRoot,
-        sessionId: 'session-a',
-        workspacePath: '/workspace',
-        eventType: 'tool.completed',
-        payload: {
-          toolName: 'ResourceLibrary',
-          toolUseID,
-          input: { action: 'import_elements', selections: [{ import_id: 'asset-a' }, { import_id: 'asset-b' }] },
-          output: JSON.stringify({ data }),
+      output: JSON.stringify({
+        data: {
+          verified_count: 1,
+          resources: [{ resource_id: 'resource-a' }],
+          failures: [{ resource_id: 'resource-b', error: 'download failed' }],
         },
-        createdAt: new Date(createdAt),
-      })
-    observeImport('partial-import', {
-      imported_count: 1,
-      failed_count: 1,
-      imported: [{ import_id: 'asset-a' }],
-      failures: [{ import_ids: ['asset-b'] }],
-    }, '2026-07-19T00:00:00.000Z')
-    observeImport('retry-import', {
-      imported_count: 1,
-      failed_count: 0,
-      imported: [{ import_id: 'asset-b' }],
-      failures: [],
-    }, '2026-07-19T00:01:00.000Z')
+      }),
+    })
 
-    expect(getObservedNativeResourceLibraryEvidence({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-    })).toMatchObject({
-      actions: ['import_elements'],
-      failedActions: [],
-      successfulImportCount: 2,
-      failedImportCount: 0,
+    expect(evidence()).toMatchObject({
+      state: 'current',
+      actions: ['import_resources'],
+      failedActions: ['import_resources'],
+      successfulResourceCount: 1,
+      failedResourceCount: 1,
     })
   })
 
-  test('ignores unsupported tools and does not create an evidence file', async () => {
+  test('keeps a failed acquisition as unresolved evidence', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
-    observeNativeResourceLibraryToolEvent({
-      dataRoot,
-      sessionId: 'session-a',
-      workspacePath: '/workspace',
-      eventType: 'tool.completed',
-      payload: { toolName: 'Bash', toolUseID: 'tool-a', input: { command: 'true' } },
-      createdAt: new Date(),
+    observe({
+      eventType: 'tool.failed',
+      toolUseID: 'failed-acquire',
+      input: {
+        action: 'import_resources',
+        selections: [{ resource_id: 'resource-a' }],
+      },
     })
 
-    await expect(readFile(
-      join(dataRoot, 'beegame-resource-library-evidence', 'session-a.jsonl'),
-      'utf8',
-    )).rejects.toThrow()
+    expect(evidence()).toMatchObject({
+      state: 'current',
+      actions: [],
+      failedActions: ['import_resources'],
+      successfulResourceCount: 0,
+      failedResourceCount: 1,
+    })
   })
 
-  test('keeps Pack exploration current only for the same art and target context', async () => {
+  test('clears a resource failure only after that exact resource succeeds', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observe({
+      toolUseID: 'partial',
+      input: {
+        action: 'import_resources',
+        selections: [
+          { resource_id: 'resource-a' },
+          { resource_id: 'resource-b' },
+        ],
+      },
+      output: acquisitionOutput(['resource-a'], ['resource-b']),
+    })
+    observe({
+      toolUseID: 'retry',
+      input: {
+        action: 'import_resources',
+        selections: [{ resource_id: 'resource-b' }],
+      },
+      output: acquisitionOutput(['resource-b'], []),
+      createdAt: '2026-07-31T00:01:00.000Z',
+    })
+
+    expect(evidence()).toMatchObject({
+      actions: ['import_resources'],
+      failedActions: [],
+      successfulResourceCount: 2,
+      failedResourceCount: 0,
+    })
+  })
+
+  test('ignores unsupported tool actions', async () => {
+    dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
+    observe({ toolName: 'Bash', toolUseID: 'shell', input: {} })
+
+    await expect(
+      readFile(
+        join(dataRoot, 'beegame-resource-library-evidence/session-a.jsonl'),
+        'utf8',
+      ),
+    ).rejects.toThrow()
+  })
+
+  test('marks catalog evidence stale when design or target context changes', async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'resource-evidence-'))
     const workspace = await mkdtemp(join(tmpdir(), 'resource-workspace-'))
     try {
       await mkdir(join(workspace, 'docs'), { recursive: true })
       await mkdir(join(workspace, 'assets'), { recursive: true })
-      await writeFile(join(workspace, 'docs', 'ART_DIRECTION.md'), '# Art\n')
-      await writeFile(join(workspace, 'docs', 'ASSET_PLAN.md'), '# Assets\n')
-      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-        version: 5,
-        project_target: {
-          asset_format_capabilities: ['portable-model'],
-          resource_library_usage: 'preferred',
-        },
-        requirements: [],
-        imports: [],
-        compositions: [],
-      }))
-      observeNativeResourceLibraryToolEvent({
-        dataRoot,
-        sessionId: 'session-a',
+      await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Art\n')
+      await writeFile(join(workspace, 'docs/ASSET_PLAN.md'), '# Assets\n')
+      await writeFile(
+        join(workspace, 'assets/asset-manifest.json'),
+        JSON.stringify({
+          version: 7,
+          project_target: {
+            asset_format_capabilities: ['portable-model'],
+            resource_library_usage: 'preferred',
+            runtime_asset_root: 'assets/runtime',
+            content_root: 'assets/content',
+            generated_asset_root: 'assets/generated',
+          },
+          requirements: [],
+          resources: [],
+        }),
+      )
+      observe({
         workspacePath: workspace,
-        eventType: 'tool.completed',
-        payload: {
-          toolName: 'ResourceLibrary',
-          toolUseID: 'tool-a',
-          input: { action: 'query_candidates' },
-          output: JSON.stringify({ items: [] }),
-        },
-        createdAt: new Date('2026-07-19T00:00:00.000Z'),
+        toolUseID: 'catalog',
+        input: { action: 'browse_catalog' },
+        output: JSON.stringify({ data: { items: [] } }),
       })
 
-      expect(getObservedNativeResourceLibraryEvidence({
-        dataRoot,
-        sessionId: 'session-a',
-        workspacePath: workspace,
-      })).toMatchObject({ state: 'current', actions: ['query_candidates'] })
-
-      await writeFile(join(workspace, 'docs', 'ART_DIRECTION.md'), '# Changed art\n')
-      expect(getObservedNativeResourceLibraryEvidence({
-        dataRoot,
-        sessionId: 'session-a',
-        workspacePath: workspace,
-      })).toMatchObject({ state: 'stale' })
+      expect(evidence(workspace)).toMatchObject({
+        state: 'current',
+        actions: ['browse_catalog'],
+      })
+      await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Changed\n')
+      expect(evidence(workspace)).toMatchObject({ state: 'stale' })
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
+
+  function observe(input: {
+    toolName?: string
+    toolUseID: string
+    input: Record<string, unknown>
+    output?: string
+    eventType?: string
+    workspacePath?: string
+    createdAt?: string
+  }): void {
+    observeNativeResourceLibraryToolEvent({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath: input.workspacePath ?? '/workspace',
+      eventType: input.eventType ?? 'tool.completed',
+      payload: {
+        toolName: input.toolName ?? 'ResourceLibrary',
+        toolUseID: input.toolUseID,
+        input: input.input,
+        ...(input.output ? { output: input.output } : {}),
+      },
+      createdAt: new Date(input.createdAt ?? '2026-07-31T00:00:00.000Z'),
+    })
+  }
+
+  function evidence(workspacePath = '/workspace') {
+    return getObservedNativeResourceLibraryEvidence({
+      dataRoot,
+      sessionId: 'session-a',
+      workspacePath,
+    })
+  }
 })
+
+function acquisitionOutput(acquired: string[], failed: string[]): string {
+  return JSON.stringify({
+    data: {
+      verified_count: acquired.length,
+      resources: acquired.map(resource_id => ({ resource_id })),
+      failures: failed.map(resource_id => ({
+        resource_id,
+        error: 'download failed',
+      })),
+    },
+  })
+}

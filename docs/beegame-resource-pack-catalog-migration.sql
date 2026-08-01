@@ -3,23 +3,19 @@ begin;
 alter table public.beegame_resource_packs
   add column if not exists styles text[] not null default '{}';
 
-update public.beegame_resource_packs
-set styles = array(
-  select btrim(value)
-  from unnest(string_to_array(style, '/')) as value
-  where btrim(value) <> ''
-)
-where cardinality(styles) = 0 and btrim(style) <> '';
+drop view if exists public.beegame_resource_pack_catalog;
 
-create or replace view public.beegame_resource_pack_catalog
+alter table public.beegame_resource_packs
+  drop column if exists style;
+
+create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as
 select
   p.id as pack_id,
   p.version as pack_version,
   p.name as pack_name,
-  p.style,
-  case when cardinality(p.styles) > 0 then p.styles else array[p.style] end as styles,
+  p.styles,
   array(select jsonb_array_elements_text(p.game_types)) as game_types,
   p.dimension,
   p.primary_category,

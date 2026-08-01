@@ -8,11 +8,11 @@ import {
 const pack: ResourcePack = {
   id: 'pack-1',
   name: 'Example Pack',
-  style: 'Stylized',
+  styles: ['Stylized'],
   gameTypes: ['adventure'],
   dimension: '2D',
   primaryCategory: 'ui-kit',
-  categories: ['characters', 'ui'],
+  categories: ['sprites', 'ui'],
   license: 'internal',
   version: '1.0.0',
   status: 'published',
@@ -23,7 +23,7 @@ const element: ResourceElement = {
   packId: 'pack-1',
   name: 'Character Idle',
   path: 'characters/idle.png',
-  category: 'characters',
+  category: 'sprites',
   kind: 'sprite-sheet',
   preview: { kind: 'image', path: 'previews/idle.png' },
   specs: { width: 256, height: 256, frames: 4 },
@@ -42,7 +42,7 @@ describe('in-memory resource repository', () => {
 
   test('lists elements by Pack and category', async () => {
     const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
-    await expect(repository.listElements('pack-1', 'characters')).resolves.toEqual([
+    await expect(repository.listElements('pack-1', 'sprites')).resolves.toEqual([
       { ...element, usageTagsMode: 'override', usageTagsSource: 'element' },
     ])
     await expect(repository.listElements('pack-1', 'ui')).resolves.toEqual([])

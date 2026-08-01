@@ -9,12 +9,12 @@ import type { ResourceElement, ResourcePack } from '../types'
 const packs: ResourcePack[] = [
   {
     id: 'world-kit', name: 'World Kit', version: '1.0.0', status: 'published',
-    style: 'Stylized', gameTypes: ['Adventure'], dimension: '3D', primaryCategory: '3d-assets',
+    styles: ['Stylized'], gameTypes: ['Adventure'], dimension: '3D', primaryCategory: '3d-assets',
     categories: ['models'], license: 'internal', tags: ['modular-world'],
   },
   {
     id: 'effects-kit', name: 'Effects Kit', version: '2.0.0', status: 'published',
-    style: 'Stylized', gameTypes: ['Action'], dimension: 'agnostic', primaryCategory: 'vfx',
+    styles: ['Stylized'], gameTypes: ['Action'], dimension: 'agnostic', primaryCategory: 'vfx',
     categories: ['vfx'], license: 'internal',
   },
 ]
@@ -31,7 +31,7 @@ describe('resource catalog browsing', () => {
 
     expect(page.total).toBe(2)
     expect(page.items).toHaveLength(1)
-    expect(page.nextCursor).toStartWith('v2:')
+    expect(page.nextCursor).toStartWith('v3:')
     expect(browseResourceCatalogPacks(packs, elements, { limit: 1, cursor: page.nextCursor }).items).toHaveLength(1)
     expect(page.facets.assetKinds).toEqual(['model', 'vfx'])
     expect(page.facets.formats).toEqual(['glb', 'webm'])
@@ -67,7 +67,12 @@ describe('resource catalog browsing', () => {
     expect(page.items).toEqual([
       expect.objectContaining({ packId: 'world-kit', elementId: 'ground' }),
     ])
-    expect(page.nextCursor).toStartWith('v2:')
+    expect(page.nextCursor).toStartWith('v3:')
+    expect(queryResourceCatalogElements(packs, elements, {
+      cursor: page.nextCursor,
+    }, 'revision-1').items).toEqual([
+      expect.objectContaining({ packId: 'world-kit', elementId: 'wall' }),
+    ])
     expect(() =>
       queryResourceCatalogElements(packs, elements, {
         filters: { assetKinds: ['vfx'] },
@@ -79,7 +84,7 @@ describe('resource catalog browsing', () => {
         filters: { assetKinds: ['model'], formats: ['glb'] },
         cursor: page.nextCursor,
       }, 'revision-2'),
-    ).toThrow('does not belong to these filters')
+    ).toThrow('does not belong to this catalog')
   })
 
   test('keeps element exploration inside the Pack deliberately selected by the Agent', () => {

@@ -56,6 +56,48 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
+  it('renders Closure Review and repair ownership from durable review state', () => {
+    const { rerender } = render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_closure',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          documentStep: 'FOUNDATION_REVIEW',
+          reviewMode: 'closure',
+          reviewTarget: 'foundation',
+          reviewAccepted: false,
+          tasks: [
+            {
+              id: 'brief_alignment',
+              title: 'brief_alignment',
+              status: 'running',
+              operation: 'review',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('复核修复与回归')).toBeInTheDocument();
+    expect(screen.getByText('审计：简报一致性')).toBeInTheDocument();
+
+    rerender(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_repair',
+          status: 'running',
+          currentPhase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          reviewMode: 'initial',
+          reviewTarget: 'foundation',
+          reviewAccepted: true,
+        }}
+      />,
+    );
+    expect(screen.getByText('修复基础文档')).toBeInTheDocument();
+  });
+
   it('shows a red failure control, copies the error detail and invokes retry', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     const writeText = vi.fn().mockResolvedValue(undefined);

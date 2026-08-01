@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import {
   mkdir,
@@ -170,22 +170,27 @@ export function createInitialDeliveryRun(input: {
   projectId: string
   ownerId: string
   confirmedBriefDigest: string
-  confirmedBriefContext?: string
+  confirmedBriefContext: string
   parentRunId?: string
   documentRevision?: string
   workspaceRevision?: string
 }): DeliveryRun {
+  if (!input.confirmedBriefContext.trim())
+    throw new Error('confirmed brief context is required')
+  const confirmedBriefDigest = createHash('sha256')
+    .update(input.confirmedBriefContext)
+    .digest('hex')
+  if (confirmedBriefDigest !== input.confirmedBriefDigest)
+    throw new Error('confirmed brief digest does not match its durable context')
   const timestamp = now()
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: input.runId ?? randomUUID(),
     projectId: input.projectId,
     ownerId: input.ownerId,
     ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
     confirmedBriefDigest: input.confirmedBriefDigest,
-    ...(input.confirmedBriefContext
-      ? { confirmedBriefContext: input.confirmedBriefContext }
-      : {}),
+    confirmedBriefContext: input.confirmedBriefContext,
     phase: 'BRIEF_CONFIRMED',
     status: 'running',
     lastProgressAt: timestamp,
@@ -195,6 +200,9 @@ export function createInitialDeliveryRun(input: {
     },
     tasks: [],
     evidence: {},
+    documentReviewState: {
+      repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }

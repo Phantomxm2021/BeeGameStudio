@@ -3,7 +3,8 @@ import { evaluateResourcePackPublishReadiness } from '../publish-readiness'
 import type { ResourceElement, ResourcePack } from '../types'
 
 const pack: ResourcePack = {
-  id: 'forest', name: 'Forest', style: 'Stylized', gameTypes: ['adventure'], dimension: '3D',
+  id: 'forest', name: 'Forest',
+  styles: ['Stylized'], gameTypes: ['adventure'], dimension: '3D',
   primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft',
 }
 const ready: ResourceElement = {

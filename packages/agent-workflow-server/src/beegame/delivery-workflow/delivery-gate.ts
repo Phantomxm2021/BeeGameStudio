@@ -31,10 +31,14 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed acceptance evidence.'],
     }
   }
-  if (run.evidence.documentReview?.status !== 'ready') {
+  if (
+    !run.revision.resource ||
+    run.documentReviewState.comprehensiveApproval?.revision !==
+      run.revision.resource
+  ) {
     return {
       allowed: false,
-      issues: ['Current workflow has no ready document-review evidence.'],
+      issues: ['Current workflow has no current comprehensive review approval.'],
     }
   }
   if (run.evidence.resourcePreparation?.status !== 'passed') {
@@ -50,10 +54,10 @@ export async function evaluateWorkflowDeliveryGate(input: {
     }
   }
   if (
-    !run.evidence.documentReview.path ||
+    !run.documentReviewState.comprehensiveApproval?.evidencePath ||
     !isWorkflowEvidenceFile(
       input.workspacePath,
-      run.evidence.documentReview.path,
+      run.documentReviewState.comprehensiveApproval.evidencePath,
     ) ||
     !run.evidence.resourcePreparation.path ||
     !isWorkflowEvidenceFile(
@@ -69,7 +73,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
     return {
       allowed: false,
       issues: [
-        'Current document-review, resource-preparation or implementation-audit evidence file is missing or outside the project workspace.',
+        'Current comprehensive-review, resource-production or implementation-audit evidence file is missing or outside the project workspace.',
       ],
     }
   }
@@ -97,7 +101,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
     return {
       allowed: false,
       issues: [
-        'Resources changed after resource preparation; run resource preparation again.',
+        'Resources or content changed after validation; run resource production again.',
       ],
     }
   }

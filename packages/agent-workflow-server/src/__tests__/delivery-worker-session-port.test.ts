@@ -3,10 +3,66 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
+import { registerBeeGameAuthoredResources, writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import type { BeeGameSessionManager } from '../beegame/session-manager'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 
 describe('delivery worker session credentials', () => {
+  test('reopens an existing catalog only for semantic review remediation', async () => {
+    const starts: Array<Record<string, unknown>> = []
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: `session-${starts.length}` }
+      },
+      updateAuthToken() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions,
+      userId: 'user-1',
+    })
+    const base = {
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'resource-preparer' as const,
+      phase: 'RESOURCE_PREPARATION' as const,
+      revision: 'revision-1',
+      allowedPaths: ['assets/'],
+    }
+    await port.start({
+      ...base,
+      dispatchId: 'dispatch-contract-repair',
+      contract: {
+        remediation: {
+          kind: 'resource_contract',
+          sourceRevision: 'resource-1',
+          attempt: 1,
+          issues: ['Canonical inventory metadata is invalid.'],
+        },
+      },
+    })
+    await port.start({
+      ...base,
+      dispatchId: 'dispatch-semantic-review',
+      contract: {
+        remediation: {
+          kind: 'document_review',
+          cycleId: 'cycle-1',
+          sourceRevision: 'resource-1',
+          findings: [],
+        },
+      },
+    })
+    expect(
+      starts[0]?.workflowAllowResourceCatalogWithExistingInventory,
+    ).toBeUndefined()
+    expect(
+      starts[1]?.workflowAllowResourceCatalogWithExistingInventory,
+    ).toBe(true)
+  })
+
   test('assigns the atomic planner one structured submission lane', async () => {
     let submittedPrompt = ''
     const sessions = {
@@ -53,29 +109,6 @@ describe('delivery worker session credentials', () => {
       status: 'completed',
       changedPaths: [],
       verificationObservations: ['The scene artifact exists.'],
-      resourceReferences: [
-        {
-          importId: 'invented-import',
-          references: ['src/render/Scene.tsx'],
-          runtimeEventIds: [],
-        },
-      ],
-      compositionIntegrations: [
-        {
-          compositionId: 'invented-composition',
-          recipePath: 'src/render/Scene.tsx',
-          references: ['src/render/Scene.tsx'],
-          runtimeEventIds: [],
-        },
-      ],
-      requirementSatisfactions: [
-        {
-          requirementId: 'invented-requirement',
-          importIds: ['invented-import'],
-          compositionIds: ['invented-composition'],
-          projectReferences: ['src/render/Scene.tsx'],
-        },
-      ],
     }
     const sessions = {
       start() {
@@ -140,9 +173,7 @@ describe('delivery worker session credentials', () => {
       contract: {
         task: {
           expectedArtifacts: ['src/render/Scene.tsx'],
-          resourceRequirementIds: [],
-          resourceImportIds: [],
-          resourceCompositionIds: [],
+          contentIds: [],
           verification: [
             {
               kind: 'file',
@@ -176,9 +207,6 @@ describe('delivery worker session credentials', () => {
           observations: ['The scene artifact exists.'],
         },
       ],
-      resourceReferences: [],
-      compositionIntegrations: [],
-      requirementSatisfactions: [],
       evidenceRefs: [
         '.beegame/workflow/evidence/implementation-dispatch-implementation.json',
       ],
@@ -248,8 +276,8 @@ describe('delivery worker session credentials', () => {
             },
           ],
           checklistIds: ['check-1'],
-          importIds: ['import-1'],
-          compositionIds: [],
+          resourceIds: ['resource-1'],
+          contentIds: [],
         },
       })
       await port.submit('dispatch-audit', 'Audit implementation')
@@ -260,8 +288,8 @@ describe('delivery worker session credentials', () => {
         status: 'failed',
         auditedTaskIds: ['task-1'],
         checklistIds: ['check-1'],
-        importIds: ['import-1'],
-        compositionIds: [],
+        resourceIds: ['resource-1'],
+        contentIds: [],
         findings: [
           {
             taskIds: ['task-1'],
@@ -294,14 +322,19 @@ describe('delivery worker session credentials', () => {
     )
     let submittedPrompt = ''
     const finding = {
-      code: 'document-conflict',
+      findingId: 'document-conflict',
+      checkId: 'cross_document_consistency',
       severity: 'blocking',
-      category: 'cross_document_conflict',
-      remediationTarget: 'foundation',
-      documents: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
-      description:
+      owner: 'foundation',
+      subjects: [
+        { path: 'docs/GDD.md', anchor: 'Rules' },
+        { path: 'docs/TECHNICAL_DESIGN.md', anchor: 'Rules' },
+      ],
+      observation:
         'The label "Level 3" conflicts with `Level 4`.\nBoth are explicit.',
+      blockingReason: 'The implementation has no unique level rule.',
       requiredAction: 'Choose one level and update both documents.',
+      closureCondition: 'Both documents define the same level rule.',
     }
     const sessions = {
       start() {
@@ -320,7 +353,19 @@ describe('delivery worker session credentials', () => {
             createdAt: new Date(),
             payload: {
               toolName: 'SubmitDocumentReviewResult',
-              input: { verdict: 'NEEDS_REVISION', findings: [finding] },
+              input: {
+                verdict: 'NEEDS_REVISION',
+                checks: [
+                  {
+                    id: 'cross_document_consistency',
+                    status: 'block',
+                    conclusion: 'The documents conflict.',
+                    evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+                    findingIds: ['document-conflict'],
+                  },
+                ],
+                findings: [finding],
+              },
             },
           },
           {
@@ -345,7 +390,13 @@ describe('delivery worker session credentials', () => {
         phase: 'DOCUMENT_REVIEW',
         revision: 'revision-1',
         allowedPaths: [],
-        contract: { reviewScope: 'foundation' },
+        contract: {
+          reviewScope: 'foundation',
+          reviewAuthority: {
+            confirmedBriefContext: 'Confirmed brief',
+            confirmedBriefDigest: 'service-owned-digest',
+          },
+        },
       })
       await port.submit('dispatch-review', 'Review foundation documents')
       const terminal = await port.waitForTerminal?.('dispatch-review')
@@ -374,6 +425,276 @@ describe('delivery worker session credentials', () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
+  })
+
+  test('accepts a document author submission before the SDK emits a turn result', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-author-result-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-author-result' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'write-started',
+            type: 'tool.started',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'write-gdd',
+              toolName: 'Write',
+              input: { file_path: 'docs/GDD.md' },
+            },
+          },
+          {
+            id: 'write-completed',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'write-gdd',
+              toolName: 'Write',
+              input: { file_path: 'docs/GDD.md' },
+            },
+          },
+          {
+            id: 'author-submission',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'submit-author-result',
+              toolName: 'SubmitDocumentAuthorResult',
+              input: { resolvedFindingIds: [] },
+            },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-author-result',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {},
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-author-result'),
+      ).resolves.toEqual({
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: [],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('allows an idempotent document author submission with no file mutation', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-author-no-op' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'author-no-op-submission',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'submit-author-no-op',
+              toolName: 'SubmitDocumentAuthorResult',
+              input: { resolvedFindingIds: [] },
+            },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-author-no-op',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {},
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-author-no-op'),
+    ).resolves.toEqual({
+      workerType: 'document-author',
+      status: 'completed',
+      writtenPaths: [],
+      resolvedFindingIds: [],
+    })
+  })
+
+  test('rejects deterministic checklist issue text submitted as a semantic finding id', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-checklist-correction' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'checklist-correction-submission',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'submit-checklist-correction',
+              toolName: 'SubmitDocumentAuthorResult',
+              input: {
+                resolvedFindingIds: [
+                  'Checklist task 1 has no stable identifier.',
+                ],
+              },
+            },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-checklist-correction',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision-1',
+      allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
+      contract: {
+        documentSet: 'checklist',
+        checklistRemediation: {
+          sourceRevision: 'revision-1',
+          attempt: 1,
+          issues: ['Checklist task 1 has no stable identifier.'],
+        },
+      },
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-checklist-correction'),
+    ).rejects.toThrow(
+      'checklistRemediation issues are not semantic finding IDs',
+    )
+  })
+
+  test('accepts only the exact semantic remediation finding ids from the dispatch contract', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-document-remediation' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'document-remediation-submission',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'submit-document-remediation',
+              toolName: 'SubmitDocumentAuthorResult',
+              input: { resolvedFindingIds: ['finding-2', 'finding-1'] },
+            },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-document-remediation',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        documentSet: 'foundation',
+        remediation: {
+          findings: [
+            { findingId: 'finding-1' },
+            { findingId: 'finding-2' },
+          ],
+        },
+      },
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-document-remediation'),
+    ).resolves.toEqual({
+      workerType: 'document-author',
+      status: 'completed',
+      writtenPaths: [],
+      resolvedFindingIds: ['finding-1', 'finding-2'],
+    })
+  })
+
+  test('rejects the retired remediation id field instead of dual-reading it', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-retired-remediation-id' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [{
+          id: 'retired-remediation-submission',
+          type: 'tool.completed',
+          text: '',
+          createdAt: new Date(),
+          payload: {
+            toolName: 'SubmitDocumentAuthorResult',
+            input: { resolvedFindingIds: ['finding-1'] },
+          },
+        }]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-retired-remediation-id',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        documentSet: 'foundation',
+        remediation: { findings: [{ id: 'finding-1' }] },
+      },
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-retired-remediation-id'),
+    ).rejects.toThrow('contract.remediation findingId is invalid')
   })
 
   test('does not accept a structured document result hidden behind a deferred wrapper', async () => {
@@ -475,7 +796,12 @@ describe('delivery worker session credentials', () => {
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
       revision: 'revision-1',
-      contract: {},
+      contract: {
+        reviewAuthority: {
+          confirmedBriefContext: 'Confirmed brief',
+          confirmedBriefDigest: 'service-owned-digest',
+        },
+      },
     }
 
     await port.start(request)
@@ -524,6 +850,8 @@ describe('delivery worker session credentials', () => {
             dependsOn: [],
             allowedPaths: ['src/'],
             expectedArtifacts: ['src/main.ts'],
+            resourceIds: [],
+            contentIds: [],
             verification: [
               {
                 kind: 'build',
@@ -534,10 +862,7 @@ describe('delivery worker session credentials', () => {
           },
         ],
         ownership: {
-          resourceRequirements: [],
           checklistItems: [{ id: 'check-1', taskId: 'task-1' }],
-          resourceImports: [],
-          resourceCompositions: [],
         },
       }
       const sessions = {
@@ -604,7 +929,7 @@ describe('delivery worker session credentials', () => {
         tasks: [
           {
             id: 'task-1',
-            resourceRequirementIds: [],
+            contentIds: [],
             expectedArtifacts: ['src/main.ts'],
           },
         ],
@@ -625,36 +950,30 @@ describe('delivery worker session credentials', () => {
       join(tmpdir(), 'beegame-resource-terminal-'),
     )
     try {
-      await mkdir(join(workspacePath, 'assets/library/root'), {
+      await mkdir(join(workspacePath, 'assets/runtime/root'), {
         recursive: true,
       })
       await writeFile(
-        join(workspacePath, 'assets/library/root/root.glb'),
+        join(workspacePath, 'assets/runtime/root/root.glb'),
         new Uint8Array([1, 2, 3]),
       )
       await writeFile(
         join(workspacePath, 'assets/asset-manifest.json'),
         JSON.stringify({
-          version: 5,
+          version: 7,
           project_target: {
-            integration_mode: 'filesystem',
             asset_format_capabilities: ['glb'],
-            resource_library_usage: 'preferred',
-            runtime_asset_root: 'assets/library',
+            runtime_asset_root: 'assets/runtime',
+            content_root: 'assets/content',
+            generated_asset_root: 'assets/generated',
           },
           requirements: [
             {
               id: 'root-model',
-              status: 'planned',
-              resource_requirement: {
-                accepted_formats: ['glb'],
-                import_budget: 1,
-                no_match: 'authored-asset',
-              },
-              satisfied_by: { import_ids: ['root'] },
+              required: true,
             },
           ],
-          imports: [
+          resources: [
             {
               id: 'root',
               source: {
@@ -664,15 +983,20 @@ describe('delivery worker session credentials', () => {
                 element_id: 'root',
                 element_path: 'models/root.glb',
               },
-              status: 'available',
-              root_path: 'assets/library/root/root.glb',
-              local_files: ['assets/library/root/root.glb'],
+              status: 'verified',
+              root_path: 'assets/runtime/root/root.glb',
+              file_paths: ['assets/runtime/root/root.glb'],
+              provisional: false,
               selected_at: new Date().toISOString(),
               selection_reason: ['Approved asset plan'],
             },
           ],
-          compositions: [],
         }),
+      )
+      await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
+      await writeFile(
+        join(workspacePath, 'assets/content/resources.json'),
+        JSON.stringify({ schema: 'beegame-content-v1', id: 'resources', kind: 'resource-registry', fulfills: ['root-model'], resources: ['root'], data: {} }),
       )
       const starts: Array<Record<string, unknown>> = []
       const sessions = {
@@ -702,7 +1026,7 @@ describe('delivery worker session credentials', () => {
                 toolUseID: 'completed-write',
                 toolName: 'Write',
                 input: {
-                  file_path: join(workspacePath, 'assets/resource-note.json'),
+                  file_path: join(workspacePath, 'assets/content/resource-note.json'),
                 },
               },
             },
@@ -739,8 +1063,13 @@ describe('delivery worker session credentials', () => {
         workerType: 'resource-preparer',
         phase: 'RESOURCE_PREPARATION',
         revision: 'revision-1',
-        allowedPaths: ['assets/asset-manifest.json', 'assets/library/'],
-        contract: { resourceAttemptMode: 'repair' },
+        allowedPaths: [
+          'assets/asset-manifest.json',
+          'assets/runtime/',
+          'assets/content/',
+          'assets/generated/',
+        ],
+        contract: {},
       }
 
       await port.start(request)
@@ -749,19 +1078,18 @@ describe('delivery worker session credentials', () => {
       expect(starts[0]).toMatchObject({
         workflowWorker: true,
         workflowWorkerType: 'resource-preparer',
-        workflowResourceAttemptMode: 'repair',
       })
       expect(terminal).toMatchObject({
         workerType: 'resource-preparer',
         revision: 'revision-1',
         status: 'completed',
-        importIds: ['root'],
+        resourceIds: ['root'],
       })
       expect(
         (terminal as { writtenPaths: string[] }).writtenPaths,
       ).not.toContain('src/forbidden.ts')
       expect((terminal as { writtenPaths: string[] }).writtenPaths).toContain(
-        'assets/resource-note.json',
+        'assets/content/resource-note.json',
       )
       const evidencePath = (terminal as { evidencePath: string }).evidencePath
       const evidence = JSON.parse(
@@ -787,7 +1115,7 @@ describe('delivery worker session credentials', () => {
       payload: {
         toolUseID: `read-${index}`,
         toolName: 'ResourceLibrary',
-        input: { action: 'query_candidates', requirement_ids: ['ground'] },
+        input: { action: 'browse_catalog', page: 1, page_size: 25 },
         output: repeatedOutput,
       },
     }))
@@ -849,7 +1177,7 @@ describe('delivery worker session credentials', () => {
         payload: {
           toolUseID: 'import-batch',
           toolName: 'ResourceLibrary',
-          input: { action: 'import_elements', selections: [] },
+          input: { action: 'import_resources', selections: [] },
         },
       },
     ]
@@ -889,7 +1217,7 @@ describe('delivery worker session credentials', () => {
       payload: {
         toolUseID: 'import-batch',
         toolName: 'ResourceLibrary',
-        input: { action: 'import_elements', selections: [] },
+        input: { action: 'import_resources', selections: [] },
       },
     })
     await expect(
@@ -937,7 +1265,6 @@ describe('delivery worker session credentials', () => {
       sessions,
       userId: 'user-1',
       resourceLimits: {
-        maxCatalogCalls: 1,
         repeatedReadResultLimit: 4,
       },
     })
@@ -957,37 +1284,5 @@ describe('delivery worker session credentials', () => {
     await expect(
       port.waitForTerminal?.('dispatch-resource-rejected-parallel'),
     ).rejects.toThrow('model turn ended after rejected calls')
-  })
-
-  test('passes the catalog read limit into the native resource session', async () => {
-    const starts: Array<Record<string, unknown>> = []
-    const sessions = {
-      start(input: Record<string, unknown>) {
-        starts.push(input)
-        return { id: 'session-resource-reused-tool-id' }
-      },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions,
-      userId: 'user-1',
-      resourceLimits: { maxCatalogCalls: 2 },
-    })
-
-    await port.start({
-      dispatchId: 'dispatch-resource-reused-tool-id',
-      runId: 'run-1',
-      ownerId: 'user-1',
-      projectId: 'project-1',
-      workspacePath: '/tmp/project-1',
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: 'revision-1',
-      contract: { resourceAttemptMode: 'selection' },
-    })
-
-    expect(starts[0]).toMatchObject({
-      workflowResourceAttemptMode: 'selection',
-      workflowResourceCatalogReadLimit: 2,
-    })
   })
 })

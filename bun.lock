@@ -310,6 +310,8 @@
         "@bee-game-studio/beegame-storage-core": "workspace:*",
         "@bee-game-studio/security-core": "workspace:*",
         "@bee-game-studio/workflow-engine": "workspace:*",
+        "@xmldom/xmldom": "^0.8.11",
+        "fonteditor-core": "^2.6.2",
         "hono": "^4.12.15",
         "zod": "^4.3.6",
       },
@@ -2476,6 +2478,8 @@
     "flora-colossus": ["flora-colossus@2.0.0", "https://registry.npmmirror.com/flora-colossus/-/flora-colossus-2.0.0.tgz", { "dependencies": { "debug": "^4.3.4", "fs-extra": "^10.1.0" } }, "sha512-dz4HxH6pOvbUzZpZ/yXhafjbR2I8cenK5xL0KtBFb7U2ADsR+OwXifnxZjij/pZWF775uSCMzWVd+jDik2H2IA=="],
 
     "follow-redirects": ["follow-redirects@1.16.0", "https://registry.npmmirror.com/follow-redirects/-/follow-redirects-1.16.0.tgz", {}, "sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw=="],
+
+    "fonteditor-core": ["fonteditor-core@2.6.3", "https://registry.npmmirror.com/fonteditor-core/-/fonteditor-core-2.6.3.tgz", { "dependencies": { "@xmldom/xmldom": "^0.8.3" } }, "sha512-YUryIKjkenjZ41E7JvM3V+02Ak4mTHDDTwBWgs9KBzypzHqLZHuua1UDRevZNTKawmnq1dbBAa70Jddl2+F4FQ=="],
 
     "for-each": ["for-each@0.3.5", "https://registry.npmmirror.com/for-each/-/for-each-0.3.5.tgz", { "dependencies": { "is-callable": "^1.2.7" } }, "sha512-dKx12eRCVIzqCxFGplyFKJMPvLEWgmNtUrpTiJIR5u97zEhRG8ySrtboPHZXx7daLxQVrl643cTzbab2tkQjxg=="],
 

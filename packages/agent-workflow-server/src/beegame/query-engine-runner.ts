@@ -34,6 +34,7 @@ import { createNativeImplementationResultTool } from './native-implementation-re
 import { createNativeValidationResultTool } from './native-validation-result-tool'
 import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
 import { createResourceSelectionClient } from './resource-selection-client'
+import { confirmedResourceLibraryUsage } from './resource-delivery-readiness'
 
 export { parseNativeTerminalTaskNotification } from './native-task-notification'
 
@@ -167,7 +168,7 @@ const SINGLE_LANE_WORKFLOW_WORKERS = new Set([
 ])
 
 const MAIN_THREAD_WORKFLOW_RESULT_TOOLS = new Set([
-  'SubmitAssetManifest',
+  'AssetManifest',
   'SubmitAtomicTaskPlan',
   'SubmitImplementationResult',
   'SubmitValidationResult',
@@ -177,9 +178,7 @@ const MAIN_THREAD_WORKFLOW_RESULT_TOOLS = new Set([
   'SubmitQuestionAnswerResult',
 ])
 
-const RESOURCE_CATALOG_READ_ACTIONS = new Set([
-  'query_candidates',
-])
+const RESOURCE_CATALOG_READ_ACTIONS = new Set(['browse_catalog'])
 
 export class ResourceCatalogTurnGate {
   private readonly turnsWithCatalogRead = new WeakSet<object>()
@@ -239,9 +238,6 @@ export function requiresBeeGameWorkflowBoundaryCheck(
     input.workflowWorkerType === 'implementation-worker' &&
     (toolName === 'Read' || toolName === 'Bash')
   ) {
-    return true
-  }
-  if (input.workflowWorkerType === 'resource-preparer' && toolName === 'Bash') {
     return true
   }
   return (
@@ -431,9 +427,8 @@ export class NativeResourceLibraryPermissionBroker {
       input: normalized.input,
     }
     const mutationAction =
-      delegated.action === 'import_elements' ||
-      delegated.action === 'record_no_match' ||
-      delegated.action === 'refresh_import_metadata'
+      delegated.action === 'import_resources' ||
+      delegated.action === 'refresh_resource_metadata'
     if (!mutationAction) {
       return Promise.resolve({
         behavior: 'allow',
@@ -482,9 +477,9 @@ export class NativeResourceLibraryPermissionBroker {
       toolUseID: input.toolUseID,
       toolName: 'ResourceLibrary',
       message:
-        delegated.action === 'refresh_import_metadata'
-          ? 'Allow objective metadata for existing Resource Library imports to be refreshed from their pinned Pack versions?'
-          : `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} explicitly selected Resource Library element(s) to be copied into this project?`,
+        delegated.action === 'refresh_resource_metadata'
+          ? 'Allow objective metadata for existing Resource Library resources to be refreshed from their pinned Pack versions?'
+          : `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} selected Resource Library resource(s) to be downloaded into this project?`,
       input: delegated.input,
     })
       .then(decision => {
@@ -733,28 +728,36 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const nativeTools = selectBeeGameWorkerTools(
       call(toolsModule, 'getTools', permissionContext) as unknown[],
       this.input.workflowWorkerType,
-      this.input.workflowResourceAttemptMode,
     )
     const assetManifestTool =
-      this.input.workflowWorkerType === 'resource-preparer' &&
-      this.input.workflowResourceAttemptMode === 'fresh'
+      this.input.workflowWorkerType === 'resource-preparer'
         ? createNativeAssetManifestTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workspacePath: this.input.cwd,
+            resourceLibraryUsage:
+              confirmedResourceLibraryUsage(this.confirmedBriefContext) ??
+              (() => {
+                throw new Error(
+                  'Resource preparation requires a confirmed Resource Library policy.',
+                )
+              })(),
           })
         : undefined
     const resourceTool =
       this.input.resourceSelectionConfig &&
-      this.input.workflowResourceAttemptMode !== 'fresh'
+      this.input.workflowWorkerType === 'resource-preparer'
         ? createNativeResourceLibraryTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workspacePath: this.input.cwd,
+            registrationBarrierPaths:
+              this.input.workflowResourceRegistrationBarrierPaths,
+            allowCatalogWithExistingInventory:
+              this.input.workflowAllowResourceCatalogWithExistingInventory,
             client: createResourceSelectionClient({
               ...this.input.resourceSelectionConfig,
               fetchImpl: PLATFORM_SERVICE_FETCH,
             }),
             fetchImpl: PLATFORM_SERVICE_FETCH,
-            catalogReadLimit: this.input.workflowResourceCatalogReadLimit ?? 12,
           })
         : undefined
     const atomicTaskPlanTool =
@@ -785,6 +788,20 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         ? createNativeWorkflowResultTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workerType: this.input.workflowWorkerType,
+            ...(this.input.workflowWorkerType === 'document-reviewer' &&
+            this.input.workflowDocumentReviewMode
+              ? {
+                  documentReviewMode:
+                    this.input.workflowDocumentReviewMode,
+                }
+              : {}),
+            ...(this.input.workflowWorkerType === 'document-reviewer' &&
+            this.input.workflowDocumentReviewScope
+              ? {
+                  documentReviewScope:
+                    this.input.workflowDocumentReviewScope,
+                }
+              : {}),
           })
         : undefined
     const workflowTools = [
@@ -1459,10 +1476,30 @@ function getToolName(tool: unknown): string {
 export function selectBeeGameWorkerTools(
   tools: unknown[],
   workflowWorkerType?: string,
-  resourceAttemptMode?: string,
 ): unknown[] {
-  if (workflowWorkerType === 'atomic-task-planner') {
+  if (
+    workflowWorkerType === 'atomic-task-planner' ||
+    workflowWorkerType === 'document-reviewer'
+  ) {
     return []
+  }
+  if (workflowWorkerType === 'document-author') {
+    const documentToolNames = new Set(['Read', 'Write', 'MultiEdit'])
+    return tools.filter(tool => documentToolNames.has(getToolName(tool)))
+  }
+  if (workflowWorkerType === 'resource-preparer') {
+    const resourceToolNames = new Set([
+      'Glob',
+      'Grep',
+      'LS',
+      'NotebookEdit',
+      'NotebookRead',
+      'Read',
+      'Write',
+      'Edit',
+      'MultiEdit',
+    ])
+    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
   }
   if (
     !workflowWorkerType ||
@@ -1470,18 +1507,6 @@ export function selectBeeGameWorkerTools(
   )
     return tools
   const redundantToolNames = new Set(['SearchExtraTools', 'ExecuteExtraTool'])
-  // Fresh planning has SubmitAssetManifest. Selection and reselection have
-  // ResourceLibrary, which owns imports and canonical bindings atomically.
-  // Generic mutation tools would create a second manifest/inventory lane.
-  // Repair remains the only resource mode that may edit its explicitly scoped
-  // canonical files until repair also has a dedicated structured operation.
-  if (
-    workflowWorkerType === 'resource-preparer' &&
-    resourceAttemptMode !== 'repair'
-  ) {
-    for (const toolName of WORKFLOW_FILE_MUTATION_TOOLS)
-      redundantToolNames.add(toolName)
-  }
   return tools.filter(tool => !redundantToolNames.has(getToolName(tool)))
 }
 

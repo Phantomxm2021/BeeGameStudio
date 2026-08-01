@@ -8,7 +8,8 @@ import { closeResourcePackRoute } from './resourceLibraryRoute'
 import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ToastProvider } from '../../contexts/ToastContext'
 
-const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
+const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack',
+  styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
 const element: ResourceElement = { id: 'element-1', packId: 'pack-1', name: 'knight.png', path: 'models/knight.png', category: 'models', kind: 'image', specs: {}, dependencies: [], status: 'ready' }
 const api = {
   createPack: async () => pack, listPacks: async () => [pack], getPack: async () => pack, listElements: async () => [element], getElement: async () => element,
@@ -198,7 +199,7 @@ describe('ResourceLibraryView workspace', () => {
       ...element,
       id: 'model-1',
       name: 'world.fbx',
-      category: 'environment',
+      category: 'models',
       kind: 'model',
       usageTags: [],
       specs: { externalReferences: JSON.stringify(['Textures/stone.png']) },

@@ -6,7 +6,9 @@ import type { ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { EditResourcePackDialog } from './EditResourcePackDialog'
 
 const pack: ResourcePackSummary = {
-  id: 'pack-1', name: 'Forest Pack', style: 'Pixel / Fantasy', gameTypes: ['RPG'], dimension: '2D', primaryCategory: '2d-art', categories: [], elementCount: 3,
+  id: 'pack-1', name: 'Forest Pack',
+  styles: ['Pixel', 'Fantasy'],
+  gameTypes: ['RPG'], dimension: '2D', primaryCategory: '2d-art', categories: [], elementCount: 3,
 }
 
 describe('EditResourcePackDialog', () => {

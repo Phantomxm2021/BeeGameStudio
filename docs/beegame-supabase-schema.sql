@@ -8,19 +8,16 @@ insert into storage.buckets (id, name, public)
 values
   ('avatars', 'avatars', true),
   ('beegame-assets', 'beegame-assets', false),
-  ('beegame-resource-packs', 'beegame-resource-packs', false),
   ('beegame-deployments', 'beegame-deployments', true)
 on conflict (id) do update
 set public = excluded.public;
 
+-- Resource Library binaries live only in R2. Drop the policies from the
+-- retired Supabase Storage path so a previously applied schema cannot keep
+-- serving or accepting Resource Pack files through a second backend.
 drop policy if exists "beegame resource pack platform read" on storage.objects;
-create policy "beegame resource pack platform read" on storage.objects
-  for select using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
-
 drop policy if exists "beegame resource pack platform write" on storage.objects;
-create policy "beegame resource pack platform write" on storage.objects
-  for all using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner())
-  with check (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
+drop policy if exists "beegame resource pack owner access" on storage.objects;
 
 drop policy if exists "beegame avatar public read" on storage.objects;
 create policy "beegame avatar public read" on storage.objects
@@ -290,7 +287,6 @@ create table if not exists public.beegame_assets (
 create table if not exists public.beegame_resource_packs (
   id text primary key,
   name text not null,
-  style text not null,
   styles text[] not null default '{}',
   primary_category text not null default 'mixed' check (primary_category in ('2d-art', '3d-assets', 'animation-rig', 'ui-kit', 'vfx', 'audio', 'fonts', 'world-scene', 'mixed')),
   game_types jsonb not null default '[]'::jsonb,
@@ -392,15 +388,9 @@ alter table public.beegame_resource_packs
   add column if not exists license_evidence text,
   add column if not exists compatible_engines text[] not null default '{}',
   add column if not exists deprecated_at timestamptz;
-update public.beegame_resource_packs
-set styles = array(
-  select btrim(value)
-  from unnest(string_to_array(style, '/')) as value
-  where btrim(value) <> ''
-)
-where cardinality(styles) = 0 and btrim(style) <> '';
-
 drop view if exists public.beegame_resource_pack_catalog;
+alter table public.beegame_resource_packs
+  drop column if exists style;
 
 create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
@@ -409,8 +399,7 @@ select
   p.id as pack_id,
   p.version as pack_version,
   p.name as pack_name,
-  p.style,
-  case when cardinality(p.styles) > 0 then p.styles else array[p.style] end as styles,
+  p.styles,
   array(select jsonb_array_elements_text(p.game_types)) as game_types,
   p.dimension,
   p.primary_category,
@@ -2072,6 +2061,128 @@ alter table public.beegame_resource_elements
   add column if not exists storage_object_id uuid references public.beegame_storage_objects(id) on delete set null;
 alter table public.beegame_deployments
   add column if not exists manifest_storage_object_id uuid references public.beegame_storage_objects(id) on delete set null;
+
+-- Resource Library metadata has one binary source of truth. Development rows
+-- that predate R2 identities are removed instead of retaining an unreadable
+-- Supabase Storage locator or a compatibility reader.
+delete from public.beegame_resource_elements
+where storage_object_id is null
+   or not exists (
+     select 1
+     from public.beegame_storage_objects object
+     where object.id = beegame_resource_elements.storage_object_id
+       and object.provider = 'r2'
+       and object.scope_type = 'pack'
+       and object.pack_id = beegame_resource_elements.pack_id
+       and object.object_kind = 'resource_element'
+       and object.logical_path = beegame_resource_elements.path
+       and object.status = 'ready'
+       and object.deleted_at is null
+   );
+
+update public.beegame_resource_packs pack
+set cover_path = object.logical_path
+from public.beegame_storage_objects object
+where pack.cover_storage_object_id = object.id
+  and object.provider = 'r2'
+  and object.scope_type = 'pack'
+  and object.pack_id = pack.id
+  and object.object_kind = 'resource_preview'
+  and object.status = 'ready'
+  and object.deleted_at is null;
+
+update public.beegame_resource_packs pack
+set cover_path = null,
+    cover_storage_object_id = null
+where pack.cover_storage_object_id is null
+   or not exists (
+     select 1
+     from public.beegame_storage_objects object
+     where object.id = pack.cover_storage_object_id
+       and object.provider = 'r2'
+       and object.scope_type = 'pack'
+       and object.pack_id = pack.id
+       and object.object_kind = 'resource_preview'
+       and object.logical_path = pack.cover_path
+       and object.status = 'ready'
+       and object.deleted_at is null
+   );
+
+alter table public.beegame_resource_packs
+  drop constraint if exists beegame_resource_packs_cover_storage_object_id_fkey;
+alter table public.beegame_resource_packs
+  add constraint beegame_resource_packs_cover_storage_object_id_fkey
+  foreign key (cover_storage_object_id) references public.beegame_storage_objects(id) on delete restrict;
+alter table public.beegame_resource_packs
+  drop constraint if exists beegame_resource_packs_cover_storage_pair_check;
+alter table public.beegame_resource_packs
+  add constraint beegame_resource_packs_cover_storage_pair_check check (
+    (cover_path is null and cover_storage_object_id is null)
+    or (nullif(btrim(cover_path), '') is not null and cover_storage_object_id is not null)
+  );
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_storage_object_id_fkey;
+alter table public.beegame_resource_elements
+  alter column storage_object_id set not null;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_storage_object_id_fkey
+  foreign key (storage_object_id) references public.beegame_storage_objects(id) on delete restrict;
+
+create or replace function public.beegame_assert_resource_storage_binding()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  bound_object_id uuid;
+  bound_pack_id text;
+  bound_logical_path text;
+  expected_object_kind text;
+begin
+  if tg_table_name = 'beegame_resource_elements' then
+    bound_object_id := new.storage_object_id;
+    bound_pack_id := new.pack_id;
+    bound_logical_path := new.path;
+    expected_object_kind := 'resource_element';
+  else
+    if new.cover_path is null and new.cover_storage_object_id is null then
+      return new;
+    end if;
+    bound_object_id := new.cover_storage_object_id;
+    bound_pack_id := new.id;
+    bound_logical_path := new.cover_path;
+    expected_object_kind := 'resource_preview';
+  end if;
+
+  if not exists (
+    select 1
+    from public.beegame_storage_objects object
+    where object.id = bound_object_id
+      and object.provider = 'r2'
+      and object.scope_type = 'pack'
+      and object.pack_id = bound_pack_id
+      and object.object_kind = expected_object_kind
+      and object.logical_path = bound_logical_path
+      and object.status = 'ready'
+      and object.deleted_at is null
+  ) then
+    raise exception 'Resource metadata must reference a ready R2 object owned by the same Pack';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists beegame_resource_elements_storage_binding on public.beegame_resource_elements;
+create trigger beegame_resource_elements_storage_binding
+before insert or update of pack_id, storage_object_id on public.beegame_resource_elements
+for each row execute function public.beegame_assert_resource_storage_binding();
+
+drop trigger if exists beegame_resource_packs_cover_storage_binding on public.beegame_resource_packs;
+create trigger beegame_resource_packs_cover_storage_binding
+before insert or update of cover_path, cover_storage_object_id on public.beegame_resource_packs
+for each row execute function public.beegame_assert_resource_storage_binding();
 
 alter table public.beegame_storage_objects enable row level security;
 alter table public.beegame_storage_upload_intents enable row level security;

@@ -26,14 +26,21 @@ export function serializeQueryEngineStartInput(
     ...(input.workflowWorkerType
       ? { workflowWorkerType: input.workflowWorkerType }
       : {}),
-    ...(input.workflowResourceAttemptMode
-      ? { workflowResourceAttemptMode: input.workflowResourceAttemptMode }
+    ...(input.workflowDocumentReviewMode
+      ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
       : {}),
-    ...(input.workflowResourceCatalogReadLimit
+    ...(input.workflowDocumentReviewScope
+      ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+      : {}),
+    ...(input.workflowResourceRegistrationBarrierPaths
       ? {
-          workflowResourceCatalogReadLimit:
-            input.workflowResourceCatalogReadLimit,
+          workflowResourceRegistrationBarrierPaths: [
+            ...input.workflowResourceRegistrationBarrierPaths,
+          ],
         }
+      : {}),
+    ...(input.workflowAllowResourceCatalogWithExistingInventory
+      ? { workflowAllowResourceCatalogWithExistingInventory: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
@@ -71,14 +78,21 @@ export function deserializeQueryEngineStartInput(
     ...(input.workflowWorkerType
       ? { workflowWorkerType: input.workflowWorkerType }
       : {}),
-    ...(input.workflowResourceAttemptMode
-      ? { workflowResourceAttemptMode: input.workflowResourceAttemptMode }
+    ...(input.workflowDocumentReviewMode
+      ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
       : {}),
-    ...(input.workflowResourceCatalogReadLimit
+    ...(input.workflowDocumentReviewScope
+      ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+      : {}),
+    ...(input.workflowResourceRegistrationBarrierPaths
       ? {
-          workflowResourceCatalogReadLimit:
-            input.workflowResourceCatalogReadLimit,
+          workflowResourceRegistrationBarrierPaths: [
+            ...input.workflowResourceRegistrationBarrierPaths,
+          ],
         }
+      : {}),
+    ...(input.workflowAllowResourceCatalogWithExistingInventory
+      ? { workflowAllowResourceCatalogWithExistingInventory: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [

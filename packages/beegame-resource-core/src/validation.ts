@@ -25,8 +25,8 @@ export function validateResourcePack(value: unknown): ResourcePack {
   const styles = Array.isArray(value.styles)
     ? value.styles.filter(item => typeof item === 'string' && item.trim())
     : []
-  if (!styles.length) requireString(value.style, 'Pack style')
-  if (value.styles !== undefined && (styles.length !== value.styles.length || !styles.length)) {
+  if (
+    styles.length !== (Array.isArray(value.styles) ? value.styles.length : 0) || !styles.length) {
     throw new ResourceValidationError('Pack styles must be a non-empty array of strings')
   }
   requireString(value.license, 'Pack license')
@@ -95,19 +95,23 @@ export function validateResourceElement(value: unknown): ResourceElement {
 }
 
 function isElementDefaults(value: unknown): boolean {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     (value.usageTags === undefined || (Array.isArray(value.usageTags) && value.usageTags.every(item => isAllowed(item, RESOURCE_USAGE_TAGS))))
+  )
 }
 
 function isContentProfile(value: unknown): boolean {
   if (!isRecord(value) || !isAllowed(value.packaging, ['self-contained', 'external-dependencies', 'unknown'] as const)) return false
   if (!Array.isArray(value.components) || value.components.some(component => !isEmbeddedComponent(component))) return false
   const inspection = value.inspection
-  return isRecord(inspection) &&
+  return (
+    isRecord(inspection) &&
     isAllowed(inspection.status, ['complete', 'partial', 'unavailable'] as const) &&
     isAllowed(inspection.source, ['server', 'client', 'admin'] as const) &&
     (inspection.inspectedAt === undefined || typeof inspection.inspectedAt === 'string') &&
     (inspection.inspectorVersion === undefined || typeof inspection.inspectorVersion === 'string')
+  )
 }
 
 function isEmbeddedComponent(value: unknown): boolean {
@@ -116,7 +120,9 @@ function isEmbeddedComponent(value: unknown): boolean {
   if (value.name !== undefined && typeof value.name !== 'string') return false
   if (value.roles !== undefined && (!Array.isArray(value.roles) || value.roles.some(role => typeof role !== 'string' || !role.trim()))) return false
   if (value.specs !== undefined && (!isRecord(value.specs) || Object.values(value.specs).some(item => !['string', 'number', 'boolean'].includes(typeof item)))) return false
-  return value.skeletonSignature === undefined || typeof value.skeletonSignature === 'string'
+  return (
+    value.skeletonSignature === undefined || typeof value.skeletonSignature === 'string'
+  )
 }
 
 function isElementRelation(value: unknown): boolean {

@@ -24,6 +24,7 @@ export type QueryEngineParentMessage =
     type: 'turn.submit'
     turnId: string
     prompt: BeeGamePromptInput
+    confirmedBriefContext?: string
   }
   | { type: 'turn.stop'; turnId?: string }
   | {

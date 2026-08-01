@@ -7,6 +7,21 @@ import {
   REQUIRED_PROJECT_DOCUMENTS,
 } from './document-readiness-audit'
 
+async function writeMinimalContent(workspace: string): Promise<void> {
+  await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
+  await writeFile(
+    join(workspace, 'assets', 'content', 'project.json'),
+    JSON.stringify({
+      schema: 'beegame-content-v1',
+      id: 'project-content',
+      kind: 'resource-registry',
+      fulfills: [],
+      resources: [],
+      data: {},
+    }),
+  )
+}
+
 describe('document readiness audit', () => {
   let workspace = ''
 
@@ -63,18 +78,21 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeMinimalContent(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
-        version: 5,
+        version: 7,
         project_target: {
           platform: 'selected-target',
           runtime: 'project-native',
           asset_format_capabilities: ['glb'],
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
         },
         requirements: [],
-        imports: [],
-        compositions: [],
+        resources: [],
       }),
     )
 
@@ -96,6 +114,7 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeMinimalContent(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
@@ -107,8 +126,12 @@ describe('document readiness audit', () => {
 
     const audit = auditDocumentReadiness(workspace)
     expect(audit.valid).toBe(false)
-    expect(audit.issues).toContain('assets/asset-manifest.json: requirements must be an array.')
-    expect(audit.issues).toContain('assets/asset-manifest.json: imports must be an array.')
+    expect(audit.issues).toContain(
+      'assets/asset-manifest.json: requirements must be an array.',
+    )
+    expect(audit.issues).toContain(
+      'assets/asset-manifest.json: resources must be an array.',
+    )
   })
 
   test('requires identified acceptance tasks without interpreting game semantics', async () => {
@@ -123,18 +146,21 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeMinimalContent(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
-        version: 5,
+        version: 7,
         project_target: {
           platform: 'selected-target',
           runtime: 'project-native',
           asset_format_capabilities: ['glb'],
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
         },
         requirements: [],
-        imports: [],
-        compositions: [],
+        resources: [],
       }),
     )
 
@@ -145,7 +171,7 @@ describe('document readiness audit', () => {
     ])
   })
 
-  test('accepts legacy bracketed stable identifiers without matching business keywords', async () => {
+  test('accepts bracketed stable identifiers without matching business keywords', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-readiness-'))
     for (const path of REQUIRED_PROJECT_DOCUMENTS) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
@@ -157,14 +183,19 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeMinimalContent(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
-        version: 5,
-        project_target: { asset_format_capabilities: ['glb'] },
+        version: 7,
+        project_target: {
+          asset_format_capabilities: ['glb'],
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
+        },
         requirements: [],
-        imports: [],
-        compositions: [],
+        resources: [],
       }),
     )
 

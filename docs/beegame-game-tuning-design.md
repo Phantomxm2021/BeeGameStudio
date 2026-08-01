@@ -27,7 +27,7 @@ engine setting, or gameplay architecture.
 Related design documents:
 
 - [World Editor design](beegame-world-editor-design.md)
-- [Logical asset and composition contract](beegame-resource-composition-contract.md)
+- [Resource and content contract](beegame-resource-content-contract.md)
 - [Native game delivery architecture](beegame-native-game-delivery-architecture.md)
 
 ## Problem and boundary
@@ -48,7 +48,7 @@ The configuration system therefore has a strict boundary:
   acceptance criteria.
 - **Game configuration** holds reviewed, typed parameters that implement that
   intent.
-- **World data** holds spatial, grid, graph, or flow composition and references
+- **World data** holds spatial, grid, graph, or flow structure and references
   configuration by stable id when required.
 - **Project-native code and assets** implement behavior and load the current
   configuration.
@@ -95,7 +95,7 @@ Every editable field declares appropriate validation:
 - enum and multi-select choices from an explicit source;
 - probability normalization and distribution rules where applicable;
 - list size and uniqueness constraints;
-- resource/composition reference compatibility and availability;
+- resource/content reference compatibility and availability;
 - conditional visibility or validity rules expressed as schema facts rather
   than guessed from labels.
 
@@ -151,14 +151,14 @@ may define additional reviewed domains.
 | `core_rules` | player state, timing, limits, outcome conditions | scalar fields, enums, toggles |
 | `progression` | stages, pacing, unlock rules, difficulty curves | ordered rows, curves, bounded formulas |
 | `economy` | costs, rewards, rates, inventories | tables, currencies, bounded values |
-| `content_pools` | eligible content, weighted selection, references | resource/composition picker, weighted lists |
+| `content_pools` | eligible content, weighted selection, references | resource/content picker, weighted lists |
 | `encounters` | authored groups, waves, event timing, spawn budgets | lists, timelines, references, constraints |
 | `presentation` | camera, feedback, animation timing, audio mix | presets, scalar fields, toggles |
 | `accessibility` | input, readability, motion, audio, display options | user-safe toggles, ranges, presets |
 | `runtime_options` | documented project startup or environment options | explicit enum/boolean/scalar fields |
 
 Resource choices do not become filenames in a value field. A content-pool entry
-uses the exact project import or composition id, including pinned Pack/version
+uses the exact project resource or content id, with pinned Pack/version
 provenance. It can only be selected when the referenced item is available and
 compatible with the project-native adapter.
 
@@ -186,7 +186,7 @@ type ConfigField = {
   sectionId: string
   type: 'number' | 'integer' | 'boolean' | 'enum' | 'string' |
         'curve' | 'table' | 'weighted_list' | 'resource_reference' |
-        'composition_reference'
+        'content_reference'
   default: ConfigValue
   constraints?: ConfigConstraint[]
   unit?: string
@@ -212,7 +212,7 @@ adapter, or another target-supported representation.
 Configuration fields that reference assets use project inventory facts:
 
 ```text
-config field → project import or composition → Pack/element/version → copied dependency closure
+config field → project resource/content id → Pack/element/version → copied dependency closure
 ```
 
 The system must distinguish:
@@ -231,7 +231,7 @@ because it appears in a dropdown.
 
 Add `配置` as a project workspace mode beside `预览` and `世界` in the existing
 large left workspace. This preserves the current project dashboard's
-composition: preview remains the play surface, world remains the composition
+layout: preview remains the play surface, world remains the authoring
 surface, configuration becomes the rules and tuning surface. Collaboration,
 deliverables, and resource evidence remain in their existing project panels.
 
@@ -263,7 +263,7 @@ The center surface changes by field type:
 - tables provide explicit columns, row identity, validation, and sorting;
 - curves provide editable control points plus a tabular alternative;
 - weighted lists show normalization and reference validity;
-- resource/composition references open the project inventory first and then
+- resource/content references open the project inventory first and then
   contextual Resource Library browsing with exact provenance.
 
 The UI must not hide invalid values. It identifies the exact field, constraint,
@@ -290,7 +290,7 @@ it to preview or request native validation afterwards.
 1. The user scopes a request to selected fields, a section, or an approved
    change request.
 2. BeeGame gives Claude Code the schema, current values, design references,
-   world context, project evidence, imports/compositions, and locks.
+   world context, project evidence, resources/content files, and locks.
 3. Claude Code returns normal project changes plus a configuration changeset.
 4. BeeGame renders the changeset as a diff, including validation and scope
    impact.
@@ -309,7 +309,7 @@ World and configuration are related but separate:
 - Configuration controls values and references that influence behavior,
   progression, availability, and presentation.
 - World objects may reference stable configuration field ids.
-- A configuration field may reference a world object, composition, import, or
+- A configuration field may reference a world object, content definition, resource, or
   collection only through declared typed relations.
 
 This avoids two failure modes: using the World Editor to conceal global game
@@ -326,7 +326,7 @@ scene editor.
   adapters, and hot-apply/reload the current preview when the target declares
   that capability;
 - protect project ownership and permissions;
-- expose exact project resource inventory and composition facts;
+- expose exact project resource inventory and content-reference facts;
 - request and display Claude Code work without driving its task lifecycle.
 
 ### Claude Code responsibilities
@@ -366,7 +366,7 @@ Native validation belongs to the target project. It verifies that the mapped
 representation loads, that the runtime applies the intended revision, and that
 relevant player-facing behavior remains valid. Native evidence is linked to the
 configuration revision and becomes stale when relevant values, mappings,
-requirements, imports, or compositions change. Stale evidence is an information
+requirements, resources, or content files change. Stale evidence is an information
 state, not a lock on direct configuration editing or preview application.
 
 ### Migration
@@ -401,14 +401,14 @@ implementation constants as game controls.
 - Implement section tree, scalar/enum/boolean editors, diff, direct project
   data save, undo/redo, revision comparison, and explicit apply-to-preview plus
   preview-test actions.
-- Add project inventory-based composition/resource reference fields.
+- Add project inventory-based resource/content reference fields.
 - Implement target-native adapters for declared supported project types.
 
 ### Phase 2 — Structured advanced data
 
 - Add tables, curves, weighted lists, conditional constraints, and clear
   validation messages.
-- Link configuration fields to world objects and compositions through typed
+- Link configuration fields to world objects and content definitions through typed
   references.
 - Add native validation evidence to revision history.
 
@@ -428,7 +428,7 @@ The configuration feature is ready for broad use only when:
    provenance, and native mapping.
 3. Unsupported or unsafe implementation constants never appear as arbitrary
    tuning controls.
-4. Resource/composition references remain exact, pinned, and validated against
+4. Resource/content references remain exact, pinned, and validated against
    project inventory.
 5. Undo restores an earlier configuration revision without corrupting native
    project files.

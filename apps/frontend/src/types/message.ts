@@ -22,7 +22,8 @@ export type MessageType =
   | 'system_status'
   | 'structured_output';
 
-export type RenderHint = 'default' | 'document' | 'artifact_card' | 'structured_json' | 'csv_table';
+export type RenderHint =
+  | 'default' | 'document' | 'artifact_card' | 'structured_json' | 'csv_table';
 
 export type WorkflowCardStatus =
   | 'draft'
@@ -38,7 +39,7 @@ export interface WorkflowCardTask {
   id: string;
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked';
-  operation?: 'write' | 'review';
+  operation?: 'write' | 'review' | 'produce' | 'assemble'
   attempt?: number;
   failureReason?: string;
 }
@@ -48,6 +49,9 @@ export interface WorkflowCardPayload {
   status: WorkflowCardStatus;
   currentPhase?: string;
   documentStep?: string;
+  reviewMode?: 'initial' | 'closure';
+  reviewTarget?: 'foundation' | 'checklist' | 'resource';
+  reviewAccepted?: boolean;
   worker?: string;
   thinking?: string;
   executionStatus?: string;
@@ -287,7 +291,8 @@ export interface ProjectEventMessage {
   trace_id?: string;
 
   /** Structured status enum (optional, used for status type) */
-  status?: 'queued' | 'running' | 'resuming' | 'paused' | 'idle' | 'finished' | 'failed' | 'stopped';
+  status?:
+    | 'queued' | 'running' | 'resuming' | 'paused' | 'idle' | 'finished' | 'failed' | 'stopped';
 
   /** Human gate name (optional, used for human_gate type) */
   gate?: string;

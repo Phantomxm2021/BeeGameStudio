@@ -16,7 +16,8 @@ describe('resource authoring routes', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'empty-pack', name: 'Empty Pack', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: [] }),
+      body: JSON.stringify({ id: 'empty-pack', name: 'Empty Pack',
+          styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: [] }),
     }))
 
     expect(response.status).toBe(201)
@@ -28,7 +29,9 @@ describe('resource authoring routes', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'invalid-categories-pack', name: 'Invalid Categories', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: 'environment' }),
+      body: JSON.stringify({ id: 'invalid-categories-pack', name: 'Invalid Categories',
+          styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: 'scenes',
+        }),
     }))
 
     expect(response.status).toBe(400)
@@ -40,7 +43,8 @@ describe('resource authoring routes', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'unsupported-categories-pack', name: 'Unsupported Categories', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['unknown'] }),
+      body: JSON.stringify({ id: 'unsupported-categories-pack', name: 'Unsupported Categories',
+          styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['unknown'] }),
     }))
 
     expect(response.status).toBe(400)
@@ -52,7 +56,8 @@ describe('resource authoring routes', () => {
     const app = createBeeGameResourceServerApp({ repository, currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
     const packResponse = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'pack-1', name: 'Forest', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['environment'] }),
+      body: JSON.stringify({ id: 'pack-1', name: 'Forest',
+          styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['scenes'] }),
     }))
     expect(packResponse.status).toBe(201)
     expect((await packResponse.json()).pack).toMatchObject({ id: 'pack-1', primaryCategory: 'world-scene', status: 'draft' })
@@ -70,7 +75,8 @@ describe('resource authoring routes', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'pack-1', name: 'Forest', style: 'Painterly', dimension: 'agnostic', gameTypes: ['adventure'], categories: ['environment'] }),
+      body: JSON.stringify({ id: 'pack-1', name: 'Forest',
+          styles: ['Painterly'], dimension: 'agnostic', gameTypes: ['adventure'], categories: ['scenes'] }),
     }))
 
     expect(response.status).toBe(400)
@@ -82,7 +88,8 @@ describe('resource authoring routes', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'pack-1', name: 'Forest', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'characters', gameTypes: ['adventure'], categories: ['environment'] }),
+      body: JSON.stringify({ id: 'pack-1', name: 'Forest',
+          styles: ['Painterly'], dimension: 'agnostic', primaryCategory: 'characters', gameTypes: ['adventure'], categories: ['scenes'] }),
     }))
 
     expect(response.status).toBe(400)

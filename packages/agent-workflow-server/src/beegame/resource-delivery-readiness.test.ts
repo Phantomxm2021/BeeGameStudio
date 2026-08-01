@@ -1,207 +1,43 @@
-import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { afterEach, describe, expect, it } from 'bun:test'
+import { writeBeeGameAssetManifest } from './asset-contracts'
 import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
-describe('resource delivery readiness', () => {
-  let workspace = ''
+const roots: string[] = []
+afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
 
-  afterEach(async () => {
-    if (workspace) await rm(workspace, { recursive: true, force: true })
-  })
-
-  test('does not call an integrated manifest ready without current native provenance', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
-    await mkdir(join(workspace, 'assets', 'library'), { recursive: true })
-    await mkdir(join(workspace, 'src'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'library', 'module.glb'), 'glTF')
-    await writeFile(join(workspace, 'src', 'world.ts'), 'export const world = true\n')
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
+describe('resource-content readiness', () => {
+  it('requires verified resources and JSON/YAML coverage', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-content-'))
+    roots.push(workspace)
+    await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+    await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/runtime/player.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    await writeBeeGameAssetManifest(workspace, {
+      version: 7,
       project_target: {
-        resource_library_usage: 'preferred',
-        asset_format_capabilities: ['glb'],
-        runtime_asset_root: 'assets/library',
+        asset_format_capabilities: ['svg', 'json', 'yaml'],
+        resource_library_usage: 'optional',
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
       },
-      requirements: [],
-      imports: [{
-        id: 'module',
-        source: {
-          type: 'resource-library',
-          pack_id: 'pack',
-          pack_version: '1',
-          element_id: 'module',
-          element_path: 'module.glb',
-        },
-        status: 'referenced',
-        root_path: 'assets/library/module.glb',
-        local_files: ['assets/library/module.glb'],
-        selected_at: '2026-07-30T00:00:00.000Z',
-        selection_reason: ['Selected by the native agent'],
-        usage_evidence: { references: ['src/world.ts'] },
+      requirements: [{ id: 'visual.player', required: true }],
+      resources: [{
+        id: 'player-art',
+        source: { type: 'agent-authored', created_at: new Date().toISOString(), reason: 'placeholder' },
+        root_path: 'assets/runtime/player.svg', file_paths: ['assets/runtime/player.svg'],
+        provisional: true, status: 'verified', selected_at: new Date().toISOString(),
+        selection_reason: ['No suitable library material was selected.'],
       }],
-      compositions: [],
+    })
+    expect(auditResourceDeliveryReadiness({ workspacePath: workspace }).ready).toBe(false)
+    await writeFile(join(workspace, 'assets/content/entities.json'), JSON.stringify({
+      schema: 'beegame-content-v1', id: 'entities', kind: 'entity-definitions',
+      fulfills: ['visual.player'], resources: ['player-art'], data: {},
     }))
-
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: workspace,
-      confirmedPolicy: 'preferred',
-      resourceEvidence: { state: 'missing' },
-    })
-    expect(readiness.valid).toBe(true)
-    expect(readiness.integrationReady).toBe(false)
-    expect(readiness.integrationIssues.join(' ')).toContain('no current native ResourceLibrary provenance')
-  })
-
-  test('blocks integration while a partial native import has unresolved ids', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        resource_library_usage: 'preferred',
-        asset_format_capabilities: ['glb'],
-        runtime_asset_root: 'assets/library',
-      },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
-
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: workspace,
-      confirmedPolicy: 'preferred',
-      resourceEvidence: {
-        state: 'current',
-        actions: ['import_elements'],
-        failedActions: ['import_elements'],
-        successfulImportCount: 1,
-        failedImportCount: 1,
-        observedAt: new Date().toISOString(),
-      },
-    })
-    expect(readiness.integrationReady).toBe(false)
-    expect(readiness.issues.join(' ')).toContain('unresolved failed native actions')
-    expect(readiness.integrationIssues.join(' ')).toContain('1 explicitly requested imports remain unresolved')
-  })
-
-  test('accepts a preferred plan with no imports after every required source decision is durable', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        resource_library_usage: 'preferred',
-        asset_format_capabilities: ['png'],
-        runtime_asset_root: 'public/assets',
-      },
-      requirements: [{
-        id: 'primary-art',
-        purpose: 'Provide the approved primary art responsibility.',
-        required: true,
-        status: 'planned',
-        source_decision: {
-          type: 'authored-asset',
-          basis: 'catalog-no-match',
-          reasons: ['No compatible catalog candidate fulfilled the approved purpose.'],
-          decided_at: new Date().toISOString(),
-          discovery_receipt: {
-            version: 1,
-            query_digest: 'query-digest',
-            candidate_digest: 'candidate-digest',
-            candidate_ids: [],
-            inspected_pack_ids: [],
-            represented_pack_ids: [],
-            candidate_count: 0,
-            total_compatible: 0,
-            structured_constraint_count: 2,
-            decision_ready: true,
-          },
-        },
-      }],
-      imports: [],
-      compositions: [],
-    }))
-
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: workspace,
-      confirmedPolicy: 'preferred',
-      resourceEvidence: {
-        state: 'current',
-        actions: ['query_candidates'],
-        failedActions: ['query_candidates'],
-        successfulImportCount: 0,
-        failedImportCount: 0,
-        observedAt: new Date().toISOString(),
-      },
-    })
-
-    expect(readiness.valid).toBe(true)
-    expect(readiness.issues).toEqual([])
-  })
-
-  test('rejects preferred zero-import plans backed only by free-form no-match prose', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(
-      join(workspace, 'assets', 'asset-manifest.json'),
-      JSON.stringify({
-        version: 5,
-        project_target: {
-          resource_library_usage: 'preferred',
-          asset_format_capabilities: ['png'],
-          runtime_asset_root: 'public/assets',
-        },
-        requirements: [
-          {
-            id: 'primary-art',
-            required: true,
-            status: 'planned',
-            source_decision: {
-              type: 'authored-asset',
-              reasons: ['No candidate was selected.'],
-              decided_at: new Date().toISOString(),
-            },
-          },
-        ],
-        imports: [],
-        compositions: [],
-      }),
-    )
-
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: workspace,
-      confirmedPolicy: 'preferred',
-    })
-
-    expect(readiness.valid).toBe(false)
-    expect(readiness.issues.join(' ')).toContain(
-      'zero imports without complete structured no-match receipts',
-    )
-  })
-
-  test('does not let a preferred library plan proceed without a target-native asset root', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'resource-readiness-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        resource_library_usage: 'preferred',
-        asset_format_capabilities: ['glb'],
-      },
-      requirements: [],
-      imports: [],
-      compositions: [],
-    }))
-
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: workspace,
-      confirmedPolicy: 'preferred',
-      resourceEvidence: { state: 'missing' },
-    })
-    expect(readiness.valid).toBe(false)
-    expect(readiness.integrationReady).toBe(false)
-    expect(readiness.issues.join(' ')).toContain('project_target.runtime_asset_root')
+    expect(auditResourceDeliveryReadiness({ workspacePath: workspace })).toMatchObject({ ready: true, contentFileCount: 1 })
   })
 })

@@ -153,7 +153,11 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
           id,
           title,
           status: taskStatus as NonNullable<WorkflowCardPayload['tasks']>[number]['status'],
-          operation: item.operation === 'write' || item.operation === 'review'
+          operation:
+            item.operation === 'write' ||
+            item.operation === 'review' ||
+            item.operation === 'produce' ||
+            item.operation === 'assemble'
             ? item.operation
             : undefined,
           attempt: Number.isFinite(Number(item.attempt)) ? Number(item.attempt) : undefined,
@@ -169,6 +173,16 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
     status,
     currentPhase: trimString(source.currentPhase ?? source.current_phase ?? source.phase) || undefined,
     documentStep: trimString(source.documentStep ?? source.document_step) || undefined,
+    reviewMode: source.reviewMode === 'initial' || source.reviewMode === 'closure'
+      ? source.reviewMode
+      : undefined,
+    reviewTarget:
+      source.reviewTarget === 'foundation' ||
+      source.reviewTarget === 'checklist' ||
+      source.reviewTarget === 'resource'
+        ? source.reviewTarget
+        : undefined,
+    reviewAccepted: source.reviewAccepted === true,
     worker: trimString(source.worker ?? activeDispatch?.workerType ?? activeDispatch?.worker_type) || undefined,
     thinking: message || (thinking && !['working', 'waiting', 'idle'].includes(thinking) ? thinking : undefined),
     executionStatus: ['working', 'waiting', 'idle'].includes(rawThinking)

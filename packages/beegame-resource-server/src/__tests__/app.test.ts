@@ -2,15 +2,26 @@ import { describe, expect, test } from 'bun:test'
 import { createInMemoryResourceRepository } from '../../../beegame-resource-core/src'
 import { createBeeGameResourceServerApp } from '../app'
 import { createSupabaseResourceLifecycleHandlers, createSupabaseResourcePackAccessChecker } from '../index'
+import type { R2ResourceStorage } from '../r2-resource-storage'
+
+const resourceStorage: R2ResourceStorage = {
+  upload: async () => ({ storageObjectId: 'object-new' }),
+  getFile: async () => undefined,
+  createDownloadUrl: async (storageObjectId, packId) => `https://r2.test/${packId}/${storageObjectId}`,
+  updateLogicalPath: async () => undefined,
+  delete: async () => true,
+  listPackObjects: async () => [],
+}
 
 const repository = createInMemoryResourceRepository({
   packs: [{
-    id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'],
-    dimension: '2D', primaryCategory: '2d-art', categories: ['characters'], license: 'internal', version: '1.0.0', status: 'published',
+    id: 'pack-1', name: 'Example Pack',
+      styles: ['Stylized'], gameTypes: ['adventure'],
+    dimension: '2D', primaryCategory: '2d-art', categories: ['sprites'], license: 'internal', version: '1.0.0', status: 'published',
   }],
   elements: [{
     id: 'element-1', packId: 'pack-1', name: 'Character Idle', path: 'characters/idle.png',
-    category: 'characters', kind: 'sprite-sheet', preview: { kind: 'image', path: 'previews/idle.png' },
+    category: 'sprites', kind: 'sprite-sheet', preview: { kind: 'image', path: 'previews/idle.png' },
     specs: { width: 256, height: 256 }, usageTags: ['character'], dependencies: [], status: 'ready',
   }],
 })
@@ -54,7 +65,8 @@ describe('resource service app', () => {
     })
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Pack', style: 'Stylized', gameTypes: ['Adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: [], license: 'internal', version: '1.0.0' }),
+      body: JSON.stringify({ name: 'Pack',
+          styles: ['Stylized'], gameTypes: ['Adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: [], license: 'internal', version: '1.0.0' }),
     }))
     expect(response.status).toBe(201)
     expect(events).toEqual([expect.objectContaining({ actorId: 'admin-1', action: 'pack.created' })])
@@ -81,7 +93,8 @@ describe('resource service app', () => {
 
   test('updates folder semantic defaults without requiring a rename', async () => {
     const localRepository = createInMemoryResourceRepository({
-      packs: [{ id: 'policy-pack', name: 'Policy', style: 'Stylized', gameTypes: ['action'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
+      packs: [{ id: 'policy-pack', name: 'Policy',
+          styles: ['Stylized'], gameTypes: ['action'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
       elements: [{ id: 'asset', packId: 'policy-pack', name: 'asset.glb', path: 'models/asset.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }],
     })
     await localRepository.createFolder('policy-pack', { id: 'models', name: 'models' })
@@ -119,7 +132,7 @@ describe('resource service app', () => {
     const app = createBeeGameResourceServerApp({
       repository,
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
-      inspectResourceElement: async (_packId, elementId) => ({ ...await repository.getElement('pack-1', elementId), contentProfile: { packaging: 'self-contained', components: [], inspection: { status: 'complete', source: 'server' } } }),
+      inspectResourceElement: async (_packId, elementId) => ({ ...(await repository.getElement('pack-1', elementId)), contentProfile: { packaging: 'self-contained', components: [], inspection: { status: 'complete', source: 'server' } } }),
       recordAuditEvent: async event => { events.push(event) },
     })
 
@@ -132,7 +145,8 @@ describe('resource service app', () => {
 
   test('deletes a non-empty folder recursively through the browser route', async () => {
     const localRepository = createInMemoryResourceRepository({
-      packs: [{ id: 'folder-pack', name: 'Folders', style: 'Stylized', gameTypes: ['adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
+      packs: [{ id: 'folder-pack', name: 'Folders',
+          styles: ['Stylized'], gameTypes: ['adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
       elements: [
         { id: 'folder-element', packId: 'folder-pack', name: 'tree.glb', path: 'models/tree.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' },
       ],
@@ -208,7 +222,8 @@ describe('resource service app', () => {
   test('archives a Pack without deleting its resource history', async () => {
     const app = createBeeGameResourceServerApp({
       repository: createInMemoryResourceRepository({
-        packs: [{ id: 'archive-pack', name: 'Archive', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'published' }],
+        packs: [{ id: 'archive-pack', name: 'Archive',
+            styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'published' }],
         elements: [],
       }),
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
@@ -221,8 +236,9 @@ describe('resource service app', () => {
   test('re-publishes an archived Pack and clears its archive marker', async () => {
     const app = createBeeGameResourceServerApp({
       repository: createInMemoryResourceRepository({
-        packs: [{ id: 'archived-pack', name: 'Archived', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'archived', deprecatedAt: '2026-07-12T00:00:00.000Z' }],
-        elements: [{ id: 'archived-element', packId: 'archived-pack', name: 'character.png', path: 'characters/character.png', category: 'characters', kind: 'image', specs: {}, usageTags: ['character'], dependencies: [], status: 'ready' }],
+        packs: [{ id: 'archived-pack', name: 'Archived',
+            styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'archived', deprecatedAt: '2026-07-12T00:00:00.000Z' }],
+        elements: [{ id: 'archived-element', packId: 'archived-pack', name: 'character.png', path: 'sprites/character.png', category: 'sprites', kind: 'image', specs: {}, usageTags: ['character'], dependencies: [], status: 'ready' }],
       }),
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
     })
@@ -230,7 +246,7 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/archived-pack/publish', { method: 'POST' }))
 
     expect(response.status).toBe(200)
-    const body = await response.json() as { pack: Record<string, unknown> }
+    const body = (await response.json()) as { pack: Record<string, unknown> }
     expect(body.pack).toEqual(expect.objectContaining({ id: 'archived-pack', status: 'published' }))
     expect(body.pack).not.toHaveProperty('deprecatedAt')
   })
@@ -275,7 +291,7 @@ describe('resource service app', () => {
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
       uploadPackCover: async (id, request) => {
         uploads.push(`${id}:${(await request.formData()).get('file') instanceof File}`)
-        return { ...((await repository.getPack(id))!), coverPath: 'cover/new.png' }
+        return { ...(await repository.getPack(id))!, coverPath: 'cover/new.png' }
       },
     })
     const good = new FormData()
@@ -307,13 +323,13 @@ describe('resource service app', () => {
     expect(signed).toEqual(['pack-1/element-1'])
   })
 
-  test('returns a canonical Supabase production signed URL through the resource-url route', async () => {
+  test('returns the canonical R2 URL through the resource-url route', async () => {
     const lifecycle = createSupabaseResourceLifecycleHandlers({
       baseUrl: 'https://project.supabase.co', serviceRoleKey: 'secret',
+      r2Storage: resourceStorage,
       fetchImpl: async (input) => {
         const url = String(input)
-        if (url.includes('beegame_resource_elements')) return Response.json([{ pack_id: 'pack-1', path: 'characters/idle.png' }])
-        if (url.includes('/object/sign/')) return Response.json({ signedURL: '/object/sign/beegame-resource-packs/pack-1/characters/idle.png?token=preview' })
+        if (url.includes('beegame_resource_elements')) return Response.json([{ pack_id: 'pack-1', path: 'characters/idle.png', storage_object_id: 'object-idle' }])
         return Response.json([])
       },
     })
@@ -327,7 +343,7 @@ describe('resource service app', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
-      url: 'https://project.supabase.co/storage/v1/object/sign/beegame-resource-packs/pack-1/characters/idle.png?token=preview',
+      url: 'https://r2.test/pack-1/object-idle',
     })
   })
 
@@ -336,7 +352,9 @@ describe('resource service app', () => {
       repository,
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
     })
-    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements?category=characters'))
+    const response = await app.fetch(new Request(
+        'http://resource.test/api/resource-packs/pack-1/elements?category=sprites',
+      ))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
   })

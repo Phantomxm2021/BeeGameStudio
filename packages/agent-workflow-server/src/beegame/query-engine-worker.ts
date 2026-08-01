@@ -54,6 +54,9 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
     try {
       await runtime.submit({
         prompt: message.prompt,
+        ...(message.confirmedBriefContext
+          ? { confirmedBriefContext: message.confirmedBriefContext }
+          : {}),
         signal: abortController.signal,
         onMessage: sdkMessage => send({
           type: 'turn.message',

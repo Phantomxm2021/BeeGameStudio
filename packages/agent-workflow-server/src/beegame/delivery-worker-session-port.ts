@@ -3,7 +3,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
-import { readCurrentResourceReviewState } from './delivery-workflow/resource-stage'
 import type {
   DeliveryWorkerPort,
   DispatchRecord,
@@ -19,7 +18,9 @@ import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-c
 import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
+  documentAuthorSubmissionSchema,
   documentAuthorTerminalSchema,
+  documentReviewSubmissionSchemaForMode,
   documentReviewerTerminalSchema,
   implementationAuditorTerminalSchema,
   questionAnswerTerminalSchema,
@@ -56,7 +57,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
   getConfirmedBriefContext?: () => Promise<string | undefined>
   resourceLimits?: {
     maxToolCalls?: number
-    maxCatalogCalls?: number
     repeatedReadResultLimit?: number
   }
 }): DeliveryWorkerPort {
@@ -92,22 +92,31 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        ...(request.workerType === 'resource-preparer' &&
-        (request.contract.resourceAttemptMode === 'fresh' ||
-          request.contract.resourceAttemptMode === 'selection' ||
-          request.contract.resourceAttemptMode === 'repair' ||
-          request.contract.resourceAttemptMode === 'reselection')
-          ? {
-              workflowResourceAttemptMode: request.contract.resourceAttemptMode,
-            }
+        ...(request.workerType === 'document-reviewer' &&
+        (request.contract.reviewMode === 'initial' ||
+          request.contract.reviewMode === 'closure')
+          ? { workflowDocumentReviewMode: request.contract.reviewMode }
           : {}),
-        ...(request.workerType === 'resource-preparer'
-          ? {
-              workflowResourceCatalogReadLimit:
-                input.resourceLimits?.maxCatalogCalls ?? 12,
-            }
+        ...(request.workerType === 'document-reviewer' &&
+        (request.contract.reviewScope === 'foundation' ||
+          request.contract.reviewScope === 'complete')
+          ? { workflowDocumentReviewScope: request.contract.reviewScope }
           : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
+        ...(request.workerType === 'resource-preparer' &&
+        Array.isArray(request.contract.existingUnregisteredResourcePaths)
+          ? {
+              workflowResourceRegistrationBarrierPaths:
+                request.contract.existingUnregisteredResourcePaths.filter(
+                  (value): value is string =>
+                    typeof value === 'string' && value.trim().length > 0,
+                ),
+            }
+          : {}),
+        ...(request.workerType === 'resource-preparer' &&
+        isDocumentReviewResourceRemediation(request.contract.remediation)
+          ? { workflowAllowResourceCatalogWithExistingInventory: true }
+          : {}),
       })
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, request)
@@ -127,13 +136,26 @@ export function createBeeGameDeliveryWorkerPort(input: {
       if (!sessionId) throw new Error('worker session is not registered')
       const authToken = await input.getAuthToken?.()
       input.sessions.updateAuthToken(sessionId, authToken)
+      const request = requests.get(dispatchId)
+      const reviewAuthority =
+        request?.workerType === 'document-reviewer' &&
+        request.contract.reviewAuthority &&
+        typeof request.contract.reviewAuthority === 'object' &&
+        !Array.isArray(request.contract.reviewAuthority)
+          ? (request.contract.reviewAuthority as Record<string, unknown>)
+          : undefined
       const confirmedBriefContext =
-        input.confirmedBriefContext ??
-        (await input.getConfirmedBriefContext?.())
+        request?.workerType === 'document-reviewer'
+          ? typeof reviewAuthority?.confirmedBriefContext === 'string'
+            ? reviewAuthority.confirmedBriefContext
+            : undefined
+          : (input.confirmedBriefContext ??
+              (await input.getConfirmedBriefContext?.()))
+      if (request?.workerType === 'document-reviewer' && !confirmedBriefContext)
+        throw new Error('document reviewer authority is missing')
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
-      const request = requests.get(dispatchId)
       const atomicTaskEvidenceInstruction =
         request?.workerType === 'atomic-task-planner'
           ? 'Submit the complete plan through SubmitAtomicTaskPlan exactly once. Do not create, inspect, read, or overwrite an evidence file; the workflow service owns its canonical persistence.'
@@ -151,20 +173,21 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'document-author'
           ? 'Submit completion through SubmitDocumentAuthorResult exactly once. Do not return terminal JSON; the workflow service derives written paths from completed file mutations.'
           : request?.workerType === 'document-reviewer'
-            ? 'Submit the verdict through SubmitDocumentReviewResult exactly once. Do not author workflow evidence or return terminal JSON; the workflow service owns document coverage, checklist coverage, revision, and evidence.'
+            ? 'Submit the verdict through SubmitDocumentReviewResult exactly once. Do not author workflow evidence or return terminal JSON; the workflow service owns document coverage, checklist coverage, revision, finding identity, and evidence.'
             : request?.workerType === 'change-impact-analyzer'
               ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
               : request?.workerType === 'question-answerer'
                 ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
                 : ''
       const assetManifestInstruction =
-        request?.workerType === 'resource-preparer' &&
-        request.contract.resourceAttemptMode === 'fresh'
-          ? 'Submit the complete canonical manifest through SubmitAssetManifest exactly once, with content containing valid JSON text. Do not write assets/asset-manifest.json with a generic file tool. Every source_decision must include concrete non-empty reasons; omit decided_at because the workflow service owns that timestamp.'
+        request?.workerType === 'resource-preparer'
+          ? 'Use AssetManifest for every manifest mutation. Establish or reconcile the complete v7 resource plan, acquire or author independent resources, and write JSON/YAML content under the declared roots. Do not write assets/asset-manifest.json with a generic file tool.'
           : ''
       const workerPrompt = [
         languageInstruction,
-        confirmedBriefContext,
+        request?.workerType === 'document-reviewer'
+          ? undefined
+          : confirmedBriefContext,
         prompt,
         atomicTaskEvidenceInstruction,
         implementationResultInstruction,
@@ -179,7 +202,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(confirmedBriefContext && request?.workerType !== 'document-reviewer'
+          ? { confirmedBriefContext }
+          : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
@@ -247,6 +272,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
       // deadline would fail a worker that is still making durable progress.
       while (true) {
         const events = input.sessions.events(sessionId)
+        const request = requests.get(dispatchId)
+        // The accepted structured submission is the workflow terminal event.
+        // Waiting for the SDK turn/result envelope after that point creates a
+        // race where a valid submission can be overwritten by a wall-clock
+        // timeout while the transport is still closing the model turn.
+        if (
+          request &&
+          hasCompletedStructuredSubmission(request.workerType, events)
+        )
+          return createDeterministicStructuredTerminal({ request, events })
         const result = [...events]
           .reverse()
           .find(
@@ -260,7 +295,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
             throw new Error(
               result.text || 'worker turn did not produce a terminal result',
             )
-          const request = requests.get(dispatchId)
           if (request?.workerType === 'resource-preparer') {
             return createDeterministicResourceTerminal({
               request,
@@ -268,45 +302,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
               events,
             })
           }
-          if (request?.workerType === 'atomic-task-planner') {
-            return createDeterministicAtomicTaskPlannerTerminal({
-              request,
-              events,
-            })
-          }
-          if (request?.workerType === 'implementation-worker') {
-            return createDeterministicImplementationWorkerTerminal({
-              request,
-              events,
-            })
-          }
-          if (
-            request?.workerType === 'implementation-auditor' ||
-            request?.workerType === 'acceptance-validator'
-          ) {
-            return createDeterministicValidationTerminal({ request, events })
-          }
-          if (request?.workerType === 'document-author')
-            return createDeterministicDocumentAuthorTerminal({
-              request,
-              events,
-            })
-          if (request?.workerType === 'document-reviewer')
-            return createDeterministicDocumentReviewTerminal({
-              request,
-              events,
-            })
-          if (request?.workerType === 'change-impact-analyzer')
-            return createDeterministicChangeImpactTerminal({ request, events })
-          if (request?.workerType === 'question-answerer')
-            return createDeterministicQuestionAnswerTerminal({
-              request,
-              events,
-            })
+          if (request)
+            return createDeterministicStructuredTerminal({ request, events })
           throw new Error('worker has no structured terminal result channel')
         }
-        const request = requests.get(dispatchId)
-        if (request?.workerType === 'resource-preparer') {
+        if (
+          request?.workerType === 'resource-preparer'
+        ) {
           const guardIssue = resourceWorkerGuardIssue(events, {
             maxToolCalls: input.resourceLimits?.maxToolCalls ?? 80,
             repeatedReadResultLimit:
@@ -317,6 +319,79 @@ export function createBeeGameDeliveryWorkerPort(input: {
         await new Promise(resolve => setTimeout(resolve, 250))
       }
     },
+  }
+}
+
+function isDocumentReviewResourceRemediation(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      (value as Record<string, unknown>).kind === 'document_review',
+  )
+}
+
+function structuredSubmissionToolName(
+  workerType: WorkerDispatchRequest['workerType'],
+): string | undefined {
+  switch (workerType) {
+    case 'document-author':
+      return 'SubmitDocumentAuthorResult'
+    case 'document-reviewer':
+      return 'SubmitDocumentReviewResult'
+    case 'atomic-task-planner':
+      return 'SubmitAtomicTaskPlan'
+    case 'implementation-worker':
+      return 'SubmitImplementationResult'
+    case 'implementation-auditor':
+    case 'acceptance-validator':
+      return 'SubmitValidationResult'
+    case 'change-impact-analyzer':
+      return 'SubmitChangeImpactResult'
+    case 'question-answerer':
+      return 'SubmitQuestionAnswerResult'
+    case 'resource-preparer':
+      return undefined
+  }
+}
+
+function hasCompletedStructuredSubmission(
+  workerType: WorkerDispatchRequest['workerType'],
+  events: ReturnType<BeeGameSessionManager['events']>,
+): boolean {
+  const toolName = structuredSubmissionToolName(workerType)
+  return Boolean(
+    toolName &&
+      events.some(
+        event =>
+          event.type === 'tool.completed' &&
+          event.payload?.toolName === toolName,
+      ),
+  )
+}
+
+async function createDeterministicStructuredTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}) {
+  switch (input.request.workerType) {
+    case 'document-author':
+      return createDeterministicDocumentAuthorTerminal(input)
+    case 'document-reviewer':
+      return createDeterministicDocumentReviewTerminal(input)
+    case 'atomic-task-planner':
+      return createDeterministicAtomicTaskPlannerTerminal(input)
+    case 'implementation-worker':
+      return createDeterministicImplementationWorkerTerminal(input)
+    case 'implementation-auditor':
+    case 'acceptance-validator':
+      return createDeterministicValidationTerminal(input)
+    case 'change-impact-analyzer':
+      return createDeterministicChangeImpactTerminal(input)
+    case 'question-answerer':
+      return createDeterministicQuestionAnswerTerminal(input)
+    case 'resource-preparer':
+      throw new Error('worker has no structured terminal result channel')
   }
 }
 
@@ -365,6 +440,18 @@ function createDeterministicDocumentAuthorTerminal(input: {
   const errors: string[] = []
   for (const candidate of candidates) {
     try {
+      const submission = documentAuthorSubmissionSchema.parse(candidate)
+      const expectedFindingIds = documentAuthorRemediationFindingIds(
+        input.request,
+      )
+      if (
+        new Set(submission.resolvedFindingIds).size !==
+          submission.resolvedFindingIds.length ||
+        !sameStringSet(submission.resolvedFindingIds, expectedFindingIds)
+      )
+        throw new Error(
+          'resolvedFindingIds must exactly match contract.remediation finding IDs; checklistRemediation issues are not semantic finding IDs',
+        )
       return documentAuthorTerminalSchema.parse({
         workerType: 'document-author',
         status: 'completed',
@@ -373,7 +460,7 @@ function createDeterministicDocumentAuthorTerminal(input: {
             completedMutationPaths(input.request.workspacePath, input.events),
           ),
         ],
-        resolvedFindingIds: candidate.resolvedFindingIds,
+        resolvedFindingIds: expectedFindingIds,
       })
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
@@ -384,6 +471,29 @@ function createDeterministicDocumentAuthorTerminal(input: {
       ? `document author result does not match the active contract: ${errors.join('; ')}`
       : 'worker terminal result is missing a valid SubmitDocumentAuthorResult call',
   )
+}
+
+function documentAuthorRemediationFindingIds(
+  request: WorkerDispatchRequest,
+): string[] {
+  const remediation = request.contract.remediation
+  if (remediation === undefined) return []
+  if (!remediation || typeof remediation !== 'object' || Array.isArray(remediation))
+    throw new Error('contract.remediation is invalid')
+  const findings = (remediation as Record<string, unknown>).findings
+  if (!Array.isArray(findings) || findings.length === 0)
+    throw new Error('contract.remediation findings are invalid')
+  const ids = findings.map(finding => {
+    if (!finding || typeof finding !== 'object' || Array.isArray(finding))
+      throw new Error('contract.remediation finding is invalid')
+    const findingId = (finding as Record<string, unknown>).findingId
+    if (typeof findingId !== 'string' || findingId.trim().length === 0)
+      throw new Error('contract.remediation findingId is invalid')
+    return findingId
+  })
+  if (new Set(ids).size !== ids.length)
+    throw new Error('contract.remediation findingIds must be unique')
+  return ids
 }
 
 async function createDeterministicDocumentReviewTerminal(input: {
@@ -397,15 +507,24 @@ async function createDeterministicDocumentReviewTerminal(input: {
   const errors: string[] = []
   for (const candidate of candidates) {
     try {
+      const reviewMode =
+        input.request.contract.reviewMode === 'closure'
+          ? 'closure'
+          : 'initial'
       const scope =
         input.request.contract.reviewScope === 'foundation'
           ? 'foundation'
           : 'complete'
+      const submission = documentReviewSubmissionSchemaForMode(
+        reviewMode,
+        scope,
+      ).parse(candidate)
       const evidencePath = `.beegame/workflow/evidence/document-review-${scope}-${input.request.dispatchId}.json`
       const terminal = documentReviewerTerminalSchema.parse({
         workerType: 'document-reviewer',
         revision: input.request.revision,
-        verdict: candidate.verdict,
+        verdict: submission.verdict,
+        checks: submission.checks,
         reviewedDocumentPaths:
           scope === 'foundation'
             ? CANONICAL_FOUNDATION_DOCUMENTS
@@ -414,7 +533,7 @@ async function createDeterministicDocumentReviewTerminal(input: {
           scope === 'foundation'
             ? []
             : await readAcceptanceChecklistIds(input.request.workspacePath),
-        findings: candidate.findings,
+        findings: submission.findings,
         evidencePath,
       })
       await writeCanonicalTerminalEvidence({
@@ -509,8 +628,8 @@ async function createDeterministicValidationTerminal(input: {
       const contract = input.request.contract
       const taskIds = submittedStringArray(contract.taskIds)
       const checklistIds = submittedStringArray(contract.checklistIds)
-      const importIds = submittedStringArray(contract.importIds)
-      const compositionIds = submittedStringArray(contract.compositionIds)
+      const resourceIds = submittedStringArray(contract.resourceIds)
+      const contentIds = submittedStringArray(contract.contentIds)
       const evidencePath = `.beegame/workflow/evidence/${input.request.workerType}-${input.request.dispatchId}.json`
       const findings = deriveValidationFindings(
         candidate.findings,
@@ -521,8 +640,8 @@ async function createDeterministicValidationTerminal(input: {
         revision: input.request.revision,
         status: candidate.status,
         checklistIds,
-        importIds,
-        compositionIds,
+        resourceIds,
+        contentIds,
         findings,
         evidencePath,
       }
@@ -613,9 +732,8 @@ function validationScopeContains(scope: string, artifactPath: string): boolean {
 }
 
 const RESOURCE_MUTATION_ACTIONS = new Set([
-  'import_elements',
-  'record_no_match',
-  'refresh_import_metadata',
+  'import_resources',
+  'refresh_resource_metadata',
 ])
 
 const WORKSPACE_MUTATION_TOOLS = new Set([
@@ -646,7 +764,8 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
         : ''
     if (
       WORKSPACE_MUTATION_TOOLS.has(toolName) ||
-      RESOURCE_MUTATION_ACTIONS.has(resourceAction)
+      RESOURCE_MUTATION_ACTIONS.has(resourceAction) ||
+      toolName === 'AssetManifest'
     )
       active.set(toolUseId, true)
   }
@@ -705,16 +824,13 @@ function isDurableResourceMutation(event: BeeGameEvent): boolean {
   const toolName = String(event.payload?.toolName ?? '')
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName))
     return true
+  if (toolName === 'AssetManifest') return true
   if (toolName !== 'ResourceLibrary') return false
   const toolInput = event.payload?.input
   if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput))
     return false
   const action = (toolInput as Record<string, unknown>).action
-  return (
-    action === 'import_elements' ||
-    action === 'record_no_match' ||
-    action === 'refresh_import_metadata'
-  )
+  return action === 'import_resources' || action === 'refresh_resource_metadata'
 }
 
 function workerNeedsActionError(reason: string): Error {
@@ -729,43 +845,9 @@ async function createDeterministicResourceTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const contract = auditAssetContract(input.request.workspacePath)
-  const selectedRequirementIds = Array.isArray(
-    input.request.contract.selectionPlan,
-  )
-    ? input.request.contract.selectionPlan.flatMap(group => {
-        if (!group || typeof group !== 'object' || Array.isArray(group)) return []
-        const responsibilities = (group as Record<string, unknown>)
-          .responsibilities
-        if (!Array.isArray(responsibilities)) return []
-        return responsibilities.flatMap(responsibility => {
-          if (
-            !responsibility ||
-            typeof responsibility !== 'object' ||
-            Array.isArray(responsibility)
-          )
-            return []
-          const requirementId = (responsibility as Record<string, unknown>)
-            .requirementId
-          return typeof requirementId === 'string' && requirementId
-            ? [requirementId]
-            : []
-        })
-      })
-    : []
-  const reviewState = contract.valid
-    ? await readCurrentResourceReviewState(input.request.workspacePath)
-    : undefined
-  const selectionResolved = selectedRequirementIds.every(
-    requirementId =>
-      !reviewState?.unresolvedRequirementIds.has(requirementId),
-  )
   const evidencePath = `.beegame/workflow/evidence/resource-preparation-${input.dispatchId}.json`
-  const importIds = (contract.imports ?? []).map(
-    resourceImport => resourceImport.id,
-  )
-  const compositionIds = contract.compositions.map(
-    composition => composition.id,
-  )
+  const resourceIds = contract.resources.map(resource => resource.id)
+  const contentIds = contract.content.files.map(file => file.id)
   const observedMutationPaths = completedMutationPaths(
     input.request.workspacePath,
     input.events,
@@ -773,29 +855,22 @@ async function createDeterministicResourceTerminal(input: {
   const writtenPaths = [
     ...new Set([
       ...(contract.present ? ['assets/asset-manifest.json'] : []),
-      ...(contract.imports ?? []).flatMap(
-        resourceImport => resourceImport.files,
-      ),
+      ...contract.resources.flatMap(resource => resource.filePaths),
+      ...contract.content.files.map(file => file.path),
       ...observedMutationPaths,
       evidencePath,
     ]),
   ]
   const terminal = {
     workerType: 'resource-preparer' as const,
-    attemptMode:
-      input.request.contract.resourceAttemptMode === 'selection' ||
-      input.request.contract.resourceAttemptMode === 'repair' ||
-      input.request.contract.resourceAttemptMode === 'reselection'
-        ? input.request.contract.resourceAttemptMode
-        : ('fresh' as const),
     revision: input.request.revision,
     status:
-      contract.present && contract.valid && selectionResolved
+      contract.present && contract.valid
         ? ('completed' as const)
         : ('failed' as const),
     writtenPaths,
-    importIds,
-    compositionIds,
+    resourceIds,
+    contentIds,
     evidencePath,
   }
   const absoluteEvidencePath = join(input.request.workspacePath, evidencePath)
@@ -812,13 +887,8 @@ async function createDeterministicResourceTerminal(input: {
         manifestPresent: contract.present,
         manifestValid: contract.valid,
         issues: contract.issues,
-        selectedRequirementIds,
-        unresolvedSelectedRequirementIds: selectedRequirementIds.filter(
-          requirementId =>
-            reviewState?.unresolvedRequirementIds.has(requirementId),
-        ),
-        importIds,
-        compositionIds,
+        resourceIds,
+        contentIds,
         observedMutationPaths,
         observedAt: new Date().toISOString(),
       },
@@ -894,6 +964,15 @@ function submittedStringArray(value: unknown): string[] {
     : []
 }
 
+function sameStringSet(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  const a = [...new Set(left)].sort()
+  const b = [...new Set(right)].sort()
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 function createDeterministicImplementationWorkerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
@@ -921,9 +1000,6 @@ function createDeterministicImplementationWorkerTerminal(input: {
         !Array.isArray(input.request.contract.task)
           ? (input.request.contract.task as Record<string, unknown>)
           : {}
-      const requirementIds = submittedStringArray(task.resourceRequirementIds)
-      const importIds = submittedStringArray(task.resourceImportIds)
-      const compositionIds = submittedStringArray(task.resourceCompositionIds)
       const verificationObservations = Array.isArray(
         candidate.verificationObservations,
       )
@@ -950,11 +1026,6 @@ function createDeterministicImplementationWorkerTerminal(input: {
           status: verification.kind === 'runtime' ? 'deferred' : 'passed',
           observations: [verificationObservations[verificationIndex]],
         })),
-        ...(importIds.length === 0 ? { resourceReferences: [] } : {}),
-        ...(compositionIds.length === 0 ? { compositionIntegrations: [] } : {}),
-        ...(requirementIds.length === 0
-          ? { requirementSatisfactions: [] }
-          : {}),
         workerType: 'implementation-worker',
         taskId: input.request.taskId,
         revision: input.request.revision,
@@ -978,12 +1049,7 @@ function normalizeSubmittedOwnership(
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('atomic task ownership must be an object')
   const record = value as Record<string, unknown>
-  const fields = [
-    'resourceRequirements',
-    'checklistItems',
-    'resourceImports',
-    'resourceCompositions',
-  ] as const
+  const fields = ['checklistItems'] as const
   if (
     Object.keys(record).some(
       key => !fields.includes(key as (typeof fields)[number]),
@@ -1034,12 +1100,7 @@ function normalizePlannedAtomicTasks(
   )
     throw new Error('atomic task ownership must be an object')
   const ownership = ownershipValue as Record<string, unknown>
-  const ownershipFields = [
-    ['resourceRequirements', 'resourceRequirementIds'],
-    ['checklistItems', 'checklistIds'],
-    ['resourceImports', 'resourceImportIds'],
-    ['resourceCompositions', 'resourceCompositionIds'],
-  ] as const
+  const ownershipFields = [['checklistItems', 'checklistIds']] as const
   if (
     Object.keys(ownership).some(
       key => !ownershipFields.some(([field]) => field === key),
@@ -1078,10 +1139,7 @@ function normalizePlannedAtomicTasks(
     if (!task || typeof task !== 'object' || Array.isArray(task)) return task
     const record = task as Record<string, unknown>
     const forbiddenWorkerOwnedFields = [
-      'resourceRequirementIds',
       'checklistIds',
-      'resourceImportIds',
-      'resourceCompositionIds',
       'status',
       'attempt',
       'startedRevision',
@@ -1096,12 +1154,7 @@ function normalizePlannedAtomicTasks(
     if (forbiddenWorkerOwnedFields.some(field => field in record)) return task
     return {
       ...task,
-      resourceRequirementIds:
-        owned.get(String(record.id))?.resourceRequirementIds ?? [],
       checklistIds: owned.get(String(record.id))?.checklistIds ?? [],
-      resourceImportIds: owned.get(String(record.id))?.resourceImportIds ?? [],
-      resourceCompositionIds:
-        owned.get(String(record.id))?.resourceCompositionIds ?? [],
       status: 'pending',
       attempt: 0,
       evidenceRefs: [],

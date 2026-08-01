@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   BeeGameSessionManager,
+  isResourceWorkerDurableProgress,
   type BeeGameSessionRunner,
   type DashboardSDKMessage,
   type DashboardPermissionDecision,
@@ -18,10 +19,8 @@ import type {
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { getObservedNativeResourceLibraryEvidence } from '../beegame/native-resource-library-evidence'
 import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
-import {
-  createInitialDeliveryRun,
-  createRunStore,
-} from '../beegame/delivery-workflow/run-store'
+import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -75,6 +74,40 @@ describe('BeeGame session runtime resilience', () => {
     if (root) await rm(root, { recursive: true, force: true })
   })
 
+  test('treats canonical resource mutations as durable progress', () => {
+    for (const [toolName, input] of [
+      ['Write', {}],
+      ['AssetManifest', { action: 'register_authored_resources' }],
+      ['ResourceLibrary', { action: 'import_resources' }],
+    ] as const) {
+      expect(
+        isResourceWorkerDurableProgress({
+          id: 1,
+          sessionId: 'resource-session',
+          type: 'tool.completed',
+          text: `${toolName} completed`,
+          payload: { type: 'tool_event', toolName, input },
+          createdAt: new Date(),
+        }),
+      ).toBe(true)
+    }
+
+    expect(
+      isResourceWorkerDurableProgress({
+        id: 2,
+        sessionId: 'resource-session',
+        type: 'tool.completed',
+        text: 'ResourceLibrary completed',
+        payload: {
+          type: 'tool_event',
+          toolName: 'ResourceLibrary',
+          input: { action: 'browse_catalog' },
+        },
+        createdAt: new Date(),
+      }),
+    ).toBe(false)
+  })
+
   test('preserves structured transport retryability across worker boundaries', () => {
     const nativeError = Object.assign(new Error('transport failed'), {
       cause: { code: 'CERTIFICATE_VERIFY_FAILED' },
@@ -107,8 +140,8 @@ describe('BeeGame session runtime resilience', () => {
                   id: 'resource-tool-1',
                   name: 'ResourceLibrary',
                   input: {
-                    action: 'query_candidates',
-                    requirement_ids: ['ground'],
+                    action: 'browse_catalog',
+                    filters: { dimensions: ['3D'] },
                   },
                 },
               ],
@@ -151,7 +184,7 @@ describe('BeeGame session runtime resilience', () => {
       }),
     ).toMatchObject({
       state: 'current',
-      actions: ['query_candidates'],
+      actions: ['browse_catalog'],
       failedActions: [],
     })
     manager.dispose()
@@ -161,7 +194,7 @@ describe('BeeGame session runtime resilience', () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-progress-'))
     const workspacePath = join(root, 'workspace')
     const store = createRunStore(workspacePath, 'user-1')
-    const initial = createInitialDeliveryRun({
+    const initial = createTestDeliveryRun({
       runId: 'run-1',
       projectId: 'project-1',
       ownerId: 'user-1',
@@ -193,8 +226,8 @@ describe('BeeGame session runtime resilience', () => {
                   id: 'resource-catalog-1',
                   name: 'ResourceLibrary',
                   input: {
-                    action: 'query_candidates',
-                    requirement_ids: ['ground'],
+                    action: 'browse_catalog',
+                    filters: { dimensions: ['3D'] },
                   },
                 },
               ],
@@ -219,7 +252,7 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
     const run = await store.load()
 
-    expect(run?.currentMessage).toBe('正在查询精确资源候选…')
+    expect(run?.currentMessage).toBe('正在浏览资源库…')
     expect(run?.lastProgressAt).toBe(startedAt)
     manager.dispose()
   })
@@ -237,13 +270,15 @@ describe('BeeGame session runtime resilience', () => {
             toolName: 'ResourceLibrary',
             message: 'Import selected resources',
             input: {
-              action: 'import_elements',
+              action: 'import_resources',
               selections: [
                 {
-                  import_id: 'selected-resource',
+                  resource_id: 'selected-resource',
                   pack_id: 'pack-1',
+                  expected_pack_version: '1.0.0',
                   element_id: 'element-1',
-                  destination_path: 'assets/library/selected-resource',
+                  destination_path: 'assets/runtime/selected-resource',
+                  selection_reason: ['Observed fit.'],
                 },
               ],
             },
@@ -253,13 +288,15 @@ describe('BeeGame session runtime resilience', () => {
             toolName: 'ResourceLibrary',
             message: 'Import selected resources',
             input: {
-              action: 'import_elements',
+              action: 'import_resources',
               selections: [
                 {
-                  import_id: 'outside-resource',
+                  resource_id: 'outside-resource',
                   pack_id: 'pack-1',
+                  expected_pack_version: '1.0.0',
                   element_id: 'element-2',
                   destination_path: '../outside/resource',
+                  selection_reason: ['Observed fit.'],
                 },
               ],
             },
@@ -312,32 +349,26 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('hard-enforces resource phase writes and preserves canonical inventory in repair mode', async () => {
+  test('hard-enforces the sole resource-production mutation boundaries', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-repair-permission-'))
     const workspacePath = join(root, 'workspace')
     await mkdir(join(workspacePath, 'assets'), { recursive: true })
     await writeFile(
       join(workspacePath, 'assets/asset-manifest.json'),
       JSON.stringify({
-        version: 5,
+        version: 7,
         project_target: {
           asset_format_capabilities: ['glb'],
-          resource_library_usage: 'preferred',
-          runtime_asset_root: 'assets/library',
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
         },
         requirements: [
           {
             id: 'model',
-            status: 'planned',
-            resource_requirement: {
-              accepted_formats: ['glb'],
-              import_budget: 1,
-              no_match: 'authored-asset',
-            },
           },
         ],
-        imports: [],
-        compositions: [],
+        resources: [],
       }),
     )
     const decisions: Record<string, DashboardPermissionDecision | undefined> =
@@ -359,33 +390,95 @@ describe('BeeGame session runtime resilience', () => {
             message: 'Write source stub',
             input: { file_path: join(workspacePath, 'src/scene.ts') },
           })
-          decisions.bash = await startInput.requestPermission?.({
-            toolUseID: 'resource-bash',
-            toolName: 'Bash',
-            message: 'Use shell in resource phase',
-            input: { command: 'touch assets/asset-manifest.json' },
-          })
+          decisions.unsupportedResourceWrite =
+            await startInput.requestPermission?.({
+              toolUseID: 'unsupported-resource-write',
+              toolName: 'Write',
+              message: 'Write an unsupported resource format',
+              input: {
+                file_path: join(workspacePath, 'assets/runtime/audio.json'),
+              },
+            })
+          decisions.binaryResourceWrite =
+            await startInput.requestPermission?.({
+              toolUseID: 'binary-resource-write',
+              toolName: 'Write',
+              message: 'Write binary media through a text tool',
+              input: {
+                file_path: join(workspacePath, 'assets/runtime/model.glb'),
+              },
+            })
+          decisions.programmaticResourceWrite =
+            await startInput.requestPermission?.({
+              toolUseID: 'programmatic-resource-write',
+              toolName: 'Write',
+              message: 'Write an executable programmatic source resource',
+              input: {
+                file_path: join(
+                  workspacePath,
+                  'assets/generated/generated-audio.json',
+                ),
+                content: JSON.stringify({
+                  format: 'beegame-programmatic-audio-v1',
+                  cues: [
+                    {
+                      id: 'cue',
+                      duration_ms: 100,
+                      voices: [
+                        {
+                          source: {
+                            type: 'oscillator',
+                            waveform: 'sine',
+                            frequency_hz: 440,
+                          },
+                          start_ms: 0,
+                          duration_ms: 100,
+                          gain: 0.1,
+                        },
+                      ],
+                    },
+                  ],
+                }),
+              },
+            })
+          decisions.invalidProgrammaticResourceWrite =
+            await startInput.requestPermission?.({
+              toolUseID: 'invalid-programmatic-resource-write',
+              toolName: 'Write',
+              message: 'Write an invalid programmatic source resource',
+              input: {
+                file_path: join(
+                  workspacePath,
+                  'assets/generated/invalid-generated-audio.json',
+                ),
+                content: JSON.stringify({
+                  format: 'beegame-programmatic-audio-v1',
+                  cues: [
+                    {
+                      id: 'cue',
+                      variants: [{ waveform: 'sine', frequency: 440 }],
+                    },
+                  ],
+                }),
+              },
+            })
           decisions.import = await startInput.requestPermission?.({
             toolUseID: 'repair-import',
             toolName: 'ResourceLibrary',
             message: 'Import replacement inventory',
             input: {
-              action: 'import_elements',
+              action: 'import_resources',
               selections: [
                 {
-                  import_id: 'replacement',
+                  resource_id: 'replacement',
                   pack_id: 'pack-1',
+                  expected_pack_version: '1.0.0',
                   element_id: 'element-1',
-                  destination_path: 'assets/library/replacement',
+                  destination_path: 'assets/runtime/replacement',
+                  selection_reason: ['Observed fit.'],
                 },
               ],
             },
-          })
-          decisions.refresh = await startInput.requestPermission?.({
-            toolUseID: 'repair-refresh',
-            toolName: 'ResourceLibrary',
-            message: 'Refresh existing inventory metadata',
-            input: { action: 'refresh_import_metadata' },
           })
         },
         stop: () => undefined,
@@ -400,32 +493,63 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'resource-preparer',
-      workflowResourceAttemptMode: 'repair',
-      workflowAllowedPaths: ['assets/asset-manifest.json', 'assets/library/'],
+      workflowAllowedPaths: [
+        'assets/asset-manifest.json',
+        'assets/runtime/',
+        'assets/content/',
+        'assets/generated/',
+      ],
     })
 
     await manager.send(session.id, 'repair resources')
     await waitForIdle(manager, session.id)
 
-    expect(decisions.manifestWrite).toEqual({
-      behavior: 'allow',
-      scope: 'once',
+    expect(decisions.manifestWrite).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('only through AssetManifest'),
     })
     expect(decisions.sourceWrite).toMatchObject({
       behavior: 'deny',
       message: expect.stringContaining('outside its declared phase scope'),
     })
-    expect(decisions.bash).toMatchObject({
+    expect(decisions.unsupportedResourceWrite).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('does not support that format'),
+    })
+    expect(decisions.binaryResourceWrite).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('author_encoded_resources'),
+    })
+    expect(decisions.programmaticResourceWrite).toEqual({
+      behavior: 'allow',
+      scope: 'once',
+    })
+    expect(decisions.invalidProgrammaticResourceWrite).toMatchObject({
       behavior: 'deny',
       message: expect.stringContaining(
-        'direct ResourceLibrary tool and scoped file tools',
+        'must match beegame-programmatic-audio-v1 before it is written',
       ),
     })
-    expect(decisions.import).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('preserve the canonical inventory'),
-    })
-    expect(decisions.refresh).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(
+      manager
+        .events(session.id)
+        .find(
+          event =>
+            event.payload?.toolUseID ===
+              'invalid-programmatic-resource-write' &&
+            event.type === 'permission.resolved',
+        )?.payload?.reasonCode,
+    ).toBe('resource_contract_invalid')
+    expect(
+      manager
+        .events(session.id)
+        .find(
+          event =>
+            event.payload?.toolUseID === 'unsupported-resource-write' &&
+            event.type === 'permission.resolved',
+        )?.payload?.reasonCode,
+    ).toBe('resource_target_format_unsupported')
+    expect(decisions.import).toEqual({ behavior: 'allow', scope: 'once' })
     expect(
       manager.pendingPermissionsForProject(
         'user-1',
@@ -463,8 +587,12 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowWorkerType: 'resource-preparer',
-      workflowResourceAttemptMode: 'selection',
-      workflowAllowedPaths: ['assets/asset-manifest.json', 'assets/library/'],
+      workflowAllowedPaths: [
+        'assets/asset-manifest.json',
+        'assets/runtime/',
+        'assets/content/',
+        'assets/generated/',
+      ],
     })
 
     await manager.send(session.id, 'select resources')
@@ -472,7 +600,7 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(decision).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('second manifest or inventory write lane'),
+      message: expect.stringContaining('only through AssetManifest'),
     })
     manager.dispose()
   })
@@ -521,6 +649,83 @@ describe('BeeGame session runtime resilience', () => {
         workspacePath,
       ),
     ).toEqual([])
+    manager.dispose()
+  })
+
+  test('allows one completed document mutation per path in a dispatch', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-mutation-boundary-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let repeatedDecision: DashboardPermissionDecision | undefined
+    let otherDocumentDecision: DashboardPermissionDecision | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'document-write-1',
+                  name: 'MultiEdit',
+                  input: { file_path: join(workspacePath, 'docs/GDD.md') },
+                },
+              ],
+            },
+          })
+          input.onMessage({
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'document-write-1',
+                  content: 'updated',
+                },
+              ],
+            },
+          })
+          repeatedDecision = await input.requestPermission({
+            toolUseID: 'document-write-2',
+            toolName: 'MultiEdit',
+            message: 'Rewrite the same document',
+            input: { file_path: join(workspacePath, 'docs/GDD.md') },
+          })
+          otherDocumentDecision = await input.requestPermission({
+            toolUseID: 'document-write-3',
+            toolName: 'MultiEdit',
+            message: 'Update another assigned document',
+            input: {
+              file_path: join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+      workflowAllowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+    })
+
+    await manager.send(session.id, 'repair documents')
+    await waitForIdle(manager, session.id)
+
+    expect(repeatedDecision).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('one successful mutation'),
+    })
+    expect(otherDocumentDecision).toEqual({
+      behavior: 'allow',
+      scope: 'once',
+    })
     manager.dispose()
   })
 
@@ -701,33 +906,27 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('denies repair metadata refresh until the final manifest is compatible', async () => {
+  test('denies metadata refresh until the canonical inventory is valid', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-refresh-order-'))
     const workspacePath = join(root, 'workspace')
-    await mkdir(join(workspacePath, 'assets/library'), { recursive: true })
-    await writeFile(join(workspacePath, 'assets/library/model.fbx'), 'fbx')
+    await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+    await writeFile(join(workspacePath, 'assets/runtime/model.fbx'), 'fbx')
     await writeFile(
       join(workspacePath, 'assets/asset-manifest.json'),
       JSON.stringify({
-        version: 5,
+        version: 7,
         project_target: {
           asset_format_capabilities: ['glb'],
-          resource_library_usage: 'preferred',
-          runtime_asset_root: 'assets/library',
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
         },
         requirements: [
           {
             id: 'model',
-            status: 'planned',
-            resource_requirement: {
-              accepted_formats: ['glb'],
-              import_budget: 1,
-              no_match: 'authored-asset',
-            },
-            satisfied_by: { import_ids: ['model'] },
           },
         ],
-        imports: [
+        resources: [
           {
             id: 'model',
             source: {
@@ -737,14 +936,14 @@ describe('BeeGame session runtime resilience', () => {
               element_id: 'model',
               element_path: 'model.fbx',
             },
-            status: 'available',
-            root_path: 'assets/library/model.fbx',
-            local_files: ['assets/library/model.fbx'],
+            provisional: false,
+            status: 'verified',
+            root_path: 'assets/runtime/model.fbx',
+            file_paths: ['assets/runtime/model.fbx'],
             selected_at: new Date().toISOString(),
             selection_reason: ['Approved inventory'],
           },
         ],
-        compositions: [],
       }),
     )
     let decision: DashboardPermissionDecision | undefined
@@ -755,7 +954,7 @@ describe('BeeGame session runtime resilience', () => {
             toolUseID: 'refresh-before-final-manifest',
             toolName: 'ResourceLibrary',
             message: 'Refresh metadata',
-            input: { action: 'refresh_import_metadata' },
+            input: { action: 'refresh_resource_metadata' },
           })
         },
         stop: () => undefined,
@@ -768,8 +967,12 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowWorkerType: 'resource-preparer',
-      workflowResourceAttemptMode: 'repair',
-      workflowAllowedPaths: ['assets/asset-manifest.json', 'assets/library/'],
+      workflowAllowedPaths: [
+        'assets/asset-manifest.json',
+        'assets/runtime/',
+        'assets/content/',
+        'assets/generated/',
+      ],
     })
 
     await manager.send(session.id, 'repair resources')
@@ -777,9 +980,7 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(decision).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining(
-        'Imported root format fbx is not supported',
-      ),
+      message: expect.stringContaining('Finalize and validate'),
     })
     manager.dispose()
   })
@@ -796,13 +997,15 @@ describe('BeeGame session runtime resilience', () => {
             toolName: 'ResourceLibrary',
             message: 'Import selected resources',
             input: {
-              action: 'import_elements',
+              action: 'import_resources',
               selections: [
                 {
-                  import_id: 'selected-resource',
+                  resource_id: 'selected-resource',
                   pack_id: 'pack-1',
+                  expected_pack_version: '1.0.0',
                   element_id: 'element-1',
-                  destination_path: 'assets/library/selected-resource',
+                  destination_path: 'assets/runtime/selected-resource',
+                  selection_reason: ['Observed fit.'],
                 },
               ],
             },

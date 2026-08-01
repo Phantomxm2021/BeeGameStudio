@@ -339,11 +339,11 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('does not synthesize local game mode options when LLM intake fails', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input) === '/api/beegame-intake/jobs'
         ? jsonResponse({ error: 'not found' }, 404)
         : jsonResponse({ error: 'intake unavailable' }, 500)
-    ));
+    )
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
@@ -352,14 +352,14 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('uses backend error message text when intake returns a structured failure', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input) === '/api/beegame-intake/jobs'
         ? jsonResponse({
           error: 'Insufficient credits',
           message: 'Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。',
         }, 402)
         : jsonResponse({ error: 'not found' }, 404)
-    ));
+    )
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring LLM' }))
@@ -443,9 +443,9 @@ describe('beeGameAdapter prompt rules', () => {
         ]),
       }));
 
-      expect(fetchMock.mock.calls.filter(([input, init]) => (
-        String(input) === '/api/beegame-intake/jobs' && init?.method === 'POST'
-      ))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input, init]) =>
+            String(input) === '/api/beegame-intake/jobs' && init?.method === 'POST'
+      )).toHaveLength(1);
       expect(pollAttempts).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -680,9 +680,9 @@ describe('beeGameAdapter prompt rules', () => {
       },
     });
 
-    const startCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    ));
+    const startCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
+    )
     const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
 
     expect(startBody.projectName).toBe('llm-project');
@@ -750,9 +750,9 @@ describe('beeGameAdapter prompt rules', () => {
       analysisId: 'analysis_direct_build',
     });
 
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    ));
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
+    )
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { brief?: Record<string, unknown> };
     expect(body.brief).toMatchObject({
       confirmedGdd: '# Rules\n- Solve the puzzle to win.',
@@ -790,9 +790,9 @@ describe('beeGameAdapter prompt rules', () => {
       },
     });
 
-    const startCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    ));
+    const startCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
+    )
     const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
     expect(startBody.projectName).toBe('movement-aim-trainer');
     expect(result.project.name).toBe('移动与瞄准训练');
@@ -843,12 +843,12 @@ describe('beeGameAdapter prompt rules', () => {
       content: '修复蛇会自动增长的问题',
     });
 
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path).endsWith('/session/ensure') && init?.method === 'POST'
-    ));
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST'
-    ));
+    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path).endsWith('/session/ensure') && init?.method === 'POST'
+    )
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST'
+    )
     expect(ensureCall).toBeTruthy();
     expect(inputCall).toBeTruthy();
   });
@@ -904,9 +904,9 @@ describe('beeGameAdapter prompt rules', () => {
         content: 'LLM generated assistant message.',
       }),
     ]));
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    )).toBe(false);
   });
 
   it('loads compact chat history from newest to oldest with a stable cursor', async () => {
@@ -956,7 +956,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { project } = seedBoundProject('beegame_paged', workspacePath);
 
-    const latest = await beeGameAdapter.getChatHistory(project.id) as Array<{ content: string }>;
+    const latest = (await beeGameAdapter.getChatHistory(project.id)) as Array<{ content: string }>;
     expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
       initialized: true,
       hasMore: true,
@@ -1267,9 +1267,9 @@ describe('beeGameAdapter prompt rules', () => {
         content: 'Recovered design context.',
       }),
     ]));
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    )).toBe(false);
   });
 
   it('does not keep a transcript-only interrupted turn running after the backend restarts', async () => {
@@ -1310,9 +1310,9 @@ describe('beeGameAdapter prompt rules', () => {
     expect(status.phase).toBe('idle');
     expect(status.active_agents).toEqual([]);
     expect(status.next_action).toBe('Ready for next request');
-    expect(polled.messages.some(message => (
-      message.type === 'status' && String(message.content || '').includes('Backend restarted')
-    ))).toBe(false);
+    expect(polled.messages.some(message =>
+          message.type === 'status' && String(message.content || '').includes('Backend restarted')
+    )).toBe(false);
   });
 
   it('treats a stopped session as idle even when the transcript turn never completed', async () => {
@@ -1494,20 +1494,20 @@ describe('beeGameAdapter prompt rules', () => {
       content: '继续任务',
     });
 
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_new/input' && init?.method === 'POST'
-    ));
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/project_backend_ensure/session/ensure' && init?.method === 'POST'
-    ));
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/beegame-sessions/beegame_new/input' && init?.method === 'POST'
+    )
+    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/project_backend_ensure/session/ensure' && init?.method === 'POST'
+    )
     const ensureBody = JSON.parse(String(ensureCall?.[1]?.body || '{}')) as { language?: string };
     expect(ensureBody.language).toBeTruthy();
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string; thinkingMode?: string };
     expect(body.text).toBe('继续任务');
     expect(body.thinkingMode).toBeUndefined();
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    )).toBe(false);
   });
 
   it('ensures a stopped BeeGame session in the backend before sending a new chat message', async () => {
@@ -1549,18 +1549,18 @@ describe('beeGameAdapter prompt rules', () => {
       content: 'Continue fixing the game.',
     });
 
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path).endsWith('/session/ensure') && init?.method === 'POST'
-    ));
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_stopped/input' && init?.method === 'POST'
-    ));
+    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path).endsWith('/session/ensure') && init?.method === 'POST'
+    )
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/beegame-sessions/beegame_stopped/input' && init?.method === 'POST'
+    )
     const inputBody = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
     expect(ensureCall).toBeTruthy();
     expect(inputBody.text).toBe('Continue fixing the game.');
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    )).toBe(false);
   });
 
   it('sends continue input for an existing idle session with transcript context', async () => {
@@ -1596,9 +1596,9 @@ describe('beeGameAdapter prompt rules', () => {
 
     await beeGameAdapter.continueTask({ project_id: project.id });
 
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST'
-    ));
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST'
+    )
     expect(inputCall).toBeTruthy();
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { language?: string };
     expect(body.language).toBe('zh');
@@ -1640,10 +1640,10 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.continueTask({ project_id: project.id });
 
     expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
       init?.method === 'PATCH'
-    ))).toBe(false);
+    )).toBe(false);
   });
 
   it('starts a BeeGame session with structured confirmed product input only', async () => {
@@ -1675,9 +1675,9 @@ describe('beeGameAdapter prompt rules', () => {
       root_path: '/tmp/beegame-projects',
     });
 
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    ));
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
+    )
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as {
       brief?: Record<string, any>;
       language?: string;
@@ -1727,7 +1727,7 @@ describe('beeGameAdapter prompt rules', () => {
       workspacePath: '/tmp/beegame-projects/display-game',
     }]));
 
-    const history = await beeGameAdapter.getChatHistory(project.id) as Array<{ sender: string; content: string }>;
+    const history = (await beeGameAdapter.getChatHistory(project.id)) as Array<{ sender: string; content: string }>;
 
     expect(history).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1769,9 +1769,9 @@ describe('beeGameAdapter prompt rules', () => {
       root_path: '/tmp/beegame-projects',
     });
 
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    ));
+    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
+        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
+    )
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { brief?: Record<string, unknown> };
     const brief = body.brief || {};
     expect(brief.idea).toBe('Build a sample game');
@@ -1840,10 +1840,10 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputBodies = fetchMock.mock.calls
-      .filter(([path, init]) => (
-        String(path) === '/api/beegame-sessions/beegame_followup/input' &&
+      .filter(([path, init]) =>
+          String(path) === '/api/beegame-sessions/beegame_followup/input' &&
         init?.method === 'POST'
-      ))
+      )
       .map(([, init]) => JSON.parse(String(init?.body ?? '{}')) as { text?: string });
     const followUp = inputBodies[0]?.text || '';
 
@@ -3234,15 +3234,21 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/projects/project_runtime/assets' && !init?.method) {
         return jsonResponse({
-          version: 5,
-          requirements: [{ id: 'title_logo', name: 'Title logo' }],
-        });
+          version: 7,
+          requirements: [{ id: 'title_logo', name: 'Title logo', required: true }],
+          resources: [],
+          });
       }
-      if (path === '/api/projects/project_runtime/assets/title_logo/upload' && init?.method === 'POST') {
+      if (path ===
+            '/api/projects/project_runtime/assets/resources/title_logo/upload' && init?.method === 'POST') {
         return jsonResponse({
           path: 'public/assets/title-logo.png',
-          requirement: { id: 'title_logo' },
-          manifest: { version: 5, requirements: [{ id: 'title_logo' }] },
+            resource: { id: 'title_logo' },
+          manifest: {
+            version: 7,
+            requirements: [{ id: 'title_logo', required: true }],
+            resources: [],
+          },
         });
       }
       if (path.includes('/api/beegame-sessions/') && (path.includes('/preview') || path.includes('/deployments') || path.includes('/assets'))) {
@@ -3296,9 +3302,9 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(result.lastEventId).toBe(1);
     expect(eventsAttempts).toBe(1);
-    expect(fetchMock.mock.calls.some(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    )).toBe(false);
   });
 
   it('does not replay a recovered terminal failure as a live dashboard error', async () => {

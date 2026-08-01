@@ -398,7 +398,7 @@
         },
         {
           "title": "專案資源整合",
-          "description": "Unity、Godot、Blender 等專案可在 asset manifest 中宣告 mcp 與 mcp_server。",
+          "description": "Configure target-specific editor and tool connections in runtime MCP settings.",
           "note": "交付物面板會顯示這些資源整合資訊，但不會假裝 editor 已連線。"
         },
         {
@@ -660,16 +660,6 @@
       "loading": "正在讀取資源合約...",
       "upload": "上傳替換",
       "uploading": "上傳中...",
-      "requestIntegration": "讓 BeeGame 整合",
-      "verifyIntegration": "重新整合 / 驗證",
-      "autoSelectLibrary": "自動選擇資源庫資源",
-      "autoSelecting": "正在選擇…",
-      "unbind": "解除資源庫綁定",
-      "unbinding": "正在解除…",
-      "unbindTitle": "解除資源庫綁定？",
-      "unbindDescription": "這只會移除資源庫關聯，已複製到專案中的檔案將保持不變。",
-      "cancel": "取消",
-      "integrateAllPending": "整合所有待處理",
       "acceptancePassed": "目前版本已驗收",
       "acceptanceFailed": "驗收未通過",
       "acceptanceBlocked": "驗收受阻",
@@ -680,15 +670,8 @@
       "placeholder": "Placeholder",
       "uploaded": "等待整合",
       "integrated": "已整合",
-      "uploadedHint": "資源已上傳，但尚未確認接入執行時。",
-      "mcp": "MCP 整合",
-      "filesystem": "檔案整合",
-      "manual": "手動整合",
       "target": "目標",
-      "formats": "格式",
-      "specs": "規格",
       "noPurpose": "未提供用途說明",
-      "compositions": "資源組合",
       "members": "個成員"
     },
     "savedPrefixSeparator": "："

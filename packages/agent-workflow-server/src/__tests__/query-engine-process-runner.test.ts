@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createProcessIsolatedQueryEngineRunner,
+  createQueryEngineTurnSubmitMessage,
 } from '../beegame/query-engine-process-runner'
 import {
   deserializeQueryEngineStartInput,
@@ -11,6 +12,28 @@ import {
 } from '../beegame/query-engine-process-input'
 
 describe('process-isolated QueryEngine runner', () => {
+  test('preserves confirmed brief authority on an isolated turn', () => {
+    const confirmedBriefContext = JSON.stringify({
+      resource_library_usage: 'required',
+    })
+    const message = createQueryEngineTurnSubmitMessage('turn-1', {
+      prompt: 'prepare resources',
+      confirmedBriefContext,
+      signal: new AbortController().signal,
+      onMessage() {},
+      async requestPermission() {
+        return { behavior: 'deny' }
+      },
+    })
+
+    expect(message).toEqual({
+      type: 'turn.submit',
+      turnId: 'turn-1',
+      prompt: 'prepare resources',
+      confirmedBriefContext,
+    })
+  })
+
   test('preserves workflow permission identity across process serialization', () => {
     const serialized = serializeQueryEngineStartInput({
       sessionId: 'resource-worker',
@@ -20,7 +43,10 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'resource-preparer',
-      workflowResourceAttemptMode: 'repair',
+      workflowResourceRegistrationBarrierPaths: [
+        'assets/provisional/audio.json',
+      ],
+      workflowAllowResourceCatalogWithExistingInventory: true,
     })
 
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
@@ -28,7 +54,30 @@ describe('process-isolated QueryEngine runner', () => {
       deliveryEvidenceDataRoot: '/tmp/evidence',
       workflowWorker: true,
       workflowWorkerType: 'resource-preparer',
-      workflowResourceAttemptMode: 'repair',
+      workflowResourceRegistrationBarrierPaths: [
+        'assets/provisional/audio.json',
+      ],
+      workflowAllowResourceCatalogWithExistingInventory: true,
+    })
+  })
+
+  test('preserves the exact document review mode across process serialization', () => {
+    const serialized = serializeQueryEngineStartInput({
+      sessionId: 'document-reviewer',
+      cwd: '/tmp/project',
+      env: {},
+      approvedOutboundTargets: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-reviewer',
+      workflowDocumentReviewMode: 'closure',
+      workflowDocumentReviewScope: 'complete',
+    })
+
+    expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
+      workflowWorker: true,
+      workflowWorkerType: 'document-reviewer',
+      workflowDocumentReviewMode: 'closure',
+      workflowDocumentReviewScope: 'complete',
     })
   })
 
@@ -58,8 +107,10 @@ describe('process-isolated QueryEngine runner', () => {
       ])
 
       expect(first).not.toBe(second)
-      const firstPid = (first as unknown as { child: { pid: number } }).child.pid
-      const secondPid = (second as unknown as { child: { pid: number } }).child.pid
+      const firstPid = (first as unknown as { child: { pid: number } }).child
+        .pid
+      const secondPid = (second as unknown as { child: { pid: number } }).child
+        .pid
       expect(firstPid).not.toBe(process.pid)
       expect(secondPid).not.toBe(process.pid)
       expect(firstPid).not.toBe(secondPid)

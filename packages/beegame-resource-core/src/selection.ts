@@ -24,7 +24,7 @@ export function resolveExactResourceElement(
     packId: pack.id,
     packVersion: pack.version,
     packName: pack.name,
-    packStyle: element.styleOverride ?? pack.style,
+    packStyles: element.styleOverride ? [element.styleOverride] : pack.styles,
     packGameTypes: pack.gameTypes,
     elementId: element.id,
     elementName: element.name,
@@ -43,7 +43,8 @@ export function resolveExactResourceElement(
 
 function dependencyClosure(root: ResourceElement, elementsById: ReadonlyMap<string, ResourceElement>): ResourceSelectionDependency[] {
   const closure: ResourceSelectionDependency[] = []
-  const visit = (element: ResourceElement, parentKey: string, ancestors: ReadonlySet<string>) => {
+  const visit = (element: ResourceElement, parentKey: string, ancestors: ReadonlySet<string>,
+  ) => {
     for (const [index, binding] of (element.dependencyBindings ?? []).entries()) {
       const dependency = elementsById.get(binding.dependencyElementId)
       if (!dependency || ancestors.has(dependency.id)) continue

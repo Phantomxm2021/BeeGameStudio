@@ -19,8 +19,8 @@ function storageStub(
   }
 }
 
-describe('R2 Resource Library lifecycle compatibility', () => {
-  test('falls back to the legacy Supabase object while an R2 object is unavailable', async () => {
+describe('R2 Resource Library lifecycle', () => {
+  test('rejects an unavailable R2 object without opening another storage path', async () => {
     const handlers = createSupabaseResourceLifecycleHandlers({
       baseUrl: 'https://supabase.test',
       serviceRoleKey: 'secret',
@@ -36,26 +36,17 @@ describe('R2 Resource Library lifecycle compatibility', () => {
             },
           ])
         }
-        if (url.includes('/object/sign/')) {
-          return Response.json({
-            signedURL:
-              '/object/sign/beegame-resource-packs/pack-1/models/item.glb?token=legacy',
-          })
-        }
         return Response.json([])
       },
     })
 
     await expect(
       handlers.getElementResourceUrl('pack-1', 'element-1'),
-    ).resolves.toBe(
-      'https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/models/item.glb?token=legacy',
-    )
+    ).rejects.toThrow('Resource element storage object is unavailable')
   })
 
   test('renames an R2 element by changing only its logical path', async () => {
     const updates: string[] = []
-    const legacyStorageCalls: string[] = []
     const current = {
       id: 'element-1',
       pack_id: 'pack-1',
@@ -78,7 +69,6 @@ describe('R2 Resource Library lifecycle compatibility', () => {
       }),
       fetchImpl: async (input, init) => {
         const url = String(input)
-        if (url.includes('/storage/v1/object/')) legacyStorageCalls.push(url)
         if (!init?.method || init.method === 'GET')
           return Response.json([current])
         if (init.method === 'PATCH')
@@ -94,6 +84,5 @@ describe('R2 Resource Library lifecycle compatibility', () => {
       path: 'models/new.glb',
     })
     expect(updates).toEqual(['models/new.glb'])
-    expect(legacyStorageCalls).toHaveLength(0)
   })
 })

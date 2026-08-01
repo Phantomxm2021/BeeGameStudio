@@ -1,49 +1,69 @@
-import { createHash } from 'node:crypto'
+import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_DIMENSIONS,
+  RESOURCE_PACK_PRIMARY_CATEGORIES,
+  RESOURCE_USAGE_TAGS,
+} from '@bee-game-studio/beegame-resource-core'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { z } from 'zod/v4'
+import { CANONICAL_ASSET_MANIFEST } from './delivery-workflow/types'
 import {
   ProjectResourceApplication,
   type ProjectResourceSelectionClient,
 } from './project-resource-application'
-import type { ResourceCatalogFilterInput } from './resource-selection-client'
-import {
-  BEEGAME_RESOURCE_NO_MATCH_OUTCOMES,
-  effectiveAssetFormats,
-  readBeeGameAssetManifest,
-  recordBeeGameResourceNoMatchInWorkspace,
-  type BeeGameRequirementDiscoveryReceipt,
-} from './asset-contracts'
 
-const MAX_CATALOG_PAGE_ITEMS = 16
+// Keep every page inside the native tool result envelope so the agent can
+// inspect catalog metadata directly instead of reaching for shell commands to
+// parse an offloaded result file. Pagination remains the single continuation
+// mechanism for larger result sets.
+const MAX_CATALOG_PAGE_ITEMS = 8
+const DEFAULT_CATALOG_PAGE_ITEMS = MAX_CATALOG_PAGE_ITEMS
+const MAX_FILTER_VALUES_PER_FIELD = 32
+const MAX_TECHNICAL_FACTS_PER_ITEM = 24
+const MAX_TECHNICAL_FACT_STRING_CHARS = 240
 
-const explicitImportSelectionSchema = z
+const catalogFiltersSchema = z
   .object({
-    import_id: z.string().min(1),
-    requirement_ids: z.array(z.string().min(1)).min(1),
-    pack_id: z.string().min(1),
-    expected_pack_version: z.string().min(1),
-    element_id: z.string().min(1),
-    destination_path: z.string().min(1),
-    selection_reason: z.array(z.string().min(1)).min(1).max(8),
+    pack_ids: z.array(z.string().trim().min(1)).min(1).optional(),
+    dimensions: z.array(z.enum(RESOURCE_DIMENSIONS)).min(1).optional(),
+    primary_categories: z
+      .array(z.enum(RESOURCE_PACK_PRIMARY_CATEGORIES))
+      .min(1)
+      .optional(),
+    styles: z.array(z.string().trim().min(1)).min(1).optional(),
+    game_types: z.array(z.string().trim().min(1)).min(1).optional(),
+    pack_tags: z.array(z.string().trim().min(1)).min(1).optional(),
+    usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)).min(1).optional(),
+    asset_kinds: z.array(z.enum(RESOURCE_ASSET_KINDS)).min(1).optional(),
+    capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)).min(1).optional(),
+    formats: z.array(z.string().trim().min(1)).min(1).optional(),
   })
+  .strict()
+  .optional()
+
+const resourceSelectionSchema = z.object({
+  resource_id: z.string().trim().min(1),
+  pack_id: z.string().trim().min(1),
+  expected_pack_version: z.string().trim().min(1),
+  element_id: z.string().trim().min(1),
+  destination_path: z.string().trim().min(1),
+  selection_reason: z.array(z.string().trim().min(1)).min(1).max(8),
+})
 
 const resourceLibraryInputSchema = z.discriminatedUnion('action', [
   z.object({
-    action: z.literal('query_candidates'),
-    requirement_ids: z.array(z.string().min(1)).min(1),
-    cursor: z.string().min(1).optional(),
+    action: z.literal('browse_catalog'),
+    filters: catalogFiltersSchema,
+    cursor: z.string().trim().min(1).optional(),
     limit: z.number().int().min(1).max(MAX_CATALOG_PAGE_ITEMS).optional(),
   }),
   z.object({
-    action: z.literal('import_elements'),
-    selections: z.array(explicitImportSelectionSchema).min(1).max(64),
+    action: z.literal('import_resources'),
+    selections: z.array(resourceSelectionSchema).min(1).max(64),
   }),
-  z.object({
-    action: z.literal('record_no_match'),
-    requirement_ids: z.array(z.string().min(1)).min(1),
-    outcome: z.enum(BEEGAME_RESOURCE_NO_MATCH_OUTCOMES),
-    reasons: z.array(z.string().trim().min(1)).min(1).max(8),
-  }),
-  z.object({ action: z.literal('refresh_import_metadata') }),
+  z.object({ action: z.literal('refresh_resource_metadata') }),
 ])
 
 type ResourceLibraryInput = z.infer<typeof resourceLibraryInputSchema>
@@ -53,195 +73,162 @@ type ProjectResourceFetch = (
   init?: RequestInit,
 ) => Promise<Response>
 
+/**
+ * Agent-facing Resource Library capability. It exposes the actual catalog,
+ * exact acquisition, and metadata refresh without deriving a project-semantic
+ * query or deciding which project requirement an element must satisfy.
+ */
 export function createNativeResourceLibraryTool(options: {
   buildTool: BuildTool
   workspacePath: string
+  registrationBarrierPaths?: string[]
+  allowCatalogWithExistingInventory?: boolean
   client: ProjectResourceSelectionClient
   fetchImpl?: ProjectResourceFetch
-  catalogReadLimit?: number
 }): unknown {
   const application = new ProjectResourceApplication(
     options.client,
     options.fetchImpl,
   )
-  const catalogReadLimit = Math.max(
-    1,
-    Math.trunc(options.catalogReadLimit ?? 12),
-  )
-  let catalogReadsSinceMutation = 0
+  const observed = new Map<string, string>()
   let callInFlight = false
-  let candidateObservation:
-    | {
-        requirementKey: string
-        requirementIds: string[]
-        queryDigest: string
-        catalogRevision?: string
-        candidateIds: Set<string>
-        packIds: Set<string>
-        total: number
-        decisionReady: boolean
-        structuredConstraintCount: number
-      }
-    | undefined
-  const catalogBudget = () => ({
-    limit: catalogReadLimit,
-    used: catalogReadsSinceMutation,
-    remaining: Math.max(0, catalogReadLimit - catalogReadsSinceMutation),
-  })
-  const catalogResult = <T extends Record<string, unknown>>(data: T) => ({
-    data: { ...data, catalog_budget: catalogBudget() },
-  })
+  const existingInventoryAtSessionStart = hasRegisteredInventory(
+    options.workspacePath,
+  )
+
   return options.buildTool({
     name: 'ResourceLibrary',
     alwaysLoad: true,
-    maxResultSizeChars: 16_000,
+    maxResultSizeChars: 24_000,
     inputSchema: resourceLibraryInputSchema,
     isConcurrencySafe: () => false,
     isReadOnly: (input: ResourceLibraryInput) =>
-      input.action !== 'import_elements' &&
-      input.action !== 'record_no_match' &&
-      input.action !== 'refresh_import_metadata',
+      input.action === 'browse_catalog',
     async description() {
-      return 'Query exact cross-Pack candidates for the active manifest responsibilities, then either import a proven selection or record the approved no-match outcome. BeeGame never chooses artistic suitability for you.'
+      return 'Browse the Resource Library with structured filters, import exact observed elements into the project, and refresh objective metadata for existing library resources.'
     },
     async prompt() {
       return [
-        'ResourceLibrary is an exact catalog and import capability. BeeGame does not select resources, infer intent, rank artistic compatibility, or author target-runtime compositions.',
-        'Catalog results are paginated. Pack and element records expose authored metadata, preview descriptors, dependency information, semantic relations and objective technical facts when available.',
-        'Catalog filters are exact metadata constraints derived from the canonical requirement group. Do not translate, broaden, or invent free-text filter values. Facets describe the available catalog scope even when the exact query returns zero items.',
-        'For semantic selection, element usageTags are authoritative. Pack dimension, style and game type provide compatibility context, while element category, format, assetKind, capabilities and contentProfile provide technical facts. Names, paths, folders and Pack tags may identify or discover records but never prove what gameplay or art responsibility an element can fulfill.',
-        'query_candidates derives exact filters from the supplied canonical manifest requirement IDs and searches reusable elements across every published Pack. Page until decision_ready is true before recording no-match.',
-        'Read actions do not modify the project. import_elements copies only the exact elements supplied by Claude Code, pins their Pack versions and includes their declared dependency closures. record_no_match atomically records the already-approved non-library source outcome with the completed canonical discovery receipt. These actions own manifest mutation; never hand-author their records. refresh_import_metadata updates objective facts for existing pinned imports.',
-        'Every import_elements selection must identify all current manifest requirement_ids it genuinely satisfies. One imported element may be reused by multiple requirements; BeeGame validates every requirement format contract before downloading and records those bindings atomically.',
-        'New imports are accepted only while the canonical requirements declare enough resource_requirement.import_budget capacity. This budget is project inventory authority derived from the approved asset plan, not permission to import unrelated candidates.',
-        'This tool reports catalog, provenance, copied-file and dependency facts only. It cannot mark a target-runtime composition complete or certify rendering, loading, visual quality, interaction, audio playback, gameplay, or player paths. Use the target runtime, native Skills and native Validator for those observations.',
-        'Choose how and when to use these actions from the confirmed project context and the native capabilities available in the current session.',
+        'ResourceLibrary is an engine-neutral catalog and acquisition capability. You decide which project resources are useful; the service does not infer project roles or artistic suitability.',
+        ...(options.registrationBarrierPaths?.length
+          ? [
+              'This dispatch has durable unregistered files from the prior Resource Production dispatch. Repair and register every path in contract.existingUnregisteredResourcePaths through AssetManifest before any ResourceLibrary action; the service enforces this ordering.',
+            ]
+          : []),
+        'Begin broadly, inspect returned filter_values and selection summaries, then refine with those exact snake_case values or continue by passing next_cursor as cursor without filters. Do not repeat equivalent filters. A zero-result query is information about that query, not approval to end resource production.',
+        'Catalog reads are bounded discovery, not the deliverable. After a bounded set of distinct probes has not found suitable material, create standalone provisional resource files and continue with the project content definitions.',
+        'Catalog entries expose authored metadata, preview descriptors, dependency counts, semantic relations, content profiles and objective technical facts. Never treat names or paths alone as proof of suitability.',
+        'import_resources copies only exact elements already observed in this tool session, pins their published Pack versions, downloads their declared dependency closure, verifies local files and records them under manifest.resources. One resource may be referenced by any number of JSON or YAML content files.',
+        'If the library cannot provide appropriate material, author a real provisional resource as a normal project file and register it through AssetManifest. Do not embed placeholders in gameplay code. Provisional resources must remain independently replaceable.',
+        'Resource acquisition does not fulfill requirements by itself. After the material inventory is complete, define how resources are used in engine-neutral JSON or YAML content files, then let the target implementation consume those content IDs and resource IDs.',
       ].join(' ')
     },
     async checkPermissions(input: ResourceLibraryInput) {
-      if (
-        input.action !== 'import_elements' &&
-        input.action !== 'record_no_match' &&
-        input.action !== 'refresh_import_metadata'
-      )
+      if (input.action === 'browse_catalog')
         return { behavior: 'allow', updatedInput: input }
-      if (input.action === 'refresh_import_metadata')
+      if (input.action === 'refresh_resource_metadata')
         return {
           behavior: 'ask',
           message:
-            'Allow objective metadata for existing Resource Library imports to be refreshed from their pinned Pack versions?',
+            'Allow objective metadata for existing Resource Library resources to be refreshed from their pinned Pack versions?',
           updatedInput: input,
         }
-      if (input.action === 'record_no_match')
-        return { behavior: 'allow', updatedInput: input }
       return {
         behavior: 'ask',
-        message: `Allow ${input.selections.length} explicitly selected Resource Library element(s) to be copied into this project?`,
+        message: `Allow ${input.selections.length} selected Resource Library resource(s) to be downloaded into this project?`,
         updatedInput: input,
       }
     },
     async call(input: ResourceLibraryInput) {
-      if (callInFlight) {
+      if (
+        (await existingInventoryAtSessionStart) &&
+        !options.allowCatalogWithExistingInventory
+      )
         throw new Error(
-          'ResourceLibrary accepts one operation at a time. Wait for the current result before choosing the next catalog read or import.',
+          'The canonical resource inventory already existed when this recovery dispatch started. Finish the deterministic inventory and content correction; ResourceLibrary reopens only for an exact semantic review finding that requires renewed selection.',
         )
-      }
+      const pendingRegistrationPaths = await unresolvedRegistrationBarrierPaths({
+        workspacePath: options.workspacePath,
+        barrierPaths: options.registrationBarrierPaths ?? [],
+      })
+      if (pendingRegistrationPaths.length)
+        throw new Error(
+          `ResourceLibrary is unavailable until every durable file from the prior resource dispatch is registered through AssetManifest: ${pendingRegistrationPaths.join(', ')}`,
+        )
+      if (callInFlight)
+        throw new Error(
+          'ResourceLibrary accepts one operation at a time. Wait for the current result before continuing.',
+        )
       callInFlight = true
       try {
-        const catalogRead = input.action === 'query_candidates'
-        if (catalogRead && catalogReadsSinceMutation >= catalogReadLimit) {
-          throw new Error(
-            `ResourceLibrary catalog budget is exhausted after ${catalogReadLimit} reads. Import a proven selection or finish with the concrete catalog blocker; another catalog read was not executed.`,
-          )
-        }
-        if (input.action === 'query_candidates') {
-          const query = await deriveCandidateQuery(
-            options.workspacePath,
-            input.requirement_ids,
-          )
-          const requirementKey = query.requirementIds.join('\0')
-          if (!input.cursor) {
-            candidateObservation = {
-              requirementKey,
-              requirementIds: query.requirementIds,
-              queryDigest: query.queryDigest,
-              candidateIds: new Set(),
-              packIds: new Set(),
-              total: 0,
-              decisionReady: false,
-              structuredConstraintCount: query.structuredConstraintCount,
-            }
-          } else if (candidateObservation?.requirementKey !== requirementKey) {
-            throw new Error(
-              'Resource candidate cursor does not belong to these requirements',
-            )
-          }
-          const page = await application.queryCandidates({
-            filters: query.filters,
+        if (input.action === 'browse_catalog') {
+          const page = await application.browseCatalog({
+            ...(input.filters
+              ? {
+                  filters: {
+                    ...(input.filters.pack_ids
+                      ? { packIds: input.filters.pack_ids }
+                      : {}),
+                    ...(input.filters.dimensions
+                      ? { dimensions: input.filters.dimensions }
+                      : {}),
+                    ...(input.filters.primary_categories
+                      ? {
+                          primaryCategories: input.filters.primary_categories,
+                        }
+                      : {}),
+                    ...(input.filters.styles
+                      ? { styles: input.filters.styles }
+                      : {}),
+                    ...(input.filters.game_types
+                      ? { gameTypes: input.filters.game_types }
+                      : {}),
+                    ...(input.filters.pack_tags
+                      ? { packTags: input.filters.pack_tags }
+                      : {}),
+                    ...(input.filters.usage_tags
+                      ? { usageTags: input.filters.usage_tags }
+                      : {}),
+                    ...(input.filters.asset_kinds
+                      ? { assetKinds: input.filters.asset_kinds }
+                      : {}),
+                    ...(input.filters.capabilities
+                      ? { capabilities: input.filters.capabilities }
+                      : {}),
+                    ...(input.filters.formats
+                      ? { formats: input.filters.formats }
+                      : {}),
+                  },
+                }
+              : {}),
             ...(input.cursor ? { cursor: input.cursor } : {}),
-            ...(input.limit ? { limit: input.limit } : {}),
+            limit: input.limit ?? DEFAULT_CATALOG_PAGE_ITEMS,
           })
-          catalogReadsSinceMutation += 1
-          const observation = candidateObservation!
-          const snapshotQueryDigest = digest([
-            query.queryDigest,
-            page.catalogRevision,
-            JSON.stringify(page.normalizedFilters),
-          ])
-          if (
-            observation.catalogRevision &&
-            (observation.catalogRevision !== page.catalogRevision ||
-              observation.queryDigest !== snapshotQueryDigest)
-          )
-            throw new Error(
-              'Resource candidate catalog changed during pagination',
+          for (const item of page.items)
+            observed.set(
+              observedKey(item.packId, item.elementId),
+              item.packVersion,
             )
-          observation.catalogRevision = page.catalogRevision
-          observation.queryDigest = snapshotQueryDigest
-          if (observation.candidateIds.size && observation.total !== page.total)
-            throw new Error('Resource candidate catalog changed during pagination')
-          observation.total = page.total
-          for (const element of page.items) {
-            observation.candidateIds.add(
-              `${element.packId}:${element.elementId}`,
-            )
-            observation.packIds.add(element.packId)
-          }
-          observation.decisionReady =
-            !page.nextCursor && observation.candidateIds.size === page.total
-          return catalogResult(
-            compactCandidatePage(page, observation.decisionReady),
-          )
+          return { data: compactCatalogPage(page) }
         }
-        if (input.action === 'import_elements') {
-          const observation = candidateObservation
-          if (!observation)
-            throw new Error(
-              'Query candidates before importing Resource Library elements',
-            )
-          const observedRequirementIds = new Set(observation.requirementIds)
+        if (input.action === 'import_resources') {
           for (const selection of input.selections) {
-            if (
-              selection.requirement_ids.some(
-                requirementId => !observedRequirementIds.has(requirementId),
-              )
+            const version = observed.get(
+              observedKey(selection.pack_id, selection.element_id),
             )
+            if (!version)
               throw new Error(
-                'Import selections must bind only the active candidate requirement group',
+                `Browse the selected Resource Library element before importing it: ${selection.pack_id}:${selection.element_id}`,
               )
-            if (
-              !observation.candidateIds.has(
-                `${selection.pack_id}:${selection.element_id}`,
-              )
-            )
+            if (version !== selection.expected_pack_version)
               throw new Error(
-                `Resource candidate was not observed in the active exact query: ${selection.pack_id}:${selection.element_id}`,
+                `The selected Pack version differs from the observed catalog version: ${selection.pack_id}`,
               )
           }
-          const selections = await Promise.all(
-            input.selections.map(async selection => ({
-              importId: selection.import_id,
-              requirementIds: selection.requirement_ids,
+          const result = await application.acquireResources(
+            options.workspacePath,
+            input.selections.map(selection => ({
+              resourceId: selection.resource_id,
               packId: selection.pack_id,
               expectedPackVersion: selection.expected_pack_version,
               elementId: selection.element_id,
@@ -249,73 +236,19 @@ export function createNativeResourceLibraryTool(options: {
               selectionReason: selection.selection_reason,
             })),
           )
-          const result = await application.importExplicitSelections(
-            options.workspacePath,
-            selections,
-          )
-          if (result.results.some(item => item.status === 'available')) {
-            catalogReadsSinceMutation = 0
-            candidateObservation = undefined
-          }
-          return { data: summarizeImportBatch(result) }
+          return { data: summarizeAcquisition(result) }
         }
-        if (input.action === 'record_no_match') {
-          const requirementIds = [...new Set(input.requirement_ids)].sort()
-          const requirementKey = requirementIds.join('\0')
-          const observation = candidateObservation
-          if (
-            !observation ||
-            observation.requirementKey !== requirementKey ||
-            !observation.decisionReady
-          )
-            throw new Error(
-              'Complete query_candidates pagination for these requirements before recording no-match',
-            )
-          const candidateIds = [...observation.candidateIds].sort()
-          const packIds = [...observation.packIds].sort()
-          const receipt: BeeGameRequirementDiscoveryReceipt = {
-            version: 1,
-            query_digest: observation.queryDigest,
-            candidate_digest: digest(candidateIds),
-            candidate_ids: candidateIds,
-            inspected_pack_ids: packIds,
-            represented_pack_ids: packIds,
-            candidate_count: candidateIds.length,
-            total_compatible: candidateIds.length,
-            structured_constraint_count:
-              observation.structuredConstraintCount,
-            decision_ready: true,
-          }
-          await recordBeeGameResourceNoMatchInWorkspace({
-            root: options.workspacePath,
-            requirementIds,
-            outcome: input.outcome,
-            reasons: input.reasons,
-            receipt,
-          })
-          catalogReadsSinceMutation = 0
-          candidateObservation = undefined
-          return {
-            data: {
-              result: 'recorded',
-              requirement_ids: requirementIds,
-              outcome: input.outcome,
-            },
-          }
-        }
-        if (input.action === 'refresh_import_metadata') {
-          const refreshed = await application.refreshImportedMetadata(
+        if (input.action === 'refresh_resource_metadata') {
+          const refreshed = await application.refreshLibraryMetadata(
             options.workspacePath,
           )
-          catalogReadsSinceMutation = 0
           return {
             data: {
-              result: refreshed.unresolvedImportIds.length
+              result: refreshed.unresolvedResourceIds.length
                 ? 'partially_refreshed'
                 : 'refreshed',
-              refreshed_count: refreshed.refreshedImportIds.length,
-              unresolved_count: refreshed.unresolvedImportIds.length,
-              unresolved_import_ids: refreshed.unresolvedImportIds,
+              refreshed_count: refreshed.refreshedResourceIds.length,
+              unresolved_resource_ids: refreshed.unresolvedResourceIds,
             },
           }
         }
@@ -342,251 +275,216 @@ export function createNativeResourceLibraryTool(options: {
   })
 }
 
-async function deriveCandidateQuery(
-  workspacePath: string,
-  requestedRequirementIds: readonly string[],
-): Promise<{
-  requirementIds: string[]
-  filters: ResourceCatalogFilterInput
-  queryDigest: string
-  structuredConstraintCount: number
-}> {
-  const requirementIds = [...new Set(requestedRequirementIds)].sort()
-  const manifest = await readBeeGameAssetManifest(workspacePath)
-  const byId = new Map(
-    manifest.requirements.map(requirement => [requirement.id, requirement]),
-  )
-  const requirements = requirementIds.map(id => {
-    const requirement = byId.get(id)
-    if (!requirement?.resource_requirement)
-      throw new Error(`Resource requirement ${id} is not awaiting selection`)
-    return requirement
-  })
-  const normalized = requirements.map(requirement => {
-    const resource = requirement.resource_requirement!
-    return {
-      ...(resource.category ? { category: resource.category } : {}),
-      ...(resource.dimension ? { dimension: resource.dimension } : {}),
-      accepted_formats: effectiveAssetFormats(
-        requirement,
-        manifest.project_target,
-      ),
-      ...(resource.styles?.length ? { styles: [...resource.styles].sort() } : {}),
-      ...(resource.game_types?.length
-        ? { game_types: [...resource.game_types].sort() }
-        : {}),
-      ...(resource.tags?.length ? { tags: [...resource.tags].sort() } : {}),
-      ...(resource.asset_kinds?.length
-        ? { asset_kinds: [...resource.asset_kinds].sort() }
-        : {}),
-      ...(resource.capabilities?.length
-        ? { capabilities: [...resource.capabilities].sort() }
-        : {}),
-      ...(resource.subresources?.length
-        ? { subresources: resource.subresources }
-        : {}),
-      ...(resource.relations?.length ? { relations: resource.relations } : {}),
-      no_match: resource.no_match,
-    }
-  })
-  const groupKey = JSON.stringify(normalized[0])
-  if (normalized.some(value => JSON.stringify(value) !== groupKey))
-    throw new Error(
-      'query_candidates accepts only requirements from one exact selection group',
+async function hasRegisteredInventory(workspacePath: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(join(workspacePath, CANONICAL_ASSET_MANIFEST), 'utf8'),
+    ) as unknown
+    return Boolean(
+      parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        Array.isArray((parsed as Record<string, unknown>).resources) &&
+        ((parsed as Record<string, unknown>).resources as unknown[]).length > 0,
     )
-  const resource = requirements[0]!.resource_requirement!
-  const filters = {
-    ...(resource.category ? { categories: [resource.category] } : {}),
-    ...(resource.dimension ? { dimensions: [resource.dimension] } : {}),
-    ...(resource.styles?.length ? { styles: resource.styles } : {}),
-    ...(resource.game_types?.length ? { gameTypes: resource.game_types } : {}),
-    ...(resource.tags?.length ? { usageTags: resource.tags } : {}),
-    ...(resource.asset_kinds?.length
-      ? { assetKinds: resource.asset_kinds }
-      : {}),
-    ...(resource.capabilities?.length
-      ? { capabilities: resource.capabilities }
-      : {}),
-    formats: normalized[0]!.accepted_formats,
-  } as ResourceCatalogFilterInput
-  const structuredConstraintCount = Object.entries(normalized[0]!).filter(
-    ([key, value]) =>
-      key !== 'no_match' &&
-      value !== undefined &&
-      (!Array.isArray(value) || value.length > 0),
-  ).length
-  return {
-    requirementIds,
-    filters,
-    queryDigest: digest([groupKey]),
-    structuredConstraintCount,
+  } catch {
+    return false
   }
 }
 
-function digest(values: readonly string[]): string {
-  return createHash('sha256').update(JSON.stringify(values)).digest('hex')
+async function unresolvedRegistrationBarrierPaths(input: {
+  workspacePath: string
+  barrierPaths: string[]
+}): Promise<string[]> {
+  if (input.barrierPaths.length === 0) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(
+      await readFile(
+        join(input.workspacePath, CANONICAL_ASSET_MANIFEST),
+        'utf8',
+      ),
+    )
+  } catch {
+    return [...new Set(input.barrierPaths)]
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    return [...new Set(input.barrierPaths)]
+  const resources = (parsed as Record<string, unknown>).resources
+  if (!Array.isArray(resources)) return [...new Set(input.barrierPaths)]
+  const registeredPaths = new Set(
+    resources.flatMap(resource => {
+      if (!resource || typeof resource !== 'object' || Array.isArray(resource))
+        return []
+      const record = resource as Record<string, unknown>
+      return [
+        ...(typeof record.root_path === 'string' ? [record.root_path] : []),
+        ...(Array.isArray(record.file_paths)
+          ? record.file_paths.filter(
+              (value): value is string => typeof value === 'string',
+            )
+          : []),
+      ].map(normalizeProjectPath)
+    }),
+  )
+  return [...new Set(input.barrierPaths)].filter(
+    path => !registeredPaths.has(normalizeProjectPath(path)),
+  )
 }
 
-function compactCandidatePage(
-  page: Awaited<ReturnType<ProjectResourceApplication['queryCandidates']>>,
-  decisionReady: boolean,
+function normalizeProjectPath(value: string): string {
+  return value.trim().split('\\').join('/').replace(/^\.\//, '')
+}
+
+function observedKey(packId: string, elementId: string): string {
+  return JSON.stringify([packId, elementId])
+}
+
+function compactCatalogPage(
+  page: Awaited<ReturnType<ProjectResourceApplication['browseCatalog']>>,
 ) {
+  const filterValues = {
+    dimensions: page.facets.dimensions,
+    primary_categories: page.facets.primaryCategories,
+    styles: page.facets.styles,
+    game_types: page.facets.gameTypes,
+    pack_tags: page.facets.packTags,
+    usage_tags: page.facets.usageTags,
+    asset_kinds: page.facets.assetKinds,
+    capabilities: page.facets.capabilities,
+    formats: page.facets.formats,
+  }
+  const compactFilterValues = Object.fromEntries(
+    Object.entries(filterValues)
+      .filter(([, values]) => values.length > 0)
+      .map(([key, values]) => [
+        key,
+        [...values].sort().slice(0, MAX_FILTER_VALUES_PER_FIELD),
+      ]),
+  )
+  const truncatedFilterValueFields = Object.entries(filterValues)
+    .filter(([, values]) => values.length > MAX_FILTER_VALUES_PER_FIELD)
+    .map(([key]) => key)
+
   return {
     items: page.items.map(element => ({
-      packId: element.packId,
-      packVersion: element.packVersion,
-      packName: element.packName,
-      packStyle: element.packStyle,
-      elementId: element.elementId,
-      elementName: element.elementName,
-      elementPath: element.elementPath,
+      pack_id: element.packId,
+      pack_version: element.packVersion,
+      pack_name: element.packName,
+      pack_styles: element.packStyles,
+      pack_game_types: element.packGameTypes,
+      element_id: element.elementId,
+      element_name: element.elementName,
+      element_path: element.elementPath,
       ...(element.preview ? { preview: element.preview } : {}),
-      category: element.category,
       dimension: element.dimension,
-      ...(element.assetKind ? { assetKind: element.assetKind } : {}),
-      ...(element.usageTags.length
-        ? { usageTags: element.usageTags.slice(0, 8) }
-        : {}),
-      ...(element.capabilities.length
-        ? { capabilities: element.capabilities.slice(0, 8) }
-        : {}),
+      ...(element.assetKind ? { asset_kind: element.assetKind } : {}),
+      usage_tags: element.usageTags,
+      capabilities: element.capabilities,
       ...(element.contentProfile
-        ? { contentProfile: compactContentProfile(element.contentProfile) }
+        ? { content_profile: compactContentProfile(element.contentProfile) }
         : {}),
       ...(element.relations.length ? { relations: element.relations } : {}),
       ...(element.technicalFacts
-        ? { technicalFacts: compactTechnicalFacts(element.technicalFacts) }
+        ? compactTechnicalFacts(element.technicalFacts)
         : {}),
-      ...(element.dependencyCount
-        ? { dependencyCount: element.dependencyCount }
-        : {}),
+      dependency_count: element.dependencyCount,
     })),
     total: page.total,
-    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-    facets: compactFacets(page.facets),
-    decision_ready: decisionReady,
+    ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
+    filter_values: compactFilterValues,
+    ...(truncatedFilterValueFields.length
+      ? { truncated_filter_value_fields: truncatedFilterValueFields }
+      : {}),
+    catalog_revision: page.catalogRevision,
   }
 }
 
 function compactContentProfile(
   profile: NonNullable<
-    Awaited<
-      ReturnType<ProjectResourceApplication['queryCandidates']>
-    >['items'][number]['contentProfile']
+    Awaited<ReturnType<ProjectResourceApplication['browseCatalog']>>['items'][number]['contentProfile']
   >,
 ) {
+  const componentCounts = new Map<string, number>()
+  for (const component of profile.components) {
+    componentCounts.set(
+      component.kind,
+      (componentCounts.get(component.kind) ?? 0) + 1,
+    )
+  }
   return {
     packaging: profile.packaging,
-    inspection: profile.inspection,
-    components: profile.components.map(component => ({
-      id: component.id,
-      kind: component.kind,
-      ...(component.name ? { name: component.name } : {}),
-      ...(component.roles?.length ? { roles: component.roles } : {}),
-      ...(component.skeletonSignature
-        ? { skeletonSignature: component.skeletonSignature }
+    component_counts: Object.fromEntries(
+      [...componentCounts.entries()].sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+    inspection: {
+      status: profile.inspection.status,
+      source: profile.inspection.source,
+      ...(profile.inspection.inspectorVersion
+        ? { inspector_version: profile.inspection.inspectorVersion }
         : {}),
-    })),
+    },
   }
 }
-
-function compactFacets(facets: Record<string, readonly string[]>) {
-  return Object.fromEntries(
-    Object.entries(facets).filter(([, values]) => values.length > 0),
-  )
-}
-
-const CATALOG_TECHNICAL_FACT_KEYS = new Set([
-  'extension',
-  'mimeType',
-  'width',
-  'height',
-  'vertices',
-  'triangles',
-  'meshCount',
-  'skinCount',
-  'skinnedMeshCount',
-  'animationCount',
-  'materialCount',
-  'embeddedTextureCount',
-  'morphTargetCount',
-  'sceneNodeCount',
-  'hasNormals',
-  'hasTextureCoordinates',
-  'boundsMinX',
-  'boundsMinY',
-  'boundsMinZ',
-  'boundsMaxX',
-  'boundsMaxY',
-  'boundsMaxZ',
-  'boundsSizeX',
-  'boundsSizeY',
-  'boundsSizeZ',
-  'boundsCenterX',
-  'boundsCenterY',
-  'boundsCenterZ',
-  'groundOffsetY',
-  'centeringOffsetX',
-  'centeringOffsetZ',
-  'inspectionStatus',
-  'processor',
-  'processorVersion',
-])
 
 function compactTechnicalFacts(
   facts: Record<string, string | number | boolean>,
 ) {
-  return Object.fromEntries(
-    Object.entries(facts).filter(([key]) =>
-      CATALOG_TECHNICAL_FACT_KEYS.has(key),
-    ),
+  const entries = Object.entries(facts).sort(([left], [right]) =>
+    left.localeCompare(right),
   )
+  const included: Array<[string, string | number | boolean]> = []
+  const omitted: string[] = []
+  for (const [key, value] of entries) {
+    if (
+      included.length >= MAX_TECHNICAL_FACTS_PER_ITEM ||
+      (typeof value === 'string' &&
+        value.length > MAX_TECHNICAL_FACT_STRING_CHARS)
+    ) {
+      omitted.push(key)
+      continue
+    }
+    included.push([key, value])
+  }
+  return {
+    technical_facts: Object.fromEntries(included),
+    ...(omitted.length ? { omitted_technical_fact_keys: omitted } : {}),
+  }
 }
 
-function summarizeImportBatch(
-  result: Awaited<
-    ReturnType<ProjectResourceApplication['importExplicitSelections']>
-  >,
+function summarizeAcquisition(
+  result: Awaited<ReturnType<ProjectResourceApplication['acquireResources']>>,
 ) {
-  const imported = result.results
-    .filter(item => item.status === 'available')
+  const verified = result.resources
+    .filter(item => item.status === 'verified')
     .map(item => ({
-      import_id: item.importId,
+      resource_id: item.resourceId,
       status: item.status,
-      ...(item.rootPath ? { root_path: item.rootPath } : {}),
-      ...(item.localFiles?.length ? { local_files: item.localFiles } : {}),
+      root_path: item.rootPath,
+      file_paths: item.filePaths,
     }))
-  const failuresByError = new Map<string, string[]>()
-  for (const item of result.results) {
-    if (item.status !== 'failed') continue
-    const error = item.error ?? 'Resource import failed'
-    failuresByError.set(error, [
-      ...(failuresByError.get(error) ?? []),
-      item.importId,
-    ])
-  }
-  const failures = [...failuresByError].map(([error, importIds]) => ({
-    error,
-    import_ids: importIds,
-  }))
+  const failures = result.resources
+    .filter(item => item.status === 'failed')
+    .map(item => ({
+      resource_id: item.resourceId,
+      error: item.error ?? 'Resource acquisition failed',
+    }))
   return {
     result:
-      imported.length === result.results.length
+      verified.length === result.resources.length
         ? 'imported'
-        : imported.length > 0
+        : verified.length
           ? 'partially_imported'
           : 'failed',
-    requested_count: result.results.length,
-    imported_count: imported.length,
-    failed_count: result.results.length - imported.length,
+    requested_count: result.resources.length,
+    verified_count: verified.length,
     manifest: {
       version: result.manifest.version,
-      project_target: result.manifest.project_target,
-      requirement_count: result.manifest.requirements.length,
-      import_count: result.manifest.imports?.length ?? 0,
-      composition_count: result.manifest.compositions?.length ?? 0,
+      resource_count: result.manifest.resources.length,
     },
-    imported,
+    resources: verified,
     failures,
   }
 }

@@ -147,54 +147,44 @@ export interface BeeGameDeploymentPayload {
   deployedAt?: string
 }
 
-export type BeeGameAssetIntegrationMode = 'filesystem' | 'mcp' | 'manual'
-
 export interface BeeGameAssetRequirementPayload {
   id: string
   name?: string
   purpose?: string
   required?: boolean
-  resource_requirement?: {
-    category?: string
-    dimension?: '2D' | '3D' | 'agnostic'
-    accepted_formats?: string[]
-    styles?: string[]
-    game_types?: string[]
-    tags?: string[]
-    asset_kinds?: string[]
-    capabilities?: string[]
-    relations?: Array<{
-      kind: string
-      target_element_id?: string
-      role?: string
-    }>
-    purpose?: string
-  }
-  satisfied_by?: {
-    import_ids?: string[]
-    composition_ids?: string[]
-    project_references?: string[]
-  }
-  status?: 'planned' | 'satisfied' | 'blocked'
 }
 
-export interface BeeGameAssetImportPayload {
+export interface BeeGameProjectResourcePayload {
   id: string
-  source: {
-    type: 'resource-library' | 'user-upload' | 'project-authored'
-    pack_id?: string
-    pack_version?: string
-    element_id?: string
-    element_path?: string
-  }
-  status: 'available' | 'referenced' | 'failed'
+  source:
+    | {
+        type: 'resource-library'
+        pack_id: string
+        pack_version: string
+        element_id: string
+        element_path: string
+      }
+    | {
+        type: 'agent-authored'
+        created_at: string
+        reason: string
+      }
+    | {
+        type: 'user-provided'
+        created_at: string
+        filename: string
+      }
+  status: 'available' | 'verified' | 'failed'
   root_path: string
-  local_files: string[]
+  file_paths: string[]
+  local_file_hashes?: Record<string, string>
+  provisional: boolean
   selected_at: string
   selection_reason: string[]
   asset_kind?: string
   capabilities?: string[]
   content_profile?: Record<string, unknown>
+  technical_facts?: Record<string, string | number | boolean>
   dependencies?: Array<{
     key: string
     parent_key: string
@@ -204,48 +194,28 @@ export interface BeeGameAssetImportPayload {
     local_path: string
     kind?: string
   }>
-  usage_evidence?: { references?: string[]; runtime_event_ids?: string[] }
   error?: string
 }
 
 export interface BeeGameAssetManifestPayload {
   contract_state?: 'missing' | 'ready'
-  version: number
+  version: 7
   project_target?: {
     platform?: string
     runtime?: string
-    integration_mode?: BeeGameAssetIntegrationMode
-    mcp_server?: string
-    asset_format_capabilities?: string[]
+    asset_format_capabilities: string[]
     resource_library_usage?: 'optional' | 'preferred' | 'required'
-    runtime_asset_root?: string
+    runtime_asset_root: string
+    content_root: string
+    generated_asset_root: string
   }
   requirements: BeeGameAssetRequirementPayload[]
-  imports?: BeeGameAssetImportPayload[]
-  compositions?: Array<{
-    id: string
-    kind: string
-    required?: boolean
-    assembly_mode?: 'direct' | 'composed'
-    members: Array<{
-      import_id?: string
-      requirement_id?: string
-      composition_id?: string
-      role: string
-      required?: boolean
-    }>
-    recipe?: { path?: string; notes?: string }
-    status?: 'planned' | 'assembled' | 'integrated' | 'failed'
-    integration_evidence?: {
-      references?: string[]
-      runtime_event_ids?: string[]
-    }
-  }>
+  resources: BeeGameProjectResourcePayload[]
 }
 
 export interface BeeGameAssetUploadPayload {
   manifest: BeeGameAssetManifestPayload
-  requirement: BeeGameAssetRequirementPayload
+  resource: BeeGameProjectResourcePayload
   path: string
   message: string
 }
@@ -256,7 +226,7 @@ export interface BeeGameResourcePackImpactPayload {
   references: Array<{
     projectId: string
     projectName: string
-    importId: string
+    resourceId: string
     packVersion: string
     elementId: string
     status?: string
@@ -559,10 +529,8 @@ export const api = {
     (await beeGameAdapter.getProjectRuntimeState(projectId)).status,
 
   getProjectTokenUsage: async (projectId: string) =>
-    (
-      (await beeGameAdapter.getProjectRuntimeState(projectId)).status
-        .current_snapshot as { token_budget?: Record<string, unknown> } | null
-    )?.token_budget ?? {},
+    (await beeGameAdapter.getProjectRuntimeState(projectId)).status.context
+      ?.token_budget ?? {},
 
   /**
    * 删除项目
@@ -636,8 +604,8 @@ export const api = {
   getProjectAssets: (projectId: string) =>
     beeGameAdapter.getProjectAssets(projectId),
 
-  uploadProjectAsset: (projectId: string, requirementId: string, file: File) =>
-    beeGameAdapter.uploadProjectAsset(projectId, requirementId, file),
+  uploadProjectAsset: (projectId: string, resourceId: string, file: File) =>
+    beeGameAdapter.uploadProjectAsset(projectId, resourceId, file),
 
   getResourcePackImpact: (packId: string) =>
     beeGameAdapter.getResourcePackImpact(packId),

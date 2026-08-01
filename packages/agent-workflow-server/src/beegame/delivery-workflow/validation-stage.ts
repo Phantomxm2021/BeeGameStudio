@@ -27,8 +27,8 @@ export async function startImplementationAudit(input: {
   workspacePath: string
   dispatcher: Dispatcher
   expectedChecklistIds: string[]
-  expectedImportIds: string[]
-  expectedCompositionIds: string[]
+  expectedResourceIds: string[]
+  expectedContentIds: string[]
   currentImplementationRevision?: string
   resourceReadiness?: ResourceDeliveryReadiness
 }): Promise<unknown> {
@@ -38,9 +38,9 @@ export async function startImplementationAudit(input: {
     throw new Error(
       'implementation audit requires every task to be complete with current evidence',
     )
-  if (input.resourceReadiness && !input.resourceReadiness.integrationReady)
+  if (input.resourceReadiness && !input.resourceReadiness.ready)
     throw new Error(
-      `implementation audit requires complete resource integration: ${input.resourceReadiness.integrationIssues.join('; ')}`,
+      `implementation audit requires ready resource content: ${input.resourceReadiness.readinessIssues.join('; ')}`,
     )
   return input.dispatcher.dispatch({
     runId: input.run.runId,
@@ -59,8 +59,8 @@ export async function startImplementationAudit(input: {
         checklistIds: task.checklistIds,
       })),
       checklistIds: input.expectedChecklistIds,
-      importIds: input.expectedImportIds,
-      compositionIds: input.expectedCompositionIds,
+      resourceIds: input.expectedResourceIds,
+      contentIds: input.expectedContentIds,
     },
   })
 }
@@ -88,8 +88,8 @@ export function reconcileImplementationAudit(input: {
   >
   expectedTaskIds?: string[]
   expectedChecklistIds?: string[]
-  expectedImportIds?: string[]
-  expectedCompositionIds?: string[]
+  expectedResourceIds?: string[]
+  expectedContentIds?: string[]
   currentImplementationRevision?: string
 }): DeliveryRun {
   if (input.run.phase !== 'IMPLEMENTATION_AUDIT')
@@ -125,11 +125,11 @@ export function reconcileImplementationAudit(input: {
   }
   exact(expected, input.terminal.auditedTaskIds, 'task')
   exact(input.expectedChecklistIds, input.terminal.checklistIds, 'checklist')
-  exact(input.expectedImportIds, input.terminal.importIds, 'import')
+  exact(input.expectedResourceIds, input.terminal.resourceIds, 'resource')
   exact(
-    input.expectedCompositionIds,
-    input.terminal.compositionIds,
-    'composition',
+    input.expectedContentIds,
+    input.terminal.contentIds,
+    'content',
   )
   const knownTaskIds = new Set(expected)
   if (
@@ -166,8 +166,8 @@ export async function startAcceptance(input: {
   workspacePath: string
   dispatcher: Dispatcher
   expectedChecklistIds: string[]
-  expectedImportIds: string[]
-  expectedCompositionIds: string[]
+  expectedResourceIds: string[]
+  expectedContentIds: string[]
   currentImplementationRevision?: string
 }): Promise<unknown> {
   if (input.run.phase !== 'ACCEPTANCE')
@@ -195,13 +195,13 @@ export async function startAcceptance(input: {
         checklistIds: task.checklistIds,
       })),
       checklistIds: input.expectedChecklistIds,
-      importIds: input.expectedImportIds,
-      compositionIds: input.expectedCompositionIds,
+      resourceIds: input.expectedResourceIds,
+      contentIds: input.expectedContentIds,
     },
   })
 }
 
-export function reconcileAcceptance(input: {
+export async function reconcileAcceptance(input: {
   run: DeliveryRun
   workspacePath?: string
   terminal: Extract<
@@ -209,10 +209,10 @@ export function reconcileAcceptance(input: {
     { workerType: 'acceptance-validator' }
   >
   expectedChecklistIds?: string[]
-  expectedImportIds?: string[]
-  expectedCompositionIds?: string[]
+  expectedResourceIds?: string[]
+  expectedContentIds?: string[]
   currentImplementationRevision?: string
-}): DeliveryRun {
+}): Promise<DeliveryRun> {
   if (input.run.phase !== 'ACCEPTANCE')
     throw new Error('acceptance is not the active phase')
   if (input.terminal.revision !== currentImplementationRevision(input.run))
@@ -247,11 +247,11 @@ export function reconcileAcceptance(input: {
     input.terminal.validatedTaskIds,
     'task',
   )
-  exact(input.expectedImportIds, input.terminal.importIds, 'import')
+  exact(input.expectedResourceIds, input.terminal.resourceIds, 'resource')
   exact(
-    input.expectedCompositionIds,
-    input.terminal.compositionIds,
-    'composition',
+    input.expectedContentIds,
+    input.terminal.contentIds,
+    'content',
   )
   const knownTaskIds = new Set(input.run.tasks.map(task => task.id))
   if (

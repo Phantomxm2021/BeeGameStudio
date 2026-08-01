@@ -5,7 +5,7 @@ import { buildExplorerTree } from './resourcePackExplorerTree'
 const pack: ResourcePackSummary = {
   id: 'pack-1',
   name: 'Fantasy Pack',
-  style: 'Stylized',
+  styles: ['Stylized'],
   dimension: '3D',
   primaryCategory: '3d-assets',
   categories: [],

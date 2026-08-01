@@ -3,7 +3,8 @@ import { resolveResourceElementMetadata } from '../metadata-policy'
 import type { ResourceElement, ResourceFolder, ResourcePack } from '../types'
 
 const pack: ResourcePack = {
-  id: 'pack', name: 'Pack', style: 'Stylized', gameTypes: ['action'], dimension: '3D',
+  id: 'pack', name: 'Pack',
+  styles: ['Stylized'], gameTypes: ['action'], dimension: '3D',
   primaryCategory: 'mixed', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published',
   elementDefaults: { usageTags: ['prop'] },
 }

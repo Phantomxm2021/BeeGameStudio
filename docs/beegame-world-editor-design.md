@@ -13,9 +13,9 @@ grids, boards, graph-shaped progression spaces, and screen-based worlds using
 one coherent interaction model. It does not require a genre name to choose a
 tool and must not hard-code a game, project, Pack, engine, or runtime.
 
-This design complements the resource composition contract:
+This design uses the resource and content contract:
 
-- [Logical asset and composition contract](beegame-resource-composition-contract.md)
+- [Resource and content contract](beegame-resource-content-contract.md)
 - [Resource Pack workspace design](superpowers/specs/2026-07-10-resource-pack-workspace-design.md)
 
 ## Product outcome
@@ -26,8 +26,8 @@ After a project exists, a user can:
 2. Inspect the hierarchy, layers, objects, rules, and resource provenance that
    make up the current world.
 3. Place, edit, group, lock, remove, and duplicate world content directly.
-4. Bring curated Pack elements into the world, either as direct logical assets
-   or parts of a project-authored composition.
+4. Bring curated Pack elements into the world as project resources referenced
+   by JSON definitions and YAML scenes.
 5. Ask Claude Code to create or revise a bounded part of the world, inspect the
    proposed change, and accept or reject it.
 6. Preserve those edits across preview, build, deployment, project updates,
@@ -98,7 +98,7 @@ A Pack records curation, provenance, license, visual evidence, and version. A
 world can use several Packs when its author documents a coherent art direction.
 BeeGame must never automatically mix Packs or score one element as the required
 answer. Claude Code and the user may deliberately compose elements from several
-compatible Packs, while the world records why that composition is coherent.
+compatible Packs, while the world records why that visual combination is coherent.
 
 A logical resource root remains atomic for selection and import. Embedded mesh,
 skin, skeleton, animation, material, atlas region, tile, or scene node is an
@@ -107,7 +107,7 @@ closures continue to be copied exactly as defined in the resource contract.
 
 ### Human intent wins over automation
 
-The user may lock a world, layer, object, property, or composition. A locked
+The user may lock a world, layer, object, property, or template. A locked
 part is visible to Claude Code as a constraint. An Agent must not silently
 modify, replace, delete, or normalize it. Agent-originated world changes are
 reviewable changesets, never invisible mutations.
@@ -130,7 +130,7 @@ type WorldDefinition = {
   dimension?: '2d' | '3d' | 'mixed'
   layers: WorldLayer[]
   objects: WorldObject[]
-  compositions: WorldComposition[]
+  templates: WorldTemplate[]
   locks: WorldLock[]
   native: NativeWorldRecipeReference[]
 }
@@ -156,18 +156,15 @@ not infer a role from a filename or a label.
 ### Objects and reusable definitions
 
 `WorldObject` is an instance with stable identity, parent relationship, layer,
-visible bounds, editable properties, and optional source composition. A
-reusable `WorldComposition` is the engine-neutral equivalent of a prefab,
-blueprint, template, or reusable level module: it may contain several imported
-logical roots and project-authored logic.
+visible bounds, editable properties, and resource or template references.
+Reusable templates are ordinary JSON definitions; scene hierarchy and placement
+are ordinary YAML. Neither receives a second asset identity or an
+engine-specific meaning.
 
-An object references a composition by stable id, not a loose file path. The
-composition carries exact Pack/element/version provenance through the project
-import inventory. Its target-native recipe records how the project realizes it.
-
-This lets one imported root be reused by many world objects without copying it
-again, and lets one composition combine several roots without claiming that the
-library itself authored a scene.
+An object references stable resource and template ids, not inferred file paths.
+Resource provenance remains in the project Manifest, while scene YAML records
+placement and hierarchy. This lets one imported resource be reused by many
+objects without copying it again.
 
 ### Topology-specific data
 
@@ -189,7 +186,7 @@ Locks are declarative constraints:
 
 ```ts
 type WorldLock = {
-  target: { kind: 'world' | 'layer' | 'object' | 'property' | 'composition'; id: string }
+  target: { kind: 'world' | 'layer' | 'object' | 'property' | 'template'; id: string }
   mode: 'preserve' | 'require-review'
   createdBy: 'user' | 'project'
   reason?: string
@@ -231,15 +228,15 @@ Project header
    ├─ Scene outline          selected world, layers and object hierarchy
    ├─ Primary canvas         spatial, grid, graph or flow surface
    ├─ Context inspector      only when an item is selected
-   └─ Composition shelf      current Pack/available project imports/change proposals
+   └─ Resource shelf         current Pack/available project resources/change proposals
 
 Existing right project panel
 └─ Collaboration, deliverables, resource evidence and review state
 ```
 
 The primary canvas owns the largest area. The scene outline and inspector are
-collapsible. The composition shelf is contextual and compact: it does not
-become a second full asset browser. It shows project imports and Pack elements
+collapsible. The resource shelf is contextual and compact: it does not
+become a second full asset browser. It shows project resources and Pack elements
 the user intentionally opened, plus their provenance and compatibility facts.
 
 ### Spatial canvas
@@ -270,7 +267,7 @@ or a visual-scripting engine.
 
 The Inspector is selection-driven and uses progressive disclosure:
 
-1. identity, layer, source composition, Pack provenance, and lock state;
+1. identity, layer, resource/template references, Pack provenance, and lock state;
 2. topology-appropriate layout data;
 3. target-supported project properties;
 4. read-only runtime and validation evidence.
@@ -283,13 +280,13 @@ requires the project-native recipe and runtime evidence.
 
 Agent calls from the editor are bounded by a user-selected scope such as the
 current selection, layer, or world. A request describes intent, constraints,
-available imported resources, Pack evidence, and locks. Claude Code chooses
+available project resources, Pack evidence, and locks. Claude Code chooses
 its own planning and native implementation strategy.
 
 Before applying a proposal, the editor shows:
 
 - affected world objects and layers;
-- imports or compositions to add, reuse, or remove;
+- resources or templates to add, reuse, or remove;
 - target-native files to be changed;
 - lock conflicts and unresolved dependencies;
 - preview and validation actions required afterwards.
@@ -306,13 +303,13 @@ World authoring must use the existing Resource Library as a fact source:
 2. Claude Code selects logical roots deliberately and calls exact import.
 3. The import service copies the root plus dependency closure, pins provenance,
    and returns project inventory.
-4. A world composition references those imports and has a project-native recipe.
-5. A target-native adapter realizes the composition in the world.
+4. JSON templates and YAML scenes reference those project resources.
+5. A target-native adapter realizes the content descriptions in the world.
 6. Preview and native validation establish that the runtime loaded and used it.
 
 This works for complete authored assets and construction kits. A world may be
 assembled from several selected elements, but that assembly belongs to the
-project's composition recipe, not to an automatic slot matcher.
+project's content files, not to an automatic slot matcher.
 
 The editor can surface catalog facts such as dimensions, bounds, embedded
 components, dependency readiness, license, style evidence, Pack version, and
@@ -332,7 +329,7 @@ names, node names, or arbitrary textual keywords.
 ### Claude Code responsibilities
 
 - read or update approved project documents before substantive implementation;
-- choose art direction and compositions using resource evidence;
+- choose art direction, resources, and content structure using resource evidence;
 - author or update project-native world files, source code, tests, and docs;
 - use installed skills and native tools as appropriate;
 - run or request target-native preview, build, test, and acceptance;
@@ -376,7 +373,7 @@ Existing projects gain a world document through explicit discovery and review:
 
 - Define and validate the portable world document, changeset, lock, and native
   recipe reference schemas.
-- Add revision/provenance links to project imports and compositions.
+- Add revision/provenance links to project resources and content files.
 - Implement read-only world outline and evidence panels for existing projects.
 - Add target adapter capability declarations; unsupported regions remain
   inspectable rather than being approximated.
@@ -394,9 +391,9 @@ Existing projects gain a world document through explicit discovery and review:
 - Persist direct user edits as commands and generate target-native operations
   only through a target adapter.
 
-### Phase 2 — Compositions and Agent proposals
+### Phase 2 — Reusable content and Agent proposals
 
-- Add reusable compositions, instances, Pack provenance, dependency readiness,
+- Add reusable JSON templates, YAML instances, Pack provenance, dependency readiness,
   and import reuse.
 - Let Claude Code consume a bounded world request and return a reviewable
   changeset plus its native-file changes.
@@ -408,9 +405,9 @@ Existing projects gain a world document through explicit discovery and review:
 - Add world-aware static checks: dangling references, deleted imports, invalid
   parent relationships, invalid topology data, lock violations, and dependency
   closure failures.
-- Require target-native preview/runtime evidence before representing a world
-  composition as integrated.
-- Support Pack version-impact inspection, composition migration proposals, and
+- Require target-native preview/runtime evidence before representing world
+  content as integrated.
+- Support Pack version-impact inspection, resource-reference update proposals, and
   archival warnings without silent updates.
 - Add multi-user edit conflict handling based on revision and command history.
 
@@ -425,7 +422,7 @@ The feature is ready for broad use only when all of the following are true:
    review.
 4. A project can reuse one exact imported logical root in several world objects
    without duplicate copying.
-5. A composition carrying several imported roots keeps Pack/version/dependency
+5. Content referencing several imported roots preserves Pack/version/dependency
    provenance and target-native realization evidence.
 6. Unsupported target-native content remains visible and safe; it is never
    silently converted or deleted.

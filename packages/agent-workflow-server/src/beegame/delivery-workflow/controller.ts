@@ -6,7 +6,6 @@ import {
   type AtomicTaskContractFacts,
 } from './atomic-task-planner'
 import { auditAssetContract } from '../asset-contract-audit'
-import { readBeeGameAssetManifest } from '../asset-contracts'
 import { createDeliveryDispatcher } from './dispatch'
 import {
   buildChangeImpactDispatch,
@@ -14,11 +13,16 @@ import {
   createChangeRequest,
 } from './change-request'
 import {
+  beginResourceDocumentReviewClosure,
+  buildDocumentReviewDispatch,
   completeDocumentDraft,
+  createInitialDocumentReviewCycle,
+  incrementDocumentReviewTransportAttempt,
   reconcileDocumentReview,
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
+import { assertReviewAuthority } from './document-review-input'
 import {
   auditResourcesForPreparation,
   completeResourcePreparation,
@@ -30,7 +34,6 @@ import {
   implementationCompletionIssue,
   startNextImplementationTask,
 } from './implementation-stage'
-import { applyImplementationResourceBindings } from './resource-integration'
 import {
   computeDocumentRevision,
   computeResourceRevision,
@@ -152,8 +155,8 @@ export function createDeliveryWorkflowController(input: {
 
   async function contractFactsFor(run: DeliveryRun): Promise<
     AtomicTaskContractFacts & {
-      importIds: string[]
-      compositionIds: string[]
+      resourceIds: string[]
+      contentIds: string[]
       resourceReadiness: ResourceDeliveryReadiness
     }
   > {
@@ -250,7 +253,15 @@ export function createDeliveryWorkflowController(input: {
         evidence:
           result.classification === 'documents_required'
             ? {}
-            : { documentReview: next.evidence.documentReview },
+            : {
+                resourcePreparation: next.evidence.resourcePreparation,
+              },
+        documentReviewState:
+          result.classification === 'documents_required'
+            ? {
+                repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+              }
+            : next.documentReviewState,
         checklistRemediation:
           result.classification === 'documents_required'
             ? undefined
@@ -388,16 +399,18 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
         audit: resourceAudit,
+        baselineResourceRevision:
+          typeof request?.contract.resourceBaselineRevision === 'string'
+            ? request.contract.resourceBaselineRevision
+            : undefined,
         ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       next = await persist(
         next,
-        result.attemptMode === 'fresh' &&
-          next.phase === 'RESOURCE_PREPARATION' &&
-          next.status === 'running'
-          ? 'resource.manifest.planned'
+        next.phase === 'RESOURCE_PREPARATION' && next.status === 'running'
+          ? 'resource.preparation.progressed'
           : next.phase === 'DOCUMENT_REVIEW'
-            ? 'phase.entered'
+            ? 'resource.preparation.ready'
             : 'resource.preparation.needs_action',
       )
       await resumeUnlocked(next)
@@ -468,26 +481,12 @@ export function createDeliveryWorkflowController(input: {
       }
       const activeTask = next.tasks.find(task => task.id === record.taskId)
       let completionFailureReason: string | undefined
-      let rollbackResourceBindings: (() => Promise<void>) | undefined
       if (result.status === 'completed' && activeTask) {
         completionFailureReason = implementationCompletionIssue({
           task: activeTask,
           workspacePath: input.workspacePath,
           terminal: result,
         })
-        if (!completionFailureReason) {
-          try {
-            rollbackResourceBindings =
-              await applyImplementationResourceBindings({
-                workspacePath: input.workspacePath,
-                task: activeTask,
-                terminal: result,
-              })
-          } catch (error) {
-            completionFailureReason =
-              error instanceof Error ? error.message : String(error)
-          }
-        }
       }
       const currentRevision = await computeWorkspaceRevision(
         input.workspacePath,
@@ -499,23 +498,17 @@ export function createDeliveryWorkflowController(input: {
         currentRevision,
         ...(completionFailureReason ? { completionFailureReason } : {}),
       })
-      if (next.status === 'failed') await rollbackResourceBindings?.()
-      try {
-        await persist(
-          next,
-          next.status === 'failed' ? 'task.failed' : 'task.completed',
-        )
-      } catch (error) {
-        await rollbackResourceBindings?.()
-        throw error
-      }
+      await persist(
+        next,
+        next.status === 'failed' ? 'task.failed' : 'task.completed',
+      )
       if (next.status !== 'running') return
       if (next.tasks.every(task => task.status === 'completed')) {
         const auditFacts = await contractFactsFor(next)
-        if (!auditFacts.resourceReadiness.integrationReady) {
+        if (!auditFacts.resourceReadiness.ready) {
           await persist(
-            resourceIntegrationBlocked(next, auditFacts.resourceReadiness),
-            'resource.integration.needs_action',
+            resourceDeliveryBlocked(next, auditFacts.resourceReadiness),
+            'resource.delivery.needs_action',
           )
           return
         }
@@ -525,8 +518,8 @@ export function createDeliveryWorkflowController(input: {
           workspacePath: input.workspacePath,
           dispatcher,
           expectedChecklistIds: auditFacts.checklistIds,
-          expectedImportIds: auditFacts.importIds,
-          expectedCompositionIds: auditFacts.compositionIds,
+          expectedResourceIds: auditFacts.resourceIds,
+          expectedContentIds: auditFacts.contentIds,
           resourceReadiness: auditFacts.resourceReadiness,
         })
       } else {
@@ -565,8 +558,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
         expectedChecklistIds: auditFacts.checklistIds,
-        expectedImportIds: auditFacts.importIds,
-        expectedCompositionIds: auditFacts.compositionIds,
+        expectedResourceIds: auditFacts.resourceIds,
+        expectedContentIds: auditFacts.contentIds,
         currentImplementationRevision: await computeWorkspaceRevision(
           input.workspacePath,
         ),
@@ -611,8 +604,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         dispatcher,
         expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedImportIds: acceptanceFacts.importIds,
-        expectedCompositionIds: acceptanceFacts.compositionIds,
+        expectedResourceIds: acceptanceFacts.resourceIds,
+        expectedContentIds: acceptanceFacts.contentIds,
         currentImplementationRevision:
           next.revision.implementation ?? next.revision.workspace,
       })
@@ -637,13 +630,13 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       const acceptanceFacts = await contractFactsFor(next)
-      next = reconcileAcceptance({
+      next = await reconcileAcceptance({
         run: { ...next, phase: 'ACCEPTANCE' },
         workspacePath: input.workspacePath,
         terminal: result,
         expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedImportIds: acceptanceFacts.importIds,
-        expectedCompositionIds: acceptanceFacts.compositionIds,
+        expectedResourceIds: acceptanceFacts.resourceIds,
+        expectedContentIds: acceptanceFacts.contentIds,
         currentImplementationRevision: await computeWorkspaceRevision(
           input.workspacePath,
         ),
@@ -767,7 +760,7 @@ export function createDeliveryWorkflowController(input: {
     }
   }
 
-  function resourceIntegrationBlocked(
+  function resourceDeliveryBlocked(
     run: DeliveryRun,
     readiness: ResourceDeliveryReadiness,
   ): DeliveryRun {
@@ -775,7 +768,7 @@ export function createDeliveryWorkflowController(input: {
       ...run,
       status: 'needs_action',
       activeDispatch: undefined,
-      blockedReason: [...readiness.issues, ...readiness.integrationIssues].join(
+      blockedReason: [...readiness.issues, ...readiness.readinessIssues].join(
         '; ',
       ),
       updatedAt: new Date().toISOString(),
@@ -809,11 +802,11 @@ export function createDeliveryWorkflowController(input: {
   }
 
   function comprehensiveReviewMissing(run: DeliveryRun): boolean {
-    const evidence = run.evidence.documentReview
+    const approval = run.documentReviewState.comprehensiveApproval
     return (
       !run.revision.resource ||
-      evidence?.status !== 'ready' ||
-      evidence.revision !== run.revision.resource
+      !approval ||
+      approval.revision !== run.revision.resource
     )
   }
 
@@ -834,8 +827,11 @@ export function createDeliveryWorkflowController(input: {
         implementation: undefined,
       },
       tasks: [],
-      evidence: {
-        documentReview: run.evidence.documentReview,
+      evidence: {},
+      documentReviewState: {
+        ...run.documentReviewState,
+        comprehensiveApproval: undefined,
+        activeCycle: undefined,
       },
     }
     await persist(invalidated, 'resource.revision.invalidated')
@@ -874,6 +870,9 @@ export function createDeliveryWorkflowController(input: {
       },
       tasks: [],
       evidence: {},
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
       checklistRemediation: undefined,
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -968,28 +967,133 @@ export function createDeliveryWorkflowController(input: {
           dispatcher,
         })
       } else {
+        if (run.documentStep !== 'FOUNDATION_REVIEW') {
+          const resourceEvidence = run.evidence.resourcePreparation
+          if (
+            !run.revision.resource ||
+            resourceEvidence?.status !== 'passed' ||
+            resourceEvidence.revision !== run.revision.resource
+          ) {
+            const readiness = auditResourceDeliveryReadiness({
+              workspacePath: input.workspacePath,
+              confirmedPolicy: confirmedResourceLibraryUsage(
+                run.confirmedBriefContext,
+              ),
+              ...(run.resourceEvidence
+                ? { resourceEvidence: run.resourceEvidence }
+                : {}),
+            })
+            const activeCycle = run.documentReviewState.activeCycle
+            const preserveResourceClosure = Boolean(
+              activeCycle?.acceptedSemanticResult &&
+                activeCycle.activeTarget === 'resource',
+            )
+            const prerequisitePhase = 'RESOURCE_PREPARATION' as const
+            const restored = await persist(
+              {
+                ...run,
+                phase: prerequisitePhase,
+                documentStep: undefined,
+                activeDispatch: undefined,
+                status: 'running',
+                blockedReason: undefined,
+                documentReviewState: {
+                  ...run.documentReviewState,
+                  comprehensiveApproval: undefined,
+                  activeCycle: preserveResourceClosure
+                    ? activeCycle
+                    : undefined,
+                },
+              },
+              'document.review.prerequisite.restored',
+            )
+            await resumeUnlocked(restored)
+            return
+          }
+        }
+        try {
+          assertReviewAuthority({
+            confirmedBriefContext: run.confirmedBriefContext,
+            confirmedBriefDigest: run.confirmedBriefDigest,
+          })
+        } catch (error) {
+          await persist(
+            {
+              ...run,
+              status: 'needs_action',
+              blockedReason:
+                error instanceof Error
+                  ? error.message
+                  : 'document review authority is invalid',
+            },
+            'document.review.authority.invalid',
+          )
+          return
+        }
         const reviewScope =
           run.documentStep === 'FOUNDATION_REVIEW' ? 'foundation' : 'complete'
-        await dispatcher.dispatch({
-          runId: run.runId,
-          ownerId: run.ownerId,
-          projectId: run.projectId,
-          workspacePath: input.workspacePath,
-          workerType: 'document-reviewer',
-          phase: run.phase,
-          revision:
-            reviewScope === 'complete'
-              ? (run.revision.resource ?? run.revision.document)
-              : run.revision.document,
-          allowedPaths: [],
-          contract: {
-            canonicalDocuments: true,
-            reviewScope,
-            ...(reviewScope === 'foundation' && run.documentRemediation
-              ? { priorRemediation: run.documentRemediation }
-              : {}),
-          },
-        })
+        const reviewRevision =
+          reviewScope === 'complete'
+            ? await computeResourceRevision(
+                input.workspacePath,
+                run.revision.document,
+              )
+            : await computeDocumentRevision(
+                input.workspacePath,
+                run.confirmedBriefDigest,
+              )
+        let reviewRun = run
+        if (!reviewRun.documentReviewState.activeCycle) {
+          reviewRun = await createInitialDocumentReviewCycle({
+            run: reviewRun,
+            workspacePath: input.workspacePath,
+            scope: reviewScope,
+            revision: reviewRevision,
+          })
+          reviewRun = await persist(reviewRun, 'document.review.cycle.created')
+        }
+        const cycle = reviewRun.documentReviewState.activeCycle
+        if (!cycle || cycle.acceptedSemanticResult) {
+          const blocked = {
+            ...reviewRun,
+            status: 'needs_action' as const,
+            blockedReason:
+              'document review cycle has already accepted its unique semantic result',
+          }
+          await persist(blocked, 'document.review.redispatch.rejected')
+          return
+        }
+        if (cycle.sourceRevision !== reviewRevision) {
+          const blocked = {
+            ...reviewRun,
+            status: 'needs_action' as const,
+            blockedReason:
+              'canonical artifacts changed after the document review cycle was frozen',
+          }
+          await persist(blocked, 'document.review.revision.changed')
+          return
+        }
+        if (cycle.transportAttempts >= 2) {
+          const blocked = {
+            ...reviewRun,
+            status: 'needs_action' as const,
+            blockedReason:
+              'document reviewer transport attempts are exhausted for this frozen revision',
+          }
+          await persist(blocked, 'document.review.transport.exhausted')
+          return
+        }
+        reviewRun = incrementDocumentReviewTransportAttempt(reviewRun)
+        reviewRun = await persist(
+          reviewRun,
+          'document.review.transport.started',
+        )
+        await dispatcher.dispatch(
+          await buildDocumentReviewDispatch({
+            run: reviewRun,
+            workspacePath: input.workspacePath,
+          }),
+        )
       }
       return
     }
@@ -1058,6 +1162,7 @@ export function createDeliveryWorkflowController(input: {
         await resumeUnlocked(awaitingReview)
         return
       }
+      const planningFacts = await contractFactsFor(run)
       await dispatcher.dispatch({
         runId: run.runId,
         ownerId: run.ownerId,
@@ -1068,13 +1173,12 @@ export function createDeliveryWorkflowController(input: {
         revision: run.revision.document,
         allowedPaths: [],
         contract: {
-          ...(await contractFactsFor(run)),
+          checklistIds: planningFacts.checklistIds,
+          resourceIds: planningFacts.resourceIds,
+          contentIds: planningFacts.contentIds,
           planningDocuments: await readAtomicTaskPlanningDocuments(
             input.workspacePath,
           ),
-          ...(run.documentAdvisories?.length
-            ? { documentAdvisories: run.documentAdvisories }
-            : {}),
           ...(run.changeRequest ? { changeRequest: run.changeRequest } : {}),
         },
       })
@@ -1131,10 +1235,10 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       const auditFacts = await contractFactsFor(run)
-      if (!auditFacts.resourceReadiness.integrationReady) {
+      if (!auditFacts.resourceReadiness.ready) {
         await persist(
-          resourceIntegrationBlocked(run, auditFacts.resourceReadiness),
-          'resource.integration.needs_action',
+          resourceDeliveryBlocked(run, auditFacts.resourceReadiness),
+          'resource.delivery.needs_action',
         )
         return
       }
@@ -1143,8 +1247,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         dispatcher,
         expectedChecklistIds: auditFacts.checklistIds,
-        expectedImportIds: auditFacts.importIds,
-        expectedCompositionIds: auditFacts.compositionIds,
+        expectedResourceIds: auditFacts.resourceIds,
+        expectedContentIds: auditFacts.contentIds,
         resourceReadiness: auditFacts.resourceReadiness,
       })
       return
@@ -1170,8 +1274,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         dispatcher,
         expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedImportIds: acceptanceFacts.importIds,
-        expectedCompositionIds: acceptanceFacts.compositionIds,
+        expectedResourceIds: acceptanceFacts.resourceIds,
+        expectedContentIds: acceptanceFacts.contentIds,
       })
     }
   }
@@ -1259,51 +1363,21 @@ async function plannerContractFacts(
   resourceEvidence?: NativeResourceLibraryEvidenceState,
 ): Promise<
   AtomicTaskContractFacts & {
-    importIds: string[]
-    compositionIds: string[]
+    resourceIds: string[]
+    contentIds: string[]
     resourceReadiness: ResourceDeliveryReadiness
   }
 > {
   const assetContract = auditAssetContract(workspacePath)
-  const assetManifest = await readBeeGameAssetManifest(workspacePath)
   const resourceReadiness = auditResourceDeliveryReadiness({
     workspacePath,
     confirmedPolicy: confirmedResourceLibraryUsage(confirmedBriefContext),
     ...(resourceEvidence ? { resourceEvidence } : {}),
   })
-  const runtimeAssetRoot = assetManifest.project_target?.runtime_asset_root
-  if (!runtimeAssetRoot)
-    throw new Error(
-      'atomic task planning requires one canonical runtime asset root',
-    )
-  const resourceBindings = assetManifest.requirements.map(requirement => {
-    if (!requirement.source_decision)
-      throw new Error(
-        `atomic task planning requires one final source decision for ${requirement.id}`,
-      )
-    return {
-      requirementId: requirement.id,
-      ...(requirement.name ? { name: requirement.name } : {}),
-      ...(requirement.purpose ? { purpose: requirement.purpose } : {}),
-      sourceType: requirement.source_decision.type,
-      importIds: requirement.satisfied_by?.import_ids ?? [],
-      compositionIds: requirement.satisfied_by?.composition_ids ?? [],
-      projectReferences: requirement.satisfied_by?.project_references ?? [],
-    }
-  })
   return {
-    resourceRequirementIds: assetContract.requirements.map(
-      requirement => requirement.id,
-    ),
     checklistIds: readAcceptanceChecklistIds(workspacePath),
-    importIds: (assetContract.imports ?? []).map(
-      resourceImport => resourceImport.id,
-    ),
-    compositionIds: assetContract.compositions.map(
-      composition => composition.id,
-    ),
-    runtimeAssetRoot,
-    resourceBindings,
+    resourceIds: assetContract.resources.map(resource => resource.id),
+    contentIds: assetContract.content.files.map(file => file.id),
     resourceReadiness,
   }
 }

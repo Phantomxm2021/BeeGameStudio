@@ -68,7 +68,7 @@ export function createBeeGameResourceServerApp(
 ) {
   const resolveUser = options.currentUserResolver ??
     createConfiguredResourceUserResolver() ??
-    (isLocalResourceFallbackAllowed() ? createLocalResourceUserResolver() : (() => undefined))
+    (isLocalResourceFallbackAllowed() ? createLocalResourceUserResolver() : () => undefined)
   const audit = async (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => {
     try { await options.recordAuditEvent?.(event) } catch (error) { console.warn('Resource audit write failed:', error) }
   }
@@ -83,13 +83,13 @@ export function createBeeGameResourceServerApp(
         (request.method === 'POST' && [
           '/api/resource-catalog/packs',
           '/api/resource-catalog/elements',
-          '/api/resource-imports/resolve',
-        ].includes(pathname)) ||
+            '/api/resource-library/resolve',
+          ].includes(pathname)) ||
         (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
         (request.method === 'POST' && /^\/api\/resource-catalog\/packs\/[^/]+\/elements$/.test(pathname))
       ) &&
         Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
-      const user = options.currentUser ?? await resolveUser(request)
+      const user = options.currentUser ?? (await resolveUser(request))
       if (!serviceSelectionRequest && !user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
       if (!serviceSelectionRequest && !hasResourceAdminPermission(user!)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
@@ -97,7 +97,8 @@ export function createBeeGameResourceServerApp(
       const packPathMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)(?:\/|$)/)
       if (!serviceSelectionRequest && packPathMatch && options.canManagePack) {
         try {
-          if (!await options.canManagePack(user!, decodeURIComponent(packPathMatch[1]))) {
+          if (!(await options.canManagePack(user!, decodeURIComponent(packPathMatch[1])))
+          ) {
             return corsResponse(jsonError(403, 'forbidden', 'You are not allowed to manage this Resource Pack'), options.corsOrigin)
           }
         } catch (error) {
@@ -173,9 +174,12 @@ export function createBeeGameResourceServerApp(
         const summary = catalog?.find(candidate => candidate.packId === packId)
         return corsResponse(Response.json({ pack, folders, summary: summary ?? null }), options.corsOrigin)
       }
-      if (request.method === 'POST' && pathname === '/api/resource-imports/resolve') {
-        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource import URLs are not configured'), options.corsOrigin)
-        const requested = parseIntegrationSelections(await request.json())
+      if (request.method === 'POST' && pathname === '/api/resource-library/resolve'
+        ) {
+        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured',
+                'Resource download URLs are not configured',
+              ), options.corsOrigin)
+        const requested = parseResourceSelections(await request.json())
         const resolved = []
         for (const selection of requested) {
           const pack = await options.repository.getPack(selection.packId)
@@ -190,7 +194,7 @@ export function createBeeGameResourceServerApp(
           if (!candidate) throw new ResourceRequestValidationError(`Resource element ${selection.elementId} has an incomplete dependency closure`)
           resolved.push({
             ...candidate,
-            importId: selection.importId,
+              resourceId: selection.resourceId,
             destinationPath: selection.destinationPath,
             selectionReason: selection.selectionReason,
             sourceUrl: await options.getElementResourceUrl(pack.id, element.id),
@@ -204,14 +208,13 @@ export function createBeeGameResourceServerApp(
       }
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
-          const body = await request.json() as Record<string, unknown>
+          const body = (await request.json()) as Record<string, unknown>
           assertElementDefaults(body.elementDefaults)
           const styles = stringList(body.styles)
           const pack = await options.repository.createPack({
             id: typeof body.id === 'string' && body.id ? body.id : `pack-${crypto.randomUUID()}`,
             name: String(body.name || ''),
-            ...(styles?.length ? { styles } : {}),
-            style: styles?.join(' / ') || String(body.style || ''),
+                styles: styles ?? [],
             gameTypes: Array.isArray(body.gameTypes) ? body.gameTypes.map(String) : [],
             dimension: body.dimension as ResourceDimension,
             primaryCategory: body.primaryCategory as ResourcePack['primaryCategory'],
@@ -241,13 +244,14 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'DELETE' && patchMatch) {
         if (!options.deleteResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource deletion is not configured'), options.corsOrigin)
         const packId = decodeURIComponent(patchMatch[1])
-        if (!await options.deleteResourcePack(packId)) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        if (!(await options.deleteResourcePack(packId)))
+            return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'pack.deleted', packId })
         return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       }
       if (request.method === 'PATCH' && patchMatch) {
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
-        const body = await request.json() as Record<string, unknown>
+        const body = (await request.json()) as Record<string, unknown>
         assertElementDefaults(body.elementDefaults)
         const pack = await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body)
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
@@ -275,7 +279,7 @@ export function createBeeGameResourceServerApp(
       }
       if (processingCollectionMatch && request.method === 'POST') {
         if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
-        const body = await request.json().catch(() => ({})) as { elementIds?: unknown }
+        const body = (await request.json().catch(() => ({}))) as { elementIds?: unknown }
         if (body.elementIds !== undefined && (!Array.isArray(body.elementIds) || body.elementIds.some(id => typeof id !== 'string' || !id.trim()))) {
           return corsResponse(jsonError(400, 'invalid_processing_job', 'elementIds must contain valid resource element ids'), options.corsOrigin)
         }
@@ -317,7 +321,7 @@ export function createBeeGameResourceServerApp(
       }
       if (folderMatch && request.method === 'POST') {
         try {
-          const body = await request.json() as { id?: string; name?: string; parentId?: string; elementDefaults?: unknown }
+          const body = (await request.json()) as { id?: string; name?: string; parentId?: string; elementDefaults?: unknown }
           if (!body.name) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
           assertElementDefaults(body.elementDefaults)
           const packId = decodeURIComponent(folderMatch[1])
@@ -332,7 +336,7 @@ export function createBeeGameResourceServerApp(
       if (folderPatchMatch && request.method === 'PATCH') {
         const packId = decodeURIComponent(folderPatchMatch[1])
         const folderId = decodeURIComponent(folderPatchMatch[2])
-        const body = await request.json() as { name?: unknown; elementDefaults?: unknown }
+        const body = (await request.json()) as { name?: unknown; elementDefaults?: unknown }
         if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
         assertElementDefaults(body.elementDefaults)
         if (body.name === undefined && body.elementDefaults === undefined) return corsResponse(jsonError(400, 'invalid_folder', 'Folder update is empty'), options.corsOrigin)
@@ -387,7 +391,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'POST' && elementMatch) {
         if (!options.addResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element upload is not configured'), options.corsOrigin)
         const packId = decodeURIComponent(elementMatch[1])
-        const element = await options.addResourceElement(packId, request) as { id?: unknown; name?: unknown }
+        const element = (await options.addResourceElement(packId, request)) as { id?: unknown; name?: unknown }
         await audit({ actorId: user!.id, action: 'element.uploaded', packId, ...(typeof element?.id === 'string' ? { elementId: element.id } : {}), ...(typeof element?.name === 'string' ? { metadata: { name: element.name } } : {}) })
         return corsResponse(Response.json({ element }, { status: 201 }), options.corsOrigin)
       }
@@ -407,12 +411,13 @@ export function createBeeGameResourceServerApp(
         if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Element resource URLs are not configured'), options.corsOrigin)
         const packId = decodeURIComponent(elementUrlMatch[1])
         const elementId = decodeURIComponent(elementUrlMatch[2])
-        if (!await options.repository.getElement(packId, elementId)) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        if (!(await options.repository.getElement(packId, elementId)))
+            return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
         return corsResponse(Response.json({ url: await options.getElementResourceUrl(packId, elementId) }), options.corsOrigin)
       }
       if (request.method === 'PATCH' && elementPatchMatch) {
         if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
-        const body = await request.json() as Record<string, unknown>
+        const body = (await request.json()) as Record<string, unknown>
         assertElementUsageTags(body)
         assertElementAssetMetadata(body)
         const packId = decodeURIComponent(elementPatchMatch[1])
@@ -421,7 +426,8 @@ export function createBeeGameResourceServerApp(
         if (!saved) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
         // Return the repository view so inherited Pack/folder metadata is
         // visible immediately after an explicit element update.
-        const element = await options.repository.getElement(packId, elementId) ?? saved
+        const element =
+            (await options.repository.getElement(packId, elementId)) ?? saved
         await audit({ actorId: user!.id, action: 'element.updated', packId, elementId, metadata: { fields: Object.keys(body).sort() } })
         return corsResponse(Response.json({ element }), options.corsOrigin)
       }
@@ -461,20 +467,67 @@ function resourceCatalogRevision(
   const snapshot = {
     packs: [...packs]
       .sort((left, right) => left.id.localeCompare(right.id))
-      .map(canonicalCatalogValue),
+      .map(pack =>
+        canonicalCatalogValue({
+          id: pack.id,
+          name: pack.name,
+          styles: pack.styles,
+          gameTypes: pack.gameTypes,
+          dimension: pack.dimension,
+          primaryCategory: pack.primaryCategory,
+          categories: pack.categories,
+          license: pack.license,
+          version: pack.version,
+          status: pack.status,
+          description: pack.description,
+          tags: pack.tags,
+          source: pack.source,
+          author: pack.author,
+          compatibleEngines: pack.compatibleEngines,
+          elementDefaults: pack.elementDefaults,
+        }),
+      ),
     elements: [...elements]
       .sort(
         (left, right) =>
           left.packId.localeCompare(right.packId) ||
           left.id.localeCompare(right.id),
       )
-      .map(canonicalCatalogValue),
+      .map(element =>
+        canonicalCatalogValue({
+          id: element.id,
+          packId: element.packId,
+          name: element.name,
+          path: element.path,
+          category: element.category,
+          kind: element.kind,
+          preview: element.preview,
+          specs: element.specs,
+          usageTags: element.usageTags,
+          usageTagsMode: element.usageTagsMode,
+          usageTagsSource: element.usageTagsSource,
+          assetKind: element.assetKind,
+          capabilities: element.capabilities,
+          contentProfile: element.contentProfile,
+          relations: element.relations,
+          dependencies: element.dependencies,
+          dependencyBindings: element.dependencyBindings,
+          status: element.status,
+          styleOverride: element.styleOverride,
+          dimensionOverride: element.dimensionOverride,
+        }),
+      ),
   }
   return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
 }
 
 function canonicalCatalogValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalCatalogValue)
+  if (Array.isArray(value))
+    return value
+      .map(canonicalCatalogValue)
+      .sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)),
+      )
   if (!value || typeof value !== 'object') return value
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
@@ -486,7 +539,9 @@ function canonicalCatalogValue(value: unknown): unknown {
 
 function isSupportedCover(file: File): boolean {
   const extension = file.name.split('.').pop()?.toLowerCase()
-  return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp4' || extension === 'webm'
+  return (
+    extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp4' || extension === 'webm'
+  )
 }
 
 async function routeRequest(request: Request, repository: ResourceRepository): Promise<Response> {
@@ -522,7 +577,7 @@ async function routeRequest(request: Request, repository: ResourceRepository): P
 function parseCategory(value: string | null): ResourceCategory | undefined {
   if (!value) return undefined
   return (RESOURCE_CATEGORIES as readonly string[]).includes(value)
-    ? value as ResourceCategory
+    ? (value as ResourceCategory)
     : undefined
 }
 
@@ -570,7 +625,8 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
   }
 }
 
-function parseIntegrationSelections(value: unknown): Array<{ importId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }> {
+function parseResourceSelections(value: unknown): Array<{
+  resourceId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Resource import request must be an object')
   const selections = (value as Record<string, unknown>).selections
   if (!Array.isArray(selections) || selections.length === 0) throw new ResourceRequestValidationError('At least one explicit Resource element selection is required')
@@ -578,7 +634,9 @@ function parseIntegrationSelections(value: unknown): Array<{ importId: string; p
   return selections.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} is invalid`)
     const record = value as Record<string, unknown>
-    const importId = requiredString(record.importId, `Resource import selection ${index + 1} importId`)
+    const resourceId = requiredString(record.resourceId,
+      `Resource selection ${index + 1} resourceId`,
+    )
     const packId = requiredString(record.packId, `Resource import selection ${index + 1} packId`)
     const expectedPackVersion = requiredString(record.expectedPackVersion, `Resource import selection ${index + 1} expectedPackVersion`)
     const elementId = requiredString(record.elementId, `Resource import selection ${index + 1} elementId`)
@@ -587,7 +645,8 @@ function parseIntegrationSelections(value: unknown): Array<{ importId: string; p
       : []
     if (!selectionReason.length) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} selectionReason is required`)
     const destinationPath = typeof record.destinationPath === 'string' && record.destinationPath.trim() ? record.destinationPath.trim() : undefined
-    return { importId, packId, expectedPackVersion, elementId, ...(destinationPath ? { destinationPath } : {}), selectionReason }
+    return {
+      resourceId, packId, expectedPackVersion, elementId, ...(destinationPath ? { destinationPath } : {}), selectionReason }
   })
 }
 
@@ -655,12 +714,14 @@ function assertElementAssetMetadata(body: Record<string, unknown>): void {
     if (!Array.isArray(value) || value.some(item => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return true
       const relation = item as Record<string, unknown>
-      return typeof relation.kind !== 'string' ||
+      return (
+          typeof relation.kind !== 'string' ||
         !(RESOURCE_RELATION_KINDS as readonly string[]).includes(relation.kind) ||
         typeof relation.targetElementId !== 'string' || !relation.targetElementId.trim() ||
         (relation.role !== undefined && (typeof relation.role !== 'string' || !relation.role.trim())) ||
         (relation.required !== undefined && typeof relation.required !== 'boolean')
-    })) {
+        )
+      })) {
       throw new ResourceRequestValidationError('Element relations must contain supported semantic relations')
     }
   }
@@ -673,13 +734,17 @@ function isContentProfileUpdate(value: unknown): boolean {
   if (!Array.isArray(profile.components) || profile.components.some(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return true
     const component = item as Record<string, unknown>
-    return typeof component.id !== 'string' || !component.id.trim() ||
+    return (
+        typeof component.id !== 'string' || !component.id.trim() ||
       typeof component.kind !== 'string' || !(RESOURCE_EMBEDDED_COMPONENT_KINDS as readonly string[]).includes(component.kind)
-  })) return false
+      )
+    })) return false
   if (!profile.inspection || typeof profile.inspection !== 'object' || Array.isArray(profile.inspection)) return false
   const inspection = profile.inspection as Record<string, unknown>
-  return ['complete', 'partial', 'unavailable'].includes(String(inspection.status)) &&
+  return (
+    ['complete', 'partial', 'unavailable'].includes(String(inspection.status)) &&
     ['server', 'client', 'admin'].includes(String(inspection.source))
+  )
 }
 
 function stringList(value: unknown): string[] | undefined {

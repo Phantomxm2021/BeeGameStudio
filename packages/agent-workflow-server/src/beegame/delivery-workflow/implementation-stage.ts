@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { readBeeGameAssetManifest } from '../asset-contracts'
+import { auditAssetContract } from '../asset-contract-audit'
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
 import { resolveWorkspaceRelativePath } from './revision'
@@ -150,22 +151,20 @@ export async function startNextImplementationTask(input: {
     revision: input.revision,
   })
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
-  const requirementIds = new Set(task.resourceRequirementIds)
-  const resourceBindings = manifest.requirements
-    .filter(requirement => requirementIds.has(requirement.id))
-    .map(requirement => {
-      if (!requirement.source_decision)
-        throw new Error(
-          `implementation requires one final source decision for ${requirement.id}`,
-        )
-      return {
-        requirementId: requirement.id,
-        sourceType: requirement.source_decision.type,
-        importIds: requirement.satisfied_by?.import_ids ?? [],
-        compositionIds: requirement.satisfied_by?.composition_ids ?? [],
-        projectReferences: requirement.satisfied_by?.project_references ?? [],
-      }
-    })
+  const contract = auditAssetContract(input.workspacePath)
+  const resourcesById = new Map(manifest.resources.map(resource => [resource.id, resource]))
+  const contentById = new Map(contract.content.files.map(file => [file.id, file]))
+  const resources = task.resourceIds.map(id => {
+    const resource = resourcesById.get(id)
+    if (!resource || resource.status !== 'verified')
+      throw new Error(`implementation task references unavailable resource ${id}`)
+    return { id, rootPath: resource.root_path, filePaths: resource.file_paths }
+  })
+  const content = task.contentIds.map(id => {
+    const file = contentById.get(id)
+    if (!file) throw new Error(`implementation task references unknown content ${id}`)
+    return file
+  })
   const request: WorkerDispatchRequest = {
     runId: started.runId,
     ownerId: started.ownerId,
@@ -179,8 +178,8 @@ export async function startNextImplementationTask(input: {
     contract: {
       task,
       currentRevision: input.revision,
-      runtimeAssetRoot: manifest.project_target?.runtime_asset_root,
-      resourceBindings,
+      resources,
+      content,
     },
   }
   await input.beforeDispatch?.(started)

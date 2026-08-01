@@ -35,6 +35,20 @@ export function createProcessIsolatedQueryEngineRunner(): BeeGameSessionRunner {
   }
 }
 
+export function createQueryEngineTurnSubmitMessage(
+  turnId: string,
+  input: BeeGameSessionSubmitInput,
+): Extract<QueryEngineParentMessage, { type: 'turn.submit' }> {
+  return {
+    type: 'turn.submit',
+    turnId,
+    prompt: input.prompt,
+    ...(input.confirmedBriefContext
+      ? { confirmedBriefContext: input.confirmedBriefContext }
+      : {}),
+  }
+}
+
 class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
   private activeTurn: {
     id: string
@@ -117,11 +131,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
         finalize()
         originalReject(error)
       }
-      this.send({
-        type: 'turn.submit',
-        turnId,
-        prompt: input.prompt,
-      })
+      this.send(createQueryEngineTurnSubmitMessage(turnId, input))
     })
   }
 

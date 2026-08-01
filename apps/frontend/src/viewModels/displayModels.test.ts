@@ -35,6 +35,9 @@ describe('displayModels', () => {
         runId: 'run-1',
         status: 'running',
         phase: 'IMPLEMENTATION',
+        reviewMode: 'closure',
+        reviewTarget: 'resource',
+        reviewAccepted: true,
         startedAt: '2026-07-30T10:00:00.000Z',
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },
@@ -52,6 +55,9 @@ describe('displayModels', () => {
       workflow: {
         runId: 'run-1',
         status: 'running',
+        reviewMode: 'closure',
+        reviewTarget: 'resource',
+        reviewAccepted: true,
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },
     })

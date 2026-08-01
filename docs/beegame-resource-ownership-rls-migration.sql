@@ -2,7 +2,7 @@
 -- beegame-resource-governance-migration.sql.
 --
 -- Service-role writes bypass RLS; this policy protects direct authenticated
--- access and keeps a Pack's rows and Storage prefix under the same owner.
+-- access to a Pack's Supabase metadata. Resource bytes are stored only in R2.
 
 create or replace function public.beegame_can_manage_resource_pack(target_pack_id text)
 returns boolean
@@ -55,11 +55,3 @@ create policy "resource dependency owner access" on public.beegame_resource_depe
 drop policy if exists "beegame resource pack platform read" on storage.objects;
 drop policy if exists "beegame resource pack platform write" on storage.objects;
 drop policy if exists "beegame resource pack owner access" on storage.objects;
-create policy "beegame resource pack owner access" on storage.objects
-  for all using (
-    bucket_id = 'beegame-resource-packs'
-    and public.beegame_can_manage_resource_pack((storage.foldername(name))[1])
-  ) with check (
-    bucket_id = 'beegame-resource-packs'
-    and public.beegame_can_manage_resource_pack((storage.foldername(name))[1])
-  );

@@ -100,7 +100,7 @@ export function RightSidebar({
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
-    const [uploadingAssetRequirementId, setUploadingAssetRequirementId] = useState<string | null>(null);
+    const [isUploadingProjectResource, setIsUploadingProjectResource] = useState(false);
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
@@ -165,16 +165,15 @@ export function RightSidebar({
 
     useEffect(() => {
         setAssetManifest(null);
-        setUploadingAssetRequirementId(null);
+    setIsUploadingProjectResource(false);
         setIsAssetsLoading(false);
     }, [projectId]);
 
     // Derived Data
     const beeGamePermissionReview = useMemo(() =>
-        pendingPermissions.find((permission: PermissionDisplayModel) => (
-            isBeeGamePermission(permission) &&
+        pendingPermissions.find((permission: PermissionDisplayModel) => isBeeGamePermission(permission) &&
             Boolean(permission?.gate_id)
-        )),
+        ),
     [pendingPermissions]);
 
     // Handlers
@@ -254,14 +253,15 @@ export function RightSidebar({
         }
     };
 
-    const handleUploadAsset = async (requirementId: string, file: File) => {
+    const handleUploadAsset = async (file: File) => {
         if (!canMutateAssets) return;
-        setUploadingAssetRequirementId(requirementId);
+    setIsUploadingProjectResource(true);
         try {
-            const result = await api.uploadProjectAsset(projectId, requirementId, file);
+            const resourceId = `user-${crypto.randomUUID()}`;
+      const result = await api.uploadProjectAsset(projectId, resourceId, file);
             setAssetManifest(result.manifest);
         } finally {
-            setUploadingAssetRequirementId(null);
+      setIsUploadingProjectResource(false);
         }
     };
 
@@ -297,19 +297,34 @@ export function RightSidebar({
 
     useEffect(() => {
         if (activeTab === 'assets') {
+            let refreshTimer: number | undefined;
+            let cancelled = false;
             const fetchAssets = async () => {
                 try {
                     setIsAssetsLoading(current => current || !assetManifest);
                     setAssetManifest(await api.getProjectAssets(projectId));
                 } catch (err) {
-                    console.error('Failed to load project assets:', err);
+                    if (
+                        !(err instanceof Error) ||
+                        (err as Error & { code?: string }).code !== 'invalid_asset_manifest'
+                    ) {
+                        console.error('Failed to load project assets:', err);
+                    } else {
+                        setAssetManifest(null);
+                        return;
+                    }
                 } finally {
                     setIsAssetsLoading(false);
                 }
+                if (!cancelled) {
+                    refreshTimer = window.setTimeout(() => void fetchAssets(), 5000);
+                }
             };
-            fetchAssets();
-            const interval = setInterval(fetchAssets, 5000);
-            return () => clearInterval(interval);
+            void fetchAssets();
+            return () => {
+                cancelled = true;
+                if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+            };
         }
     }, [activeTab, projectId]);
 
@@ -349,9 +364,7 @@ export function RightSidebar({
                                     {tab === 'assets' && assetManifest?.requirements.length ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.requirements.length}</span>
                                     ) : null}
-                                    {activeTab === tab && (
-                                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300" />
-                                    )}
+                                    {activeTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300" />}
                                 </button>
                             ))}
                         </div>
@@ -417,7 +430,7 @@ export function RightSidebar({
                             <AssetsPanel
                                 manifest={assetManifest}
                                 isLoading={isAssetsLoading}
-                                isUploadingRequirementId={uploadingAssetRequirementId}
+                isUploadingResource={isUploadingProjectResource}
                                 onUpload={canMutateAssets ? handleUploadAsset : undefined}
                                 acceptance={projectStatus?.acceptance}
                                 lang={lang}

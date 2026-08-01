@@ -8,7 +8,8 @@ import {
 import { createBeeGameResourceServerApp } from '../app'
 
 const pack: ResourcePack = {
-  id: 'modular-kit', name: 'Modular Kit', style: 'Stylized', gameTypes: ['Action'],
+  id: 'modular-kit', name: 'Modular Kit',
+  styles: ['Stylized'], gameTypes: ['Action'],
   dimension: '3D' as const, primaryCategory: '3d-assets', categories: ['models'],
   license: 'internal', version: '1.0.0', status: 'published' as const,
 }
@@ -99,6 +100,59 @@ describe('agentic resource exploration routes', () => {
     )
   })
 
+  test('continues from the cursor when set ordering and signed cover URLs change', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{
+        ...pack,
+        styles: ['Stylized', 'Fantasy'],
+        gameTypes: ['Action', 'Strategy'],
+      }],
+      elements: [
+        element('ground', 'models/ground.glb', ['terrain', 'environment']),
+        element('wall', 'models/wall.glb', ['building', 'environment']),
+      ],
+    })
+    let reverseSets = false
+    const app = createBeeGameResourceServerApp({
+      repository: {
+        ...repository,
+        listPacks: async () => {
+          reverseSets = !reverseSets
+          return (await repository.listPacks()).map(item => ({
+            ...item,
+            coverPath: `https://signed.example/${reverseSets ? 'new' : 'old'}`,
+            styles: reverseSets ? [...item.styles].reverse() : item.styles,
+            gameTypes: reverseSets
+              ? [...item.gameTypes].reverse()
+              : item.gameTypes,
+          }))
+        },
+        listElements: async (packId, category) =>
+          (await repository.listElements(packId, category)).map(item => ({
+            ...item,
+            usageTags: reverseSets
+              ? [...(item.usageTags ?? [])].reverse()
+              : item.usageTags,
+          })),
+      },
+      currentUser: { id: 'admin', role: 'owner' },
+      getElementResourceUrl: async path => `https://storage.example/${path}`,
+    })
+
+    const first = await post(app, '/api/resource-catalog/elements', { limit: 1 })
+    const firstBody = await first.json()
+    const second = await post(app, '/api/resource-catalog/elements', {
+      cursor: firstBody.nextCursor,
+      limit: 1,
+    })
+    const secondBody = await second.json()
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(secondBody.catalogRevision).toBe(firstBody.catalogRevision)
+    expect(secondBody.items).toHaveLength(1)
+  })
+
   test('resolves signed dependency closures only for explicit selections', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [pack],
@@ -116,15 +170,16 @@ describe('agentic resource exploration routes', () => {
       currentUser: { id: 'admin', role: 'owner' },
       getElementResourceUrl: async path => `https://storage.example/${path}`,
     })
-    const response = await post(app, '/api/resource-imports/resolve', {
-      selections: [{ importId: 'scene-root', packId: pack.id, expectedPackVersion: pack.version, elementId: 'scene', selectionReason: ['Primary scene kit'] }],
+    const response = await post(app, '/api/resource-library/resolve', {
+      selections: [{
+          resourceId: 'scene-root', packId: pack.id, expectedPackVersion: pack.version, elementId: 'scene', selectionReason: ['Primary scene kit'] }],
     })
 
     expect(response.status).toBe(200)
     const body = await response.json()
     expect(body.selections).toHaveLength(1)
     expect(body.selections[0]).toEqual(expect.objectContaining({
-      importId: 'scene-root', elementId: 'scene', sourceUrl: expect.stringContaining('https://storage.example/'),
+        resourceId: 'scene-root', elementId: 'scene', sourceUrl: expect.stringContaining('https://storage.example/'),
       technicalFacts: { boundsSizeX: 8, hasNormals: true },
     }))
     expect(body.selections[0].dependencies).toHaveLength(1)

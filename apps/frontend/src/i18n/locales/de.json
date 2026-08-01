@@ -184,9 +184,6 @@
       "loading": "Loading asset contracts...",
       "upload": "Upload replacement",
       "uploading": "Uploading...",
-      "requestIntegration": "Ask BeeGame to integrate",
-      "verifyIntegration": "Re-integrate / verify",
-      "integrateAllPending": "Integrate all pending",
       "acceptancePassed": "Aktuelle Revision abgenommen",
       "acceptanceFailed": "Abnahme fehlgeschlagen",
       "acceptanceBlocked": "Abnahme blockiert",
@@ -197,15 +194,8 @@
       "placeholder": "Placeholder",
       "uploaded": "Pending integration",
       "integrated": "Integrated",
-      "uploadedHint": "Uploaded, but not confirmed in runtime yet.",
-      "mcp": "MCP integration",
-      "filesystem": "File integration",
-      "manual": "Manual integration",
       "target": "Target",
-      "formats": "Formats",
-      "specs": "Specs",
       "noPurpose": "No purpose provided",
-      "compositions": "Asset-Kompositionen",
       "members": "Mitglieder"
     },
     "savedPrefixSeparator": ": "
@@ -279,7 +269,7 @@
         },
         {
           "title": "Projekt-Ressourcen",
-          "description": "Unity-, Godot-, Blender- und ähnliche Projekte können mcp und mcp_server im asset manifest deklarieren.",
+          "description": "Configure target-specific editor and tool connections in runtime MCP settings.",
           "note": "Das Ergebnisse-Panel zeigt diese Metadaten, ohne eine verbundene Editor-Sitzung vorzutäuschen."
         },
         {

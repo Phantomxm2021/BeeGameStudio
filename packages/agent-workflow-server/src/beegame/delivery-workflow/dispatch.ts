@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readBeeGameAssetManifest } from '../asset-contracts'
 import { parseDispatchRecord, parseResourceRemediation } from './schema'
 import {
   parseWorkerTerminalResult,
@@ -32,6 +33,13 @@ const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
 const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
+const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 5 * 60 * 1000
+const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 300_000
+// Initial authoring owns six mutually consistent foundation documents in one
+// bounded pass. Its wall-clock budget must cover that fixed workload; retries
+// preserve completed documents as durable checkpoints.
+const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 15 * 60 * 1000
+const DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS = 1_000_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
@@ -61,17 +69,19 @@ function now(): string {
   return new Date().toISOString()
 }
 
-function usageBudgetTokens(usage: {
-  input_tokens: number
-  cache_creation_tokens: number
-  completion_tokens: number
-} | undefined): number {
+function usageBudgetTokens(
+  usage:
+    | {
+        input_tokens: number
+        cache_creation_tokens: number
+        completion_tokens: number
+      }
+    | undefined,
+): number {
   if (!usage) return 0
   return Math.max(
     0,
-    usage.input_tokens +
-      usage.cache_creation_tokens +
-      usage.completion_tokens,
+    usage.input_tokens + usage.cache_creation_tokens + usage.completion_tokens,
   )
 }
 
@@ -100,6 +110,10 @@ export function createDeliveryDispatcher(options: {
   progressPollIntervalMs?: number
   resourceMaxDurationMs?: number
   resourceMaxTokens?: number
+  documentReviewMaxDurationMs?: number
+  documentReviewMaxTokens?: number
+  documentAuthorMaxDurationMs?: number
+  documentAuthorMaxTokens?: number
   onTerminal?: (
     record: DispatchRecord,
     result: WorkerTerminalResult,
@@ -129,6 +143,16 @@ export function createDeliveryDispatcher(options: {
     options.resourceMaxDurationMs ?? DEFAULT_RESOURCE_MAX_DURATION_MS
   const resourceMaxTokens =
     options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
+  const documentReviewMaxDurationMs =
+    options.documentReviewMaxDurationMs ??
+    DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS
+  const documentReviewMaxTokens =
+    options.documentReviewMaxTokens ?? DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS
+  const documentAuthorMaxDurationMs =
+    options.documentAuthorMaxDurationMs ??
+    DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS
+  const documentAuthorMaxTokens =
+    options.documentAuthorMaxTokens ?? DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -338,7 +362,11 @@ export function createDeliveryDispatcher(options: {
       idleProgressTimeoutMs <= 0 &&
       resourceIdleProgressTimeoutMs <= 0 &&
       resourceMaxDurationMs <= 0 &&
-      resourceMaxTokens <= 0
+      resourceMaxTokens <= 0 &&
+      documentReviewMaxDurationMs <= 0 &&
+      documentReviewMaxTokens <= 0 &&
+      documentAuthorMaxDurationMs <= 0 &&
+      documentAuthorMaxTokens <= 0
     )
       return
     while (true) {
@@ -356,11 +384,30 @@ export function createDeliveryDispatcher(options: {
       )
       const isResourceWorker =
         run.activeDispatch.workerType === 'resource-preparer'
+      const isDocumentReviewer =
+        run.activeDispatch.workerType === 'document-reviewer'
+      const isDocumentAuthor =
+        run.activeDispatch.workerType === 'document-author'
       const resourceMutationInFlight =
         isResourceWorker &&
         (await options.workerPort
           .hasInFlightMutation?.(dispatchId)
           .catch(() => false))
+      const activeRequest =
+        requests.get(dispatchId) ?? run.activeDispatch.request
+      if (
+        isResourceWorker &&
+        !resourceMutationInFlight &&
+        activeRequest &&
+        (await resourcePlanCheckpointCompleted(activeRequest))
+      ) {
+        await yieldResourceDispatch(
+          dispatchId,
+          'resource plan checkpoint completed',
+          'dispatch.resource_plan_checkpoint_yielded',
+        )
+        return
+      }
       if (
         isResourceWorker &&
         !resourceMutationInFlight &&
@@ -396,7 +443,8 @@ export function createDeliveryDispatcher(options: {
         !resourceMutationInFlight &&
         resourceMaxTokens > 0
       ) {
-        const consumed = Math.max(0,
+        const consumed = Math.max(
+          0,
           run.activeDispatch.startingUsageBudgetTokens === undefined
             ? (run.usage?.total_tokens ?? 0) -
                 (run.activeDispatch.startingUsageTotalTokens ?? 0)
@@ -408,6 +456,43 @@ export function createDeliveryDispatcher(options: {
           if (hasDurableProgressSinceDispatch(run))
             await yieldResourceDispatch(dispatchId, reason)
           else await markDispatchNeedsAction(dispatchId, reason)
+          return
+        }
+      }
+      const documentDurationLimit = isDocumentReviewer
+        ? documentReviewMaxDurationMs
+        : isDocumentAuthor
+          ? documentAuthorMaxDurationMs
+          : 0
+      if (documentDurationLimit > 0) {
+        const startedAt = Date.parse(run.activeDispatch.startedAt)
+        if (
+          Number.isFinite(startedAt) &&
+          Date.now() - startedAt >= documentDurationLimit
+        ) {
+          await markDispatchNeedsAction(
+            dispatchId,
+            `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
+          )
+          return
+        }
+      }
+      const documentTokenLimit = isDocumentReviewer
+        ? documentReviewMaxTokens
+        : isDocumentAuthor
+          ? documentAuthorMaxTokens
+          : 0
+      if (documentTokenLimit > 0) {
+        const consumed = Math.max(
+          0,
+          (run.usage?.total_tokens ?? 0) -
+            (run.activeDispatch.startingUsageTotalTokens ?? 0),
+        )
+        if (consumed >= documentTokenLimit) {
+          await markDispatchNeedsAction(
+            dispatchId,
+            `${run.activeDispatch.workerType} exceeded its ${documentTokenLimit} total token limit`,
+          )
           return
         }
       }
@@ -440,6 +525,26 @@ export function createDeliveryDispatcher(options: {
     )
   }
 
+  async function resourcePlanCheckpointCompleted(
+    request: WorkerDispatchRequest,
+  ): Promise<boolean> {
+    if (
+      request.workerType !== 'resource-preparer' ||
+      request.contract.resourcePlanOnly !== true
+    )
+      return false
+    try {
+      const manifest = await readBeeGameAssetManifest(request.workspacePath)
+      return (
+        Boolean(manifest.project_target) &&
+        manifest.requirements.length > 0 &&
+        manifest.resources.length === 0
+      )
+    } catch {
+      return false
+    }
+  }
+
   function resourceRemediationFromRequest(request: WorkerDispatchRequest) {
     if (
       request.workerType !== 'resource-preparer' ||
@@ -447,7 +552,19 @@ export function createDeliveryDispatcher(options: {
     )
       return undefined
     try {
-      return parseResourceRemediation(request.contract.remediation)
+      const remediation = request.contract.remediation
+      if (
+        !remediation ||
+        typeof remediation !== 'object' ||
+        Array.isArray(remediation) ||
+        (remediation as Record<string, unknown>).kind === 'document_review'
+      )
+        return undefined
+      const resourceRemediation = {
+        ...(remediation as Record<string, unknown>),
+      }
+      delete resourceRemediation.kind
+      return parseResourceRemediation(resourceRemediation)
     } catch {
       return undefined
     }
@@ -547,11 +664,7 @@ export function createDeliveryDispatcher(options: {
     }
     const status =
       result.workerType === 'document-reviewer'
-        ? result.verdict === 'READY'
-          ? 'completed'
-          : result.verdict === 'BLOCKED'
-            ? 'blocked'
-            : 'failed'
+        ? 'completed'
         : result.workerType === 'document-author' ||
             result.workerType === 'atomic-task-planner' ||
             result.workerType === 'change-impact-analyzer' ||
@@ -791,6 +904,7 @@ export function createDeliveryDispatcher(options: {
   async function yieldResourceDispatch(
     dispatchId: string,
     reason: string,
+    eventType = 'dispatch.resource_budget_yielded',
   ): Promise<DispatchRecord> {
     const run = await options.store.load()
     if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
@@ -812,7 +926,7 @@ export function createDeliveryDispatcher(options: {
       },
       {
         runId: run.runId,
-        type: 'dispatch.resource_budget_yielded',
+        type: eventType,
         phase: run.phase,
         status: 'running',
         revision: run.revision,

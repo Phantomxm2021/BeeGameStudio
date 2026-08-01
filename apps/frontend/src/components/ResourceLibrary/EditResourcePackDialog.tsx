@@ -20,7 +20,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
   }), [t])
   const initialValues = useMemo<ResourcePackFormValues>(() => ({
     name: pack.name,
-    styles: pack.styles?.length ? [...pack.styles] : pack.style.split('/').map(value => value.trim()).filter(Boolean),
+    styles: [...pack.styles],
     dimension: pack.dimension,
     gameTypes: [...(pack.gameTypes || [])],
     primaryCategory: pack.primaryCategory,
@@ -34,7 +34,8 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
     compatibleEngines: (pack.compatibleEngines || []).join(', '),
   }), [pack])
 
-  return <ResourcePackFormDialog
+  return (
+    <ResourcePackFormDialog
     open={open}
     title={copy.title}
     submitLabel={copy.update}
@@ -62,6 +63,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
       })
     }}
   />
+  );
 }
 
 function translated(t: (key: string) => string, key: string, fallback: string): string {

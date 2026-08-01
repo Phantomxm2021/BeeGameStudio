@@ -94,26 +94,106 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export type DocumentReviewFinding = {
-  id: string
-  code?: string
-  severity: 'blocking' | 'non_blocking'
-  category: 'cross_document_conflict' | 'missing_spec' | 'calculation' | 'other'
-  remediationTarget: 'foundation' | 'checklist' | 'resource'
-  resourceAction?: 'repair' | 'reselection'
-  resourceRequirementIds?: string[]
-  resourceImportIds?: string[]
-  documents: string[]
-  description: string
-  requiredAction: string
+export const FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS = [
+  'brief_alignment',
+  'cross_document_consistency',
+  'gameplay_completeness',
+  'technical_feasibility',
+  'art_direction_coherence',
+  'ui_audio_consistency',
+  'acceptance_observability',
+] as const
+
+export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
+  'checklist_traceability',
+  'resource_semantic_fitness',
+  'content_structure_fitness',
+  'resource_content_consistency',
+  'implementation_readiness',
+] as const
+
+export const COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS = [
+  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
+] as const
+
+export type DocumentReviewScope = 'foundation' | 'complete'
+export type DocumentReviewMode = 'initial' | 'closure'
+export type FoundationDocumentReviewCheckId =
+  (typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS)[number]
+export type ComprehensiveDocumentReviewCheckId =
+  (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number]
+export type DocumentReviewCheckId = ComprehensiveDocumentReviewCheckId
+
+export type DocumentReviewCheck = {
+  id: DocumentReviewCheckId
+  status: 'pass' | 'block'
+  conclusion: string
+  evidence: Array<{ path: string; anchor: string }>
+  findingIds: string[]
 }
 
-export type DocumentRemediation = {
-  sourceRevision: string
+export type DocumentReviewFindingSubject = {
+  path: string
+  anchor: string
+  requirementId?: string
+  resourceId?: string
+  contentId?: string
+}
+
+export type DocumentReviewFinding = {
+  findingId: string
+  checkId: DocumentReviewCheckId
+  severity: 'blocking'
+  owner: 'foundation' | 'checklist' | 'resource'
+  regressionPaths?: string[]
+  subjects: DocumentReviewFindingSubject[]
+  observation: string
+  blockingReason: string
+  requiredAction: string
+  closureCondition: string
+}
+
+export type DocumentReviewApproval = {
+  scope: DocumentReviewScope
+  revision: string
+  checks: DocumentReviewCheck[]
+  checkEvidenceDigests: Record<string, Record<string, string>>
   evidencePath: string
-  attempt: number
+  approvedAt: string
+}
+
+export type DocumentReviewCycle = {
+  cycleId: string
+  parentCycleId?: string
+  /** Scope of the Initial Review that created this finding ledger. */
+  originScope: DocumentReviewScope
+  scope: DocumentReviewScope
+  mode: DocumentReviewMode
+  sourceRevision: string
+  requiredCheckIds: DocumentReviewCheckId[]
+  checks: DocumentReviewCheck[]
+  checkEvidenceDigests: Record<string, Record<string, string>>
   findings: DocumentReviewFinding[]
-  resolvedFindingIds?: string[]
+  activeTarget?: 'foundation' | 'checklist' | 'resource'
+  acceptedSemanticResult: boolean
+  transportAttempts: number
+  /** Exact protocol rejection carried into the one remaining transport attempt. */
+  transportCorrection?: string
+  changedPaths: string[]
+  sourceArtifactDigests: Record<string, string>
+  evidencePath?: string
+}
+
+export type DocumentReviewState = {
+  foundationApproval?: DocumentReviewApproval
+  comprehensiveApproval?: DocumentReviewApproval
+  activeCycle?: DocumentReviewCycle
+  repairPasses: {
+    foundation: number
+    checklist: number
+    resource: number
+  }
 }
 
 export type ChecklistRemediation = {
@@ -126,10 +206,6 @@ export type ResourceRemediation = {
   sourceRevision: string
   attempt: number
   issues: string[]
-  mode: 'repair' | 'reselection'
-  preserveImportIds: string[]
-  preserveCompositionIds: string[]
-  reselectImportIds?: string[]
 }
 
 export type Revision = {
@@ -148,13 +224,12 @@ export type TaskVerification = {
 export type AtomicTask = {
   id: string
   title: string
-  resourceRequirementIds: string[]
   checklistIds: string[]
+  resourceIds: string[]
+  contentIds: string[]
   dependsOn: string[]
   allowedPaths: string[]
   expectedArtifacts: string[]
-  resourceImportIds?: string[]
-  resourceCompositionIds?: string[]
   verification: TaskVerification[]
   status: AtomicTaskStatus
   attempt: number
@@ -204,8 +279,8 @@ export type ResourceEvidenceSnapshot =
       state: 'stale' | 'current'
       actions: string[]
       failedActions: string[]
-      successfulImportCount: number
-      failedImportCount: number
+      successfulResourceCount: number
+      failedResourceCount: number
       observedAt: string
     }
 
@@ -227,13 +302,13 @@ export type WorkflowEvent = {
 }
 
 export type DeliveryRun = {
-  schemaVersion: 1
+  schemaVersion: 2
   runId: string
   projectId: string
   ownerId: string
   parentRunId?: string
   confirmedBriefDigest: string
-  confirmedBriefContext?: string
+  confirmedBriefContext: string
   changeRequest?: string
   changeRoute?: 'question' | 'implementation_only' | 'documents_required'
   changeAffectedRequirementIds?: string[]
@@ -251,17 +326,12 @@ export type DeliveryRun = {
   tasks: AtomicTask[]
   activeDispatch?: DispatchRecord
   evidence: {
-    documentReview?: EvidenceRef
     resourcePreparation?: EvidenceRef
     implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
-  /** Exact reviewer corrections carried across author/reviewer retries. */
-  documentRemediation?: DocumentRemediation
-  /** Non-blocking review findings preserved for downstream planning. */
-  documentAdvisories?: DocumentReviewFinding[]
-  /** Cumulative blocking review cycles for the current confirmed brief. */
-  documentReviewCycleCount?: number
+  /** Sole owner of document review approvals, findings, retries and closure. */
+  documentReviewState: DocumentReviewState
   /** Deterministic checklist-structure issues carried across bounded author retries. */
   checklistRemediation?: ChecklistRemediation
   /** Exact deterministic resource-contract failures carried into a repair pass. */

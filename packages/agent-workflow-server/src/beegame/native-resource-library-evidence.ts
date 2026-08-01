@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { normalizeResourceLibraryCall } from './native-resource-library-call'
 
 type ResourceLibraryObservation = {
-  version: 4
+  version: 1
   sessionId: string
   turnId?: string
   toolUseID: string
@@ -14,19 +14,14 @@ type ResourceLibraryObservation = {
   inputDigest: string
   outputDigest?: string
   outcome?: 'succeeded' | 'partial' | 'failed'
-  importedCount?: number
+  acquiredCount?: number
   failedCount?: number
-  requestedImportIds?: string[]
-  importedImportIds?: string[]
-  failedImportIds?: string[]
+  requestedResourceIds?: string[]
+  acquiredResourceIds?: string[]
+  failedResourceIds?: string[]
   createdAt: string
 }
 
-/**
- * Passive provenance only. It records which native exploration/integration
- * operation Claude Code chose to invoke, but never enforces a call sequence,
- * selects a resource, or changes the Agent task state.
- */
 export function observeNativeResourceLibraryToolEvent(input: {
   dataRoot: string
   sessionId: string
@@ -46,36 +41,47 @@ export function observeNativeResourceLibraryToolEvent(input: {
     input.eventType !== 'tool.started' &&
     input.eventType !== 'tool.completed' &&
     input.eventType !== 'tool.failed'
-  ) return
+  )
+    return
   const output = stringValue(input.payload.output)
-  const completion = input.eventType === 'tool.completed'
-    ? classifyCompletion(normalized.validAction, output)
-    : undefined
+  const completion =
+    input.eventType === 'tool.completed'
+      ? classifyCompletion(normalized.validAction, output)
+      : undefined
   appendObservation(input.dataRoot, input.sessionId, {
-    version: 4,
+    version: 1,
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
-    phase: input.eventType === 'tool.started'
-      ? 'started'
-      : input.eventType === 'tool.completed'
-        ? 'completed'
-        : 'failed',
+    phase:
+      input.eventType === 'tool.started'
+        ? 'started'
+        : input.eventType === 'tool.completed'
+          ? 'completed'
+          : 'failed',
     action: normalized.validAction,
     resourceContextDigest: digestResourceContext(input.workspacePath),
     inputDigest: digest(normalized.input),
     ...(output ? { outputDigest: digest(output) } : {}),
-    ...(completion ? {
-      outcome: completion.outcome,
-      ...(completion.importedCount !== undefined ? { importedCount: completion.importedCount } : {}),
-      ...(completion.failedCount !== undefined ? { failedCount: completion.failedCount } : {}),
-      ...(completion.importedImportIds.length ? { importedImportIds: completion.importedImportIds } : {}),
-      ...(completion.failedImportIds.length ? { failedImportIds: completion.failedImportIds } : {}),
-    } : input.eventType === 'tool.failed'
-      ? { outcome: 'failed' as const }
-      : {}),
-    ...(normalized.validAction === 'import_elements'
-      ? { requestedImportIds: extractRequestedImportIds(normalized.input) }
+    ...(completion
+      ? {
+          outcome: completion.outcome,
+          acquiredCount: completion.acquiredCount,
+          failedCount: completion.failedCount,
+          ...(completion.acquiredResourceIds.length
+            ? { acquiredResourceIds: completion.acquiredResourceIds }
+            : {}),
+          ...(completion.failedResourceIds.length
+            ? { failedResourceIds: completion.failedResourceIds }
+            : {}),
+        }
+      : input.eventType === 'tool.failed'
+        ? { outcome: 'failed' as const }
+        : {}),
+    ...(normalized.validAction === 'import_resources'
+      ? {
+          requestedResourceIds: extractResourceIds(normalized.input.selections),
+        }
       : {}),
     createdAt: input.createdAt.toISOString(),
   })
@@ -83,67 +89,80 @@ export function observeNativeResourceLibraryToolEvent(input: {
 
 export type NativeResourceLibraryEvidenceState =
   | { state: 'missing' }
-  | { state: 'stale'; actions: string[]; failedActions: string[]; successfulImportCount: number; failedImportCount: number; observedAt: string }
-  | { state: 'current'; actions: string[]; failedActions: string[]; successfulImportCount: number; failedImportCount: number; observedAt: string }
+  | {
+      state: 'stale' | 'current'
+      actions: string[]
+      failedActions: string[]
+      successfulResourceCount: number
+      failedResourceCount: number
+      observedAt: string
+    }
 
 export function getObservedNativeResourceLibraryEvidence(input: {
   dataRoot: string
   sessionId: string
   workspacePath: string
 }): NativeResourceLibraryEvidenceState {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-    .filter(observation =>
-      observation.phase === 'completed' || observation.phase === 'failed'
-    )
-  if (observations.length === 0) return { state: 'missing' }
+  const observations = readObservations(input.dataRoot, input.sessionId).filter(
+    observation =>
+      observation.phase === 'completed' || observation.phase === 'failed',
+  )
+  if (!observations.length) return { state: 'missing' }
   const currentDigest = digestResourceContext(input.workspacePath)
   const current = observations.filter(
     observation => observation.resourceContextDigest === currentDigest,
   )
   const selected = current.length ? current : observations
-  const succeeded = selected.filter(observation => observation.outcome !== 'failed')
   const latestByAction = new Map<string, ResourceLibraryObservation>()
-  for (const observation of selected) latestByAction.set(observation.action, observation)
-  const latestImportState = new Map<string, 'succeeded' | 'failed'>()
+  const latestResourceState = new Map<string, 'succeeded' | 'failed'>()
   for (const observation of selected) {
-    if (observation.action !== 'import_elements') continue
-    for (const importId of observation.importedImportIds ?? []) {
-      latestImportState.set(importId, 'succeeded')
-    }
-    const failedIds = observation.failedImportIds?.length
-      ? observation.failedImportIds
+    latestByAction.set(observation.action, observation)
+    if (observation.action !== 'import_resources') continue
+    for (const id of observation.acquiredResourceIds ?? [])
+      latestResourceState.set(id, 'succeeded')
+    const failedIds = observation.failedResourceIds?.length
+      ? observation.failedResourceIds
       : observation.phase === 'failed'
-        ? observation.requestedImportIds ?? []
+        ? (observation.requestedResourceIds ?? [])
         : []
-    for (const importId of failedIds) latestImportState.set(importId, 'failed')
+    for (const id of failedIds) latestResourceState.set(id, 'failed')
   }
-  const latestImport = selected.filter(item => item.action === 'import_elements').at(-1)
-  const successfulImportCount = latestImportState.size
-    ? [...latestImportState.values()].filter(state => state === 'succeeded').length
-    : latestImport?.importedCount ?? 0
-  const failedImportCount = latestImportState.size
-    ? [...latestImportState.values()].filter(state => state === 'failed').length
-    : latestImport?.failedCount ?? 0
+  const latestAcquisition = selected
+    .filter(item => item.action === 'import_resources')
+    .at(-1)
+  const successfulResourceCount = latestResourceState.size
+    ? [...latestResourceState.values()].filter(state => state === 'succeeded')
+        .length
+    : (latestAcquisition?.acquiredCount ?? 0)
+  const failedResourceCount = latestResourceState.size
+    ? [...latestResourceState.values()].filter(state => state === 'failed')
+        .length
+    : (latestAcquisition?.failedCount ?? 0)
   const unresolvedFailures = [...latestByAction.values()].filter(observation =>
-    observation.action === 'import_elements'
-      ? failedImportCount > 0 || observation.outcome === 'failed' || observation.outcome === 'partial'
-      : observation.outcome === 'failed'
+    observation.action === 'import_resources'
+      ? failedResourceCount > 0 ||
+        observation.outcome === 'failed' ||
+        observation.outcome === 'partial'
+      : observation.outcome === 'failed',
   )
   return {
     state: current.length ? 'current' : 'stale',
-    actions: [...new Set(succeeded.map(observation => observation.action))],
-    failedActions: [...new Set(unresolvedFailures.map(observation => observation.action))],
-    successfulImportCount,
-    failedImportCount,
+    actions: [
+      ...new Set(
+        selected
+          .filter(observation => observation.outcome !== 'failed')
+          .map(observation => observation.action),
+      ),
+    ],
+    failedActions: [
+      ...new Set(unresolvedFailures.map(observation => observation.action)),
+    ],
+    successfulResourceCount,
+    failedResourceCount,
     observedAt: selected.at(-1)!.createdAt,
   }
 }
 
-/**
- * Resource exploration remains current while art direction, asset planning and
- * target capabilities remain current. Implementation files and imported file
- * inventory do not invalidate the earlier Pack exploration decision.
- */
 export function digestResourceContext(workspacePath: string): string {
   const workspace = resolve(workspacePath)
   const hash = createHash('sha256')
@@ -158,89 +177,88 @@ export function digestResourceContext(workspacePath: string): string {
   return hash.digest('hex')
 }
 
-function appendObservation(dataRoot: string, sessionId: string, observation: ResourceLibraryObservation): void {
-  const path = join(dataRoot, 'beegame-resource-library-evidence', `${sessionId}.jsonl`)
+function classifyCompletion(action: string, output: string) {
+  if (action !== 'import_resources')
+    return {
+      outcome: 'succeeded' as const,
+      acquiredCount: 0,
+      failedCount: 0,
+      acquiredResourceIds: [] as string[],
+      failedResourceIds: [] as string[],
+    }
+  const value = parseJson(output)
+  const data = isRecord(value) && isRecord(value.data) ? value.data : value
+  if (!isRecord(data))
+    return {
+      outcome: 'failed' as const,
+      acquiredCount: 0,
+      failedCount: 0,
+      acquiredResourceIds: [] as string[],
+      failedResourceIds: [] as string[],
+    }
+  const acquiredResourceIds = extractResourceIds(data.resources)
+  const failedResourceIds = extractResourceIds(data.failures)
+  const acquiredCount =
+    finiteCount(data.verified_count) ?? acquiredResourceIds.length
+  const failedCount = failedResourceIds.length
+  return {
+    outcome:
+      acquiredCount > 0
+        ? failedCount > 0
+          ? ('partial' as const)
+          : ('succeeded' as const)
+        : ('failed' as const),
+    acquiredCount,
+    failedCount,
+    acquiredResourceIds,
+    failedResourceIds,
+  }
+}
+
+function extractResourceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return uniqueStrings(
+    value.flatMap(item => (isRecord(item) ? [item.resource_id] : [])),
+  )
+}
+
+function appendObservation(
+  dataRoot: string,
+  sessionId: string,
+  observation: ResourceLibraryObservation,
+): void {
+  const path = join(
+    dataRoot,
+    'beegame-resource-library-evidence',
+    `${sessionId}.jsonl`,
+  )
   mkdirSync(dirname(path), { recursive: true })
   appendFileSync(path, `${JSON.stringify(observation)}\n`, 'utf8')
 }
 
-function readObservations(dataRoot: string, sessionId: string): ResourceLibraryObservation[] {
-  const path = join(dataRoot, 'beegame-resource-library-evidence', `${sessionId}.jsonl`)
+function readObservations(
+  dataRoot: string,
+  sessionId: string,
+): ResourceLibraryObservation[] {
+  const path = join(
+    dataRoot,
+    'beegame-resource-library-evidence',
+    `${sessionId}.jsonl`,
+  )
   if (!existsSync(path)) return []
-  return readFileSync(path, 'utf8').split('\n').flatMap(line => {
-    if (!line.trim()) return []
-    try {
-      const observation = JSON.parse(line) as ResourceLibraryObservation
-      return observation.version === 4 && observation.sessionId === sessionId
-        ? [observation]
-        : []
-    } catch {
-      return []
-    }
-  })
-}
-
-function classifyCompletion(
-  action: string,
-  output: string,
-): {
-  outcome: 'succeeded' | 'partial' | 'failed'
-  importedCount?: number
-  failedCount?: number
-  importedImportIds: string[]
-  failedImportIds: string[]
-} {
-  if (action !== 'import_elements') return { outcome: 'succeeded', importedImportIds: [], failedImportIds: [] }
-  const value = parseJson(output)
-  const data = isRecord(value) && isRecord(value.data) ? value.data : value
-  if (!isRecord(data)) return { outcome: 'failed', importedCount: 0, importedImportIds: [], failedImportIds: [] }
-  const importedCount = finiteCount(data.imported_count) ?? (Array.isArray(data.imported) ? data.imported.length : 0)
-  const failedCount = finiteCount(data.failed_count) ?? countFailureIds(data.failures)
-  const importedImportIds = extractImportIds(data.imported, 'import_id')
-  const failedImportIds = Array.isArray(data.failures)
-    ? uniqueStrings(data.failures.flatMap(item => isRecord(item) && Array.isArray(item.import_ids) ? item.import_ids : []))
-    : []
-  return {
-    outcome: importedCount > 0
-      ? failedCount > 0 ? 'partial' : 'succeeded'
-      : 'failed',
-    importedCount,
-    failedCount,
-    importedImportIds,
-    failedImportIds,
-  }
-}
-
-function extractRequestedImportIds(input: Record<string, unknown>): string[] {
-  return Array.isArray(input.selections)
-    ? extractImportIds(input.selections, 'import_id')
-    : []
-}
-
-function extractImportIds(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) return []
-  return uniqueStrings(value.flatMap(item => isRecord(item) ? [item[field]] : []))
-}
-
-function uniqueStrings(value: unknown[]): string[] {
-  return [...new Set(value.flatMap(item => typeof item === 'string' && item.trim() ? [item.trim()] : []))]
-}
-
-function parseJson(value: string): unknown {
-  if (!value) return undefined
-  try { return JSON.parse(value) as unknown } catch { return undefined }
-}
-
-function finiteCount(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
-}
-
-function countFailureIds(value: unknown): number {
-  if (!Array.isArray(value)) return 0
-  return value.reduce((total, item) => {
-    if (!isRecord(item) || !Array.isArray(item.import_ids)) return total
-    return total + item.import_ids.length
-  }, 0)
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .flatMap(line => {
+      if (!line.trim()) return []
+      try {
+        const observation = JSON.parse(line) as ResourceLibraryObservation
+        return observation.version === 1 && observation.sessionId === sessionId
+          ? [observation]
+          : []
+      } catch {
+        return []
+      }
+    })
 }
 
 function readProjectTarget(path: string): string {
@@ -255,16 +273,43 @@ function readProjectTarget(path: string): string {
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
-  if (isRecord(value)) {
-    return `{${Object.keys(value).sort().map(key =>
-      `${JSON.stringify(key)}:${stableJson(value[key])}`
-    ).join(',')}}`
-  }
+  if (isRecord(value))
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')}}`
   return JSON.stringify(value) ?? 'null'
 }
 
+function parseJson(value: string): unknown {
+  if (!value) return undefined
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function finiteCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : undefined
+}
+
+function uniqueStrings(value: unknown[]): string[] {
+  return [
+    ...new Set(
+      value.flatMap(item =>
+        typeof item === 'string' && item.trim() ? [item.trim()] : [],
+      ),
+    ),
+  ]
+}
+
 function digest(value: unknown): string {
-  return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
+  return createHash('sha256')
+    .update(typeof value === 'string' ? value : JSON.stringify(value))
+    .digest('hex')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

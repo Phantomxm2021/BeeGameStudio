@@ -1,19 +1,7 @@
 import { transitionDeliveryRun } from './transition'
+import { computeDocumentRevision, computeResourceRevision } from './revision'
 import type { DeliveryRun, DispatchRecord } from './types'
 import type { RunStore } from './run-store'
-
-function terminalIds(
-  run: DeliveryRun,
-  key: 'importIds' | 'compositionIds',
-): string[] {
-  const value = run.activeDispatch?.terminalResult?.[key]
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is string =>
-          typeof item === 'string' && Boolean(item.trim()),
-      )
-    : []
-}
 
 function withResourceRemediation(run: DeliveryRun): DeliveryRun {
   if (
@@ -24,22 +12,110 @@ function withResourceRemediation(run: DeliveryRun): DeliveryRun {
       run.status !== 'blocked')
   )
     return run
+  const sourceRevision =
+    run.evidence.resourcePreparation?.revision ?? run.revision.document
+  if (run.resourceRemediation?.sourceRevision === sourceRevision) return run
   return {
     ...run,
     resourceRemediation: {
-      sourceRevision:
-        run.evidence.resourcePreparation?.revision ?? run.revision.document,
-      attempt: (run.resourceRemediation?.attempt ?? 0) + 1,
+      sourceRevision,
+      attempt: 1,
       issues: [run.blockedReason],
-      // A remediation snapshot is diagnostic history, not execution intent.
-      // Resource preparation re-derives repair/reselection/selection from the
-      // current canonical manifest on every dispatch. Carrying an old
-      // reselection mode or removed import IDs here traps otherwise-valid
-      // partial inventory in an obsolete retry lane.
-      mode: 'repair',
-      preserveImportIds: terminalIds(run, 'importIds'),
-      preserveCompositionIds: terminalIds(run, 'compositionIds'),
     },
+  }
+}
+
+function reviewRetryIsLocked(run: DeliveryRun): boolean {
+  const cycle = run.documentReviewState.activeCycle
+  return Boolean(
+    run.phase === 'DOCUMENT_REVIEW' &&
+      run.documentStep !== 'CHECKLIST_DRAFTING' &&
+      cycle &&
+      cycle.acceptedSemanticResult,
+  )
+}
+
+function resetExhaustedDocumentReviewTransport(run: DeliveryRun): DeliveryRun {
+  const cycle = run.documentReviewState.activeCycle
+  if (
+    run.phase !== 'DOCUMENT_REVIEW' ||
+    run.documentStep === 'CHECKLIST_DRAFTING' ||
+    !cycle ||
+    cycle.acceptedSemanticResult ||
+    cycle.transportAttempts < 2
+  )
+    return run
+  return {
+    ...run,
+    documentReviewState: {
+      ...run.documentReviewState,
+      activeCycle: undefined,
+    },
+  }
+}
+
+function retainDocumentReviewTransportCorrection(
+  run: DeliveryRun,
+): DeliveryRun {
+  const cycle = run.documentReviewState.activeCycle
+  const reason = run.blockedReason?.trim()
+  if (
+    run.phase !== 'DOCUMENT_REVIEW' ||
+    !cycle ||
+    cycle.acceptedSemanticResult ||
+    !reason
+  )
+    return run
+  return {
+    ...run,
+    documentReviewState: {
+      ...run.documentReviewState,
+      activeCycle: { ...cycle, transportCorrection: reason },
+    },
+  }
+}
+
+async function unlockReviewForChangedRevision(input: {
+  run: DeliveryRun
+  workspacePath?: string
+}): Promise<DeliveryRun | undefined> {
+  const cycle = input.run.documentReviewState.activeCycle
+  if (!cycle || !input.workspacePath || !reviewRetryIsLocked(input.run))
+    return undefined
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const currentRevision =
+    cycle.scope === 'foundation'
+      ? documentRevision
+      : await computeResourceRevision(input.workspacePath, documentRevision)
+  if (currentRevision === cycle.sourceRevision) return undefined
+  return {
+    ...input.run,
+    status: 'running',
+    blockedReason: undefined,
+    revision: {
+      ...input.run.revision,
+      document: documentRevision,
+      ...(cycle.scope === 'complete' ? { resource: currentRevision } : {}),
+      implementation: undefined,
+    },
+    tasks: [],
+    evidence:
+      cycle.scope === 'foundation'
+        ? {}
+        : {
+            resourcePreparation: input.run.evidence.resourcePreparation,
+          },
+    documentReviewState: {
+      ...input.run.documentReviewState,
+      ...(cycle.scope === 'foundation'
+        ? { foundationApproval: undefined, comprehensiveApproval: undefined }
+        : { comprehensiveApproval: undefined }),
+      activeCycle: undefined,
+    },
+    updatedAt: new Date().toISOString(),
   }
 }
 
@@ -68,6 +144,7 @@ async function acquireAndLoad(input: {
 export async function resumeRun(input: {
   store: RunStore
   runId: string
+  workspacePath?: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun> {
   const reconciled = await input.store.reconcile(
@@ -83,17 +160,28 @@ export async function resumeRun(input: {
       acquired.run.status === 'blocked' ||
       acquired.run.status === 'stopped' ||
       acquired.run.status === 'failed'
-    const resumed = retryable
-      ? transitionDeliveryRun(
-          {
-            ...withResourceRemediation(acquired.run),
-            activeDispatch: acquired.run.activeDispatch?.terminalResult
-              ? acquired.run.activeDispatch
-              : undefined,
-          },
-          { type: 'retry' },
-        )
-      : acquired.run
+    const changedReview = await unlockReviewForChangedRevision({
+      run: acquired.run,
+      workspacePath: input.workspacePath,
+    })
+    if (reviewRetryIsLocked(acquired.run) && !changedReview) return acquired.run
+    const resumed =
+      changedReview ??
+      (retryable
+        ? transitionDeliveryRun(
+            {
+              ...resetExhaustedDocumentReviewTransport(
+                retainDocumentReviewTransportCorrection(
+                  withResourceRemediation(acquired.run),
+                ),
+              ),
+              activeDispatch: acquired.run.activeDispatch?.terminalResult
+                ? acquired.run.activeDispatch
+                : undefined,
+            },
+            { type: 'retry' },
+          )
+        : acquired.run)
     return input.store.commit(resumed, {
       runId: resumed.runId,
       type: 'run.resumed',
@@ -109,6 +197,7 @@ export async function resumeRun(input: {
 export async function retryRun(input: {
   store: RunStore
   runId: string
+  workspacePath?: string
   taskId?: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun> {
@@ -124,15 +213,26 @@ export async function retryRun(input: {
     // durable run, so repeating it must be an idempotent read rather than an
     // invalid state transition.
     if (acquired.run.status === 'running') return acquired.run
+    const changedReview = await unlockReviewForChangedRevision({
+      run: acquired.run,
+      workspacePath: input.workspacePath,
+    })
+    if (reviewRetryIsLocked(acquired.run) && !changedReview) return acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
-    const resumed = transitionDeliveryRun(
-      {
-        ...withResourceRemediation(acquired.run),
-        activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
-      },
-      { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
-    )
+    const resumed =
+      changedReview ??
+      transitionDeliveryRun(
+        {
+          ...resetExhaustedDocumentReviewTransport(
+            retainDocumentReviewTransportCorrection(
+              withResourceRemediation(acquired.run),
+            ),
+          ),
+          activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
+        },
+        { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
+      )
     return input.store.commit(resumed, {
       runId: resumed.runId,
       type: 'run.retry_requested',

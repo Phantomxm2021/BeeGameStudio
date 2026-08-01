@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentWorkflowApp } from '../app'
 import {
-  createInitialDeliveryRun,
   createRunStore,
 } from '../beegame/delivery-workflow/run-store'
+import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 describe('project stop route', () => {
   test('stops a durable workflow even when no ordinary project session exists', async () => {
@@ -39,7 +39,7 @@ describe('project stop route', () => {
 
       const store = createRunStore(workspace, ownerId)
       await store.save(
-        createInitialDeliveryRun({
+        createTestDeliveryRun({
           runId: 'run-project-stop',
           projectId,
           ownerId,

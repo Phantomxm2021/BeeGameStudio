@@ -20,12 +20,6 @@ type EvidenceEvent = { evidence: EvidenceRef }
 
 export type DeliveryTransition =
   | { type: 'documents_ready' }
-  | ({ type: 'document_review_ready' } & EvidenceEvent)
-  | ({
-      type: 'document_review_needs_revision'
-      target?: 'foundation' | 'checklist' | 'resource'
-    } & EvidenceEvent)
-  | ({ type: 'document_review_blocked' } & EvidenceEvent)
   | ({
       type: 'resource_preparation_ready'
       resourceRevision: string
@@ -155,7 +149,6 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
 function withEvidence(
   run: DeliveryRun,
   key:
-    | 'documentReview'
     | 'resourcePreparation'
     | 'implementationAudit'
     | 'acceptance',
@@ -197,57 +190,11 @@ export function transitionDeliveryRun(
         ...run,
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
-        documentRemediation: undefined,
-        documentAdvisories: undefined,
-        documentReviewCycleCount: undefined,
+        documentReviewState: {
+          repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+        },
         checklistRemediation: undefined,
         updatedAt: timestamp(),
-      }
-      break
-    case 'document_review_ready':
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      if (!run.revision.resource)
-        fail('comprehensive document review requires a resource revision')
-      requireEvidence(event.evidence, run.revision.resource, ['ready'])
-      next = {
-        ...withEvidence(run, 'documentReview', event.evidence),
-        phase: 'ATOMIC_TASK_PLANNING',
-        documentStep: undefined,
-        documentRemediation: undefined,
-        documentReviewCycleCount: undefined,
-      }
-      break
-    case 'document_review_needs_revision':
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      requireEvidence(
-        event.evidence,
-        run.documentStep === 'CHECKLIST_REVIEW'
-          ? (run.revision.resource ?? run.revision.document)
-          : run.revision.document,
-        ['failed'],
-      )
-      next = {
-        ...withEvidence(run, 'documentReview', event.evidence),
-        phase:
-          event.target === 'resource'
-            ? 'RESOURCE_PREPARATION'
-            : event.target === 'checklist'
-              ? 'DOCUMENT_REVIEW'
-              : 'DOCUMENT_DRAFTING',
-        documentStep:
-          event.target === 'resource'
-            ? undefined
-            : event.target === 'checklist'
-              ? 'CHECKLIST_DRAFTING'
-              : 'FOUNDATION_DRAFTING',
-        revision: {
-          ...run.revision,
-          resource: undefined,
-          implementation: undefined,
-        },
-        tasks: [],
-        evidence: { documentReview: event.evidence },
-        checklistRemediation: undefined,
       }
       break
     case 'resource_preparation_ready':
@@ -260,7 +207,6 @@ export function transitionDeliveryRun(
         documentStep: 'CHECKLIST_REVIEW',
         status: 'running',
         blockedReason: undefined,
-        documentRemediation: undefined,
         resourceRemediation: undefined,
       }
       break
@@ -276,33 +222,19 @@ export function transitionDeliveryRun(
         blockedReason: event.reason,
       }
       break
-    case 'document_review_blocked':
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      requireEvidence(
-        event.evidence,
-        run.documentStep === 'CHECKLIST_REVIEW'
-          ? (run.revision.resource ?? run.revision.document)
-          : run.revision.document,
-        ['blocked'],
-      )
-      next = {
-        ...withEvidence(run, 'documentReview', event.evidence),
-        status: 'needs_action',
-        blockedReason: 'document review is blocked and requires attention',
-      }
-      break
     case 'tasks_planned':
       requirePhase(run, 'ATOMIC_TASK_PLANNING')
       if (
         !run.revision.resource ||
-        run.evidence.resourcePreparation?.status !== 'passed'
+        run.evidence.resourcePreparation?.status !== 'passed' ||
+        run.evidence.resourcePreparation.revision !== run.revision.resource
       )
-        fail('task planning requires passed resource preparation evidence')
+        fail('task planning requires passed resource-content evidence')
       if (
-        run.evidence.documentReview?.status !== 'ready' ||
-        run.evidence.documentReview.revision !== run.revision.resource
+        run.documentReviewState.comprehensiveApproval?.revision !==
+        run.revision.resource
       )
-        fail('task planning requires current comprehensive review evidence')
+        fail('task planning requires current comprehensive review approval')
       assertTaskGraph(event.tasks)
       if (!event.tasks.length) fail('atomic task graph must not be empty')
       next = {

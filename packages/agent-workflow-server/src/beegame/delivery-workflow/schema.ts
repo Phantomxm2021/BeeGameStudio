@@ -2,9 +2,13 @@ import { z } from 'zod/v4'
 import type {
   AtomicTask,
   ChecklistRemediation,
+  DocumentReviewApproval,
+  DocumentReviewCheck,
+  DocumentReviewCycle,
+  DocumentReviewFinding,
+  DocumentReviewState,
   DeliveryPhase,
   DeliveryRun,
-  DocumentRemediation,
   DispatchRecord,
   EvidenceRef,
   Revision,
@@ -12,6 +16,10 @@ import type {
   TaskVerification,
   WorkflowEvent,
   WorkerDispatchRequest,
+} from './types'
+import {
+  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
 } from './types'
 
 export const DELIVERY_PHASES = [
@@ -98,13 +106,12 @@ export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
     id: z.string().min(1),
     title: z.string().min(1),
-    resourceRequirementIds: z.array(z.string().min(1)),
     checklistIds: z.array(z.string().min(1)),
+    resourceIds: z.array(z.string().min(1)),
+    contentIds: z.array(z.string().min(1)),
     dependsOn: z.array(z.string().min(1)),
     allowedPaths: z.array(z.string().min(1)).min(1),
     expectedArtifacts: z.array(z.string().min(1)).min(1),
-    resourceImportIds: z.array(z.string().min(1)).optional(),
-    resourceCompositionIds: z.array(z.string().min(1)).optional(),
     verification: z.array(verificationSchema).min(1),
     status: z.enum(ATOMIC_TASK_STATUSES),
     attempt: z.number().int().nonnegative(),
@@ -165,41 +172,149 @@ const resourceEvidenceSchema = z.union([
       state: z.enum(['stale', 'current']),
       actions: z.array(z.string().min(1)),
       failedActions: z.array(z.string().min(1)),
-      successfulImportCount: z.number().int().nonnegative(),
-      failedImportCount: z.number().int().nonnegative(),
+      successfulResourceCount: z.number().int().nonnegative(),
+      failedResourceCount: z.number().int().nonnegative(),
       observedAt: z.string().datetime(),
     })
     .strict(),
 ])
 
-const documentReviewFindingSchema = z
+const documentReviewCheckIdSchema = z.enum(
+  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+)
+
+export const persistedDocumentReviewCheckSchema: z.ZodType<DocumentReviewCheck> =
+  z
+    .object({
+      id: documentReviewCheckIdSchema,
+      status: z.enum(['pass', 'block']),
+      conclusion: z.string().trim().min(1),
+      evidence: z
+        .array(
+          z
+            .object({
+              path: z.string().min(1),
+              anchor: z.string().trim().min(1),
+            })
+            .strict(),
+        )
+        .min(1),
+      findingIds: z.array(z.string().min(1)),
+    })
+    .strict()
+
+export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFinding> =
+  z
+    .object({
+      findingId: z.string().min(1),
+      checkId: documentReviewCheckIdSchema,
+      severity: z.literal('blocking'),
+      owner: z.enum(['foundation', 'checklist', 'resource']),
+      regressionPaths: z.array(z.string().min(1)).optional(),
+      subjects: z.array(z.object({
+        path: z.string().min(1),
+        anchor: z.string().min(1),
+        requirementId: z.string().min(1).optional(),
+        resourceId: z.string().min(1).optional(),
+        contentId: z.string().min(1).optional(),
+      }).strict()).min(1),
+      observation: z.string().min(1),
+      blockingReason: z.string().min(1),
+      requiredAction: z.string().min(1),
+      closureCondition: z.string().min(1),
+    })
+    .strict()
+
+const checkEvidenceDigestsSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.string().min(1)),
+)
+
+const documentReviewApprovalSchema: z.ZodType<DocumentReviewApproval> = z
   .object({
-    id: z.string().min(1),
-    code: z.string().min(1).optional(),
-    severity: z.enum(['blocking', 'non_blocking']),
-    category: z.enum([
-      'cross_document_conflict',
-      'missing_spec',
-      'calculation',
-      'other',
-    ]),
-    remediationTarget: z.enum(['foundation', 'checklist', 'resource']),
-    resourceAction: z.enum(['repair', 'reselection']).optional(),
-    resourceRequirementIds: z.array(z.string().min(1)).optional(),
-    resourceImportIds: z.array(z.string().min(1)).optional(),
-    documents: z.array(z.string().min(1)).min(1),
-    description: z.string().min(1),
-    requiredAction: z.string().min(1),
+    scope: z.enum(['foundation', 'complete']),
+    revision: z.string().min(1),
+    checks: z.array(persistedDocumentReviewCheckSchema).min(1),
+    checkEvidenceDigests: checkEvidenceDigestsSchema,
+    evidencePath: z.string().min(1),
+    approvedAt: z.string().datetime(),
   })
   .strict()
+  .superRefine((approval, context) => {
+    const expected =
+      approval.scope === 'foundation'
+        ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
+        : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
+    const ids = approval.checks.map(check => check.id)
+    if (
+      ids.length !== expected.length ||
+      new Set(ids).size !== expected.length ||
+      expected.some(id => !ids.includes(id)) ||
+      approval.checks.some(check => check.status !== 'pass')
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message:
+          'document review approval requires the exact passing check set',
+      })
+  })
 
-const documentRemediationSchema: z.ZodType<DocumentRemediation> = z
+const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
   .object({
+    cycleId: z.string().min(1),
+    parentCycleId: z.string().min(1).optional(),
+    originScope: z.enum(['foundation', 'complete']),
+    scope: z.enum(['foundation', 'complete']),
+    mode: z.enum(['initial', 'closure']),
     sourceRevision: z.string().min(1),
-    evidencePath: z.string().min(1),
-    attempt: z.number().int().positive(),
-    findings: z.array(documentReviewFindingSchema).min(1),
-    resolvedFindingIds: z.array(z.string().min(1)).optional(),
+    requiredCheckIds: z.array(documentReviewCheckIdSchema).min(1),
+    checks: z.array(persistedDocumentReviewCheckSchema),
+    checkEvidenceDigests: checkEvidenceDigestsSchema,
+    findings: z.array(persistedDocumentReviewFindingSchema),
+    activeTarget: z.enum(['foundation', 'checklist', 'resource']).optional(),
+    acceptedSemanticResult: z.boolean(),
+    transportAttempts: z.number().int().min(0).max(2),
+    transportCorrection: z.string().min(1).optional(),
+    changedPaths: z.array(z.string().min(1)),
+    sourceArtifactDigests: z.record(z.string(), z.string().min(1)),
+    evidencePath: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((cycle, context) => {
+    if (
+      cycle.mode === 'initial' &&
+      (cycle.originScope !== cycle.scope ||
+        cycle.parentCycleId ||
+        (!cycle.acceptedSemanticResult && cycle.activeTarget) ||
+        cycle.changedPaths.length > 0)
+    )
+      context.addIssue({
+        code: 'custom',
+        message: 'initial document review cycle has closure-only state',
+      })
+    if (
+      cycle.mode === 'closure' &&
+      (!cycle.parentCycleId || !cycle.activeTarget)
+    )
+      context.addIssue({
+        code: 'custom',
+        message: 'closure document review cycle requires parent and target',
+      })
+  })
+
+const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
+  .object({
+    foundationApproval: documentReviewApprovalSchema.optional(),
+    comprehensiveApproval: documentReviewApprovalSchema.optional(),
+    activeCycle: documentReviewCycleSchema.optional(),
+    repairPasses: z
+      .object({
+        foundation: z.number().int().min(0).max(2),
+        checklist: z.number().int().min(0).max(2),
+        resource: z.number().int().min(0).max(2),
+      })
+      .strict(),
   })
   .strict()
 
@@ -216,10 +331,6 @@ const resourceRemediationSchema: z.ZodType<ResourceRemediation> = z
     sourceRevision: z.string().min(1),
     attempt: z.number().int().positive(),
     issues: z.array(z.string().min(1)).min(1),
-    mode: z.enum(['repair', 'reselection']),
-    preserveImportIds: z.array(z.string().min(1)),
-    preserveCompositionIds: z.array(z.string().min(1)),
-    reselectImportIds: z.array(z.string().min(1)).optional(),
   })
   .strict()
 
@@ -245,13 +356,13 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
 
 export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     runId: z.string().min(1),
     projectId: z.string().min(1),
     ownerId: z.string().min(1),
     parentRunId: z.string().min(1).optional(),
     confirmedBriefDigest: z.string().min(1),
-    confirmedBriefContext: z.string().min(1).optional(),
+    confirmedBriefContext: z.string().min(1),
     changeRequest: z.string().min(1).optional(),
     changeRoute: z
       .enum(['question', 'implementation_only', 'documents_required'])
@@ -277,15 +388,12 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     activeDispatch: dispatchRecordSchema.optional(),
     evidence: z
       .object({
-        documentReview: evidenceRefSchema.optional(),
         resourcePreparation: evidenceRefSchema.optional(),
         implementationAudit: evidenceRefSchema.optional(),
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
-    documentRemediation: documentRemediationSchema.optional(),
-    documentAdvisories: z.array(documentReviewFindingSchema).optional(),
-    documentReviewCycleCount: z.number().int().positive().optional(),
+    documentReviewState: documentReviewStateSchema,
     checklistRemediation: checklistRemediationSchema.optional(),
     resourceRemediation: resourceRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),

@@ -1,8 +1,7 @@
 export const RESOURCE_LIBRARY_ACTIONS = [
-  'query_candidates',
-  'import_elements',
-  'record_no_match',
-  'refresh_import_metadata',
+  'browse_catalog',
+  'import_resources',
+  'refresh_resource_metadata',
 ] as const
 
 export type ResourceLibraryAction = (typeof RESOURCE_LIBRARY_ACTIONS)[number]
