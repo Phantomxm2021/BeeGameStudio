@@ -12,6 +12,11 @@ const finding = {
   requiredAction: 'Use the canonical content root.',
   closureCondition: 'The document defines only the canonical root.',
 }
+const {
+  severity: _submissionSeverity,
+  owner: _submissionOwner,
+  ...submissionFinding
+} = finding
 
 function submission() {
   return {
@@ -25,8 +30,9 @@ function submission() {
         { path: 'docs/TECHNICAL_DESIGN.md', anchor: 'Resources' },
       ],
       findingIds: ['CONTRACT-1'],
+      assessments: [],
     }],
-    findings: [finding],
+    findings: [submissionFinding],
   }
 }
 
@@ -46,7 +52,7 @@ describe('native document review result tool', () => {
     expect(() =>
       schema.parse({
         ...submission(),
-        findings: [{ ...finding, regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],
+        findings: [{ ...submissionFinding, regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],
       }),
     ).toThrow()
     expect(
@@ -69,7 +75,7 @@ describe('native document review result tool', () => {
     expect(
       schema.parse({
         ...submission(),
-        findings: [{ ...finding, regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],
+        findings: [{ ...submissionFinding, regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],
       }),
     ).toMatchObject({
       findings: [{ regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],

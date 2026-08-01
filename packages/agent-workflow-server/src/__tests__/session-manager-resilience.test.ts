@@ -125,6 +125,85 @@ describe('BeeGame session runtime resilience', () => {
     })
   })
 
+  test('tracks a terminal tool from stream start until its result', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-streaming-terminal-'))
+    const workspacePath = join(root, 'workspace')
+    let releaseStream!: () => void
+    const streamGate = new Promise<void>(resolve => {
+      releaseStream = resolve
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 0,
+              content_block: {
+                type: 'tool_use',
+                id: 'review-terminal-1',
+                name: 'SubmitDocumentReviewResult',
+                input: {},
+              },
+            },
+          } as DashboardSDKMessage)
+          await streamGate
+          input.onMessage({
+            type: 'assistant',
+            message: {
+              content: [{
+                type: 'tool_use',
+                id: 'review-terminal-1',
+                name: 'SubmitDocumentReviewResult',
+                input: {},
+              }],
+            },
+          })
+          input.onMessage({
+            type: 'user',
+            message: {
+              content: [{
+                type: 'tool_result',
+                tool_use_id: 'review-terminal-1',
+                content: 'accepted',
+              }],
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    const send = manager.send(session.id, 'review documents')
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (manager.hasInFlightToolSubmission(
+        session.id,
+        'SubmitDocumentReviewResult',
+      )) break
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    expect(manager.hasInFlightToolSubmission(
+      session.id,
+      'SubmitDocumentReviewResult',
+    )).toBe(true)
+    releaseStream()
+    await send
+    expect(manager.hasInFlightToolSubmission(
+      session.id,
+      'SubmitDocumentReviewResult',
+    )).toBe(false)
+  })
+
   test('records native Resource Library provenance from workflow workers', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-evidence-'))
     const workspacePath = join(root, 'workspace')

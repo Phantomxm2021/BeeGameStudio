@@ -1,5 +1,6 @@
 import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
+import { documentReviewCheckSchema } from './document-review-check-schema'
 import {
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
 } from './types'
@@ -67,60 +68,36 @@ export const documentReviewFindingSchema = z
   .strict()
   .superRefine(refineDocumentReviewFinding)
 
-function foundationDocumentReviewFindingSchema(
+const documentReviewSubmissionFindingShape = {
+  findingId: documentReviewFindingShape.findingId,
+  checkId: documentReviewFindingShape.checkId,
+  subjects: documentReviewFindingShape.subjects,
+  observation: documentReviewFindingShape.observation,
+  blockingReason: documentReviewFindingShape.blockingReason,
+  requiredAction: documentReviewFindingShape.requiredAction,
+  closureCondition: documentReviewFindingShape.closureCondition,
+}
+
+function documentReviewSubmissionFindingSchema(
   mode: 'initial' | 'closure',
+  scope: 'foundation' | 'complete',
 ) {
-  const shape = {
-    findingId: documentReviewFindingShape.findingId,
-    checkId: documentReviewFindingShape.checkId,
-    severity: documentReviewFindingShape.severity,
-    owner: z.literal('foundation'),
-    subjects: z.array(z.object({
-      path: z.string().min(1),
-      anchor: z.string().trim().min(1),
-    }).strict()).min(1),
-    observation: documentReviewFindingShape.observation,
-    blockingReason: documentReviewFindingShape.blockingReason,
-    requiredAction: documentReviewFindingShape.requiredAction,
-    closureCondition: documentReviewFindingShape.closureCondition,
-  }
+  const subjects = scope === 'foundation'
+    ? z.array(z.object({
+        path: z.string().min(1),
+        anchor: z.string().trim().min(1),
+      }).strict()).min(1)
+    : documentReviewSubmissionFindingShape.subjects
   return z.object({
-    ...shape,
+    ...documentReviewSubmissionFindingShape,
+    subjects,
     ...(mode === 'closure'
       ? { regressionPaths: z.array(z.string().min(1)).optional() }
       : {}),
   }).strict()
 }
 
-export const documentReviewCheckSchema = z
-  .object({
-    id: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
-    status: z.enum(['pass', 'block']),
-    conclusion: z.string().trim().min(1),
-    evidence: z
-      .array(
-        z
-          .object({
-            path: z
-              .string()
-              .min(1)
-              .describe(
-                'Exact path of an artifact supplied in the active review request.',
-              ),
-            anchor: z
-              .string()
-              .trim()
-              .min(1)
-              .describe(
-                'For Markdown, use an exact heading from the artifact, with or without its # prefix. For JSON, use an exact JSON Pointer. Never submit prose, table rows, code expressions, or inferred labels.',
-              ),
-          })
-          .strict(),
-      )
-      .min(1),
-    findingIds: z.array(z.string().min(1)),
-  })
-  .strict()
+export { documentReviewCheckSchema } from './document-review-check-schema'
 
 export const documentAuthorTerminalSchema = z
   .object({
@@ -145,7 +122,7 @@ function requireConsistentDocumentReviewVerdict(
       status: 'pass' | 'block'
       findingIds: string[]
     }>
-    findings: Array<{ findingId: string; severity: 'blocking'; checkId: string }>
+    findings: Array<{ findingId: string; checkId: string }>
   },
   context: z.RefinementCtx,
 ): void {
@@ -236,7 +213,6 @@ function requireConsistentDocumentReviewVerdict(
 function documentReviewSubmissionSchema<
   FindingSchema extends z.ZodType<{
     findingId: string
-    severity: 'blocking'
     checkId: string
   }>,
 >(findingSchema: FindingSchema) {
@@ -254,11 +230,7 @@ export function documentReviewSubmissionSchemaForMode(
   scope: 'foundation' | 'complete' = 'complete',
 ) {
   return documentReviewSubmissionSchema(
-    scope === 'foundation'
-      ? foundationDocumentReviewFindingSchema(mode)
-      : mode === 'initial'
-        ? documentReviewInitialFindingSchema
-        : documentReviewFindingSchema,
+    documentReviewSubmissionFindingSchema(mode, scope),
   )
 }
 

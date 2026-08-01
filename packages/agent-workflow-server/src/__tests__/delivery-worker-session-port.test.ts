@@ -316,7 +316,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('persists document review from one structured submission without serializing prose', async () => {
+  test('derives document review from one structured submission without pre-persisting evidence', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-review-result-'),
     )
@@ -336,6 +336,11 @@ describe('delivery worker session credentials', () => {
       requiredAction: 'Choose one level and update both documents.',
       closureCondition: 'Both documents define the same level rule.',
     }
+    const {
+      severity: _submissionSeverity,
+      owner: _submissionOwner,
+      ...findingInput
+    } = finding
     const sessions = {
       start() {
         return { id: 'session-reviewer' }
@@ -362,9 +367,10 @@ describe('delivery worker session credentials', () => {
                     conclusion: 'The documents conflict.',
                     evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
                     findingIds: ['document-conflict'],
+                    assessments: [],
                   },
                 ],
-                findings: [finding],
+                findings: [findingInput],
               },
             },
           },
@@ -411,17 +417,15 @@ describe('delivery worker session credentials', () => {
         checklistIds: [],
         findings: [finding],
       })
-      const evidence = JSON.parse(
-        await readFile(
+      await expect(
+        readFile(
           join(
             workspacePath,
             '.beegame/workflow/evidence/document-review-foundation-dispatch-review.json',
           ),
           'utf8',
         ),
-      ) as { findings: unknown[] }
-      expect(evidence.findings).toHaveLength(1)
-      expect(evidence.findings[0]).toEqual(finding)
+      ).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -1222,6 +1226,64 @@ describe('delivery worker session credentials', () => {
     })
     await expect(
       port.hasInFlightMutation?.('dispatch-resource-import'),
+    ).resolves.toBe(false)
+  })
+
+  test('reports only an actively streaming terminal tool submission', async () => {
+    const events: Array<{
+      id: string
+      type: 'tool.started' | 'tool.completed'
+      text: string
+      createdAt: Date
+      payload: { toolUseID: string; toolName: string; input: Record<string, never> }
+    }> = [{
+      id: 'review-terminal-started',
+      type: 'tool.started' as const,
+      text: '',
+      createdAt: new Date(),
+      payload: {
+        toolUseID: 'review-terminal',
+        toolName: 'SubmitDocumentReviewResult',
+        input: {},
+      },
+    }]
+    const sessions = {
+      start() {
+        return { id: 'session-review-terminal' }
+      },
+      events() {
+        return events
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-review-terminal',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision-1',
+      contract: {},
+    })
+
+    await expect(
+      port.hasInFlightTerminalSubmission?.('dispatch-review-terminal'),
+    ).resolves.toBe(true)
+    events.push({
+      id: 'review-terminal-completed',
+      type: 'tool.completed',
+      text: '',
+      createdAt: new Date(),
+      payload: {
+        toolUseID: 'review-terminal',
+        toolName: 'SubmitDocumentReviewResult',
+        input: {},
+      },
+    })
+    await expect(
+      port.hasInFlightTerminalSubmission?.('dispatch-review-terminal'),
     ).resolves.toBe(false)
   })
 

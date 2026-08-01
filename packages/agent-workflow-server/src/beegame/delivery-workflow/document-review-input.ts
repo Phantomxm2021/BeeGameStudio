@@ -255,6 +255,29 @@ export function validateDocumentReviewChecks(input: {
           `document review check ${check.id} references a missing exact anchor`,
         )
     }
+    for (const assessment of check.assessments ?? []) {
+      for (const evidence of assessment.evidence) {
+        const content = artifacts.get(evidence.path)
+        if (content === undefined) {
+          issues.push(
+            `document review criterion ${assessment.criterion} references an unavailable artifact`,
+          )
+          continue
+        }
+        const anchorExists =
+          evidence.path === REVIEW_AUTHORITY_ARTIFACT_PATH
+            ? evidence.anchor === '$'
+            : evidence.path.endsWith('.md')
+              ? exactMarkdownHeadingExists(content, evidence.anchor)
+              : evidence.path.endsWith('.yaml') || evidence.path.endsWith('.yml')
+                ? structuredContentId(content, true) === evidence.anchor
+                : exactJsonPointerExists(content, evidence.anchor)
+        if (!anchorExists)
+          issues.push(
+            `document review criterion ${assessment.criterion} references a missing exact anchor`,
+          )
+      }
+    }
   }
   return issues
 }
@@ -268,10 +291,12 @@ export function checkEvidenceDigests(input: {
     input.checks.map(check => [
       check.id,
       Object.fromEntries(
-        check.evidence.map(evidence => [
-          evidence.path,
-          digests[evidence.path]!,
-        ]),
+        [
+          ...check.evidence,
+          ...(check.assessments ?? []).flatMap(assessment =>
+            assessment.evidence,
+          ),
+        ].map(evidence => [evidence.path, digests[evidence.path]!]),
       ),
     ]),
   )

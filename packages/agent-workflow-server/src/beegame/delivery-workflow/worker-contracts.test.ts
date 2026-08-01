@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  documentReviewCheckSchema,
   documentReviewFindingSchema,
   documentReviewSubmissionSchemaForMode,
 } from './worker-contracts'
+import { GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA } from './types'
 
 const baseFinding = {
   findingId: 'CALC-1',
@@ -15,6 +17,11 @@ const baseFinding = {
   requiredAction: 'Correct the calculation.',
   closureCondition: 'The documents define one deterministic calculation.',
 }
+const {
+  severity: _submissionSeverity,
+  owner: _submissionOwner,
+  ...submissionFinding
+} = baseFinding
 
 describe('document review finding contract', () => {
   test('preserves the single canonical finding contract', () => {
@@ -54,8 +61,9 @@ describe('document review finding contract', () => {
         conclusion: 'The delivery contract conflicts.',
         evidence: [{ path: 'systemDeliveryContract', anchor: '/roots/content' }],
         findingIds: ['CALC-1'],
+        assessments: [],
       }],
-      findings: [{ ...baseFinding, regressionPaths: ['docs/GDD.md'] }],
+      findings: [{ ...submissionFinding, regressionPaths: ['docs/GDD.md'] }],
     }
     expect(() =>
       documentReviewSubmissionSchemaForMode('initial').parse(submission),
@@ -75,9 +83,10 @@ describe('document review finding contract', () => {
         conclusion: 'The foundation documents conflict.',
         evidence: [{ path: 'systemDeliveryContract', anchor: '/content/factOwnership' }],
         findingIds: ['CALC-1'],
+        assessments: [],
       }],
       findings: [{
-        ...baseFinding,
+        ...submissionFinding,
         checkId: 'cross_document_consistency',
         owner: 'resource',
         subjects: [{
@@ -93,5 +102,60 @@ describe('document review finding contract', () => {
         'foundation',
       ).parse(submission),
     ).toThrow()
+  })
+})
+
+describe('game design review evidence contract', () => {
+  const strategyCheck = {
+    id: 'gameplay_strategy_viability' as const,
+    status: 'pass' as const,
+    conclusion: 'The documented strategy space is viable.',
+    evidence: [{ path: 'docs/GDD.md', anchor: 'Strategy' }],
+    findingIds: [],
+    assessments: GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA.gameplay_strategy_viability.map(
+      criterion => ({
+        criterion,
+        status: 'pass' as const,
+        evidence: [{ path: 'docs/GDD.md', anchor: 'Strategy' }],
+        derivation: 'Compared every documented choice, response and recovery path.',
+        conclusion: 'The criterion is supported by the cited design facts.',
+      }),
+    ),
+  }
+
+  test('requires structured criteria instead of a prose-only design pass', () => {
+    const { assessments: _assessments, ...proseOnly } = strategyCheck
+    expect(() => documentReviewCheckSchema.parse(proseOnly)).toThrow()
+    expect(documentReviewCheckSchema.parse(strategyCheck)).toEqual(strategyCheck)
+  })
+
+  test('does not duplicate finding identities inside criterion assessments', () => {
+    expect(() => documentReviewCheckSchema.parse({
+      ...strategyCheck,
+      assessments: strategyCheck.assessments.map(assessment => ({
+        ...assessment,
+        findingIds: [],
+      })),
+    })).toThrow()
+  })
+
+  test('rejects duplicate criteria and check-level status drift', () => {
+    expect(() =>
+      documentReviewCheckSchema.parse({
+        ...strategyCheck,
+        assessments: strategyCheck.assessments.map(assessment => ({
+          ...assessment,
+          criterion: 'meaningful_choices',
+        })),
+      }),
+    ).toThrow('requires its exact criterion set')
+
+    expect(() =>
+      documentReviewCheckSchema.parse({
+        ...strategyCheck,
+        status: 'block',
+        findingIds: ['STRATEGY-1'],
+      }),
+    ).toThrow('status must match its criterion statuses')
   })
 })

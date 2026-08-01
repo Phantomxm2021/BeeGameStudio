@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { documentReviewCheckSchema } from './document-review-check-schema'
 import type {
   AtomicTask,
   ChecklistRemediation,
@@ -184,24 +185,7 @@ const documentReviewCheckIdSchema = z.enum(
 )
 
 export const persistedDocumentReviewCheckSchema: z.ZodType<DocumentReviewCheck> =
-  z
-    .object({
-      id: documentReviewCheckIdSchema,
-      status: z.enum(['pass', 'block']),
-      conclusion: z.string().trim().min(1),
-      evidence: z
-        .array(
-          z
-            .object({
-              path: z.string().min(1),
-              anchor: z.string().trim().min(1),
-            })
-            .strict(),
-        )
-        .min(1),
-      findingIds: z.array(z.string().min(1)),
-    })
-    .strict()
+  documentReviewCheckSchema
 
 export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFinding> =
   z

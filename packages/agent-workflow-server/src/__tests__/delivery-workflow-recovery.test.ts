@@ -77,6 +77,7 @@ describe('delivery workflow recovery', () => {
           conclusion: 'A required behavior is missing.',
           evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           findingIds: ['missing-behavior'],
+          assessments: [],
         },
       ],
       reviewedDocumentPaths: [],
@@ -1030,6 +1031,71 @@ describe('delivery workflow recovery', () => {
     })
   })
 
+  test('gives an actively streaming reviewer terminal one bounded grace window', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-terminal-grace-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+    })
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      idleProgressTimeoutMs: 0,
+      resourceMaxDurationMs: 0,
+      resourceMaxTokens: 0,
+      documentReviewMaxDurationMs: 20,
+      documentReviewTerminalGraceMs: 70,
+      documentReviewMaxTokens: 0,
+      documentAuthorMaxDurationMs: 0,
+      documentAuthorMaxTokens: 0,
+      progressPollIntervalMs: 5,
+      workerPort: {
+        async start(request) {
+          return {
+            sessionId: 'session-review',
+            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+        async hasInFlightTerminalSubmission() {
+          return true
+        },
+      },
+    })
+    await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: initial.revision.document,
+      contract: { reviewScope: 'foundation' },
+    })
+    await new Promise(resolve => setTimeout(resolve, 35))
+    expect((await store.load())?.status).toBe('running')
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await store.load())?.status === 'needs_action') break
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(await store.load()).toMatchObject({
+      status: 'needs_action',
+      blockedReason:
+        'document-reviewer terminal submission exceeded its 70ms grace limit',
+    })
+  })
+
   test('bounds reviewer usage by total tokens including cache reads', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-token-limit-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -1383,6 +1449,7 @@ describe('delivery workflow recovery', () => {
           conclusion: 'The authority is aligned.',
           evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           findingIds: [],
+          assessments: [],
         },
       ],
       reviewedDocumentPaths: [],

@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  checkEvidenceDigests,
   validateDocumentReviewChecks,
   validateDocumentReviewFindingSubjects,
 } from './document-review-input'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
+import {
+  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+} from './types'
 
 describe('system delivery contract projection', () => {
   test('projects the one canonical engine-neutral delivery boundary', () => {
@@ -113,22 +118,61 @@ describe('system delivery contract review evidence', () => {
       }),
     ).toEqual([])
   })
+
+  test('validates criterion evidence independently and includes it in check invalidation', () => {
+    const projectEvidence = [{ path: 'docs/GDD.md', anchor: 'Gameplay' }]
+    const checks = foundationChecks(projectEvidence).map(check =>
+      ['cross_document_consistency', 'technical_feasibility'].includes(check.id)
+        ? {
+            ...check,
+            evidence: [
+              ...projectEvidence,
+              {
+                path: 'systemDeliveryContract',
+                anchor: '/canonicalAssetManifest/path',
+              },
+            ],
+          }
+        : check,
+    )
+    const strategy = checks.find(
+      check => check.id === 'gameplay_strategy_viability',
+    )!
+    strategy.assessments![0]!.evidence = [
+      { path: 'systemDeliveryContract', anchor: '/content/schema' },
+    ]
+    const issues = validateDocumentReviewChecks({
+      scope: 'foundation',
+      artifacts,
+      checks,
+    })
+    expect(issues).toEqual([])
+    expect(
+      checkEvidenceDigests({ checks, artifacts })[
+        'gameplay_strategy_viability'
+      ],
+    ).toHaveProperty('systemDeliveryContract')
+  })
 })
 
 function foundationChecks(evidence: Array<{ path: string; anchor: string }>) {
-  return [
-    'brief_alignment',
-    'cross_document_consistency',
-    'gameplay_completeness',
-    'technical_feasibility',
-    'art_direction_coherence',
-    'ui_audio_consistency',
-    'acceptance_observability',
-  ].map(id => ({
-    id: id as Parameters<typeof validateDocumentReviewChecks>[0]['checks'][number]['id'],
+  return FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(id => ({
+    id,
     status: 'pass' as const,
     conclusion: 'Reviewed.',
     evidence,
     findingIds: [],
+    assessments:
+      id in GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+        ? GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+            id as keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+          ].map(criterion => ({
+            criterion,
+            status: 'pass' as const,
+            evidence,
+            derivation: 'Derived from the supplied design facts.',
+            conclusion: 'The fixed criterion passes.',
+          }))
+        : [],
   }))
 }

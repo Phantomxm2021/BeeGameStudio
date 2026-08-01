@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -24,6 +24,8 @@ import {
   COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+  GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
   type DocumentReviewCheck,
   type DocumentReviewScope,
@@ -41,11 +43,15 @@ afterEach(async () => {
 })
 
 describe('single-track document review workflow', () => {
-  test('uses the exact document-authoritative 7 plus 5 review matrix', () => {
+  test('uses the exact document-authoritative 11 plus 5 review matrix', () => {
     expect(FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS).toEqual([
       'brief_alignment',
       'cross_document_consistency',
       'gameplay_completeness',
+      'gameplay_strategy_viability',
+      'economy_progression_integrity',
+      'numeric_balance_feasibility',
+      'pacing_difficulty_coherence',
       'technical_feasibility',
       'art_direction_coherence',
       'ui_audio_consistency',
@@ -447,6 +453,14 @@ describe('single-track document review workflow', () => {
     expect(afterChecklist.documentReviewState.activeCycle?.findings[0]?.findingId).toBe(
       'resource-gap',
     )
+    expect(afterChecklist.documentReviewState.activeCycle?.requiredCheckIds).toEqual([
+      ...GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
+      'technical_feasibility',
+      'resource_semantic_fitness',
+      'content_structure_fitness',
+      'resource_content_consistency',
+      'implementation_readiness',
+    ])
     expect(afterChecklist.documentReviewState.repairPasses).toEqual({
       foundation: 0,
       checklist: 1,
@@ -537,23 +551,27 @@ describe('single-track document review workflow', () => {
       },
     ]
 
+    const rejectedTerminal = await reviewTerminal({
+      workspacePath,
+      scope: 'foundation',
+      revision: base.revision.document,
+      verdict: 'NEEDS_REVISION',
+      checks,
+      findings: [regression('docs/TECHNICAL_DESIGN.md')],
+    })
     await expect(
       reconcileDocumentReview({
         run,
         workspacePath,
-        terminal: await reviewTerminal({
-          workspacePath,
-          scope: 'foundation',
-          revision: base.revision.document,
-          verdict: 'NEEDS_REVISION',
-          checks,
-          findings: [regression('docs/TECHNICAL_DESIGN.md')],
-        }),
+        terminal: rejectedTerminal,
         currentDocumentRevision: base.revision.document,
         scope: 'foundation',
         audit: () => ({ valid: true, issues: [] }),
       }),
     ).rejects.toThrow('changed-path regression')
+    await expect(
+      readFile(join(workspacePath, rejectedTerminal.evidencePath), 'utf8'),
+    ).rejects.toThrow()
 
     const accepted = await reconcileDocumentReview({
       run,
@@ -683,6 +701,18 @@ function passingChecks(scope: DocumentReviewScope): DocumentReviewCheck[] {
         : []),
     ],
     findingIds: [],
+    assessments:
+      id in GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+        ? GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+            id as keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+          ].map(criterion => ({
+            criterion,
+            status: 'pass' as const,
+            evidence: [{ path: 'docs/GDD.md', anchor: 'Spec' }],
+            derivation: 'Compared the documented choices, values and state paths.',
+            conclusion: 'The criterion is satisfied by the cited design facts.',
+          }))
+        : [],
   }))
 }
 
@@ -690,11 +720,20 @@ function checksWithBlocks(
   scope: DocumentReviewScope,
   blocks: Partial<Record<DocumentReviewCheck['id'], string[]>>,
 ): DocumentReviewCheck[] {
-  return passingChecks(scope).map(check =>
-    blocks[check.id]
-      ? { ...check, status: 'block' as const, findingIds: blocks[check.id]! }
-      : check,
-  )
+  return passingChecks(scope).map(check => {
+    const findingIds = blocks[check.id]
+    if (!findingIds) return check
+    return {
+      ...check,
+      status: 'block' as const,
+      findingIds,
+      assessments: check.assessments.map((assessment, index) =>
+        index === 0
+          ? { ...assessment, status: 'block' as const }
+          : assessment,
+      ),
+    }
+  })
 }
 
 function reviewFinding(input: {
@@ -736,10 +775,6 @@ async function reviewTerminal(input: {
   >['findings']
 }): Promise<Extract<WorkerTerminalResult, { workerType: 'document-reviewer' }>> {
   const evidencePath = `.beegame/workflow/evidence/review-${randomUUID()}.json`
-  await mkdir(join(input.workspacePath, '.beegame/workflow/evidence'), {
-    recursive: true,
-  })
-  await writeFile(join(input.workspacePath, evidencePath), '{}\n')
   return {
     workerType: 'document-reviewer',
     revision: input.revision,

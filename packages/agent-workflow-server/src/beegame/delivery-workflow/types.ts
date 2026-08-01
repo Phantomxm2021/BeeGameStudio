@@ -98,6 +98,10 @@ export const FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS = [
   'brief_alignment',
   'cross_document_consistency',
   'gameplay_completeness',
+  'gameplay_strategy_viability',
+  'economy_progression_integrity',
+  'numeric_balance_feasibility',
+  'pacing_difficulty_coherence',
   'technical_feasibility',
   'art_direction_coherence',
   'ui_audio_consistency',
@@ -125,12 +129,61 @@ export type ComprehensiveDocumentReviewCheckId =
   (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number]
 export type DocumentReviewCheckId = ComprehensiveDocumentReviewCheckId
 
+export const DOCUMENT_REVIEW_OWNER_BY_CHECK_ID = Object.fromEntries([
+  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(id => [id, 'foundation'] as const),
+  ['checklist_traceability', 'checklist'] as const,
+  ['resource_semantic_fitness', 'resource'] as const,
+  ['content_structure_fitness', 'resource'] as const,
+  ['resource_content_consistency', 'resource'] as const,
+  ['implementation_readiness', 'resource'] as const,
+]) as Record<DocumentReviewCheckId, 'foundation' | 'checklist' | 'resource'>
+
+export const GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA = {
+  gameplay_strategy_viability: [
+    'meaningful_choices',
+    'dominant_strategy_risk',
+    'counterplay_and_recovery',
+  ],
+  economy_progression_integrity: [
+    'sources_and_sinks',
+    'affordability_and_growth',
+    'exploit_and_deadlock',
+  ],
+  numeric_balance_feasibility: [
+    'outcome_bounds',
+    'relative_value',
+    'formula_consistency',
+  ],
+  pacing_difficulty_coherence: [
+    'pressure_curve',
+    'capability_curve',
+    'spike_and_recovery',
+  ],
+} as const satisfies Partial<Record<DocumentReviewCheckId, readonly string[]>>
+
+export type GameDesignDocumentReviewCheckId =
+  keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+export const GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS = Object.keys(
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+) as GameDesignDocumentReviewCheckId[]
+export type DocumentReviewCriterionId =
+  (typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA)[GameDesignDocumentReviewCheckId][number]
+
+export type DocumentReviewAssessment = {
+  criterion: DocumentReviewCriterionId
+  status: 'pass' | 'block'
+  evidence: Array<{ path: string; anchor: string }>
+  derivation: string
+  conclusion: string
+}
+
 export type DocumentReviewCheck = {
   id: DocumentReviewCheckId
   status: 'pass' | 'block'
   conclusion: string
   evidence: Array<{ path: string; anchor: string }>
   findingIds: string[]
+  assessments: DocumentReviewAssessment[]
 }
 
 export type DocumentReviewFindingSubject = {
@@ -379,5 +432,7 @@ export type DeliveryWorkerPort = {
   status(dispatchId: string): Promise<DispatchRecord>
   /** True while a write or Resource Library import is still in flight. */
   hasInFlightMutation?(dispatchId: string): Promise<boolean>
+  /** True while the worker's sole structured terminal tool is streaming. */
+  hasInFlightTerminalSubmission?(dispatchId: string): Promise<boolean>
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }

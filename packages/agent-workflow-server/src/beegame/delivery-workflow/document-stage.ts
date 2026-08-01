@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import { isWorkflowEvidenceFile } from './evidence'
+import { resolveWorkflowEvidencePath } from './evidence'
 import {
   checkEvidenceDigests,
   documentReviewArtifactDigests,
@@ -25,6 +26,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
   type DocumentReviewCheck,
   type DocumentReviewCheckId,
@@ -65,6 +67,7 @@ const CLOSURE_CHECKS: Record<
     'implementation_readiness',
   ],
   resource: [
+    ...GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
     'technical_feasibility',
     'resource_semantic_fitness',
     'content_structure_fitness',
@@ -926,7 +929,11 @@ export async function reconcileDocumentReview(input: {
     throw new Error(
       `document review cannot be reconciled: ${readiness.issues.join('; ')}`,
     )
-  if (!isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath))
+  const acceptedEvidencePath = resolveWorkflowEvidencePath(
+    input.workspacePath,
+    input.terminal.evidencePath,
+  )
+  if (!acceptedEvidencePath)
     throw new Error(
       'document review evidence is outside the workflow evidence directory',
     )
@@ -977,6 +984,13 @@ export async function reconcileDocumentReview(input: {
   ]
   if (contractIssues.length)
     throw new Error([...new Set(contractIssues)].join('; '))
+
+  await mkdir(dirname(acceptedEvidencePath), { recursive: true })
+  await writeFile(
+    acceptedEvidencePath,
+    `${JSON.stringify(input.terminal, null, 2)}\n`,
+    'utf8',
+  )
 
   const findings = normalizedReviewFindings(cycle, input.terminal.findings)
   const submittedDigests = checkEvidenceDigests({

@@ -12,6 +12,8 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  DOCUMENT_REVIEW_OWNER_BY_CHECK_ID,
+  type DocumentReviewCheckId,
 } from './delivery-workflow/types'
 import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
 import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-contracts'
@@ -264,6 +266,17 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) return false
       return hasInFlightResourceMutation(input.sessions.events(sessionId))
+    },
+    async hasInFlightTerminalSubmission(dispatchId) {
+      const sessionId = sessions.get(dispatchId)
+      const request = requests.get(dispatchId)
+      if (!sessionId || !request) return false
+      const terminalToolName = structuredSubmissionToolName(request.workerType)
+      if (!terminalToolName) return false
+      return Boolean(input.sessions.hasInFlightToolSubmission?.(
+        sessionId,
+        terminalToolName,
+      )) || hasInFlightTool(input.sessions.events(sessionId), terminalToolName)
     },
     async waitForTerminal(dispatchId) {
       const sessionId = sessions.get(dispatchId)
@@ -519,6 +532,13 @@ async function createDeterministicDocumentReviewTerminal(input: {
         reviewMode,
         scope,
       ).parse(candidate)
+      const findings = submission.findings.map(finding => ({
+        ...finding,
+        severity: 'blocking' as const,
+        owner: DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[
+          finding.checkId as DocumentReviewCheckId
+        ],
+      }))
       const evidencePath = `.beegame/workflow/evidence/document-review-${scope}-${input.request.dispatchId}.json`
       const terminal = documentReviewerTerminalSchema.parse({
         workerType: 'document-reviewer',
@@ -533,13 +553,8 @@ async function createDeterministicDocumentReviewTerminal(input: {
           scope === 'foundation'
             ? []
             : await readAcceptanceChecklistIds(input.request.workspacePath),
-        findings: submission.findings,
+        findings,
         evidencePath,
-      })
-      await writeCanonicalTerminalEvidence({
-        workspacePath: input.request.workspacePath,
-        evidencePath,
-        value: terminal,
       })
       return terminal
     } catch (error) {
@@ -768,6 +783,24 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
       toolName === 'AssetManifest'
     )
       active.set(toolUseId, true)
+  }
+  return active.size > 0
+}
+
+function hasInFlightTool(events: BeeGameEvent[], expectedToolName: string): boolean {
+  const active = new Set<string>()
+  for (const event of events) {
+    const toolUseId = String(event.payload?.toolUseID ?? '')
+    if (!toolUseId) continue
+    if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+      active.delete(toolUseId)
+      continue
+    }
+    if (
+      event.type === 'tool.started' &&
+      String(event.payload?.toolName ?? '') === expectedToolName
+    )
+      active.add(toolUseId)
   }
   return active.size > 0
 }

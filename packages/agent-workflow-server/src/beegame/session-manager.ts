@@ -370,6 +370,8 @@ type SessionRecord = {
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
   toolUses: Map<string, { toolName: string; input?: unknown }>
+  /** Tool-use blocks observed before their streamed JSON input is complete. */
+  streamingToolUses: Map<string, string>
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
@@ -645,6 +647,7 @@ export class BeeGameSessionManager {
       abortController: null,
       pendingPermissions: new Map(),
       toolUses: new Map(),
+      streamingToolUses: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -900,6 +903,12 @@ export class BeeGameSessionManager {
         event => event.id > after && !isThinkingProtocolControlEvent(event),
       )
       .map(event => formatBeeGameEventForDisplay(event, record.language))
+  }
+
+  hasInFlightToolSubmission(sessionId: string, toolName: string): boolean {
+    const record = this.sessions.get(sessionId)
+    if (!record) return false
+    return [...record.streamingToolUses.values()].some(name => name === toolName)
   }
 
   transcript(sessionId: string): Array<{
@@ -1414,6 +1423,7 @@ export class BeeGameSessionManager {
       onMessage: message => {
         onRuntimeMessage?.()
         appendProjectAgentRawLog(record, message)
+        trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
         }
@@ -1457,6 +1467,13 @@ export class BeeGameSessionManager {
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
+          if (
+            toolEvent.type === 'tool.completed' ||
+            toolEvent.type === 'tool.failed'
+          ) {
+            const toolUseId = getStringField(toolEvent.payload, 'toolUseID')
+            if (toolUseId) record.streamingToolUses.delete(toolUseId)
+          }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
         this.queueUsageRecord(record, submittedTurnId, message)
@@ -5177,6 +5194,20 @@ function extractStreamTextDelta(message: DashboardSDKMessage): string {
   const delta = getObjectField(event, 'delta')
   if (!delta || getStringField(delta, 'type') !== 'text_delta') return ''
   return getStringField(delta, 'text')
+}
+
+function trackStreamingToolUse(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): void {
+  if (message.type !== 'stream_event') return
+  const event = getObjectField(message, 'event') ?? message
+  if (getStringField(event, 'type') !== 'content_block_start') return
+  const block = getObjectField(event, 'content_block')
+  if (getStringField(block, 'type') !== 'tool_use') return
+  const toolUseId = getStringField(block, 'id')
+  const toolName = getStringField(block, 'name')
+  if (toolUseId && toolName) record.streamingToolUses.set(toolUseId, toolName)
 }
 
 function extractStreamThinkingStatus(

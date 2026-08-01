@@ -98,6 +98,29 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('修复基础文档')).toBeInTheDocument();
   });
 
+  it('renders fixed game-design review tasks as user-facing labels', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_design_review',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          tasks: [
+            { id: 'strategy', title: 'gameplay_strategy_viability', status: 'completed', operation: 'review' },
+            { id: 'economy', title: 'economy_progression_integrity', status: 'completed', operation: 'review' },
+            { id: 'numeric', title: 'numeric_balance_feasibility', status: 'running', operation: 'review' },
+            { id: 'pacing', title: 'pacing_difficulty_coherence', status: 'pending', operation: 'review' },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('审计：策略可行性')).toBeInTheDocument();
+    expect(screen.getByText('审计：经济与成长闭环')).toBeInTheDocument();
+    expect(screen.getByText('审计：数值可行性')).toBeInTheDocument();
+    expect(screen.getByText('审计：节奏与难度一致性')).toBeInTheDocument();
+  });
+
   it('shows a red failure control, copies the error detail and invokes retry', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     const writeText = vi.fn().mockResolvedValue(undefined);

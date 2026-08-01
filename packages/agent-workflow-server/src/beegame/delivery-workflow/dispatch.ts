@@ -34,6 +34,7 @@ const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
 const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 5 * 60 * 1000
+const DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS = 3 * 60 * 1000
 const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 300_000
 // Initial authoring owns six mutually consistent foundation documents in one
 // bounded pass. Its wall-clock budget must cover that fixed workload; retries
@@ -111,6 +112,7 @@ export function createDeliveryDispatcher(options: {
   resourceMaxDurationMs?: number
   resourceMaxTokens?: number
   documentReviewMaxDurationMs?: number
+  documentReviewTerminalGraceMs?: number
   documentReviewMaxTokens?: number
   documentAuthorMaxDurationMs?: number
   documentAuthorMaxTokens?: number
@@ -148,6 +150,9 @@ export function createDeliveryDispatcher(options: {
     DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS
   const documentReviewMaxTokens =
     options.documentReviewMaxTokens ?? DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS
+  const documentReviewTerminalGraceMs =
+    options.documentReviewTerminalGraceMs ??
+    DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS
   const documentAuthorMaxDurationMs =
     options.documentAuthorMaxDurationMs ??
     DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS
@@ -388,6 +393,11 @@ export function createDeliveryDispatcher(options: {
         run.activeDispatch.workerType === 'document-reviewer'
       const isDocumentAuthor =
         run.activeDispatch.workerType === 'document-author'
+      const documentTerminalInFlight =
+        isDocumentReviewer &&
+        (await options.workerPort
+          .hasInFlightTerminalSubmission?.(dispatchId)
+          .catch(() => false))
       const resourceMutationInFlight =
         isResourceWorker &&
         (await options.workerPort
@@ -470,9 +480,19 @@ export function createDeliveryDispatcher(options: {
           Number.isFinite(startedAt) &&
           Date.now() - startedAt >= documentDurationLimit
         ) {
+          if (
+            isDocumentReviewer &&
+            documentTerminalInFlight &&
+            documentReviewTerminalGraceMs > 0 &&
+            Date.now() - startedAt <
+              documentDurationLimit + documentReviewTerminalGraceMs
+          )
+            continue
           await markDispatchNeedsAction(
             dispatchId,
-            `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
+            isDocumentReviewer && documentTerminalInFlight
+              ? `document-reviewer terminal submission exceeded its ${documentReviewTerminalGraceMs}ms grace limit`
+              : `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
           )
           return
         }

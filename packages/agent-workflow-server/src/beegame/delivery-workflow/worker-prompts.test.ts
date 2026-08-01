@@ -43,4 +43,18 @@ describe('resource-content worker prompts', () => {
     expect(reviewerPrompt).toContain('never a runtime/source substitute or second loader')
     expect(reviewerPrompt).toContain('project documents that agree with each other but conflict with systemDeliveryContract')
   })
+
+  test('requires structured strategy, economy, numeric and pacing derivations', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-reviewer', phase: 'DOCUMENT_REVIEW', revision: 'revision',
+      contract: { reviewScope: 'foundation', reviewMode: 'initial' },
+    })
+    expect(prompt).toContain('gameplay_strategy_viability')
+    expect(prompt).toContain('economy_progression_integrity')
+    expect(prompt).toContain('numeric_balance_feasibility')
+    expect(prompt).toContain('pacing_difficulty_coherence')
+    expect(prompt).toContain('Use only cited document facts')
+    expect(prompt).toContain('not final feel or empirical balance')
+  })
 })

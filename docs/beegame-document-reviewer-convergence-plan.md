@@ -31,6 +31,10 @@ Foundation Review 不得要求尚未创建的 Checklist、Manifest、资源或�
 - `brief_alignment`
 - `cross_document_consistency`
 - `gameplay_completeness`
+- `gameplay_strategy_viability`
+- `economy_progression_integrity`
+- `numeric_balance_feasibility`
+- `pacing_difficulty_coherence`
 - `technical_feasibility`
 - `art_direction_coherence`
 - `ui_audio_consistency`
@@ -50,7 +54,7 @@ Comprehensive 的固定集合不是替换 Foundation，而是严格并集：
 COMPREHENSIVE_CHECKS = FOUNDATION_CHECKS + COMPREHENSIVE_ADDITIONS
 ```
 
-因此 Foundation 固定为 7 项，Comprehensive 固定为 12 项。不得重命名、替换、拆分或按案例新增顶层 check；新发现的审计规则必须归入已有 check 的职责。
+因此 Foundation 固定为 11 项，Comprehensive 固定为 16 项。不得重命名、替换、拆分或按案例新增顶层 check；新发现的审计规则必须归入已有 check 的职责。
 
 ### 3.3 Check 职责边界
 
@@ -59,6 +63,10 @@ COMPREHENSIVE_CHECKS = FOUNDATION_CHECKS + COMPREHENSIVE_ADDITIONS
 | `brief_alignment` | 确认简报、范围与语言合同一致 | 自行扩大产品范围 |
 | `cross_document_consistency` | 跨文档事实、ID 与权威归属一致 | 选择一个冲突文档作为默认权威 |
 | `gameplay_completeness` | 完整玩家循环、状态、机制与结果 | 实现代码与运行证明 |
+| `gameplay_strategy_viability` | 玩家有意义的选择、支配策略风险、反制与失败恢复 | 以个人偏好要求更多玩法或内容 |
+| `economy_progression_integrity` | 来源与消耗、可负担性与成长、套利与资源死锁 | 假设文档未声明的留存或商业化目标 |
+| `numeric_balance_feasibility` | 结果边界、相对价值和公式一致性可由已声明数值成立 | 声称文档审计已经证明最终手感或精确平衡 |
+| `pacing_difficulty_coherence` | 压力曲线、能力曲线、难度尖峰与恢复窗口相互匹配 | 要求尚未实现的运行采样或自动试玩结果 |
 | `technical_feasibility` | 目标约束、确定性规则和单一资源加载路径可实现 | 指定框架内部实现或引擎专用对象 |
 | `art_direction_coherence` | 视觉职责、风格和可读性要求一致 | 选择具体 Catalog 资源 |
 | `ui_audio_consistency` | UI、交互与音频职责跨文档一致 | 要求尚未存在的运行录屏 |
@@ -70,6 +78,23 @@ COMPREHENSIVE_CHECKS = FOUNDATION_CHECKS + COMPREHENSIVE_ADDITIONS
 | `implementation_readiness` | 当前合同足以生成唯一、可执行的实现计划 | 要求尚未实现的构建或运行结果 |
 
 每个 required check 必须返回 conclusion、artifact anchors 和必要的 finding。不得根据项目名、游戏类型、关键词或正则动态增删 check。
+
+### 3.4 游戏设计推导证据
+
+`gameplay_strategy_viability`、`economy_progression_integrity`、`numeric_balance_feasibility` 与 `pacing_difficulty_coherence` 不是对文档中是否出现相关章节的关键词检查。每项 check 必须提交以下固定 criterion，且每个 criterion 必须有独立状态、精确 artifact evidence、推导过程和结论。父 check 的 evidence 支撑总体结论，criterion evidence 支撑各自推导；两者都独立验证 artifact 与 anchor，不要求重复同一证据项。服务端将两层 evidence 的 artifact digest 合并为该 check 的唯一失效依据。Finding 只由父 check 的 `findingIds` 统一关联，criterion 不重复提交 `findingIds`：
+
+| Check | 固定 criterion |
+| --- | --- |
+| `gameplay_strategy_viability` | `meaningful_choices`、`dominant_strategy_risk`、`counterplay_and_recovery` |
+| `economy_progression_integrity` | `sources_and_sinks`、`affordability_and_growth`、`exploit_and_deadlock` |
+| `numeric_balance_feasibility` | `outcome_bounds`、`relative_value`、`formula_consistency` |
+| `pacing_difficulty_coherence` | `pressure_curve`、`capability_curve`、`spike_and_recovery` |
+
+推导只能使用 Confirmed Brief 与当前项目文档明确声明的规则、数值、公式和约束，不得补造数值、默认概率、玩家水平或平台行为。数值 criterion 的推导至少给出所使用的输入、单位或无量纲说明、计算/比较方法和结果边界；定性 criterion 必须列出被比较的玩家选择、反制关系或状态路径。若缺少的信息会导致核心循环的可行性、策略空间、经济闭环或难度曲线无法判断，该缺失本身就是指向其事实 owner 的 blocking finding。
+
+文档审计的目标是排除可证明的无解、必胜、支配策略、资源死锁、无限套利、公式冲突和不连续难度边界，并确认存在可实现的设计区间。它不宣称已经证明最终手感或精确平衡；实现后的运行验收使用同一批批准规则与 Checklist 验证实际行为，不建立第二套 balance finding、第二份数值权威或自动调参回路。
+
+服务端必须结构化约束 criterion 集合、状态与 evidence；任一 criterion 阻塞时父 check 必须阻塞并引用至少一个同 check finding。不得仅靠 Prompt 要求一段自由文本，也不得用关键词、正则或游戏类型推断应审计哪些 criterion。
 
 涉及系统交付边界的 check 必须在 evidence 中引用 `systemDeliveryContract` 的精确 JSON Pointer：Foundation 与 Comprehensive 的 `cross_document_consistency`、`technical_feasibility`，以及 Comprehensive 的 `content_structure_fitness`、`resource_content_consistency`。该引用只证明 Reviewer 实际核对了固定权威；finding 的 subject 仍必须指向需要修订的项目 artifact，不能把只读合同列为修复对象。
 
@@ -89,6 +114,7 @@ Reviewer 只接收服务端生成的当前 revision 投影：
 - 当前固定 System Delivery Contract；
 - 当前阶段允许审计的完整文档；
 - Foundation 或 Comprehensive 固定 check set；
+- 四项游戏设计 check 的固定 criterion 与结构化推导结果；
 - prior findings、当前 repair batch 和 server diff；
 - Comprehensive 阶段的 canonical v7 Manifest；
 - 从内容文件安全解析出的 `schema`、`id`、`kind`、`fulfills`、`resources` 与文件路径；
@@ -96,7 +122,7 @@ Reviewer 只接收服务端生成的当前 revision 投影：
 
 投影是 request view，不落盘、不成为第二份合同。它不得截断语义 ID，不保存候选搜索历史，不包含 Agent 自报验证结论，也不包含构建日志或运行验收事实。
 
-Durable review state 只保存 revision、artifact digest、finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
+Durable review state 只保存 revision、artifact digest、finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。Reviewer 的结构化 terminal 必须先通过 Workflow 的 revision、check、criterion、evidence、finding 与 closure 合同校验，只有被接受的 terminal 才能写入 evidence 文件；被拒绝的传输不得留下伪 canonical evidence。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
 
 ### 4.1 System Delivery Contract
 
@@ -123,16 +149,15 @@ System Delivery Contract 由服务端当前常量结构化生成，是只读 req
 
 - 稳定 `findingId`；
 - `checkId`；
-- `owner`：`foundation`、`checklist` 或 `resource`；
 - 当前合法 artifact subject；
 - 精确位置或稳定语义 ID；
 - 可观察冲突；
 - 为什么阻塞当前门禁；
 - closure condition。
 
-Foundation subject 只能引用六份基础文档；Checklist subject 只能引用验收清单；Resource subject 只能引用 Manifest requirement/resource ID 或内容文件 ID。Reviewer 若引用不存在的 ID，terminal 无效，不能把格式错误伪装成业务 finding。
+`owner` 与 `severity` 不是 Reviewer 可填写的第二份事实：服务端按固定 `checkId` 矩阵唯一派生 `foundation`、`checklist` 或 `resource`，并将所有 finding 定义为 blocking。Foundation subject 只能引用六份基础文档；Checklist subject 只能引用验收清单；Resource subject 只能引用 Manifest requirement/resource ID 或内容文件 ID。Reviewer 若引用不存在的 ID，terminal 无效，不能把格式错误伪装成业务 finding。
 
-提交工具必须按当前 scope 与 mode 生成唯一 Schema：Foundation 只暴露 `owner: foundation` 和文档 `path/anchor`；Comprehensive 才暴露 checklist/resource owner 与资源语义 ID；Initial 不暴露 `regressionPaths`；Closure 才允许它引用 server 提供的 changed paths。禁止用一份宽松 Schema 同时承载四种协议后再靠提示词约束。
+提交工具必须按当前 scope 与 mode 生成唯一 Schema：Foundation 只暴露文档 `path/anchor`；Comprehensive 才暴露资源语义 ID；Initial 不暴露 `regressionPaths`；Closure 才允许它引用 server 提供的 changed paths。工具输入不得暴露可由 check 矩阵派生的 `owner`、固定为 blocking 的 `severity`，或 criterion 层重复的 `findingIds`。禁止用一份宽松 Schema 同时承载四种协议后再靠提示词约束。
 
 ## 6. 审计原则
 
@@ -169,6 +194,8 @@ Reviewer 审计可观察需求、资源引用与内容结构，不得要求 Pref
 6. 已关闭 finding 不得在同一 revision 以新 ID 重新提出，除非 diff 产生了可证明的新冲突。
 7. 上游变更确定性失效受影响的下游 approval；不重新开放无关全文审计。
 8. 自动修订达到上限后进入 `needs_action`，保留真实 findings 和累计时间。
+
+Reviewer 的审计计算与终端提交使用同一 dispatch，但超时边界必须识别唯一终端工具的真实状态：审计计算仍受固定墙钟限制；若 `SubmitDocumentReviewResult` 已开始且尚未完成，不得在原墙钟到点时截断正在流式提交的合法结果，而是从原墙钟到点时刻起给予一个固定、有限的 terminal grace。Reviewer 是只读 worker，禁止使用 durable mutation 时间作为 grace 起点。Grace 到期仍未形成合法 terminal 才进入 `needs_action`。不得因此增设第二提交工具、prose parser、部分结果缓存或续传协议。
 
 修复必须提升相应文档 PATCH 版本；资源或内容修复提升 Manifest revision。版本变化用于证据失效，不等同于自动通过。
 
@@ -209,3 +236,4 @@ Workflow Card 的阶段、task 与 icon 必须来自 durable review 状态：
 5. 修订次数有界，重启和继续不重置；
 6. 没有 Composition phase、`cmp-*`、双轨、feedback、fallback 或兼容 reader；
 7. 系统 Chrome 能打开交付项目并按 Checklist 完成真实玩家路径。
+8. 至少使用结构不同的全新项目证明 Reviewer 能阻止无意义选择、支配策略、经济死锁/套利、数值无解和难度断层，而不是只发现格式或跨文档冲突。
