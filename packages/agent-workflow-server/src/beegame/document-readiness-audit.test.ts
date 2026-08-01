@@ -29,7 +29,7 @@ describe('document readiness audit', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
-  test('accepts the six foundation documents before checklist and manifest creation', async () => {
+  test('accepts the eight foundation documents before checklist and manifest creation', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-foundation-'))
     for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
@@ -42,6 +42,24 @@ describe('document readiness audit', () => {
         includeAssetManifest: false,
       }),
     ).toEqual({ valid: true, issues: [] })
+  })
+
+  test('rejects a seven-document foundation missing either new fact owner', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-eight-'))
+    for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {
+      if (path === 'docs/LEVEL_SCENE_DESIGN.md') continue
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+
+    expect(
+      auditDocumentReadiness(workspace, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      }).issues,
+    ).toEqual([
+      'Required project document is missing: docs/LEVEL_SCENE_DESIGN.md',
+    ])
   })
 
   test('accepts an approved checklist before resource preparation creates the manifest', async () => {

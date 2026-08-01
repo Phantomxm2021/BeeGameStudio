@@ -36,7 +36,7 @@ const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
 const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 5 * 60 * 1000
 const DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS = 3 * 60 * 1000
 const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 300_000
-// Initial authoring owns six mutually consistent foundation documents in one
+// Initial authoring owns eight mutually consistent foundation documents in one
 // bounded pass. Its wall-clock budget must cover that fixed workload; retries
 // preserve completed documents as durable checkpoints.
 const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 15 * 60 * 1000

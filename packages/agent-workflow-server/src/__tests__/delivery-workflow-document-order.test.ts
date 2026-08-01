@@ -43,7 +43,21 @@ afterEach(async () => {
 })
 
 describe('single-track document review workflow', () => {
-  test('uses the exact document-authoritative 11 plus 5 review matrix', () => {
+  test('uses the exact document-authoritative 12 plus 5 review matrix', () => {
+    expect(CANONICAL_FOUNDATION_DOCUMENTS).toEqual([
+      'docs/GDD.md',
+      'docs/BALANCE_DESIGN.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/TECHNICAL_DESIGN.md',
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/AUDIO_DESIGN.md',
+      'docs/ASSET_PLAN.md',
+    ])
+    expect(CANONICAL_PROJECT_DOCUMENTS).toEqual([
+      ...CANONICAL_FOUNDATION_DOCUMENTS,
+      'docs/acceptance/gameplay-checklist.md',
+    ])
     expect(FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS).toEqual([
       'brief_alignment',
       'cross_document_consistency',
@@ -52,6 +66,7 @@ describe('single-track document review workflow', () => {
       'economy_progression_integrity',
       'numeric_balance_feasibility',
       'pacing_difficulty_coherence',
+      'level_scene_design_integrity',
       'technical_feasibility',
       'art_direction_coherence',
       'ui_audio_consistency',
@@ -68,6 +83,13 @@ describe('single-track document review workflow', () => {
       ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
       ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
     ])
+    expect(GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS).toHaveLength(5)
+    expect(
+      Object.values(GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA).reduce(
+        (total, criteria) => total + criteria.length,
+        0,
+      ),
+    ).toBe(15)
   })
 
   test('carries completed foundation documents into an interrupted-pass retry', async () => {

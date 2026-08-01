@@ -54,7 +54,26 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('economy_progression_integrity')
     expect(prompt).toContain('numeric_balance_feasibility')
     expect(prompt).toContain('pacing_difficulty_coherence')
+    expect(prompt).toContain('level_scene_design_integrity')
+    expect(prompt).toContain('spatial_gameplay_support')
+    expect(prompt).toContain('scene_state_completeness')
     expect(prompt).toContain('Use only cited document facts')
     expect(prompt).toContain('not final feel or empirical balance')
+  })
+
+  test('assigns the eight foundation documents one fact owner each', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+      contract: {
+        documentSet: 'foundation',
+        systemDeliveryContract: buildSystemDeliveryContract(),
+      },
+    })
+    expect(prompt).toContain('eight canonical foundation documents')
+    expect(prompt).toContain('BALANCE_DESIGN owns')
+    expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
+    expect(prompt).toContain('Events, waves and numeric configuration')
+    expect(prompt).toContain('world, scene, hierarchy and instance placement')
   })
 })

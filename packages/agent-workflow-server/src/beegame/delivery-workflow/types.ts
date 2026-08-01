@@ -1,5 +1,7 @@
 export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/GDD.md',
+  'docs/BALANCE_DESIGN.md',
+  'docs/LEVEL_SCENE_DESIGN.md',
   'docs/TECHNICAL_DESIGN.md',
   'docs/ART_DIRECTION.md',
   'docs/UI_UX_SPEC.md',
@@ -10,6 +12,8 @@ export const CANONICAL_PROJECT_DOCUMENTS = [
 
 export const CANONICAL_FOUNDATION_DOCUMENTS = [
   'docs/GDD.md',
+  'docs/BALANCE_DESIGN.md',
+  'docs/LEVEL_SCENE_DESIGN.md',
   'docs/TECHNICAL_DESIGN.md',
   'docs/ART_DIRECTION.md',
   'docs/UI_UX_SPEC.md',
@@ -102,6 +106,7 @@ export const FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS = [
   'economy_progression_integrity',
   'numeric_balance_feasibility',
   'pacing_difficulty_coherence',
+  'level_scene_design_integrity',
   'technical_feasibility',
   'art_direction_coherence',
   'ui_audio_consistency',
@@ -158,6 +163,11 @@ export const GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA = {
     'pressure_curve',
     'capability_curve',
     'spike_and_recovery',
+  ],
+  level_scene_design_integrity: [
+    'spatial_gameplay_support',
+    'level_progression_coherence',
+    'scene_state_completeness',
   ],
 } as const satisfies Partial<Record<DocumentReviewCheckId, readonly string[]>>
 

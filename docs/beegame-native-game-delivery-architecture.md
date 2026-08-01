@@ -205,16 +205,18 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 
 ### 5.1 新项目
 
-主 Agent 应先检查空工作区并建立与项目相关的六份 Foundation 文档：
+主 Agent 应先检查空工作区并建立与项目相关的八份 Foundation 文档：
 
 - `docs/GDD.md`
+- `docs/BALANCE_DESIGN.md`
+- `docs/LEVEL_SCENE_DESIGN.md`
+- `docs/TECHNICAL_DESIGN.md`
 - `docs/ART_DIRECTION.md`
 - `docs/UI_UX_SPEC.md`
 - `docs/AUDIO_DESIGN.md`
-- `docs/TECHNICAL_DESIGN.md`
 - `docs/ASSET_PLAN.md`
 
-Foundation 文档必须来自当前确认简报，不得套用某个示例游戏。六份文档经独立 Foundation Review 达到 READY 后，才创建 `docs/acceptance/gameplay-checklist.md`；Checklist 结构通过后才进入 Resource Production 并由服务创建 `assets/asset-manifest.json`。资源文件与 JSON/YAML 内容描述通过门禁后，独立 Comprehensive Review 对七份文档、Manifest 和内容描述执行实施前审计。Checklist、Manifest 或实现不得提前与 Foundation 并行创建。
+Foundation 文档必须来自当前确认简报，不得套用某个示例游戏。八份文档的集合、事实归属与最低完整性以 `beegame-foundation-document-authority-plan.md` 为唯一权威。八份文档经独立 Foundation Review 达到 READY 后，才创建 `docs/acceptance/gameplay-checklist.md`；Checklist 结构通过后才进入 Resource Production 并由服务创建 `assets/asset-manifest.json`。资源文件与 JSON/YAML 内容描述通过门禁后，独立 Comprehensive Review 对九份项目文档、Manifest 和内容描述执行实施前审计。Checklist、Manifest 或实现不得提前与 Foundation 并行创建。
 
 ### 5.2 已有项目和修改需求
 

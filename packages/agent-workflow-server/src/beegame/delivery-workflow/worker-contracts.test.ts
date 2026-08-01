@@ -129,6 +129,35 @@ describe('game design review evidence contract', () => {
     expect(documentReviewCheckSchema.parse(strategyCheck)).toEqual(strategyCheck)
   })
 
+  test('requires the complete level and scene design criterion set', () => {
+    const levelSceneCheck = {
+      ...strategyCheck,
+      id: 'level_scene_design_integrity' as const,
+      evidence: [
+        { path: 'docs/LEVEL_SCENE_DESIGN.md', anchor: 'Spatial Design' },
+      ],
+      assessments:
+        GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA.level_scene_design_integrity.map(
+          criterion => ({
+            criterion,
+            status: 'pass' as const,
+            evidence: [
+              {
+                path: 'docs/LEVEL_SCENE_DESIGN.md',
+                anchor: 'Spatial Design',
+              },
+            ],
+            derivation:
+              'Compared spatial support, level progression and scene-state paths.',
+            conclusion: 'The criterion is supported by the cited design facts.',
+          }),
+        ),
+    }
+    expect(documentReviewCheckSchema.parse(levelSceneCheck)).toEqual(
+      levelSceneCheck,
+    )
+  })
+
   test('does not duplicate finding identities inside criterion assessments', () => {
     expect(() => documentReviewCheckSchema.parse({
       ...strategyCheck,

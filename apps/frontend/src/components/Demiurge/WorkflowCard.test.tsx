@@ -110,6 +110,7 @@ describe('WorkflowCard', () => {
             { id: 'economy', title: 'economy_progression_integrity', status: 'completed', operation: 'review' },
             { id: 'numeric', title: 'numeric_balance_feasibility', status: 'running', operation: 'review' },
             { id: 'pacing', title: 'pacing_difficulty_coherence', status: 'pending', operation: 'review' },
+            { id: 'level-scene', title: 'level_scene_design_integrity', status: 'pending', operation: 'review' },
           ],
         }}
       />,
@@ -119,6 +120,26 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('审计：经济与成长闭环')).toBeInTheDocument();
     expect(screen.getByText('审计：数值可行性')).toBeInTheDocument();
     expect(screen.getByText('审计：节奏与难度一致性')).toBeInTheDocument();
+    expect(screen.getByText('审计：关卡与场景完整性')).toBeInTheDocument();
+  });
+
+  it('renders the balance and level-scene foundation documents', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_eight_documents',
+          status: 'running',
+          currentPhase: 'DOCUMENT_DRAFTING',
+          tasks: [
+            { id: 'balance', title: 'docs/BALANCE_DESIGN.md', status: 'completed', operation: 'write' },
+            { id: 'level-scene', title: 'docs/LEVEL_SCENE_DESIGN.md', status: 'running', operation: 'write' },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('数值与平衡设计')).toBeInTheDocument();
+    expect(screen.getByText('关卡与场景设计')).toBeInTheDocument();
   });
 
   it('shows a red failure control, copies the error detail and invokes retry', async () => {

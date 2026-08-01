@@ -15,7 +15,7 @@ Workflow evidence 只证明某个 revision 是否通过审计，不复制项目�
 ## 2. 交付流程
 
 ```text
-六份基础文档
+八份 Foundation 文档
   -> Foundation Review
   -> Gameplay Checklist
   -> Resource & Content Preparation
@@ -126,7 +126,7 @@ Gate 失败时只返回当前事实产生的明确问题；修复原文件后重
 
 ## 8. Reviewer 与实现
 
-Reviewer 只审核当前 revision 的七份文档、Manifest 和内容文件。资源 finding 必须引用现有 requirement、resource 或 content ID。Closure Review 只复查原 finding 与服务冻结的改动，不重新开放全文审计。
+Reviewer 只审核当前 revision 的九份项目文档（八份 Foundation 文档与 Gameplay Checklist）、Manifest 和内容文件。资源 finding 必须引用现有 requirement、resource 或 content ID。Closure Review 只复查原 finding 与服务冻结的改动，不重新开放全文审计。
 
 Atomic Task Planner 为任务声明只读的 `resourceIds` 和 `contentIds`。Implementation Agent 通过这些 ID 加载资源和内容；目标引擎的对象、导入器或构建规则留在项目实现或 target adapter 内，共享合同不规定 Web、Unity、Godot、Unreal 或其他引擎结构。
 

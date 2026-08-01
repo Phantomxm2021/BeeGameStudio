@@ -166,7 +166,12 @@ export function getObservedNativeResourceLibraryEvidence(input: {
 export function digestResourceContext(workspacePath: string): string {
   const workspace = resolve(workspacePath)
   const hash = createHash('sha256')
-  for (const relativePath of ['docs/ART_DIRECTION.md', 'docs/ASSET_PLAN.md']) {
+  for (const relativePath of [
+    'docs/BALANCE_DESIGN.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/ASSET_PLAN.md',
+  ]) {
     const path = join(workspace, relativePath)
     hash.update(relativePath)
     hash.update(existsSync(path) ? readFileSync(path) : '')

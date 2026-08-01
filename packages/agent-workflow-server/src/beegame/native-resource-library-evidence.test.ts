@@ -138,6 +138,11 @@ describe('native Resource Library evidence', () => {
     try {
       await mkdir(join(workspace, 'docs'), { recursive: true })
       await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), '# Balance\n')
+      await writeFile(
+        join(workspace, 'docs/LEVEL_SCENE_DESIGN.md'),
+        '# Level and scene\n',
+      )
       await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Art\n')
       await writeFile(join(workspace, 'docs/ASSET_PLAN.md'), '# Assets\n')
       await writeFile(
@@ -166,7 +171,10 @@ describe('native Resource Library evidence', () => {
         state: 'current',
         actions: ['browse_catalog'],
       })
-      await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Changed\n')
+      await writeFile(
+        join(workspace, 'docs/LEVEL_SCENE_DESIGN.md'),
+        '# Changed level and scene\n',
+      )
       expect(evidence(workspace)).toMatchObject({ state: 'stale' })
     } finally {
       await rm(workspace, { recursive: true, force: true })

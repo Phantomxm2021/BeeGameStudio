@@ -63,6 +63,8 @@ const workerLabel: Record<string, string> = {
 
 const documentTitle: Record<string, string> = {
   'docs/GDD.md': '游戏设计文档 GDD',
+  'docs/BALANCE_DESIGN.md': '数值与平衡设计',
+  'docs/LEVEL_SCENE_DESIGN.md': '关卡与场景设计',
   'docs/TECHNICAL_DESIGN.md': '技术设计文档',
   'docs/ART_DIRECTION.md': '美术方向',
   'docs/UI_UX_SPEC.md': 'UI / UX 规格',
@@ -77,6 +79,7 @@ const documentTitle: Record<string, string> = {
   economy_progression_integrity: '经济与成长闭环',
   numeric_balance_feasibility: '数值可行性',
   pacing_difficulty_coherence: '节奏与难度一致性',
+  level_scene_design_integrity: '关卡与场景完整性',
   technical_feasibility: '技术可行性',
   art_direction_coherence: '美术方向一致性',
   ui_audio_consistency: 'UI 与音频一致性',
