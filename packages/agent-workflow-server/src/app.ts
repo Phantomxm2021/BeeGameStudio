@@ -5497,6 +5497,15 @@ function workflowViewForDisplay(
                 reviewAccepted:
                   workflow.documentReviewState.activeCycle
                     .acceptedSemanticResult === true,
+                reviewTarget:
+                  workflow.documentReviewState.activeCycle.activeTarget ===
+                    'foundation' ||
+                  workflow.documentReviewState.activeCycle.activeTarget ===
+                    'checklist' ||
+                  workflow.documentReviewState.activeCycle.activeTarget ===
+                    'resource'
+                    ? workflow.documentReviewState.activeCycle.activeTarget
+                    : undefined,
                 reviewFindings: Array.isArray(
                   workflow.documentReviewState.activeCycle.findings,
                 )
@@ -5504,11 +5513,15 @@ function workflowViewForDisplay(
                       finding =>
                         isObject(finding) &&
                         typeof finding.findingId === 'string' &&
-                        typeof finding.requiredAction === 'string'
+                        typeof finding.requiredAction === 'string' &&
+                        (finding.owner === 'foundation' ||
+                          finding.owner === 'checklist' ||
+                          finding.owner === 'resource')
                           ? [
                               {
                                 id: finding.findingId,
                                 title: finding.requiredAction,
+                                owner: finding.owner,
                               },
                             ]
                           : [],
@@ -5524,6 +5537,35 @@ function workflowViewForDisplay(
             workflowStatus: workflowStatus(workflow),
             thinking: workflowThinkingStatus(workflow),
             activeDispatch: workflow.activeDispatch,
+            ...(isObject(workflow.documentReviewState) &&
+            isObject(workflow.documentReviewState.activeCycle)
+              ? {
+                  reviewTarget:
+                    workflow.documentReviewState.activeCycle.activeTarget ===
+                    'resource'
+                      ? 'resource'
+                      : undefined,
+                  reviewFindings: Array.isArray(
+                    workflow.documentReviewState.activeCycle.findings,
+                  )
+                    ? workflow.documentReviewState.activeCycle.findings.flatMap(
+                        finding =>
+                          isObject(finding) &&
+                          typeof finding.findingId === 'string' &&
+                          typeof finding.requiredAction === 'string' &&
+                          finding.owner === 'resource'
+                            ? [
+                                {
+                                  id: finding.findingId,
+                                  title: finding.requiredAction,
+                                  owner: 'resource' as const,
+                                },
+                              ]
+                            : [],
+                      )
+                    : undefined,
+                }
+              : {}),
           })
         : atomicDisplayTasks
   const completedTaskCount = displayTasks.filter(

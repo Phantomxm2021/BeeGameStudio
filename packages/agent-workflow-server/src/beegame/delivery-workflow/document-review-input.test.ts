@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildDocumentReviewReferenceIndex,
   checkEvidenceDigests,
   validateDocumentReviewChecks,
   validateDocumentReviewFindingSubjects,
@@ -9,6 +10,30 @@ import {
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
 } from './types'
+
+describe('document review exact reference index', () => {
+  test('projects only exact frozen headings, semantic IDs and legal owner paths', () => {
+    expect(buildDocumentReviewReferenceIndex([
+      { path: 'docs/GDD.md', content: '# Game\n## 4.2 Overflow & Armor\n' },
+      { path: 'docs/acceptance/gameplay-checklist.md', content: '# Acceptance\n' },
+      { path: 'assets/asset-manifest.json', content: JSON.stringify({ requirements: [{ id: 'RES-UI-TYPEFACE' }], resources: [{ id: 'res.ui.iconography' }] }) },
+      { path: 'assets/content/world.yaml', content: 'id: content.world\nkind: world-definition\n' },
+    ])).toEqual({
+      markdownHeadings: {
+        'docs/GDD.md': ['# Game', '## 4.2 Overflow & Armor'],
+        'docs/acceptance/gameplay-checklist.md': ['# Acceptance'],
+      },
+      requirementIds: ['RES-UI-TYPEFACE'],
+      resourceIds: ['res.ui.iconography'],
+      contentIdsByPath: { 'assets/content/world.yaml': 'content.world' },
+      subjectPathsByOwner: {
+        foundation: expect.arrayContaining(['docs/GDD.md']),
+        checklist: ['docs/acceptance/gameplay-checklist.md'],
+        resource: ['assets/asset-manifest.json', 'assets/content/world.yaml'],
+      },
+    })
+  })
+})
 
 describe('system delivery contract projection', () => {
   test('projects the one canonical engine-neutral delivery boundary', () => {
@@ -25,6 +50,11 @@ describe('system delivery contract projection', () => {
       content: {
         schema: 'beegame-content-v1',
         requiredFields: ['schema', 'id', 'kind', 'fulfills', 'resources', 'data'],
+        referenceSemantics: {
+          fulfills: 'manifest-requirement-ids',
+          resources: 'manifest-resource-ids',
+          physicalPathsOwnedBy: 'canonical-asset-manifest',
+        },
         jsonKinds: [
           'resource-registry',
           'entity-definitions',

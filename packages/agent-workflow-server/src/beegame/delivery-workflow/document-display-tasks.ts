@@ -23,6 +23,12 @@ export type AssetDisplayTaskInput = {
   workflowStatus?: string
   thinking?: string
   activeDispatch?: unknown
+  reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  reviewFindings?: Array<{
+    id: string
+    title: string
+    owner: 'foundation' | 'checklist' | 'resource'
+  }>
 }
 
 export type DocumentDisplayTaskInput = {
@@ -34,7 +40,12 @@ export type DocumentDisplayTaskInput = {
   thinking?: string
   reviewCheckIds?: DocumentReviewCheckId[]
   reviewAccepted?: boolean
-  reviewFindings?: Array<{ id: string; title: string }>
+  reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  reviewFindings?: Array<{
+    id: string
+    title: string
+    owner: 'foundation' | 'checklist' | 'resource'
+  }>
 }
 
 /**
@@ -96,18 +107,25 @@ export function projectDocumentDisplayTasks(
     operation === 'write' &&
     input.reviewAccepted &&
     input.reviewFindings?.length
-  )
-    return input.reviewFindings.map(finding => ({
+  ) {
+    const currentOwnerFindings = input.reviewTarget
+      ? input.reviewFindings.filter(
+          finding => finding.owner === input.reviewTarget,
+        )
+      : input.reviewFindings
+    if (currentOwnerFindings.length)
+      return currentOwnerFindings.map(finding => ({
       id: finding.id,
       title: finding.title,
       status: active
         ? 'running'
-        : input.workflowStatus === 'failed'
+        : workflowFailed(input.workflowStatus)
           ? 'failed'
           : 'pending',
       attempt: 0,
       operation: 'write',
     }))
+  }
 
   return documentPaths.map(path => {
     const absolutePath = join(workspace, path)
@@ -120,7 +138,12 @@ export function projectDocumentDisplayTasks(
         return false
       }
     })()
-    const isCurrent = active && currentItemId === path
+    const isSoleWriteTask = operation === 'write' && documentPaths.length === 1
+    const isCurrent =
+      active && (currentItemId === path || isSoleWriteTask)
+    const isFailed =
+      workflowFailed(input.workflowStatus) &&
+      (currentItemId === path || isSoleWriteTask)
     return {
       id: path,
       title: path,
@@ -129,13 +152,13 @@ export function projectDocumentDisplayTasks(
         : operation === 'review'
           ? reviewedPaths.has(path)
             ? 'completed'
-            : input.workflowStatus === 'failed' && currentItemId === path
+            : isFailed
               ? 'failed'
               : 'pending'
-          : exists
-            ? 'completed'
-            : input.workflowStatus === 'failed' && currentItemId === path
-              ? 'failed'
+          : isFailed
+            ? 'failed'
+            : exists
+              ? 'completed'
               : 'pending',
       attempt: 0,
       operation,
@@ -160,6 +183,25 @@ export function projectAssetDisplayTasks(
     input.workflowStatus === 'running' &&
     input.thinking === 'working' &&
     dispatchStatus === 'running'
+
+  const currentResourceFindings =
+    input.reviewTarget === 'resource'
+      ? (input.reviewFindings ?? []).filter(
+          finding => finding.owner === 'resource',
+        )
+      : []
+  if (currentResourceFindings.length)
+    return currentResourceFindings.map(finding => ({
+      id: finding.id,
+      title: finding.title,
+      status: active
+        ? 'running'
+        : workflowFailed(input.workflowStatus)
+          ? 'failed'
+          : 'pending',
+      attempt: 0,
+      operation: 'produce',
+    }))
 
   {
     const planningStatus =
@@ -243,6 +285,15 @@ function dispatchTaskStatus(
     return 'failed'
   if (dispatchStatus === 'completed') return 'completed'
   return 'pending'
+}
+
+function workflowFailed(status: string | undefined): boolean {
+  return (
+    status === 'failed' ||
+    status === 'blocked' ||
+    status === 'needs_action' ||
+    status === 'stopped'
+  )
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

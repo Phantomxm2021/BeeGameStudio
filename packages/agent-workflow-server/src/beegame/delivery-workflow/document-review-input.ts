@@ -38,6 +38,18 @@ export type DocumentReviewArtifact = {
   content: string
 }
 
+export type DocumentReviewReferenceIndex = {
+  markdownHeadings: Record<string, string[]>
+  requirementIds: string[]
+  resourceIds: string[]
+  contentIdsByPath: Record<string, string>
+  subjectPathsByOwner: {
+    foundation: string[]
+    checklist: string[]
+    resource: string[]
+  }
+}
+
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
@@ -161,6 +173,16 @@ function exactMarkdownHeadingExists(content: string, anchor: string): boolean {
     if (anchor === heading || anchor === candidate.trim()) return true
   }
   return false
+}
+
+function exactMarkdownHeadings(content: string): string[] {
+  return content.split('\n').flatMap(line => {
+    const candidate = line.trimStart()
+    let markerLength = 0
+    while (candidate[markerLength] === '#') markerLength += 1
+    if (markerLength === 0 || candidate[markerLength] !== ' ') return []
+    return [candidate.trim()]
+  })
 }
 
 function decodeJsonPointerToken(value: string): string {
@@ -311,6 +333,46 @@ function idSet(value: unknown): Set<string> {
       return typeof id === 'string' && id ? [id] : []
     }),
   )
+}
+
+export function buildDocumentReviewReferenceIndex(
+  artifacts: DocumentReviewArtifact[],
+): DocumentReviewReferenceIndex {
+  const manifest = artifacts.find(
+    artifact => artifact.path === CANONICAL_ASSET_MANIFEST,
+  )
+  let projection: Record<string, unknown> = {}
+  if (manifest) {
+    const parsed = JSON.parse(manifest.content) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      projection = parsed as Record<string, unknown>
+  }
+  const contentIdsByPath = Object.fromEntries(
+    artifacts
+      .filter(artifact => artifact.path.startsWith('assets/content/'))
+      .flatMap(artifact => {
+        const id = structuredContentId(
+          artifact.content,
+          artifact.path.endsWith('.yaml') || artifact.path.endsWith('.yml'),
+        )
+        return id ? [[artifact.path, id] as const] : []
+      }),
+  )
+  return {
+    markdownHeadings: Object.fromEntries(
+      artifacts
+        .filter(artifact => artifact.path.endsWith('.md'))
+        .map(artifact => [artifact.path, exactMarkdownHeadings(artifact.content)]),
+    ),
+    requirementIds: [...idSet(projection.requirements)],
+    resourceIds: [...idSet(projection.resources)],
+    contentIdsByPath,
+    subjectPathsByOwner: {
+      foundation: [...CANONICAL_FOUNDATION_DOCUMENTS],
+      checklist: ['docs/acceptance/gameplay-checklist.md'],
+      resource: [CANONICAL_ASSET_MANIFEST, ...Object.keys(contentIdsByPath)],
+    },
+  }
 }
 
 export function validateDocumentReviewFindingSubjects(input: {

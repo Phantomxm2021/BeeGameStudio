@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  beginResourceDocumentReviewClosure,
   buildDocumentReviewDispatch,
   completeDocumentDraft,
   createInitialDocumentReviewCycle,
@@ -156,6 +157,12 @@ describe('single-track document review workflow', () => {
         expect.objectContaining({ path: 'systemDeliveryContract' }),
       ]),
     )
+    expect(request.contract.referenceIndex).toMatchObject({
+      subjectPathsByOwner: {
+        foundation: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        checklist: ['docs/acceptance/gameplay-checklist.md'],
+      },
+    })
     expect(
       Object.keys(run.documentReviewState.activeCycle!.sourceArtifactDigests),
     ).toEqual(
@@ -249,6 +256,62 @@ describe('single-track document review workflow', () => {
         },
       },
     })
+  })
+
+  test('projects atomically completed repair documents into an interrupted retry request', async () => {
+    const workspacePath = await createWorkspace()
+    let run = await reviewRun(workspacePath, 'foundation')
+    run = await createInitialDocumentReviewCycle({
+      run,
+      workspacePath,
+      scope: 'foundation',
+      revision: run.revision.document,
+    })
+    run = incrementDocumentReviewTransportAttempt(run)
+    run = await reconcileDocumentReview({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'foundation',
+        revision: run.revision.document,
+        verdict: 'NEEDS_REVISION',
+        checks: checksWithBlocks('foundation', {
+          brief_alignment: ['authority-conflict'],
+        }),
+        findings: [
+          reviewFinding({
+            findingId: 'authority-conflict',
+            checkId: 'brief_alignment',
+            owner: 'foundation',
+            path: 'docs/GDD.md',
+          }),
+        ],
+      }),
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+    await writeFile(
+      join(workspacePath, 'docs/GDD.md'),
+      documentContent('GDD', '1.0.1', '2026-08-02T00:00:00.000Z'),
+    )
+
+    let retryRequest: WorkerDispatchRequest | undefined
+    await startDocumentStage({
+      run,
+      workspacePath,
+      dispatcher: {
+        async dispatch(request) {
+          retryRequest = request
+          return request
+        },
+      },
+    })
+
+    expect(retryRequest?.contract.interruptedRepairChangedPaths).toEqual([
+      'docs/GDD.md',
+    ])
   })
 
   test('repairs one finding batch, freezes the server diff, and closes it without a full re-review', async () => {
@@ -371,6 +434,90 @@ describe('single-track document review workflow', () => {
     expect(closed.documentStep).toBe('CHECKLIST_DRAFTING')
   })
 
+  test('projects a comprehensive baseline onto foundation closure scope', async () => {
+    const workspacePath = await createWorkspace()
+    let run = await reviewRun(workspacePath, 'complete')
+    run = await createInitialDocumentReviewCycle({
+      run,
+      workspacePath,
+      scope: 'complete',
+      revision: run.revision.resource!,
+    })
+    run = incrementDocumentReviewTransportAttempt(run)
+    run = await reconcileDocumentReview({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'complete',
+        revision: run.revision.resource!,
+        verdict: 'NEEDS_REVISION',
+        checks: checksWithBlocks('complete', {
+          level_scene_design_integrity: ['foundation-gap'],
+        }),
+        findings: [
+          reviewFinding({
+            findingId: 'foundation-gap',
+            checkId: 'level_scene_design_integrity',
+            owner: 'foundation',
+            path: 'docs/GDD.md',
+          }),
+        ],
+      }),
+      currentDocumentRevision: run.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    let authorRequest: WorkerDispatchRequest | undefined
+    await startDocumentStage({
+      run,
+      workspacePath,
+      dispatcher: {
+        async dispatch(request) {
+          authorRequest = request
+          return request
+        },
+      },
+    })
+    await writeFile(
+      join(workspacePath, 'docs/GDD.md'),
+      documentContent('GDD', '1.0.1', '2026-08-02T00:00:00.000Z'),
+    )
+    run = await completeDocumentDraft({
+      run: withDispatch(run, authorRequest!),
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: ['foundation-gap'],
+      },
+      documentSet: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    expect(run.documentReviewState.activeCycle).toMatchObject({
+      originScope: 'complete',
+      scope: 'foundation',
+      mode: 'closure',
+      activeTarget: 'foundation',
+      changedPaths: ['docs/GDD.md'],
+    })
+    expect(
+      Object.keys(run.documentReviewState.activeCycle!.sourceArtifactDigests),
+    ).toEqual(
+      expect.arrayContaining([
+        'reviewAuthority',
+        'systemDeliveryContract',
+        ...CANONICAL_FOUNDATION_DOCUMENTS,
+      ]),
+    )
+    expect(
+      Object.keys(run.documentReviewState.activeCycle!.sourceArtifactDigests),
+    ).not.toContain(CANONICAL_ASSET_MANIFEST)
+  })
+
   test('closes checklist findings before handing the same ledger to the resource owner', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'complete')
@@ -487,6 +634,37 @@ describe('single-track document review workflow', () => {
       foundation: 0,
       checklist: 1,
       resource: 1,
+    })
+
+    const manifestPath = join(workspacePath, CANONICAL_ASSET_MANIFEST)
+    await writeFile(
+      manifestPath,
+      `${(await readFile(manifestPath, 'utf8')).trim()}\n\n`,
+    )
+    const resourceRevision = await computeResourceRevision(
+      workspacePath,
+      afterChecklist.revision.document,
+    )
+    const resourceClosure = await beginResourceDocumentReviewClosure({
+      run: {
+        ...afterChecklist,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_REVIEW',
+        revision: {
+          ...afterChecklist.revision,
+          resource: resourceRevision,
+        },
+      },
+      workspacePath,
+      currentRevision: resourceRevision,
+    })
+
+    expect(resourceClosure.documentReviewState.activeCycle).toMatchObject({
+      mode: 'closure',
+      activeTarget: 'resource',
+      acceptedSemanticResult: false,
+      transportAttempts: 0,
+      changedPaths: [CANONICAL_ASSET_MANIFEST],
     })
   })
 

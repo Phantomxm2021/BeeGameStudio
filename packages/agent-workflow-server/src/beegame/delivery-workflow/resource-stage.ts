@@ -182,6 +182,12 @@ export async function reconcileCurrentResourcePreparation(input: {
   resourceEvidence?: ResourceEvidenceSnapshot
 }): Promise<DeliveryRun | undefined> {
   if (input.run.phase !== 'RESOURCE_PREPARATION' || input.run.activeDispatch?.status === 'running') return undefined
+  const reviewCycle = input.run.documentReviewState.activeCycle
+  if (
+    reviewCycle?.acceptedSemanticResult &&
+    reviewCycle.activeTarget === 'resource'
+  )
+    return undefined
   const readiness = auditResourcesForPreparation({
     workspacePath: input.workspacePath,
     confirmedBriefContext: input.run.confirmedBriefContext,

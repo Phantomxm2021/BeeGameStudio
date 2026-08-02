@@ -33,13 +33,16 @@ const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
 const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
-const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 5 * 60 * 1000
+// A comprehensive reviewer owns one fixed 17-check pass over the complete
+// pre-implementation contract. Keep its budget aligned with that bounded
+// workload instead of applying the shorter generic worker duration.
+const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 15 * 60 * 1000
 const DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS = 3 * 60 * 1000
 const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 300_000
-// Initial authoring owns eight mutually consistent foundation documents in one
-// bounded pass. Its wall-clock budget must cover that fixed workload; retries
-// preserve completed documents as durable checkpoints.
-const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 15 * 60 * 1000
+// Initial authoring or one accepted repair batch may own several mutually
+// consistent documents. Keep one bounded turn long enough to finish its
+// planned atomic writes; retries preserve completed documents as checkpoints.
+const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 30 * 60 * 1000
 const DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS = 1_000_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
@@ -70,22 +73,6 @@ function now(): string {
   return new Date().toISOString()
 }
 
-function usageBudgetTokens(
-  usage:
-    | {
-        input_tokens: number
-        cache_creation_tokens: number
-        completion_tokens: number
-      }
-    | undefined,
-): number {
-  if (!usage) return 0
-  return Math.max(
-    0,
-    usage.input_tokens + usage.cache_creation_tokens + usage.completion_tokens,
-  )
-}
-
 function terminalEvidencePath(
   result: WorkerTerminalResult,
 ): string | undefined {
@@ -97,7 +84,11 @@ function terminalEvidencePath(
 function workerRequiresEvidence(
   workerType: WorkerDispatchRequest['workerType'],
 ): boolean {
-  return workerType !== 'document-author'
+  // Document review evidence is intentionally persisted by the semantic
+  // reconciler only after the frozen check/finding contract is accepted.
+  // Requiring the file here would reject every valid reviewer terminal before
+  // that reconciler gets the opportunity to validate and persist it.
+  return workerType !== 'document-author' && workerType !== 'document-reviewer'
 }
 
 export function createDeliveryDispatcher(options: {
@@ -279,7 +270,6 @@ export function createDeliveryDispatcher(options: {
       revision: request.revision,
       status: 'running',
       startingUsageTotalTokens: Math.max(0, run.usage?.total_tokens ?? 0),
-      startingUsageBudgetTokens: usageBudgetTokens(run.usage),
       startedAt: now(),
       request: dispatchRequest,
     })
@@ -318,8 +308,30 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker returned a dispatch id that does not match the durable dispatch',
         )
+      // Supervision starts as soon as the durable dispatch owns a transport.
+      // submit() spans the complete model turn, so attaching these observers
+      // after awaiting it would leave thinking/tool execution unsupervised.
+      if (options.workerPort.waitForTerminal) {
+        void options.workerPort
+          .waitForTerminal(record.dispatchId)
+          .then(terminal => thisComplete(terminal))
+          .catch(error =>
+            isWorkerNeedsActionError(error)
+              ? thisNeedsAction(error.message)
+              : thisFail(error),
+          )
+      }
+      void monitorIdleProgress(record.dispatchId).catch(() => undefined)
       await options.workerPort.submit(dispatchId, buildWorkerPrompt(request))
     } catch (error) {
+      const current = await options.store.load()
+      if (
+        current?.activeDispatch?.dispatchId === record.dispatchId &&
+        current.activeDispatch.status !== 'running'
+      ) {
+        releaseDispatch(record.dispatchId)
+        return current.activeDispatch
+      }
       await markDispatchFailed(
         record.dispatchId,
         error instanceof Error ? error.message : 'worker dispatch failed',
@@ -332,17 +344,6 @@ export function createDeliveryDispatcher(options: {
         forgetDispatch(record.dispatchId)
       throw error
     }
-    if (options.workerPort.waitForTerminal) {
-      void options.workerPort
-        .waitForTerminal(record.dispatchId)
-        .then(terminal => thisComplete(terminal))
-        .catch(error =>
-          isWorkerNeedsActionError(error)
-            ? thisNeedsAction(error.message)
-            : thisFail(error),
-        )
-    }
-    void monitorIdleProgress(record.dispatchId).catch(() => undefined)
     return record
 
     function thisComplete(terminal: unknown): void {
@@ -455,11 +456,8 @@ export function createDeliveryDispatcher(options: {
       ) {
         const consumed = Math.max(
           0,
-          run.activeDispatch.startingUsageBudgetTokens === undefined
-            ? (run.usage?.total_tokens ?? 0) -
-                (run.activeDispatch.startingUsageTotalTokens ?? 0)
-            : usageBudgetTokens(run.usage) -
-                run.activeDispatch.startingUsageBudgetTokens,
+          (run.usage?.total_tokens ?? 0) -
+            (run.activeDispatch.startingUsageTotalTokens ?? 0),
         )
         if (consumed >= resourceMaxTokens) {
           const reason = `resource worker exceeded its ${resourceMaxTokens} token limit`

@@ -18,7 +18,7 @@ import { decryptSecret, encryptSecret } from '../security/secret-crypto'
 
 export const SESSION_COOKIE_NAME = 'beegame_session'
 const SESSION_RECORD_TYPE = 'auth:session'
-const SESSION_COOKIE_MAX_AGE_SECONDS = 28_800
+const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const SESSION_COOKIE_MAX_AGE_MS = SESSION_COOKIE_MAX_AGE_SECONDS * 1000
 // Session records already reserve 30 seconds when Supabase reports expires_in.
 // This second guard refreshes another 30 seconds early, giving an outbound RPC

@@ -312,6 +312,17 @@ describe('BeeGame session runtime resilience', () => {
               ],
             },
           })
+          input.onMessage({
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'text',
+                  text: 'Now I will inspect more resources.',
+                },
+              ],
+            },
+          } as DashboardSDKMessage)
         },
         stop: () => undefined,
       }),
@@ -487,6 +498,16 @@ describe('BeeGame session runtime resilience', () => {
                 file_path: join(workspacePath, 'assets/runtime/model.glb'),
               },
             })
+          decisions.textRuntimeResourceWrite =
+            await startInput.requestPermission?.({
+              toolUseID: 'text-runtime-resource-write',
+              toolName: 'Write',
+              message: 'Write a glTF placeholder directly',
+              input: {
+                file_path: join(workspacePath, 'assets/runtime/model.gltf'),
+                content: '{}',
+              },
+            })
           decisions.programmaticResourceWrite =
             await startInput.requestPermission?.({
               toolUseID: 'programmatic-resource-write',
@@ -593,11 +614,15 @@ describe('BeeGame session runtime resilience', () => {
     })
     expect(decisions.unsupportedResourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('does not support that format'),
+      message: expect.stringContaining('author_provisional_resources'),
     })
     expect(decisions.binaryResourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('author_encoded_resources'),
+      message: expect.stringContaining('AssetManifest'),
+    })
+    expect(decisions.textRuntimeResourceWrite).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('author_provisional_resources'),
     })
     expect(decisions.programmaticResourceWrite).toEqual({
       behavior: 'allow',
@@ -627,7 +652,7 @@ describe('BeeGame session runtime resilience', () => {
             event.payload?.toolUseID === 'unsupported-resource-write' &&
             event.type === 'permission.resolved',
         )?.payload?.reasonCode,
-    ).toBe('resource_target_format_unsupported')
+    ).toBeUndefined()
     expect(decisions.import).toEqual({ behavior: 'allow', scope: 'once' })
     expect(
       manager.pendingPermissionsForProject(
@@ -1159,6 +1184,41 @@ describe('BeeGame session runtime resilience', () => {
     })
 
     await manager.send(session.id, 'continue')
+    await waitForIdle(manager, session.id)
+
+    expect(starts).toBe(2)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
+    manager.dispose()
+  })
+
+  test('restarts a workflow worker once before any runtime message without classifying provider text', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-startup-retry-'))
+    let starts = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => {
+        starts += 1
+        const current = starts
+        return {
+          submit: async () => {
+            if (current === 1) throw new Error('provider startup failed')
+          },
+          stop: () => undefined,
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'review documents')
     await waitForIdle(manager, session.id)
 
     expect(starts).toBe(2)

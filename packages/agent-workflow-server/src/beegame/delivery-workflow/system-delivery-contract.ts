@@ -26,6 +26,11 @@ export function buildSystemDeliveryContract() {
     content: {
       schema: BEEGAME_CONTENT_SCHEMA,
       requiredFields: ['schema', 'id', 'kind', 'fulfills', 'resources', 'data'],
+      referenceSemantics: {
+        fulfills: 'manifest-requirement-ids',
+        resources: 'manifest-resource-ids',
+        physicalPathsOwnedBy: 'canonical-asset-manifest',
+      },
       jsonKinds: [...BEEGAME_JSON_CONTENT_KINDS],
       yamlKinds: [...BEEGAME_YAML_CONTENT_KINDS],
       factOwnership: 'single',

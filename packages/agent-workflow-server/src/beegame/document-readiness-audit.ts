@@ -4,6 +4,7 @@ import { auditAssetContract } from './asset-contract-audit'
 import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
 
 export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
+export const MAX_ACCEPTANCE_CHECKLIST_TASKS = 64
 
 export type DocumentReadinessAudit = {
   valid: boolean
@@ -126,6 +127,11 @@ function auditChecklistStructure(content: string, path: string): string[] {
   }
   if (taskCount === 0) {
     issues.push(`${path}: Acceptance checklist contains no task items.`)
+  }
+  if (taskCount > MAX_ACCEPTANCE_CHECKLIST_TASKS) {
+    issues.push(
+      `${path}: Acceptance checklist has ${taskCount} tasks; the maximum is ${MAX_ACCEPTANCE_CHECKLIST_TASKS}. Group variants that share one setup, action and observable outcome.`,
+    )
   }
   return issues
 }

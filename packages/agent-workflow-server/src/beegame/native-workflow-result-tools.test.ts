@@ -55,9 +55,10 @@ describe('native document review result tool', () => {
         findings: [{ ...submissionFinding, regressionPaths: ['docs/TECHNICAL_DESIGN.md'] }],
       }),
     ).toThrow()
-    expect(
-      await (definition!.prompt as () => Promise<string>)(),
-    ).toContain('Initial Review findings cannot contain regressionPaths')
+    const prompt = await (definition!.prompt as () => Promise<string>)()
+    expect(prompt).toContain('Initial Review findings cannot contain regressionPaths')
+    expect(prompt).toContain('rejected by input validation is not a result')
+    expect(prompt).toContain('never JSON-encoded strings')
   })
 
   test('exposes regression paths only for Closure Review', () => {

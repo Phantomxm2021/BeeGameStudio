@@ -117,7 +117,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : {}),
         ...(request.workerType === 'resource-preparer' &&
         isDocumentReviewResourceRemediation(request.contract.remediation)
-          ? { workflowAllowResourceCatalogWithExistingInventory: true }
+          ? {
+              workflowAllowResourceCatalogWithExistingInventory: true,
+              workflowAllowResourceRemediationMutations: true,
+            }
           : {}),
       })
       sessions.set(dispatchId, session.id)

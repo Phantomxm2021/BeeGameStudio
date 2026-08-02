@@ -1,5 +1,6 @@
 import { transitionDeliveryRun } from './transition'
 import { computeDocumentRevision, computeResourceRevision } from './revision'
+import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import type { DeliveryRun, DispatchRecord } from './types'
 import type { RunStore } from './run-store'
 
@@ -155,17 +156,28 @@ export async function resumeRun(input: {
   const acquired = await acquireAndLoad(input)
   try {
     if (acquired.run.status === 'completed') return acquired.run
+    const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
+      acquired.run,
+    )
     const retryable =
       acquired.run.status === 'needs_action' ||
       acquired.run.status === 'blocked' ||
       acquired.run.status === 'stopped' ||
       acquired.run.status === 'failed'
-    const changedReview = await unlockReviewForChangedRevision({
-      run: acquired.run,
-      workspacePath: input.workspacePath,
-    })
-    if (reviewRetryIsLocked(acquired.run) && !changedReview) return acquired.run
+    const changedReview = restoredHandoff
+      ? undefined
+      : await unlockReviewForChangedRevision({
+          run: acquired.run,
+          workspacePath: input.workspacePath,
+        })
+    if (
+      reviewRetryIsLocked(acquired.run) &&
+      !restoredHandoff &&
+      !changedReview
+    )
+      return acquired.run
     const resumed =
+      restoredHandoff ??
       changedReview ??
       (retryable
         ? transitionDeliveryRun(
@@ -213,14 +225,25 @@ export async function retryRun(input: {
     // durable run, so repeating it must be an idempotent read rather than an
     // invalid state transition.
     if (acquired.run.status === 'running') return acquired.run
-    const changedReview = await unlockReviewForChangedRevision({
-      run: acquired.run,
-      workspacePath: input.workspacePath,
-    })
-    if (reviewRetryIsLocked(acquired.run) && !changedReview) return acquired.run
+    const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
+      acquired.run,
+    )
+    const changedReview = restoredHandoff
+      ? undefined
+      : await unlockReviewForChangedRevision({
+          run: acquired.run,
+          workspacePath: input.workspacePath,
+        })
+    if (
+      reviewRetryIsLocked(acquired.run) &&
+      !restoredHandoff &&
+      !changedReview
+    )
+      return acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =
+      restoredHandoff ??
       changedReview ??
       transitionDeliveryRun(
         {

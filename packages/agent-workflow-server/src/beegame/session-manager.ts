@@ -263,6 +263,7 @@ export type BeeGameSessionRunnerStartInput = {
   /** Durable resource files that must enter the canonical manifest before another catalog operation. */
   workflowResourceRegistrationBarrierPaths?: string[]
   workflowAllowResourceCatalogWithExistingInventory?: boolean
+  workflowAllowResourceRemediationMutations?: boolean
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -353,6 +354,7 @@ type SessionRecord = {
   workflowAllowedPaths?: string[]
   workflowResourceRegistrationBarrierPaths?: string[]
   workflowAllowResourceCatalogWithExistingInventory?: boolean
+  workflowAllowResourceRemediationMutations?: boolean
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -486,6 +488,7 @@ export type StartBeeGameSessionInput = {
   workflowAllowedPaths?: string[]
   workflowResourceRegistrationBarrierPaths?: string[]
   workflowAllowResourceCatalogWithExistingInventory?: boolean
+  workflowAllowResourceRemediationMutations?: boolean
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -627,6 +630,9 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowAllowResourceCatalogWithExistingInventory
         ? { workflowAllowResourceCatalogWithExistingInventory: true }
+        : {}),
+      ...(input.workflowAllowResourceRemediationMutations
+        ? { workflowAllowResourceRemediationMutations: true }
         : {}),
       runtime,
       userId: input.userId,
@@ -1276,6 +1282,9 @@ export class BeeGameSessionManager {
             ...(record.workflowAllowResourceCatalogWithExistingInventory
               ? { workflowAllowResourceCatalogWithExistingInventory: true }
               : {}),
+            ...(record.workflowAllowResourceRemediationMutations
+              ? { workflowAllowResourceRemediationMutations: true }
+              : {}),
             requestPermission: request =>
               this.requestPermission(record, request),
           })
@@ -1289,7 +1298,7 @@ export class BeeGameSessionManager {
             attempt === 0 &&
             !signal.aborted &&
             !runtimeMessageObserved &&
-            isRetryableQueryEngineError(error)
+            (record.workflowWorker || isRetryableQueryEngineError(error))
           disposeRunner(runner)
           if (record.runner === runner) record.runner = null
           runner = null
@@ -1884,9 +1893,11 @@ export class BeeGameSessionManager {
         event,
       )
       const progressMessage =
-        event.type === 'assistant.message'
-          ? sanitizeWorkflowDisplayMessage(event.text)
-          : (resourceActivityMessage ?? '')
+        record.workflowWorkerType === 'resource-preparer'
+          ? (resourceActivityMessage ?? '')
+          : event.type === 'assistant.message'
+            ? sanitizeWorkflowDisplayMessage(event.text)
+            : ''
       const currentItemId = workflowDocumentFromToolEvent(record, event)
       const reviewedDocumentPath =
         record.workflowWorkerType === 'document-reviewer' &&
@@ -2160,8 +2171,8 @@ export type RecoveredProjectSessionMetadata = {
 /**
  * Recover the latest durable session reference from an owned project workspace.
  *
- * The project log index is a persistence fallback, not an authorization source:
- * callers must establish workspace ownership before invoking this function.
+ * The project log index is the durable session reference, not an authorization
+ * source: callers must establish workspace ownership before invoking this function.
  */
 export async function recoverLatestProjectSessionFromDisk(
   workspacePath: string,
@@ -2884,26 +2895,7 @@ export function getLatestRuntimeUsage(
   const streamedUsage = sumUsageEvents(events, -1)
   if (streamedUsage.total_tokens > 0) return streamedUsage
 
-  // Older/partial transports do not always expose modelUsage. Preserve the
-  // message-level fallback for those sessions; unlike modelUsage these values
-  // describe distinct messages and are deduplicated by message id.
-  const assistantUsage = sumAssistantMessageUsage(events)
-  if (assistantUsage.total_tokens > 0) return assistantUsage
-
-  // A result-only legacy transport has no message ids to deduplicate. Count at
-  // most the latest result in each BeeGame turn so streamed copies are not
-  // multiplied while distinct legacy turns remain measurable.
-  const resultUsageByTurn = new Map<string, BeeGameRuntimeSnapshot['usage']>()
-  for (const event of events) {
-    if (event.type !== 'result') continue
-    const usage = getUsageFromEventPayload(event.payload)
-    if (usage.total_tokens <= 0) continue
-    resultUsageByTurn.set(event.turnId || '__session__', usage)
-  }
-  return [...resultUsageByTurn.values()].reduce((total, usage) => {
-    addRuntimeUsage(total, usage)
-    return total
-  }, emptyRuntimeUsage())
+  return emptyRuntimeUsage()
 }
 
 function findLastModelUsageEventIndex(events: BeeGameEvent[]): number {
@@ -2982,38 +2974,7 @@ function getRuntimeUsageForTurn(
 
   const streamedUsage = sumUsageEvents(scopedEvents, -1)
   if (streamedUsage.total_tokens > 0) return streamedUsage
-
-  for (const event of [...scopedEvents].reverse()) {
-    if (event.type !== 'result') continue
-    const usage = getUsageFromEventPayload(event.payload)
-    if (usage.total_tokens > 0) return usage
-  }
-  return sumAssistantMessageUsage(scopedEvents)
-}
-
-export function sumAssistantMessageUsage(
-  events: BeeGameEvent[],
-): BeeGameRuntimeSnapshot['usage'] {
-  const usageByMessage = new Map<string, BeeGameRuntimeSnapshot['usage']>()
-  for (const event of events) {
-    if (event.type !== 'assistant.message') continue
-    usageByMessage.set(
-      getAssistantUsageIdentity(event),
-      getUsageFromEventPayload(event.payload),
-    )
-  }
-
-  return [...usageByMessage.values()].reduce<BeeGameRuntimeSnapshot['usage']>(
-    (total, usage) => {
-      total.prompt_tokens += usage.prompt_tokens
-      total.completion_tokens += usage.completion_tokens
-      total.cache_read_tokens += usage.cache_read_tokens
-      total.cache_creation_tokens += usage.cache_creation_tokens
-      total.total_tokens += usage.total_tokens
-      return total
-    },
-    emptyRuntimeUsage(),
-  )
+  return emptyRuntimeUsage()
 }
 
 function deriveLatestTurnDiagnostics(
@@ -3128,20 +3089,6 @@ function deriveObservedRoleTokens(
 
 function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function getAssistantUsageIdentity(event: BeeGameEvent): string {
-  const payload = event.payload
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const message = payload.message
-    if (message && typeof message === 'object' && !Array.isArray(message)) {
-      const messageId = (message as Record<string, unknown>).id
-      if (typeof messageId === 'string' && messageId.trim()) {
-        return `${event.turnId ?? ''}:${messageId}`
-      }
-    }
-  }
-  return `${event.turnId ?? ''}:event:${event.id}`
 }
 
 function getUsageFromEventPayload(
@@ -3700,6 +3647,25 @@ function getBeeGamePermissionPolicyDecision(
     record.workflowWorkerType === 'resource-preparer' &&
     (request.toolName === 'Read' || isFileMutationTool(request.toolName))
   ) {
+    const runtimeMutationPath = isFileMutationTool(request.toolName)
+      ? extractPermissionPaths(request.input).find(path => {
+          const absolute = isAbsolute(path)
+            ? resolve(path)
+            : resolve(record.session.cwd, path)
+          const projectRelative = relative(record.session.cwd, absolute)
+          return (
+            projectRelative === BEEGAME_RESOURCE_ROOTS.runtime ||
+            projectRelative.startsWith(`${BEEGAME_RESOURCE_ROOTS.runtime}/`)
+          )
+        })
+      : undefined
+    if (runtimeMutationPath) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          'Resource production mutates runtime assets only through ResourceLibrary or AssetManifest author_provisional_resources/author_encoded_resources so file creation and inventory registration remain one operation.',
+      }
+    }
     const binaryPath = extractPermissionPaths(request.input).find(path => {
       const absolute = isAbsolute(path) ? resolve(path) : resolve(record.session.cwd, path)
       const projectRelative = relative(record.session.cwd, absolute)

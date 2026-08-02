@@ -741,6 +741,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
                   'Resource preparation requires a confirmed Resource Library policy.',
                 )
               })(),
+            allowResourceRemediationMutations:
+              this.input.workflowAllowResourceRemediationMutations === true,
           })
         : undefined
     const resourceTool =

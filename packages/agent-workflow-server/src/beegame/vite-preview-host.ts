@@ -159,7 +159,7 @@ export function rewriteRootStaticAssetRequest(requestUrl: string, base: string):
 
 export function createManagedVitePreviewPlugin(base: string): VitePreviewHostPlugin {
   return {
-    name: 'beegame-managed-preview-compatibility',
+    name: 'beegame-managed-preview',
     enforce: 'post',
     transformIndexHtml: {
       order: 'post',

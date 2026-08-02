@@ -405,6 +405,22 @@ export function createDeliveryWorkflowController(input: {
             : undefined,
         ...(resourceEvidence ? { resourceEvidence } : {}),
       })
+      if (
+        next.status === 'running' &&
+        next.phase === 'DOCUMENT_REVIEW' &&
+        next.documentReviewState.activeCycle?.acceptedSemanticResult &&
+        next.documentReviewState.activeCycle.activeTarget === 'resource'
+      ) {
+        if (!next.revision.resource)
+          throw new Error(
+            'resource review closure requires the completed resource revision',
+          )
+        next = await beginResourceDocumentReviewClosure({
+          run: next,
+          workspacePath: input.workspacePath,
+          currentRevision: next.revision.resource,
+        })
+      }
       next = await persist(
         next,
         next.phase === 'RESOURCE_PREPARATION' && next.status === 'running'

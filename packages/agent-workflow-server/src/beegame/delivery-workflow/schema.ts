@@ -135,7 +135,6 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     request: workerDispatchRequestSchema.optional(),
     terminalResult: z.record(z.string(), z.unknown()).optional(),
     startingUsageTotalTokens: z.number().int().nonnegative().optional(),
-    startingUsageBudgetTokens: z.number().int().nonnegative().optional(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime().optional(),
   })

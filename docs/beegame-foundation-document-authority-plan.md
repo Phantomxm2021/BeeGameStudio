@@ -136,9 +136,21 @@ Foundation 固定为 12 项；Comprehensive 仍为 Foundation 与 5 项下游检
 
 Foundation Author 必须在一次 dispatch 中获得八份唯一允许路径和本方案要求；断点恢复只继续同一八文档集合。修复时只允许写 finding 指向的 Foundation 文档，并要求对应文档 PATCH 版本提升。
 
-Checklist Author 必须从八份已批准文档派生验收项。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。
+Foundation 修复 dispatch 只消费已接受 finding、其 closure condition、被分配的 subject 文档，以及 finding 明确引用且确有必要核对的事实 owner；每份读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，回归与 closure condition 的最终判定唯一属于随后一次 Closure Reviewer。
 
-Resource Agent 必须同时读取 `ART_DIRECTION.md`、`ASSET_PLAN.md` 和 `LEVEL_SCENE_DESIGN.md` 获取资源与空间职责；读取 `BALANCE_DESIGN.md` 只用于资源变体或能力表现需要，不得将数值复制进 Manifest。JSON/YAML 生成必须遵守第 3 节的唯一事实归属。
+同一修复 batch 若在多文档原子写入之间被中断，已完成的文档写入保持为当前 canonical artifact。重试 request 必须由服务端比较 frozen repair baseline 与当前 artifact digest，派生本轮已变化路径；该投影不落盘、不拆分 finding ledger，也不形成第二修复队列。Author 读取这些当前文档一次：已经满足 accepted finding 的内容必须保留，不得仅为重放 dispatch 再次写入或提升版本；只有当前内容仍不满足同一 closure condition 时才允许再次修订。最终 terminal 仍一次性解析完整 finding batch，Closure diff 始终相对原 frozen baseline 计算。
+
+Document Author 的固定墙钟上限为 30 分钟，用于覆盖八文档初次完整撰写或一个多文档 repair batch 的一次规划、原子写入与唯一终态提交。超时仍必须中断 transport 并保留已完成的 canonical 写入；不得为了缩短墙钟而拆分 finding batch、允许增量 Edit 或建立第二提交协议。Document Reviewer 继续使用独立的 15 分钟审计上限与有限 terminal grace。
+
+Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证、改走第二网络路径或引入 fallback transport。
+
+Checklist Author 必须从八份已批准文档派生**最小充分的场景级验收集合**。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。同一 setup、action 与 observable outcome 下的波次、敌人、输入、资源、cue 或表格行变体必须在一个参数化验收项中核对，不得按每个变体或文档句子机械拆项；一项可以引用多个批准事实，但每个稳定 ID 仍只描述一个可独立判定的场景结果。Author 必须在首次写入前完成分组和计数；常规首个交付目标为 24–40 项，只有批准设计确实包含更多互相独立的可观察场景时才允许超过 40 项，绝对不得超过 64 项。超出上限属于确定性 Checklist 合同错误，必须在进入资源阶段前原地修订，不得把膨胀清单交给 Planner 或 Implementation；禁止先写超限草稿再依赖同一 dispatch 二次改写。
+
+Resource Agent 必须读取完整的八份已批准 Foundation 文档，但每份只提供第 3 节规定的事实：`ASSET_PLAN.md` 与 `ART_DIRECTION.md` 提供资源职责和表现约束，`LEVEL_SCENE_DESIGN.md` 提供 YAML 空间事实，`GDD.md`、`BALANCE_DESIGN.md`、`UI_UX_SPEC.md`、`AUDIO_DESIGN.md` 与 `TECHNICAL_DESIGN.md` 分别提供其 JSON/加载投影所需事实。Agent 不得复制数值进 Manifest、不得让 JSON/YAML 越权重定义设计，也不得读取未批准或平行文档。首次内容写入前必须完成完整 JSON/YAML 集合规划，并将互相独立的文件写入合并到一个并行工具批次；只有具体写入失败才补写，不得逐文件重新携带完整上下文循环规划。
+
+Resource Production 首次建立 `project_target.asset_format_capabilities` 时必须从已批准的 `ASSET_PLAN.md` 与目标运行环境推导。后续资源修复只有在替换同一稳定 resource ID、且新文件格式由已批准 Asset Plan 明确允许时，才能在同一 Manifest 中**追加**该直接文件扩展名；不得移除既有格式，也不得修改 platform、runtime、资源库策略或三个 canonical root。该追加与替换资源必须作为同一次 Manifest 修订提交，不创建第二 target、第二 Manifest 或兼容读取分支。除此之外的 `project_target` 变化均为阻塞错误。
+
+Resource remediation 可以清除已证明语义错误或已被替代的项目库存记录，但只限 resource ID **不是**任何已批准 requirement ID、且当前 JSON/YAML 已不再引用该 resource ID 的记录；其未被其他记录共享的本地文件必须在同一次 Manifest 修订中删除。与 requirement ID 同名的稳定职责资源不得删除，只能按替换合同原位修复。初次 Resource Production、普通重试和实现阶段均不得借此裁剪库存。
 
 Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifest 与 JSON/YAML 的完整批准集合。任何硬编码设计事实、第二加载路径或引擎专用交付要求都应在 Comprehensive Review 阶段阻塞。
 

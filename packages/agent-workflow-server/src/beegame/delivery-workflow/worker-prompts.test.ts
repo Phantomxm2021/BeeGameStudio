@@ -17,6 +17,13 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('events, waves and numeric configuration as JSON')
     expect(prompt).toContain('world, scene, hierarchy and instance placement as YAML')
     expect(prompt).toContain('event-definitions, wave-definitions')
+    expect(prompt).toContain('fulfills contains only exact requirement IDs')
+    expect(prompt).toContain('reference every Manifest resource ID')
+    expect(prompt).toContain('shell and nested agents are not available')
+    expect(prompt).toContain('AssetManifest author_provisional_resources')
+    expect(prompt).toContain('Use scoped Write only for JSON/YAML content')
+    expect(prompt).toContain('Never retry or invent Bash')
+    expect(prompt).toContain('never hand-author runtime files')
   })
 
   test('requires authors and reviewers to keep one resource loading path', () => {
@@ -42,6 +49,13 @@ describe('resource-content worker prompts', () => {
     expect(reviewerPrompt).toContain('technical_feasibility')
     expect(reviewerPrompt).toContain('never a runtime/source substitute or second loader')
     expect(reviewerPrompt).toContain('project documents that agree with each other but conflict with systemDeliveryContract')
+    expect(reviewerPrompt).toContain('fulfills may contain only exact current Manifest requirement IDs')
+    expect(reviewerPrompt).toContain('never request document names, headings, prose labels or invented duty IDs')
+    expect(reviewerPrompt).toContain('verbatim from contract.referenceIndex')
+    expect(reviewerPrompt).toContain('subjectPathsByOwner.resource')
+    expect(reviewerPrompt).toContain('never resource repair subjects')
+    expect(reviewerPrompt).toContain('exactly one accepted SubmitDocumentReviewResult')
+    expect(reviewerPrompt).toContain('rejected by tool input validation is not a result')
   })
 
   test('requires structured strategy, economy, numeric and pacing derivations', () => {
@@ -61,6 +75,27 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('not final feel or empirical balance')
   })
 
+  test('routes complete-review defects to the artifact owner without duplicate findings', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-reviewer', phase: 'DOCUMENT_REVIEW', revision: 'revision',
+      contract: { reviewScope: 'complete', reviewMode: 'initial' },
+    })
+    expect(prompt).toContain('every defect whose repair target is the Manifest or JSON/YAML content belongs to')
+    expect(prompt).toContain('Do not duplicate one content or resource defect under a foundation check')
+  })
+
+  test('keeps resource remediation on the single replacement and pruning lane', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'resource-preparer', phase: 'RESOURCE_PREPARATION', revision: 'revision',
+      contract: { remediation: { findings: [] } },
+    })
+    expect(prompt).toContain('same replacement commit')
+    expect(prompt).toContain('prune_unbound_resources')
+    expect(prompt).toContain('resource ID is not a requirement ID')
+  })
+
   test('assigns the eight foundation documents one fact owner each', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
@@ -75,5 +110,50 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Events, waves and numeric configuration')
     expect(prompt).toContain('world, scene, hierarchy and instance placement')
+  })
+
+  test('keeps foundation repair bounded to the accepted finding batch', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+      contract: {
+        documentSet: 'foundation',
+        remediation: { findings: [] },
+        interruptedRepairChangedPaths: ['docs/GDD.md'],
+        systemDeliveryContract: buildSystemDeliveryContract(),
+      },
+    })
+    expect(prompt).toContain('complete repair scope')
+    expect(prompt).toContain('Do not inspect unrelated documents')
+    expect(prompt).toContain('the next reviewer owns regression and closure')
+    expect(prompt).toContain('docs/GDD.md')
+    expect(prompt).toContain('Do not rewrite a document or increment its version merely to replay')
+  })
+
+  test('keeps the checklist minimal and scenario-level', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+      contract: { documentSet: 'checklist' },
+    })
+    expect(prompt).toContain('Target 24-40 checkbox tasks')
+    expect(prompt).toContain('Before the only file mutation')
+    expect(prompt).toContain('never exceed 64 checkbox tasks')
+    expect(prompt).toContain('do not create one task per document sentence or variant')
+    expect(prompt).toContain('Never write an oversized draft')
+  })
+
+  test('gives resource production the complete approved fact-owner set', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'resource-preparer', phase: 'RESOURCE_PREPARATION', revision: 'revision',
+      contract: {},
+    })
+    expect(prompt).toContain('complete eight-document approved Foundation set')
+    expect(prompt).toContain('Respect its fact owners')
+    expect(prompt).toContain('Do not read unapproved or parallel documents')
+    expect(prompt).toContain('Plan the complete JSON/YAML file set')
+    expect(prompt).toContain('one parallel tool batch')
+    expect(prompt).toContain('only for a specific failed write')
   })
 })

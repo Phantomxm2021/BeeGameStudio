@@ -312,12 +312,14 @@ BeeGame 只保留以下一条持久状态链：
 → Delivery
 ```
 
-每个箭头只由当前 durable revision 的结构化 terminal、确定性 gate 和 transition 推进。Workflow Card 只投影该状态，不能反向推断或改变 phase。
+每个箭头只由当前 durable revision 的结构化 terminal、确定性 gate 和 transition 推进。Workflow Card 只投影该状态，不能反向推断或改变 phase。Card 的阶段、任务、状态和进度文案必须来自服务端结构化 workflow/tool 状态；不得把 Worker 自由 prose、流式片段、terminal JSON 或工具参数直接作为 Card 文案。
 
 ## 8. 失败、后台任务和恢复
 
 - Active Session 仍存在时恢复同一 dispatch 和事件订阅，不创建竞争 Worker。
 - Session 丢失且没有合法 terminal 时，按阶段 transport attempt 上限恢复；不得重置语义修复次数。
+- 已登录用户的唯一 HttpOnly session 必须覆盖长时 Delivery Workflow，并通过同一服务端 refresh token 记录续期 access token。会话寿命不得短于正常完整交付；后台阶段切换不得退回 bearer token、绕过认证或建立第二认证路径。显式 logout、服务端撤销或 refresh token 被认证提供方判定无效时才终止该会话。
+- 所有 Worker 的 token 监督与 Project Info 使用同一累计 `total_tokens` 口径，包含 input、cache read、cache creation 与 output；dispatch 只以开始时的累计快照计算增量。不得为 Resource、Reviewer 或其他阶段另设排除 cache 的预算口径。达到阶段上限时在 durable checkpoint yield 或进入明确 needs_action，不重置累计统计。
 - Reviewer findings 进入唯一 `documentReviewState` 和有序 owner 队列；超限后进入 `needs_action`。
 - 用户停止任务时，BeeGame 停止当前 dispatch 并持久化累计时间和状态。
 - 权限拒绝是事实，不得通过 BeeGame更换命令或伪造证据绕过。

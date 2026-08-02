@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   auditDocumentReadiness,
+  MAX_ACCEPTANCE_CHECKLIST_TASKS,
   REQUIRED_PROJECT_DOCUMENTS,
 } from './document-readiness-audit'
 
@@ -80,6 +81,35 @@ describe('document readiness audit', () => {
         includeAssetManifest: false,
       }),
     ).toEqual({ valid: true, issues: [] })
+  })
+
+  test('rejects a mechanically expanded checklist before resource preparation', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-checklist-size-'))
+    for (const path of REQUIRED_PROJECT_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(
+        join(workspace, path),
+        path.endsWith('gameplay-checklist.md')
+          ? [
+              '# Acceptance',
+              ...Array.from(
+                { length: MAX_ACCEPTANCE_CHECKLIST_TASKS + 1 },
+                (_, index) =>
+                  `- [ ] CHECK-${index + 1} Observe scenario ${index + 1} with runtime evidence.`,
+              ),
+            ].join('\n')
+          : `# ${path}\n`,
+      )
+    }
+
+    expect(
+      auditDocumentReadiness(workspace, {
+        includeChecklist: true,
+        includeAssetManifest: false,
+      }).issues,
+    ).toContain(
+      `docs/acceptance/gameplay-checklist.md: Acceptance checklist has ${MAX_ACCEPTANCE_CHECKLIST_TASKS + 1} tasks; the maximum is ${MAX_ACCEPTANCE_CHECKLIST_TASKS}. Group variants that share one setup, action and observable outcome.`,
+    )
   })
 
   test('requires the complete non-empty document baseline and canonical asset contract', async () => {

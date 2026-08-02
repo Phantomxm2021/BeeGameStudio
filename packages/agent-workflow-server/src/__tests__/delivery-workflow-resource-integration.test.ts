@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { reconcileCurrentResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
@@ -21,5 +22,46 @@ describe('v7 resource-content workflow', () => {
     })
     expect(next).toMatchObject({ phase: 'DOCUMENT_REVIEW', documentStep: 'CHECKLIST_REVIEW' })
     expect(next.evidence).not.toHaveProperty('compositionAssembly')
+  })
+
+  it('does not reconcile ready files across an accepted resource finding batch', async () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-resource-review-remediation',
+      projectId: 'project-resource-review-remediation',
+      ownerId: 'owner-resource-review-remediation',
+      documentRevision: 'docs',
+      workspaceRevision: 'workspace',
+    })
+    const run = {
+      ...initial,
+      phase: 'RESOURCE_PREPARATION' as const,
+      documentStep: undefined,
+      documentReviewState: {
+        ...initial.documentReviewState,
+        activeCycle: {
+          cycleId: 'resource-review-cycle',
+          originScope: 'complete' as const,
+          scope: 'complete' as const,
+          mode: 'initial' as const,
+          sourceRevision: 'resources',
+          requiredCheckIds: [],
+          checks: [],
+          checkEvidenceDigests: {},
+          findings: [],
+          activeTarget: 'resource' as const,
+          acceptedSemanticResult: true,
+          transportAttempts: 1,
+          changedPaths: [],
+          sourceArtifactDigests: {},
+        },
+      },
+    }
+
+    expect(
+      await reconcileCurrentResourcePreparation({
+        run,
+        workspacePath: '/workspace-is-not-read',
+      }),
+    ).toBeUndefined()
   })
 })

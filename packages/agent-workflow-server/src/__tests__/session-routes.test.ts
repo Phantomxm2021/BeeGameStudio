@@ -131,6 +131,7 @@ describe('HttpOnly session routes', () => {
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('SameSite=Lax')
     expect(cookie).toContain('Path=/')
+    expect(cookie).toContain('Max-Age=2592000')
 
     const cookieValue = cookie.split(';', 1)[0]
     const refreshResponse = await app.request('/api/auth/session/refresh', {

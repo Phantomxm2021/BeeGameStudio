@@ -121,11 +121,14 @@ Reviewer 只接收服务端生成的当前 revision 投影：
 - prior findings、当前 repair batch 和 server diff；
 - Comprehensive 阶段的 canonical v7 Manifest；
 - 从内容文件安全解析出的 `schema`、`id`、`kind`、`fulfills`、`resources` 与文件路径；
+- 从同一批 frozen artifacts 确定性派生的精确引用索引：各 Markdown 文档的完整标题、当前 Manifest requirement/resource ID、各内容文件的 stable content ID，以及 foundation/checklist/resource 各 owner 合法的 finding subject 路径；
 - 当前 Catalog provenance 和确定性资源门禁结果。
 
 投影是 request view，不落盘、不成为第二份合同。它不得截断语义 ID，不保存候选搜索历史，不包含 Agent 自报验证结论，也不包含构建日志或运行验收事实。
 
-Durable review state 只保存 revision、artifact digest、finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。Reviewer 的结构化 terminal 必须先通过 Workflow 的 revision、check、criterion、evidence、finding 与 closure 合同校验，只有被接受的 terminal 才能写入 evidence 文件；被拒绝的传输不得留下伪 canonical evidence。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
+精确引用索引只用于让 Reviewer 从 frozen artifacts 已存在的身份中逐字选择 evidence 与 subject，不产生新事实。Reviewer 不得缩写、近似改写、模糊匹配或自动修正标题与 ID；服务端仍以同一批 artifacts 做精确校验。Foundation 文档可以作为 resource check 的 evidence，但不能成为 resource finding 的修复 subject。
+
+Durable review state 只保存 revision、artifact digest、finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。Reviewer 的结构化 terminal 必须先通过 Workflow 的 revision、check、criterion、evidence、finding 与 closure 合同校验，只有被接受的 terminal 才能写入 evidence 文件；被 Schema 拒绝的调用不算 terminal，Reviewer 必须在同一 turn 立即按原语义纠正并重新提交，不得改成解释性正文或等待用户确认。被拒绝的传输不得留下伪 canonical evidence。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
 
 ### 4.1 System Delivery Contract
 
@@ -138,6 +141,8 @@ System Delivery Contract 由服务端当前常量结构化生成，是只读 req
 - generated adapter root：`assets/generated`；
 - 内容 Schema：`beegame-content-v1`；
 - 每个内容文件必须包含 `schema`、`id`、`kind`、`fulfills`、`resources`、`data`；
+- `fulfills` 只能引用当前 Manifest 中的 requirement ID；内容到批准职责的追踪通过这些稳定 requirement 完成，不得写文档名、标题、段落或另造职责 ID；
+- `resources` 只能引用当前 Manifest 中的 resource ID；物理路径只由 Manifest 拥有；
 - JSON kinds：`resource-registry`、`entity-definitions`、`ui-configuration`、`audio-configuration`、`event-definitions`、`wave-definitions`、`numeric-configuration`；
 - YAML kinds：`world-definition`、`scene-definitions`、`hierarchy-definition`、`placement-definitions`；
 - JSON/YAML 同一事实不得双写；

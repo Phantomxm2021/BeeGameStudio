@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
+  buildDocumentReviewReferenceIndex,
   checkEvidenceDigests,
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
@@ -150,6 +151,47 @@ function routeToRemediation(
         [target]: completedPasses + 1,
       },
     },
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+export function restoreAcceptedReviewRemediationHandoff(
+  run: DeliveryRun,
+): DeliveryRun | undefined {
+  const cycle = run.documentReviewState.activeCycle
+  const target = cycle?.activeTarget
+  if (!cycle?.acceptedSemanticResult || !target) return undefined
+  const completedPasses = run.documentReviewState.repairPasses[target]
+  if (
+    completedPasses <= 0 ||
+    completedPasses >= MAX_DOCUMENT_REPAIR_PASSES
+  )
+    return undefined
+  const expectedPhase =
+    target === 'foundation'
+      ? 'DOCUMENT_DRAFTING'
+      : target === 'checklist'
+        ? 'DOCUMENT_REVIEW'
+        : 'RESOURCE_PREPARATION'
+  const expectedDocumentStep =
+    target === 'foundation'
+      ? 'FOUNDATION_DRAFTING'
+      : target === 'checklist'
+        ? 'CHECKLIST_DRAFTING'
+        : undefined
+  if (
+    run.phase === expectedPhase &&
+    run.documentStep === expectedDocumentStep
+  )
+    return undefined
+  return {
+    ...run,
+    phase: expectedPhase,
+    documentStep: expectedDocumentStep,
+    status: 'running',
+    activeDispatch: undefined,
+    blockedReason: undefined,
+    tasks: [],
     updatedAt: new Date().toISOString(),
   }
 }
@@ -482,6 +524,7 @@ export async function buildDocumentReviewDispatch(input: {
       cycleId: cycle.cycleId,
       reviewAuthority: authority,
       requiredCheckIds: cycle.requiredCheckIds,
+      referenceIndex: buildDocumentReviewReferenceIndex(artifacts),
       reviewArtifacts: artifacts.filter(
         artifact => artifact.path !== 'reviewAuthority',
       ),
@@ -519,7 +562,13 @@ async function beginDocumentReviewClosure(input: {
     scope,
     reviewAuthority(input.run),
   )
-  const changes = artifactDigestChanges(previous.sourceArtifactDigests, artifacts)
+  const closureArtifactPaths = new Set(artifacts.map(artifact => artifact.path))
+  const sourceArtifactDigests = Object.fromEntries(
+    Object.entries(previous.sourceArtifactDigests).filter(([path]) =>
+      closureArtifactPaths.has(path),
+    ),
+  )
+  const changes = artifactDigestChanges(sourceArtifactDigests, artifacts)
   const changedPaths = [...new Set(changes.map(change => change.path))]
   const allowedPaths = new Set(
     target === 'foundation'
@@ -567,7 +616,7 @@ async function beginDocumentReviewClosure(input: {
         acceptedSemanticResult: false,
         transportAttempts: 0,
         changedPaths,
-        sourceArtifactDigests: previous.sourceArtifactDigests,
+        sourceArtifactDigests,
       },
     },
     activeDispatch: undefined,
@@ -621,6 +670,22 @@ export async function startDocumentStage(input: {
         }),
       )
     : undefined
+  const interruptedRepairChangedPaths = remediationFindings.length
+    ? artifactDigestChanges(
+        Object.fromEntries(
+          Object.entries(cycle!.sourceArtifactDigests).filter(([path]) =>
+            allowedPaths.includes(path),
+          ),
+        ),
+        (
+          await readDocumentReviewArtifacts(
+            input.workspacePath,
+            'foundation',
+            reviewAuthority(input.run),
+          )
+        ).filter(artifact => allowedPaths.includes(artifact.path)),
+      ).map(change => change.path)
+    : []
   const existingDocumentPaths = remediationFindings.length
     ? []
     : allowedPaths.filter(path => {
@@ -644,6 +709,9 @@ export async function startDocumentStage(input: {
       documentSet: 'foundation',
       systemDeliveryContract: buildSystemDeliveryContract(),
       ...(existingDocumentPaths.length ? { existingDocumentPaths } : {}),
+      ...(interruptedRepairChangedPaths.length
+        ? { interruptedRepairChangedPaths }
+        : {}),
       ...(remediationFindings.length
         ? {
             remediation: {

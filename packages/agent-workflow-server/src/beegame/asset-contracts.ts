@@ -19,6 +19,7 @@ import {
   parseBeeGameProgrammaticAudioText,
   type BeeGameProgrammaticAudioResource,
 } from './programmatic-audio-resource'
+import { auditBeeGameContent } from './content-contracts'
 
 export const BEEGAME_RESOURCE_STATUSES = [
   'available',
@@ -171,6 +172,7 @@ export type BeeGameAuthoredResourceInput = {
   capabilities?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
+  replace_existing_provisional?: boolean
 }
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 export const CURRENT_ASSET_MANIFEST_VERSION = 7
@@ -421,12 +423,33 @@ export async function addBeeGameLibraryResourceToWorkspace(
 export async function registerBeeGameAuthoredResources(
   workspacePath: string,
   inputs: readonly BeeGameAuthoredResourceInput[],
+  options: { additionalFormatCapabilities?: readonly string[] } = {},
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
   const manifest = await readBeeGameAssetManifest(root)
-  const target = requireProjectTarget(manifest)
-  let updated = manifest
+  const establishedTarget = requireProjectTarget(manifest)
+  const additionalFormatCapabilities = uniqueStrings(
+    options.additionalFormatCapabilities ?? [],
+  )
+  const target = additionalFormatCapabilities.length
+    ? validateTarget(
+        {
+          ...establishedTarget,
+          asset_format_capabilities: uniqueStrings([
+            ...establishedTarget.asset_format_capabilities,
+            ...additionalFormatCapabilities,
+          ]),
+        },
+        [],
+      )
+    : establishedTarget
+  if (!target)
+    throw new Error('Additional authored resource formats are invalid.')
+  let updated = additionalFormatCapabilities.length
+    ? parseCanonicalBeeGameAssetManifest({ ...manifest, project_target: target })
+    : manifest
   const now = new Date().toISOString()
+  const obsoletePaths = new Set<string>()
   for (const input of inputs) {
     const id = normalizeId(input.id)
     if (!id) throw new Error('Authored resource id is required')
@@ -437,14 +460,22 @@ export async function registerBeeGameAuthoredResources(
       throw new Error(
         `Authored resource id belongs to a different source: ${id}`,
       )
-    if (
+    const changesPaths = Boolean(
       existing &&
       (existing.root_path !== rootPath ||
         existing.file_paths.length !== filePaths.length ||
-        existing.file_paths.some(path => !filePaths.includes(path)))
+        existing.file_paths.some(path => !filePaths.includes(path))),
     )
+    if (changesPaths && !input.replace_existing_provisional)
       throw new Error(
         `Authored resource paths are immutable for stable id ${id}; revise the existing files in place or use the explicit replacement operation.`,
+      )
+    if (
+      changesPaths &&
+      (!existing?.provisional || !input.provisional || existing.source.type !== 'agent-authored')
+    )
+      throw new Error(
+        `Only an agent-authored provisional resource can be replaced in place: ${id}`,
       )
     if (!filePaths.includes(rootPath))
       throw new Error(
@@ -511,9 +542,95 @@ export async function registerBeeGameAuthoredResources(
         ? { technical_facts: { ...input.technical_facts } }
         : {}),
     }
+    if (changesPaths)
+      existing?.file_paths
+        .filter(path => !filePaths.includes(path))
+        .forEach(path => obsoletePaths.add(path))
     updated = replaceResource(updated, resource)
   }
   await writeManifestAtomically(root, updated)
+  const retainedPaths = new Set(updated.resources.flatMap(resource => resource.file_paths))
+  await Promise.all(
+    [...obsoletePaths]
+      .filter(path => !retainedPaths.has(path))
+      .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
+  )
+  return updated
+}
+
+export async function removeBeeGameUnboundResources(
+  workspacePath: string,
+  resourceIds: readonly string[],
+): Promise<BeeGameAssetManifest> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifest = await readBeeGameAssetManifest(root)
+  requireProjectTarget(manifest)
+  const ids = uniqueStrings(resourceIds.map(normalizeId))
+  if (!ids.length) throw new Error('At least one resource id is required.')
+  const requirementIds = new Set(manifest.requirements.map(item => item.id))
+  const protectedIds = ids.filter(id => requirementIds.has(id))
+  if (protectedIds.length)
+    throw new Error(
+      `Requirement resource identities must be repaired in place: ${protectedIds.join(', ')}.`,
+    )
+  const existingIds = new Set(manifest.resources.map(item => item.id))
+  const missingIds = ids.filter(id => !existingIds.has(id))
+  if (missingIds.length)
+    throw new Error(`Resource identities do not exist: ${missingIds.join(', ')}.`)
+  const referencedIds = new Set(
+    auditBeeGameContent(root, manifest).referencedResourceIds,
+  )
+  const stillReferenced = ids.filter(id => referencedIds.has(id))
+  if (stillReferenced.length)
+    throw new Error(
+      `Remove resource references from JSON/YAML before pruning inventory: ${stillReferenced.join(', ')}.`,
+    )
+  const removed = manifest.resources.filter(resource => ids.includes(resource.id))
+  const updated = parseCanonicalBeeGameAssetManifest({
+    ...manifest,
+    resources: manifest.resources.filter(resource => !ids.includes(resource.id)),
+  })
+  const retainedPaths = new Set(
+    updated.resources.flatMap(resource => resource.file_paths),
+  )
+  const obsoletePaths = [
+    ...new Set(
+      removed
+        .flatMap(resource => resource.file_paths)
+        .filter(path => !retainedPaths.has(path)),
+    ),
+  ]
+  const snapshots = await Promise.all(
+    obsoletePaths.map(async path => {
+      try {
+        return {
+          path,
+          bytes: await readFile(resolveInsideWorkspace(root, path)),
+        }
+      } catch {
+        return { path }
+      }
+    }),
+  )
+  await writeManifestAtomically(root, updated)
+  try {
+    await Promise.all(
+      obsoletePaths.map(path =>
+        rm(resolveInsideWorkspace(root, path), { force: true }),
+      ),
+    )
+  } catch (error) {
+    await Promise.all(
+      snapshots.map(async snapshot => {
+        if (!snapshot.bytes) return
+        const absolute = resolveInsideWorkspace(root, snapshot.path)
+        await mkdir(dirname(absolute), { recursive: true })
+        await writeFile(absolute, snapshot.bytes)
+      }),
+    )
+    await writeManifestAtomically(root, manifest)
+    throw error
+  }
   return updated
 }
 

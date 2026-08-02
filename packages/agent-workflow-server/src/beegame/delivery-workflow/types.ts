@@ -314,8 +314,6 @@ export type DispatchRecord = {
   terminalResult?: Record<string, unknown>
   /** Cumulative run usage captured before this worker starts. */
   startingUsageTotalTokens?: number
-  /** Cumulative non-cache work tokens captured before this worker starts. */
-  startingUsageBudgetTokens?: number
   startedAt: string
   finishedAt?: string
 }
