@@ -181,6 +181,7 @@ import type {
   DispatchRecord,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
+import { DELIVERY_PHASES } from './beegame/delivery-workflow/schema'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
@@ -5693,6 +5694,9 @@ function workflowViewForDisplay(
   const completedTaskCount = displayTasks.filter(
     task => isObject(task) && task.status === 'completed',
   ).length
+  const phaseIndex = DELIVERY_PHASES.indexOf(
+    workflow.phase as (typeof DELIVERY_PHASES)[number],
+  )
   const activeDispatch = isObject(workflow.activeDispatch)
     ? {
         ...(typeof workflow.activeDispatch.workerType === 'string'
@@ -5724,6 +5728,9 @@ function workflowViewForDisplay(
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
     phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
+    ...(phaseIndex >= 0
+      ? { phaseIndex: phaseIndex + 1, phaseCount: DELIVERY_PHASES.length }
+      : {}),
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
       : {}),

@@ -61,6 +61,11 @@ export type DocumentReviewSubmissionContract = {
   priorFindings?: Array<{
     findingId: string
     owner: 'foundation' | 'checklist' | 'resource'
+    subjects?: DocumentReviewFinding['subjects']
+    observation?: string
+    blockingReason?: string
+    requiredAction?: string
+    closureCondition?: string
   }>
   changedPaths?: string[]
 }

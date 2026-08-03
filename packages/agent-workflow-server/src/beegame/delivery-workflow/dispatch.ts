@@ -30,19 +30,13 @@ export type DispatchCredits = {
   ) => Promise<void>
 }
 
-const DEFAULT_IDLE_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
 const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
-const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
-const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
 const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 60_000
 // Initial authoring owns one document. Repair planning and repair owner tasks
 // use smaller independent bounds because neither may span multiple documents.
-const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 30 * 60 * 1000
 const DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS = 1_000_000
-const DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_TOKENS = 250_000
-const DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_TOKENS = 300_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
@@ -140,15 +134,9 @@ export function createDeliveryDispatcher(options: {
   store: RunStore
   workerPort: DeliveryWorkerPort
   credits?: DispatchCredits
-  /** Maximum time without durable worker progress before recovery is needed. */
-  idleProgressTimeoutMs?: number
-  /** Resource-only no-mutation limit; does not change stable worker lanes. */
-  resourceIdleProgressTimeoutMs?: number
   progressPollIntervalMs?: number
-  resourceMaxDurationMs?: number
   resourceMaxTokens?: number
   documentReviewMaxTokens?: number
-  documentAuthorMaxDurationMs?: number
   documentAuthorMaxTokens?: number
   onTerminal?: (
     record: DispatchRecord,
@@ -166,24 +154,12 @@ export function createDeliveryDispatcher(options: {
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
   let dispatchTail: Promise<void> = Promise.resolve()
-  const idleProgressTimeoutMs =
-    options.idleProgressTimeoutMs ?? DEFAULT_IDLE_PROGRESS_TIMEOUT_MS
   const progressPollIntervalMs =
     options.progressPollIntervalMs ?? DEFAULT_PROGRESS_POLL_INTERVAL_MS
-  const resourceIdleProgressTimeoutMs =
-    options.resourceIdleProgressTimeoutMs ??
-    (options.idleProgressTimeoutMs !== undefined
-      ? options.idleProgressTimeoutMs
-      : DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS)
-  const resourceMaxDurationMs =
-    options.resourceMaxDurationMs ?? DEFAULT_RESOURCE_MAX_DURATION_MS
   const resourceMaxTokens =
     options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
   const documentReviewMaxTokens =
     options.documentReviewMaxTokens ?? DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS
-  const documentAuthorMaxDurationMs =
-    options.documentAuthorMaxDurationMs ??
-    DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS
   const documentAuthorMaxTokens =
     options.documentAuthorMaxTokens ?? DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS
 
@@ -404,12 +380,8 @@ export function createDeliveryDispatcher(options: {
 
   async function monitorIdleProgress(dispatchId: string): Promise<void> {
     if (
-      idleProgressTimeoutMs <= 0 &&
-      resourceIdleProgressTimeoutMs <= 0 &&
-      resourceMaxDurationMs <= 0 &&
       resourceMaxTokens <= 0 &&
       documentReviewMaxTokens <= 0 &&
-      documentAuthorMaxDurationMs <= 0 &&
       documentAuthorMaxTokens <= 0
     )
       return
@@ -423,9 +395,6 @@ export function createDeliveryDispatcher(options: {
         run.status !== 'running'
       )
         return
-      const lastProgress = Date.parse(
-        run.lastProgressAt ?? run.activeDispatch.startedAt,
-      )
       const isResourceWorker =
         run.activeDispatch.workerType === 'resource-preparer'
       const isDocumentReviewer =
@@ -455,36 +424,6 @@ export function createDeliveryDispatcher(options: {
       if (
         isResourceWorker &&
         !resourceMutationInFlight &&
-        resourceIdleProgressTimeoutMs > 0 &&
-        Number.isFinite(lastProgress) &&
-        Date.now() - lastProgress >= resourceIdleProgressTimeoutMs
-      ) {
-        await markDispatchNeedsAction(
-          dispatchId,
-          `resource worker produced no durable resource mutation for ${resourceIdleProgressTimeoutMs}ms`,
-        )
-        return
-      }
-      if (
-        isResourceWorker &&
-        !resourceMutationInFlight &&
-        resourceMaxDurationMs > 0
-      ) {
-        const startedAt = Date.parse(run.activeDispatch.startedAt)
-        if (
-          Number.isFinite(startedAt) &&
-          Date.now() - startedAt >= resourceMaxDurationMs
-        ) {
-          const reason = `resource worker exceeded its ${resourceMaxDurationMs}ms wall-clock limit`
-          if (hasDurableProgressSinceDispatch(run))
-            await yieldResourceDispatch(dispatchId, reason)
-          else await markDispatchNeedsAction(dispatchId, reason)
-          return
-        }
-      }
-      if (
-        isResourceWorker &&
-        !resourceMutationInFlight &&
         resourceMaxTokens > 0
       ) {
         const consumed = Math.max(
@@ -497,27 +436,6 @@ export function createDeliveryDispatcher(options: {
           if (hasDurableProgressSinceDispatch(run))
             await yieldResourceDispatch(dispatchId, reason)
           else await markDispatchNeedsAction(dispatchId, reason)
-          return
-        }
-      }
-      const documentDurationLimit = isDocumentAuthor
-        ? (options.documentAuthorMaxDurationMs ??
-          (activeRequest?.contract.authoringMode === 'repair-planning'
-            ? DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_DURATION_MS
-            : activeRequest?.contract.authoringMode === 'remediation'
-              ? DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_DURATION_MS
-              : documentAuthorMaxDurationMs))
-        : 0
-      if (documentDurationLimit > 0) {
-        const startedAt = Date.parse(run.activeDispatch.startedAt)
-        if (
-          Number.isFinite(startedAt) &&
-          Date.now() - startedAt >= documentDurationLimit
-        ) {
-          await markDispatchNeedsAction(
-            dispatchId,
-            `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
-          )
           return
         }
       }
@@ -544,18 +462,6 @@ export function createDeliveryDispatcher(options: {
           )
           return
         }
-      }
-      if (
-        !isResourceWorker &&
-        idleProgressTimeoutMs > 0 &&
-        Number.isFinite(lastProgress) &&
-        Date.now() - lastProgress >= idleProgressTimeoutMs
-      ) {
-        await markDispatchNeedsAction(
-          dispatchId,
-          `worker produced no durable progress for ${idleProgressTimeoutMs}ms`,
-        )
-        return
       }
     }
   }

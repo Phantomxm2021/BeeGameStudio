@@ -105,7 +105,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.authoringMode === 'initial'
           ? 'Use the service-projected upstream authority without reloading it. Follow the target-state instruction: read only the assigned target once when it already exists, otherwise write the new target directly. Perform the assigned document Write exactly once with the complete document, required version and updated_at. The completed Write is the terminal action.'
           : request.contract.authoringMode === 'repair-planning'
-            ? 'Act only as the read-only Repair Lead. Use the service-projected accepted findings and canonical subjects, then submit one structured repair plan. Do not write or mutate project files.'
+            ? 'Act only as the read-only Repair Lead for the single accepted finding in contract.repairDecisionTask. Submit one structured repair decision; the service owns its identity, subjects, order and durable plan ledger. Do not write or mutate project files.'
             : 'Read only the assigned current target exactly once, apply the locked repair decision, then perform exactly one Write for that document. Include every required content change plus the PATCH version and updated_at update in that mutation.',
         request.contract.documentSet === 'checklist'
           ? [
@@ -127,10 +127,10 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ].join(' ')
           : request.contract.authoringMode === 'repair-planning'
             ? [
-                'This is the sole planning task for one accepted foundation finding batch.',
-                'Partition every finding ID exactly once into the smallest coupled root-problem groups. For each group preserve immutable authority, choose one minimal repair decision, include every accepted finding subject path exactly in the plan without adding or omitting paths, and declare acyclic dependencies.',
-                'Prefer the smallest correction that closes the stated conditions. Do not add unrelated systems, broaden scope, reopen review, calculate exhaustive scenarios, write files, or create a second plan or finding queue.',
-                'Submit the plan through SubmitDocumentRepairPlan exactly once.',
+                'This is the sole planning task for contract.repairDecisionTask.finding.',
+                'Preserve its immutable authority and choose one minimal repair decision that closes its stated condition. The service owns identity, subjects, ordering and plan-ledger persistence.',
+                'Do not add unrelated systems, broaden scope, reopen review, calculate exhaustive scenarios, write files, or create a second plan or finding queue.',
+                'Submit the decision through SubmitDocumentRepairDecision exactly once.',
               ].join(' ')
             : [
                 request.contract.authoringMode === 'initial'
@@ -169,6 +169,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Submit contract.currentCheckId with pass/block, a concise conclusion, evidence and findingIds. Evidence and subjects must use only stable referenceId values from contract.referenceIndex.references; never submit path or anchor text. Every finding belongs to the current check and has one stable findingId, exact subjects, observable conflict, blocking reason, required action and closure condition. Subjects are exactly what requiredAction must change; contextual or already-correct artifacts remain evidence only. Do not submit owner, severity, a cycle verdict or another check.',
         'A subject reference must declare the owner derived for that reference in contract.referenceIndex. Foundation documents may be evidence for a resource defect but cannot be resource repair subjects. Foundation and checklist findings cannot carry resource IDs.',
         'Every check must include assessments. Only gameplay_strategy_viability, economy_progression_integrity, numeric_balance_feasibility, pacing_difficulty_coherence and level_scene_design_integrity use their exact three non-empty criterion assessments; every other check must use assessments: []. Every resource-owned finding must carry at least one current requirementId, resourceId or contentId on the corresponding Manifest/content subject.',
+        'contract.priorFindings is the accepted unique-ownership ledger. If the same root defect is already represented by an equal, narrower, or broader canonical subject set under the same owner, cite it as context and do not create another finding ID. Report only a new defect uniquely owned by the current check.',
         'For every projected content file, fulfills may contain only exact current Manifest requirement IDs and resources may contain only exact current Manifest resource IDs. Requirement IDs are the sole content-to-approved-duty trace; never request document names, headings, prose labels or invented duty IDs in fulfills, and never request physical paths in either reference array.',
         'Whenever present, cross_document_consistency, technical_feasibility, content_structure_fitness and resource_content_consistency must cite an exact JSON Pointer from the systemDeliveryContract artifact in evidence. Finding subjects still point to the project artifact that must change.',
         request.contract.reviewScope === 'foundation'
@@ -219,7 +220,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
       return request.contract.authoringMode === 'repair-planning'
-        ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
+        ? 'Call SubmitDocumentRepairDecision exactly once. Do not write files, return terminal JSON, or add completion prose.'
         : request.contract.authoringMode === 'remediation'
           ? 'After the one assigned Write, call SubmitDocumentAuthorResult exactly once with resolvedFindingIds: []. Closure remains owned by the Reviewer.'
           : 'Write the assigned document exactly once as the only mutation. Read only that target once first when the target-state instruction says it exists. The workflow service derives completion from the durable Write; do not submit a result, return terminal JSON, or add completion prose.'

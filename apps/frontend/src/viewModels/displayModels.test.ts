@@ -35,6 +35,8 @@ describe('displayModels', () => {
         runId: 'run-1',
         status: 'running',
         phase: 'IMPLEMENTATION',
+        phaseIndex: 6,
+        phaseCount: 9,
         reviewMode: 'closure',
         reviewTarget: 'resource',
         reviewAccepted: true,
@@ -55,6 +57,8 @@ describe('displayModels', () => {
       workflow: {
         runId: 'run-1',
         status: 'running',
+        phaseIndex: 6,
+        phaseCount: 9,
         reviewMode: 'closure',
         reviewTarget: 'resource',
         reviewAccepted: true,

@@ -172,6 +172,12 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
     runId,
     status,
     currentPhase: trimString(source.currentPhase ?? source.current_phase ?? source.phase) || undefined,
+    phaseIndex: Number.isFinite(Number(source.phaseIndex ?? source.phase_index))
+      ? Number(source.phaseIndex ?? source.phase_index)
+      : undefined,
+    phaseCount: Number.isFinite(Number(source.phaseCount ?? source.phase_count))
+      ? Number(source.phaseCount ?? source.phase_count)
+      : undefined,
     documentStep: trimString(source.documentStep ?? source.document_step) || undefined,
     reviewMode: source.reviewMode === 'initial' || source.reviewMode === 'closure'
       ? source.reviewMode

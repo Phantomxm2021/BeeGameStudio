@@ -24,6 +24,8 @@ describe('WorkflowCard', () => {
           runId: 'run_1',
           status: 'running',
           currentPhase: 'DOCUMENT_REVIEW',
+          phaseIndex: 3,
+          phaseCount: 9,
           documentStep: 'FOUNDATION_REVIEW',
           worker: 'document-reviewer',
           thinking: '正在检查当前文档版本。',
@@ -45,7 +47,8 @@ describe('WorkflowCard', () => {
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
     expect(screen.getByText(/Document Reviewer · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
-    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('3 / 9')).toBeInTheDocument();
+    expect(screen.getByText('任务 1 / 3')).toBeInTheDocument();
     expect(screen.getByText('审计：游戏设计文档 GDD')).toBeInTheDocument();
     expect(screen.getByLabelText('任务状态：已审计')).toHaveAttribute('data-task-icon', 'review-completed');
     expect(screen.getByLabelText('任务状态：审计中')).toHaveAttribute('data-task-icon', 'review-running');

@@ -173,7 +173,7 @@ const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
   'SubmitImplementationResult',
   'SubmitValidationResult',
   'SubmitDocumentAuthorResult',
-  'SubmitDocumentRepairPlan',
+  'SubmitDocumentRepairDecision',
   'SubmitDocumentReviewCheck',
   'SubmitChangeImpactResult',
   'SubmitQuestionAnswerResult',

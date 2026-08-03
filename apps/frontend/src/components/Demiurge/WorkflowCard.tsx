@@ -297,6 +297,8 @@ export function WorkflowCard({
   const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(message || '');
   const completedCount = workflow.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = workflow.totalTaskCount ?? tasks.length;
+  const hasPhaseProgress = Number.isInteger(workflow.phaseIndex) && Number.isInteger(workflow.phaseCount)
+    && Number(workflow.phaseIndex) > 0 && Number(workflow.phaseCount) >= Number(workflow.phaseIndex);
   const reviewStageTitle = workflow.reviewAccepted && workflow.reviewTarget
     ? workflow.reviewTarget === 'foundation'
       ? '修复基础文档'
@@ -376,8 +378,8 @@ export function WorkflowCard({
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="truncate text-sm font-semibold text-zinc-100">{stageTitle}</h3>
-                  {totalCount > 0 ? (
-                    <span className="text-[11px] tabular-nums text-zinc-500">{completedCount} / {totalCount}</span>
+                  {hasPhaseProgress ? (
+                    <span className="text-[11px] tabular-nums text-zinc-500">{workflow.phaseIndex} / {workflow.phaseCount}</span>
                   ) : null}
                 </div>
               </div>
@@ -455,10 +457,12 @@ export function WorkflowCard({
             {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
 
             {tasks.length > 0 ? (
-              <ul
-                data-testid="workflow-card-task-region"
-                className={`scrollbar-premium mt-4 space-y-2 pl-3 pr-1 ${tasks.length > 12 ? 'scroll-fade scroll-fade-y scroll-fade-6 max-h-[17.5rem] overflow-y-auto overscroll-contain' : ''}`}
-              >
+              <div className="mt-4">
+                <p className="mb-2 pl-3 text-[10px] tabular-nums text-zinc-600">任务 {completedCount} / {totalCount}</p>
+                <ul
+                  data-testid="workflow-card-task-region"
+                  className={`scrollbar-premium space-y-2 pl-3 pr-1 ${tasks.length > 12 ? 'scroll-fade scroll-fade-y scroll-fade-6 max-h-[17.5rem] overflow-y-auto overscroll-contain' : ''}`}
+                >
                 {tasks.map(task => (
                   <li key={task.id} className="flex min-w-0 items-start gap-2 text-xs">
                     <span className="mt-px shrink-0">{taskIcon(task)}</span>
@@ -475,7 +479,8 @@ export function WorkflowCard({
                     </span>
                   </li>
                 ))}
-              </ul>
+                </ul>
+              </div>
             ) : null}
 
             {actionError ? (

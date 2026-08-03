@@ -50,6 +50,9 @@ export interface WorkflowCardPayload {
   runId: string;
   status: WorkflowCardStatus;
   currentPhase?: string;
+  /** One-based current position in the server-owned delivery phase order. */
+  phaseIndex?: number;
+  phaseCount?: number;
   documentStep?: string;
   reviewMode?: 'initial' | 'closure';
   reviewTarget?: 'foundation' | 'checklist' | 'resource';

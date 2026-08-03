@@ -246,11 +246,9 @@ describe('resource-content worker prompts', () => {
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(planningPrompt).toContain('smallest coupled root-problem groups')
-    expect(planningPrompt).toContain(
-      'include every accepted finding subject path exactly',
-    )
-    expect(planningPrompt).toContain('SubmitDocumentRepairPlan exactly once')
+    expect(planningPrompt).toContain('contract.repairDecisionTask.finding')
+    expect(planningPrompt).toContain('service owns identity, subjects, ordering')
+    expect(planningPrompt).toContain('SubmitDocumentRepairDecision exactly once')
     expect(planningPrompt).toContain('Do not write or mutate project files')
 
     const ownerPrompt = buildWorkerPrompt({

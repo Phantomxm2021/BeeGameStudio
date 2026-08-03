@@ -28,7 +28,7 @@ import {
   changeImpactTerminalSchema,
   documentAuthorSubmissionSchema,
   documentAuthorTerminalSchema,
-  documentRepairPlanSubmissionSchema,
+  documentRepairDecisionSubmissionSchema,
   documentReviewCheckSubmissionSchemaForMode,
   documentReviewerTerminalSchema,
   implementationAuditorTerminalSchema,
@@ -85,6 +85,21 @@ function reviewerSubmissionContract(
               {
                 findingId: record.findingId,
                 owner: record.owner as 'foundation' | 'checklist' | 'resource',
+                ...(Array.isArray(record.subjects)
+                  ? { subjects: record.subjects }
+                  : {}),
+                ...(typeof record.observation === 'string'
+                  ? { observation: record.observation }
+                  : {}),
+                ...(typeof record.blockingReason === 'string'
+                  ? { blockingReason: record.blockingReason }
+                  : {}),
+                ...(typeof record.requiredAction === 'string'
+                  ? { requiredAction: record.requiredAction }
+                  : {}),
+                ...(typeof record.closureCondition === 'string'
+                  ? { closureCondition: record.closureCondition }
+                  : {}),
               },
             ]
           : []
@@ -138,31 +153,28 @@ export async function buildDocumentAuthorAuthorityBlock(
     )
       throw new Error('document repair planning authority is invalid')
     const findings = (remediation as Record<string, unknown>).findings
-    if (!Array.isArray(findings) || findings.length === 0)
+    if (!Array.isArray(findings) || findings.length !== 1)
       throw new Error('document repair planning findings are invalid')
-    const sourcePaths = [
-      ...new Set(
-        findings.flatMap(finding => {
-          if (!finding || typeof finding !== 'object' || Array.isArray(finding))
-            return []
-          const subjects = (finding as Record<string, unknown>).subjects
-          if (!Array.isArray(subjects)) return []
-          return subjects.flatMap(subject => {
-            if (
-              !subject ||
-              typeof subject !== 'object' ||
-              Array.isArray(subject)
-            )
-              return []
-            const path = (subject as Record<string, unknown>).path
-            return typeof path === 'string' &&
-              CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never)
-              ? [path]
-              : []
-          })
-        }),
-      ),
-    ]
+    const repairDecisionTask = request.contract.repairDecisionTask
+    if (
+      !repairDecisionTask ||
+      typeof repairDecisionTask !== 'object' ||
+      Array.isArray(repairDecisionTask)
+    )
+      throw new Error('document repair decision task is invalid')
+    const authorityPaths = (repairDecisionTask as Record<string, unknown>)
+      .authorityPaths
+    if (
+      !Array.isArray(authorityPaths) ||
+      authorityPaths.length === 0 ||
+      authorityPaths.some(
+        path =>
+          typeof path !== 'string' ||
+          !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+      )
+    )
+      throw new Error('document repair decision authority paths are invalid')
+    const sourcePaths = [...new Set(authorityPaths as string[])]
     const documents = await Promise.all(
       sourcePaths.map(async path => ({
         path,
@@ -170,7 +182,7 @@ export async function buildDocumentAuthorAuthorityBlock(
       })),
     )
     return [
-      'The workflow service projected the complete accepted repair scope below. Act only as the Repair Lead: lock the smallest consistent decisions and submit one plan. Do not write project files, reopen review, or expand scope.',
+      'The workflow service projected the current accepted finding and its exact subject/evidence authority below. Act only as the Repair Lead: lock the smallest consistent decision for this finding. Do not write project files, reopen review, or expand scope.',
       ...documents.map(
         document =>
           `--- BEGIN REPAIR AUTHORITY: ${document.path} ---\n${document.content}\n--- END REPAIR AUTHORITY: ${document.path} ---`,
@@ -388,7 +400,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? request.contract.authoringMode === 'initial'
             ? 'Write the assigned document exactly once as the only mutation. Read only that target once first when the target-state instruction says it exists. The workflow service derives completion from the durable Write; do not submit a result or add completion prose.'
             : request.contract.authoringMode === 'repair-planning'
-              ? 'Submit the locked plan through SubmitDocumentRepairPlan exactly once. Do not write project files or return terminal JSON.'
+              ? 'Submit the locked decision through SubmitDocumentRepairDecision exactly once. Do not write project files or return terminal JSON.'
               : 'Read only the assigned repair target once, write it exactly once, then call SubmitDocumentAuthorResult with resolvedFindingIds: []. Do not return terminal JSON; the workflow service derives the completed owner path from the file mutation.'
           : request?.workerType === 'document-reviewer'
             ? 'Submit only the active check through SubmitDocumentReviewCheck exactly once. Use stable referenceId values; the workflow persists the single review ledger and derives the final verdict.'
@@ -632,7 +644,7 @@ function structuredSubmissionToolName(
       return request.contract.authoringMode === 'initial'
         ? undefined
         : request.contract.authoringMode === 'repair-planning'
-          ? 'SubmitDocumentRepairPlan'
+          ? 'SubmitDocumentRepairDecision'
           : 'SubmitDocumentAuthorResult'
     case 'document-reviewer':
       return 'SubmitDocumentReviewCheck'
@@ -733,18 +745,18 @@ function createDeterministicDocumentAuthorTerminal(input: {
   if (input.request.contract.authoringMode === 'repair-planning') {
     const candidates = completedToolInputs(
       input.events,
-      'SubmitDocumentRepairPlan',
+      'SubmitDocumentRepairDecision',
     )
     const errors: string[] = []
     for (const candidate of candidates) {
       try {
-        const repairPlan = documentRepairPlanSubmissionSchema.parse(candidate)
+        const repairDecision = documentRepairDecisionSubmissionSchema.parse(candidate)
         return documentAuthorTerminalSchema.parse({
           workerType: 'document-author',
           status: 'completed',
           writtenPaths: [],
           resolvedFindingIds: [],
-          repairPlan,
+          repairDecision,
         })
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error))
@@ -752,8 +764,8 @@ function createDeterministicDocumentAuthorTerminal(input: {
     }
     throw new Error(
       errors.length
-        ? `document repair plan does not match the active contract: ${errors.join('; ')}`
-        : 'worker terminal result is missing a valid SubmitDocumentRepairPlan call',
+        ? `document repair decision does not match the active contract: ${errors.join('; ')}`
+        : 'worker terminal result is missing a valid SubmitDocumentRepairDecision call',
     )
   }
   const candidates = completedToolInputs(

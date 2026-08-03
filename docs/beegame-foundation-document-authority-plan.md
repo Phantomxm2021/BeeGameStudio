@@ -159,9 +159,9 @@ Foundation 修复 dispatch 只消费已接受 finding、其 closure condition、
 
 Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 
-1. Repair Lead 一次消费完整 accepted finding batch，将其归并为最小根问题组；每个 finding ID 必须且只能属于一个组；
-2. 每组声明不可改变的权威约束、唯一修订决策、受影响 canonical 路径和组间依赖；不得把“修改 A 或修改 B”继续留给 Document Author。Reviewer check 的 `evidence` 表示判断所依赖的完整事实范围；finding 的 `subjects` 则是 `requiredAction` 已确认必须实际改变的完整修订范围。Repair Lead 必须完整采用 subjects，不能缩减或扩大 accepted finding；
-3. 服务端验证 finding 完整分区、`affectedPaths` 与全部 accepted subjects 精确相等、路径权限和无环依赖，并把被接受的 plan 直接记录在原 active review cycle；它只是该 finding ledger 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
+1. Repair Lead 按 accepted finding ledger 的稳定顺序逐项处理；每个只读 dispatch 只消费一个尚未规划的 finding，避免一个字段错误迫使完整 batch 重传；
+2. Repair Lead 只提交该 finding 不可改变的权威约束与唯一修订决策；不得把“修改 A 或修改 B”继续留给 Document Author。Reviewer check 的 `evidence` 表示判断所依赖的完整事实范围；finding 的 `subjects` 则是 `requiredAction` 已确认必须实际改变的完整修订范围；
+3. 服务端从当前 finding 确定性派生 group ID、finding ID、`affectedPaths` 和依赖，将接受的决定追加到原 active review cycle 的唯一 repair plan ledger。模型不得提交这些可派生身份字段；服务端必须保证 ledger 是 accepted findings 的稳定前缀，最终恰好覆盖完整 batch。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
 4. 服务端从 plan 和固定 Foundation owner 顺序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 内容、与该文档相关的 finding 和已锁定决策，并只允许一次 `Write`；
 5. 每份成功写入立即形成 durable checkpoint、提升该文档 PATCH 版本并释放模型上下文。重启只继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；
 6. 全部目标文档完成后，服务端相对 frozen baseline 核对 changed paths、版本和 finding 覆盖，再启动唯一 Closure Reviewer；Closure Reviewer 仍按原 finding ID、closure condition 和 server diff 独立判定。
@@ -172,7 +172,7 @@ Document Author 的运行时能力声明必须与真实工具完全一致。Auth
 
 同一修复 batch 若在文档 owner task 之间被中断，已完成路径保存在 active cycle 的唯一 repair cursor 中并保持为当前 canonical artifact。恢复时服务端必须同时验证 checkpoint 路径相对 frozen baseline 已发生合法变化；不得仅凭模型声明推进 cursor。已经完成的路径不得再次派发或再次提升版本。Closure diff 始终相对原 frozen baseline 计算。
 
-首次 Document Author 与 repair owner task 的墙钟和 token 边界都只覆盖当前一份文档；边界到期不得依靠上下文压缩、自动续写或提高预算完成另一份文档。Repair Lead 只提交结构化计划，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable owner task 不等于拆分 finding ledger，也不允许第二终态、增量 Edit 或并行修订队列。纯 thinking、`max_tokens` 自动续写和重复读取不是 durable 修订进度。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中；它继续使用独立的 15 分钟审计上限与有限 terminal grace，但不得靠提高输出预算、延长墙钟或重建整份报告完成 terminal。
+首次 Document Author、Repair Lead、repair owner task、Document Reviewer 与 Resource Agent 都不使用固定业务墙钟、durable-progress idle 或 terminal grace 截止线；项目复杂度、网络状态、模型响应时间和文件 mutation 间隔不是失败条件。只有连接断开、worker 进程退出或明确终态可以结束 dispatch。token 边界仍只覆盖当前有界 task，且不得依靠上下文压缩、自动续写或提高预算完成另一项任务。Repair Lead 只提交当前 finding 的结构化决定，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable planning/owner task 不等于拆分 finding 或 repair-plan ledger，也不允许第二终态、增量 Edit 或并行修订队列。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中。
 
 Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证、改走第二网络路径或引入 fallback transport。
 

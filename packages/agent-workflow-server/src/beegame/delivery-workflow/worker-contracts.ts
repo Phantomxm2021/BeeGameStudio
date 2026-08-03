@@ -200,27 +200,10 @@ const documentReviewCheckSubmissionSchema = z
 
 export { documentReviewCheckSchema } from './document-review-check-schema'
 
-export const documentRepairPlanSubmissionSchema = z
+export const documentRepairDecisionSubmissionSchema = z
   .object({
-    groups: z
-      .array(
-        z
-          .object({
-            groupId: z.string().trim().min(1),
-            findingIds: z.array(z.string().trim().min(1)).min(1),
-            invariants: z.array(z.string().trim().min(1)).min(1),
-            decision: z.string().trim().min(1),
-            affectedPaths: z
-              .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
-              .min(1)
-              .describe(
-                'Accepted finding subject paths assigned to this group; the complete plan must neither omit nor add a subject path.',
-              ),
-            dependsOn: z.array(z.string().trim().min(1)),
-          })
-          .strict(),
-      )
-      .min(1),
+    invariants: z.array(z.string().trim().min(1)).min(1),
+    decision: z.string().trim().min(1),
   })
   .strict()
 
@@ -230,7 +213,7 @@ export const documentAuthorTerminalSchema = z
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
-    repairPlan: documentRepairPlanSubmissionSchema.optional(),
+    repairDecision: documentRepairDecisionSubmissionSchema.optional(),
   })
   .strict()
 

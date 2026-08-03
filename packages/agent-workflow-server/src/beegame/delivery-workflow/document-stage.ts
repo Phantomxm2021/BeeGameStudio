@@ -568,6 +568,9 @@ export async function buildDocumentReviewDispatch(input: {
       reviewArtifacts: checkArtifacts.filter(
         artifact => artifact.path !== 'reviewAuthority',
       ),
+      ...(cycle.findings.length
+        ? { priorFindings: cycle.findings }
+        : {}),
       ...(cycle.mode === 'closure'
         ? {
             activeTarget: cycle.activeTarget,
@@ -691,12 +694,34 @@ export async function startDocumentStage(input: {
       ? findingsForTarget(cycle, 'foundation')
       : []
   const repairPlan = remediationFindings.length ? cycle?.repairPlan : undefined
-  const repairPaths = repairPlan
+  const plannedFindingIds = new Set(
+    repairPlan?.groups.flatMap(group => group.findingIds) ?? [],
+  )
+  const nextPlanningFinding = remediationFindings.find(
+    finding => !plannedFindingIds.has(finding.findingId),
+  )
+  const repairDecisionAuthorityPaths = nextPlanningFinding
+    ? [
+        ...new Set(
+          [
+            ...nextPlanningFinding.subjects.map(subject => subject.path),
+            ...(cycle?.checks.find(
+              check => check.id === nextPlanningFinding.checkId,
+            )?.evidence.map(item => item.path) ?? []),
+          ].filter(path =>
+            CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+          ),
+        ),
+      ]
+    : []
+  const repairPlanComplete =
+    remediationFindings.length > 0 && !nextPlanningFinding
+  const repairPaths = repairPlanComplete && repairPlan
     ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         repairPlan.groups.some(group => group.affectedPaths.includes(path)),
       )
     : []
-  const repairPath = repairPlan
+  const repairPath = repairPlanComplete && repairPlan
     ? repairPaths.find(path => !repairPlan.completedPaths.includes(path))
     : undefined
   const initialPath = remediationFindings.length
@@ -737,7 +762,7 @@ export async function startDocumentStage(input: {
     workerType: 'document-author',
     phase: 'DOCUMENT_DRAFTING',
     taskId: remediationFindings.length
-      ? (repairPath ?? `${cycle!.cycleId}:repair-plan`)
+      ? (repairPath ?? `${cycle!.cycleId}:repair-decision:${nextPlanningFinding!.findingId}`)
       : initialPath,
     revision: input.run.revision.document,
     allowedPaths,
@@ -774,13 +799,20 @@ export async function startDocumentStage(input: {
                 ),
               },
             }
-          : { authoringMode: 'repair-planning' }),
-      ...(remediationFindings.length && !repairPath
+          : {
+              authoringMode: 'repair-planning',
+              repairDecisionTask: {
+                cycleId: cycle!.cycleId,
+                finding: nextPlanningFinding,
+                authorityPaths: repairDecisionAuthorityPaths,
+              },
+            }),
+      ...(remediationFindings.length && !repairPath && nextPlanningFinding
         ? {
             remediation: {
               cycleId: cycle!.cycleId,
               sourceRevision: cycle!.sourceRevision,
-              findings: remediationFindings,
+              findings: [nextPlanningFinding],
             },
           }
         : {}),
@@ -1023,113 +1055,6 @@ export async function completeDocumentDraft(input: {
       }
 }
 
-function foundationRepairPlanIssues(input: {
-  plan: NonNullable<
-    Extract<
-      WorkerTerminalResult,
-      { workerType: 'document-author' }
-    >['repairPlan']
-  >
-  findings: DocumentReviewFinding[]
-}): string[] {
-  const { groups } = input.plan
-  const expectedFindingIds = input.findings.map(finding => finding.findingId)
-  const assignedFindingIds = groups.flatMap(group => group.findingIds)
-  const expectedPaths = [
-    ...new Set(
-      input.findings.flatMap(finding =>
-        finding.subjects
-          .map(subject => subject.path)
-          .filter(path =>
-            CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-          ),
-      ),
-    ),
-  ]
-  const affectedPaths = [
-    ...new Set(groups.flatMap(group => group.affectedPaths)),
-  ]
-  const groupIds = groups.map(group => group.groupId)
-  const knownGroups = new Set(groupIds)
-  const issues: string[] = []
-  if (
-    assignedFindingIds.length !== expectedFindingIds.length ||
-    new Set(assignedFindingIds).size !== assignedFindingIds.length ||
-    !exactStringSet(assignedFindingIds, expectedFindingIds)
-  )
-    issues.push(
-      'repair plan must partition every active foundation finding exactly once',
-    )
-  if (new Set(groupIds).size !== groupIds.length)
-    issues.push('repair plan group IDs must be unique')
-  if (!exactStringSet(affectedPaths, expectedPaths))
-    issues.push(
-      'repair plan affected paths must exactly cover the accepted finding subjects',
-    )
-  for (const group of groups) {
-    if (
-      new Set(group.findingIds).size !== group.findingIds.length ||
-      new Set(group.affectedPaths).size !== group.affectedPaths.length ||
-      new Set(group.dependsOn).size !== group.dependsOn.length
-    )
-      issues.push(`repair group ${group.groupId} contains duplicate entries`)
-    if (
-      group.dependsOn.some(
-        dependency =>
-          dependency === group.groupId || !knownGroups.has(dependency),
-      )
-    )
-      issues.push(`repair group ${group.groupId} has an invalid dependency`)
-    const ownedPaths = new Set(
-      input.findings
-        .filter(finding => group.findingIds.includes(finding.findingId))
-        .flatMap(finding => finding.subjects.map(subject => subject.path)),
-    )
-    if (group.affectedPaths.some(path => !ownedPaths.has(path)))
-      issues.push(
-        `repair group ${group.groupId} expands beyond its finding subjects`,
-      )
-    for (const dependencyId of group.dependsOn) {
-      const dependency = groups.find(
-        candidate => candidate.groupId === dependencyId,
-      )
-      if (!dependency) continue
-      const dependencyLastOwner = Math.max(
-        ...dependency.affectedPaths.map(path =>
-          CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path),
-        ),
-      )
-      const groupFirstOwner = Math.min(
-        ...group.affectedPaths.map(path =>
-          CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path),
-        ),
-      )
-      if (dependencyLastOwner > groupFirstOwner)
-        issues.push(
-          `repair group ${group.groupId} dependency order conflicts with canonical document ownership`,
-        )
-    }
-  }
-  const dependencies = new Map(
-    groups.map(group => [group.groupId, group.dependsOn]),
-  )
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-  const visit = (groupId: string): void => {
-    if (visited.has(groupId)) return
-    if (visiting.has(groupId)) {
-      issues.push('repair plan dependencies must be acyclic')
-      return
-    }
-    visiting.add(groupId)
-    for (const dependency of dependencies.get(groupId) ?? []) visit(dependency)
-    visiting.delete(groupId)
-    visited.add(groupId)
-  }
-  for (const groupId of groupIds) visit(groupId)
-  return [...new Set(issues)]
-}
-
 function completeFoundationRepairPlanning(
   input: {
     run: DeliveryRun
@@ -1141,16 +1066,36 @@ function completeFoundationRepairPlanning(
 ): DeliveryRun {
   if (!cycle || findings.length === 0)
     throw new Error('foundation repair planning has no accepted finding batch')
-  const plan = input.terminal.repairPlan
+  const decision = input.terminal.repairDecision
+  const plannedFindingIds = new Set(
+    cycle.repairPlan?.groups.flatMap(group => group.findingIds) ?? [],
+  )
+  const finding = findings.find(
+    candidate => !plannedFindingIds.has(candidate.findingId),
+  )
+  const affectedPaths = finding
+    ? [
+        ...new Set(
+          finding.subjects.flatMap(subject =>
+            CANONICAL_FOUNDATION_DOCUMENTS.includes(subject.path as never)
+              ? [subject.path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]]
+              : [],
+          ),
+        ),
+      ]
+    : []
   const issues = [
-    ...(!plan ? ['document repair planner did not submit a repair plan'] : []),
+    ...(!finding ? ['document repair decision cursor is already complete'] : []),
+    ...(!decision ? ['document repair planner did not submit a repair decision'] : []),
+    ...(finding && affectedPaths.length === 0
+      ? ['document repair finding has no canonical foundation subjects']
+      : []),
     ...(input.terminal.writtenPaths.length
       ? ['document repair planner cannot write project files']
       : []),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['document repair planner cannot resolve findings']
       : []),
-    ...(plan ? foundationRepairPlanIssues({ plan, findings }) : []),
   ]
   return {
     ...input.run,
@@ -1160,11 +1105,24 @@ function completeFoundationRepairPlanning(
     documentReviewState: {
       ...input.run.documentReviewState,
       activeCycle:
-        issues.length || !plan
+        issues.length || !decision || !finding
           ? cycle
           : {
               ...cycle,
-              repairPlan: { groups: plan.groups, completedPaths: [] },
+              repairPlan: {
+                groups: [
+                  ...(cycle.repairPlan?.groups ?? []),
+                  {
+                    groupId: `repair-${finding.findingId}`,
+                    findingIds: [finding.findingId],
+                    invariants: decision.invariants,
+                    decision: decision.decision,
+                    affectedPaths,
+                    dependsOn: [],
+                  },
+                ],
+                completedPaths: [],
+              },
             },
     },
     updatedAt: new Date().toISOString(),
@@ -1202,7 +1160,7 @@ async function completeFoundationRepairOwner(
     ...(!exactStringSet(writtenPaths, [expectedPath])
       ? [`document repair owner must write exactly ${expectedPath}`]
       : []),
-    ...(input.terminal.repairPlan
+    ...(input.terminal.repairDecision
       ? ['document repair owner cannot replace the accepted repair plan']
       : []),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
@@ -1455,6 +1413,7 @@ export async function reconcileDocumentReview(input: {
       currentCheckId: input.terminal.checks[0]!.id,
       artifacts,
       ...(cycle.activeTarget ? { activeTarget: cycle.activeTarget } : {}),
+      ...(cycle.findings.length ? { priorFindings: cycle.findings } : {}),
       ...(cycle.mode === 'closure'
         ? {
             priorFindings: findingsForTarget(

@@ -249,7 +249,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const resourceLibrary = { name: 'ResourceLibrary' }
     const terminalTools = [
       'AssetManifest',
-      'SubmitDocumentRepairPlan',
+      'SubmitDocumentRepairDecision',
       'SubmitAtomicTaskPlan',
       'SubmitImplementationResult',
       'SubmitValidationResult',

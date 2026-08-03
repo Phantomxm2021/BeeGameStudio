@@ -329,6 +329,52 @@ describe('single-track document review workflow', () => {
     ).toBe('cross_document_consistency')
   })
 
+  test('projects complete accepted finding ownership into every later check', async () => {
+    const workspacePath = await createWorkspace()
+    let run = await reviewRun(workspacePath, 'foundation')
+    run = await createInitialDocumentReviewCycle({
+      run,
+      workspacePath,
+      scope: 'foundation',
+      revision: run.revision.document,
+    })
+    const acceptedFinding = reviewFinding({
+      findingId: 'owned-root',
+      checkId: 'brief_alignment',
+      owner: 'foundation',
+      path: 'docs/GDD.md',
+    })
+    run = await reconcileDocumentReviewCheck({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'foundation',
+        revision: run.revision.document,
+        verdict: 'NEEDS_REVISION',
+        checks: checksWithBlocks('foundation', {
+          brief_alignment: ['owned-root'],
+        }).slice(0, 1),
+        findings: [acceptedFinding],
+      }),
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    const request = await buildDocumentReviewDispatch({ run, workspacePath })
+    expect(request.contract.priorFindings).toEqual([
+      expect.objectContaining({
+        findingId: 'owned-root',
+        owner: 'foundation',
+        subjects: acceptedFinding.subjects,
+        observation: acceptedFinding.observation,
+        requiredAction: acceptedFinding.requiredAction,
+        closureCondition: acceptedFinding.closureCondition,
+      }),
+    ])
+  })
+
   test('keeps mixed findings in one ledger and selects the ordered foundation owner', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'complete')
@@ -475,7 +521,7 @@ describe('single-track document review workflow', () => {
     expect(retryRequest?.allowedPaths).toEqual([])
   })
 
-  test('rejects a repair plan that does not exactly partition findings', async () => {
+  test('accepts one repair decision and advances to the next finding', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'foundation')
     run = await createInitialDocumentReviewCycle({
@@ -534,25 +580,15 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'partial-plan',
-              findingIds: ['gdd-finding'],
-              invariants: ['Keep scope fixed'],
-              decision: 'Correct only one finding.',
-              affectedPaths: ['docs/GDD.md'],
-              dependsOn: [],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Keep scope fixed'],
+          decision: 'Correct only the current finding.',
         },
       },
       documentSet: 'foundation',
     })
-    expect(rejected.blockedReason).toContain(
-      'partition every active foundation finding exactly once',
-    )
-    expect(rejected.documentReviewState.activeCycle?.repairPlan).toBeUndefined()
+    expect(rejected.blockedReason).toBeUndefined()
+    expect(rejected.documentReviewState.activeCycle?.repairPlan?.groups).toHaveLength(1)
   })
 
   test('keeps cross-document evidence outside the exact repair subject scope', async () => {
@@ -610,6 +646,16 @@ describe('single-track document review workflow', () => {
         },
       },
     })
+    expect(planningRequest?.contract.repairDecisionTask).toMatchObject({
+      finding: expect.objectContaining({
+        findingId: 'shared-threshold-conflict',
+      }),
+      authorityPaths: [
+        'docs/BALANCE_DESIGN.md',
+        'docs/ART_DIRECTION.md',
+        'docs/AUDIO_DESIGN.md',
+      ],
+    })
 
     const accepted = await completeDocumentDraft({
       run: withDispatch(run, planningRequest!),
@@ -619,18 +665,9 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'threshold-authority',
-              findingIds: ['shared-threshold-conflict'],
-              invariants: ['Preserve presentation mappings'],
-              decision:
-                'Correct the shared threshold at its Balance authority.',
-              affectedPaths: ['docs/BALANCE_DESIGN.md'],
-              dependsOn: [],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Preserve presentation mappings'],
+          decision: 'Correct the shared threshold at its Balance authority.',
         },
       },
       documentSet: 'foundation',
@@ -648,7 +685,7 @@ describe('single-track document review workflow', () => {
     })
   })
 
-  test('rejects a grouped plan that omits an accepted finding subject path', async () => {
+  test('derives affected paths from the accepted finding rather than model input', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'foundation')
     run = await createInitialDocumentReviewCycle({
@@ -708,26 +745,16 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'combined-root',
-              findingIds: ['gdd-finding', 'balance-finding'],
-              invariants: ['Keep scope fixed'],
-              decision: 'Correct both findings.',
-              affectedPaths: ['docs/GDD.md'],
-              dependsOn: [],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Keep scope fixed'],
+          decision: 'Correct the current accepted finding.',
         },
       },
       documentSet: 'foundation',
     })
 
-    expect(rejected.blockedReason).toContain(
-      'affected paths must exactly cover the accepted finding subjects',
-    )
-    expect(rejected.documentReviewState.activeCycle?.repairPlan).toBeUndefined()
+    expect(rejected.blockedReason).toBeUndefined()
+    expect(rejected.documentReviewState.activeCycle?.repairPlan?.groups[0]?.affectedPaths).toEqual(['docs/GDD.md'])
   })
 
   test('repairs multiple documents through one durable serial owner cursor', async () => {
@@ -790,25 +817,35 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'gdd-root',
-              findingIds: ['gdd-finding'],
-              invariants: ['Keep unrelated gameplay rules'],
-              decision: 'Correct the GDD authority.',
-              affectedPaths: ['docs/GDD.md'],
-              dependsOn: [],
-            },
-            {
-              groupId: 'balance-root',
-              findingIds: ['balance-finding'],
-              invariants: ['Keep unrelated balance values'],
-              decision: 'Correct the Balance authority.',
-              affectedPaths: ['docs/BALANCE_DESIGN.md'],
-              dependsOn: ['gdd-root'],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Keep unrelated gameplay rules'],
+          decision: 'Correct the GDD authority.',
+        },
+      },
+      documentSet: 'foundation',
+    })
+    await startDocumentStage({
+      run,
+      workspacePath,
+      dispatcher: {
+        async dispatch(next) {
+          request = next
+          return next
+        },
+      },
+    })
+    expect(request?.contract.authoringMode).toBe('repair-planning')
+    run = await completeDocumentDraft({
+      run: withDispatch(run, request!),
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [],
+        resolvedFindingIds: [],
+        repairDecision: {
+          invariants: ['Keep unrelated balance values'],
+          decision: 'Correct the Balance authority.',
         },
       },
       documentSet: 'foundation',
@@ -956,17 +993,9 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'repair-authority-conflict',
-              findingIds: [findingId],
-              invariants: ['Preserve unrelated GDD authority'],
-              decision: 'Correct the cited GDD authority conflict.',
-              affectedPaths: ['docs/GDD.md'],
-              dependsOn: [],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Preserve unrelated GDD authority'],
+          decision: 'Correct the cited GDD authority conflict.',
         },
       },
       documentSet: 'foundation',
@@ -1095,17 +1124,9 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          groups: [
-            {
-              groupId: 'repair-foundation-gap',
-              findingIds: ['foundation-gap'],
-              invariants: ['Preserve unrelated foundation authority'],
-              decision: 'Correct the cited foundation gap in GDD.',
-              affectedPaths: ['docs/GDD.md'],
-              dependsOn: [],
-            },
-          ],
+        repairDecision: {
+          invariants: ['Preserve unrelated foundation authority'],
+          decision: 'Correct the cited foundation gap in GDD.',
         },
       },
       documentSet: 'foundation',

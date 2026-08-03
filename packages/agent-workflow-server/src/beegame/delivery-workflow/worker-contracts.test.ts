@@ -3,6 +3,7 @@ import {
   documentReviewCheckSchema,
   documentReviewFindingSchema,
   documentReviewCheckSubmissionSchemaForMode,
+  documentRepairDecisionSubmissionSchema,
 } from './worker-contracts'
 import { GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA } from './types'
 
@@ -26,6 +27,23 @@ const referenceSubmissionFinding = {
   ...submissionFinding,
   subjects: [{ referenceId: 'ref-subject' }],
 }
+
+describe('document repair decision contract', () => {
+  test('rejects a string-shaped invariants field within the current finding only', () => {
+    expect(
+      documentRepairDecisionSubmissionSchema.safeParse({
+        invariants: '["Preserve approved authority"]',
+        decision: 'Apply the smallest consistent correction.',
+      }).success,
+    ).toBe(false)
+    expect(
+      documentRepairDecisionSubmissionSchema.safeParse({
+        invariants: ['Preserve approved authority'],
+        decision: 'Apply the smallest consistent correction.',
+      }).success,
+    ).toBe(true)
+  })
+})
 
 describe('document review finding contract', () => {
   test('preserves the single canonical finding contract', () => {

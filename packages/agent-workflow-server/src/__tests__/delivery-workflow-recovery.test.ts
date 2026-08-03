@@ -375,7 +375,7 @@ describe('delivery workflow recovery', () => {
         status: 'interrupted',
         startedAt: '2026-01-01T00:00:00.000Z',
         finishedAt: terminalAt,
-        failureReason: 'document-author exceeded its wall-clock limit',
+        failureReason: 'worker transport was interrupted',
       },
     })
 
@@ -795,7 +795,6 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 100,
       progressPollIntervalMs: 10,
       workerPort: {
         async start(request) {
@@ -874,7 +873,7 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.resourcePreparationAttempt).toBe(2)
   })
 
-  test('starts a fresh retry dispatch even while the timed-out transport is still closing', async () => {
+  test('starts a fresh retry dispatch even while an explicitly stopped transport is still closing', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-stale-key-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -891,7 +890,6 @@ describe('delivery workflow recovery', () => {
     let closeCalls = 0
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 30,
       progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
@@ -923,11 +921,8 @@ describe('delivery workflow recovery', () => {
     }
     const first = await dispatcher.dispatch(request)
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-    expect((await store.load())?.status).toBe('needs_action')
+    await dispatcher.stop(first.dispatchId, 'operator stopped workflow')
+    expect((await store.load())?.status).toBe('stopped')
     expect(closeCalls).toBe(1)
 
     const retried = await retryRun({ store, runId: initial.runId })
@@ -968,7 +963,7 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.lastProgressAt).not.toBe(durableAt)
   })
 
-  test('applies the resource wall-clock limit even when idle detection is disabled', async () => {
+  test('does not stop resource work because wall-clock time elapsed', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-wall-clock-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -980,8 +975,6 @@ describe('delivery workflow recovery', () => {
     await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 20,
       resourceMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1009,19 +1002,15 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: {},
     })
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
+    await new Promise(resolve => setTimeout(resolve, 40))
 
     expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'resource worker exceeded its 20ms wall-clock limit',
-      activeDispatch: { status: 'interrupted' },
+      status: 'running',
+      activeDispatch: { status: 'running' },
     })
   })
 
-  test('supervises document wall-clock while submit is still running the model turn', async () => {
+  test('does not stop document work while a model turn remains active', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-submit-clock-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -1031,11 +1020,8 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
     })
     await store.save({ ...initial, phase: 'DOCUMENT_DRAFTING' })
-    let finishSubmit: (() => void) | undefined
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      documentAuthorMaxDurationMs: 20,
       documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1045,14 +1031,8 @@ describe('delivery workflow recovery', () => {
             dispatchId: request.dispatchId ?? 'missing-dispatch-id',
           }
         },
-        async submit() {
-          await new Promise<void>(resolve => {
-            finishSubmit = resolve
-          })
-        },
-        async stop() {
-          finishSubmit?.()
-        },
+        async submit() {},
+        async stop() {},
         async status() {
           throw new Error('not used')
         },
@@ -1070,14 +1050,11 @@ describe('delivery workflow recovery', () => {
       contract: { documentSet: 'foundation' },
     })
 
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'document-author exceeded its 20ms wall-clock limit',
-      activeDispatch: { status: 'interrupted' },
-    })
+    await new Promise(resolve => setTimeout(resolve, 40))
+    expect(await store.load()).toMatchObject({ status: 'running', activeDispatch: { status: 'running' } })
   })
 
-  test('reports resource no-mutation timeout before the longer wall-clock cap', async () => {
+  test('does not stop resource work because no mutation has occurred yet', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-no-mutation-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -1089,9 +1066,6 @@ describe('delivery workflow recovery', () => {
     await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceIdleProgressTimeoutMs: 20,
-      resourceMaxDurationMs: 1000,
       resourceMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1119,16 +1093,11 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: {},
     })
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
+    await new Promise(resolve => setTimeout(resolve, 40))
 
     expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason:
-        'resource worker produced no durable resource mutation for 20ms',
-      activeDispatch: { status: 'interrupted' },
+      status: 'running',
+      activeDispatch: { status: 'running' },
     })
   })
 
@@ -1155,8 +1124,6 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 0,
       resourceMaxTokens: 50,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1217,11 +1184,8 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 0,
       resourceMaxTokens: 0,
       documentReviewMaxTokens: 0,
-      documentAuthorMaxDurationMs: 0,
       documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1277,11 +1241,8 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 0,
       resourceMaxTokens: 0,
       documentReviewMaxTokens: 50,
-      documentAuthorMaxDurationMs: 0,
       documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
@@ -1337,8 +1298,6 @@ describe('delivery workflow recovery', () => {
     const yielded: string[] = []
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 0,
       resourceMaxTokens: 50,
       progressPollIntervalMs: 5,
       onResourceBudgetYield: async (_record, reason) => {
@@ -1403,9 +1362,6 @@ describe('delivery workflow recovery', () => {
     const yielded: string[] = []
     const dispatcher = createDeliveryDispatcher({
       store,
-      idleProgressTimeoutMs: 0,
-      resourceIdleProgressTimeoutMs: 0,
-      resourceMaxDurationMs: 60_000,
       resourceMaxTokens: 0,
       progressPollIntervalMs: 5,
       onResourceBudgetYield: async (_record, reason) => {

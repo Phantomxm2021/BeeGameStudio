@@ -1,7 +1,7 @@
 import {
   changeImpactSubmissionSchema,
   documentAuthorSubmissionSchema,
-  documentRepairPlanSubmissionSchema,
+  documentRepairDecisionSubmissionSchema,
   documentReviewCheckSubmissionSchemaForMode,
   questionAnswerSubmissionSchema,
 } from './delivery-workflow/worker-contracts'
@@ -58,14 +58,14 @@ const definitions = {
   },
 } as const
 
-const documentRepairPlanDefinition = {
-  name: 'SubmitDocumentRepairPlan',
-  schema: documentRepairPlanSubmissionSchema,
+const documentRepairDecisionDefinition = {
+  name: 'SubmitDocumentRepairDecision',
+  schema: documentRepairDecisionSubmissionSchema,
   description:
-    'Submit the single repair decision plan for the active accepted finding batch.',
+    'Submit the single repair decision for the current accepted finding.',
   prompt:
-    'Call exactly once. Partition every active finding ID exactly once into the smallest coupled root-problem groups. Lock one minimal decision per group, list immutable constraints, include every accepted subject path without adding or omitting paths, and declare acyclic dependencies. Do not reinterpret finding scope, write project files, reopen review, add unrelated design, or return prose.',
-  message: '提交文档修订计划',
+    'Call exactly once. State the immutable constraints and lock one minimal decision for contract.repairDecisionTask.finding. The service owns finding identity, affected paths, ordering and ledger persistence. Do not write project files, reopen review, add unrelated design, or return prose.',
+  message: '提交文档修订决策',
 } as const
 
 export function createNativeWorkflowResultTool(options: {
@@ -79,7 +79,7 @@ export function createNativeWorkflowResultTool(options: {
   const definition =
     options.workerType === 'document-author' &&
     options.documentAuthorMode === 'repair-planning'
-      ? documentRepairPlanDefinition
+      ? documentRepairDecisionDefinition
       : definitions[options.workerType]
   const schema =
     options.workerType === 'document-reviewer'

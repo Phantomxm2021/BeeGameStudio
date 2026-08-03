@@ -348,14 +348,15 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         group => group.findingIds,
       )
       if (
-        assignedFindingIds.length !== expectedFindingIds.length ||
+        assignedFindingIds.length > expectedFindingIds.length ||
         new Set(assignedFindingIds).size !== assignedFindingIds.length ||
-        expectedFindingIds.some(id => !assignedFindingIds.includes(id))
+        assignedFindingIds.some((id, index) => id !== expectedFindingIds[index])
       )
         context.addIssue({
           code: 'custom',
           path: ['repairPlan', 'groups'],
-          message: 'repair plan must partition the active foundation findings',
+          message:
+            'repair plan must be the stable accepted-finding prefix without duplicates',
         })
       const groupIds = cycle.repairPlan.groups.map(group => group.groupId)
       const knownGroups = new Set(groupIds)
@@ -402,10 +403,11 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
           path: ['repairPlan', 'groups'],
           message: 'repair plan dependencies must be acyclic',
         })
+      const plannedFindingSet = new Set(assignedFindingIds)
       const expectedPaths = [
         ...new Set(
           cycle.findings
-            .filter(finding => finding.owner === 'foundation')
+            .filter(finding => plannedFindingSet.has(finding.findingId))
             .flatMap(finding =>
               finding.subjects
                 .map(subject => subject.path)
@@ -428,6 +430,15 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
           code: 'custom',
           path: ['repairPlan', 'groups'],
           message: 'repair plan paths must cover the finding subjects exactly',
+        })
+      if (
+        assignedFindingIds.length < expectedFindingIds.length &&
+        cycle.repairPlan.completedPaths.length > 0
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'completedPaths'],
+          message: 'document repair cannot start before every finding has a decision',
         })
       const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         cycle.repairPlan!.groups.some(group =>
