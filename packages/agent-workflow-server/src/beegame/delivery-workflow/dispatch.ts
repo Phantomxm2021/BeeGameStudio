@@ -32,12 +32,6 @@ export type DispatchCredits = {
 
 const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
-const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 60_000
-// Initial authoring owns one document. Repair planning and repair owner tasks
-// use smaller independent bounds because neither may span multiple documents.
-const DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS = 1_000_000
-const DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_TOKENS = 250_000
-const DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_TOKENS = 300_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
@@ -136,8 +130,6 @@ export function createDeliveryDispatcher(options: {
   credits?: DispatchCredits
   progressPollIntervalMs?: number
   resourceMaxTokens?: number
-  documentReviewMaxTokens?: number
-  documentAuthorMaxTokens?: number
   onTerminal?: (
     record: DispatchRecord,
     result: WorkerTerminalResult,
@@ -158,10 +150,6 @@ export function createDeliveryDispatcher(options: {
     options.progressPollIntervalMs ?? DEFAULT_PROGRESS_POLL_INTERVAL_MS
   const resourceMaxTokens =
     options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
-  const documentReviewMaxTokens =
-    options.documentReviewMaxTokens ?? DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS
-  const documentAuthorMaxTokens =
-    options.documentAuthorMaxTokens ?? DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -379,12 +367,6 @@ export function createDeliveryDispatcher(options: {
   }
 
   async function monitorIdleProgress(dispatchId: string): Promise<void> {
-    if (
-      resourceMaxTokens <= 0 &&
-      documentReviewMaxTokens <= 0 &&
-      documentAuthorMaxTokens <= 0
-    )
-      return
     while (true) {
       await new Promise(resolve => setTimeout(resolve, progressPollIntervalMs))
       const run = await options.store.load()
@@ -397,10 +379,6 @@ export function createDeliveryDispatcher(options: {
         return
       const isResourceWorker =
         run.activeDispatch.workerType === 'resource-preparer'
-      const isDocumentReviewer =
-        run.activeDispatch.workerType === 'document-reviewer'
-      const isDocumentAuthor =
-        run.activeDispatch.workerType === 'document-author'
       const resourceMutationInFlight =
         isResourceWorker &&
         (await options.workerPort
@@ -436,30 +414,6 @@ export function createDeliveryDispatcher(options: {
           if (hasDurableProgressSinceDispatch(run))
             await yieldResourceDispatch(dispatchId, reason)
           else await markDispatchNeedsAction(dispatchId, reason)
-          return
-        }
-      }
-      const documentTokenLimit = isDocumentReviewer
-        ? documentReviewMaxTokens
-        : isDocumentAuthor
-          ? (options.documentAuthorMaxTokens ??
-            (activeRequest?.contract.authoringMode === 'repair-planning'
-              ? DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_TOKENS
-              : activeRequest?.contract.authoringMode === 'remediation'
-                ? DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_TOKENS
-                : documentAuthorMaxTokens))
-          : 0
-      if (documentTokenLimit > 0) {
-        const consumed = Math.max(
-          0,
-          (run.usage?.total_tokens ?? 0) -
-            (run.activeDispatch.startingUsageTotalTokens ?? 0),
-        )
-        if (consumed >= documentTokenLimit) {
-          await markDispatchNeedsAction(
-            dispatchId,
-            `${run.activeDispatch.workerType} exceeded its ${documentTokenLimit} total token limit`,
-          )
           return
         }
       }

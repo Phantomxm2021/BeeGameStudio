@@ -28,7 +28,6 @@ import {
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
-  MAX_DOCUMENT_REPAIR_PASSES,
   type DeliveryRun,
   type DocumentReviewCheck,
   type DocumentReviewCheckId,
@@ -83,7 +82,6 @@ type Dispatcher = {
 
 type RemediationTarget = 'foundation' | 'checklist' | 'resource'
 
-const MAX_CHECKLIST_REMEDIATION_ATTEMPTS = 3
 const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
 const SYSTEM_CONTRACT_PATH = 'systemDeliveryContract'
 
@@ -224,14 +222,6 @@ function routeToRemediation(
       type: 'resource_review_remediation_required',
     })
   const completedPasses = run.documentReviewState.repairPasses[target]
-  if (completedPasses >= MAX_DOCUMENT_REPAIR_PASSES)
-    return {
-      ...run,
-      status: 'needs_action',
-      activeDispatch: undefined,
-      blockedReason: `document ${target} remediation exhausted its bounded repair passes`,
-      updatedAt: new Date().toISOString(),
-    }
   return {
     ...run,
     phase: target === 'foundation' ? 'DOCUMENT_DRAFTING' : 'DOCUMENT_REVIEW',
@@ -259,8 +249,7 @@ export function restoreAcceptedReviewRemediationHandoff(
   const target = cycle?.activeTarget
   if (!cycle?.acceptedSemanticResult || !target) return undefined
   const completedPasses = run.documentReviewState.repairPasses[target]
-  if (completedPasses <= 0 || completedPasses >= MAX_DOCUMENT_REPAIR_PASSES)
-    return undefined
+  if (completedPasses <= 0) return undefined
   if (target === 'resource') {
     if (run.phase === 'RESOURCE_PREPARATION' && run.documentStep === undefined)
       return undefined
@@ -975,9 +964,6 @@ export async function completeDocumentDraft(input: {
   const checklistAttempt = checklistCanBeRemediated
     ? (input.run.checklistRemediation?.attempt ?? 0) + 1
     : undefined
-  const checklistRetryAvailable =
-    checklistAttempt !== undefined &&
-    checklistAttempt <= MAX_CHECKLIST_REMEDIATION_ATTEMPTS
   const issues = [
     ...readiness.issues,
     ...(outOfScope.length
@@ -1004,10 +990,7 @@ export async function completeDocumentDraft(input: {
       workspace: workspaceRevision,
     },
     activeDispatch: undefined,
-    status:
-      checklistAttempt !== undefined && !checklistRetryAvailable
-        ? 'needs_action'
-        : input.run.status,
+    status: input.run.status,
     blockedReason: issues.length ? issues.join('; ') : undefined,
     ...(documentSet === 'checklist'
       ? {

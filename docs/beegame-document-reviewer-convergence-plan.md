@@ -218,11 +218,11 @@ Reviewer 审计可观察需求、资源引用与内容结构，不得要求 Pref
 6. Closure Review 只复核 prior findings、server diff、固定受影响 checks 和直接 regression。
 7. 已关闭 finding 不得在同一 revision 以新 ID 重新提出，除非 diff 产生了可证明的新冲突。
 8. 上游变更确定性失效受影响的下游 approval；不重新开放无关全文审计。
-9. 自动修订达到上限后进入 `needs_action`，保留真实 findings 和累计时间。
+9. 自动修订不设置次数上限；每轮只处理当前 accepted finding，并持续闭环到 Closure 通过、出现明确基础设施错误或用户停止。
 
 Reviewer 的 `requiredAction` 与 `closureCondition` 必须定义结果约束，但不得把互斥修法错误地伪装成多个 finding。具体修法由 Repair Lead 在原 active cycle 中锁定；Closure 只判断文档结果是否关闭原 finding，不把 repair plan 提升为项目审计权威。
 
-每个 Agent dispatch 的职责、输入和 token 边界独立受控，但 Reviewer、Repair Lead、Document Author 与 Resource Agent 均不设置固定业务墙钟、durable-progress idle 或 terminal grace 截止线；已接受 check 与 repair decision 已经是同一 Cycle 的 canonical ledger，不是部分结果缓存。只有连接断开、worker 进程退出或明确终态等可观察基础设施事件可以结束当前 dispatch；经过时长、网络慢、模型持续输出或尚未产生文件 mutation 都不是业务失败。不得增设整轮提交工具、prose parser、自动续写或第二事实源。
+每个 Agent dispatch 的职责与输入独立受控，但 Reviewer、Repair Lead、Document Author 与 Resource Agent 均不设置固定业务墙钟、durable-progress idle、terminal grace、累计 token 或自动修订次数截止线；已接受 check 与 repair decision 已经是同一 Cycle 的 canonical ledger，不是部分结果缓存。只有连接断开、worker 进程退出、用户停止或明确终态等可观察事件可以结束当前 dispatch；经过时长、累计 token、修订轮次、网络慢、模型持续输出或尚未产生文件 mutation 都不是业务失败。不得增设整轮提交工具、prose parser、自动续写或第二事实源。
 
 修复必须提升相应文档 PATCH 版本；资源或内容修复提升 Manifest revision。版本变化用于证据失效，不等同于自动通过。
 
@@ -266,7 +266,7 @@ Card 标题旁的主进度固定显示当前 delivery phase 在服务端 canonic
 2. JSON/YAML 与 Manifest 只存在一个 owner；
 3. placeholder 不会因库内无匹配而停止项目；
 4. invalid check submission 不会变成业务 finding，也不会抹除已接受 check；
-5. 修订次数有界，重启和继续不重置；
+5. 修订次数不构成停止条件；重启和继续保留同一 Cycle、finding ledger、累计时间与修订计数；
 6. 没有 Composition phase、`cmp-*`、双轨、feedback、fallback 或兼容 reader；
 7. 系统 Chrome 能打开交付项目并按 Checklist 完成真实玩家路径。
 8. 至少使用结构不同的全新项目证明 Reviewer 能阻止无意义选择、支配策略、经济死锁/套利、数值无解、难度断层、空间不支持和场景状态缺口，而不是只发现格式或跨文档冲突。

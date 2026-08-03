@@ -285,7 +285,6 @@ export type DocumentReviewState = {
   }
 }
 
-export const MAX_DOCUMENT_REPAIR_PASSES = 2
 export const DELIVERY_RUN_SCHEMA_VERSION = 6 as const
 
 export type ChecklistRemediation = {

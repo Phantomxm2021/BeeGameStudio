@@ -172,7 +172,7 @@ Document Author 的运行时能力声明必须与真实工具完全一致。Auth
 
 同一修复 batch 若在文档 owner task 之间被中断，已完成路径保存在 active cycle 的唯一 repair cursor 中并保持为当前 canonical artifact。恢复时服务端必须同时验证 checkpoint 路径相对 frozen baseline 已发生合法变化；不得仅凭模型声明推进 cursor。已经完成的路径不得再次派发或再次提升版本。Closure diff 始终相对原 frozen baseline 计算。
 
-首次 Document Author、Repair Lead、repair owner task、Document Reviewer 与 Resource Agent 都不使用固定业务墙钟、durable-progress idle 或 terminal grace 截止线；项目复杂度、网络状态、模型响应时间和文件 mutation 间隔不是失败条件。只有连接断开、worker 进程退出或明确终态可以结束 dispatch。token 边界仍只覆盖当前有界 task，且不得依靠上下文压缩、自动续写或提高预算完成另一项任务。Repair Lead 只提交当前 finding 的结构化决定，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable planning/owner task 不等于拆分 finding 或 repair-plan ledger，也不允许第二终态、增量 Edit 或并行修订队列。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中。
+首次 Document Author、Repair Lead、repair owner task、Document Reviewer 与 Resource Agent 都不使用固定业务墙钟、durable-progress idle、terminal grace、累计 token 或自动修订次数截止线；项目复杂度、网络状态、模型响应时间、累计 token、修订轮次和文件 mutation 间隔都不是失败条件。只有连接断开、worker 进程退出、用户停止或明确终态可以结束 dispatch。每个 dispatch 仍只负责当前有界 task，但不得以 token 预算、经过时间或修订次数强制结束它，也不得依靠上下文压缩或第二续写通道完成另一项任务。Repair Lead 只提交当前 finding 的结构化决定，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable planning/owner task 不等于拆分 finding 或 repair-plan ledger，也不允许第二终态、增量 Edit 或并行修订队列。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中。
 
 Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证、改走第二网络路径或引入 fallback transport。
 

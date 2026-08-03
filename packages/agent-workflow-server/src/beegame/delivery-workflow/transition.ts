@@ -1,5 +1,4 @@
 import { parseDeliveryRun } from './schema'
-import { MAX_DOCUMENT_REPAIR_PASSES } from './types'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -311,17 +310,6 @@ export function transitionDeliveryRun(
           'resource review remediation requires at least one resource finding',
         )
       const completedPasses = run.documentReviewState.repairPasses.resource
-      if (completedPasses >= MAX_DOCUMENT_REPAIR_PASSES) {
-        next = {
-          ...run,
-          status: 'needs_action',
-          activeDispatch: undefined,
-          blockedReason:
-            'document resource remediation exhausted its bounded repair passes',
-          updatedAt: timestamp(),
-        }
-        break
-      }
       next = enterResourcePreparation(run, {
         repairPasses: {
           ...run.documentReviewState.repairPasses,

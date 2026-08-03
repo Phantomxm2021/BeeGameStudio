@@ -1352,7 +1352,7 @@ describe('single-track document review workflow', () => {
     })
   })
 
-  test('does not enter a third repair pass from an initial review result', async () => {
+  test('continues resource remediation without a repair-pass cutoff', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'complete')
     run = await createInitialDocumentReviewCycle({
@@ -1367,7 +1367,7 @@ describe('single-track document review workflow', () => {
       scope: 'complete',
       revision: run.revision.resource!,
     })
-    const blocked = await reconcileDocumentReview({
+    const routed = await reconcileDocumentReview({
       run,
       workspacePath,
       terminal: await reviewTerminal({
@@ -1393,12 +1393,10 @@ describe('single-track document review workflow', () => {
       audit: () => ({ valid: true, issues: [] }),
     })
 
-    expect(blocked.status).toBe('needs_action')
-    expect(blocked.phase).toBe('DOCUMENT_REVIEW')
-    expect(blocked.documentReviewState.repairPasses.resource).toBe(2)
-    expect(blocked.blockedReason).toContain(
-      'exhausted its bounded repair passes',
-    )
+    expect(routed.status).toBe('running')
+    expect(routed.phase).toBe('RESOURCE_PREPARATION')
+    expect(routed.documentReviewState.repairPasses.resource).toBe(3)
+    expect(routed.blockedReason).toBeUndefined()
   })
 
   test('accepts only changed-path regressions during Closure Review', async () => {

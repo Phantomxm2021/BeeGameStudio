@@ -471,9 +471,9 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
     activeCycle: documentReviewCycleSchema.optional(),
     repairPasses: z
       .object({
-        foundation: z.number().int().min(0).max(2),
-        checklist: z.number().int().min(0).max(2),
-        resource: z.number().int().min(0).max(2),
+        foundation: z.number().int().min(0),
+        checklist: z.number().int().min(0),
+        resource: z.number().int().min(0),
       })
       .strict(),
   })

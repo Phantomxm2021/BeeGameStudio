@@ -115,7 +115,7 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(join(workspace, evidencePath), 'utf8')).toBe('{}\n')
   })
 
-  test('explicit retry cannot reset an exhausted accepted repair budget', async () => {
+  test('explicit retry resumes an accepted repair handoff regardless of prior pass count', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-lock-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -185,9 +185,9 @@ describe('delivery workflow recovery', () => {
       workspacePath: workspace,
     })
     expect(retried).toMatchObject({
-      status: 'needs_action',
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
       documentReviewState: {
         repairPasses: { foundation: 2 },
         activeCycle: {
@@ -1022,7 +1022,6 @@ describe('delivery workflow recovery', () => {
     await store.save({ ...initial, phase: 'DOCUMENT_DRAFTING' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
@@ -1185,8 +1184,6 @@ describe('delivery workflow recovery', () => {
     const dispatcher = createDeliveryDispatcher({
       store,
       resourceMaxTokens: 0,
-      documentReviewMaxTokens: 0,
-      documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
@@ -1217,8 +1214,8 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.blockedReason).toBeUndefined()
   })
 
-  test('bounds reviewer usage by total tokens including cache reads', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-token-limit-'))
+  test('does not stop reviewer work when cumulative token usage increases', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-token-growth-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-1',
@@ -1242,8 +1239,6 @@ describe('delivery workflow recovery', () => {
     const dispatcher = createDeliveryDispatcher({
       store,
       resourceMaxTokens: 0,
-      documentReviewMaxTokens: 50,
-      documentAuthorMaxTokens: 0,
       progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
@@ -1274,15 +1269,12 @@ describe('delivery workflow recovery', () => {
       cache_read_tokens: 80,
       total_tokens: 150,
     })
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-
+    await new Promise(resolve => setTimeout(resolve, 40))
     expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'document-reviewer exceeded its 50 total token limit',
+      status: 'running',
+      activeDispatch: { status: 'running' },
     })
+    expect((await store.load())?.blockedReason).toBeUndefined()
   })
 
   test('yields a resource dispatch with durable progress so the controller can continue it', async () => {
