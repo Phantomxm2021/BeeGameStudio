@@ -32,16 +32,19 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
-  test('disables extended thinking for structured planning and implementation workers', () => {
+  test('disables extended thinking for action-oriented workflow workers', () => {
+    expect(getBeeGameWorkflowThinkingConfig('document-author')).toEqual({
+      type: 'disabled',
+    })
     expect(getBeeGameWorkflowThinkingConfig('atomic-task-planner')).toEqual({
       type: 'disabled',
     })
     expect(getBeeGameWorkflowThinkingConfig('implementation-worker')).toEqual({
       type: 'disabled',
     })
-    expect(
-      getBeeGameWorkflowThinkingConfig('document-reviewer'),
-    ).toBeUndefined()
+    expect(getBeeGameWorkflowThinkingConfig('document-reviewer')).toEqual({
+      type: 'disabled',
+    })
     expect(getBeeGameWorkflowThinkingConfig()).toBeUndefined()
   })
 
@@ -76,7 +79,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         'Read',
       ),
     ).toBe(true)
-
   })
 
   test('preserves workflow mutation boundaries without exposing resource shell access', () => {
@@ -203,7 +205,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual(['Read', 'Write', 'Glob'])
   })
 
-  test('keeps document writes batchable without the incremental Edit lane', () => {
+  test('keeps one target read and write lane without Edit or MultiEdit', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -215,7 +217,15 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       selectBeeGameWorkerTools(tools, 'document-author').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Write', 'MultiEdit'])
+    ).toEqual(['Read', 'Write'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'document-author', 'remediation').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read', 'Write'])
+    expect(
+      selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
+    ).toEqual([])
   })
 
   test('removes file and exploration lanes from the atomic planner', () => {
@@ -234,16 +244,17 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual([])
   })
 
-  test('inherits operational capabilities but keeps terminal tools on the main worker', () => {
+  test('inherits operational capabilities but keeps workflow control tools on the main worker', () => {
     const existing = { name: 'existing-mcp-tool' }
     const resourceLibrary = { name: 'ResourceLibrary' }
     const terminalTools = [
       'AssetManifest',
+      'SubmitDocumentRepairPlan',
       'SubmitAtomicTaskPlan',
       'SubmitImplementationResult',
       'SubmitValidationResult',
       'SubmitDocumentAuthorResult',
-      'SubmitDocumentReviewResult',
+      'SubmitDocumentReviewCheck',
       'SubmitChangeImpactResult',
       'SubmitQuestionAnswerResult',
     ].map(name => ({ name }))

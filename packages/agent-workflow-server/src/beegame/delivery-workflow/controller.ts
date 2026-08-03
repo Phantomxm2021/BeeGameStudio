@@ -17,7 +17,6 @@ import {
   buildDocumentReviewDispatch,
   completeDocumentDraft,
   createInitialDocumentReviewCycle,
-  incrementDocumentReviewTransportAttempt,
   reconcileDocumentReview,
   startChecklistDraftStage,
   startDocumentStage,
@@ -231,6 +230,10 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? 'DOCUMENT_DRAFTING'
             : 'ATOMIC_TASK_PLANNING',
+        documentStep:
+          result.classification === 'documents_required'
+            ? 'FOUNDATION_DRAFTING'
+            : undefined,
         status: 'running',
         revision: {
           ...next.revision,
@@ -262,6 +265,10 @@ export function createDeliveryWorkflowController(input: {
                 repairPasses: { foundation: 0, checklist: 0, resource: 0 },
               }
             : next.documentReviewState,
+        foundationDraftState:
+          result.classification === 'documents_required'
+            ? { completedPaths: [] }
+            : next.foundationDraftState,
         checklistRemediation:
           result.classification === 'documents_required'
             ? undefined
@@ -303,6 +310,7 @@ export function createDeliveryWorkflowController(input: {
       next = await completeDocumentDraft({
         run: {
           ...next,
+          activeDispatch: run.activeDispatch,
           phase:
             documentSet === 'checklist'
               ? 'DOCUMENT_REVIEW'
@@ -395,7 +403,7 @@ export function createDeliveryWorkflowController(input: {
         ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       next = await completeResourcePreparation({
-        run: { ...next, phase: 'RESOURCE_PREPARATION' },
+        run: next,
         workspacePath: input.workspacePath,
         terminal: result,
         audit: resourceAudit,
@@ -831,7 +839,7 @@ export function createDeliveryWorkflowController(input: {
     reason: string,
   ): Promise<void> {
     const invalidated = transitionDeliveryRun(run, {
-      type: 'resource_preparation_invalidated',
+      type: 'resource_preparation_required',
       reason,
     })
     await persist(invalidated, 'resource.revision.invalidated')
@@ -873,6 +881,7 @@ export function createDeliveryWorkflowController(input: {
       documentReviewState: {
         repairPasses: { foundation: 0, checklist: 0, resource: 0 },
       },
+      foundationDraftState: { completedPaths: [] },
       checklistRemediation: undefined,
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -934,29 +943,11 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.phase === 'DOCUMENT_DRAFTING') {
-      const changeMessage = run.changeRequest
-      if (changeMessage) {
-        await dispatcher.dispatch({
-          runId: run.runId,
-          ownerId: run.ownerId,
-          projectId: run.projectId,
-          workspacePath: input.workspacePath,
-          workerType: 'document-author',
-          phase: run.phase,
-          revision: run.revision.document,
-          allowedPaths: ['docs/'],
-          contract: {
-            confirmedBriefDigest: run.confirmedBriefDigest,
-            changeRequest: changeMessage,
-          },
-        })
-      } else {
-        await startDocumentStage({
-          run,
-          workspacePath: input.workspacePath,
-          dispatcher,
-        })
-      }
+      await startDocumentStage({
+        run,
+        workspacePath: input.workspacePath,
+        dispatcher,
+      })
       return
     }
     if (run.phase === 'DOCUMENT_REVIEW') {
@@ -974,37 +965,12 @@ export function createDeliveryWorkflowController(input: {
             resourceEvidence?.status !== 'passed' ||
             resourceEvidence.revision !== run.revision.resource
           ) {
-            const readiness = auditResourceDeliveryReadiness({
-              workspacePath: input.workspacePath,
-              confirmedPolicy: confirmedResourceLibraryUsage(
-                run.confirmedBriefContext,
-              ),
-              ...(run.resourceEvidence
-                ? { resourceEvidence: run.resourceEvidence }
-                : {}),
-            })
-            const activeCycle = run.documentReviewState.activeCycle
-            const preserveResourceClosure = Boolean(
-              activeCycle?.acceptedSemanticResult &&
-                activeCycle.activeTarget === 'resource',
-            )
-            const prerequisitePhase = 'RESOURCE_PREPARATION' as const
             const restored = await persist(
-              {
-                ...run,
-                phase: prerequisitePhase,
-                documentStep: undefined,
-                activeDispatch: undefined,
-                status: 'running',
-                blockedReason: undefined,
-                documentReviewState: {
-                  ...run.documentReviewState,
-                  comprehensiveApproval: undefined,
-                  activeCycle: preserveResourceClosure
-                    ? activeCycle
-                    : undefined,
-                },
-              },
+              transitionDeliveryRun(run, {
+                type: 'resource_preparation_required',
+                reason:
+                  'resource preparation evidence is missing before comprehensive review',
+              }),
               'document.review.prerequisite.restored',
             )
             await resumeUnlocked(restored)
@@ -1073,21 +1039,7 @@ export function createDeliveryWorkflowController(input: {
           await persist(blocked, 'document.review.revision.changed')
           return
         }
-        if (cycle.transportAttempts >= 2) {
-          const blocked = {
-            ...reviewRun,
-            status: 'needs_action' as const,
-            blockedReason:
-              'document reviewer transport attempts are exhausted for this frozen revision',
-          }
-          await persist(blocked, 'document.review.transport.exhausted')
-          return
-        }
-        reviewRun = incrementDocumentReviewTransportAttempt(reviewRun)
-        reviewRun = await persist(
-          reviewRun,
-          'document.review.transport.started',
-        )
+        reviewRun = await persist(reviewRun, 'document.review.semantic.started')
         await dispatcher.dispatch(
           await buildDocumentReviewDispatch({
             run: reviewRun,

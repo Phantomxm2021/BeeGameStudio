@@ -11,6 +11,7 @@ import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
 import { normalizeChatHistory } from '../../utils/chatHistory';
+import type { WorkflowCardAction } from '../../types/message';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
@@ -42,7 +43,7 @@ interface RightSidebarProps {
     ) => void;
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
-    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
+    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onResolveToolPermission?: (

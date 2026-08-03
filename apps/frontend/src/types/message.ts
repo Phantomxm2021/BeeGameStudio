@@ -38,11 +38,13 @@ export type WorkflowCardStatus =
 export interface WorkflowCardTask {
   id: string;
   title: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped';
   operation?: 'write' | 'review' | 'produce' | 'assemble'
   attempt?: number;
   failureReason?: string;
 }
+
+export type WorkflowCardAction = 'resume' | 'retry' | 'restart';
 
 export interface WorkflowCardPayload {
   runId: string;
@@ -67,7 +69,7 @@ export interface WorkflowCardPayload {
   elapsedMs?: number;
   /** Start of the current active interval; absent while paused or terminal. */
   activeSince?: string;
-  nextAction?: 'resume' | 'retry';
+  nextAction?: WorkflowCardAction;
   block?: {
     message: string;
     nextAction?: string;

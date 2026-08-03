@@ -12,14 +12,16 @@ import type {
   DeliveryRun,
   DispatchRecord,
   EvidenceRef,
+  FoundationDraftState,
   Revision,
-  ResourceRemediation,
   TaskVerification,
   WorkflowEvent,
   WorkerDispatchRequest,
 } from './types'
 import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  DELIVERY_RUN_SCHEMA_VERSION,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
 } from './types'
 
@@ -194,13 +196,19 @@ export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFindi
       severity: z.literal('blocking'),
       owner: z.enum(['foundation', 'checklist', 'resource']),
       regressionPaths: z.array(z.string().min(1)).optional(),
-      subjects: z.array(z.object({
-        path: z.string().min(1),
-        anchor: z.string().min(1),
-        requirementId: z.string().min(1).optional(),
-        resourceId: z.string().min(1).optional(),
-        contentId: z.string().min(1).optional(),
-      }).strict()).min(1),
+      subjects: z
+        .array(
+          z
+            .object({
+              path: z.string().min(1),
+              anchor: z.string().min(1),
+              requirementId: z.string().min(1).optional(),
+              resourceId: z.string().min(1).optional(),
+              contentId: z.string().min(1).optional(),
+            })
+            .strict(),
+        )
+        .min(1),
       observation: z.string().min(1),
       blockingReason: z.string().min(1),
       requiredAction: z.string().min(1),
@@ -252,19 +260,60 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
     mode: z.enum(['initial', 'closure']),
     sourceRevision: z.string().min(1),
     requiredCheckIds: z.array(documentReviewCheckIdSchema).min(1),
+    completedCheckIds: z.array(documentReviewCheckIdSchema),
     checks: z.array(persistedDocumentReviewCheckSchema),
     checkEvidenceDigests: checkEvidenceDigestsSchema,
     findings: z.array(persistedDocumentReviewFindingSchema),
     activeTarget: z.enum(['foundation', 'checklist', 'resource']).optional(),
     acceptedSemanticResult: z.boolean(),
-    transportAttempts: z.number().int().min(0).max(2),
-    transportCorrection: z.string().min(1).optional(),
     changedPaths: z.array(z.string().min(1)),
     sourceArtifactDigests: z.record(z.string(), z.string().min(1)),
+    repairPlan: z
+      .object({
+        groups: z
+          .array(
+            z
+              .object({
+                groupId: z.string().trim().min(1),
+                findingIds: z.array(z.string().trim().min(1)).min(1),
+                invariants: z.array(z.string().trim().min(1)).min(1),
+                decision: z.string().trim().min(1),
+                affectedPaths: z
+                  .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
+                  .min(1),
+                dependsOn: z.array(z.string().trim().min(1)),
+              })
+              .strict(),
+          )
+          .min(1),
+        completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+      })
+      .strict()
+      .optional(),
     evidencePath: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((cycle, context) => {
+    const completedPrefix = cycle.requiredCheckIds.slice(
+      0,
+      cycle.completedCheckIds.length,
+    )
+    if (
+      completedPrefix.length !== cycle.completedCheckIds.length ||
+      completedPrefix.some(
+        (id, index) => id !== cycle.completedCheckIds[index],
+      ) ||
+      cycle.acceptedSemanticResult !==
+        (cycle.completedCheckIds.length === cycle.requiredCheckIds.length) ||
+      cycle.completedCheckIds.some(
+        id => !cycle.checks.some(check => check.id === id),
+      )
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['completedCheckIds'],
+        message: 'document review completed checks must be the required-order prefix',
+      })
     if (
       cycle.mode === 'initial' &&
       (cycle.originScope !== cycle.scope ||
@@ -284,6 +333,124 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         code: 'custom',
         message: 'closure document review cycle requires parent and target',
       })
+    if (cycle.repairPlan) {
+      if (!cycle.acceptedSemanticResult || cycle.activeTarget !== 'foundation')
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan'],
+          message:
+            'foundation repair plan requires one accepted active foundation finding ledger',
+        })
+      const expectedFindingIds = cycle.findings
+        .filter(finding => finding.owner === 'foundation')
+        .map(finding => finding.findingId)
+      const assignedFindingIds = cycle.repairPlan.groups.flatMap(
+        group => group.findingIds,
+      )
+      if (
+        assignedFindingIds.length !== expectedFindingIds.length ||
+        new Set(assignedFindingIds).size !== assignedFindingIds.length ||
+        expectedFindingIds.some(id => !assignedFindingIds.includes(id))
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'groups'],
+          message: 'repair plan must partition the active foundation findings',
+        })
+      const groupIds = cycle.repairPlan.groups.map(group => group.groupId)
+      const knownGroups = new Set(groupIds)
+      if (
+        knownGroups.size !== groupIds.length ||
+        cycle.repairPlan.groups.some(
+          group =>
+            new Set(group.findingIds).size !== group.findingIds.length ||
+            new Set(group.affectedPaths).size !== group.affectedPaths.length ||
+            new Set(group.dependsOn).size !== group.dependsOn.length ||
+            group.dependsOn.some(
+              dependency =>
+                dependency === group.groupId || !knownGroups.has(dependency),
+            ),
+        )
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'groups'],
+          message: 'repair plan group identities and dependencies are invalid',
+        })
+      const dependencyMap = new Map(
+        cycle.repairPlan.groups.map(group => [group.groupId, group.dependsOn]),
+      )
+      const visiting = new Set<string>()
+      const visited = new Set<string>()
+      let cyclic = false
+      const visit = (groupId: string): void => {
+        if (visited.has(groupId) || cyclic) return
+        if (visiting.has(groupId)) {
+          cyclic = true
+          return
+        }
+        visiting.add(groupId)
+        for (const dependency of dependencyMap.get(groupId) ?? [])
+          visit(dependency)
+        visiting.delete(groupId)
+        visited.add(groupId)
+      }
+      for (const groupId of groupIds) visit(groupId)
+      if (cyclic)
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'groups'],
+          message: 'repair plan dependencies must be acyclic',
+        })
+      const expectedPaths = [
+        ...new Set(
+          cycle.findings
+            .filter(finding => finding.owner === 'foundation')
+            .flatMap(finding =>
+              finding.subjects
+                .map(subject => subject.path)
+                .filter(path =>
+                  CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+                ),
+            ),
+        ),
+      ]
+      const plannedPaths = [
+        ...new Set(
+          cycle.repairPlan.groups.flatMap(group => group.affectedPaths),
+        ),
+      ]
+      if (
+        plannedPaths.length !== expectedPaths.length ||
+        expectedPaths.some(path => !plannedPaths.includes(path as never))
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'groups'],
+          message: 'repair plan paths must cover the finding subjects exactly',
+        })
+      const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+        cycle.repairPlan!.groups.some(group =>
+          group.affectedPaths.includes(path),
+        ),
+      )
+      const completedPrefix = repairPaths.slice(
+        0,
+        cycle.repairPlan.completedPaths.length,
+      )
+      if (
+        completedPrefix.length !== cycle.repairPlan.completedPaths.length ||
+        completedPrefix.some(
+          (path, index) => path !== cycle.repairPlan!.completedPaths[index],
+        )
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['repairPlan', 'completedPaths'],
+          message:
+            'repair plan completed paths must be the canonical owner-order prefix',
+        })
+    }
   })
 
 const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
@@ -309,13 +476,26 @@ const checklistRemediationSchema: z.ZodType<ChecklistRemediation> = z
   })
   .strict()
 
-const resourceRemediationSchema: z.ZodType<ResourceRemediation> = z
+const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
-    sourceRevision: z.string().min(1),
-    attempt: z.number().int().positive(),
-    issues: z.array(z.string().min(1)).min(1),
+    completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
   })
   .strict()
+  .superRefine((state, context) => {
+    const expected = CANONICAL_FOUNDATION_DOCUMENTS.slice(
+      0,
+      state.completedPaths.length,
+    )
+    if (
+      state.completedPaths.length > CANONICAL_FOUNDATION_DOCUMENTS.length ||
+      state.completedPaths.some((path, index) => path !== expected[index])
+    )
+      context.addIssue({
+        code: 'custom',
+        message:
+          'foundation draft checkpoints must be a canonical dependency-order prefix',
+      })
+  })
 
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   .object({
@@ -339,7 +519,7 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
 
 export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(DELIVERY_RUN_SCHEMA_VERSION),
     runId: z.string().min(1),
     projectId: z.string().min(1),
     ownerId: z.string().min(1),
@@ -377,8 +557,9 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       })
       .strict(),
     documentReviewState: documentReviewStateSchema,
+    foundationDraftState: foundationDraftStateSchema,
     checklistRemediation: checklistRemediationSchema.optional(),
-    resourceRemediation: resourceRemediationSchema.optional(),
+    resourcePreparationAttempt: z.number().int().nonnegative().optional(),
     usage: workflowUsageSchema.optional(),
     resourceEvidence: resourceEvidenceSchema.optional(),
     currentMessage: z.string().min(1).optional(),
@@ -392,6 +573,29 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     updatedAt: z.string().datetime(),
   })
   .strict()
+  .superRefine((run, context) => {
+    const requiresCompletedFoundation =
+      run.phase === 'DOCUMENT_REVIEW' ||
+      run.phase === 'RESOURCE_PREPARATION' ||
+      run.phase === 'ATOMIC_TASK_PLANNING' ||
+      run.phase === 'IMPLEMENTATION' ||
+      run.phase === 'IMPLEMENTATION_AUDIT' ||
+      run.phase === 'ACCEPTANCE' ||
+      run.phase === 'DELIVERY' ||
+      (run.phase === 'DOCUMENT_DRAFTING' &&
+        run.documentReviewState.activeCycle?.acceptedSemanticResult === true)
+    if (
+      requiresCompletedFoundation &&
+      run.foundationDraftState.completedPaths.length !==
+        CANONICAL_FOUNDATION_DOCUMENTS.length
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['foundationDraftState', 'completedPaths'],
+        message:
+          'foundation review and downstream phases require all durable authoring checkpoints',
+      })
+  })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>
   deliveryRunSchema.parse(value)
@@ -401,5 +605,3 @@ export const parseDispatchRecord = (value: unknown): DispatchRecord =>
   dispatchRecordSchema.parse(value)
 export const parseEvidenceRef = (value: unknown): EvidenceRef =>
   evidenceRefSchema.parse(value)
-export const parseResourceRemediation = (value: unknown): ResourceRemediation =>
-  resourceRemediationSchema.parse(value)

@@ -148,7 +148,7 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
         const id = trimString(item.id);
         const title = trimString(item.title);
         const taskStatus = trimString(item.status).toLowerCase();
-        if (!id || !title || !['pending', 'running', 'completed', 'failed', 'blocked'].includes(taskStatus)) return [];
+        if (!id || !title || !['pending', 'running', 'completed', 'failed', 'blocked', 'stopped'].includes(taskStatus)) return [];
         return [{
           id,
           title,
@@ -202,7 +202,10 @@ const normalizeWorkflowDisplay = (payload: unknown): WorkflowCardPayload | undef
       ? Math.max(0, Number(source.elapsedMs ?? source.elapsed_ms))
       : undefined,
     activeSince: trimString(source.activeSince ?? source.active_since) || undefined,
-    nextAction: nextActionValue === 'resume' || nextActionValue === 'retry' ? nextActionValue : undefined,
+    nextAction:
+      nextActionValue === 'resume' || nextActionValue === 'retry' || nextActionValue === 'restart'
+        ? nextActionValue
+        : undefined,
     block: blockMessage || failureReason
       ? {
           message: blockMessage || failureReason,

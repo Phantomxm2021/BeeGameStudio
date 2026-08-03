@@ -12,7 +12,7 @@ import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTransl
 import { MessageScrollerItem } from '../../ui/message-scroller';
 import { Marker, MarkerContent, MarkerIcon } from '../../ui/marker';
 import { WorkflowCard } from '../WorkflowCard';
-import type { WorkflowCardPayload } from '../../../types/message';
+import type { WorkflowCardAction, WorkflowCardPayload } from '../../../types/message';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -23,7 +23,7 @@ type BeeGameCollaborationFeedProps = {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
-    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
+    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
 };
 
 type ToolFeedMessage = ChatDisplayMessage & {

@@ -535,6 +535,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
           canSendMessage
             ? async action => {
                 if (action === 'resume') await api.resumeWorkflow(projectId);
+                else if (action === 'restart') await api.restartWorkflow(projectId);
                 else await api.retryWorkflow(projectId);
                 await loadProjectRuntimeState(projectId);
               }

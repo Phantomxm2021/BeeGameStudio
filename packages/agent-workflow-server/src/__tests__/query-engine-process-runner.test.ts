@@ -71,6 +71,18 @@ describe('process-isolated QueryEngine runner', () => {
       workflowWorkerType: 'document-reviewer',
       workflowDocumentReviewMode: 'closure',
       workflowDocumentReviewScope: 'complete',
+      workflowDocumentReviewContract: {
+        scope: 'complete',
+        mode: 'closure',
+        requiredCheckIds: ['implementation_readiness'],
+        currentCheckId: 'implementation_readiness',
+        artifacts: [
+          { path: 'assets/asset-manifest.json', content: '{"version":7}\n' },
+        ],
+        activeTarget: 'resource',
+        priorFindings: [{ findingId: 'finding-1', owner: 'resource' }],
+        changedPaths: ['assets/asset-manifest.json'],
+      },
     })
 
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
@@ -78,6 +90,32 @@ describe('process-isolated QueryEngine runner', () => {
       workflowWorkerType: 'document-reviewer',
       workflowDocumentReviewMode: 'closure',
       workflowDocumentReviewScope: 'complete',
+      workflowDocumentReviewContract: {
+        scope: 'complete',
+        mode: 'closure',
+        requiredCheckIds: ['implementation_readiness'],
+        activeTarget: 'resource',
+      },
+    })
+  })
+
+  test('preserves the exact document author contract across process serialization', () => {
+    const serialized = serializeQueryEngineStartInput({
+      sessionId: 'document-author',
+      cwd: '/tmp/project',
+      env: {},
+      approvedOutboundTargets: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-author',
+      workflowAllowedPaths: ['docs/GDD.md'],
+      workflowDocumentAuthorMode: 'remediation',
+    })
+
+    expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
+      workflowWorker: true,
+      workflowWorkerType: 'document-author',
+      workflowAllowedPaths: ['docs/GDD.md'],
+      workflowDocumentAuthorMode: 'remediation',
     })
   })
 
@@ -114,8 +152,25 @@ describe('process-isolated QueryEngine runner', () => {
       expect(firstPid).not.toBe(process.pid)
       expect(secondPid).not.toBe(process.pid)
       expect(firstPid).not.toBe(secondPid)
+      const firstExited = (
+        first as unknown as { child: { exited: Promise<number> } }
+      ).child.exited
+      const secondExited = (
+        second as unknown as { child: { exited: Promise<number> } }
+      ).child.exited
       first.dispose?.()
       second.dispose?.()
+      await expect(
+        Promise.race([
+          Promise.all([firstExited, secondExited]),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('isolated workers did not exit')),
+              2_000,
+            ),
+          ),
+        ]),
+      ).resolves.toBeDefined()
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

@@ -160,7 +160,11 @@ import {
   loadBeeGameIntakeJob,
   saveBeeGameIntakeJob,
 } from './beegame/intake-job-store'
-import { createRunStore } from './beegame/delivery-workflow/run-store'
+import {
+  createRunStore,
+  readObsoleteWorkflowRestartSeed,
+  WorkflowStoreError,
+} from './beegame/delivery-workflow/run-store'
 import {
   reconcileRunOnStartup,
   resumeRun,
@@ -2484,6 +2488,69 @@ export function createAgentWorkflowApp(
       })
       scheduleDeliveryResume({ controller, store, run: retried })
       return c.json(retried, 202)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
+  })
+
+  app.post('/api/projects/:id/workflow/restart', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project?.root_path)
+        return c.json({ error: 'Project not found' }, 404)
+      const seed = await readObsoleteWorkflowRestartSeed(
+        project.root_path,
+        user.id,
+      )
+      if (seed.projectId !== project.id)
+        return c.json({ error: 'workflow project identity mismatch' }, 409)
+      await beeGameSessions.disposeWorkflowWorkers(
+        seed.runId,
+        project.root_path,
+      )
+      const store = createRunStore(project.root_path, user.id)
+      const initial = createInitialDeliveryRun({
+        projectId: seed.projectId,
+        ownerId: seed.ownerId,
+        confirmedBriefDigest: seed.confirmedBriefDigest,
+        confirmedBriefContext: seed.confirmedBriefContext,
+        documentRevision: 'uncomputed',
+        workspaceRevision: 'uncomputed',
+      })
+      const savedInitial = await store.replaceObsolete(initial, seed.runId, {
+        runId: initial.runId,
+        type: 'run.created',
+        phase: initial.phase,
+        status: initial.status,
+        revision: initial.revision,
+      })
+      const drafting = transitionDeliveryRun(savedInitial, {
+        type: 'documents_ready',
+      })
+      const savedDrafting = await store.commit(drafting, {
+        runId: drafting.runId,
+        type: 'phase.entered',
+        phase: drafting.phase,
+        status: drafting.status,
+        revision: drafting.revision,
+      })
+      const controller = getDeliveryController({
+        request: c.req.raw,
+        user,
+        projectId: seed.projectId,
+        workspacePath: project.root_path,
+        briefContext: seed.confirmedBriefContext,
+      })
+      scheduleDeliveryResume({ controller, store, run: savedDrafting })
+      return c.json(savedDrafting, 202)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -5349,6 +5416,8 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
       detail,
     })
   }
+  const obsolete =
+    error instanceof WorkflowStoreError && error.code === 'obsolete'
   const now = new Date().toISOString()
   return {
     runId: 'workflow-state-error',
@@ -5357,7 +5426,10 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
     tasks: [],
     evidence: {},
     workflowStateError: true,
-    blockedReason: `当前项目的工作流状态无效，无法继续运行。请新建项目重新运行。诊断编号：${traceId}`,
+    workflowStateObsolete: obsolete,
+    blockedReason: obsolete
+      ? `当前项目使用旧版工作流协议，无法继续运行。请点击重新开始以创建当前版本的全新工作流。诊断编号：${traceId}`
+      : `当前项目的工作流状态无效，无法安全继续。诊断编号：${traceId}`,
     // Detailed schema diagnostics stay in the server log. The user-facing
     // workflow card must never render internal JSON validation output.
     message: '',
@@ -5414,8 +5486,9 @@ function workflowMessageKey(workflow: JsonObject): string {
 
 function workflowNextAction(
   workflow: JsonObject,
-): 'resume' | 'retry' | undefined {
-  if (workflow.workflowStateError === true) return undefined
+): 'resume' | 'retry' | 'restart' | undefined {
+  if (workflow.workflowStateError === true)
+    return workflow.workflowStateObsolete === true ? 'restart' : undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
   const acceptedReviewIsBounded =
@@ -5469,6 +5542,13 @@ function workflowViewForDisplay(
             typeof workflow.currentItemId === 'string'
               ? workflow.currentItemId
               : undefined,
+          foundationDraftCompletedPaths:
+            isObject(workflow.foundationDraftState) &&
+            Array.isArray(workflow.foundationDraftState.completedPaths)
+              ? workflow.foundationDraftState.completedPaths.flatMap(path =>
+                  typeof path === 'string' ? [path] : [],
+                )
+              : undefined,
           reviewedDocumentPaths: Array.isArray(workflow.reviewedDocumentPaths)
             ? workflow.reviewedDocumentPaths.flatMap(path =>
                 typeof path === 'string' ? [path] : [],
@@ -5494,6 +5574,15 @@ function workflowViewForDisplay(
                       typeof projectDocumentDisplayTasks
                     >[0]['reviewCheckIds'])
                   : undefined,
+                reviewCompletedCheckIds: Array.isArray(
+                  workflow.documentReviewState.activeCycle.completedCheckIds,
+                )
+                  ? (workflow.documentReviewState.activeCycle.completedCheckIds.filter(
+                      (id): id is string => typeof id === 'string',
+                    ) as Parameters<
+                      typeof projectDocumentDisplayTasks
+                    >[0]['reviewCompletedCheckIds'])
+                  : undefined,
                 reviewAccepted:
                   workflow.documentReviewState.activeCycle
                     .acceptedSemanticResult === true,
@@ -5505,6 +5594,39 @@ function workflowViewForDisplay(
                   workflow.documentReviewState.activeCycle.activeTarget ===
                     'resource'
                     ? workflow.documentReviewState.activeCycle.activeTarget
+                    : undefined,
+                repairPlan:
+                  isObject(
+                    workflow.documentReviewState.activeCycle.repairPlan,
+                  ) &&
+                  Array.isArray(
+                    workflow.documentReviewState.activeCycle.repairPlan.groups,
+                  ) &&
+                  Array.isArray(
+                    workflow.documentReviewState.activeCycle.repairPlan
+                      .completedPaths,
+                  )
+                    ? {
+                        groups:
+                          workflow.documentReviewState.activeCycle.repairPlan.groups.flatMap(
+                            group =>
+                              isObject(group) &&
+                              Array.isArray(group.affectedPaths)
+                                ? [
+                                    {
+                                      affectedPaths: group.affectedPaths.filter(
+                                        (path): path is string =>
+                                          typeof path === 'string',
+                                      ),
+                                    },
+                                  ]
+                                : [],
+                          ),
+                        completedPaths:
+                          workflow.documentReviewState.activeCycle.repairPlan.completedPaths.filter(
+                            (path): path is string => typeof path === 'string',
+                          ),
+                      }
                     : undefined,
                 reviewFindings: Array.isArray(
                   workflow.documentReviewState.activeCycle.findings,
@@ -5589,15 +5711,13 @@ function workflowViewForDisplay(
     : undefined
   const evidence = isObject(workflow.evidence)
     ? Object.fromEntries(
-        [
-          'resourcePreparation',
-          'implementationAudit',
-          'acceptance',
-        ].flatMap(key => {
-          const value = (workflow.evidence as Record<string, unknown>)[key]
-          if (!isObject(value) || typeof value.status !== 'string') return []
-          return [[key, { status: value.status }]]
-        }),
+        ['resourcePreparation', 'implementationAudit', 'acceptance'].flatMap(
+          key => {
+            const value = (workflow.evidence as Record<string, unknown>)[key]
+            if (!isObject(value) || typeof value.status !== 'string') return []
+            return [[key, { status: value.status }]]
+          },
+        ),
       )
     : {}
   return {

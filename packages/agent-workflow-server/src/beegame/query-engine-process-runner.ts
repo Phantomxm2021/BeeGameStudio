@@ -145,9 +145,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
     this.disposed = true
     this.send({ type: 'runtime.dispose' })
     this.failActiveTurn(new Error('Claude runtime process was closed'))
-    setTimeout(() => {
-      if (this.child.exitCode === null) this.child.kill()
-    }, 1_000).unref?.()
+    if (this.child.exitCode === null) this.child.kill('SIGKILL')
   }
 
   private onMessage(message: QueryEngineWorkerMessage): void {

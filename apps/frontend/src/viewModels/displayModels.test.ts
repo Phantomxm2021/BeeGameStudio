@@ -70,4 +70,44 @@ describe('displayModels', () => {
       blocked: false,
     })?.workflow).toBeUndefined()
   })
+
+  it('preserves a stopped workflow task without converting it to failure', () => {
+    expect(
+      toProjectRuntimeDisplayModel({
+        project_id: 'project-1',
+        workflow: {
+          runId: 'run-stopped',
+          status: 'stopped',
+          tasks: [
+            {
+              id: 'docs/AUDIO_DESIGN.md',
+              title: 'docs/AUDIO_DESIGN.md',
+              status: 'stopped',
+            },
+          ],
+        },
+      })?.workflow,
+    ).toMatchObject({
+      status: 'cancelled',
+      tasks: [
+        {
+          id: 'docs/AUDIO_DESIGN.md',
+          status: 'stopped',
+        },
+      ],
+    })
+  })
+
+  it('preserves the canonical obsolete-workflow restart action', () => {
+    expect(toProjectRuntimeDisplayModel({
+      project_id: 'project-1',
+      phase: 'BRIEF_CONFIRMED',
+      blocked: true,
+      workflow: {
+        runId: 'workflow-state-error',
+        status: 'needs_action',
+        nextAction: 'restart',
+      },
+    })?.workflow?.nextAction).toBe('restart')
+  })
 })

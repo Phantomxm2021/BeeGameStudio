@@ -410,6 +410,13 @@ export const beeGameAdapter = {
     );
   },
 
+  async restartWorkflow(projectId: string): Promise<Record<string, unknown>> {
+    return postJson<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow/restart`,
+      {},
+    );
+  },
+
   async requestProjectAction(data: {
     project_id: string;
     kind: 'build_error_repair' | 'deployment_failure_repair';

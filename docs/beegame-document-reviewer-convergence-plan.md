@@ -111,24 +111,34 @@ Reviewer 同时服从三层不可互相替代的权威：
 
 项目文档即使彼此一致，只要违反 Confirmed Brief 或 System Delivery Contract，仍然必须产生 blocking finding。Reviewer 不得用“跨文档一致”替代“整体符合权威”。
 
+每个 revision 只创建一个 durable Review Cycle。Cycle 以固定 check 顺序作为唯一游标，任何时刻只能有一个 active check；前一项未被接受时不得派发后一项，同一 Cycle 禁止并行 Reviewer。Foundation 严格按 3.1 的 12 项顺序执行，Comprehensive 在其后继续 3.2 的 5 项。每个 check 的输入与职责必须有界，只接收该 check、固定 criterion、frozen revision 和完成判断所需的权威投影；执行时间不设固定总时限，因为项目复杂度、网络状态和模型响应时间不是业务失败条件。`cross_document_consistency` 等确需全局判断的 check 可以读取完整 frozen artifact set，但不得因此合并其他 check 的结论。
+
 Reviewer 只接收服务端生成的当前 revision 投影：
 
 - 确认简报与语言合同；
 - 当前固定 System Delivery Contract；
 - 当前阶段允许审计的完整文档；
-- Foundation 或 Comprehensive 固定 check set；
+- 当前唯一 active check 及其固定 criterion；
 - 五项结构化设计 check 的固定 criterion 与结构化推导结果；
 - prior findings、当前 repair batch 和 server diff；
 - Comprehensive 阶段的 canonical v7 Manifest；
 - 从内容文件安全解析出的 `schema`、`id`、`kind`、`fulfills`、`resources` 与文件路径；
-- 从同一批 frozen artifacts 确定性派生的精确引用索引：各 Markdown 文档的完整标题、当前 Manifest requirement/resource ID、各内容文件的 stable content ID，以及 foundation/checklist/resource 各 owner 合法的 finding subject 路径；
+- 从同一批 frozen artifacts 确定性派生的稳定 `referenceId` 索引：服务端维护 `referenceId -> canonical path + exact anchor` 映射；Reviewer 的 evidence 与 subject 只提交 `referenceId`，不得手抄路径或标题；
 - 当前 Catalog provenance 和确定性资源门禁结果。
 
 投影是 request view，不落盘、不成为第二份合同。它不得截断语义 ID，不保存候选搜索历史，不包含 Agent 自报验证结论，也不包含构建日志或运行验收事实。
 
-精确引用索引只用于让 Reviewer 从 frozen artifacts 已存在的身份中逐字选择 evidence 与 subject，不产生新事实。Reviewer 不得缩写、近似改写、模糊匹配或自动修正标题与 ID；服务端仍以同一批 artifacts 做精确校验。Foundation 文档可以作为 resource check 的 evidence，但不能成为 resource finding 的修复 subject。
+Reviewer 的可审计推理只写入当前 check submission 的 conclusion、criterion derivation/conclusion 与 finding 字段。运行时必须关闭 extended thinking，禁止生成与 submission 竞争输出预算的第二份长推理。每个 dispatch 必须且只能提交当前 check；不能提交其他 check、整轮 verdict 或整轮报告，也不能依靠 `max_tokens` 续写或提高输出上限完成另一项检查。Reviewer 不存在 wall-clock deadline 或 terminal grace deadline；只要 worker 进程、模型流、工具调用或终态提交仍然存活，Workflow 不得按经过时长停止它。连接断开、进程退出等基础设施失活只能中断当前 check 并保留 durable cursor，不能把项目复杂度记录为失败。
 
-Durable review state 只保存 revision、artifact digest、finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。Reviewer 的结构化 terminal 必须先通过 Workflow 的 revision、check、criterion、evidence、finding 与 closure 合同校验，只有被接受的 terminal 才能写入 evidence 文件；被 Schema 拒绝的调用不算 terminal，Reviewer 必须在同一 turn 立即按原语义纠正并重新提交，不得改成解释性正文或等待用户确认。被拒绝的传输不得留下伪 canonical evidence。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
+稳定引用索引只用于让 Reviewer 选择 frozen artifacts 已存在的身份，不产生新事实。`evidence` 是形成判断时读取的事实范围，不代表文件必须修改；finding `subjects` 是 `requiredAction` 确认必须实际改变并由 Closure 核对 diff 的完整修订范围。已经正确引用唯一事实 owner、仅用于证明冲突或约束修法的消费者文档只能列入 evidence，不得列入 subjects。服务端在接受当前 check 时将 `referenceId` 唯一解析为 canonical path/anchor 后写入同一个 Review Cycle；不存在自由文本锚点兼容、模糊匹配或自动修正。Foundation 文档可以作为 resource check 的 evidence，但不能成为 resource finding 的修复 subject。
+
+Durable review state 只保存 revision、artifact digest、按固定顺序已接受的 check ledger、统一 finding ledger、repair owner、changed paths、check evidence digest 与最终 evidence。当前 check 的结构化 submission 必须在原生提交工具返回 `accepted` 之前，通过 Workflow 唯一的 revision-bound check contract 完成 check、criterion、referenceId、finding、subject 与 closure 校验；提交工具与持久化边界必须调用同一个规范化和校验实现，不得各自维护规则。被拒绝的调用不算完成，Reviewer 必须在同一 dispatch 纠正当前 check；已经持久化的前序 check 不回滚、不重算。进程中断后从第一个未完成 check 恢复，仍使用同一 Cycle 和 frozen revision。Closure 的 server diff 由修复前后的 digest 计算，只传路径及前后 digest；不得保存完整文档副本、完整 Reviewer request 或第二份可恢复正文。
+
+禁止以 `transportCorrection`、整轮重审或任何 feedback lane 修复 submission contract 错误。一个 check 对应一个语义 dispatch；模型进程或网络在 accepted submission 前中断，只能恢复当前 check，不能携带未接受正文或创建替代协议。多个串行 check dispatch 都提交到同一个 Cycle ledger，不是多套 Reviewer、第二事实源或双轨。
+
+### 4.2 唯一汇总规则
+
+Reviewer 不提交整轮 verdict。最后一个 required check 被接受后，服务端从同一 ledger 确定性派生唯一结论：全部 check 为 `pass` 且 finding ledger 为空时为 `READY`；存在任一 `block` 且每个 blocking check 都有合法 finding 时为 `NEEDS_REVISION`。服务端随后一次性冻结完整 finding batch 并进入唯一修订流程。任何 finding 都不得在其他 required check 尚未完成时触发修订。
 
 ### 4.1 System Delivery Contract
 
@@ -163,6 +173,8 @@ System Delivery Contract 由服务端当前常量结构化生成，是只读 req
 - 为什么阻塞当前门禁；
 - closure condition。
 
+每个 subject 都必须被同一 finding 的 `requiredAction` 明确要求改变；反之，`requiredAction` 要求改变的每条 canonical 路径都必须出现在 subjects。跨文档检查可以引用多份 evidence，但不得把无需改变的佐证文档扩大成修订 subject。若冲突由唯一事实 owner 的错误引起，而消费者已经正确委托该 owner，则只把事实 owner 列为 subject；Repair Lead 无权在 accepted finding 之后缩减或扩大该集合。
+
 `owner` 与 `severity` 不是 Reviewer 可填写的第二份事实：服务端按固定 `checkId` 矩阵唯一派生 `foundation`、`checklist` 或 `resource`，并将所有 finding 定义为 blocking。Foundation subject 只能引用八份基础文档；Checklist subject 只能引用验收清单；Resource subject 只能引用 Manifest requirement/resource ID 或内容文件 ID。Reviewer 若引用不存在的 ID，terminal 无效，不能把格式错误伪装成业务 finding。
 
 提交工具必须按当前 scope 与 mode 生成唯一 Schema：Foundation 只暴露文档 `path/anchor`；Comprehensive 才暴露资源语义 ID；Initial 不暴露 `regressionPaths`；Closure 才允许它引用 server 提供的 changed paths。工具输入不得暴露可由 check 矩阵派生的 `owner`、固定为 blocking 的 `severity`，或 criterion 层重复的 `findingIds`。禁止用一份宽松 Schema 同时承载四种协议后再靠提示词约束。
@@ -194,16 +206,21 @@ Reviewer 审计可观察需求、资源引用与内容结构，不得要求 Pref
 
 ## 7. 收敛算法
 
-1. Initial Review 对当前 scope 执行一次完整审计。
-2. 服务端验证 terminal、check coverage、anchors 和 subjects。
-3. findings 按 `foundation -> checklist -> resource` 分组；每次只派发当前最上游 owner 的完整 batch。
-4. Owner 一次性修复该 batch，并提交变更后的 artifact revision。
-5. Closure Review 只复核 prior findings、server diff、固定受影响 checks 和直接 regression。
-6. 已关闭 finding 不得在同一 revision 以新 ID 重新提出，除非 diff 产生了可证明的新冲突。
-7. 上游变更确定性失效受影响的下游 approval；不重新开放无关全文审计。
-8. 自动修订达到上限后进入 `needs_action`，保留真实 findings 和累计时间。
+首次 Foundation Drafting 不属于 Reviewer 收敛循环。它必须由唯一 durable cursor 按八份 canonical 文档的固定顺序逐份完成；Initial Author 不生成 finding、不执行 remediation、不做 Closure，也不得继承前一文档的模型对话。八份全部完成并形成完整 revision 后，以下 Reviewer 算法才开始。
 
-Reviewer 的审计计算与终端提交使用同一 dispatch，但超时边界必须识别唯一终端工具的真实状态：审计计算仍受固定墙钟限制；若 `SubmitDocumentReviewResult` 已开始且尚未完成，不得在原墙钟到点时截断正在流式提交的合法结果，而是从原墙钟到点时刻起给予一个固定、有限的 terminal grace。Reviewer 是只读 worker，禁止使用 durable mutation 时间作为 grace 起点。Grace 到期仍未形成合法 terminal 才进入 `needs_action`。不得因此增设第二提交工具、prose parser、部分结果缓存或续传协议。
+1. Initial Review 对当前 scope 执行一次完整审计。
+2. 原生 terminal 工具在返回 accepted 前，用唯一 revision-bound submission contract 验证 check coverage、criteria、anchors、subjects 与 closure；最终持久化只复用同一校验器并确认 frozen revision 未变化。
+3. findings 按 `foundation -> checklist -> resource` 分组；每次只派发当前最上游 owner 的完整 batch。
+4. Foundation Repair Lead 在一个只读 planning dispatch 中把完整 batch 归并为无环的根问题组，为每组锁定权威约束、唯一最小修订决策、受影响路径和依赖顺序；服务端验证后把 plan 写入同一 active review cycle。
+5. 服务端从该 plan 派生唯一串行 document repair cursor；每个 Foundation Owner task 只修改一份 canonical 文档并形成 durable checkpoint。完整 batch、finding ledger 和 Closure 仍各自唯一，不得把 owner task 建成第二修订队列或并行 lane。
+6. Closure Review 只复核 prior findings、server diff、固定受影响 checks 和直接 regression。
+7. 已关闭 finding 不得在同一 revision 以新 ID 重新提出，除非 diff 产生了可证明的新冲突。
+8. 上游变更确定性失效受影响的下游 approval；不重新开放无关全文审计。
+9. 自动修订达到上限后进入 `needs_action`，保留真实 findings 和累计时间。
+
+Reviewer 的 `requiredAction` 与 `closureCondition` 必须定义结果约束，但不得把互斥修法错误地伪装成多个 finding。具体修法由 Repair Lead 在原 active cycle 中锁定；Closure 只判断文档结果是否关闭原 finding，不把 repair plan 提升为项目审计权威。
+
+每个 check dispatch 的职责、输入和 token 边界独立受控，但不设置固定墙钟或 terminal grace 截止线；已接受 check 已经是同一 Cycle 的 canonical ledger，不是部分结果缓存。基础设施失活时只中断当前 check；仍有模型流、工具活动或终态提交时必须继续等待。不得增设整轮提交工具、prose parser、自动续写或第二事实源。
 
 修复必须提升相应文档 PATCH 版本；资源或内容修复提升 Manifest revision。版本变化用于证据失效，不等同于自动通过。
 
@@ -212,11 +229,14 @@ Reviewer 的审计计算与终端提交使用同一 dispatch，但超时边界�
 Workflow Card 的阶段、task 与 icon 必须来自 durable review 状态：
 
 - Initial Review：`正在审计完整文档基线`；
+- Initial Drafting：显示当前唯一 canonical 文档及八文档 durable 完成进度；当前文档成功后自动推进，不把 Author thinking 或自我检查显示成 Reviewer task；
 - Repair：`正在修订审计发现`，逐项显示 finding closure；
 - Closure Review：`正在复核本轮修订`；
 - READY：任务完成 icon；
 - failed / needs_action：错误 icon 与真实错误 popover，计时停止；
 - retry / continue 恢复同一 durable dispatch，不重置累计运行时长。
+
+审计 task 必须按固定顺序展示真实游标：已进入 ledger 的 check 为 completed，唯一 active check 为 running，后续 check 为 pending；停止或失败只影响 active check。禁止把全部未完成 check 同时显示为 running。
 
 不得沿用“撰写文档”task 表示 Reviewer，也不得从聊天文案推断状态。
 
@@ -230,6 +250,7 @@ Workflow Card 的阶段、task 与 icon 必须来自 durable review 状态：
 - reviewer prose parser；
 - finding feedback/shadow store；
 - legacy terminal、fallback reader、双写状态与兼容测试。
+- 八文档初稿单 dispatch、`existingDocumentPaths` 续写、初稿 finding/repair/Closure、跨文档对话摘要和 Author 自我反馈循环。
 
 ## 10. 验收
 
@@ -240,8 +261,10 @@ Workflow Card 的阶段、task 与 icon 必须来自 durable review 状态：
 1. Review task/icon 随真实子状态变化；
 2. JSON/YAML 与 Manifest 只存在一个 owner；
 3. placeholder 不会因库内无匹配而停止项目；
-4. invalid terminal 不会变成业务 finding；
+4. invalid check submission 不会变成业务 finding，也不会抹除已接受 check；
 5. 修订次数有界，重启和继续不重置；
 6. 没有 Composition phase、`cmp-*`、双轨、feedback、fallback 或兼容 reader；
 7. 系统 Chrome 能打开交付项目并按 Checklist 完成真实玩家路径。
 8. 至少使用结构不同的全新项目证明 Reviewer 能阻止无意义选择、支配策略、经济死锁/套利、数值无解、难度断层、空间不支持和场景状态缺口，而不是只发现格式或跨文档冲突。
+9. 任一时刻只有一个 active check；重启后从第一个未完成 check 恢复；最后一项之前不产生 verdict、不进入修订。
+10. Reviewer submission 不含自由文本 path/anchor，也不存在任何巨型终态提交通道。

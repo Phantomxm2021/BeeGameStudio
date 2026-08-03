@@ -1,9 +1,17 @@
 import {
   changeImpactSubmissionSchema,
   documentAuthorSubmissionSchema,
-  documentReviewSubmissionSchemaForMode,
+  documentRepairPlanSubmissionSchema,
+  documentReviewCheckSubmissionSchemaForMode,
   questionAnswerSubmissionSchema,
 } from './delivery-workflow/worker-contracts'
+import {
+  validateDocumentReviewSubmission,
+  normalizeDocumentReviewCheckSubmission,
+  type DocumentReviewCheckSubmission,
+  type DocumentReviewSubmissionContract,
+} from './delivery-workflow/document-review-input'
+import type { DocumentReviewFinding } from './delivery-workflow/types'
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 
@@ -24,12 +32,12 @@ const definitions = {
     message: '提交文档编写结果',
   },
   'document-reviewer': {
-    name: 'SubmitDocumentReviewResult',
+    name: 'SubmitDocumentReviewCheck',
     schema: undefined,
     description:
-      'Submit the complete document review check matrix, verdict, and structured findings.',
+      'Submit the current document review check and its structured findings.',
     prompt:
-      'Produce exactly one accepted result after reviewing the active contract. A call rejected by input validation is not a result: immediately correct the same semantic payload and resubmit without prose or user confirmation. checks and findings must be JSON array values, never JSON-encoded strings. Treat the systemDeliveryContract artifact as fixed system authority and block project artifacts that conflict with it even when they agree with each other. cross_document_consistency, technical_feasibility, content_structure_fitness and resource_content_consistency must cite an exact systemDeliveryContract JSON Pointer whenever the check is present. Submit every required check with a concise conclusion, exact evidence anchors and findingIds. The four gameplay/balance checks and level_scene_design_integrity must include their exact schema-required criterion assessments; each assessment cites exact evidence and derives its conclusion only from supplied facts. Findings are linked once through the parent check findingIds. Submit the verdict and structured findings. Every finding has one stable findingId, checkId, exact subjects, observation, blockingReason, requiredAction and closureCondition. The workflow derives blocking severity and repair owner from the fixed check matrix, and owns revision, reviewed paths, checklist coverage and canonical evidence. READY requires every required check and criterion to pass and no findings; NEEDS_REVISION requires a blocking check and finding.',
+      'Submit exactly contract.currentCheckId once. Evidence and subjects use only referenceId values supplied by contract.referenceIndex; never copy paths or anchors. A rejected call is not accepted: correct the same check without prose or user confirmation. The workflow persists this check in the single review cycle and derives the final verdict only after every required check is accepted.',
     message: '提交文档审阅结果',
   },
   'change-impact-analyzer': {
@@ -50,16 +58,32 @@ const definitions = {
   },
 } as const
 
+const documentRepairPlanDefinition = {
+  name: 'SubmitDocumentRepairPlan',
+  schema: documentRepairPlanSubmissionSchema,
+  description:
+    'Submit the single repair decision plan for the active accepted finding batch.',
+  prompt:
+    'Call exactly once. Partition every active finding ID exactly once into the smallest coupled root-problem groups. Lock one minimal decision per group, list immutable constraints, include every accepted subject path without adding or omitting paths, and declare acyclic dependencies. Do not reinterpret finding scope, write project files, reopen review, add unrelated design, or return prose.',
+  message: '提交文档修订计划',
+} as const
+
 export function createNativeWorkflowResultTool(options: {
   buildTool: BuildTool
   workerType: WorkflowResultWorker
   documentReviewMode?: 'initial' | 'closure'
   documentReviewScope?: 'foundation' | 'complete'
+  documentReviewContract?: DocumentReviewSubmissionContract
+  documentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
 }): unknown {
-  const definition = definitions[options.workerType]
+  const definition =
+    options.workerType === 'document-author' &&
+    options.documentAuthorMode === 'repair-planning'
+      ? documentRepairPlanDefinition
+      : definitions[options.workerType]
   const schema =
     options.workerType === 'document-reviewer'
-      ? documentReviewSubmissionSchemaForMode(
+      ? documentReviewCheckSubmissionSchemaForMode(
           options.documentReviewMode ?? 'initial',
           options.documentReviewScope ?? 'foundation',
         )
@@ -83,6 +107,27 @@ export function createNativeWorkflowResultTool(options: {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: unknown) {
+      if (options.workerType === 'document-reviewer') {
+        if (!options.documentReviewContract)
+          throw new Error('document reviewer submission contract is missing')
+        const submission = documentReviewCheckSubmissionSchemaForMode(
+          options.documentReviewMode ?? 'initial',
+          options.documentReviewScope ?? 'foundation',
+        ).parse(input)
+        const normalized = normalizeDocumentReviewCheckSubmission({
+          contract: options.documentReviewContract,
+          submission: submission as unknown as DocumentReviewCheckSubmission,
+        })
+        const issues = validateDocumentReviewSubmission({
+          contract: options.documentReviewContract,
+          checks: [normalized.check],
+          findings: normalized.findings,
+        })
+        if (issues.length)
+          throw new Error(
+            `document review submission rejected: ${issues.join('; ')}`,
+          )
+      }
       return { data: { accepted: true, workerType: options.workerType } }
     },
     renderToolUseMessage() {

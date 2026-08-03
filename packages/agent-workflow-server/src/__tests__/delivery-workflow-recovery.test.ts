@@ -9,9 +9,15 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
-import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import {
+  createRunStore,
+  readObsoleteWorkflowRestartSeed,
+} from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
-import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import {
+  DELIVERY_RUN_SCHEMA_VERSION,
+  type WorkerDispatchRequest,
+} from '../beegame/delivery-workflow/types'
 
 describe('delivery workflow recovery', () => {
   let workspace = ''
@@ -142,7 +148,15 @@ describe('delivery workflow recovery', () => {
           mode: 'closure',
           sourceRevision: revision,
           requiredCheckIds: ['brief_alignment'],
-          checks: [],
+          completedCheckIds: ['brief_alignment'],
+          checks: [{
+            id: 'brief_alignment' as const,
+            status: 'block' as const,
+            conclusion: 'Foundation remediation is required.',
+            evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+            findingIds: ['MISSING-RULE'],
+            assessments: [],
+          }],
           checkEvidenceDigests: {},
           findings: [
             {
@@ -159,7 +173,6 @@ describe('delivery workflow recovery', () => {
           ],
           activeTarget: 'foundation',
           acceptedSemanticResult: true,
-          transportAttempts: 1,
           changedPaths: ['docs/GDD.md'],
           sourceArtifactDigests: {},
         },
@@ -186,7 +199,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('restores an interrupted accepted resource remediation handoff', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-review-handoff-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-resource-review-handoff-'),
+    )
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-resource-review-handoff',
@@ -213,7 +228,15 @@ describe('delivery workflow recovery', () => {
           mode: 'initial',
           sourceRevision: 'resources',
           requiredCheckIds: ['resource_content_consistency'],
-          checks: [],
+          completedCheckIds: ['resource_content_consistency'],
+          checks: [{
+            id: 'resource_content_consistency' as const,
+            status: 'block' as const,
+            conclusion: 'Resource remediation is required.',
+            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+            findingIds: ['resource-finding'],
+            assessments: [],
+          }],
           checkEvidenceDigests: {},
           findings: [
             {
@@ -236,7 +259,6 @@ describe('delivery workflow recovery', () => {
           ],
           activeTarget: 'resource',
           acceptedSemanticResult: true,
-          transportAttempts: 1,
           changedPaths: [],
           sourceArtifactDigests: {},
         },
@@ -258,118 +280,6 @@ describe('delivery workflow recovery', () => {
           activeTarget: 'resource',
         },
       },
-    })
-  })
-
-  test('starts a fresh review cycle after an exhausted transport is retried', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-transport-retry-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-review-transport-retry',
-      projectId: 'project-review-transport-retry',
-      ownerId: 'owner-1',
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_REVIEW',
-      status: 'failed',
-      blockedReason: 'reviewer transport failed',
-      activeDispatch: {
-        dispatchId: 'review-dispatch',
-        workerType: 'document-reviewer',
-        phase: 'DOCUMENT_REVIEW',
-        revision: initial.revision.document,
-        status: 'failed',
-        failureReason: 'reviewer transport failed',
-        request: {
-          runId: initial.runId,
-          ownerId: initial.ownerId,
-          projectId: initial.projectId,
-          workspacePath: workspace,
-          workerType: 'document-reviewer',
-          phase: 'DOCUMENT_REVIEW',
-          revision: initial.revision.document,
-          contract: { reviewScope: 'complete' },
-        },
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-      },
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeCycle: {
-          cycleId: 'exhausted-cycle',
-          originScope: 'complete',
-          scope: 'complete',
-          mode: 'initial',
-          sourceRevision: initial.revision.document,
-          requiredCheckIds: ['resource_content_consistency'],
-          checks: [],
-          checkEvidenceDigests: {},
-          findings: [],
-          acceptedSemanticResult: false,
-          transportAttempts: 2,
-          changedPaths: [],
-          sourceArtifactDigests: {},
-        },
-      },
-    })
-
-    const retried = await retryRun({
-      store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-
-    expect(retried.status).toBe('running')
-    expect(retried.blockedReason).toBeUndefined()
-    expect(retried.activeDispatch).toBeUndefined()
-    expect(retried.documentReviewState.activeCycle).toBeUndefined()
-  })
-
-  test('carries an exact reviewer protocol rejection into the remaining transport', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-correction-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-review-correction',
-      projectId: 'project-review-correction',
-      ownerId: 'owner-1',
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
-      blockedReason: 'document review check references a missing exact anchor',
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeCycle: {
-          cycleId: 'correction-cycle',
-          originScope: 'foundation',
-          scope: 'foundation',
-          mode: 'initial',
-          sourceRevision: initial.revision.document,
-          requiredCheckIds: ['brief_alignment'],
-          checks: [],
-          checkEvidenceDigests: {},
-          findings: [],
-          acceptedSemanticResult: false,
-          transportAttempts: 1,
-          changedPaths: [],
-          sourceArtifactDigests: {},
-        },
-      },
-    })
-
-    const retried = await retryRun({ store, runId: initial.runId })
-
-    expect(retried.status).toBe('running')
-    expect(retried.blockedReason).toBeUndefined()
-    expect(retried.documentReviewState.activeCycle).toMatchObject({
-      cycleId: 'correction-cycle',
-      transportAttempts: 1,
-      transportCorrection:
-        'document review check references a missing exact anchor',
     })
   })
 
@@ -440,7 +350,51 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.reviewedDocumentPaths).toEqual(['docs/GDD.md'])
   })
 
-  test('rejects retired schema-v1 fields without rewriting the snapshot', async () => {
+  test('rejects late progress from a terminal dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-terminal-progress-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    const terminalAt = '2026-01-01T00:30:00.000Z'
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      status: 'needs_action',
+      thinking: 'idle',
+      lastProgressAt: terminalAt,
+      activeDispatch: {
+        dispatchId: 'author-dispatch',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: initial.revision.document,
+        status: 'interrupted',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: terminalAt,
+        failureReason: 'document-author exceeded its wall-clock limit',
+      },
+    })
+
+    await store.updateProgress(initial.runId, {
+      dispatchId: 'author-dispatch',
+      thinking: 'working',
+      message: 'late thinking event',
+      durable: true,
+    })
+
+    expect(await store.load()).toMatchObject({
+      status: 'needs_action',
+      thinking: 'idle',
+      lastProgressAt: terminalAt,
+      activeDispatch: { status: 'interrupted' },
+    })
+  })
+
+  test('rejects retired current-version fields without rewriting the snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-normalize-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -471,6 +425,104 @@ describe('delivery workflow recovery', () => {
       'workflow snapshot schema is invalid',
     )
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(retiredSnapshot)
+  })
+
+  test('rejects an obsolete snapshot version before nested schema validation', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-obsolete-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-obsolete',
+      projectId: 'project-obsolete',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    const obsoleteSnapshot = JSON.stringify({
+      ...initial,
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
+      activeDispatch: {
+        retiredStateMarker: true,
+      },
+    })
+    await writeFile(store.paths.snapshot, obsoleteSnapshot, 'utf8')
+
+    await expect(store.load()).rejects.toMatchObject({
+      code: 'obsolete',
+      message: `unsupported workflow snapshot schema version ${DELIVERY_RUN_SCHEMA_VERSION - 1}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+    })
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
+  })
+
+  test('extracts only digest-bound authority when explicitly restarting an obsolete snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-restart-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-obsolete',
+      projectId: 'project-obsolete',
+      ownerId: 'owner-1',
+      confirmedBriefContext: 'Build the confirmed game.',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      JSON.stringify({
+        ...initial,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
+        activeDispatch: {
+          untrustedRetiredState: true,
+        },
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
+    ).resolves.toEqual({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
+      runId: initial.runId,
+      projectId: initial.projectId,
+      ownerId: initial.ownerId,
+      confirmedBriefDigest: initial.confirmedBriefDigest,
+      confirmedBriefContext: initial.confirmedBriefContext,
+    })
+  })
+
+  test('does not treat a current snapshot as restartable obsolete state', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-current-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-current',
+      projectId: 'project-current',
+      ownerId: 'owner-1',
+    })
+    await store.save(initial)
+
+    await expect(
+      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
+    ).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  test('does not allow an older server to replace a newer snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-newer-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-newer',
+      projectId: 'project-newer',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      JSON.stringify({
+        ...initial,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION + 1,
+      }),
+      'utf8',
+    )
+
+    await expect(store.load()).rejects.toMatchObject({ code: 'invalid' })
+    await expect(
+      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
+    ).rejects.toMatchObject({ code: 'conflict' })
   })
 
   test('does not overwrite a genuinely invalid workflow snapshot', async () => {
@@ -542,8 +594,8 @@ describe('delivery workflow recovery', () => {
       id: 'task-1',
       title: 'Build the runtime entry point',
       checklistIds: [],
-              resourceIds: [],
-              contentIds: [],
+      resourceIds: [],
+      contentIds: [],
       dependsOn: [],
       allowedPaths: ['src/'],
       expectedArtifacts: ['src/main.ts'],
@@ -612,8 +664,8 @@ describe('delivery workflow recovery', () => {
       id: 'task-1',
       title: 'Build the runtime entry point',
       checklistIds: [],
-              resourceIds: [],
-              contentIds: [],
+      resourceIds: [],
+      contentIds: [],
       dependsOn: [],
       allowedPaths: ['src/'],
       expectedArtifacts: ['src/main.ts'],
@@ -658,7 +710,7 @@ describe('delivery workflow recovery', () => {
     expect(continued.activeDispatch).toBeUndefined()
   })
 
-  test('carries exact resource failures into a retry repair contract', async () => {
+  test('resumes failed Resource Production without creating a repair contract', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-retry-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -701,15 +753,11 @@ describe('delivery workflow recovery', () => {
 
     expect(retried).toMatchObject({
       status: 'running',
-      resourceRemediation: {
-        sourceRevision: 'resource-revision',
-        attempt: 1,
-        issues: ['canonical resource contract failed'],
-      },
+      resourcePreparationAttempt: 1,
     })
   })
 
-  test('preserves authoritative resource remediation across a retry startup failure', async () => {
+  test('preserves Resource Production retry accounting across a startup failure', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-retry-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -723,20 +771,12 @@ describe('delivery workflow recovery', () => {
       phase: 'RESOURCE_PREPARATION',
       status: 'needs_action',
       blockedReason: 'resource worker produced no durable mutation',
-      resourceRemediation: {
-        sourceRevision: initial.revision.document,
-        attempt: 7,
-        issues: ['prior remediation issue'],
-      },
+      resourcePreparationAttempt: 7,
     })
 
     const retried = await retryRun({ store, runId: initial.runId })
 
-    expect(retried.resourceRemediation).toEqual({
-      sourceRevision: initial.revision.document,
-      attempt: 7,
-      issues: ['prior remediation issue'],
-    })
+    expect(retried.resourcePreparationAttempt).toBe(7)
   })
 
   test('starts retry idle timing from the new dispatch instead of stale run progress', async () => {
@@ -790,7 +830,7 @@ describe('delivery workflow recovery', () => {
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
   })
 
-  test('preserves the exact resource remediation while dispatching the correction', async () => {
+  test('preserves Resource Production execution accounting without a retry contract', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-remediation-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -799,15 +839,10 @@ describe('delivery workflow recovery', () => {
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
     })
-    const remediation = {
-      sourceRevision: initial.revision.document,
-      attempt: 2,
-      issues: ['target compatibility changed'],
-    }
     await store.save({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
-      resourceRemediation: remediation,
+      resourcePreparationAttempt: 2,
     })
     const dispatcher = createDeliveryDispatcher({
       store,
@@ -833,10 +868,10 @@ describe('delivery workflow recovery', () => {
       workerType: 'resource-preparer',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
-      contract: { remediation },
+      contract: {},
     })
 
-    expect((await store.load())?.resourceRemediation).toEqual(remediation)
+    expect((await store.load())?.resourcePreparationAttempt).toBe(2)
   })
 
   test('starts a fresh retry dispatch even while the timed-out transport is still closing', async () => {
@@ -1166,8 +1201,8 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('gives an actively streaming reviewer terminal one bounded grace window', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-terminal-grace-'))
+  test('does not stop an active reviewer because wall-clock time elapsed', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-no-wall-clock-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-1',
@@ -1185,8 +1220,6 @@ describe('delivery workflow recovery', () => {
       idleProgressTimeoutMs: 0,
       resourceMaxDurationMs: 0,
       resourceMaxTokens: 0,
-      documentReviewMaxDurationMs: 20,
-      documentReviewTerminalGraceMs: 70,
       documentReviewMaxTokens: 0,
       documentAuthorMaxDurationMs: 0,
       documentAuthorMaxTokens: 0,
@@ -1203,9 +1236,6 @@ describe('delivery workflow recovery', () => {
         async status() {
           throw new Error('not used')
         },
-        async hasInFlightTerminalSubmission() {
-          return true
-        },
       },
     })
     await dispatcher.dispatch({
@@ -1218,17 +1248,9 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: { reviewScope: 'foundation' },
     })
-    await new Promise(resolve => setTimeout(resolve, 35))
+    await new Promise(resolve => setTimeout(resolve, 100))
     expect((await store.load())?.status).toBe('running')
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason:
-        'document-reviewer terminal submission exceeded its 70ms grace limit',
-    })
+    expect((await store.load())?.blockedReason).toBeUndefined()
   })
 
   test('bounds reviewer usage by total tokens including cache reads', async () => {
@@ -1258,7 +1280,6 @@ describe('delivery workflow recovery', () => {
       idleProgressTimeoutMs: 0,
       resourceMaxDurationMs: 0,
       resourceMaxTokens: 0,
-      documentReviewMaxDurationMs: 0,
       documentReviewMaxTokens: 50,
       documentAuthorMaxDurationMs: 0,
       documentAuthorMaxTokens: 0,
@@ -1426,9 +1447,7 @@ describe('delivery workflow recovery', () => {
           content_root: 'assets/content',
           generated_asset_root: 'assets/generated',
         },
-        requirements: [
-          { id: 'world.structure', required: true },
-        ],
+        requirements: [{ id: 'world.structure', required: true }],
         resources: [],
       })}\n`,
     )

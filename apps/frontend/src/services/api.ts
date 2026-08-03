@@ -455,6 +455,8 @@ export const api = {
 
   retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
 
+  restartWorkflow: (projectId: string) => beeGameAdapter.restartWorkflow(projectId),
+
   requestProjectAction: (data: {
     project_id: string
     kind: 'build_error_repair' | 'deployment_failure_repair'

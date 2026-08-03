@@ -4,6 +4,7 @@ import {
   AlertCircle,
   CircleCheckBig,
   Circle,
+  CirclePause,
   LoaderCircle,
   RotateCcw,
   ScanText as ScanTextTaskIcon,
@@ -22,7 +23,7 @@ import { PauseIcon } from '../ui/pause';
 import { ScanTextIcon } from '../ui/scan-text';
 import { XIcon } from '../ui/x';
 import { useToastContext } from '../../contexts/ToastContext';
-import type { WorkflowCardPayload, WorkflowCardTask } from '../../types/message';
+import type { WorkflowCardAction, WorkflowCardPayload, WorkflowCardTask } from '../../types/message';
 
 const statusLabel: Record<WorkflowCardPayload['status'], string> = {
   draft: '准备中',
@@ -158,6 +159,7 @@ const useVerticalOverflow = <T extends HTMLElement>(contentKey: string) => {
 };
 
 const taskStatusText = (task: WorkflowCardTask): string => {
+  if (task.status === 'stopped') return '已停止';
   if (task.operation === 'review') {
     if (task.status === 'completed') return '已审计';
     if (task.status === 'running') return '审计中';
@@ -189,6 +191,9 @@ const taskIcon = (task: WorkflowCardTask) => {
     );
   if (task.status === 'failed' || task.status === 'blocked') return (
       <XCircle aria-label={label} data-task-icon={task.operation === 'review' ? 'review-failed' : 'write-failed'} className="h-4 w-4 text-rose-300" />
+    );
+  if (task.status === 'stopped') return (
+      <CirclePause aria-label={label} data-task-icon="task-stopped" className="h-4 w-4 text-zinc-500" />
     );
   if (task.operation === 'review') return (
       <ScanTextTaskIcon aria-label={label} data-task-icon={task.status === 'running' ? 'review-running' : 'review-pending'} className={`h-4 w-4 ${task.status === 'running' ? 'animate-pulse text-sky-300' : 'text-zinc-600'}`} />
@@ -278,7 +283,7 @@ export function WorkflowCard({
   onAction,
 }: {
   workflow: WorkflowCardPayload;
-  onAction?: (action: 'resume' | 'retry') => Promise<void> | void;
+  onAction?: (action: WorkflowCardAction) => Promise<void> | void;
 }) {
   const { showSuccess, showError } = useToastContext();
   const [now, setNow] = useState(() => Date.now());
@@ -486,7 +491,13 @@ export function WorkflowCard({
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
                 >
                   <RotateCcw className={`h-3.5 w-3.5 ${actionState === 'pending' ? 'animate-spin' : ''}`} />
-                  {actionState === 'pending' ? '处理中…' : workflow.nextAction === 'resume' ? '继续' : '重试'}
+                  {actionState === 'pending'
+                    ? '处理中…'
+                    : workflow.nextAction === 'resume'
+                      ? '继续'
+                      : workflow.nextAction === 'restart'
+                        ? '重新开始'
+                        : '重试'}
                 </button>
               ) : null}
             </div>

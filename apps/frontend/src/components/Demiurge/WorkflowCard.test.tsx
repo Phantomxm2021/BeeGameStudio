@@ -56,6 +56,34 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
+  it('renders a manually stopped task as stopped instead of failed', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_stopped',
+          status: 'cancelled',
+          currentPhase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          tasks: [
+            {
+              id: 'audio',
+              title: 'docs/AUDIO_DESIGN.md',
+              status: 'stopped',
+              operation: 'write',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('已停止')).toBeInTheDocument();
+    expect(screen.getByLabelText('任务状态：已停止')).toHaveAttribute(
+      'data-task-icon',
+      'task-stopped',
+    );
+    expect(screen.queryByText('编写失败')).not.toBeInTheDocument();
+  });
+
   it('renders Closure Review and repair ownership from durable review state', () => {
     const { rerender } = render(
       <WorkflowCard
@@ -170,6 +198,24 @@ describe('WorkflowCard', () => {
     expect(toast.showSuccess).toHaveBeenCalledWith('错误信息已复制');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
+  });
+
+  it('presents obsolete workflow replacement as an explicit restart action', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'workflow-state-error',
+          status: 'blocked',
+          block: { message: '当前项目使用旧版工作流协议。' },
+          nextAction: 'restart',
+        }}
+        onAction={onAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart'));
   });
 
   it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {

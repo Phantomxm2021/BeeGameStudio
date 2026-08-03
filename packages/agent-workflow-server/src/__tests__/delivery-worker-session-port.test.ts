@@ -2,12 +2,156 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
-import { registerBeeGameAuthoredResources, writeBeeGameAssetManifest } from '../beegame/asset-contracts'
+import {
+  buildDocumentAuthorAuthorityBlock,
+  createBeeGameDeliveryWorkerPort,
+} from '../beegame/delivery-worker-session-port'
+import {
+  registerBeeGameAuthoredResources,
+  writeBeeGameAssetManifest,
+} from '../beegame/asset-contracts'
 import type { BeeGameSessionManager } from '../beegame/session-manager'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import { buildDocumentReviewReferenceIndex } from '../beegame/delivery-workflow/document-review-input'
+
+function reviewerContract() {
+  return {
+    reviewScope: 'foundation' as const,
+    reviewMode: 'initial' as const,
+    requiredCheckIds: ['cross_document_consistency'],
+    currentCheckId: 'cross_document_consistency',
+    reviewAuthority: {
+      confirmedBriefContext: 'Confirmed brief',
+      confirmedBriefDigest: 'service-owned-digest',
+    },
+    reviewArtifacts: [
+      {
+        path: 'systemDeliveryContract',
+        content: '{"roots":{"content":"assets/content"}}\n',
+      },
+      { path: 'docs/GDD.md', content: '# Rules\n' },
+      { path: 'docs/TECHNICAL_DESIGN.md', content: '# Rules\n' },
+    ],
+  }
+}
 
 describe('delivery worker session credentials', () => {
+  test('starts one read-only repair-planning worker boundary', async () => {
+    const starts: Array<Record<string, unknown>> = []
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: 'session-document-repair' }
+      },
+      updateAuthToken() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-document-repair',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: [],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'repair-planning',
+        remediation: {
+          findings: [{ findingId: 'F1' }, { findingId: 'F2' }],
+        },
+      },
+    })
+
+    expect(starts[0]).toMatchObject({
+      workflowAllowedPaths: [],
+      workflowDocumentAuthorMode: 'repair-planning',
+    })
+  })
+
+  test('does not expose remediation tools during initial document authoring', async () => {
+    const starts: Array<Record<string, unknown>> = []
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: `session-${starts.length}` }
+      },
+      updateAuthToken() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    const base = {
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      revision: 'revision-1',
+    }
+    await port.start({
+      ...base,
+      dispatchId: 'dispatch-gdd',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+      },
+    })
+    await port.start({
+      ...base,
+      dispatchId: 'dispatch-level',
+      allowedPaths: ['docs/LEVEL_SCENE_DESIGN.md'],
+      contract: {
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      },
+    })
+
+    expect(starts[0]?.workflowDocumentAuthorMode).toBe('initial')
+    expect(starts[1]?.workflowDocumentAuthorMode).toBe('initial')
+  })
+
+  test('projects upstream authority and requires one target read when an earlier run left the target', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'initial-authority-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(join(workspacePath, 'docs/GDD.md'), 'gdd authority')
+      await writeFile(
+        join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
+        'level authority',
+      )
+      await writeFile(
+        join(workspacePath, 'docs/BALANCE_DESIGN.md'),
+        'stale target content',
+      )
+      const block = await buildDocumentAuthorAuthorityBlock({
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: ['docs/BALANCE_DESIGN.md'],
+        contract: {
+          authoringMode: 'initial',
+          foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+          upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+        },
+      })
+      expect(block).toContain('gdd authority')
+      expect(block).toContain('level authority')
+      expect(block).toContain('exists from an earlier run')
+      expect(block).toContain('Read exactly that target once')
+      expect(block).not.toContain('\nstale target content\n')
+      expect(block).not.toContain('BALANCE_DESIGN.md ---\n')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('reopens an existing catalog only for semantic review remediation', async () => {
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
@@ -34,14 +178,7 @@ describe('delivery worker session credentials', () => {
     await port.start({
       ...base,
       dispatchId: 'dispatch-contract-repair',
-      contract: {
-        remediation: {
-          kind: 'resource_contract',
-          sourceRevision: 'resource-1',
-          attempt: 1,
-          issues: ['Canonical inventory metadata is invalid.'],
-        },
-      },
+      contract: {},
     })
     await port.start({
       ...base,
@@ -51,16 +188,16 @@ describe('delivery worker session credentials', () => {
           kind: 'document_review',
           cycleId: 'cycle-1',
           sourceRevision: 'resource-1',
-          findings: [],
+          findings: [{ findingId: 'resource-finding' }],
         },
       },
     })
     expect(
       starts[0]?.workflowAllowResourceCatalogWithExistingInventory,
     ).toBeUndefined()
-    expect(
-      starts[1]?.workflowAllowResourceCatalogWithExistingInventory,
-    ).toBe(true)
+    expect(starts[1]?.workflowAllowResourceCatalogWithExistingInventory).toBe(
+      true,
+    )
   })
 
   test('assigns the atomic planner one structured submission lane', async () => {
@@ -321,6 +458,7 @@ describe('delivery worker session credentials', () => {
       join(tmpdir(), 'beegame-review-result-'),
     )
     let submittedPrompt = ''
+    let reviewerStart: Record<string, unknown> | undefined
     const finding = {
       findingId: 'document-conflict',
       checkId: 'cross_document_consistency',
@@ -336,13 +474,28 @@ describe('delivery worker session credentials', () => {
       requiredAction: 'Choose one level and update both documents.',
       closureCondition: 'Both documents define the same level rule.',
     }
-    const {
-      severity: _submissionSeverity,
-      owner: _submissionOwner,
-      ...findingInput
-    } = finding
+    const references = buildDocumentReviewReferenceIndex([
+      { path: 'reviewAuthority', content: 'Confirmed brief' },
+      ...reviewerContract().reviewArtifacts,
+    ]).references
+    const systemReferenceId = references.find(
+      reference => reference.anchor === '/roots/content',
+    )!.referenceId
+    const gddReferenceId = references.find(
+      reference => reference.path === 'docs/GDD.md',
+    )!.referenceId
+    const findingInput = {
+      findingId: finding.findingId,
+      checkId: finding.checkId,
+      subjects: [{ referenceId: gddReferenceId }],
+      observation: finding.observation,
+      blockingReason: finding.blockingReason,
+      requiredAction: finding.requiredAction,
+      closureCondition: finding.closureCondition,
+    }
     const sessions = {
-      start() {
+      start(input: Record<string, unknown>) {
+        reviewerStart = input
         return { id: 'session-reviewer' }
       },
       updateAuthToken() {},
@@ -357,19 +510,19 @@ describe('delivery worker session credentials', () => {
             text: '',
             createdAt: new Date(),
             payload: {
-              toolName: 'SubmitDocumentReviewResult',
+              toolName: 'SubmitDocumentReviewCheck',
               input: {
-                verdict: 'NEEDS_REVISION',
-                checks: [
-                  {
-                    id: 'cross_document_consistency',
-                    status: 'block',
-                    conclusion: 'The documents conflict.',
-                    evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
-                    findingIds: ['document-conflict'],
-                    assessments: [],
-                  },
-                ],
+                check: {
+                  id: 'cross_document_consistency',
+                  status: 'block',
+                  conclusion: 'The documents conflict.',
+                  evidence: [
+                    { referenceId: systemReferenceId },
+                    { referenceId: gddReferenceId },
+                  ],
+                  findingIds: ['document-conflict'],
+                  assessments: [],
+                },
                 findings: [findingInput],
               },
             },
@@ -396,26 +549,26 @@ describe('delivery worker session credentials', () => {
         phase: 'DOCUMENT_REVIEW',
         revision: 'revision-1',
         allowedPaths: [],
-        contract: {
-          reviewScope: 'foundation',
-          reviewAuthority: {
-            confirmedBriefContext: 'Confirmed brief',
-            confirmedBriefDigest: 'service-owned-digest',
-          },
-        },
+        contract: reviewerContract(),
       })
       await port.submit('dispatch-review', 'Review foundation documents')
       const terminal = await port.waitForTerminal?.('dispatch-review')
-      expect(submittedPrompt).toContain(
-        'SubmitDocumentReviewResult exactly once',
-      )
+      expect(submittedPrompt).toContain('SubmitDocumentReviewCheck exactly once')
+      expect(reviewerStart?.workflowDocumentReviewContract).toMatchObject({
+        scope: 'foundation',
+        mode: 'initial',
+        requiredCheckIds: ['cross_document_consistency'],
+      })
       expect(submittedPrompt).not.toContain('Terminal JSON contract')
       expect(terminal).toMatchObject({
         workerType: 'document-reviewer',
         revision: 'revision-1',
         verdict: 'NEEDS_REVISION',
         checklistIds: [],
-        findings: [finding],
+        findings: [expect.objectContaining({
+          findingId: finding.findingId,
+          subjects: [{ path: 'docs/GDD.md', anchor: '# Rules' }],
+        })],
       })
       await expect(
         readFile(
@@ -495,6 +648,74 @@ describe('delivery worker session credentials', () => {
 
       await expect(
         port.waitForTerminal?.('dispatch-author-result'),
+      ).resolves.toEqual({
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: [],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('derives an initial document terminal from its single durable write', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-initial-author-result-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-initial-author-result' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'write-started',
+            type: 'tool.started',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'write-gdd',
+              toolName: 'Write',
+              input: { file_path: 'docs/GDD.md' },
+            },
+          },
+          {
+            id: 'write-completed',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'write-gdd',
+              toolName: 'Write',
+              input: { file_path: 'docs/GDD.md' },
+            },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-initial-author-result',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          authoringMode: 'initial',
+          foundationDocumentPath: 'docs/GDD.md',
+          upstreamDocumentPaths: [],
+        },
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-initial-author-result'),
       ).resolves.toEqual({
         workerType: 'document-author',
         status: 'completed',
@@ -642,10 +863,7 @@ describe('delivery worker session credentials', () => {
       contract: {
         documentSet: 'foundation',
         remediation: {
-          findings: [
-            { findingId: 'finding-1' },
-            { findingId: 'finding-2' },
-          ],
+          findings: [{ findingId: 'finding-1' }, { findingId: 'finding-2' }],
         },
       },
     })
@@ -660,23 +878,25 @@ describe('delivery worker session credentials', () => {
     })
   })
 
-  test('rejects the retired remediation id field instead of dual-reading it', async () => {
+  test('does not treat a retired remediation id field as repair authority', async () => {
     const sessions = {
       start() {
         return { id: 'session-retired-remediation-id' }
       },
       updateAuthToken() {},
       events() {
-        return [{
-          id: 'retired-remediation-submission',
-          type: 'tool.completed',
-          text: '',
-          createdAt: new Date(),
-          payload: {
-            toolName: 'SubmitDocumentAuthorResult',
-            input: { resolvedFindingIds: ['finding-1'] },
+        return [
+          {
+            id: 'retired-remediation-submission',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'SubmitDocumentAuthorResult',
+              input: { resolvedFindingIds: ['finding-1'] },
+            },
           },
-        }]
+        ]
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
@@ -695,7 +915,6 @@ describe('delivery worker session credentials', () => {
         remediation: { findings: [{ id: 'finding-1' }] },
       },
     })
-
     await expect(
       port.waitForTerminal?.('dispatch-retired-remediation-id'),
     ).rejects.toThrow('contract.remediation findingId is invalid')
@@ -758,6 +977,60 @@ describe('delivery worker session credentials', () => {
     )
   })
 
+  test('reports the actual initial Write failure instead of requiring a remediation terminal', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-initial-write-failure' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'failed-write',
+            type: 'tool.failed',
+            text: 'Write failed',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'Write',
+              output:
+                'File has been unexpectedly modified. Read it again before attempting to write it.',
+            },
+          },
+          {
+            id: 'initial-turn-result',
+            type: 'result',
+            text: 'Unable to write.',
+            createdAt: new Date(),
+            payload: { result: 'Unable to write.' },
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+
+    await port.start({
+      dispatchId: 'dispatch-initial-write-failure',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+      },
+    })
+
+    await expect(
+      port.waitForTerminal?.('dispatch-initial-write-failure'),
+    ).rejects.toThrow(
+      'initial document Write failed: File has been unexpectedly modified',
+    )
+  })
+
   test('resolves the current auth token for every worker start and submit', async () => {
     const starts: Array<{ authToken?: string }> = []
     const updates: Array<{ sessionId: string; authToken?: string }> = []
@@ -800,12 +1073,7 @@ describe('delivery worker session credentials', () => {
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
       revision: 'revision-1',
-      contract: {
-        reviewAuthority: {
-          confirmedBriefContext: 'Confirmed brief',
-          confirmedBriefDigest: 'service-owned-digest',
-        },
-      },
+      contract: reviewerContract(),
     }
 
     await port.start(request)
@@ -1000,7 +1268,14 @@ describe('delivery worker session credentials', () => {
       await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
       await writeFile(
         join(workspacePath, 'assets/content/resources.json'),
-        JSON.stringify({ schema: 'beegame-content-v1', id: 'resources', kind: 'resource-registry', fulfills: ['root-model'], resources: ['root'], data: {} }),
+        JSON.stringify({
+          schema: 'beegame-content-v1',
+          id: 'resources',
+          kind: 'resource-registry',
+          fulfills: ['root-model'],
+          resources: ['root'],
+          data: {},
+        }),
       )
       const starts: Array<Record<string, unknown>> = []
       const sessions = {
@@ -1030,7 +1305,10 @@ describe('delivery worker session credentials', () => {
                 toolUseID: 'completed-write',
                 toolName: 'Write',
                 input: {
-                  file_path: join(workspacePath, 'assets/content/resource-note.json'),
+                  file_path: join(
+                    workspacePath,
+                    'assets/content/resource-note.json',
+                  ),
                 },
               },
             },
@@ -1146,7 +1424,7 @@ describe('delivery worker session credentials', () => {
       workerType: 'resource-preparer',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision-1',
-      contract: {},
+      contract: reviewerContract(),
     })
 
     try {
@@ -1235,18 +1513,24 @@ describe('delivery worker session credentials', () => {
       type: 'tool.started' | 'tool.completed'
       text: string
       createdAt: Date
-      payload: { toolUseID: string; toolName: string; input: Record<string, never> }
-    }> = [{
-      id: 'review-terminal-started',
-      type: 'tool.started' as const,
-      text: '',
-      createdAt: new Date(),
       payload: {
-        toolUseID: 'review-terminal',
-        toolName: 'SubmitDocumentReviewResult',
-        input: {},
+        toolUseID: string
+        toolName: string
+        input: Record<string, never>
+      }
+    }> = [
+      {
+        id: 'review-terminal-started',
+        type: 'tool.started' as const,
+        text: '',
+        createdAt: new Date(),
+        payload: {
+          toolUseID: 'review-terminal',
+          toolName: 'SubmitDocumentReviewCheck',
+          input: {},
+        },
       },
-    }]
+    ]
     const sessions = {
       start() {
         return { id: 'session-review-terminal' }
@@ -1265,7 +1549,7 @@ describe('delivery worker session credentials', () => {
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
       revision: 'revision-1',
-      contract: {},
+      contract: reviewerContract(),
     })
 
     await expect(
@@ -1278,7 +1562,7 @@ describe('delivery worker session credentials', () => {
       createdAt: new Date(),
       payload: {
         toolUseID: 'review-terminal',
-        toolName: 'SubmitDocumentReviewResult',
+        toolName: 'SubmitDocumentReviewCheck',
         input: {},
       },
     })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { readBeeGameAssetManifest } from '../asset-contracts'
-import { parseDispatchRecord, parseResourceRemediation } from './schema'
+import { parseDispatchRecord } from './schema'
 import {
   parseWorkerTerminalResult,
   type WorkerTerminalResult,
@@ -11,6 +12,7 @@ import {
   persistImplementationEvidence,
 } from './evidence'
 import type {
+  DeliveryRun,
   DeliveryWorkerPort,
   DispatchRecord,
   WorkerDispatchRequest,
@@ -33,17 +35,15 @@ const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
 const DEFAULT_RESOURCE_IDLE_PROGRESS_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_DURATION_MS = 10 * 60 * 1000
 const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
-// A comprehensive reviewer owns one fixed 17-check pass over the complete
-// pre-implementation contract. Keep its budget aligned with that bounded
-// workload instead of applying the shorter generic worker duration.
-const DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS = 15 * 60 * 1000
-const DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS = 3 * 60 * 1000
-const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 300_000
-// Initial authoring or one accepted repair batch may own several mutually
-// consistent documents. Keep one bounded turn long enough to finish its
-// planned atomic writes; retries preserve completed documents as checkpoints.
+const DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS = 60_000
+// Initial authoring owns one document. Repair planning and repair owner tasks
+// use smaller independent bounds because neither may span multiple documents.
 const DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS = 30 * 60 * 1000
 const DEFAULT_DOCUMENT_AUTHOR_MAX_TOKENS = 1_000_000
+const DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_DURATION_MS = 10 * 60 * 1000
+const DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_TOKENS = 250_000
+const DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_DURATION_MS = 10 * 60 * 1000
+const DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_TOKENS = 300_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
@@ -91,6 +91,51 @@ function workerRequiresEvidence(
   return workerType !== 'document-author' && workerType !== 'document-reviewer'
 }
 
+function assertSingleResourceWorkAuthority(
+  request: WorkerDispatchRequest,
+  run: DeliveryRun,
+): void {
+  if (request.workerType !== 'resource-preparer') return
+  if ('preparationRetry' in request.contract) {
+    throw new DispatchError(
+      'blocked',
+      'resource preparation retry contracts are retired',
+    )
+  }
+  const remediation = request.contract.remediation
+  const cycle = run.documentReviewState.activeCycle
+  const hasAcceptedResourceAuthority = Boolean(
+    cycle?.acceptedSemanticResult && cycle.activeTarget === 'resource',
+  )
+  const findings = hasAcceptedResourceAuthority
+    ? cycle!.findings.filter(finding => finding.owner === 'resource')
+    : []
+  if (hasAcceptedResourceAuthority && findings.length === 0) {
+    throw new DispatchError(
+      'blocked',
+      'accepted resource review authority requires at least one resource finding',
+    )
+  }
+  if (!hasAcceptedResourceAuthority) {
+    if (remediation !== undefined)
+      throw new DispatchError(
+        'blocked',
+        'resource remediation requires the active accepted document-review authority',
+      )
+    return
+  }
+  const expected = {
+    kind: 'document_review',
+    cycleId: cycle!.cycleId,
+    findings,
+  }
+  if (!isDeepStrictEqual(remediation, expected))
+    throw new DispatchError(
+      'blocked',
+      'resource remediation must exactly match the active accepted document-review authority',
+    )
+}
+
 export function createDeliveryDispatcher(options: {
   store: RunStore
   workerPort: DeliveryWorkerPort
@@ -102,8 +147,6 @@ export function createDeliveryDispatcher(options: {
   progressPollIntervalMs?: number
   resourceMaxDurationMs?: number
   resourceMaxTokens?: number
-  documentReviewMaxDurationMs?: number
-  documentReviewTerminalGraceMs?: number
   documentReviewMaxTokens?: number
   documentAuthorMaxDurationMs?: number
   documentAuthorMaxTokens?: number
@@ -136,14 +179,8 @@ export function createDeliveryDispatcher(options: {
     options.resourceMaxDurationMs ?? DEFAULT_RESOURCE_MAX_DURATION_MS
   const resourceMaxTokens =
     options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
-  const documentReviewMaxDurationMs =
-    options.documentReviewMaxDurationMs ??
-    DEFAULT_DOCUMENT_REVIEW_MAX_DURATION_MS
   const documentReviewMaxTokens =
     options.documentReviewMaxTokens ?? DEFAULT_DOCUMENT_REVIEW_MAX_TOKENS
-  const documentReviewTerminalGraceMs =
-    options.documentReviewTerminalGraceMs ??
-    DEFAULT_DOCUMENT_REVIEW_TERMINAL_GRACE_MS
   const documentAuthorMaxDurationMs =
     options.documentAuthorMaxDurationMs ??
     DEFAULT_DOCUMENT_AUTHOR_MAX_DURATION_MS
@@ -203,6 +240,7 @@ export function createDeliveryDispatcher(options: {
     const run = await options.store.load()
     if (!run)
       throw new DispatchError('not_found', 'delivery run does not exist')
+    assertSingleResourceWorkAuthority(request, run)
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
     if (
@@ -261,7 +299,6 @@ export function createDeliveryDispatcher(options: {
     }
     const dispatchId = randomUUID()
     const dispatchRequest = { ...request, dispatchId }
-    const resourceRemediation = resourceRemediationFromRequest(request)
     const record = parseDispatchRecord({
       dispatchId,
       workerType: request.workerType,
@@ -283,12 +320,14 @@ export function createDeliveryDispatcher(options: {
           activeDispatch: record,
           lastProgressAt: record.startedAt,
           currentMessage: undefined,
-          currentItemId: undefined,
+          currentItemId:
+            request.workerType === 'document-author' && request.taskId
+              ? request.taskId
+              : undefined,
           ...(request.workerType === 'document-reviewer'
             ? { reviewedDocumentPaths: [] }
             : {}),
           thinking: 'working',
-          ...(resourceRemediation ? { resourceRemediation } : {}),
         },
         {
           runId: run.runId,
@@ -369,7 +408,6 @@ export function createDeliveryDispatcher(options: {
       resourceIdleProgressTimeoutMs <= 0 &&
       resourceMaxDurationMs <= 0 &&
       resourceMaxTokens <= 0 &&
-      documentReviewMaxDurationMs <= 0 &&
       documentReviewMaxTokens <= 0 &&
       documentAuthorMaxDurationMs <= 0 &&
       documentAuthorMaxTokens <= 0
@@ -394,11 +432,6 @@ export function createDeliveryDispatcher(options: {
         run.activeDispatch.workerType === 'document-reviewer'
       const isDocumentAuthor =
         run.activeDispatch.workerType === 'document-author'
-      const documentTerminalInFlight =
-        isDocumentReviewer &&
-        (await options.workerPort
-          .hasInFlightTerminalSubmission?.(dispatchId)
-          .catch(() => false))
       const resourceMutationInFlight =
         isResourceWorker &&
         (await options.workerPort
@@ -467,30 +500,23 @@ export function createDeliveryDispatcher(options: {
           return
         }
       }
-      const documentDurationLimit = isDocumentReviewer
-        ? documentReviewMaxDurationMs
-        : isDocumentAuthor
-          ? documentAuthorMaxDurationMs
-          : 0
+      const documentDurationLimit = isDocumentAuthor
+        ? (options.documentAuthorMaxDurationMs ??
+          (activeRequest?.contract.authoringMode === 'repair-planning'
+            ? DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_DURATION_MS
+            : activeRequest?.contract.authoringMode === 'remediation'
+              ? DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_DURATION_MS
+              : documentAuthorMaxDurationMs))
+        : 0
       if (documentDurationLimit > 0) {
         const startedAt = Date.parse(run.activeDispatch.startedAt)
         if (
           Number.isFinite(startedAt) &&
           Date.now() - startedAt >= documentDurationLimit
         ) {
-          if (
-            isDocumentReviewer &&
-            documentTerminalInFlight &&
-            documentReviewTerminalGraceMs > 0 &&
-            Date.now() - startedAt <
-              documentDurationLimit + documentReviewTerminalGraceMs
-          )
-            continue
           await markDispatchNeedsAction(
             dispatchId,
-            isDocumentReviewer && documentTerminalInFlight
-              ? `document-reviewer terminal submission exceeded its ${documentReviewTerminalGraceMs}ms grace limit`
-              : `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
+            `${run.activeDispatch.workerType} exceeded its ${documentDurationLimit}ms wall-clock limit`,
           )
           return
         }
@@ -498,7 +524,12 @@ export function createDeliveryDispatcher(options: {
       const documentTokenLimit = isDocumentReviewer
         ? documentReviewMaxTokens
         : isDocumentAuthor
-          ? documentAuthorMaxTokens
+          ? (options.documentAuthorMaxTokens ??
+            (activeRequest?.contract.authoringMode === 'repair-planning'
+              ? DEFAULT_DOCUMENT_REPAIR_PLANNER_MAX_TOKENS
+              : activeRequest?.contract.authoringMode === 'remediation'
+                ? DEFAULT_DOCUMENT_REPAIR_OWNER_MAX_TOKENS
+                : documentAuthorMaxTokens))
           : 0
       if (documentTokenLimit > 0) {
         const consumed = Math.max(
@@ -560,31 +591,6 @@ export function createDeliveryDispatcher(options: {
       )
     } catch {
       return false
-    }
-  }
-
-  function resourceRemediationFromRequest(request: WorkerDispatchRequest) {
-    if (
-      request.workerType !== 'resource-preparer' ||
-      request.contract.remediation === undefined
-    )
-      return undefined
-    try {
-      const remediation = request.contract.remediation
-      if (
-        !remediation ||
-        typeof remediation !== 'object' ||
-        Array.isArray(remediation) ||
-        (remediation as Record<string, unknown>).kind === 'document_review'
-      )
-        return undefined
-      const resourceRemediation = {
-        ...(remediation as Record<string, unknown>),
-      }
-      delete resourceRemediation.kind
-      return parseResourceRemediation(resourceRemediation)
-    } catch {
-      return undefined
     }
   }
 

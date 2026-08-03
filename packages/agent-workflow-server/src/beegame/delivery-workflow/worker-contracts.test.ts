@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   documentReviewCheckSchema,
   documentReviewFindingSchema,
-  documentReviewSubmissionSchemaForMode,
+  documentReviewCheckSubmissionSchemaForMode,
 } from './worker-contracts'
 import { GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA } from './types'
 
@@ -22,6 +22,10 @@ const {
   owner: _submissionOwner,
   ...submissionFinding
 } = baseFinding
+const referenceSubmissionFinding = {
+  ...submissionFinding,
+  subjects: [{ referenceId: 'ref-subject' }],
+}
 
 describe('document review finding contract', () => {
   test('preserves the single canonical finding contract', () => {
@@ -54,50 +58,44 @@ describe('document review finding contract', () => {
 
   test('does not expose Closure regression fields in Initial Review', () => {
     const submission = {
-      verdict: 'NEEDS_REVISION',
-      checks: [{
+      check: {
         id: 'technical_feasibility',
         status: 'block',
         conclusion: 'The delivery contract conflicts.',
-        evidence: [{ path: 'systemDeliveryContract', anchor: '/roots/content' }],
+        evidence: [{ referenceId: 'ref-system' }],
         findingIds: ['CALC-1'],
         assessments: [],
-      }],
-      findings: [{ ...submissionFinding, regressionPaths: ['docs/GDD.md'] }],
+      },
+      findings: [{ ...referenceSubmissionFinding, regressionPaths: ['docs/GDD.md'] }],
     }
     expect(() =>
-      documentReviewSubmissionSchemaForMode('initial').parse(submission),
+      documentReviewCheckSubmissionSchemaForMode('initial').parse(submission),
     ).toThrow()
     expect(
-      documentReviewSubmissionSchemaForMode('closure').parse(submission)
+      documentReviewCheckSubmissionSchemaForMode('closure').parse(submission)
         .findings[0],
     ).toMatchObject({ regressionPaths: ['docs/GDD.md'] })
   })
 
   test('does not expose resource ownership or identities in Foundation Review', () => {
     const submission = {
-      verdict: 'NEEDS_REVISION',
-      checks: [{
+      check: {
         id: 'cross_document_consistency',
         status: 'block',
         conclusion: 'The foundation documents conflict.',
-        evidence: [{ path: 'systemDeliveryContract', anchor: '/content/factOwnership' }],
+        evidence: [{ referenceId: 'ref-system' }],
         findingIds: ['CALC-1'],
         assessments: [],
-      }],
+      },
       findings: [{
-        ...submissionFinding,
+        ...referenceSubmissionFinding,
         checkId: 'cross_document_consistency',
         owner: 'resource',
-        subjects: [{
-          path: 'docs/AUDIO_DESIGN.md',
-          anchor: 'Resources',
-          resourceId: 'UNREGISTERED-ID',
-        }],
+        subjects: [{ referenceId: 'ref-audio', resourceId: 'UNREGISTERED-ID' }],
       }],
     }
     expect(() =>
-      documentReviewSubmissionSchemaForMode(
+      documentReviewCheckSubmissionSchemaForMode(
         'initial',
         'foundation',
       ).parse(submission),

@@ -1,4 +1,5 @@
 import { parseDeliveryRun } from './schema'
+import { MAX_DOCUMENT_REPAIR_PASSES } from './types'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -28,7 +29,8 @@ export type DeliveryTransition =
       type: 'resource_preparation_needs_action'
       reason: string
     } & EvidenceEvent)
-  | { type: 'resource_preparation_invalidated'; reason: string }
+  | { type: 'resource_preparation_required'; reason?: string }
+  | { type: 'resource_review_remediation_required' }
   | { type: 'tasks_planned'; tasks: AtomicTask[] }
   | { type: 'task_started'; taskId: string; revision: string }
   | {
@@ -112,6 +114,38 @@ function assertTaskGraph(tasks: AtomicTask[]): void {
 export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
   parseDeliveryRun(run)
   assertTaskGraph(run.tasks)
+  const activeReviewCycle = run.documentReviewState.activeCycle
+  if (
+    activeReviewCycle?.acceptedSemanticResult &&
+    activeReviewCycle.activeTarget === 'resource' &&
+    run.phase !== 'RESOURCE_PREPARATION' &&
+    run.phase !== 'DOCUMENT_REVIEW'
+  ) {
+    throw new WorkflowTransitionError(
+      'invariant_violation',
+      'accepted resource review findings must remain in Resource Production or Closure Review',
+    )
+  }
+  if (
+    run.phase === 'RESOURCE_PREPARATION' &&
+    activeReviewCycle?.acceptedSemanticResult &&
+    activeReviewCycle.activeTarget === 'resource' &&
+    !activeReviewCycle.findings.some(finding => finding.owner === 'resource')
+  ) {
+    throw new WorkflowTransitionError(
+      'invariant_violation',
+      'accepted resource review authority requires at least one resource finding',
+    )
+  }
+  if (
+    run.resourcePreparationAttempt !== undefined &&
+    run.phase !== 'RESOURCE_PREPARATION'
+  ) {
+    throw new WorkflowTransitionError(
+      'invariant_violation',
+      'resource preparation retry state is valid only in Resource Production',
+    )
+  }
   if (
     run.activeTaskId &&
     !run.tasks.some(task => task.id === run.activeTaskId)
@@ -149,10 +183,7 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
 
 function withEvidence(
   run: DeliveryRun,
-  key:
-    | 'resourcePreparation'
-    | 'implementationAudit'
-    | 'acceptance',
+  key: 'resourcePreparation' | 'implementationAudit' | 'acceptance',
   evidence: EvidenceRef,
 ): DeliveryRun {
   return {
@@ -178,6 +209,44 @@ function requireEvidence(
     fail(`evidence status ${evidence.status} is not valid for this transition`)
 }
 
+function enterResourcePreparation(
+  run: DeliveryRun,
+  options: {
+    reason?: string
+    repairPasses?: DeliveryRun['documentReviewState']['repairPasses']
+  } = {},
+): DeliveryRun {
+  const activeCycle = run.documentReviewState.activeCycle
+  const preserveReviewCycle = Boolean(
+    activeCycle?.acceptedSemanticResult &&
+      activeCycle.activeTarget === 'resource',
+  )
+  return {
+    ...run,
+    phase: 'RESOURCE_PREPARATION',
+    documentStep: undefined,
+    status: 'running',
+    activeTaskId: undefined,
+    activeDispatch: undefined,
+    blockedReason: options.reason,
+    revision: {
+      ...run.revision,
+      resource: undefined,
+      implementation: undefined,
+    },
+    tasks: [],
+    evidence: {},
+    resourcePreparationAttempt: undefined,
+    documentReviewState: {
+      ...run.documentReviewState,
+      comprehensiveApproval: undefined,
+      activeCycle: preserveReviewCycle ? activeCycle : undefined,
+      ...(options.repairPasses ? { repairPasses: options.repairPasses } : {}),
+    },
+    updatedAt: timestamp(),
+  }
+}
+
 export function transitionDeliveryRun(
   input: DeliveryRun,
   event: DeliveryTransition,
@@ -191,6 +260,7 @@ export function transitionDeliveryRun(
         ...run,
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
+        foundationDraftState: { completedPaths: [] },
         documentReviewState: {
           repairPasses: { foundation: 0, checklist: 0, resource: 0 },
         },
@@ -208,7 +278,7 @@ export function transitionDeliveryRun(
         documentStep: 'CHECKLIST_REVIEW',
         status: 'running',
         blockedReason: undefined,
-        resourceRemediation: undefined,
+        resourcePreparationAttempt: undefined,
       }
       break
     case 'resource_preparation_needs_action':
@@ -223,36 +293,41 @@ export function transitionDeliveryRun(
         blockedReason: event.reason,
       }
       break
-    case 'resource_preparation_invalidated': {
+    case 'resource_preparation_required': {
+      next = enterResourcePreparation(run, { reason: event.reason })
+      break
+    }
+    case 'resource_review_remediation_required': {
       const activeCycle = run.documentReviewState.activeCycle
-      const preserveReviewRemediation = Boolean(
-        activeCycle?.acceptedSemanticResult &&
-          activeCycle.activeTarget === 'resource',
+      if (
+        !activeCycle?.acceptedSemanticResult ||
+        activeCycle.activeTarget !== 'resource'
       )
-      next = {
-        ...run,
-        phase: 'RESOURCE_PREPARATION',
-        documentStep: undefined,
-        status: 'running',
-        activeTaskId: undefined,
-        activeDispatch: undefined,
-        blockedReason: event.reason,
-        revision: {
-          ...run.revision,
-          resource: undefined,
-          implementation: undefined,
-        },
-        tasks: [],
-        evidence: {},
-        resourceRemediation: preserveReviewRemediation
-          ? undefined
-          : run.resourceRemediation,
-        documentReviewState: {
-          ...run.documentReviewState,
-          comprehensiveApproval: undefined,
-          activeCycle: preserveReviewRemediation ? activeCycle : undefined,
-        },
+        fail(
+          'resource review remediation requires an accepted resource finding batch',
+        )
+      if (!activeCycle.findings.some(finding => finding.owner === 'resource'))
+        fail(
+          'resource review remediation requires at least one resource finding',
+        )
+      const completedPasses = run.documentReviewState.repairPasses.resource
+      if (completedPasses >= MAX_DOCUMENT_REPAIR_PASSES) {
+        next = {
+          ...run,
+          status: 'needs_action',
+          activeDispatch: undefined,
+          blockedReason:
+            'document resource remediation exhausted its bounded repair passes',
+          updatedAt: timestamp(),
+        }
+        break
       }
+      next = enterResourcePreparation(run, {
+        repairPasses: {
+          ...run.documentReviewState.repairPasses,
+          resource: completedPasses + 1,
+        },
+      })
       break
     }
     case 'tasks_planned':

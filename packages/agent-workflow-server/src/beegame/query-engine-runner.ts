@@ -167,13 +167,14 @@ const SINGLE_LANE_WORKFLOW_WORKERS = new Set([
   'question-answerer',
 ])
 
-const MAIN_THREAD_WORKFLOW_RESULT_TOOLS = new Set([
+const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
   'AssetManifest',
   'SubmitAtomicTaskPlan',
   'SubmitImplementationResult',
   'SubmitValidationResult',
   'SubmitDocumentAuthorResult',
-  'SubmitDocumentReviewResult',
+  'SubmitDocumentRepairPlan',
+  'SubmitDocumentReviewCheck',
   'SubmitChangeImpactResult',
   'SubmitQuestionAnswerResult',
 ])
@@ -234,6 +235,8 @@ export function requiresBeeGameWorkflowBoundaryCheck(
   if (input.workflowWorker !== true) return false
   if (WORKFLOW_FILE_MUTATION_TOOLS.has(toolName)) return true
   if (WORKFLOW_EXTERNAL_WEB_TOOLS.has(toolName)) return true
+  if (input.workflowWorkerType === 'document-author' && toolName === 'Read')
+    return true
   if (
     input.workflowWorkerType === 'implementation-worker' &&
     (toolName === 'Read' || toolName === 'Bash')
@@ -249,7 +252,9 @@ export function requiresBeeGameWorkflowBoundaryCheck(
 export function getBeeGameWorkflowThinkingConfig(
   workerType?: BeeGameSessionRunnerStartInput['workflowWorkerType'],
 ): { type: 'disabled' } | undefined {
-  return workerType === 'atomic-task-planner' ||
+  return workerType === 'document-author' ||
+    workerType === 'document-reviewer' ||
+    workerType === 'atomic-task-planner' ||
     workerType === 'implementation-worker'
     ? { type: 'disabled' }
     : undefined
@@ -728,6 +733,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const nativeTools = selectBeeGameWorkerTools(
       call(toolsModule, 'getTools', permissionContext) as unknown[],
       this.input.workflowWorkerType,
+      this.input.workflowDocumentAuthorMode,
     )
     const assetManifestTool =
       this.input.workflowWorkerType === 'resource-preparer'
@@ -783,25 +789,35 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           })
         : undefined
     const workflowResultTool =
-      this.input.workflowWorkerType === 'document-author' ||
+      (this.input.workflowWorkerType === 'document-author' &&
+        this.input.workflowDocumentAuthorMode !== 'initial') ||
       this.input.workflowWorkerType === 'document-reviewer' ||
       this.input.workflowWorkerType === 'change-impact-analyzer' ||
       this.input.workflowWorkerType === 'question-answerer'
         ? createNativeWorkflowResultTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workerType: this.input.workflowWorkerType,
+            ...(this.input.workflowWorkerType === 'document-author' &&
+            this.input.workflowDocumentAuthorMode
+              ? { documentAuthorMode: this.input.workflowDocumentAuthorMode }
+              : {}),
             ...(this.input.workflowWorkerType === 'document-reviewer' &&
             this.input.workflowDocumentReviewMode
               ? {
-                  documentReviewMode:
-                    this.input.workflowDocumentReviewMode,
+                  documentReviewMode: this.input.workflowDocumentReviewMode,
                 }
               : {}),
             ...(this.input.workflowWorkerType === 'document-reviewer' &&
             this.input.workflowDocumentReviewScope
               ? {
-                  documentReviewScope:
-                    this.input.workflowDocumentReviewScope,
+                  documentReviewScope: this.input.workflowDocumentReviewScope,
+                }
+              : {}),
+            ...(this.input.workflowWorkerType === 'document-reviewer' &&
+            this.input.workflowDocumentReviewContract
+              ? {
+                  documentReviewContract:
+                    this.input.workflowDocumentReviewContract,
                 }
               : {}),
           })
@@ -1073,8 +1089,8 @@ export class NativeBackgroundTaskLedger {
 
 /**
  * Publishes operational BeeGame capabilities through Claude Code's supported
- * inherited tool pool. Structured workflow result tools remain main-thread
- * only so a child Agent cannot become a second terminal submission lane.
+ * inherited tool pool. Workflow control and result tools remain main-thread
+ * only so a child Agent cannot create a second planning or terminal lane.
  */
 export function installInheritedBeeGameTools(
   appState: MutableAppState,
@@ -1083,7 +1099,7 @@ export function installInheritedBeeGameTools(
   const currentMcp = getField<Record<string, unknown>>(appState, 'mcp', {})
   const currentTools = getField<unknown[]>(currentMcp, 'tools', [])
   const operationalTools = inheritedTools.filter(
-    tool => !MAIN_THREAD_WORKFLOW_RESULT_TOOLS.has(getToolName(tool)),
+    tool => !MAIN_THREAD_WORKFLOW_TOOLS.has(getToolName(tool)),
   )
   return {
     ...appState,
@@ -1478,6 +1494,7 @@ function getToolName(tool: unknown): string {
 export function selectBeeGameWorkerTools(
   tools: unknown[],
   workflowWorkerType?: string,
+  documentAuthorMode?: 'initial' | 'repair-planning' | 'remediation',
 ): unknown[] {
   if (
     workflowWorkerType === 'atomic-task-planner' ||
@@ -1486,7 +1503,8 @@ export function selectBeeGameWorkerTools(
     return []
   }
   if (workflowWorkerType === 'document-author') {
-    const documentToolNames = new Set(['Read', 'Write', 'MultiEdit'])
+    if (documentAuthorMode === 'repair-planning') return []
+    const documentToolNames = new Set(['Read', 'Write'])
     return tools.filter(tool => documentToolNames.has(getToolName(tool)))
   }
   if (workflowWorkerType === 'resource-preparer') {

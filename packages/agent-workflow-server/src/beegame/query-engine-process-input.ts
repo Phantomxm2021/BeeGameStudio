@@ -26,11 +26,20 @@ export function serializeQueryEngineStartInput(
     ...(input.workflowWorkerType
       ? { workflowWorkerType: input.workflowWorkerType }
       : {}),
+    ...(input.workflowAllowedPaths
+      ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
+      : {}),
+    ...(input.workflowDocumentAuthorMode
+      ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
+      : {}),
     ...(input.workflowDocumentReviewMode
       ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
       : {}),
     ...(input.workflowDocumentReviewScope
       ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+      : {}),
+    ...(input.workflowDocumentReviewContract
+      ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
       : {}),
     ...(input.workflowResourceRegistrationBarrierPaths
       ? {
@@ -41,6 +50,9 @@ export function serializeQueryEngineStartInput(
       : {}),
     ...(input.workflowAllowResourceCatalogWithExistingInventory
       ? { workflowAllowResourceCatalogWithExistingInventory: true }
+      : {}),
+    ...(input.workflowAllowResourceRemediationMutations
+      ? { workflowAllowResourceRemediationMutations: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
@@ -78,11 +90,20 @@ export function deserializeQueryEngineStartInput(
     ...(input.workflowWorkerType
       ? { workflowWorkerType: input.workflowWorkerType }
       : {}),
+    ...(input.workflowAllowedPaths
+      ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
+      : {}),
+    ...(input.workflowDocumentAuthorMode
+      ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
+      : {}),
     ...(input.workflowDocumentReviewMode
       ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
       : {}),
     ...(input.workflowDocumentReviewScope
       ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+      : {}),
+    ...(input.workflowDocumentReviewContract
+      ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
       : {}),
     ...(input.workflowResourceRegistrationBarrierPaths
       ? {
@@ -93,6 +114,9 @@ export function deserializeQueryEngineStartInput(
       : {}),
     ...(input.workflowAllowResourceCatalogWithExistingInventory
       ? { workflowAllowResourceCatalogWithExistingInventory: true }
+      : {}),
+    ...(input.workflowAllowResourceRemediationMutations
+      ? { workflowAllowResourceRemediationMutations: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [

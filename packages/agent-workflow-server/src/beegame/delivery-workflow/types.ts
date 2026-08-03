@@ -1,7 +1,7 @@
 export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/GDD.md',
-  'docs/BALANCE_DESIGN.md',
   'docs/LEVEL_SCENE_DESIGN.md',
+  'docs/BALANCE_DESIGN.md',
   'docs/TECHNICAL_DESIGN.md',
   'docs/ART_DIRECTION.md',
   'docs/UI_UX_SPEC.md',
@@ -12,14 +12,22 @@ export const CANONICAL_PROJECT_DOCUMENTS = [
 
 export const CANONICAL_FOUNDATION_DOCUMENTS = [
   'docs/GDD.md',
-  'docs/BALANCE_DESIGN.md',
   'docs/LEVEL_SCENE_DESIGN.md',
+  'docs/BALANCE_DESIGN.md',
   'docs/TECHNICAL_DESIGN.md',
   'docs/ART_DIRECTION.md',
   'docs/UI_UX_SPEC.md',
   'docs/AUDIO_DESIGN.md',
   'docs/ASSET_PLAN.md',
 ] as const
+
+export type FoundationDocumentPath =
+  (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
+
+export type FoundationDraftState = {
+  /** Completed initial-authoring checkpoints in canonical dependency order. */
+  completedPaths: FoundationDocumentPath[]
+}
 
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
   ...CANONICAL_PROJECT_DOCUMENTS,
@@ -135,7 +143,9 @@ export type ComprehensiveDocumentReviewCheckId =
 export type DocumentReviewCheckId = ComprehensiveDocumentReviewCheckId
 
 export const DOCUMENT_REVIEW_OWNER_BY_CHECK_ID = Object.fromEntries([
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(id => [id, 'foundation'] as const),
+  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(
+    id => [id, 'foundation'] as const,
+  ),
   ['checklist_traceability', 'checklist'] as const,
   ['resource_semantic_fitness', 'resource'] as const,
   ['content_structure_fitness', 'resource'] as const,
@@ -226,6 +236,21 @@ export type DocumentReviewApproval = {
   approvedAt: string
 }
 
+export type DocumentRepairGroup = {
+  groupId: string
+  findingIds: string[]
+  invariants: string[]
+  decision: string
+  affectedPaths: FoundationDocumentPath[]
+  dependsOn: string[]
+}
+
+export type DocumentRepairPlan = {
+  groups: DocumentRepairGroup[]
+  /** Durable owner-task cursor; paths occur in canonical owner order. */
+  completedPaths: FoundationDocumentPath[]
+}
+
 export type DocumentReviewCycle = {
   cycleId: string
   parentCycleId?: string
@@ -235,16 +260,17 @@ export type DocumentReviewCycle = {
   mode: DocumentReviewMode
   sourceRevision: string
   requiredCheckIds: DocumentReviewCheckId[]
+  /** Ordered cursor for checks accepted in this cycle (not inherited checks). */
+  completedCheckIds: DocumentReviewCheckId[]
   checks: DocumentReviewCheck[]
   checkEvidenceDigests: Record<string, Record<string, string>>
   findings: DocumentReviewFinding[]
   activeTarget?: 'foundation' | 'checklist' | 'resource'
   acceptedSemanticResult: boolean
-  transportAttempts: number
-  /** Exact protocol rejection carried into the one remaining transport attempt. */
-  transportCorrection?: string
   changedPaths: string[]
   sourceArtifactDigests: Record<string, string>
+  /** Sole execution plan for the accepted foundation finding ledger. */
+  repairPlan?: DocumentRepairPlan
   evidencePath?: string
 }
 
@@ -259,13 +285,10 @@ export type DocumentReviewState = {
   }
 }
 
-export type ChecklistRemediation = {
-  sourceRevision: string
-  attempt: number
-  issues: string[]
-}
+export const MAX_DOCUMENT_REPAIR_PASSES = 2
+export const DELIVERY_RUN_SCHEMA_VERSION = 6 as const
 
-export type ResourceRemediation = {
+export type ChecklistRemediation = {
   sourceRevision: string
   attempt: number
   issues: string[]
@@ -363,7 +386,7 @@ export type WorkflowEvent = {
 }
 
 export type DeliveryRun = {
-  schemaVersion: 2
+  schemaVersion: typeof DELIVERY_RUN_SCHEMA_VERSION
   runId: string
   projectId: string
   ownerId: string
@@ -393,10 +416,12 @@ export type DeliveryRun = {
   }
   /** Sole owner of document review approvals, findings, retries and closure. */
   documentReviewState: DocumentReviewState
+  /** Sole durable cursor for the initial eight-document authoring pass. */
+  foundationDraftState: FoundationDraftState
   /** Deterministic checklist-structure issues carried across bounded author retries. */
   checklistRemediation?: ChecklistRemediation
-  /** Exact deterministic resource-contract failures carried into a repair pass. */
-  resourceRemediation?: ResourceRemediation
+  /** Durable execution count for the current Resource Production phase. */
+  resourcePreparationAttempt?: number
   usage?: WorkflowUsage
   /** Latest deterministic native Resource Library provenance observed for this run. */
   resourceEvidence?: ResourceEvidenceSnapshot

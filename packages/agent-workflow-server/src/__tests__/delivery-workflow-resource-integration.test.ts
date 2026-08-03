@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import { reconcileCurrentResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
-import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
+import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
+import {
+  assertDeliveryRunInvariants,
+  transitionDeliveryRun,
+} from '../beegame/delivery-workflow/transition'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 describe('v7 resource-content workflow', () => {
@@ -17,10 +21,20 @@ describe('v7 resource-content workflow', () => {
       documentStep: undefined,
     }
     const next = transitionDeliveryRun(run, {
-      type: 'resource_preparation_ready', resourceRevision: 'resources',
-      evidence: { path: '.beegame/workflow/evidence/resources.json', kind: 'resource_preparation', revision: 'resources', status: 'passed', observedAt: new Date().toISOString() },
+      type: 'resource_preparation_ready',
+      resourceRevision: 'resources',
+      evidence: {
+        path: '.beegame/workflow/evidence/resources.json',
+        kind: 'resource_preparation',
+        revision: 'resources',
+        status: 'passed',
+        observedAt: new Date().toISOString(),
+      },
     })
-    expect(next).toMatchObject({ phase: 'DOCUMENT_REVIEW', documentStep: 'CHECKLIST_REVIEW' })
+    expect(next).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_REVIEW',
+    })
     expect(next.evidence).not.toHaveProperty('compositionAssembly')
   })
 
@@ -44,13 +58,39 @@ describe('v7 resource-content workflow', () => {
           scope: 'complete' as const,
           mode: 'initial' as const,
           sourceRevision: 'resources',
-          requiredCheckIds: [],
-          checks: [],
+          requiredCheckIds: ['resource_content_consistency' as const],
+          completedCheckIds: ['resource_content_consistency' as const],
+          checks: [{
+            id: 'resource_content_consistency' as const,
+            status: 'block' as const,
+            conclusion: 'Resource remediation is required.',
+            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+            findingIds: ['resource-review-finding'],
+            assessments: [],
+          }],
           checkEvidenceDigests: {},
-          findings: [],
+          findings: [
+            {
+              findingId: 'resource-review-finding',
+              checkId: 'resource_content_consistency' as const,
+              severity: 'blocking' as const,
+              owner: 'resource' as const,
+              subjects: [
+                {
+                  path: 'assets/asset-manifest.json',
+                  anchor: '/requirements/0',
+                  requirementId: 'resource-review-requirement',
+                },
+              ],
+              observation: 'The resource contract is incomplete.',
+              blockingReason: 'The resource cannot be loaded.',
+              requiredAction: 'Complete the canonical resource contract.',
+              closureCondition:
+                'The resource is loadable through the canonical path.',
+            },
+          ],
           activeTarget: 'resource' as const,
           acceptedSemanticResult: true,
-          transportAttempts: 1,
           changedPaths: [],
           sourceArtifactDigests: {},
         },
@@ -81,7 +121,15 @@ describe('v7 resource-content workflow', () => {
       mode: 'closure' as const,
       sourceRevision: 'resources',
       requiredCheckIds: ['resource_content_consistency' as const],
-      checks: [],
+      completedCheckIds: ['resource_content_consistency' as const],
+      checks: [{
+        id: 'resource_content_consistency' as const,
+        status: 'block' as const,
+        conclusion: 'Resource remediation is required.',
+        evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+        findingIds: ['resource-format-gap'],
+        assessments: [],
+      }],
       checkEvidenceDigests: {},
       findings: [
         {
@@ -96,15 +144,17 @@ describe('v7 resource-content workflow', () => {
               resourceId: 'resource-1',
             },
           ],
-          observation: 'The registered material cannot satisfy its loading contract.',
-          blockingReason: 'Implementation cannot load the approved resource role.',
+          observation:
+            'The registered material cannot satisfy its loading contract.',
+          blockingReason:
+            'Implementation cannot load the approved resource role.',
           requiredAction: 'Replace the material in the canonical inventory.',
-          closureCondition: 'The same resource role is loadable through the canonical path.',
+          closureCondition:
+            'The same resource role is loadable through the canonical path.',
         },
       ],
       activeTarget: 'resource' as const,
       acceptedSemanticResult: true,
-      transportAttempts: 1,
       changedPaths: [],
       sourceArtifactDigests: {},
     }
@@ -122,14 +172,9 @@ describe('v7 resource-content workflow', () => {
           ...initial.documentReviewState,
           activeCycle,
         },
-        resourceRemediation: {
-          sourceRevision: 'resources',
-          attempt: 1,
-          issues: ['parallel deterministic repair state'],
-        },
       },
       {
-        type: 'resource_preparation_invalidated',
+        type: 'resource_preparation_required',
         reason: 'resource inventory changed',
       },
     )
@@ -144,8 +189,139 @@ describe('v7 resource-content workflow', () => {
         },
       },
     })
-    expect(invalidated.resourceRemediation).toBeUndefined()
+    expect(invalidated.resourcePreparationAttempt).toBeUndefined()
     expect(invalidated.revision.resource).toBeUndefined()
     expect(invalidated.revision.implementation).toBeUndefined()
+  })
+
+  it('rejects Resource Production retry state outside the resource phase', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-invalid-resource-retry',
+      projectId: 'project-invalid-resource-retry',
+      ownerId: 'owner-invalid-resource-retry',
+    })
+
+    expect(() =>
+      transitionDeliveryRun(
+        {
+          ...initial,
+          phase: 'DOCUMENT_REVIEW',
+          documentStep: 'CHECKLIST_REVIEW',
+          resourcePreparationAttempt: 1,
+        },
+        { type: 'resource_preparation_required' },
+      ),
+    ).toThrow(
+      'resource preparation retry state is valid only in Resource Production',
+    )
+  })
+
+  it('rejects downstream planning while accepted resource findings still await closure', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-unclosed-resource-review',
+      projectId: 'project-unclosed-resource-review',
+      ownerId: 'owner-unclosed-resource-review',
+    })
+
+    expect(() =>
+      assertDeliveryRunInvariants({
+        ...initial,
+        phase: 'ATOMIC_TASK_PLANNING',
+        documentReviewState: {
+          ...initial.documentReviewState,
+          activeCycle: {
+            cycleId: 'unclosed-resource-cycle',
+            originScope: 'complete',
+            scope: 'complete',
+            mode: 'initial',
+            sourceRevision: 'resource-revision',
+            requiredCheckIds: ['resource_content_consistency'],
+            completedCheckIds: ['resource_content_consistency'],
+            checks: [{
+              id: 'resource_content_consistency' as const,
+              status: 'pass' as const,
+              conclusion: 'The check passed.',
+              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+              findingIds: [],
+              assessments: [],
+            }],
+            checkEvidenceDigests: {},
+            findings: [],
+            activeTarget: 'resource',
+            acceptedSemanticResult: true,
+            changedPaths: [],
+            sourceArtifactDigests: {},
+          },
+        },
+      }),
+    ).toThrow(
+      'accepted resource review findings must remain in Resource Production or Closure Review',
+    )
+  })
+
+  it('rejects the retired resource remediation state instead of dual-reading it', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-retired-resource-state',
+      projectId: 'project-retired-resource-state',
+      ownerId: 'owner-retired-resource-state',
+    })
+
+    expect(() =>
+      parseDeliveryRun({
+        ...initial,
+        resourceRemediation: {
+          sourceRevision: initial.revision.document,
+          attempt: 1,
+          issues: ['retired state'],
+        },
+      }),
+    ).toThrow()
+  })
+
+  it('rejects empty accepted resource authority instead of falling back to Resource Production retry', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-empty-resource-authority',
+      projectId: 'project-empty-resource-authority',
+      ownerId: 'owner-empty-resource-authority',
+    })
+
+    expect(() =>
+      assertDeliveryRunInvariants({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+        documentReviewState: {
+          ...initial.documentReviewState,
+          repairPasses: {
+            ...initial.documentReviewState.repairPasses,
+            resource: 1,
+          },
+          activeCycle: {
+            cycleId: 'empty-resource-cycle',
+            originScope: 'complete',
+            scope: 'complete',
+            mode: 'initial',
+            sourceRevision: 'resource-revision',
+            requiredCheckIds: ['resource_content_consistency'],
+            completedCheckIds: ['resource_content_consistency'],
+            checks: [{
+              id: 'resource_content_consistency' as const,
+              status: 'pass' as const,
+              conclusion: 'The check passed.',
+              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+              findingIds: [],
+              assessments: [],
+            }],
+            checkEvidenceDigests: {},
+            findings: [],
+            activeTarget: 'resource',
+            acceptedSemanticResult: true,
+            changedPaths: [],
+            sourceArtifactDigests: {},
+          },
+        },
+      }),
+    ).toThrow(
+      'accepted resource review authority requires at least one resource finding',
+    )
   })
 })

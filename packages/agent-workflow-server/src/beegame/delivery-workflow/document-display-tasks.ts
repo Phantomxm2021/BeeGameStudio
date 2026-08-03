@@ -12,7 +12,7 @@ import {
 export type DocumentDisplayTask = {
   id: string
   title: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
   operation: 'write' | 'review' | 'produce'
 }
@@ -34,13 +34,19 @@ export type AssetDisplayTaskInput = {
 export type DocumentDisplayTaskInput = {
   workspacePath: string
   currentItemId?: string
+  foundationDraftCompletedPaths?: string[]
   reviewedDocumentPaths?: string[]
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
   reviewCheckIds?: DocumentReviewCheckId[]
+  reviewCompletedCheckIds?: DocumentReviewCheckId[]
   reviewAccepted?: boolean
   reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  repairPlan?: {
+    groups: Array<{ affectedPaths: string[] }>
+    completedPaths: string[]
+  }
   reviewFindings?: Array<{
     id: string
     title: string
@@ -87,27 +93,76 @@ export function projectDocumentDisplayTasks(
       ),
     ) ?? [],
   )
+  const draftedPaths = new Set(
+    input.foundationDraftCompletedPaths?.filter(path =>
+      CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+    ) ?? [],
+  )
 
-  if (operation === 'review' && input.reviewCheckIds?.length)
+  if (operation === 'review' && input.reviewCheckIds?.length) {
+    const completed = new Set(input.reviewCompletedCheckIds ?? [])
+    const activeCheckId = input.reviewCheckIds.find(id => !completed.has(id))
     return input.reviewCheckIds.map(id => ({
       id,
       title: id,
-      status: input.reviewAccepted
+      status: input.reviewAccepted || completed.has(id)
         ? 'completed'
-        : active
+        : id === activeCheckId && active
           ? 'running'
-          : input.workflowStatus === 'failed'
-            ? 'failed'
-            : 'pending',
+          : id === activeCheckId && workflowStopped(input.workflowStatus)
+            ? 'stopped'
+            : id === activeCheckId && input.workflowStatus === 'failed'
+              ? 'failed'
+              : 'pending',
       attempt: 0,
       operation: 'review',
     }))
+  }
 
   if (
     operation === 'write' &&
     input.reviewAccepted &&
     input.reviewFindings?.length
   ) {
+    if (input.reviewTarget === 'foundation') {
+      if (!input.repairPlan)
+        return [
+          {
+            id: 'foundation-repair-plan',
+            title: '制定文档修订方案',
+            status: active
+              ? 'running'
+              : workflowStopped(input.workflowStatus)
+                ? 'stopped'
+                : workflowFailed(input.workflowStatus)
+                  ? 'failed'
+                  : 'pending',
+            attempt: 0,
+            operation: 'review',
+          },
+        ]
+      const completed = new Set(input.repairPlan.completedPaths)
+      const paths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+        input.repairPlan!.groups.some(group =>
+          group.affectedPaths.includes(path),
+        ),
+      )
+      return paths.map(path => ({
+        id: path,
+        title: path,
+        status: completed.has(path)
+          ? 'completed'
+          : active && currentItemId === path
+            ? 'running'
+            : workflowStopped(input.workflowStatus) && currentItemId === path
+              ? 'stopped'
+              : workflowFailed(input.workflowStatus) && currentItemId === path
+                ? 'failed'
+                : 'pending',
+        attempt: 0,
+        operation: 'write',
+      }))
+    }
     const currentOwnerFindings = input.reviewTarget
       ? input.reviewFindings.filter(
           finding => finding.owner === input.reviewTarget,
@@ -115,16 +170,18 @@ export function projectDocumentDisplayTasks(
       : input.reviewFindings
     if (currentOwnerFindings.length)
       return currentOwnerFindings.map(finding => ({
-      id: finding.id,
-      title: finding.title,
-      status: active
-        ? 'running'
-        : workflowFailed(input.workflowStatus)
-          ? 'failed'
-          : 'pending',
-      attempt: 0,
-      operation: 'write',
-    }))
+        id: finding.id,
+        title: finding.title,
+        status: active
+          ? 'running'
+          : workflowStopped(input.workflowStatus)
+            ? 'stopped'
+            : workflowFailed(input.workflowStatus)
+              ? 'failed'
+              : 'pending',
+        attempt: 0,
+        operation: 'write',
+      }))
   }
 
   return documentPaths.map(path => {
@@ -139,27 +196,35 @@ export function projectDocumentDisplayTasks(
       }
     })()
     const isSoleWriteTask = operation === 'write' && documentPaths.length === 1
-    const isCurrent =
-      active && (currentItemId === path || isSoleWriteTask)
+    const isCurrent = active && (currentItemId === path || isSoleWriteTask)
     const isFailed =
       workflowFailed(input.workflowStatus) &&
+      (currentItemId === path || isSoleWriteTask)
+    const isStopped =
+      workflowStopped(input.workflowStatus) &&
       (currentItemId === path || isSoleWriteTask)
     return {
       id: path,
       title: path,
       status: isCurrent
         ? 'running'
-        : operation === 'review'
-          ? reviewedPaths.has(path)
-            ? 'completed'
+        : isStopped
+          ? 'stopped'
+          : operation === 'review'
+            ? reviewedPaths.has(path)
+              ? 'completed'
+              : isFailed
+                ? 'failed'
+                : 'pending'
             : isFailed
               ? 'failed'
-              : 'pending'
-          : isFailed
-            ? 'failed'
-            : exists
-              ? 'completed'
-              : 'pending',
+              : input.documentStep === 'FOUNDATION_DRAFTING'
+                ? draftedPaths.has(path)
+                  ? 'completed'
+                  : 'pending'
+                : exists
+                  ? 'completed'
+                  : 'pending',
       attempt: 0,
       operation,
     }
@@ -196,9 +261,11 @@ export function projectAssetDisplayTasks(
       title: finding.title,
       status: active
         ? 'running'
-        : workflowFailed(input.workflowStatus)
-          ? 'failed'
-          : 'pending',
+        : workflowStopped(input.workflowStatus)
+          ? 'stopped'
+          : workflowFailed(input.workflowStatus)
+            ? 'failed'
+            : 'pending',
       attempt: 0,
       operation: 'produce',
     }))
@@ -208,11 +275,11 @@ export function projectAssetDisplayTasks(
       audit.present && audit.valid
         ? 'completed'
         : workerType === 'resource-preparer'
-          ? dispatchTaskStatus(dispatchStatus, active)
+          ? dispatchTaskStatus(dispatchStatus, active, input.workflowStatus)
           : 'pending'
     const inventoryStatus =
       workerType === 'resource-preparer' && audit.present && audit.valid
-        ? dispatchTaskStatus(dispatchStatus, active)
+        ? dispatchTaskStatus(dispatchStatus, active, input.workflowStatus)
         : audit.resources.length > 0 &&
             audit.resources.every(resource => resource.status === 'verified')
           ? 'completed'
@@ -274,13 +341,15 @@ export function projectAssetDisplayTasks(
 function dispatchTaskStatus(
   dispatchStatus: string | undefined,
   active: boolean,
+  workflowStatus?: string,
 ): DocumentDisplayTask['status'] {
   if (active) return 'running'
+  if (workflowStopped(workflowStatus) && dispatchStatus === 'interrupted')
+    return 'stopped'
   if (
     dispatchStatus === 'failed' ||
     dispatchStatus === 'blocked' ||
-    dispatchStatus === 'invalid' ||
-    dispatchStatus === 'interrupted'
+    dispatchStatus === 'invalid'
   )
     return 'failed'
   if (dispatchStatus === 'completed') return 'completed'
@@ -289,11 +358,12 @@ function dispatchTaskStatus(
 
 function workflowFailed(status: string | undefined): boolean {
   return (
-    status === 'failed' ||
-    status === 'blocked' ||
-    status === 'needs_action' ||
-    status === 'stopped'
+    status === 'failed' || status === 'blocked' || status === 'needs_action'
   )
+}
+
+function workflowStopped(status: string | undefined): boolean {
+  return status === 'stopped'
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

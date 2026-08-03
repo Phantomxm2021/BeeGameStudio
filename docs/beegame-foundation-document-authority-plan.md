@@ -24,7 +24,7 @@ Foundation 固定为以下八份文档：
 7. `docs/AUDIO_DESIGN.md`
 8. `docs/ASSET_PLAN.md`
 
-八份文档必须在同一个 Foundation Drafting pass 中共同完成，每份文档均以 YAML front matter 声明稳定 `document_id`、`MAJOR.MINOR.PATCH` 版本和 ISO 8601 UTC `updated_at`。任一文档缺失、为空、越权拥有事实或缺少核心设计输入，Foundation 不得通过。
+八份文档必须在同一个 Foundation Drafting pass 中按固定依赖顺序串行完成；一个 pass 是同一 durable workflow 阶段和同一 Foundation revision，不是一个模型上下文、一个 transport turn 或一个八文档 dispatch。每份文档是一个独立 durable task，只允许一个 active Document Author dispatch、一个 canonical 路径和一次 `Write`。完成后服务端自动推进下一份，八份全部完成前不得启动 Initial Reviewer。每份文档均以 YAML front matter 声明稳定 `document_id`、`MAJOR.MINOR.PATCH` 版本和 ISO 8601 UTC `updated_at`。任一文档缺失、为空、越权拥有事实或缺少核心设计输入，Foundation 不得通过。
 
 `docs/acceptance/gameplay-checklist.md` 不是 Foundation 文档。它只能在八份文档通过 Foundation Initial Review、必要修复和 Closure Review 后生成。`assets/asset-manifest.json`、资源文件及 JSON/YAML 可执行内容只能在 Checklist 完成后创建。
 
@@ -87,7 +87,14 @@ Foundation 固定为以下八份文档：
 
 ```text
 Confirmed Brief
-  -> 八份 Foundation 文档
+  -> GDD
+  -> Level/Scene Design
+  -> Balance Design
+  -> Technical Design
+  -> Art Direction
+  -> UI/UX Spec
+  -> Audio Design
+  -> Asset Plan
   -> Foundation Initial Review（12 checks）
   -> Foundation Owner 批量修复
   -> Foundation Closure Review
@@ -113,6 +120,8 @@ Foundation 固定执行以下 12 项，其中空间设计检查为本次补齐�
 
 Foundation 固定为 12 项；Comprehensive 仍为 Foundation 与 5 项下游检查的严格并集，固定为 17 项。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
 
+Reviewer 只允许一个 frozen-revision Review Cycle。Cycle 内按固定顺序逐项派发 check；每项原生工具必须在返回 `accepted` 前，使用与持久化相同的唯一 submission contract 校验 active check、固定 criteria、稳定 `referenceId`、finding subject owner 与 Closure 边界。格式或引用错误只能在当前 check dispatch 内修正；已接受的前序 check 不回滚。禁止 `transportCorrection`、并行 Reviewer、反馈式整轮重审或兼容接受分支。
+
 `level_scene_design_integrity` 必须提交三个固定 criterion：
 
 | Criterion | 必须证明 |
@@ -134,13 +143,36 @@ Foundation 固定为 12 项；Comprehensive 仍为 Foundation 与 5 项下游检
 
 ## 7. Author 与下游合同
 
-Foundation Author 必须在一次 dispatch 中获得八份唯一允许路径和本方案要求；断点恢复只继续同一八文档集合。修复时只允许写 finding 指向的 Foundation 文档，并要求对应文档 PATCH 版本提升。
+首次 Foundation Author 固定按 `GDD -> LEVEL_SCENE_DESIGN -> BALANCE_DESIGN -> TECHNICAL_DESIGN -> ART_DIRECTION -> UI_UX_SPEC -> AUDIO_DESIGN -> ASSET_PLAN` 串行执行。每个 dispatch 只获得当前文档的唯一允许路径，以及该文档确实依赖且已经完成的上游 canonical 文档；不得获得八份可写路径、不得携带上一份文档的模型对话或压缩摘要，也不得在初稿阶段提出 finding、执行 Closure、模拟 Reviewer 或自行建立修订循环。成功终态只完成当前 durable task，服务端随后创建下一任务；八份完成后才计算完整 Foundation revision。
+
+上游依赖由事实 owner 固定投影，不等同于“此前所有文档”：Level/Scene 读取 GDD；Balance 读取 GDD 与 Level/Scene；Technical 读取 GDD、Level/Scene 与 Balance；Art 读取 GDD 与 Level/Scene；UI/UX 读取 GDD 与 Level/Scene；Audio 读取 GDD、Level/Scene 与 UI/UX；Asset Plan 读取 GDD、Level/Scene、Technical、Art、UI/UX 与 Audio。服务端在启动 Initial Author 前一次性读取这些 canonical 上游文档并作为同一 prompt 的只读 authority block 提供；Author 不得用工具重新装载上游或浏览其他路径。若当前目标不存在，Initial Author 直接执行一次 `Write`；若目标已存在（包括显式重新开始、Change Request 或 finding remediation），Author 必须且只能先 `Read` 当前唯一允许路径一次，以满足底层文件状态守卫并获得实际写入基线，随后执行一次 `Write`。Initial restart 读取到的旧目标只用于建立覆盖前提，不得被提升为当前 run 的产品 authority；Change Request 与 remediation 的当前目标内容则是本次受控修订基线。该读取不产生摘要、临时文件、第二事实源或第二写入通道。
+
+Initial Author 的唯一 mutation 是当前目标文件的一次 `Write`；目标已存在时允许且只允许此前对该目标的一次必要 `Read`。该 mutation 完成后，服务端以实际写入路径和 durable 文件校验直接派生完成终态并关闭 worker；不得要求模型再调用 `SubmitDocumentAuthorResult`、复述完成结果或在相同完整 authority 上下文中进行第二次推理。Initial Write 未完成时必须报告实际文件工具失败，不得进入 remediation terminal 解析。`SubmitDocumentAuthorResult` 只属于 accepted finding batch 的 remediation，因为该终态还必须声明完整 resolved finding IDs。初稿与修订因此仍是两个互斥状态，不是双轨。
+
+首次 Author 只写决策级权威事实：原始设计输入、规则、基础数值、公式、必要配置和直接决定设计是否成立的少量边界。不得把所有可重算面积、比例、距离、构筑模拟、表格派生值或自我审计过程写入 Foundation。后续 JSON/YAML 承载批准设计的完整可执行投影；Foundation 不复制纯执行数据，也不把模拟报告提升为设计权威。
+
+初稿采用紧凑的 decision contract，而不是说明书：只记录当前 owner 的稳定 ID、选择、约束、公式、必要边界和给下游的接口引用。不得复述 confirmed brief、上游正文、fact-owner 总表、通用系统合同、理由散文、示例、测试用例、伪代码、实现步骤或调参过程；这些内容若不是当前 owner 的独立权威事实，就不得写入当前文档。完整性由 Initial Reviewer 跨八份文档判断，不以单份文档篇幅替代审计。
+
+修复时只允许写 accepted finding 指向且 repair plan 分配给当前 task 的一份 Foundation 文档，并要求该文档 PATCH 版本提升。首次撰写、repair planning 和 finding owner 修复是互斥任务，不共享 prompt 或允许路径。
 
 Foundation 修复 dispatch 只消费已接受 finding、其 closure condition、被分配的 subject 文档，以及 finding 明确引用且确有必要核对的事实 owner；每份读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，回归与 closure condition 的最终判定唯一属于随后一次 Closure Reviewer。
 
-同一修复 batch 若在多文档原子写入之间被中断，已完成的文档写入保持为当前 canonical artifact。重试 request 必须由服务端比较 frozen repair baseline 与当前 artifact digest，派生本轮已变化路径；该投影不落盘、不拆分 finding ledger，也不形成第二修复队列。Author 读取这些当前文档一次：已经满足 accepted finding 的内容必须保留，不得仅为重放 dispatch 再次写入或提升版本；只有当前内容仍不满足同一 closure condition 时才允许再次修订。最终 terminal 仍一次性解析完整 finding batch，Closure diff 始终相对原 frozen baseline 计算。
+Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 
-Document Author 的固定墙钟上限为 30 分钟，用于覆盖八文档初次完整撰写或一个多文档 repair batch 的一次规划、原子写入与唯一终态提交。超时仍必须中断 transport 并保留已完成的 canonical 写入；不得为了缩短墙钟而拆分 finding batch、允许增量 Edit 或建立第二提交协议。Document Reviewer 继续使用独立的 15 分钟审计上限与有限 terminal grace。
+1. Repair Lead 一次消费完整 accepted finding batch，将其归并为最小根问题组；每个 finding ID 必须且只能属于一个组；
+2. 每组声明不可改变的权威约束、唯一修订决策、受影响 canonical 路径和组间依赖；不得把“修改 A 或修改 B”继续留给 Document Author。Reviewer check 的 `evidence` 表示判断所依赖的完整事实范围；finding 的 `subjects` 则是 `requiredAction` 已确认必须实际改变的完整修订范围。Repair Lead 必须完整采用 subjects，不能缩减或扩大 accepted finding；
+3. 服务端验证 finding 完整分区、`affectedPaths` 与全部 accepted subjects 精确相等、路径权限和无环依赖，并把被接受的 plan 直接记录在原 active review cycle；它只是该 finding ledger 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
+4. 服务端从 plan 和固定 Foundation owner 顺序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 内容、与该文档相关的 finding 和已锁定决策，并只允许一次 `Write`；
+5. 每份成功写入立即形成 durable checkpoint、提升该文档 PATCH 版本并释放模型上下文。重启只继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；
+6. 全部目标文档完成后，服务端相对 frozen baseline 核对 changed paths、版本和 finding 覆盖，再启动唯一 Closure Reviewer；Closure Reviewer 仍按原 finding ID、closure condition 和 server diff 独立判定。
+
+Repair plan 只保存在原 active review cycle 内，并在该 cycle 关闭时一并退出活动状态；canonical 文档始终是唯一产品权威。禁止继续保留 `DocumentWorkbench`、多文档修订 dispatch、重试时重新规划或任何兼容执行分支。Initial Author 只锁定 confirmed brief 所需的最小原始设计输入、公式和直接边界；不得在 Reviewer 之前展开完整波次/构筑模拟、逐项候选方案比较、穷举调参或证明全局可行性。完整策略、经济、数值、节奏与空间可行性判断属于 Initial Reviewer；Reviewer 接受 finding 后，Repair Lead 只决定关闭这些 finding 的最小一致修改，不得借修订新增无关系统、扩大玩法范围或重新审计未受影响内容。
+
+Document Author 的运行时能力声明必须与真实工具完全一致。Author 只保留受限 `Read` 与 `Write`：`Read` 只能命中当前唯一目标且至多成功一次，`Write` 只能命中该目标且至多成功一次；不得提供 `Edit`、`MultiEdit`，也不得通过 Bash、临时项目文件、隐藏脚本或第二写入工具绕过 repair plan 与 canonical 单次写入合同。Repair Lead 只获得结构化 plan terminal，不得获得任何项目写入工具。
+
+同一修复 batch 若在文档 owner task 之间被中断，已完成路径保存在 active cycle 的唯一 repair cursor 中并保持为当前 canonical artifact。恢复时服务端必须同时验证 checkpoint 路径相对 frozen baseline 已发生合法变化；不得仅凭模型声明推进 cursor。已经完成的路径不得再次派发或再次提升版本。Closure diff 始终相对原 frozen baseline 计算。
+
+首次 Document Author 与 repair owner task 的墙钟和 token 边界都只覆盖当前一份文档；边界到期不得依靠上下文压缩、自动续写或提高预算完成另一份文档。Repair Lead 只提交结构化计划，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable owner task 不等于拆分 finding ledger，也不允许第二终态、增量 Edit 或并行修订队列。纯 thinking、`max_tokens` 自动续写和重复读取不是 durable 修订进度。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中；它继续使用独立的 15 分钟审计上限与有限 terminal grace，但不得靠提高输出预算、延长墙钟或重建整份报告完成 terminal。
 
 Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证、改走第二网络路径或引入 fallback transport。
 
@@ -157,8 +189,8 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 ## 8. 落地任务
 
 1. 将 `CANONICAL_FOUNDATION_DOCUMENTS` 和 `CANONICAL_PROJECT_DOCUMENTS` 改为八文档集合；Checklist 保持最后生成。
-2. 更新 Readiness Audit、revision digest、允许路径、断点恢复和 finding subject 校验，使八文档缺一不可。
-3. 更新 Foundation Author prompt/contract，明确八份文档及第 3、4 节事实边界；删除所有“六份”描述。
+2. 新增唯一 durable Foundation draft cursor，按固定顺序每次只派发一份文档；删除八路径初稿 dispatch、`existingDocumentPaths` 续写投影及对模型压缩摘要的依赖。
+3. 更新 Foundation Author prompt/contract，分离互斥的首次撰写、Repair Lead planning 与单文档 finding 修复；初稿与 owner task 都只写当前文档，彻底删除全量 Workbench 指令与工具。
 4. 新增 `level_scene_design_integrity`、三个固定 criterion、固定 owner 和结构化 Schema；Foundation/Comprehensive 数量改为 12/17。
 5. 更新 Reviewer prompt、Closure 受影响 check 计算和 evidence digest，纳入 Balance 与 Level/Scene。
 6. 更新 Checklist Author、Resource Agent、Atomic Planner 与 Implementation 输入，消费八文档批准集合。
@@ -177,6 +209,7 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 - 不存在按游戏类型、项目名、关键词或正则增删文档/check 的逻辑；
 - 不存在 `LEVEL_DESIGN.md`、`SCENE_DESIGN.md` 等平行文件名；
 - 不存在第二 Balance Reviewer、第二 finding ledger、feedback/shadow 状态或开放式全文返工；
+- 不存在一次派发八份初稿、`existingDocumentPaths` 兼容续写、初稿 repair group、初稿自审或跨文档模型对话继承；
 - Checklist 与 Manifest 均无法在八文档 Foundation Closure 前创建；
 - placeholder 是正常资源文件，不是源码分支或运行时 substitute；
 - Reviewer task、icon、进度和累计时间来自 durable Workflow 状态。
@@ -184,11 +217,13 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 ## 10. 验收标准
 
 1. Readiness 对七份或任一缺失文档确定性失败，对八份非空合法文档通过。
-2. Foundation Author 只允许写八份路径，Checklist Author 只允许写 Checklist。
-3. Foundation Reviewer 必须返回 12 checks 和 15 structured criteria；Comprehensive 必须返回 17 checks 和同一 15 criteria。
+2. 首次 Foundation Author 每个 dispatch 只允许写当前 cursor 指向的一份文档，完成后自动推进；Repair Author 只允许写 accepted finding subjects，Checklist Author 只允许写 Checklist。
+3. Foundation Reviewer 必须在同一 Cycle 严格串行接受 12 checks 和 15 structured criteria；Comprehensive 必须严格串行接受 17 checks 和同一 15 criteria。每次只提交当前 check，最终 verdict 由服务端汇总。
 4. Balance 缺少关键口径、公式或可行边界时产生 foundation finding；不得由 Agent 补造。
 5. Level/Scene 缺少空间支持、关卡曲线或场景状态闭环时产生 foundation finding。
 6. 修复后对应文档 PATCH 版本提升，Closure 只关闭已验证 finding 和直接 regression。
+7. 任一未知 `referenceId` 必须在 `SubmitDocumentReviewCheck` 返回 accepted 前被拒绝；同一 check dispatch 修正后可提交成功，已完成 check 不得丢失或重算。
 7. Checklist 在 Foundation Closure 前不存在；Manifest 与 JSON/YAML 在 Checklist 完成前不存在。
 8. 服务端、前端、类型检查和 diff 检查通过。
 9. 系统 Chrome 的单项目实测完整经过 Drafting、Initial Review、Repair、Closure 并进入 Checklist；第二项目只有在第一个完成后才能启动。
+10. 日志不存在八文档或多文档 repair 单 dispatch、跨文档上下文压缩、`DocumentWorkbench`、重试重新规划或 Author 自行提出并修复审计问题。

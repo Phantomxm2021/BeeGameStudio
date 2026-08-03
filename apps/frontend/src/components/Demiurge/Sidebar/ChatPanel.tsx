@@ -17,6 +17,7 @@ import type { WaitingPermissionState } from '../../../utils/waitingPermission';
 import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
+import type { WorkflowCardAction } from '../../../types/message';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -28,7 +29,7 @@ interface ChatPanelProps {
     onSend: () => void;
     onSendMessage?: (message: string) => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
-    onWorkflowAction?: (action: 'resume' | 'retry') => Promise<void> | void;
+    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];

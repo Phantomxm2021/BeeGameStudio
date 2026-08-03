@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
@@ -10,8 +10,7 @@ import {
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
   requiredDocumentReviewCheckIds,
-  validateDocumentReviewChecks,
-  validateDocumentReviewFindingSubjects,
+  validateDocumentReviewSubmission,
   type DocumentReviewArtifact,
   type ReviewAuthority,
 } from './document-review-input'
@@ -21,6 +20,7 @@ import {
   computeWorkspaceRevision,
 } from './revision'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
+import { transitionDeliveryRun } from './transition'
 import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -28,14 +28,45 @@ import {
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
+  MAX_DOCUMENT_REPAIR_PASSES,
   type DeliveryRun,
   type DocumentReviewCheck,
   type DocumentReviewCheckId,
   type DocumentReviewCycle,
   type DocumentReviewFinding,
   type DocumentReviewScope,
+  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './types'
+
+const INITIAL_FOUNDATION_UPSTREAM_PATHS: Record<
+  FoundationDocumentPath,
+  readonly FoundationDocumentPath[]
+> = {
+  'docs/GDD.md': [],
+  'docs/LEVEL_SCENE_DESIGN.md': ['docs/GDD.md'],
+  'docs/BALANCE_DESIGN.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+  'docs/TECHNICAL_DESIGN.md': [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ],
+  'docs/ART_DIRECTION.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+  'docs/UI_UX_SPEC.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+  'docs/AUDIO_DESIGN.md': [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/UI_UX_SPEC.md',
+  ],
+  'docs/ASSET_PLAN.md': [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/TECHNICAL_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ],
+}
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type ReadinessAudit = (
@@ -53,8 +84,82 @@ type Dispatcher = {
 type RemediationTarget = 'foundation' | 'checklist' | 'resource'
 
 const MAX_CHECKLIST_REMEDIATION_ATTEMPTS = 3
-const MAX_DOCUMENT_REPAIR_PASSES = 2
 const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
+const SYSTEM_CONTRACT_PATH = 'systemDeliveryContract'
+
+const REVIEW_ARTIFACT_PATHS_BY_CHECK: Record<
+  DocumentReviewCheckId,
+  readonly string[] | 'all'
+> = {
+  brief_alignment: 'all',
+  cross_document_consistency: 'all',
+  gameplay_completeness: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ],
+  gameplay_strategy_viability: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ],
+  economy_progression_integrity: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+  numeric_balance_feasibility: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ],
+  pacing_difficulty_coherence: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ],
+  level_scene_design_integrity: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+  ],
+  technical_feasibility: [
+    SYSTEM_CONTRACT_PATH,
+    'docs/TECHNICAL_DESIGN.md',
+    'docs/ASSET_PLAN.md',
+  ],
+  art_direction_coherence: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/ASSET_PLAN.md',
+  ],
+  ui_audio_consistency: [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ],
+  acceptance_observability: 'all',
+  checklist_traceability: 'all',
+  resource_semantic_fitness: 'all',
+  content_structure_fitness: 'all',
+  resource_content_consistency: 'all',
+  implementation_readiness: 'all',
+}
+
+function artifactsForReviewCheck(
+  artifacts: DocumentReviewArtifact[],
+  checkId: DocumentReviewCheckId,
+): DocumentReviewArtifact[] {
+  const selected = REVIEW_ARTIFACT_PATHS_BY_CHECK[checkId]
+  if (selected === 'all') return artifacts
+  const paths = new Set(selected)
+  return artifacts.filter(
+    artifact =>
+      artifact.path === 'reviewAuthority' || paths.has(artifact.path),
+  )
+}
 
 const CLOSURE_CHECKS: Record<
   RemediationTarget,
@@ -99,10 +204,7 @@ function findingsForTarget(
   cycle: DocumentReviewCycle | undefined,
   target: RemediationTarget,
 ): DocumentReviewFinding[] {
-  return (
-    cycle?.findings.filter(finding => finding.owner === target) ??
-    []
-  )
+  return cycle?.findings.filter(finding => finding.owner === target) ?? []
 }
 
 function nextTarget(findings: DocumentReviewFinding[]): RemediationTarget {
@@ -117,6 +219,10 @@ function routeToRemediation(
   run: DeliveryRun,
   target: RemediationTarget,
 ): DeliveryRun {
+  if (target === 'resource')
+    return transitionDeliveryRun(run, {
+      type: 'resource_review_remediation_required',
+    })
   const completedPasses = run.documentReviewState.repairPasses[target]
   if (completedPasses >= MAX_DOCUMENT_REPAIR_PASSES)
     return {
@@ -128,18 +234,9 @@ function routeToRemediation(
     }
   return {
     ...run,
-    phase:
-      target === 'foundation'
-        ? 'DOCUMENT_DRAFTING'
-        : target === 'checklist'
-          ? 'DOCUMENT_REVIEW'
-          : 'RESOURCE_PREPARATION',
+    phase: target === 'foundation' ? 'DOCUMENT_DRAFTING' : 'DOCUMENT_REVIEW',
     documentStep:
-      target === 'foundation'
-        ? 'FOUNDATION_DRAFTING'
-        : target === 'checklist'
-          ? 'CHECKLIST_DRAFTING'
-          : undefined,
+      target === 'foundation' ? 'FOUNDATION_DRAFTING' : 'CHECKLIST_DRAFTING',
     status: 'running',
     activeDispatch: undefined,
     blockedReason: undefined,
@@ -162,27 +259,20 @@ export function restoreAcceptedReviewRemediationHandoff(
   const target = cycle?.activeTarget
   if (!cycle?.acceptedSemanticResult || !target) return undefined
   const completedPasses = run.documentReviewState.repairPasses[target]
-  if (
-    completedPasses <= 0 ||
-    completedPasses >= MAX_DOCUMENT_REPAIR_PASSES
-  )
+  if (completedPasses <= 0 || completedPasses >= MAX_DOCUMENT_REPAIR_PASSES)
     return undefined
+  if (target === 'resource') {
+    if (run.phase === 'RESOURCE_PREPARATION' && run.documentStep === undefined)
+      return undefined
+    return transitionDeliveryRun(run, {
+      type: 'resource_preparation_required',
+    })
+  }
   const expectedPhase =
-    target === 'foundation'
-      ? 'DOCUMENT_DRAFTING'
-      : target === 'checklist'
-        ? 'DOCUMENT_REVIEW'
-        : 'RESOURCE_PREPARATION'
+    target === 'foundation' ? 'DOCUMENT_DRAFTING' : 'DOCUMENT_REVIEW'
   const expectedDocumentStep =
-    target === 'foundation'
-      ? 'FOUNDATION_DRAFTING'
-      : target === 'checklist'
-        ? 'CHECKLIST_DRAFTING'
-        : undefined
-  if (
-    run.phase === expectedPhase &&
-    run.documentStep === expectedDocumentStep
-  )
+    target === 'foundation' ? 'FOUNDATION_DRAFTING' : 'CHECKLIST_DRAFTING'
+  if (run.phase === expectedPhase && run.documentStep === expectedDocumentStep)
     return undefined
   return {
     ...run,
@@ -239,45 +329,6 @@ function normalizedReviewFindings(
   >['findings'],
 ): DocumentReviewFinding[] {
   return findings
-}
-
-function closureContractIssues(input: {
-  cycle: DocumentReviewCycle
-  findings: Extract<
-    WorkerTerminalResult,
-    { workerType: 'document-reviewer' }
-  >['findings']
-}): string[] {
-  const issues: string[] = []
-  if (input.cycle.mode === 'initial') {
-    if (input.findings.some(finding => finding.regressionPaths?.length))
-      issues.push(
-        'initial review cannot reference repair regressions',
-      )
-    return issues
-  }
-  const target = input.cycle.activeTarget
-  const priorIds = new Set(
-    findingsForTarget(input.cycle, target ?? 'foundation').map(
-      finding => finding.findingId,
-    ),
-  )
-  const changedPaths = new Set(input.cycle.changedPaths)
-  for (const finding of input.findings) {
-    if (finding.owner !== target)
-      issues.push(
-        'closure review finding is outside the active remediation owner',
-      )
-    const priorFindingValid = priorIds.has(finding.findingId)
-    const regressionValid =
-      Boolean(finding.regressionPaths?.length) &&
-      finding.regressionPaths!.every(path => changedPaths.has(path))
-    if (!priorFindingValid && !regressionValid)
-      issues.push(
-        'closure review finding must reference an active prior finding or a changed-path regression',
-      )
-  }
-  return issues
 }
 
 function mergeChecks(
@@ -453,32 +504,14 @@ export async function createInitialDocumentReviewCycle(input: {
         mode: 'initial',
         sourceRevision: input.revision,
         requiredCheckIds: requiredDocumentReviewCheckIds(input.scope),
+        completedCheckIds: [],
         checks: [],
         checkEvidenceDigests: {},
         findings: [],
         acceptedSemanticResult: false,
-        transportAttempts: 0,
         changedPaths: [],
         sourceArtifactDigests,
       },
-    },
-    updatedAt: new Date().toISOString(),
-  }
-}
-
-export function incrementDocumentReviewTransportAttempt(
-  run: DeliveryRun,
-): DeliveryRun {
-  const cycle = run.documentReviewState.activeCycle
-  if (!cycle || cycle.acceptedSemanticResult)
-    throw new Error('document review has no dispatchable cycle')
-  if (cycle.transportAttempts >= 2)
-    throw new Error('document review transport attempts are exhausted')
-  return {
-    ...run,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeCycle: { ...cycle, transportAttempts: cycle.transportAttempts + 1 },
     },
     updatedAt: new Date().toISOString(),
   }
@@ -489,7 +522,7 @@ export async function buildDocumentReviewDispatch(input: {
   workspacePath: string
 }): Promise<WorkerDispatchRequest> {
   const cycle = input.run.documentReviewState.activeCycle
-  if (!cycle || cycle.acceptedSemanticResult || cycle.transportAttempts < 1)
+  if (!cycle || cycle.acceptedSemanticResult)
     throw new Error('document review cycle is not ready for dispatch')
   const authority = reviewAuthority(input.run)
   const artifacts = await readDocumentReviewArtifacts(
@@ -509,6 +542,12 @@ export async function buildDocumentReviewDispatch(input: {
     )
   )
     throw new Error('document closure diff changed after the cycle was frozen')
+  const currentCheckId = cycle.requiredCheckIds.find(
+    id => !cycle.completedCheckIds.includes(id),
+  )
+  if (!currentCheckId)
+    throw new Error('document review cycle has no incomplete check')
+  const checkArtifacts = artifactsForReviewCheck(artifacts, currentCheckId)
   return {
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -524,15 +563,14 @@ export async function buildDocumentReviewDispatch(input: {
       cycleId: cycle.cycleId,
       reviewAuthority: authority,
       requiredCheckIds: cycle.requiredCheckIds,
-      referenceIndex: buildDocumentReviewReferenceIndex(artifacts),
-      reviewArtifacts: artifacts.filter(
+      currentCheckId,
+      referenceIndex: buildDocumentReviewReferenceIndex(checkArtifacts),
+      reviewArtifacts: checkArtifacts.filter(
         artifact => artifact.path !== 'reviewAuthority',
       ),
-      ...(cycle.transportCorrection
-        ? { transportCorrection: cycle.transportCorrection }
-        : {}),
       ...(cycle.mode === 'closure'
         ? {
+            activeTarget: cycle.activeTarget,
             priorFindings: findingsForTarget(cycle, cycle.activeTarget!),
             changedPaths: cycle.changedPaths,
             changes: changes.map(change => ({
@@ -575,15 +613,16 @@ async function beginDocumentReviewClosure(input: {
       ? CANONICAL_FOUNDATION_DOCUMENTS
       : target === 'checklist'
         ? [CHECKLIST_PATH]
-        : [...new Set([
-            ...artifacts.map(artifact => artifact.path),
-            ...Object.keys(previous.sourceArtifactDigests),
-          ])]
-            .filter(
-              path =>
-                path === CANONICAL_ASSET_MANIFEST ||
-                path.startsWith('assets/content/'),
-            ),
+        : [
+            ...new Set([
+              ...artifacts.map(artifact => artifact.path),
+              ...Object.keys(previous.sourceArtifactDigests),
+            ]),
+          ].filter(
+            path =>
+              path === CANONICAL_ASSET_MANIFEST ||
+              path.startsWith('assets/content/'),
+          ),
   )
   if (!changedPaths.length)
     throw new Error(
@@ -609,12 +648,12 @@ async function beginDocumentReviewClosure(input: {
         mode: 'closure',
         sourceRevision: input.currentRevision,
         requiredCheckIds: [...CLOSURE_CHECKS[target]],
+        completedCheckIds: [],
         checks: previous.checks,
         checkEvidenceDigests: previous.checkEvidenceDigests,
         findings: previous.findings,
         activeTarget: target,
         acceptedSemanticResult: false,
-        transportAttempts: 0,
         changedPaths,
         sourceArtifactDigests,
       },
@@ -651,50 +690,45 @@ export async function startDocumentStage(input: {
     cycle?.acceptedSemanticResult && cycle.activeTarget === 'foundation'
       ? findingsForTarget(cycle, 'foundation')
       : []
-  const allowedPaths = remediationFindings.length
-    ? [
-        ...new Set(
-          remediationFindings.flatMap(finding =>
-            finding.subjects.map(subject => subject.path).filter(path =>
-              CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-            ),
-          ),
-        ),
-      ]
-    : [...CANONICAL_FOUNDATION_DOCUMENTS]
-  const previousDocumentMetadata = remediationFindings.length
-    ? Object.fromEntries(
-        allowedPaths.flatMap(path => {
-          const metadata = readDocumentMetadata(input.workspacePath, path)
-          return metadata ? [[path, metadata]] : []
-        }),
+  const repairPlan = remediationFindings.length ? cycle?.repairPlan : undefined
+  const repairPaths = repairPlan
+    ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+        repairPlan.groups.some(group => group.affectedPaths.includes(path)),
       )
-    : undefined
-  const interruptedRepairChangedPaths = remediationFindings.length
-    ? artifactDigestChanges(
-        Object.fromEntries(
-          Object.entries(cycle!.sourceArtifactDigests).filter(([path]) =>
-            allowedPaths.includes(path),
-          ),
-        ),
-        (
-          await readDocumentReviewArtifacts(
-            input.workspacePath,
-            'foundation',
-            reviewAuthority(input.run),
-          )
-        ).filter(artifact => allowedPaths.includes(artifact.path)),
-      ).map(change => change.path)
     : []
-  const existingDocumentPaths = remediationFindings.length
-    ? []
-    : allowedPaths.filter(path => {
-        const absolutePath = join(input.workspacePath, path)
-        return (
-          existsSync(absolutePath) &&
-          Boolean(readFileSync(absolutePath, 'utf8').trim())
-        )
-      })
+  const repairPath = repairPlan
+    ? repairPaths.find(path => !repairPlan.completedPaths.includes(path))
+    : undefined
+  const initialPath = remediationFindings.length
+    ? undefined
+    : CANONICAL_FOUNDATION_DOCUMENTS[
+        input.run.foundationDraftState.completedPaths.length
+      ]
+  if (!remediationFindings.length && !initialPath)
+    throw new Error(
+      'foundation drafting has no remaining canonical document task',
+    )
+  const allowedPaths = remediationFindings.length
+    ? repairPath
+      ? [repairPath]
+      : []
+    : [initialPath!]
+  const previousDocumentMetadata = remediationFindings.length
+    ? repairPath
+      ? (() => {
+          const metadata = readDocumentMetadata(input.workspacePath, repairPath)
+          return metadata ? { [repairPath]: metadata } : undefined
+        })()
+      : undefined
+    : input.run.changeRequest && initialPath
+      ? (() => {
+          const metadata = readDocumentMetadata(
+            input.workspacePath,
+            initialPath,
+          )
+          return metadata ? { [initialPath]: metadata } : undefined
+        })()
+      : undefined
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -702,17 +736,46 @@ export async function startDocumentStage(input: {
     workspacePath: input.workspacePath,
     workerType: 'document-author',
     phase: 'DOCUMENT_DRAFTING',
+    taskId: remediationFindings.length
+      ? (repairPath ?? `${cycle!.cycleId}:repair-plan`)
+      : initialPath,
     revision: input.run.revision.document,
     allowedPaths,
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
+      ...(input.run.changeRequest
+        ? { changeRequest: input.run.changeRequest }
+        : {}),
       documentSet: 'foundation',
       systemDeliveryContract: buildSystemDeliveryContract(),
-      ...(existingDocumentPaths.length ? { existingDocumentPaths } : {}),
-      ...(interruptedRepairChangedPaths.length
-        ? { interruptedRepairChangedPaths }
-        : {}),
-      ...(remediationFindings.length
+      ...(initialPath
+        ? {
+            authoringMode: 'initial',
+            foundationDocumentPath: initialPath,
+            upstreamDocumentPaths: [
+              ...INITIAL_FOUNDATION_UPSTREAM_PATHS[initialPath],
+            ],
+          }
+        : repairPath
+          ? {
+              authoringMode: 'remediation',
+              foundationDocumentPath: repairPath,
+              repairTask: {
+                cycleId: cycle!.cycleId,
+                groups: repairPlan!.groups.filter(group =>
+                  group.affectedPaths.includes(repairPath),
+                ),
+                findings: remediationFindings.filter(finding =>
+                  repairPlan!.groups.some(
+                    group =>
+                      group.affectedPaths.includes(repairPath) &&
+                      group.findingIds.includes(finding.findingId),
+                  ),
+                ),
+              },
+            }
+          : { authoringMode: 'repair-planning' }),
+      ...(remediationFindings.length && !repairPath
         ? {
             remediation: {
               cycleId: cycle!.cycleId,
@@ -798,6 +861,24 @@ export async function completeDocumentDraft(input: {
     !(documentSet === 'checklist' && input.run.phase === 'DOCUMENT_REVIEW')
   )
     throw new Error('document draft is not the active phase')
+  const cycle = input.run.documentReviewState.activeCycle
+  const target: RemediationTarget =
+    documentSet === 'checklist' ? 'checklist' : 'foundation'
+  const remediationFindings =
+    cycle?.acceptedSemanticResult && cycle.activeTarget === target
+      ? findingsForTarget(cycle, target)
+      : []
+  if (documentSet === 'foundation' && remediationFindings.length === 0)
+    return completeInitialFoundationDocumentDraft(input)
+  if (
+    documentSet === 'foundation' &&
+    input.run.activeDispatch?.request?.contract.authoringMode ===
+      'repair-planning'
+  )
+    return completeFoundationRepairPlanning(input, cycle, remediationFindings)
+  if (documentSet === 'foundation' && cycle?.repairPlan)
+    return completeFoundationRepairOwner(input, cycle, remediationFindings)
+
   const readiness = input.audit
     ? input.audit(input.workspacePath, {
         includeChecklist: documentSet === 'checklist',
@@ -832,13 +913,6 @@ export async function completeDocumentDraft(input: {
       !allowedPaths.has(normalized as never)
     )
   })
-  const cycle = input.run.documentReviewState.activeCycle
-  const target: RemediationTarget =
-    documentSet === 'checklist' ? 'checklist' : 'foundation'
-  const remediationFindings =
-    cycle?.acceptedSemanticResult && cycle.activeTarget === target
-      ? findingsForTarget(cycle, target)
-      : []
   const expectedFindingIds = remediationFindings.map(
     finding => finding.findingId,
   )
@@ -937,12 +1011,361 @@ export async function completeDocumentDraft(input: {
     })
   }
 
+  return documentSet === 'checklist'
+    ? transitionDeliveryRun(
+        { ...updated, checklistRemediation: undefined },
+        { type: 'resource_preparation_required' },
+      )
+    : {
+        ...updated,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+      }
+}
+
+function foundationRepairPlanIssues(input: {
+  plan: NonNullable<
+    Extract<
+      WorkerTerminalResult,
+      { workerType: 'document-author' }
+    >['repairPlan']
+  >
+  findings: DocumentReviewFinding[]
+}): string[] {
+  const { groups } = input.plan
+  const expectedFindingIds = input.findings.map(finding => finding.findingId)
+  const assignedFindingIds = groups.flatMap(group => group.findingIds)
+  const expectedPaths = [
+    ...new Set(
+      input.findings.flatMap(finding =>
+        finding.subjects
+          .map(subject => subject.path)
+          .filter(path =>
+            CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+          ),
+      ),
+    ),
+  ]
+  const affectedPaths = [
+    ...new Set(groups.flatMap(group => group.affectedPaths)),
+  ]
+  const groupIds = groups.map(group => group.groupId)
+  const knownGroups = new Set(groupIds)
+  const issues: string[] = []
+  if (
+    assignedFindingIds.length !== expectedFindingIds.length ||
+    new Set(assignedFindingIds).size !== assignedFindingIds.length ||
+    !exactStringSet(assignedFindingIds, expectedFindingIds)
+  )
+    issues.push(
+      'repair plan must partition every active foundation finding exactly once',
+    )
+  if (new Set(groupIds).size !== groupIds.length)
+    issues.push('repair plan group IDs must be unique')
+  if (!exactStringSet(affectedPaths, expectedPaths))
+    issues.push(
+      'repair plan affected paths must exactly cover the accepted finding subjects',
+    )
+  for (const group of groups) {
+    if (
+      new Set(group.findingIds).size !== group.findingIds.length ||
+      new Set(group.affectedPaths).size !== group.affectedPaths.length ||
+      new Set(group.dependsOn).size !== group.dependsOn.length
+    )
+      issues.push(`repair group ${group.groupId} contains duplicate entries`)
+    if (
+      group.dependsOn.some(
+        dependency =>
+          dependency === group.groupId || !knownGroups.has(dependency),
+      )
+    )
+      issues.push(`repair group ${group.groupId} has an invalid dependency`)
+    const ownedPaths = new Set(
+      input.findings
+        .filter(finding => group.findingIds.includes(finding.findingId))
+        .flatMap(finding => finding.subjects.map(subject => subject.path)),
+    )
+    if (group.affectedPaths.some(path => !ownedPaths.has(path)))
+      issues.push(
+        `repair group ${group.groupId} expands beyond its finding subjects`,
+      )
+    for (const dependencyId of group.dependsOn) {
+      const dependency = groups.find(
+        candidate => candidate.groupId === dependencyId,
+      )
+      if (!dependency) continue
+      const dependencyLastOwner = Math.max(
+        ...dependency.affectedPaths.map(path =>
+          CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path),
+        ),
+      )
+      const groupFirstOwner = Math.min(
+        ...group.affectedPaths.map(path =>
+          CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path),
+        ),
+      )
+      if (dependencyLastOwner > groupFirstOwner)
+        issues.push(
+          `repair group ${group.groupId} dependency order conflicts with canonical document ownership`,
+        )
+    }
+  }
+  const dependencies = new Map(
+    groups.map(group => [group.groupId, group.dependsOn]),
+  )
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (groupId: string): void => {
+    if (visited.has(groupId)) return
+    if (visiting.has(groupId)) {
+      issues.push('repair plan dependencies must be acyclic')
+      return
+    }
+    visiting.add(groupId)
+    for (const dependency of dependencies.get(groupId) ?? []) visit(dependency)
+    visiting.delete(groupId)
+    visited.add(groupId)
+  }
+  for (const groupId of groupIds) visit(groupId)
+  return [...new Set(issues)]
+}
+
+function completeFoundationRepairPlanning(
+  input: {
+    run: DeliveryRun
+    workspacePath: string
+    terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
+  },
+  cycle: DocumentReviewCycle | undefined,
+  findings: DocumentReviewFinding[],
+): DeliveryRun {
+  if (!cycle || findings.length === 0)
+    throw new Error('foundation repair planning has no accepted finding batch')
+  const plan = input.terminal.repairPlan
+  const issues = [
+    ...(!plan ? ['document repair planner did not submit a repair plan'] : []),
+    ...(input.terminal.writtenPaths.length
+      ? ['document repair planner cannot write project files']
+      : []),
+    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
+      ? ['document repair planner cannot resolve findings']
+      : []),
+    ...(plan ? foundationRepairPlanIssues({ plan, findings }) : []),
+  ]
   return {
-    ...updated,
-    phase:
-      documentSet === 'checklist' ? 'RESOURCE_PREPARATION' : 'DOCUMENT_REVIEW',
-    documentStep: documentSet === 'checklist' ? undefined : 'FOUNDATION_REVIEW',
-    ...(documentSet === 'checklist' ? { checklistRemediation: undefined } : {}),
+    ...input.run,
+    activeDispatch: undefined,
+    currentItemId: undefined,
+    blockedReason: issues.length ? issues.join('; ') : undefined,
+    documentReviewState: {
+      ...input.run.documentReviewState,
+      activeCycle:
+        issues.length || !plan
+          ? cycle
+          : {
+              ...cycle,
+              repairPlan: { groups: plan.groups, completedPaths: [] },
+            },
+    },
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+async function completeFoundationRepairOwner(
+  input: {
+    run: DeliveryRun
+    workspacePath: string
+    terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
+    audit?: ReadinessAudit
+  },
+  cycle: DocumentReviewCycle,
+  findings: DocumentReviewFinding[],
+): Promise<DeliveryRun> {
+  const plan = cycle.repairPlan!
+  const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+    plan.groups.some(group => group.affectedPaths.includes(path)),
+  )
+  const expectedPath = repairPaths.find(
+    path => !plan.completedPaths.includes(path),
+  )
+  if (!expectedPath)
+    throw new Error('foundation repair cursor is already complete')
+  const requestPath =
+    input.run.activeDispatch?.request?.contract.foundationDocumentPath
+  const writtenPaths = input.terminal.writtenPaths.map(path =>
+    path.replaceAll('\\', '/'),
+  )
+  const issues = [
+    ...(requestPath !== expectedPath
+      ? ['document repair dispatch does not match the durable owner cursor']
+      : []),
+    ...(!exactStringSet(writtenPaths, [expectedPath])
+      ? [`document repair owner must write exactly ${expectedPath}`]
+      : []),
+    ...(input.terminal.repairPlan
+      ? ['document repair owner cannot replace the accepted repair plan']
+      : []),
+    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
+      ? ['document repair owner cannot declare finding closure']
+      : []),
+    ...documentMetadataIssues({
+      workspacePath: input.workspacePath,
+      writtenPaths,
+      previous:
+        input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
+    }),
+  ]
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const base: DeliveryRun = {
+    ...input.run,
+    activeDispatch: undefined,
+    revision: {
+      ...input.run.revision,
+      document: documentRevision,
+      workspace: workspaceRevision,
+    },
+    blockedReason: issues.length ? issues.join('; ') : undefined,
+    updatedAt: new Date().toISOString(),
+  }
+  if (issues.length) return base
+  const completedPaths = [...plan.completedPaths, expectedPath]
+  const updated: DeliveryRun = {
+    ...base,
+    currentItemId: expectedPath,
+    documentReviewState: {
+      ...base.documentReviewState,
+      activeCycle: {
+        ...cycle,
+        repairPlan: { ...plan, completedPaths },
+      },
+    },
+  }
+  if (completedPaths.length < repairPaths.length) return updated
+  const readiness = input.audit
+    ? input.audit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      })
+    : await defaultAudit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      })
+  if (!readiness.valid)
+    return { ...updated, blockedReason: readiness.issues.join('; ') }
+  if (
+    !exactStringSet(
+      findings.map(finding => finding.findingId),
+      plan.groups.flatMap(group => group.findingIds),
+    )
+  )
+    return {
+      ...updated,
+      blockedReason:
+        'completed repair plan no longer covers the active finding ledger',
+    }
+  return beginDocumentReviewClosure({
+    run: updated,
+    workspacePath: input.workspacePath,
+    currentRevision: documentRevision,
+  })
+}
+
+async function completeInitialFoundationDocumentDraft(input: {
+  run: DeliveryRun
+  workspacePath: string
+  terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
+  audit?: ReadinessAudit
+}): Promise<DeliveryRun> {
+  const completedPaths = input.run.foundationDraftState.completedPaths
+  const expectedPath = CANONICAL_FOUNDATION_DOCUMENTS[completedPaths.length]
+  if (!expectedPath)
+    throw new Error('foundation initial-authoring cursor is already complete')
+
+  const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
+    path.split('\\').join('/'),
+  )
+  const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
+  const version = metadata ? parseSemanticVersion(metadata.version) : undefined
+  const issues = [
+    ...(!exactStringSet(normalizedWrittenPaths, [expectedPath])
+      ? [
+          `initial document author must write exactly the active canonical document: ${expectedPath}`,
+        ]
+      : []),
+    ...(normalizedWrittenPaths.some(
+      path => isAbsolute(path) || path.split('/').includes('..'),
+    )
+      ? ['initial document author returned an unsafe document path']
+      : []),
+    ...(!metadata ||
+    !version ||
+    !Number.isFinite(Date.parse(metadata.updatedAt))
+      ? [`${expectedPath}: canonical front matter is incomplete or invalid`]
+      : []),
+    ...documentMetadataIssues({
+      workspacePath: input.workspacePath,
+      writtenPaths: normalizedWrittenPaths,
+      previous:
+        input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
+    }),
+    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
+      ? ['initial document author cannot resolve review findings']
+      : []),
+  ]
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const base: DeliveryRun = {
+    ...input.run,
+    revision: {
+      ...input.run.revision,
+      document: documentRevision,
+      workspace: workspaceRevision,
+    },
+    activeDispatch: undefined,
+    currentItemId: expectedPath,
+    blockedReason: issues.length ? issues.join('; ') : undefined,
+    updatedAt: new Date().toISOString(),
+  }
+  if (issues.length) return base
+
+  const nextCompletedPaths = [...completedPaths, expectedPath]
+  if (nextCompletedPaths.length < CANONICAL_FOUNDATION_DOCUMENTS.length)
+    return {
+      ...base,
+      foundationDraftState: { completedPaths: nextCompletedPaths },
+      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[nextCompletedPaths.length],
+      blockedReason: undefined,
+    }
+
+  const readiness = input.audit
+    ? input.audit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      })
+    : await defaultAudit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+      })
+  if (!readiness.valid)
+    return {
+      ...base,
+      foundationDraftState: { completedPaths: nextCompletedPaths },
+      blockedReason: readiness.issues.join('; '),
+    }
+  return {
+    ...base,
+    foundationDraftState: { completedPaths: nextCompletedPaths },
+    phase: 'DOCUMENT_REVIEW',
+    documentStep: 'FOUNDATION_REVIEW',
+    currentItemId: undefined,
+    blockedReason: undefined,
   }
 }
 
@@ -1024,34 +1447,40 @@ export async function reconcileDocumentReview(input: {
     scope,
     reviewAuthority(input.run),
   )
-  const contractIssues = [
-    ...validateDocumentReviewChecks({
+  const contractIssues = validateDocumentReviewSubmission({
+    contract: {
       scope,
-      checks: input.terminal.checks,
+      mode: cycle.mode,
+      requiredCheckIds: cycle.requiredCheckIds,
+      currentCheckId: input.terminal.checks[0]!.id,
       artifacts,
-    }).filter(issue =>
-      cycle.requiredCheckIds.length ===
-      requiredDocumentReviewCheckIds(scope).length
-        ? true
-        : issue !== 'document review does not cover the required check set',
-    ),
-    ...(!exactStringSet(
-      input.terminal.checks.map(check => check.id),
-      cycle.requiredCheckIds,
-    )
-      ? ['document review does not cover the cycle required check set']
-      : []),
-    ...validateDocumentReviewFindingSubjects({
-      findings: input.terminal.findings.map((finding, index) => ({
-        ...finding,
-        id: `submitted-${index}`,
-      })),
-      artifacts,
-    }),
-    ...closureContractIssues({ cycle, findings: input.terminal.findings }),
-  ]
+      ...(cycle.activeTarget ? { activeTarget: cycle.activeTarget } : {}),
+      ...(cycle.mode === 'closure'
+        ? {
+            priorFindings: findingsForTarget(
+              cycle,
+              cycle.activeTarget ?? 'foundation',
+            ),
+            changedPaths: cycle.changedPaths,
+          }
+        : {}),
+    },
+    checks: input.terminal.checks,
+    findings: input.terminal.findings,
+  })
   if (contractIssues.length)
     throw new Error([...new Set(contractIssues)].join('; '))
+
+  const submittedCheck = input.terminal.checks[0]
+  if (!submittedCheck || input.terminal.checks.length !== 1)
+    throw new Error('document reviewer must submit exactly one active check')
+  if (cycle.completedCheckIds.includes(submittedCheck.id))
+    throw new Error('document reviewer cannot replace an accepted check')
+  const existingFindingIds = new Set(
+    cycle.findings.map(finding => finding.findingId),
+  )
+  if (input.terminal.findings.some(finding => existingFindingIds.has(finding.findingId)))
+    throw new Error('document reviewer finding ID is already accepted')
 
   await mkdir(dirname(acceptedEvidencePath), { recursive: true })
   await writeFile(
@@ -1060,12 +1489,25 @@ export async function reconcileDocumentReview(input: {
     'utf8',
   )
 
-  const findings = normalizedReviewFindings(cycle, input.terminal.findings)
+  const submittedFindings = normalizedReviewFindings(
+    cycle,
+    input.terminal.findings,
+  )
+  const findings =
+    cycle.mode === 'closure'
+      ? [
+          ...cycle.findings.filter(
+            finding => finding.checkId !== submittedCheck.id,
+          ),
+          ...submittedFindings,
+        ]
+      : [...cycle.findings, ...submittedFindings]
   const submittedDigests = checkEvidenceDigests({
     checks: input.terminal.checks,
     artifacts,
   })
   const mergedChecks = mergeChecks(cycle.checks, input.terminal.checks)
+  const completedCheckIds = [...cycle.completedCheckIds, submittedCheck.id]
   const mergedDigests = mergeCheckDigests(
     cycle.checkEvidenceDigests,
     submittedDigests,
@@ -1073,10 +1515,11 @@ export async function reconcileDocumentReview(input: {
   const acceptedCycle: DocumentReviewCycle = {
     ...cycle,
     checks: mergedChecks,
+    completedCheckIds,
     checkEvidenceDigests: mergedDigests,
     findings,
-    acceptedSemanticResult: true,
-    transportCorrection: undefined,
+    acceptedSemanticResult:
+      completedCheckIds.length === cycle.requiredCheckIds.length,
     evidencePath: input.terminal.evidencePath,
   }
   const base: DeliveryRun = {
@@ -1088,16 +1531,25 @@ export async function reconcileDocumentReview(input: {
     },
     updatedAt: new Date().toISOString(),
   }
-  if (input.terminal.verdict === 'BLOCKED')
+  if (!acceptedCycle.acceptedSemanticResult)
     return {
       ...base,
-      status: 'needs_action',
-      blockedReason:
-        'document reviewer could not complete the frozen check contract',
+      status: 'running',
+      blockedReason: undefined,
+      currentItemId: cycle.requiredCheckIds.find(
+        id => !completedCheckIds.includes(id),
+      ),
     }
 
+  const verdict = mergedChecks.some(
+    check =>
+      cycle.requiredCheckIds.includes(check.id) && check.status === 'block',
+  )
+    ? 'NEEDS_REVISION'
+    : 'READY'
+
   if (cycle.mode === 'initial') {
-    if (input.terminal.verdict === 'NEEDS_REVISION') {
+    if (verdict === 'NEEDS_REVISION') {
       const target = nextTarget(findings)
       return routeToRemediation(
         {
@@ -1113,8 +1565,8 @@ export async function reconcileDocumentReview(input: {
     const approval = {
       scope,
       revision: cycle.sourceRevision,
-      checks: input.terminal.checks,
-      checkEvidenceDigests: submittedDigests,
+      checks: mergedChecks,
+      checkEvidenceDigests: mergedDigests,
       evidencePath: input.terminal.evidencePath,
       approvedAt: new Date().toISOString(),
     }
@@ -1148,7 +1600,7 @@ export async function reconcileDocumentReview(input: {
   const untouchedFindings = cycle.findings.filter(
     finding => finding.owner !== target,
   )
-  if (input.terminal.verdict === 'NEEDS_REVISION') {
+  if (verdict === 'NEEDS_REVISION') {
     const sourceArtifactDigests = await currentReviewArtifactDigests({
       workspacePath: input.workspacePath,
       run: base,
@@ -1179,8 +1631,8 @@ export async function reconcileDocumentReview(input: {
     const approval = {
       scope: 'foundation' as const,
       revision: cycle.sourceRevision,
-      checks: input.terminal.checks,
-      checkEvidenceDigests: submittedDigests,
+      checks: mergedChecks,
+      checkEvidenceDigests: mergedDigests,
       evidencePath: input.terminal.evidencePath,
       approvedAt: new Date().toISOString(),
     }
@@ -1224,7 +1676,6 @@ export async function reconcileDocumentReview(input: {
             parentCycleId: cycle.cycleId,
             scope: cycle.originScope,
             sourceRevision: cycle.sourceRevision,
-            requiredCheckIds: [...CLOSURE_CHECKS[queuedTarget]],
             findings: untouchedFindings,
             activeTarget: queuedTarget,
             sourceArtifactDigests,

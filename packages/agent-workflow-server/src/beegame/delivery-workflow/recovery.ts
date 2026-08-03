@@ -4,7 +4,7 @@ import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import type { DeliveryRun, DispatchRecord } from './types'
 import type { RunStore } from './run-store'
 
-function withResourceRemediation(run: DeliveryRun): DeliveryRun {
+function withResourcePreparationAttempt(run: DeliveryRun): DeliveryRun {
   if (
     run.phase !== 'RESOURCE_PREPARATION' ||
     !run.blockedReason ||
@@ -13,16 +13,18 @@ function withResourceRemediation(run: DeliveryRun): DeliveryRun {
       run.status !== 'blocked')
   )
     return run
-  const sourceRevision =
-    run.evidence.resourcePreparation?.revision ?? run.revision.document
-  if (run.resourceRemediation?.sourceRevision === sourceRevision) return run
+  const activeCycle = run.documentReviewState.activeCycle
+  if (
+    activeCycle?.acceptedSemanticResult &&
+    activeCycle.activeTarget === 'resource'
+  )
+    return run
   return {
     ...run,
-    resourceRemediation: {
-      sourceRevision,
-      attempt: 1,
-      issues: [run.blockedReason],
-    },
+    resourcePreparationAttempt: Math.max(
+      1,
+      run.resourcePreparationAttempt ?? 0,
+    ),
   }
 }
 
@@ -34,46 +36,6 @@ function reviewRetryIsLocked(run: DeliveryRun): boolean {
       cycle &&
       cycle.acceptedSemanticResult,
   )
-}
-
-function resetExhaustedDocumentReviewTransport(run: DeliveryRun): DeliveryRun {
-  const cycle = run.documentReviewState.activeCycle
-  if (
-    run.phase !== 'DOCUMENT_REVIEW' ||
-    run.documentStep === 'CHECKLIST_DRAFTING' ||
-    !cycle ||
-    cycle.acceptedSemanticResult ||
-    cycle.transportAttempts < 2
-  )
-    return run
-  return {
-    ...run,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeCycle: undefined,
-    },
-  }
-}
-
-function retainDocumentReviewTransportCorrection(
-  run: DeliveryRun,
-): DeliveryRun {
-  const cycle = run.documentReviewState.activeCycle
-  const reason = run.blockedReason?.trim()
-  if (
-    run.phase !== 'DOCUMENT_REVIEW' ||
-    !cycle ||
-    cycle.acceptedSemanticResult ||
-    !reason
-  )
-    return run
-  return {
-    ...run,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeCycle: { ...cycle, transportCorrection: reason },
-    },
-  }
 }
 
 async function unlockReviewForChangedRevision(input: {
@@ -170,11 +132,7 @@ export async function resumeRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    if (
-      reviewRetryIsLocked(acquired.run) &&
-      !restoredHandoff &&
-      !changedReview
-    )
+    if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
       return acquired.run
     const resumed =
       restoredHandoff ??
@@ -182,11 +140,7 @@ export async function resumeRun(input: {
       (retryable
         ? transitionDeliveryRun(
             {
-              ...resetExhaustedDocumentReviewTransport(
-                retainDocumentReviewTransportCorrection(
-                  withResourceRemediation(acquired.run),
-                ),
-              ),
+              ...withResourcePreparationAttempt(acquired.run),
               activeDispatch: acquired.run.activeDispatch?.terminalResult
                 ? acquired.run.activeDispatch
                 : undefined,
@@ -234,11 +188,7 @@ export async function retryRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    if (
-      reviewRetryIsLocked(acquired.run) &&
-      !restoredHandoff &&
-      !changedReview
-    )
+    if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
       return acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
@@ -247,11 +197,7 @@ export async function retryRun(input: {
       changedReview ??
       transitionDeliveryRun(
         {
-          ...resetExhaustedDocumentReviewTransport(
-            retainDocumentReviewTransportCorrection(
-              withResourceRemediation(acquired.run),
-            ),
-          ),
+          ...withResourcePreparationAttempt(acquired.run),
           activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },

@@ -2,8 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildDocumentReviewReferenceIndex,
   checkEvidenceDigests,
-  validateDocumentReviewChecks,
-  validateDocumentReviewFindingSubjects,
+  validateDocumentReviewSubmission,
 } from './document-review-input'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import {
@@ -13,24 +12,46 @@ import {
 
 describe('document review exact reference index', () => {
   test('projects only exact frozen headings, semantic IDs and legal owner paths', () => {
-    expect(buildDocumentReviewReferenceIndex([
-      { path: 'docs/GDD.md', content: '# Game\n## 4.2 Overflow & Armor\n' },
-      { path: 'docs/acceptance/gameplay-checklist.md', content: '# Acceptance\n' },
-      { path: 'assets/asset-manifest.json', content: JSON.stringify({ requirements: [{ id: 'RES-UI-TYPEFACE' }], resources: [{ id: 'res.ui.iconography' }] }) },
-      { path: 'assets/content/world.yaml', content: 'id: content.world\nkind: world-definition\n' },
-    ])).toEqual({
-      markdownHeadings: {
-        'docs/GDD.md': ['# Game', '## 4.2 Overflow & Armor'],
-        'docs/acceptance/gameplay-checklist.md': ['# Acceptance'],
-      },
+    expect(
+      buildDocumentReviewReferenceIndex([
+        { path: 'docs/GDD.md', content: '# Game\n## 4.2 Overflow & Armor\n' },
+        {
+          path: 'docs/acceptance/gameplay-checklist.md',
+          content: '# Acceptance\n',
+        },
+        {
+          path: 'assets/asset-manifest.json',
+          content: JSON.stringify({
+            requirements: [{ id: 'RES-UI-TYPEFACE' }],
+            resources: [{ id: 'res.ui.iconography' }],
+          }),
+        },
+        {
+          path: 'assets/content/world.yaml',
+          content: 'id: content.world\nkind: world-definition\n',
+        },
+      ]),
+    ).toMatchObject({
+      references: expect.arrayContaining([
+        expect.objectContaining({
+          path: 'docs/GDD.md',
+          anchor: '# Game',
+          subjectOwner: 'foundation',
+        }),
+        expect.objectContaining({
+          path: 'docs/GDD.md',
+          anchor: '## 4.2 Overflow & Armor',
+          subjectOwner: 'foundation',
+        }),
+        expect.objectContaining({
+          path: 'docs/acceptance/gameplay-checklist.md',
+          anchor: '# Acceptance',
+          subjectOwner: 'checklist',
+        }),
+      ]),
       requirementIds: ['RES-UI-TYPEFACE'],
       resourceIds: ['res.ui.iconography'],
       contentIdsByPath: { 'assets/content/world.yaml': 'content.world' },
-      subjectPathsByOwner: {
-        foundation: expect.arrayContaining(['docs/GDD.md']),
-        checklist: ['docs/acceptance/gameplay-checklist.md'],
-        resource: ['assets/asset-manifest.json', 'assets/content/world.yaml'],
-      },
     })
   })
 })
@@ -49,7 +70,14 @@ describe('system delivery contract projection', () => {
       },
       content: {
         schema: 'beegame-content-v1',
-        requiredFields: ['schema', 'id', 'kind', 'fulfills', 'resources', 'data'],
+        requiredFields: [
+          'schema',
+          'id',
+          'kind',
+          'fulfills',
+          'resources',
+          'data',
+        ],
         referenceSemantics: {
           fulfills: 'manifest-requirement-ids',
           resources: 'manifest-resource-ids',
@@ -85,26 +113,67 @@ describe('system delivery contract projection', () => {
 
 describe('document review resource-content subjects', () => {
   test('accepts current requirement, resource and content IDs', () => {
-    const issues = validateDocumentReviewFindingSubjects({
-      artifacts: [
-        { path: 'assets/asset-manifest.json', content: JSON.stringify({ requirements: [{ id: 'world.layout' }], resources: [{ id: 'world-art' }] }) },
-        { path: 'assets/content/world.json', content: JSON.stringify({ id: 'world' }) },
-      ],
-      findings: [{
+    const artifacts = [
+      {
+        path: 'assets/asset-manifest.json',
+        content: JSON.stringify({
+          requirements: [{ id: 'world.layout' }],
+          resources: [{ id: 'world-art' }],
+        }),
+      },
+      {
+        path: 'assets/content/world.json',
+        content: JSON.stringify({ id: 'world' }),
+      },
+    ]
+    const findings = [
+      {
         findingId: 'RESOURCE_CONTENT',
-        checkId: 'resource_content_consistency',
-        severity: 'blocking',
-        owner: 'resource',
+        checkId: 'resource_semantic_fitness' as const,
         subjects: [
-          { path: 'assets/asset-manifest.json', anchor: '/requirements/0', requirementId: 'world.layout' },
-          { path: 'assets/asset-manifest.json', anchor: '/resources/0', resourceId: 'world-art' },
-          { path: 'assets/content/world.json', anchor: '$', contentId: 'world' },
+          {
+            path: 'assets/asset-manifest.json',
+            anchor: '/requirements/0',
+            requirementId: 'world.layout',
+          },
+          {
+            path: 'assets/asset-manifest.json',
+            anchor: '/resources/0',
+            resourceId: 'world-art',
+          },
+          {
+            path: 'assets/content/world.json',
+            anchor: '$',
+            contentId: 'world',
+          },
         ],
         observation: 'Mismatch.',
         blockingReason: 'The resource contract is inconsistent.',
         requiredAction: 'Correct it.',
         closureCondition: 'All cited identities agree.',
-      }],
+      },
+    ]
+    const issues = validateDocumentReviewSubmission({
+      contract: {
+        scope: 'complete',
+        mode: 'initial',
+        requiredCheckIds: ['resource_semantic_fitness'],
+        currentCheckId: 'resource_semantic_fitness',
+        artifacts,
+      },
+      checks: [
+        {
+          id: 'resource_semantic_fitness',
+          status: 'block',
+          conclusion: 'The resource contract is inconsistent.',
+          evidence: [
+            { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
+          ],
+          findingIds: ['RESOURCE_CONTENT'],
+          assessments: [],
+        },
+      ],
+      findings,
     })
     expect(issues).toEqual([])
   })
@@ -112,21 +181,30 @@ describe('document review resource-content subjects', () => {
 
 describe('system delivery contract review evidence', () => {
   const artifacts = [
-    { path: 'systemDeliveryContract', content: JSON.stringify(buildSystemDeliveryContract()) },
+    {
+      path: 'systemDeliveryContract',
+      content: JSON.stringify(buildSystemDeliveryContract()),
+    },
     { path: 'docs/GDD.md', content: '# Gameplay\n' },
   ]
 
   test('rejects a delivery-boundary check that ignores system authority', () => {
-    const issues = validateDocumentReviewChecks({
-      scope: 'foundation',
-      artifacts,
-      checks: foundationChecks([{ path: 'docs/GDD.md', anchor: 'Gameplay' }]),
+    const checks = foundationChecks([
+      { path: 'docs/GDD.md', anchor: 'Gameplay' },
+    ]).filter(check => check.id === 'technical_feasibility')
+    const issues = validateDocumentReviewSubmission({
+      contract: {
+        scope: 'foundation',
+        mode: 'initial',
+        requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        currentCheckId: 'technical_feasibility',
+        artifacts,
+      },
+      checks,
+      findings: [],
     })
     expect(issues).toContain(
       'document review check technical_feasibility does not cite the system delivery contract',
-    )
-    expect(issues).toContain(
-      'document review check cross_document_consistency does not cite the system delivery contract',
     )
   })
 
@@ -134,36 +212,32 @@ describe('system delivery contract review evidence', () => {
     const projectEvidence = [{ path: 'docs/GDD.md', anchor: 'Gameplay' }]
     const systemEvidence = [
       ...projectEvidence,
-      { path: 'systemDeliveryContract', anchor: '/canonicalAssetManifest/path' },
+      {
+        path: 'systemDeliveryContract',
+        anchor: '/canonicalAssetManifest/path',
+      },
     ]
     expect(
-      validateDocumentReviewChecks({
-        scope: 'foundation',
-        artifacts,
-        checks: foundationChecks(projectEvidence).map(check =>
-          ['cross_document_consistency', 'technical_feasibility'].includes(check.id)
-            ? { ...check, evidence: systemEvidence }
-            : check,
-        ),
+      validateDocumentReviewSubmission({
+        contract: {
+          scope: 'foundation',
+          mode: 'initial',
+          requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+          currentCheckId: 'technical_feasibility',
+          artifacts,
+        },
+        checks: foundationChecks(projectEvidence)
+          .filter(check => check.id === 'technical_feasibility')
+          .map(check => ({ ...check, evidence: systemEvidence })),
+        findings: [],
       }),
     ).toEqual([])
   })
 
   test('validates criterion evidence independently and includes it in check invalidation', () => {
     const projectEvidence = [{ path: 'docs/GDD.md', anchor: 'Gameplay' }]
-    const checks = foundationChecks(projectEvidence).map(check =>
-      ['cross_document_consistency', 'technical_feasibility'].includes(check.id)
-        ? {
-            ...check,
-            evidence: [
-              ...projectEvidence,
-              {
-                path: 'systemDeliveryContract',
-                anchor: '/canonicalAssetManifest/path',
-              },
-            ],
-          }
-        : check,
+    const checks = foundationChecks(projectEvidence).filter(
+      check => check.id === 'gameplay_strategy_viability',
     )
     const strategy = checks.find(
       check => check.id === 'gameplay_strategy_viability',
@@ -171,10 +245,16 @@ describe('system delivery contract review evidence', () => {
     strategy.assessments![0]!.evidence = [
       { path: 'systemDeliveryContract', anchor: '/content/schema' },
     ]
-    const issues = validateDocumentReviewChecks({
-      scope: 'foundation',
-      artifacts,
+    const issues = validateDocumentReviewSubmission({
+      contract: {
+        scope: 'foundation',
+        mode: 'initial',
+        requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        currentCheckId: 'gameplay_strategy_viability',
+        artifacts,
+      },
       checks,
+      findings: [],
     })
     expect(issues).toEqual([])
     expect(

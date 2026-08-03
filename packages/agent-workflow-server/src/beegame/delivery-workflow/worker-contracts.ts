@@ -2,28 +2,51 @@ import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
 import { documentReviewCheckSchema } from './document-review-check-schema'
 import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+  type DocumentReviewCriterionId,
+  type GameDesignDocumentReviewCheckId,
 } from './types'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
 const documentReviewFindingShape = {
-    findingId: z.string().trim().min(1),
-    checkId: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
-    severity: z.literal('blocking'),
-    owner: z.enum(['foundation', 'checklist', 'resource']),
-    subjects: z.array(z.object({
-      path: z.string().min(1),
-      anchor: z.string().trim().min(1),
-      requirementId: z.string().min(1).optional(),
-      resourceId: z.string().min(1).optional(),
-      contentId: z.string().min(1).optional(),
-    }).strict()).min(1),
-    observation: z.string().trim().min(1),
-    blockingReason: z.string().trim().min(1),
-    requiredAction: z.string().min(1),
-    closureCondition: z.string().trim().min(1),
-  } as const
+  findingId: z.string().trim().min(1),
+  checkId: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
+  severity: z.literal('blocking'),
+  owner: z.enum(['foundation', 'checklist', 'resource']),
+  subjects: z
+    .array(
+      z
+        .object({
+          path: z
+            .string()
+            .min(1)
+            .describe(
+              'Canonical artifact path that the finding requiredAction requires to change; contextual or already-correct evidence is not a subject.',
+            ),
+          anchor: z.string().trim().min(1),
+          requirementId: z.string().min(1).optional(),
+          resourceId: z.string().min(1).optional(),
+          contentId: z.string().min(1).optional(),
+        })
+        .strict(),
+    )
+    .min(1)
+    .describe(
+      'Complete mutation scope for this finding. Every listed artifact must change, and every artifact required to change must be listed.',
+    ),
+  observation: z.string().trim().min(1),
+  blockingReason: z.string().trim().min(1),
+  requiredAction: z
+    .string()
+    .min(1)
+    .describe(
+      'Required correction whose complete canonical mutation paths are exactly the finding subjects.',
+    ),
+  closureCondition: z.string().trim().min(1),
+} as const
 
 function refineDocumentReviewFinding(
   finding: {
@@ -36,8 +59,8 @@ function refineDocumentReviewFinding(
   },
   context: z.RefinementCtx,
 ): void {
-  const semanticSubjectCount = finding.subjects.filter(subject =>
-    subject.requirementId || subject.resourceId || subject.contentId,
+  const semanticSubjectCount = finding.subjects.filter(
+    subject => subject.requirementId || subject.resourceId || subject.contentId,
   ).length
   if (finding.owner === 'resource' && semanticSubjectCount === 0)
     context.addIssue({
@@ -78,26 +101,128 @@ const documentReviewSubmissionFindingShape = {
   closureCondition: documentReviewFindingShape.closureCondition,
 }
 
-function documentReviewSubmissionFindingSchema(
+function documentReviewCheckSubmissionFindingSchema(
   mode: 'initial' | 'closure',
-  scope: 'foundation' | 'complete',
+  _scope: 'foundation' | 'complete',
 ) {
-  const subjects = scope === 'foundation'
-    ? z.array(z.object({
-        path: z.string().min(1),
-        anchor: z.string().trim().min(1),
-      }).strict()).min(1)
-    : documentReviewSubmissionFindingShape.subjects
-  return z.object({
-    ...documentReviewSubmissionFindingShape,
-    subjects,
-    ...(mode === 'closure'
-      ? { regressionPaths: z.array(z.string().min(1)).optional() }
-      : {}),
-  }).strict()
+  const subjects = z
+    .array(
+      z
+        .object({
+          referenceId: z.string().trim().min(1),
+          requirementId: z.string().min(1).optional(),
+          resourceId: z.string().min(1).optional(),
+          contentId: z.string().min(1).optional(),
+        })
+        .strict(),
+    )
+    .min(1)
+  return z
+    .object({
+      findingId: documentReviewSubmissionFindingShape.findingId,
+      checkId: documentReviewSubmissionFindingShape.checkId,
+      subjects,
+      observation: documentReviewSubmissionFindingShape.observation,
+      blockingReason: documentReviewSubmissionFindingShape.blockingReason,
+      requiredAction: documentReviewSubmissionFindingShape.requiredAction,
+      closureCondition: documentReviewSubmissionFindingShape.closureCondition,
+      ...(mode === 'closure'
+        ? { regressionPaths: z.array(z.string().min(1)).optional() }
+        : {}),
+    })
+    .strict()
 }
 
+const documentReviewReferenceSchema = z
+  .object({ referenceId: z.string().trim().min(1) })
+  .strict()
+
+const documentReviewCriterionIds = Object.values(
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+).flat() as DocumentReviewCriterionId[]
+
+const documentReviewCheckSubmissionSchema = z
+  .object({
+    id: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
+    status: z.enum(['pass', 'block']),
+    conclusion: z.string().trim().min(1),
+    evidence: z.array(documentReviewReferenceSchema).min(1),
+    findingIds: z.array(z.string().trim().min(1)),
+    assessments: z
+      .array(
+        z
+          .object({
+            criterion: z.enum(documentReviewCriterionIds),
+            status: z.enum(['pass', 'block']),
+            evidence: z.array(documentReviewReferenceSchema).min(1),
+            derivation: z.string().trim().min(1),
+            conclusion: z.string().trim().min(1),
+          })
+          .strict(),
+      )
+      .max(3),
+  })
+  .strict()
+  .superRefine((check, context) => {
+    const criteria = GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+      check.id as GameDesignDocumentReviewCheckId
+    ]
+    if (!criteria) {
+      if (check.assessments.length)
+        context.addIssue({
+          code: 'custom',
+          path: ['assessments'],
+          message: 'non-design review checks cannot submit assessments',
+        })
+      return
+    }
+    const submitted = check.assessments.map(item => item.criterion)
+    if (
+      submitted.length !== criteria.length ||
+      new Set(submitted).size !== criteria.length ||
+      criteria.some(id => !submitted.includes(id))
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['assessments'],
+        message: `design review check ${check.id} requires its exact criterion set`,
+      })
+    if (
+      (check.status === 'block') !==
+      check.assessments.some(item => item.status === 'block')
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['status'],
+        message: 'check status must match assessment statuses',
+      })
+  })
+
 export { documentReviewCheckSchema } from './document-review-check-schema'
+
+export const documentRepairPlanSubmissionSchema = z
+  .object({
+    groups: z
+      .array(
+        z
+          .object({
+            groupId: z.string().trim().min(1),
+            findingIds: z.array(z.string().trim().min(1)).min(1),
+            invariants: z.array(z.string().trim().min(1)).min(1),
+            decision: z.string().trim().min(1),
+            affectedPaths: z
+              .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
+              .min(1)
+              .describe(
+                'Accepted finding subject paths assigned to this group; the complete plan must neither omit nor add a subject path.',
+              ),
+            dependsOn: z.array(z.string().trim().min(1)),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict()
 
 export const documentAuthorTerminalSchema = z
   .object({
@@ -105,6 +230,7 @@ export const documentAuthorTerminalSchema = z
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
+    repairPlan: documentRepairPlanSubmissionSchema.optional(),
   })
   .strict()
 
@@ -114,25 +240,13 @@ export const documentAuthorSubmissionSchema = z
   })
   .strict()
 
-function requireConsistentDocumentReviewVerdict(
+function requireConsistentDocumentReviewCheck(
   value: {
-    verdict: 'READY' | 'NEEDS_REVISION' | 'BLOCKED'
-    checks: Array<{
-      id: string
-      status: 'pass' | 'block'
-      findingIds: string[]
-    }>
+    check: { id: string; status: 'pass' | 'block'; findingIds: string[] }
     findings: Array<{ findingId: string; checkId: string }>
   },
   context: z.RefinementCtx,
 ): void {
-  const checkIds = value.checks.map(check => check.id)
-  if (new Set(checkIds).size !== checkIds.length)
-    context.addIssue({
-      code: 'custom',
-      path: ['checks'],
-      message: 'document review check IDs must be unique',
-    })
   const findingIds = value.findings.map(finding => finding.findingId)
   if (new Set(findingIds).size !== findingIds.length)
     context.addIssue({
@@ -141,30 +255,14 @@ function requireConsistentDocumentReviewVerdict(
       message: 'document review finding codes must be unique',
     })
   const knownFindingIds = new Set(findingIds)
-  const referencedFindingIds = new Set<string>()
-  for (const [index, check] of value.checks.entries()) {
-    if (check.status === 'pass' && check.findingIds.length > 0)
-      context.addIssue({
-        code: 'custom',
-        path: ['checks', index, 'findingIds'],
-        message: 'passing checks cannot reference findings',
-      })
-    if (check.status === 'block' && check.findingIds.length === 0)
-      context.addIssue({
-        code: 'custom',
-        path: ['checks', index, 'findingIds'],
-        message: 'blocking checks require at least one finding code',
-      })
-    for (const findingId of check.findingIds) {
-      referencedFindingIds.add(findingId)
-      if (!knownFindingIds.has(findingId))
-        context.addIssue({
-          code: 'custom',
-          path: ['checks', index, 'findingIds'],
-          message: `unknown document review finding ID: ${findingId}`,
-        })
-    }
-  }
+  if (value.check.status === 'pass' && value.check.findingIds.length > 0)
+    context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: 'passing check cannot reference findings' })
+  if (value.check.status === 'block' && value.check.findingIds.length === 0)
+    context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: 'blocking check requires findings' })
+  const referencedFindingIds = new Set(value.check.findingIds)
+  for (const findingId of value.check.findingIds)
+    if (!knownFindingIds.has(findingId))
+      context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: `unknown document review finding ID: ${findingId}` })
   for (const [index, finding] of value.findings.entries())
     if (!referencedFindingIds.has(finding.findingId))
       context.addIssue({
@@ -173,64 +271,39 @@ function requireConsistentDocumentReviewVerdict(
         message: 'every finding must be referenced by a blocking check',
       })
   for (const [index, finding] of value.findings.entries()) {
-    const owningCheck = value.checks.find(check => check.id === finding.checkId)
-    if (!owningCheck?.findingIds.includes(finding.findingId))
+    if (
+      finding.checkId !== value.check.id ||
+      !value.check.findingIds.includes(finding.findingId)
+    )
       context.addIssue({
         code: 'custom',
         path: ['findings', index, 'checkId'],
         message: 'finding checkId must reference the finding ID',
       })
   }
-  const hasBlockingCheck = value.checks.some(check => check.status === 'block')
-  if (
-    value.verdict === 'READY' &&
-    (value.findings.length > 0 || hasBlockingCheck)
-  ) {
-    context.addIssue({
-      code: 'custom',
-      path: ['verdict'],
-      message: 'READY requires passing checks and no findings',
-    })
-  }
-  if (
-    value.verdict === 'NEEDS_REVISION' &&
-    (value.findings.length === 0 || !hasBlockingCheck)
-  ) {
-    context.addIssue({
-      code: 'custom',
-      path: ['verdict'],
-      message: 'NEEDS_REVISION requires blocking checks and findings',
-    })
-  }
-  if (value.verdict === 'BLOCKED' && value.findings.length > 0)
-    context.addIssue({
-      code: 'custom',
-      path: ['findings'],
-      message: 'BLOCKED cannot contain semantic findings',
-    })
 }
 
-function documentReviewSubmissionSchema<
+function documentReviewCheckSubmissionContractSchema<
   FindingSchema extends z.ZodType<{
     findingId: string
     checkId: string
   }>,
 >(findingSchema: FindingSchema) {
-  return z.object({
-    verdict: z.enum(['READY', 'NEEDS_REVISION', 'BLOCKED']),
-    checks: z.array(documentReviewCheckSchema).min(1),
-    findings: z.array(findingSchema),
-  })
-  .strict()
-  .superRefine(requireConsistentDocumentReviewVerdict)
+  return z
+    .object({
+      check: documentReviewCheckSubmissionSchema,
+      findings: z.array(findingSchema),
+    })
+    .strict()
+    .superRefine(requireConsistentDocumentReviewCheck)
 }
 
-export function documentReviewSubmissionSchemaForMode(
+export function documentReviewCheckSubmissionSchemaForMode(
   mode: 'initial' | 'closure',
   scope: 'foundation' | 'complete' = 'complete',
 ) {
-  return documentReviewSubmissionSchema(
-    documentReviewSubmissionFindingSchema(mode, scope),
+  return documentReviewCheckSubmissionContractSchema(
+    documentReviewCheckSubmissionFindingSchema(mode, scope),
   )
 }
 
@@ -245,7 +318,22 @@ export const documentReviewerTerminalSchema = base
     evidencePath: z.string().min(1),
   })
   .strict()
-  .superRefine(requireConsistentDocumentReviewVerdict)
+  .superRefine((value, context) => {
+    const checks = value.checks
+    const findings = value.findings
+    const findingIds = new Set(findings.map(finding => finding.findingId))
+    if (new Set(checks.map(check => check.id)).size !== checks.length)
+      context.addIssue({ code: 'custom', path: ['checks'], message: 'document review check IDs must be unique' })
+    for (const [index, check] of checks.entries()) {
+      if (check.status === 'pass' && check.findingIds.length)
+        context.addIssue({ code: 'custom', path: ['checks', index, 'findingIds'], message: 'passing checks cannot reference findings' })
+      if (check.status === 'block' && (!check.findingIds.length || check.findingIds.some(id => !findingIds.has(id))))
+        context.addIssue({ code: 'custom', path: ['checks', index, 'findingIds'], message: 'blocking checks require known findings' })
+    }
+    const blocked = checks.some(check => check.status === 'block')
+    if ((value.verdict === 'READY') !== (!blocked && findings.length === 0))
+      context.addIssue({ code: 'custom', path: ['verdict'], message: 'document review verdict does not match the canonical ledger' })
+  })
 
 export const resourcePreparerTerminalSchema = base
   .extend({

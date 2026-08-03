@@ -52,6 +52,7 @@ const apiMocks = vi.hoisted(() => ({
   requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
   resumeWorkflow: vi.fn().mockResolvedValue({ status: 'running' }),
   retryWorkflow: vi.fn().mockResolvedValue({ status: 'running' }),
+  restartWorkflow: vi.fn().mockResolvedValue({ status: 'running' }),
   getCreditBalance: vi.fn(() =>
     Promise.resolve({
       userId: 'user_1',
@@ -228,6 +229,7 @@ vi.mock('../../services/api', () => ({
     requestProjectAction: apiMocks.requestProjectAction,
     resumeWorkflow: apiMocks.resumeWorkflow,
     retryWorkflow: apiMocks.retryWorkflow,
+    restartWorkflow: apiMocks.restartWorkflow,
   },
 }));
 
@@ -416,6 +418,21 @@ describe('DashboardView runtime loading', () => {
     });
 
     expect(apiMocks.retryWorkflow).toHaveBeenCalledWith('proj_1');
+    expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
+    expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
+  });
+
+  it('restarts an obsolete workflow and refreshes the canonical snapshot', async () => {
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+    await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
+    loadPendingPermissions.mockClear();
+    loadProjectStatus.mockClear();
+
+    await act(async () => {
+      await capturedRightSidebarProps?.onWorkflowAction('restart');
+    });
+
+    expect(apiMocks.restartWorkflow).toHaveBeenCalledWith('proj_1');
     expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
     expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
   });
