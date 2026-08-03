@@ -28,6 +28,7 @@ export type DeliveryTransition =
       type: 'resource_preparation_needs_action'
       reason: string
     } & EvidenceEvent)
+  | { type: 'resource_preparation_invalidated'; reason: string }
   | { type: 'tasks_planned'; tasks: AtomicTask[] }
   | { type: 'task_started'; taskId: string; revision: string }
   | {
@@ -222,6 +223,38 @@ export function transitionDeliveryRun(
         blockedReason: event.reason,
       }
       break
+    case 'resource_preparation_invalidated': {
+      const activeCycle = run.documentReviewState.activeCycle
+      const preserveReviewRemediation = Boolean(
+        activeCycle?.acceptedSemanticResult &&
+          activeCycle.activeTarget === 'resource',
+      )
+      next = {
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+        documentStep: undefined,
+        status: 'running',
+        activeTaskId: undefined,
+        activeDispatch: undefined,
+        blockedReason: event.reason,
+        revision: {
+          ...run.revision,
+          resource: undefined,
+          implementation: undefined,
+        },
+        tasks: [],
+        evidence: {},
+        resourceRemediation: preserveReviewRemediation
+          ? undefined
+          : run.resourceRemediation,
+        documentReviewState: {
+          ...run.documentReviewState,
+          comprehensiveApproval: undefined,
+          activeCycle: preserveReviewRemediation ? activeCycle : undefined,
+        },
+      }
+      break
+    }
     case 'tasks_planned':
       requirePhase(run, 'ATOMIC_TASK_PLANNING')
       if (

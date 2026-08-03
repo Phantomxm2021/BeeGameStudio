@@ -830,26 +830,10 @@ export function createDeliveryWorkflowController(input: {
     run: DeliveryRun,
     reason: string,
   ): Promise<void> {
-    const invalidated: DeliveryRun = {
-      ...run,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'running',
-      activeTaskId: undefined,
-      activeDispatch: undefined,
-      blockedReason: reason,
-      revision: {
-        ...run.revision,
-        resource: undefined,
-        implementation: undefined,
-      },
-      tasks: [],
-      evidence: {},
-      documentReviewState: {
-        ...run.documentReviewState,
-        comprehensiveApproval: undefined,
-        activeCycle: undefined,
-      },
-    }
+    const invalidated = transitionDeliveryRun(run, {
+      type: 'resource_preparation_invalidated',
+      reason,
+    })
     await persist(invalidated, 'resource.revision.invalidated')
     await startResourcePreparation({
       run: invalidated,

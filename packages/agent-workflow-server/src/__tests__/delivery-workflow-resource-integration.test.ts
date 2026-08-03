@@ -64,4 +64,88 @@ describe('v7 resource-content workflow', () => {
       }),
     ).toBeUndefined()
   })
+
+  it('preserves the sole accepted resource finding batch when resources are invalidated', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-resource-review-invalidation',
+      projectId: 'project-resource-review-invalidation',
+      ownerId: 'owner-resource-review-invalidation',
+      documentRevision: 'docs',
+      workspaceRevision: 'workspace',
+    })
+    const activeCycle = {
+      cycleId: 'resource-review-cycle',
+      parentCycleId: 'resource-review-parent-cycle',
+      originScope: 'complete' as const,
+      scope: 'complete' as const,
+      mode: 'closure' as const,
+      sourceRevision: 'resources',
+      requiredCheckIds: ['resource_content_consistency' as const],
+      checks: [],
+      checkEvidenceDigests: {},
+      findings: [
+        {
+          findingId: 'resource-format-gap',
+          checkId: 'resource_content_consistency' as const,
+          severity: 'blocking' as const,
+          owner: 'resource' as const,
+          subjects: [
+            {
+              path: 'assets/asset-manifest.json',
+              anchor: '/resources/0',
+              resourceId: 'resource-1',
+            },
+          ],
+          observation: 'The registered material cannot satisfy its loading contract.',
+          blockingReason: 'Implementation cannot load the approved resource role.',
+          requiredAction: 'Replace the material in the canonical inventory.',
+          closureCondition: 'The same resource role is loadable through the canonical path.',
+        },
+      ],
+      activeTarget: 'resource' as const,
+      acceptedSemanticResult: true,
+      transportAttempts: 1,
+      changedPaths: [],
+      sourceArtifactDigests: {},
+    }
+    const invalidated = transitionDeliveryRun(
+      {
+        ...initial,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_REVIEW',
+        revision: {
+          ...initial.revision,
+          resource: 'resources',
+          implementation: 'implementation',
+        },
+        documentReviewState: {
+          ...initial.documentReviewState,
+          activeCycle,
+        },
+        resourceRemediation: {
+          sourceRevision: 'resources',
+          attempt: 1,
+          issues: ['parallel deterministic repair state'],
+        },
+      },
+      {
+        type: 'resource_preparation_invalidated',
+        reason: 'resource inventory changed',
+      },
+    )
+
+    expect(invalidated).toMatchObject({
+      phase: 'RESOURCE_PREPARATION',
+      status: 'running',
+      documentReviewState: {
+        activeCycle: {
+          cycleId: activeCycle.cycleId,
+          findings: [{ findingId: 'resource-format-gap' }],
+        },
+      },
+    })
+    expect(invalidated.resourceRemediation).toBeUndefined()
+    expect(invalidated.revision.resource).toBeUndefined()
+    expect(invalidated.revision.implementation).toBeUndefined()
+  })
 })

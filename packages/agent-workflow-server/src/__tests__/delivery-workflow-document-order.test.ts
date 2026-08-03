@@ -18,6 +18,7 @@ import {
   computeDocumentRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
+import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -635,6 +636,32 @@ describe('single-track document review workflow', () => {
       checklist: 1,
       resource: 1,
     })
+
+    let resourceRequest: WorkerDispatchRequest | undefined
+    await startResourcePreparation({
+      run: {
+        ...afterChecklist,
+        resourceRemediation: {
+          sourceRevision: afterChecklist.revision.document,
+          attempt: 1,
+          issues: ['deterministic resource issue'],
+        },
+      },
+      workspacePath,
+      dispatcher: {
+        async dispatch(request) {
+          resourceRequest = request
+          return request
+        },
+      },
+    })
+    expect(resourceRequest?.contract.remediation).toMatchObject({
+      kind: 'document_review',
+      cycleId: afterChecklist.documentReviewState.activeCycle?.cycleId,
+      findings: [{ findingId: 'resource-gap' }],
+      issues: expect.arrayContaining(['deterministic resource issue']),
+    })
+    expect(resourceRequest?.contract).not.toHaveProperty('reviewRemediation')
 
     const manifestPath = join(workspacePath, CANONICAL_ASSET_MANIFEST)
     await writeFile(

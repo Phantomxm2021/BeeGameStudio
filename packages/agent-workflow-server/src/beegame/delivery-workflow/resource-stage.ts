@@ -89,6 +89,27 @@ export async function startResourcePreparation(input: {
         ...(input.run.resourceEvidence?.state === 'current' ? { resourceEvidence: input.run.resourceEvidence } : {}),
       })
     : undefined
+  const deterministicIssues = [
+    ...(input.run.resourceRemediation?.issues ?? []),
+    ...(audit?.issues ?? []),
+    ...(audit?.readinessIssues ?? []),
+  ]
+  const remediation = reviewFindings.length
+    ? {
+        kind: 'document_review',
+        cycleId: reviewCycle!.cycleId,
+        findings: reviewFindings,
+        ...(deterministicIssues.length
+          ? { issues: [...new Set(deterministicIssues)] }
+          : {}),
+      }
+    : input.run.resourceRemediation
+      ? {
+          kind: 'resource_contract',
+          ...input.run.resourceRemediation,
+          issues: [...new Set(deterministicIssues)],
+        }
+      : undefined
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -109,8 +130,7 @@ export async function startResourcePreparation(input: {
         jsonOwnership: 'resource mappings, entities, UI, audio, events, waves and numeric configuration',
         yamlOwnership: 'world, scene, hierarchy and instance placement only',
       },
-      ...(input.run.resourceRemediation ? { remediation: { kind: 'resource_contract', ...input.run.resourceRemediation, issues: [...(audit?.issues ?? []), ...(audit?.readinessIssues ?? [])] } } : {}),
-      ...(reviewFindings.length ? { reviewRemediation: { cycleId: reviewCycle!.cycleId, findings: reviewFindings } } : {}),
+      ...(remediation ? { remediation } : {}),
     },
   })
 }
