@@ -35,7 +35,7 @@ const documentReviewFindingShape = {
             .string()
             .min(1)
             .describe(
-              'Canonical artifact path that the finding requiredAction requires to change; contextual or already-correct evidence is not a subject.',
+              'Canonical artifact path whose current content violates authority and must change to satisfy requiredOutcome; contextual or already-correct evidence is not a subject.',
             ),
           anchor: z.string().trim().min(1),
           requirementId: z.string().min(1).optional(),
@@ -49,14 +49,13 @@ const documentReviewFindingShape = {
       'Complete mutation scope for this finding. Every listed artifact must change, and every artifact required to change must be listed.',
     ),
   observation: z.string().trim().min(1),
-  blockingReason: z.string().trim().min(1),
-  requiredAction: z
+  blockingImpact: z.string().trim().min(1),
+  requiredOutcome: z
     .string()
     .min(1)
     .describe(
-      'Required correction whose complete canonical mutation paths are exactly the finding subjects.',
+      'One authority-preserving result that must be true after repair; do not provide alternative repairs or editing steps.',
     ),
-  closureCondition: z.string().trim().min(1),
 } as const
 
 function refineDocumentReviewFinding(
@@ -97,7 +96,7 @@ export const documentReviewInitialFindingSchema = z
 export const documentReviewFindingSchema = z
   .object({
     ...documentReviewFindingShape,
-    regressionPaths: z.array(z.string().min(1)).optional(),
+    regressionPaths: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict()
   .superRefine(refineDocumentReviewFinding)
@@ -107,9 +106,8 @@ const documentReviewSubmissionFindingShape = {
   evidence: documentReviewFindingShape.evidence,
   subjects: documentReviewFindingShape.subjects,
   observation: documentReviewFindingShape.observation,
-  blockingReason: documentReviewFindingShape.blockingReason,
-  requiredAction: documentReviewFindingShape.requiredAction,
-  closureCondition: documentReviewFindingShape.closureCondition,
+  blockingImpact: documentReviewFindingShape.blockingImpact,
+  requiredOutcome: documentReviewFindingShape.requiredOutcome,
 }
 
 function documentReviewCheckSubmissionFindingSchema(
@@ -134,11 +132,10 @@ function documentReviewCheckSubmissionFindingSchema(
       evidence: z.array(documentReviewReferenceSchema).min(1),
       subjects,
       observation: documentReviewSubmissionFindingShape.observation,
-      blockingReason: documentReviewSubmissionFindingShape.blockingReason,
-      requiredAction: documentReviewSubmissionFindingShape.requiredAction,
-      closureCondition: documentReviewSubmissionFindingShape.closureCondition,
+      blockingImpact: documentReviewSubmissionFindingShape.blockingImpact,
+      requiredOutcome: documentReviewSubmissionFindingShape.requiredOutcome,
       ...(mode === 'closure'
-        ? { regressionPaths: z.array(z.string().min(1)).optional() }
+        ? { regressionPaths: z.array(z.string().min(1)).min(1).optional() }
         : {}),
     })
     .strict()
@@ -152,32 +149,41 @@ const documentReviewCriterionIds = Object.values(
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
 ).flat() as DocumentReviewCriterionId[]
 
-function documentReviewCheckSubmissionSchemaForCheck(
-  currentCheckId: (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number],
+function documentReviewAssessmentSubmissionSchema(
+  criterionIds: readonly DocumentReviewCriterionId[],
 ) {
+  const visibleCriterionIds = (
+    criterionIds.length ? criterionIds : documentReviewCriterionIds
+  ) as [DocumentReviewCriterionId, ...DocumentReviewCriterionId[]]
   return z
     .object({
-      conclusion: z.string().trim().min(1),
+      criterion: z.enum(visibleCriterionIds),
+      status: z.enum(['pass', 'block']),
       evidence: z.array(documentReviewReferenceSchema).min(1),
-      assessments: z
-        .array(
-          z
-            .object({
-              criterion: z.enum(documentReviewCriterionIds),
-              status: z.enum(['pass', 'block']),
-              evidence: z.array(documentReviewReferenceSchema).min(1),
-              derivation: z.string().trim().min(1),
-              conclusion: z.string().trim().min(1),
-            })
-            .strict(),
-        )
-        .max(3),
+      derivation: z.string().trim().min(1),
+      conclusion: z.string().trim().min(1),
     })
+    .strict()
+}
+
+const documentReviewCheckSubmissionShape = {
+  conclusion: z.string().trim().min(1),
+  evidence: z.array(documentReviewReferenceSchema).min(1),
+  assessments: z
+    .array(documentReviewAssessmentSubmissionSchema(documentReviewCriterionIds))
+    .max(3),
+}
+
+function documentReviewCheckSubmissionSchemaForCheck(
+  atomicCheckId: (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number],
+) {
+  return z
+    .object(documentReviewCheckSubmissionShape)
     .strict()
     .superRefine((check, context) => {
       const criteria =
         GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
-          currentCheckId as GameDesignDocumentReviewCheckId
+          atomicCheckId as GameDesignDocumentReviewCheckId
         ]
       if (!criteria) {
         if (check.assessments.length)
@@ -197,18 +203,35 @@ function documentReviewCheckSubmissionSchemaForCheck(
         context.addIssue({
           code: 'custom',
           path: ['assessments'],
-          message: `design review check ${currentCheckId} requires its exact criterion set`,
+          message: `design review check ${atomicCheckId} requires its exact criterion set`,
         })
     })
 }
 
 export { documentReviewCheckSchema } from './document-review-check-schema'
 
-export const documentRepairDecisionSubmissionSchema = z
+export const documentRepairPlanSubmissionSchema = z
   .object({
-    decision: z.string().trim().min(1),
+    decisions: z
+      .array(z.object({ decision: z.string().trim().min(1) }).strict())
+      .min(1),
   })
   .strict()
+
+export function documentRepairPlanSubmissionSchemaForGroupCount(
+  groupCount: number,
+) {
+  if (!Number.isSafeInteger(groupCount) || groupCount <= 0)
+    throw new Error('document repair plan group count is invalid')
+  return documentRepairPlanSubmissionSchema.superRefine((value, context) => {
+    if (value.decisions.length !== groupCount)
+      context.addIssue({
+        code: 'custom',
+        path: ['decisions'],
+        message: `document repair plan requires exactly ${groupCount} decisions`,
+      })
+  })
+}
 
 export const documentAuthorTerminalSchema = z
   .object({
@@ -216,19 +239,13 @@ export const documentAuthorTerminalSchema = z
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
-    repairDecision: documentRepairDecisionSubmissionSchema.optional(),
-  })
-  .strict()
-
-export const documentAuthorSubmissionSchema = z
-  .object({
-    resolvedFindingIds: z.array(z.string().min(1)),
+    repairPlan: documentRepairPlanSubmissionSchema.optional(),
   })
   .strict()
 
 function requireConsistentDocumentReviewCheck(
   value: {
-    check: { assessments: Array<{ status: 'pass' | 'block' }> }
+    assessments: Array<{ status: 'pass' | 'block' }>
     findings: Array<{ findingId: string }>
   },
   context: z.RefinementCtx,
@@ -240,11 +257,11 @@ function requireConsistentDocumentReviewCheck(
       path: ['findings'],
       message: 'document review finding codes must be unique',
     })
-  const assessmentBlocks = value.check.assessments.some(
+  const assessmentBlocks = value.assessments.some(
     item => item.status === 'block',
   )
   if (
-    value.check.assessments.length > 0 &&
+    value.assessments.length > 0 &&
     assessmentBlocks !== value.findings.length > 0
   )
     context.addIssue({
@@ -258,25 +275,89 @@ function documentReviewCheckSubmissionContractSchema<
   FindingSchema extends z.ZodType<{
     findingId: string
   }>,
->(findingSchema: FindingSchema, currentCheckId: DocumentReviewCheckId) {
+>(findingSchema: FindingSchema, atomicCheckId: DocumentReviewCheckId) {
+  const checkSchema = documentReviewCheckSubmissionSchemaForCheck(atomicCheckId)
   return z
     .object({
-      check: documentReviewCheckSubmissionSchemaForCheck(currentCheckId),
+      ...checkSchema.shape,
+      findings: z.array(findingSchema),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      const { findings: _findings, ...check } = value
+      const parsed = checkSchema.safeParse(check)
+      if (!parsed.success)
+        for (const issue of parsed.error.issues)
+          context.addIssue({ ...issue, path: issue.path })
+    })
+    .superRefine(requireConsistentDocumentReviewCheck)
+}
+
+function visibleDocumentReviewCheckSubmissionSchema<
+  FindingSchema extends z.ZodType<{
+    findingId: string
+  }>,
+>(
+  findingSchema: FindingSchema,
+  criterionIds: readonly DocumentReviewCriterionId[],
+) {
+  return z
+    .object({
+      conclusion: documentReviewCheckSubmissionShape.conclusion,
+      evidence: documentReviewCheckSubmissionShape.evidence,
+      assessments: z
+        .array(documentReviewAssessmentSubmissionSchema(criterionIds))
+        .max(criterionIds.length ? 3 : 0),
       findings: z.array(findingSchema),
     })
     .strict()
     .superRefine(requireConsistentDocumentReviewCheck)
 }
 
-export function documentReviewCheckSubmissionSchemaForMode(
-  mode: 'initial' | 'closure',
-  scope: 'foundation' | 'complete' = 'complete',
-  currentCheckId: DocumentReviewCheckId = COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS[0],
-) {
-  return documentReviewCheckSubmissionContractSchema(
-    documentReviewCheckSubmissionFindingSchema(mode, scope),
-    currentCheckId,
+export function documentReviewPacketSubmissionSchemaForContract(contract: {
+  mode: 'initial' | 'closure'
+  scope: 'foundation' | 'complete'
+  currentCheckIds: DocumentReviewCheckId[]
+}) {
+  const findingSchema = documentReviewCheckSubmissionFindingSchema(
+    contract.mode,
+    contract.scope,
   )
+  const packetCriterionIds = [
+    ...new Set(
+      contract.currentCheckIds.flatMap(
+        checkId =>
+          GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+            checkId as GameDesignDocumentReviewCheckId
+          ] ?? [],
+      ),
+    ),
+  ]
+  const visibleCheckSchema = visibleDocumentReviewCheckSubmissionSchema(
+    findingSchema,
+    packetCriterionIds,
+  )
+  return z
+    .object({
+      checks: z
+        .array(visibleCheckSchema)
+        .length(contract.currentCheckIds.length),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      for (const [index, checkId] of contract.currentCheckIds.entries()) {
+        const parsed = documentReviewCheckSubmissionContractSchema(
+          findingSchema,
+          checkId,
+        ).safeParse(value.checks[index])
+        if (!parsed.success)
+          for (const issue of parsed.error.issues)
+            context.addIssue({
+              ...issue,
+              path: ['checks', index, ...issue.path],
+            })
+      }
+    })
 }
 
 export const documentReviewerTerminalSchema = base
@@ -288,6 +369,7 @@ export const documentReviewerTerminalSchema = base
     checklistIds: z.array(z.string().min(1)),
     findings: z.array(documentReviewFindingSchema),
     evidencePath: z.string().min(1),
+    rejectedSubmissionCount: z.number().int().nonnegative(),
   })
   .strict()
   .superRefine((value, context) => {

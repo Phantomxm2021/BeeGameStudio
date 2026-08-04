@@ -5,7 +5,49 @@ import { tmpdir } from 'node:os'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
+  projectReviewFindingDisplayItems,
 } from './document-display-tasks'
+
+describe('review finding display projection', () => {
+  test('uses only the current requiredOutcome contract', () => {
+    const findings = [
+      {
+        findingId: 'foundation-current',
+        owner: 'foundation',
+        requiredOutcome: 'The foundation documents agree.',
+      },
+      {
+        findingId: 'resource-current',
+        owner: 'resource',
+        requiredOutcome: 'The resource contract is complete.',
+      },
+      {
+        findingId: 'retired-shape',
+        owner: 'foundation',
+        requiredAction: 'This retired field must not be projected.',
+      },
+    ]
+    expect(projectReviewFindingDisplayItems(findings)).toEqual([
+      {
+        id: 'foundation-current',
+        owner: 'foundation',
+        title: 'The foundation documents agree.',
+      },
+      {
+        id: 'resource-current',
+        owner: 'resource',
+        title: 'The resource contract is complete.',
+      },
+    ])
+    expect(projectReviewFindingDisplayItems(findings, 'resource')).toEqual([
+      {
+        id: 'resource-current',
+        owner: 'resource',
+        title: 'The resource contract is complete.',
+      },
+    ])
+  })
+})
 
 describe('resource-content display tasks', () => {
   test('shows content preparation in the single resource phase', async () => {
@@ -68,7 +110,7 @@ describe('resource-content display tasks', () => {
 })
 
 describe('document repair display tasks', () => {
-  test('shows one serial review cursor instead of parallel running checks', async () => {
+  test('shows every check in the sole active review packet as running', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-display-'))
     try {
       const tasks = projectDocumentDisplayTasks({
@@ -80,12 +122,24 @@ describe('document repair display tasks', () => {
           'brief_alignment',
           'cross_document_consistency',
           'gameplay_completeness',
+          'gameplay_strategy_viability',
+          'economy_progression_integrity',
+          'numeric_balance_feasibility',
+          'pacing_difficulty_coherence',
         ],
-        reviewCompletedCheckIds: ['brief_alignment'],
+        reviewCompletedCheckIds: [
+          'brief_alignment',
+          'cross_document_consistency',
+          'gameplay_completeness',
+        ],
       })
       expect(tasks.map(task => task.status)).toEqual([
         'completed',
+        'completed',
+        'completed',
         'running',
+        'running',
+        'pending',
         'pending',
       ])
     } finally {
@@ -169,7 +223,7 @@ describe('document repair display tasks', () => {
         documentStep: 'FOUNDATION_DRAFTING',
         workflowStatus: 'running',
         thinking: 'working',
-        reviewAccepted: true,
+        reviewPacketSetComplete: true,
         reviewTarget: 'foundation',
         reviewFindings: [
           { id: 'F-001', title: 'foundation repair', owner: 'foundation' },
@@ -197,15 +251,16 @@ describe('document repair display tasks', () => {
         workflowStatus: 'running',
         thinking: 'working',
         currentItemId: 'docs/BALANCE_DESIGN.md',
-        reviewAccepted: true,
+        reviewPacketSetComplete: true,
         reviewTarget: 'foundation',
-        reviewFindings: [
-          { id: 'F-001', title: 'repair authority', owner: 'foundation' },
-        ],
         repairPlan: {
           groups: [
             {
-              affectedPaths: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+              affectedPaths: [
+                'docs/GDD.md',
+                'docs/BALANCE_DESIGN.md',
+                'docs/UI_UX_SPEC.md',
+              ],
             },
           ],
           completedPaths: ['docs/GDD.md'],
@@ -220,6 +275,11 @@ describe('document repair display tasks', () => {
         expect.objectContaining({
           id: 'docs/BALANCE_DESIGN.md',
           status: 'running',
+          operation: 'write',
+        }),
+        expect.objectContaining({
+          id: 'docs/UI_UX_SPEC.md',
+          status: 'pending',
           operation: 'write',
         }),
       ])

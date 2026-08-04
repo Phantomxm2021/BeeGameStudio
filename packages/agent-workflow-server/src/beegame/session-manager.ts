@@ -44,6 +44,7 @@ import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
+import type { CanonicalDocumentCommitContract } from './native-canonical-document-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -261,8 +262,8 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorkerType?: string
   workflowAllowedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentReviewMode?: 'initial' | 'closure'
-  workflowDocumentReviewScope?: 'foundation' | 'complete'
+  workflowDocumentRepairGroupCount?: number
+  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   /** Durable resource files that must enter the canonical manifest before another catalog operation. */
   workflowResourceRegistrationBarrierPaths?: string[]
@@ -353,11 +354,11 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowDocumentReviewMode?: 'initial' | 'closure'
-  workflowDocumentReviewScope?: 'foundation' | 'complete'
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
+  workflowDocumentRepairGroupCount?: number
+  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowResourceRegistrationBarrierPaths?: string[]
   workflowAllowResourceCatalogWithExistingInventory?: boolean
   workflowAllowResourceRemediationMutations?: boolean
@@ -489,11 +490,11 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowDocumentReviewMode?: 'initial' | 'closure'
-  workflowDocumentReviewScope?: 'foundation' | 'complete'
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
+  workflowDocumentRepairGroupCount?: number
+  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowResourceRegistrationBarrierPaths?: string[]
   workflowAllowResourceCatalogWithExistingInventory?: boolean
   workflowAllowResourceRemediationMutations?: boolean
@@ -620,12 +621,6 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
-      ...(input.workflowDocumentReviewMode
-        ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
-        : {}),
-      ...(input.workflowDocumentReviewScope
-        ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
-        : {}),
       ...(input.workflowDocumentReviewContract
         ? {
             workflowDocumentReviewContract:
@@ -637,6 +632,18 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
+        : {}),
+      ...(input.workflowDocumentRepairGroupCount
+        ? {
+            workflowDocumentRepairGroupCount:
+              input.workflowDocumentRepairGroupCount,
+          }
+        : {}),
+      ...(input.workflowCanonicalDocumentCommitContract
+        ? {
+            workflowCanonicalDocumentCommitContract:
+              input.workflowCanonicalDocumentCommitContract,
+          }
         : {}),
       ...(input.workflowResourceRegistrationBarrierPaths
         ? {
@@ -1302,17 +1309,6 @@ export class BeeGameSessionManager {
             ...(record.workflowWorkerType
               ? { workflowWorkerType: record.workflowWorkerType }
               : {}),
-            ...(record.workflowDocumentReviewMode
-              ? {
-                  workflowDocumentReviewMode: record.workflowDocumentReviewMode,
-                }
-              : {}),
-            ...(record.workflowDocumentReviewScope
-              ? {
-                  workflowDocumentReviewScope:
-                    record.workflowDocumentReviewScope,
-                }
-              : {}),
             ...(record.workflowDocumentReviewContract
               ? {
                   workflowDocumentReviewContract:
@@ -1325,6 +1321,18 @@ export class BeeGameSessionManager {
             ...(record.workflowDocumentAuthorMode
               ? {
                   workflowDocumentAuthorMode: record.workflowDocumentAuthorMode,
+                }
+              : {}),
+            ...(record.workflowDocumentRepairGroupCount
+              ? {
+                  workflowDocumentRepairGroupCount:
+                    record.workflowDocumentRepairGroupCount,
+                }
+              : {}),
+            ...(record.workflowCanonicalDocumentCommitContract
+              ? {
+                  workflowCanonicalDocumentCommitContract:
+                    record.workflowCanonicalDocumentCommitContract,
                 }
               : {}),
             ...(record.workflowResourceRegistrationBarrierPaths
@@ -2140,7 +2148,9 @@ export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
 export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
   return (
     event.type === 'tool.completed' &&
-    isFileMutationTool(getDashboardPayloadString(event.payload, 'toolName'))
+    (isFileMutationTool(getDashboardPayloadString(event.payload, 'toolName')) ||
+      getDashboardPayloadString(event.payload, 'toolName') ===
+        'CommitCanonicalDocument')
   )
 }
 
@@ -3766,53 +3776,6 @@ function getBeeGamePermissionPolicyDecision(
       }
     }
   }
-  if (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'document-author' &&
-    request.toolName === 'Read'
-  ) {
-    const paths = extractPermissionPaths(request.input)
-    const allowedPaths = record.workflowAllowedPaths ?? []
-    if (
-      paths.length !== 1 ||
-      allowedPaths.length !== 1 ||
-      !isPathInsideWorkflowScope(record.session.cwd, allowedPaths, paths[0])
-    )
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Document authoring may read only its one assigned canonical target.',
-      }
-    if (
-      completedFileReadPaths(record).has(resolve(record.session.cwd, paths[0]))
-    )
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Document authoring permits exactly one successful read of its assigned target before the one Write.',
-      }
-    return {
-      behavior: 'auto_allow',
-      message: 'document_target_read',
-    }
-  }
-  if (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'document-author' &&
-    isFileMutationTool(request.toolName)
-  ) {
-    const completedPaths = completedFileMutationPaths(record)
-    const repeatedPath = extractPermissionPaths(request.input).find(path =>
-      completedPaths.has(resolve(record.session.cwd, path)),
-    )
-    if (repeatedPath) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Document authoring permits one successful mutation per assigned document in a dispatch. Plan every edit for that document in one Write call, then submit the result without rereading or rewriting it.',
-      }
-    }
-  }
   if (record.workflowWorker && isFileMutationTool(request.toolName)) {
     const paths = extractPermissionPaths(request.input)
     const allowedPaths = record.workflowAllowedPaths ?? []
@@ -3893,56 +3856,6 @@ function getBeeGamePermissionPolicyDecision(
     }
   }
   return { behavior: 'ask_user' }
-}
-
-function completedFileMutationPaths(record: SessionRecord): Set<string> {
-  const startedPaths = new Map<string, string[]>()
-  const completedPaths = new Set<string>()
-  for (const event of record.events) {
-    const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
-    if (!toolUseID) continue
-    if (event.type === 'tool.started') {
-      const toolName = getDashboardPayloadString(event.payload, 'toolName')
-      if (!isFileMutationTool(toolName)) continue
-      const input = getDashboardPayloadRecord(event.payload, 'input')
-      startedPaths.set(
-        toolUseID,
-        extractPermissionPaths(input).map(path =>
-          resolve(record.session.cwd, path),
-        ),
-      )
-      continue
-    }
-    if (event.type !== 'tool.completed') continue
-    for (const path of startedPaths.get(toolUseID) ?? [])
-      completedPaths.add(path)
-  }
-  return completedPaths
-}
-
-function completedFileReadPaths(record: SessionRecord): Set<string> {
-  const startedPaths = new Map<string, string[]>()
-  const completedPaths = new Set<string>()
-  for (const event of record.events) {
-    const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
-    if (!toolUseID) continue
-    if (event.type === 'tool.started') {
-      if (getDashboardPayloadString(event.payload, 'toolName') !== 'Read')
-        continue
-      const input = getDashboardPayloadRecord(event.payload, 'input')
-      startedPaths.set(
-        toolUseID,
-        extractPermissionPaths(input).map(path =>
-          resolve(record.session.cwd, path),
-        ),
-      )
-      continue
-    }
-    if (event.type !== 'tool.completed') continue
-    for (const path of startedPaths.get(toolUseID) ?? [])
-      completedPaths.add(path)
-  }
-  return completedPaths
 }
 
 function hasCompletedTool(

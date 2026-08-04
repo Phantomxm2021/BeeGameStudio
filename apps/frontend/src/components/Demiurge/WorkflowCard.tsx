@@ -186,19 +186,34 @@ const taskStatusText = (task: WorkflowCardTask): string => {
 
 const taskIcon = (task: WorkflowCardTask) => {
   const label = `任务状态：${taskStatusText(task)}`;
-  if (task.status === 'completed') return (
-      <CircleCheckBig aria-label={label} data-task-icon={task.operation === 'review' ? 'review-completed' : 'write-completed'} className="h-4 w-4 text-emerald-300" />
+  if (task.status === 'completed')
+    return (
+      <CircleCheckBig
+        aria-label={label}
+        data-task-icon={task.operation === 'review' ? 'review-completed' : 'write-completed'}
+        className="h-4 w-4 text-emerald-300"
+      />
     );
-  if (task.status === 'failed' || task.status === 'blocked') return (
-      <XCircle aria-label={label} data-task-icon={task.operation === 'review' ? 'review-failed' : 'write-failed'} className="h-4 w-4 text-rose-300" />
+  if (task.status === 'failed' || task.status === 'blocked')
+    return (
+      <XCircle
+        aria-label={label}
+        data-task-icon={task.operation === 'review' ? 'review-failed' : 'write-failed'}
+        className="h-4 w-4 text-rose-300"
+      />
     );
-  if (task.status === 'stopped') return (
-      <CirclePause aria-label={label} data-task-icon="task-stopped" className="h-4 w-4 text-zinc-500" />
+  if (task.status === 'stopped')
+    return <CirclePause aria-label={label} data-task-icon="task-stopped" className="h-4 w-4 text-zinc-500" />;
+  if (task.operation === 'review')
+    return (
+      <ScanTextTaskIcon
+        aria-label={label}
+        data-task-icon={task.status === 'running' ? 'review-running' : 'review-pending'}
+        className={`h-4 w-4 ${task.status === 'running' ? 'animate-pulse text-sky-300' : 'text-zinc-600'}`}
+      />
     );
-  if (task.operation === 'review') return (
-      <ScanTextTaskIcon aria-label={label} data-task-icon={task.status === 'running' ? 'review-running' : 'review-pending'} className={`h-4 w-4 ${task.status === 'running' ? 'animate-pulse text-sky-300' : 'text-zinc-600'}`} />
-    );
-  if (task.status === 'running') return (
+  if (task.status === 'running')
+    return (
       <LoaderCircle aria-label={label} data-task-icon="write-running" className="h-4 w-4 animate-spin text-sky-300" />
     );
   return <Circle aria-label={label} data-task-icon="write-pending" className="h-4 w-4 text-zinc-600" />;
@@ -213,7 +228,10 @@ type AnimatedStatusIconComponent = ForwardRefExoticComponent<
   HTMLAttributes<HTMLDivElement> & { size?: number } & RefAttributes<AnimatedStatusIconHandle>
 >;
 
-const AutoPlayStatusIcon = ({ Icon, ...props }: {
+const AutoPlayStatusIcon = ({
+  Icon,
+  ...props
+}: {
   Icon: AnimatedStatusIconComponent;
 } & HTMLAttributes<HTMLDivElement> & { size?: number }) => {
   const iconRef = useRef<AnimatedStatusIconHandle>(null);
@@ -247,21 +265,41 @@ const WorkflowStatusIcon = ({ status }: { status: WorkflowCardPayload['status'] 
   switch (status) {
     case 'draft':
       return (
-        <AutoPlayStatusIcon Icon={HourglassIcon} {...props} className={`${props.className} text-zinc-400`} data-icon="hourglass" />
+        <AutoPlayStatusIcon
+          Icon={HourglassIcon}
+          {...props}
+          className={`${props.className} text-zinc-400`}
+          data-icon="hourglass"
+        />
       );
     case 'running':
       return <GripIcon {...props} data-icon="grip" loop />;
     case 'blocked':
       return (
-        <AutoPlayStatusIcon Icon={BadgeAlertIcon} {...props} className={`${props.className} text-amber-300`} data-icon="badge-alert" />
+        <AutoPlayStatusIcon
+          Icon={BadgeAlertIcon}
+          {...props}
+          className={`${props.className} text-amber-300`}
+          data-icon="badge-alert"
+        />
       );
     case 'verifying':
       return (
-        <AutoPlayStatusIcon Icon={ScanTextIcon} {...props} className={`${props.className} text-sky-300`} data-icon="scan-text" />
+        <AutoPlayStatusIcon
+          Icon={ScanTextIcon}
+          {...props}
+          className={`${props.className} text-sky-300`}
+          data-icon="scan-text"
+        />
       );
     case 'completed':
       return (
-        <AutoPlayStatusIcon Icon={CircleCheckIcon} {...props} className={`${props.className} text-emerald-300`} data-icon="circle-check" />
+        <AutoPlayStatusIcon
+          Icon={CircleCheckIcon}
+          {...props}
+          className={`${props.className} text-emerald-300`}
+          data-icon="circle-check"
+        />
       );
     case 'failed':
       return (
@@ -269,11 +307,21 @@ const WorkflowStatusIcon = ({ status }: { status: WorkflowCardPayload['status'] 
       );
     case 'cancelled':
       return (
-        <AutoPlayStatusIcon Icon={PauseIcon} {...props} className={`${props.className} text-zinc-400`} data-icon="pause" />
+        <AutoPlayStatusIcon
+          Icon={PauseIcon}
+          {...props}
+          className={`${props.className} text-zinc-400`}
+          data-icon="pause"
+        />
       );
     case 'stale':
       return (
-        <AutoPlayStatusIcon Icon={ClockIcon} {...props} className={`${props.className} text-amber-300`} data-icon="clock" />
+        <AutoPlayStatusIcon
+          Icon={ClockIcon}
+          {...props}
+          className={`${props.className} text-amber-300`}
+          data-icon="clock"
+        />
       );
   }
 };
@@ -294,25 +342,52 @@ export function WorkflowCard({
   const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(workflow.status) && Boolean(workflow.block);
   const tasks = workflow.tasks ?? [];
   const message = workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
-  const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(message || '');
+  const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(
+    message || '',
+  );
   const completedCount = workflow.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = workflow.totalTaskCount ?? tasks.length;
-  const hasPhaseProgress = Number.isInteger(workflow.phaseIndex) && Number.isInteger(workflow.phaseCount)
-    && Number(workflow.phaseIndex) > 0 && Number(workflow.phaseCount) >= Number(workflow.phaseIndex);
-  const reviewStageTitle = workflow.reviewAccepted && workflow.reviewTarget
-    ? workflow.reviewTarget === 'foundation'
-      ? '修复基础文档'
-      : workflow.reviewTarget === 'checklist'
-        ? '修复验收清单'
-        : '修复资源与内容合同'
-    : workflow.reviewMode === 'closure'
-      ? '复核修复与回归'
-      : workflow.reviewMode === 'initial'
-        ? workflow.documentStep === 'FOUNDATION_REVIEW'
-          ? '审计基础文档'
-          : '审计完整交付合同'
-        : undefined;
-  const stageTitle = reviewStageTitle || stageLabel[workflow.documentStep || ''] || stageLabel[workflow.currentPhase || ''] || workflow.currentPhase || '等待阶段';
+  const hasPhaseProgress =
+    Number.isInteger(workflow.phaseIndex) &&
+    Number.isInteger(workflow.phaseCount) &&
+    Number(workflow.phaseIndex) > 0 &&
+    Number(workflow.phaseCount) >= Number(workflow.phaseIndex);
+  const convergingFoundation = workflow.phaseIndex === 4;
+  const foundationContext =
+    convergingFoundation || workflow.reviewTarget === 'foundation' || workflow.documentStep === 'FOUNDATION_REVIEW';
+  const convergenceTitle = convergingFoundation ? '基础文档收敛' : '完整交付收敛';
+  const substageTitle =
+    workflow.substage === 'INITIAL_DRAFTING'
+      ? '基础文档编写'
+      : workflow.substage === 'INITIAL_REVIEW'
+        ? foundationContext
+          ? '基础文档初审'
+          : '完整交付初审'
+        : workflow.substage === 'REPAIR_PLANNING'
+          ? '制定修订方案'
+          : workflow.substage === 'REPAIRING'
+            ? workflow.reviewTarget === 'foundation'
+              ? '修订基础文档'
+              : workflow.reviewTarget === 'checklist'
+                ? '修订验收清单'
+                : '修订资源与内容合同'
+            : workflow.substage === 'CLOSURE_REVIEW'
+              ? 'Closure Review'
+              : workflow.substage === 'CHECKLIST_DRAFTING'
+                ? '编写验收清单'
+                : undefined;
+  const stageTitle =
+    workflow.substage && [4, 6].includes(Number(workflow.phaseIndex))
+      ? convergenceTitle
+      : substageTitle ||
+        stageLabel[workflow.documentStep || ''] ||
+        stageLabel[workflow.currentPhase || ''] ||
+        workflow.currentPhase ||
+        '等待阶段';
+  const convergencePosition =
+    substageTitle && [4, 6].includes(Number(workflow.phaseIndex)) && workflow.substage !== 'INITIAL_DRAFTING'
+      ? [workflow.convergencePass ? `第 ${workflow.convergencePass} 轮` : '', substageTitle].filter(Boolean).join(' · ')
+      : undefined;
   const startedAt = Date.parse(workflow.createdAt || '');
   const finishedAt = Date.parse(workflow.completedAt || (!isActive ? workflow.updatedAt || '' : ''));
   const activeSince = Date.parse(workflow.activeSince || '');
@@ -333,13 +408,14 @@ export function WorkflowCard({
 
   const executionText = useMemo(() => {
     const worker = workerLabel[workflow.worker || ''] || workflow.worker || '';
-    const state = workflow.executionStatus === 'working'
-      ? '正在执行'
-      : workflow.executionStatus === 'waiting'
-        ? '等待中'
-        : workflow.executionStatus === 'idle'
-          ? '空闲'
-          : workflow.executionStatus || '';
+    const state =
+      workflow.executionStatus === 'working'
+        ? '正在执行'
+        : workflow.executionStatus === 'waiting'
+          ? '等待中'
+          : workflow.executionStatus === 'idle'
+            ? '空闲'
+            : workflow.executionStatus || '';
     const item = workflow.currentItemId ? documentTitle[workflow.currentItemId] || workflow.currentItemId : '';
     return [worker, state, item].filter(Boolean).join(' · ');
   }, [workflow.currentItemId, workflow.executionStatus, workflow.worker]);
@@ -379,9 +455,12 @@ export function WorkflowCard({
                 <div className="flex items-center gap-2">
                   <h3 className="truncate text-sm font-semibold text-zinc-100">{stageTitle}</h3>
                   {hasPhaseProgress ? (
-                    <span className="text-[11px] tabular-nums text-zinc-500">{workflow.phaseIndex} / {workflow.phaseCount}</span>
+                    <span className="text-[11px] tabular-nums text-zinc-500">
+                      {workflow.phaseIndex} / {workflow.phaseCount}
+                    </span>
                   ) : null}
                 </div>
+                {convergencePosition ? <p className="mt-1 text-xs text-zinc-400">{convergencePosition}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
@@ -431,21 +510,35 @@ export function WorkflowCard({
                     ),
                     li: props => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
                     blockquote: props => (
-                      <blockquote className="my-2 border-l-2 border-white/15 pl-3 text-xs leading-5 text-zinc-400" {...props} />
+                      <blockquote
+                        className="my-2 border-l-2 border-white/15 pl-3 text-xs leading-5 text-zinc-400"
+                        {...props}
+                      />
                     ),
                     a: props => (
-                      <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-2 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />
+                      <a
+                        className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-2 hover:text-emerald-200"
+                        target="_blank"
+                        rel="noreferrer"
+                        {...props}
+                      />
                     ),
                     strong: props => <strong className="font-semibold text-zinc-100" {...props} />,
                     pre: props => (
-                      <pre className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-zinc-950 p-2 text-xs leading-5 text-zinc-200" {...props} />
+                      <pre
+                        className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-zinc-950 p-2 text-xs leading-5 text-zinc-200"
+                        {...props}
+                      />
                     ),
                     code: props => (
                       <code className="rounded bg-white/[0.06] px-1 py-0.5 text-xs text-zinc-200" {...props} />
                     ),
                     table: props => <table className="my-2 block max-w-full overflow-x-auto text-xs" {...props} />,
                     th: props => (
-                      <th className="border border-white/10 px-2 py-1 text-left font-semibold text-zinc-200" {...props} />
+                      <th
+                        className="border border-white/10 px-2 py-1 text-left font-semibold text-zinc-200"
+                        {...props}
+                      />
                     ),
                     td: props => <td className="border border-white/10 px-2 py-1 text-zinc-300" {...props} />,
                   }}
@@ -458,33 +551,53 @@ export function WorkflowCard({
 
             {tasks.length > 0 ? (
               <div className="mt-4">
-                <p className="mb-2 pl-3 text-[10px] tabular-nums text-zinc-600">任务 {completedCount} / {totalCount}</p>
+                <p className="mb-2 pl-3 text-[10px] tabular-nums text-zinc-600">
+                  任务 {completedCount} / {totalCount}
+                </p>
                 <ul
                   data-testid="workflow-card-task-region"
                   className={`scrollbar-premium space-y-2 pl-3 pr-1 ${tasks.length > 12 ? 'scroll-fade scroll-fade-y scroll-fade-6 max-h-[17.5rem] overflow-y-auto overscroll-contain' : ''}`}
                 >
-                {tasks.map(task => (
-                  <li key={task.id} className="flex min-w-0 items-start gap-2 text-xs">
-                    <span className="mt-px shrink-0">{taskIcon(task)}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className={task.status === 'completed' ? 'truncate text-zinc-500 line-through decoration-zinc-700' : task.status === 'running' ? 'truncate text-zinc-200' : 'truncate text-zinc-400'}>
-                        {displayTaskTitle(task)}
-                      </p>
-                      {task.failureReason ? (
-                        <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p>
-                      ) : null}
-                    </div>
-                    <span className={task.status === 'running' ? 'shrink-0 text-[10px] text-sky-300' : task.status === 'failed' || task.status === 'blocked' ? 'shrink-0 text-[10px] text-rose-300' : 'shrink-0 text-[10px] text-zinc-600'}>
-                      {taskStatusText(task)}
-                    </span>
-                  </li>
-                ))}
+                  {tasks.map(task => (
+                    <li key={task.id} className="flex min-w-0 items-start gap-2 text-xs">
+                      <span className="mt-px shrink-0">{taskIcon(task)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={
+                            task.status === 'completed'
+                              ? 'truncate text-zinc-500 line-through decoration-zinc-700'
+                              : task.status === 'running'
+                                ? 'truncate text-zinc-200'
+                                : 'truncate text-zinc-400'
+                          }
+                        >
+                          {displayTaskTitle(task)}
+                        </p>
+                        {task.failureReason ? (
+                          <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={
+                          task.status === 'running'
+                            ? 'shrink-0 text-[10px] text-sky-300'
+                            : task.status === 'failed' || task.status === 'blocked'
+                              ? 'shrink-0 text-[10px] text-rose-300'
+                              : 'shrink-0 text-[10px] text-zinc-600'
+                        }
+                      >
+                        {taskStatusText(task)}
+                      </span>
+                    </li>
+                  ))}
                 </ul>
               </div>
             ) : null}
 
             {actionError ? (
-              <p role="alert" className="mt-3 text-xs text-rose-300">{actionError}</p>
+              <p role="alert" className="mt-3 text-xs text-rose-300">
+                {actionError}
+              </p>
             ) : null}
             <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
               <span className="text-[11px] tabular-nums text-zinc-500">{formatDuration(elapsed)}</span>
@@ -509,7 +622,6 @@ export function WorkflowCard({
           </div>
         </div>
       </div>
-
     </section>
   );
 }

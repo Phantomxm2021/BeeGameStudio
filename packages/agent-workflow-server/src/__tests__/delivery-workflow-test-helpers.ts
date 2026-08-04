@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 import { createInitialDeliveryRun } from '../beegame/delivery-workflow/run-store'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+  type DocumentReviewCheckId,
+} from '../beegame/delivery-workflow/types'
 
 type InitialRunInput = Omit<
   Parameters<typeof createInitialDeliveryRun>[0],
@@ -35,5 +40,42 @@ export function createTestDeliveryRun(input: InitialRunInput) {
           ? []
           : [...CANONICAL_FOUNDATION_DOCUMENTS],
     },
+  }
+}
+
+export function createAcceptedComprehensiveReview(input?: {
+  blockingCheckId?: DocumentReviewCheckId
+  findingIds?: string[]
+}) {
+  const requiredCheckIds = [...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS]
+  return {
+    requiredCheckIds,
+    completedCheckIds: [...requiredCheckIds],
+    checks: requiredCheckIds.map(id => {
+      const blocked = id === input?.blockingCheckId
+      return {
+        id,
+        status: blocked ? ('block' as const) : ('pass' as const),
+        conclusion: blocked
+          ? 'Canonical remediation is required.'
+          : 'The canonical check passed.',
+        evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+        findingIds: blocked ? (input?.findingIds ?? []) : [],
+        assessments:
+          id in GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+            ? GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+                id as keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+              ].map(criterion => ({
+                criterion,
+                status: 'pass' as const,
+                evidence: [
+                  { path: 'assets/asset-manifest.json', anchor: '$' },
+                ],
+                derivation: 'The fixture satisfies the canonical criterion.',
+                conclusion: 'The criterion passed.',
+              }))
+            : [],
+      }
+    }),
   }
 }

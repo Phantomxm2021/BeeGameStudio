@@ -17,6 +17,7 @@ import {
   buildDocumentReviewDispatch,
   completeDocumentDraft,
   createInitialDocumentReviewCycle,
+  documentReviewerDispatchMatchesActivePacket,
   reconcileDocumentReview,
   startChecklistDraftStage,
   startDocumentStage,
@@ -918,6 +919,21 @@ export function createDeliveryWorkflowController(input: {
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
     if (run.activeDispatch?.terminalResult) {
+      if (
+        !documentReviewerDispatchMatchesActivePacket(run, run.activeDispatch)
+      ) {
+        const refreshed = await persist(
+          {
+            ...run,
+            activeDispatch: undefined,
+            blockedReason: undefined,
+          },
+          'document.review.stale_terminal_discarded',
+          { dispatchId: run.activeDispatch.dispatchId },
+        )
+        await resumeUnlocked(refreshed)
+        return
+      }
       await dispatcher.replayTerminal(run.activeDispatch)
       return
     }

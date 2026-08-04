@@ -5,7 +5,10 @@ import {
   assertDeliveryRunInvariants,
   transitionDeliveryRun,
 } from '../beegame/delivery-workflow/transition'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createAcceptedComprehensiveReview,
+  createTestDeliveryRun,
+} from './delivery-workflow-test-helpers'
 
 describe('v7 resource-content workflow', () => {
   it('moves directly from resource preparation to comprehensive review', () => {
@@ -84,9 +87,8 @@ describe('v7 resource-content workflow', () => {
                 },
               ],
               observation: 'The resource contract is incomplete.',
-              blockingReason: 'The resource cannot be loaded.',
-              requiredAction: 'Complete the canonical resource contract.',
-              closureCondition:
+              blockingImpact: 'The resource cannot be loaded.',
+              requiredOutcome:
                 'The resource is loadable through the canonical path.',
             },
           ],
@@ -148,10 +150,9 @@ describe('v7 resource-content workflow', () => {
           ],
           observation:
             'The registered material cannot satisfy its loading contract.',
-          blockingReason:
+          blockingImpact:
             'Implementation cannot load the approved resource role.',
-          requiredAction: 'Replace the material in the canonical inventory.',
-          closureCondition:
+          requiredOutcome:
             'The same resource role is loadable through the canonical path.',
         },
       ],
@@ -237,16 +238,7 @@ describe('v7 resource-content workflow', () => {
             scope: 'complete',
             mode: 'initial',
             sourceRevision: 'resource-revision',
-            requiredCheckIds: ['resource_content_consistency'],
-            completedCheckIds: ['resource_content_consistency'],
-            checks: [{
-              id: 'resource_content_consistency' as const,
-              status: 'pass' as const,
-              conclusion: 'The check passed.',
-              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-              findingIds: [],
-              assessments: [],
-            }],
+            ...createAcceptedComprehensiveReview(),
             checkEvidenceDigests: {},
             findings: [],
             activeTarget: 'resource',
@@ -303,16 +295,7 @@ describe('v7 resource-content workflow', () => {
             scope: 'complete',
             mode: 'initial',
             sourceRevision: 'resource-revision',
-            requiredCheckIds: ['resource_content_consistency'],
-            completedCheckIds: ['resource_content_consistency'],
-            checks: [{
-              id: 'resource_content_consistency' as const,
-              status: 'pass' as const,
-              conclusion: 'The check passed.',
-              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-              findingIds: [],
-              assessments: [],
-            }],
+            ...createAcceptedComprehensiveReview(),
             checkEvidenceDigests: {},
             findings: [],
             activeTarget: 'resource',

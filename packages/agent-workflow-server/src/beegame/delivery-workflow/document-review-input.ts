@@ -19,6 +19,7 @@ import {
   type DocumentReviewFinding,
   type DocumentReviewScope,
 } from './types'
+import { documentReviewPacketSubmissionSchemaForContract } from './worker-contracts'
 
 export const REVIEW_AUTHORITY_ARTIFACT_PATH = 'reviewAuthority' as const
 
@@ -37,6 +38,136 @@ export type ReviewAuthority = {
 export type DocumentReviewArtifact = {
   path: string
   content: string
+}
+
+type ReviewArtifactDependency =
+  | 'all'
+  | {
+      paths: readonly string[]
+      includeContent?: boolean
+    }
+
+export const REVIEW_ARTIFACT_DEPENDENCIES_BY_CHECK: Record<
+  DocumentReviewCheckId,
+  ReviewArtifactDependency
+> = {
+  brief_alignment: { paths: CANONICAL_FOUNDATION_DOCUMENTS },
+  cross_document_consistency: {
+    paths: [
+      SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+      ...CANONICAL_FOUNDATION_DOCUMENTS,
+    ],
+  },
+  gameplay_completeness: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/AUDIO_DESIGN.md',
+    ],
+  },
+  gameplay_strategy_viability: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+    ],
+  },
+  economy_progression_integrity: {
+    paths: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+  },
+  numeric_balance_feasibility: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+    ],
+  },
+  pacing_difficulty_coherence: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+    ],
+  },
+  level_scene_design_integrity: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+    ],
+  },
+  technical_feasibility: {
+    paths: [
+      SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+      ...CANONICAL_FOUNDATION_DOCUMENTS,
+    ],
+  },
+  art_direction_coherence: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/ASSET_PLAN.md',
+    ],
+  },
+  ui_audio_consistency: {
+    paths: [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/AUDIO_DESIGN.md',
+    ],
+  },
+  acceptance_observability: { paths: CANONICAL_FOUNDATION_DOCUMENTS },
+  checklist_traceability: { paths: CANONICAL_PROJECT_DOCUMENTS },
+  resource_semantic_fitness: {
+    paths: [...CANONICAL_FOUNDATION_DOCUMENTS, CANONICAL_ASSET_MANIFEST],
+  },
+  content_structure_fitness: {
+    paths: [
+      SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+      'docs/TECHNICAL_DESIGN.md',
+      'docs/ASSET_PLAN.md',
+      CANONICAL_ASSET_MANIFEST,
+    ],
+    includeContent: true,
+  },
+  resource_content_consistency: {
+    paths: [
+      SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+      'docs/TECHNICAL_DESIGN.md',
+      'docs/ASSET_PLAN.md',
+      CANONICAL_ASSET_MANIFEST,
+    ],
+    includeContent: true,
+  },
+  implementation_readiness: 'all',
+}
+
+export function documentReviewCheckDependsOnPath(
+  checkId: DocumentReviewCheckId,
+  path: string,
+): boolean {
+  const dependency = REVIEW_ARTIFACT_DEPENDENCIES_BY_CHECK[checkId]
+  return (
+    dependency === 'all' ||
+    path === REVIEW_AUTHORITY_ARTIFACT_PATH ||
+    dependency.paths.includes(path) ||
+    (dependency.includeContent === true && path.startsWith('assets/content/'))
+  )
+}
+
+export function artifactsForDocumentReviewCheck(
+  artifacts: DocumentReviewArtifact[],
+  checkId: DocumentReviewCheckId,
+): DocumentReviewArtifact[] {
+  return artifacts.filter(artifact =>
+    documentReviewCheckDependsOnPath(checkId, artifact.path),
+  )
 }
 
 export type DocumentReviewReferenceIndex = {
@@ -78,18 +209,19 @@ export type DocumentReviewSubmissionContract = {
   scope: DocumentReviewScope
   mode: 'initial' | 'closure'
   requiredCheckIds: DocumentReviewCheckId[]
-  currentCheckId: DocumentReviewCheckId
+  currentCheckIds: DocumentReviewCheckId[]
   artifacts: DocumentReviewArtifact[]
   activeTarget?: 'foundation' | 'checklist' | 'resource'
   priorFindings?: Array<{
     findingId: string
-    checkId?: DocumentReviewCheckId
+    checkId: DocumentReviewCheckId
     owner: 'foundation' | 'checklist' | 'resource'
+    open: boolean
+    evidence?: DocumentReviewFinding['evidence']
     subjects?: DocumentReviewFinding['subjects']
     observation?: string
-    blockingReason?: string
-    requiredAction?: string
-    closureCondition?: string
+    blockingImpact?: string
+    requiredOutcome: string
   }>
   changedPaths?: string[]
 }
@@ -400,10 +532,12 @@ function validateReviewChecks(input: {
     expected.some(id => !submitted.includes(id))
   )
     issues.push('document review does not cover the required check set')
-  const artifacts = new Map(
-    input.artifacts.map(artifact => [artifact.path, artifact.content]),
-  )
   for (const check of input.checks) {
+    const checkArtifacts = new Map(
+      artifactsForDocumentReviewCheck(input.artifacts, check.id).map(
+        artifact => [artifact.path, artifact.content],
+      ),
+    )
     if (
       SYSTEM_DELIVERY_CONTRACT_CHECK_IDS.has(check.id) &&
       !check.evidence.some(
@@ -414,7 +548,7 @@ function validateReviewChecks(input: {
         `document review check ${check.id} does not cite the system delivery contract`,
       )
     for (const evidence of check.evidence) {
-      const content = artifacts.get(evidence.path)
+      const content = checkArtifacts.get(evidence.path)
       if (content === undefined) {
         issues.push(
           `document review check ${check.id} references an unavailable artifact`,
@@ -436,7 +570,7 @@ function validateReviewChecks(input: {
     }
     for (const assessment of check.assessments ?? []) {
       for (const evidence of assessment.evidence) {
-        const content = artifacts.get(evidence.path)
+        const content = checkArtifacts.get(evidence.path)
         if (content === undefined) {
           issues.push(
             `document review criterion ${assessment.criterion} references an unavailable artifact`,
@@ -466,17 +600,11 @@ export function checkEvidenceDigests(input: {
   checks: DocumentReviewCheck[]
   artifacts: DocumentReviewArtifact[]
 }): Record<string, Record<string, string>> {
-  const digests = documentReviewArtifactDigests(input.artifacts)
   return Object.fromEntries(
     input.checks.map(check => [
       check.id,
-      Object.fromEntries(
-        [
-          ...check.evidence,
-          ...(check.assessments ?? []).flatMap(
-            assessment => assessment.evidence,
-          ),
-        ].map(evidence => [evidence.path, digests[evidence.path]!]),
+      documentReviewArtifactDigests(
+        artifactsForDocumentReviewCheck(input.artifacts, check.id),
       ),
     ]),
   )
@@ -550,15 +678,14 @@ type ReviewSubjectReferenceInput = ReviewReferenceInput & {
   contentId?: string
 }
 
-export type DocumentReviewCheckSubmission = {
-  check: Pick<DocumentReviewCheck, 'conclusion'> & {
-    evidence: ReviewReferenceInput[]
-    assessments: Array<
-      Omit<DocumentReviewCheck['assessments'][number], 'evidence'> & {
-        evidence: ReviewReferenceInput[]
-      }
-    >
-  }
+export type DocumentReviewAtomicCheckSubmission = {
+  conclusion: string
+  evidence: ReviewReferenceInput[]
+  assessments: Array<
+    Omit<DocumentReviewCheck['assessments'][number], 'evidence'> & {
+      evidence: ReviewReferenceInput[]
+    }
+  >
   findings: Array<
     Omit<
       DocumentReviewFinding,
@@ -570,11 +697,15 @@ export type DocumentReviewCheckSubmission = {
   >
 }
 
-/** Resolve model-selected stable references into canonical persisted evidence. */
-export function normalizeDocumentReviewCheckSubmission(input: {
+export type DocumentReviewPacketSubmission = {
+  checks: DocumentReviewAtomicCheckSubmission[]
+}
+
+/** Resolve one transactional packet into canonical persisted checks. */
+export function normalizeDocumentReviewPacketSubmission(input: {
   contract: DocumentReviewSubmissionContract
-  submission: DocumentReviewCheckSubmission
-}): { check: DocumentReviewCheck; findings: DocumentReviewFinding[] } {
+  submission: DocumentReviewPacketSubmission
+}): { checks: DocumentReviewCheck[]; findings: DocumentReviewFinding[] } {
   const index = buildDocumentReviewReferenceIndex(input.contract.artifacts)
   const references = new Map(
     index.references.map(reference => [reference.referenceId, reference]),
@@ -587,49 +718,80 @@ export function normalizeDocumentReviewCheckSubmission(input: {
       )
     return { path: reference.path, anchor: reference.anchor }
   }
-  const findingIds = input.submission.findings.map(finding => finding.findingId)
-  const status = findingIds.length > 0 ? 'block' : 'pass'
-  const check: DocumentReviewCheck = {
-    ...input.submission.check,
-    id: input.contract.currentCheckId,
-    status,
-    findingIds,
-    evidence: input.submission.check.evidence.map(resolveReference),
-    assessments: input.submission.check.assessments.map(assessment => ({
-      ...assessment,
-      evidence: assessment.evidence.map(resolveReference),
-    })),
+  const normalized = input.submission.checks.map((submission, index) => {
+    const checkId = input.contract.currentCheckIds[index]!
+    const findingIds = submission.findings.map(finding => finding.findingId)
+    const check: DocumentReviewCheck = {
+      conclusion: submission.conclusion,
+      id: checkId,
+      status: findingIds.length > 0 ? 'block' : 'pass',
+      findingIds,
+      evidence: submission.evidence.map(resolveReference),
+      assessments: submission.assessments.map(assessment => ({
+        ...assessment,
+        evidence: assessment.evidence.map(resolveReference),
+      })),
+    }
+    const findings = submission.findings.map(finding => ({
+      ...finding,
+      checkId,
+      severity: 'blocking' as const,
+      owner: DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[checkId],
+      evidence: finding.evidence.map(resolveReference),
+      subjects: finding.subjects.map(subject => {
+        const reference = references.get(subject.referenceId)
+        if (!reference)
+          throw new Error(
+            `unknown document review subject referenceId: ${subject.referenceId}`,
+          )
+        const expectedOwner = DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[checkId]
+        if (reference.subjectOwner !== expectedOwner)
+          throw new Error(
+            `document review subject ${subject.referenceId} is not owned by ${expectedOwner}`,
+          )
+        return {
+          path: reference.path,
+          anchor: reference.anchor,
+          ...(subject.requirementId
+            ? { requirementId: subject.requirementId }
+            : {}),
+          ...(subject.resourceId ? { resourceId: subject.resourceId } : {}),
+          ...(subject.contentId ? { contentId: subject.contentId } : {}),
+        }
+      }),
+    }))
+    return { check, findings }
+  })
+  return {
+    checks: normalized.map(item => item.check),
+    findings: normalized.flatMap(item => item.findings),
   }
-  const findings = input.submission.findings.map(finding => ({
-    ...finding,
-    checkId: input.contract.currentCheckId,
-    severity: 'blocking' as const,
-    owner: DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[input.contract.currentCheckId],
-    evidence: finding.evidence.map(resolveReference),
-    subjects: finding.subjects.map(subject => {
-      const reference = references.get(subject.referenceId)
-      if (!reference)
-        throw new Error(
-          `unknown document review subject referenceId: ${subject.referenceId}`,
-        )
-      const expectedOwner =
-        DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[input.contract.currentCheckId]
-      if (reference.subjectOwner !== expectedOwner)
-        throw new Error(
-          `document review subject ${subject.referenceId} is not owned by ${expectedOwner}`,
-        )
-      return {
-        path: reference.path,
-        anchor: reference.anchor,
-        ...(subject.requirementId
-          ? { requirementId: subject.requirementId }
-          : {}),
-        ...(subject.resourceId ? { resourceId: subject.resourceId } : {}),
-        ...(subject.contentId ? { contentId: subject.contentId } : {}),
-      }
-    }),
-  }))
-  return { check, findings }
+}
+
+/**
+ * Sole contract-bound parser and acceptance boundary for one Reviewer packet.
+ * Native tool acceptance and durable terminal reconstruction must both call
+ * this function with the same durable contract.
+ */
+export function parseAndValidateDocumentReviewPacketSubmission(input: {
+  contract: DocumentReviewSubmissionContract
+  submission: unknown
+}): { checks: DocumentReviewCheck[]; findings: DocumentReviewFinding[] } {
+  const submission = documentReviewPacketSubmissionSchemaForContract(
+    input.contract,
+  ).parse(input.submission) as unknown as DocumentReviewPacketSubmission
+  const normalized = normalizeDocumentReviewPacketSubmission({
+    contract: input.contract,
+    submission,
+  })
+  const issues = validateDocumentReviewSubmission({
+    contract: input.contract,
+    checks: normalized.checks,
+    findings: normalized.findings,
+  })
+  if (issues.length)
+    throw new Error(`document review submission rejected: ${issues.join('; ')}`)
+  return normalized
 }
 
 function validateReviewFindingSubjects(input: {
@@ -664,8 +826,14 @@ function validateReviewFindingSubjects(input: {
   const contentIds = new Set(contentIdsByPath.values())
   const issues: string[] = []
   for (const finding of input.findings) {
+    const findingArtifacts = artifactsForDocumentReviewCheck(
+      input.artifacts,
+      finding.checkId,
+    )
     for (const evidence of finding.evidence) {
-      const artifact = input.artifacts.find(item => item.path === evidence.path)
+      const artifact = findingArtifacts.find(
+        item => item.path === evidence.path,
+      )
       if (!artifact) {
         issues.push(
           `document review finding ${finding.findingId} has unavailable evidence`,
@@ -687,7 +855,7 @@ function validateReviewFindingSubjects(input: {
         )
     }
     for (const subject of finding.subjects) {
-      const artifact = input.artifacts.find(item => item.path === subject.path)
+      const artifact = findingArtifacts.find(item => item.path === subject.path)
       if (!artifact) {
         issues.push(
           `document review finding ${finding.findingId} has an unavailable subject`,
@@ -764,10 +932,12 @@ export function validateDocumentReviewSubmission(input: {
   >
 }): string[] {
   if (
-    input.checks.length !== 1 ||
-    input.checks[0]?.id !== input.contract.currentCheckId
+    input.checks.length !== input.contract.currentCheckIds.length ||
+    input.checks.some(
+      (check, index) => check.id !== input.contract.currentCheckIds[index],
+    )
   )
-    return ['document review must submit exactly the active check']
+    return ['document review must submit exactly the active check packet']
   const checkIssues = validateReviewChecks({
     scope: input.contract.scope,
     checks: input.checks,
@@ -777,9 +947,12 @@ export function validateDocumentReviewSubmission(input: {
   )
   const submittedCheckIds = input.checks.map(check => check.id)
   const exactCycleCoverage =
-    submittedCheckIds.length === 1 &&
-    submittedCheckIds[0] === input.contract.currentCheckId &&
-    input.contract.requiredCheckIds.includes(input.contract.currentCheckId)
+    submittedCheckIds.length === input.contract.currentCheckIds.length &&
+    submittedCheckIds.every(
+      (checkId, index) =>
+        checkId === input.contract.currentCheckIds[index] &&
+        input.contract.requiredCheckIds.includes(checkId),
+    )
   const findings = input.findings.map((finding, index) => {
     const owner = DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[finding.checkId]
     return {
@@ -792,13 +965,16 @@ export function validateDocumentReviewSubmission(input: {
   const issues = [
     ...checkIssues,
     ...(!exactCycleCoverage
-      ? ['document review does not match the active cycle check']
+      ? ['document review does not match the active cycle check packet']
       : []),
     ...validateReviewFindingSubjects({
       findings,
       artifacts: input.contract.artifacts,
     }),
   ]
+  const submittedFindingIds = input.findings.map(finding => finding.findingId)
+  if (new Set(submittedFindingIds).size !== submittedFindingIds.length)
+    issues.push('document review packet finding IDs must be unique')
   for (const [index, finding] of input.findings.entries()) {
     const expectedOwner = DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[finding.checkId]
     if (finding.owner !== undefined && finding.owner !== expectedOwner)
@@ -809,9 +985,19 @@ export function validateDocumentReviewSubmission(input: {
   if (input.contract.mode === 'initial') {
     if (input.findings.some(finding => finding.regressionPaths?.length))
       issues.push('initial review cannot reference repair regressions')
-  } else {
-    const priorIds = new Set(
+    const acceptedIds = new Set(
       (input.contract.priorFindings ?? []).map(finding => finding.findingId),
+    )
+    if (input.findings.some(finding => acceptedIds.has(finding.findingId)))
+      issues.push(
+        'initial review finding ID already exists in the cycle ledger',
+      )
+  } else {
+    const priorById = new Map(
+      (input.contract.priorFindings ?? []).map(finding => [
+        finding.findingId,
+        finding,
+      ]),
     )
     const changedPaths = new Set(input.contract.changedPaths ?? [])
     for (const finding of findings) {
@@ -819,13 +1005,31 @@ export function validateDocumentReviewSubmission(input: {
         issues.push(
           'closure review finding is outside the active remediation owner',
         )
-      const priorFindingValid = priorIds.has(finding.findingId)
-      const regressionValid =
-        Boolean(finding.regressionPaths?.length) &&
-        finding.regressionPaths!.every(path => changedPaths.has(path))
-      if (!priorFindingValid && !regressionValid)
+      const prior = priorById.get(finding.findingId)
+      if (prior) {
+        if (!prior.open) {
+          issues.push(
+            `closure review finding ${finding.findingId} is already closed`,
+          )
+          continue
+        }
+        if (
+          prior.checkId !== finding.checkId ||
+          prior.owner !== finding.owner ||
+          prior.requiredOutcome !== finding.requiredOutcome
+        )
+          issues.push(
+            `closure review finding ${finding.findingId} does not preserve its accepted identity`,
+          )
+        if (finding.regressionPaths !== undefined)
+          issues.push(
+            `closure review prior finding ${finding.findingId} cannot declare regression paths`,
+          )
+        continue
+      }
+      if (finding.regressionPaths?.some(path => !changedPaths.has(path)))
         issues.push(
-          'closure review finding must reference an active prior finding or a changed-path regression',
+          'closure review regression must reference only changed paths',
         )
     }
   }

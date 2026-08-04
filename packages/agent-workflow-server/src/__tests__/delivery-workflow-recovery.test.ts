@@ -13,17 +13,89 @@ import {
   createRunStore,
   readObsoleteWorkflowRestartSeed,
 } from '../beegame/delivery-workflow/run-store'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createAcceptedComprehensiveReview,
+  createTestDeliveryRun,
+} from './delivery-workflow-test-helpers'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
+import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
 
 describe('delivery workflow recovery', () => {
   let workspace = ''
 
   afterEach(async () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('recovers a committed canonical document without redispatching its semantic repair', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-receipt-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'document-repair-dispatch',
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: initial.revision.document,
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'remediation',
+        foundationDocumentPath: 'docs/GDD.md',
+      },
+    }
+    await commitCanonicalDocument({
+      workspacePath: workspace,
+      contract: {
+        dispatchId: request.dispatchId!,
+        targetPath: 'docs/GDD.md',
+        documentId: 'GDD',
+        operation: 'create',
+        baselineDigest: null,
+      },
+      body: '# Game Design\n\nRepaired rules.',
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'needs_action',
+      activeDispatch: {
+        dispatchId: request.dispatchId!,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: initial.revision.document,
+        status: 'interrupted',
+        startedAt: new Date().toISOString(),
+        request,
+      },
+      blockedReason: 'worker transport was interrupted',
+    })
+
+    const resumed = await retryRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(resumed.status).toBe('running')
+    expect(resumed.activeDispatch).toMatchObject({
+      dispatchId: request.dispatchId,
+      status: 'completed',
+      terminalResult: {
+        workerType: 'document-author',
+        writtenPaths: ['docs/GDD.md'],
+      },
+    })
   })
 
   test('records NEEDS_REVISION as a completed reviewer execution', async () => {
@@ -73,7 +145,24 @@ describe('delivery workflow recovery', () => {
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
       revision: initial.revision.document,
-      contract: { reviewScope: 'foundation' },
+      contract: {
+        reviewScope: 'foundation',
+        currentCheckIds: [
+          'brief_alignment',
+          'cross_document_consistency',
+          'gameplay_completeness',
+        ],
+        reviewArtifacts: [{ path: 'docs/GDD.md', content: 'abc' }],
+        referenceIndex: { references: [{ referenceId: 'ref-1' }] },
+        priorFindings: [{ findingId: 'prior-1' }],
+      },
+    })
+    await store.updateUsage(initial.runId, {
+      input_tokens: 20,
+      cache_read_tokens: 10,
+      cache_creation_tokens: 5,
+      completion_tokens: 4,
+      total_tokens: 39,
     })
     const completed = await dispatcher.completeDispatch(dispatch.dispatchId, {
       workerType: 'document-reviewer',
@@ -88,6 +177,22 @@ describe('delivery workflow recovery', () => {
           findingIds: ['missing-behavior'],
           assessments: [],
         },
+        {
+          id: 'cross_document_consistency',
+          status: 'pass',
+          conclusion: 'The documents are consistent.',
+          evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+          findingIds: [],
+          assessments: [],
+        },
+        {
+          id: 'gameplay_completeness',
+          status: 'pass',
+          conclusion: 'The gameplay contract is complete.',
+          evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+          findingIds: [],
+          assessments: [],
+        },
       ],
       reviewedDocumentPaths: [],
       checklistIds: [],
@@ -100,12 +205,12 @@ describe('delivery workflow recovery', () => {
           evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           observation: 'A required behavior is missing.',
-          blockingReason: 'The behavior cannot be implemented uniquely.',
-          requiredAction: 'Define the required behavior.',
-          closureCondition: 'The required behavior is observable and complete.',
+          blockingImpact: 'The behavior cannot be implemented uniquely.',
+          requiredOutcome: 'The required behavior is observable and complete.',
         },
       ],
       evidencePath,
+      rejectedSubmissionCount: 2,
     })
 
     expect(completed.record.status).toBe('completed')
@@ -114,6 +219,31 @@ describe('delivery workflow recovery', () => {
       status: 'completed',
     })
     expect(await readFile(join(workspace, evidencePath), 'utf8')).toBe('{}\n')
+    expect(
+      (await store.readEvents()).find(
+        event => event.type === 'dispatch.completed',
+      ),
+    ).toMatchObject({
+      reviewerPerformance: {
+        checkIds: [
+          'brief_alignment',
+          'cross_document_consistency',
+          'gameplay_completeness',
+        ],
+        usage: {
+          input_tokens: 20,
+          cache_read_tokens: 10,
+          cache_creation_tokens: 5,
+          completion_tokens: 4,
+          total_tokens: 39,
+        },
+        artifactCount: 1,
+        artifactBytes: 3,
+        referenceCount: 1,
+        priorFindingCount: 1,
+        rejectedSubmissionCount: 2,
+      },
+    })
   })
 
   test('explicit retry resumes an accepted repair handoff regardless of prior pass count', async () => {
@@ -150,14 +280,16 @@ describe('delivery workflow recovery', () => {
           sourceRevision: revision,
           requiredCheckIds: ['brief_alignment'],
           completedCheckIds: ['brief_alignment'],
-          checks: [{
-            id: 'brief_alignment' as const,
-            status: 'block' as const,
-            conclusion: 'Foundation remediation is required.',
-            evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
-            findingIds: ['MISSING-RULE'],
-            assessments: [],
-          }],
+          checks: [
+            {
+              id: 'brief_alignment' as const,
+              status: 'block' as const,
+              conclusion: 'Foundation remediation is required.',
+              evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+              findingIds: ['MISSING-RULE'],
+              assessments: [],
+            },
+          ],
           checkEvidenceDigests: {},
           findings: [
             {
@@ -168,9 +300,8 @@ describe('delivery workflow recovery', () => {
               evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
               subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
               observation: 'A required rule is missing.',
-              blockingReason: 'The behavior cannot be implemented uniquely.',
-              requiredAction: 'Define the required rule.',
-              closureCondition: 'The required rule is defined.',
+              blockingImpact: 'The behavior cannot be implemented uniquely.',
+              requiredOutcome: 'The required rule is defined.',
             },
           ],
           activeTarget: 'foundation',
@@ -229,16 +360,10 @@ describe('delivery workflow recovery', () => {
           scope: 'complete',
           mode: 'initial',
           sourceRevision: 'resources',
-          requiredCheckIds: ['resource_content_consistency'],
-          completedCheckIds: ['resource_content_consistency'],
-          checks: [{
-            id: 'resource_content_consistency' as const,
-            status: 'block' as const,
-            conclusion: 'Resource remediation is required.',
-            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+          ...createAcceptedComprehensiveReview({
+            blockingCheckId: 'resource_content_consistency',
             findingIds: ['resource-finding'],
-            assessments: [],
-          }],
+          }),
           checkEvidenceDigests: {},
           findings: [
             {
@@ -255,9 +380,8 @@ describe('delivery workflow recovery', () => {
                 },
               ],
               observation: 'The resource contract is inconsistent.',
-              blockingReason: 'Implementation cannot resolve the resource.',
-              requiredAction: 'Correct the canonical resource contract.',
-              closureCondition: 'The resource contract is consistent.',
+              blockingImpact: 'Implementation cannot resolve the resource.',
+              requiredOutcome: 'The resource contract is consistent.',
             },
           ],
           activeTarget: 'resource',
@@ -1053,7 +1177,10 @@ describe('delivery workflow recovery', () => {
     })
 
     await new Promise(resolve => setTimeout(resolve, 40))
-    expect(await store.load()).toMatchObject({ status: 'running', activeDispatch: { status: 'running' } })
+    expect(await store.load()).toMatchObject({
+      status: 'running',
+      activeDispatch: { status: 'running' },
+    })
   })
 
   test('does not stop resource work because no mutation has occurred yet', async () => {
@@ -1153,7 +1280,7 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: {},
     })
-    expect(dispatch.startingUsageTotalTokens).toBe(100)
+    expect(dispatch.startingUsage).toEqual(baselineUsage)
     await store.updateUsage(initial.runId, {
       ...baselineUsage,
       cache_read_tokens: 80,
@@ -1561,6 +1688,7 @@ describe('delivery workflow recovery', () => {
       checklistIds: [],
       findings: [],
       evidencePath,
+      rejectedSubmissionCount: 0,
     })
 
     expect(started.map(request => request.workerType)).toEqual([

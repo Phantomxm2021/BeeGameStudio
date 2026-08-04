@@ -1,5 +1,10 @@
 import { z } from 'zod/v4'
 import { documentReviewCheckSchema } from './document-review-check-schema'
+import { openDocumentReviewFindings } from './document-review-findings'
+import {
+  deriveFoundationRepairGroups,
+  repairPlanMatchesCanonicalGraph,
+} from './document-repair-graph'
 import type {
   AtomicTask,
   ChecklistRemediation,
@@ -124,6 +129,16 @@ export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   })
   .strict()
 
+const workflowUsageSchema = z
+  .object({
+    input_tokens: z.number().nonnegative(),
+    cache_read_tokens: z.number().nonnegative(),
+    cache_creation_tokens: z.number().nonnegative(),
+    completion_tokens: z.number().nonnegative(),
+    total_tokens: z.number().nonnegative(),
+  })
+  .strict()
+
 export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
   .object({
     dispatchId: z.string().min(1),
@@ -136,7 +151,7 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     failureReason: z.string().min(1).optional(),
     request: workerDispatchRequestSchema.optional(),
     terminalResult: z.record(z.string(), z.unknown()).optional(),
-    startingUsageTotalTokens: z.number().int().nonnegative().optional(),
+    startingUsage: workflowUsageSchema.optional(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime().optional(),
   })
@@ -154,16 +169,6 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
     revision: z.string().min(1),
     status: z.enum(['ready', 'passed', 'failed', 'blocked']),
     observedAt: z.string().datetime(),
-  })
-  .strict()
-
-const workflowUsageSchema = z
-  .object({
-    input_tokens: z.number().nonnegative(),
-    cache_read_tokens: z.number().nonnegative(),
-    cache_creation_tokens: z.number().nonnegative(),
-    completion_tokens: z.number().nonnegative(),
-    total_tokens: z.number().nonnegative(),
   })
   .strict()
 
@@ -195,7 +200,7 @@ export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFindi
       checkId: documentReviewCheckIdSchema,
       severity: z.literal('blocking'),
       owner: z.enum(['foundation', 'checklist', 'resource']),
-      regressionPaths: z.array(z.string().min(1)).optional(),
+      regressionPaths: z.array(z.string().min(1)).min(1).optional(),
       evidence: z
         .array(
           z
@@ -220,9 +225,8 @@ export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFindi
         )
         .min(1),
       observation: z.string().min(1),
-      blockingReason: z.string().min(1),
-      requiredAction: z.string().min(1),
-      closureCondition: z.string().min(1),
+      blockingImpact: z.string().min(1),
+      requiredOutcome: z.string().min(1),
     })
     .strict()
 
@@ -303,6 +307,28 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
   })
   .strict()
   .superRefine((cycle, context) => {
+    const canonicalCheckIds =
+      cycle.scope === 'foundation'
+        ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
+        : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
+    const canonicalRequiredSubset = canonicalCheckIds.filter(id =>
+      cycle.requiredCheckIds.includes(id),
+    )
+    if (
+      new Set(cycle.requiredCheckIds).size !== cycle.requiredCheckIds.length ||
+      canonicalRequiredSubset.length !== cycle.requiredCheckIds.length ||
+      canonicalRequiredSubset.some(
+        (id, index) => id !== cycle.requiredCheckIds[index],
+      ) ||
+      (cycle.mode === 'initial' &&
+        cycle.requiredCheckIds.length !== canonicalCheckIds.length)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['requiredCheckIds'],
+        message:
+          'document review required checks must be the canonical ordered set or closure subset',
+      })
     const completedPrefix = cycle.requiredCheckIds.slice(
       0,
       cycle.completedCheckIds.length,
@@ -343,6 +369,29 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         code: 'custom',
         message: 'closure document review cycle requires parent and target',
       })
+    const findingIds = cycle.findings.map(finding => finding.findingId)
+    if (new Set(findingIds).size !== findingIds.length)
+      context.addIssue({
+        code: 'custom',
+        path: ['findings'],
+        message: 'document review finding ledger IDs must be unique',
+      })
+    const findingById = new Map(
+      cycle.findings.map(finding => [finding.findingId, finding]),
+    )
+    if (
+      cycle.checks.some(check =>
+        check.findingIds.some(
+          findingId => findingById.get(findingId)?.checkId !== check.id,
+        ),
+      )
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message:
+          'document review check finding IDs must resolve to their canonical ledger owner',
+      })
     if (cycle.repairPlan) {
       if (!cycle.acceptedSemanticResult || cycle.activeTarget !== 'foundation')
         context.addIssue({
@@ -351,98 +400,37 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
           message:
             'foundation repair plan requires one accepted active foundation finding ledger',
         })
-      const expectedFindingIds = cycle.findings
-        .filter(finding => finding.owner === 'foundation')
-        .map(finding => finding.findingId)
-      const assignedFindingIds = cycle.repairPlan.groups.flatMap(
-        group => group.findingIds,
+      const foundationFindings = openDocumentReviewFindings(cycle).filter(
+        finding => finding.owner === 'foundation',
       )
-      if (
-        assignedFindingIds.length > expectedFindingIds.length ||
-        new Set(assignedFindingIds).size !== assignedFindingIds.length ||
-        assignedFindingIds.some((id, index) => id !== expectedFindingIds[index])
-      )
+      let derivedRepairGroups: ReturnType<typeof deriveFoundationRepairGroups> =
+        []
+      let repairGraphDerived = true
+      try {
+        derivedRepairGroups = deriveFoundationRepairGroups(foundationFindings)
+      } catch {
+        repairGraphDerived = false
         context.addIssue({
           code: 'custom',
           path: ['repairPlan', 'groups'],
-          message:
-            'repair plan must be the stable accepted-finding prefix without duplicates',
+          message: 'foundation repair findings must have canonical subjects',
         })
-      const groupIds = cycle.repairPlan.groups.map(group => group.groupId)
-      const knownGroups = new Set(groupIds)
+      }
       if (
-        knownGroups.size !== groupIds.length ||
-        cycle.repairPlan.groups.some(
-          group =>
-            new Set(group.findingIds).size !== group.findingIds.length ||
-            new Set(group.affectedPaths).size !== group.affectedPaths.length ||
-            new Set(group.dependsOn).size !== group.dependsOn.length ||
-            group.dependsOn.some(
-              dependency =>
-                dependency === group.groupId || !knownGroups.has(dependency),
-            ),
+        repairGraphDerived &&
+        !repairPlanMatchesCanonicalGraph(
+          cycle.repairPlan.groups,
+          derivedRepairGroups,
         )
       )
         context.addIssue({
           code: 'custom',
           path: ['repairPlan', 'groups'],
-          message: 'repair plan group identities and dependencies are invalid',
-        })
-      const dependencyMap = new Map(
-        cycle.repairPlan.groups.map(group => [group.groupId, group.dependsOn]),
-      )
-      const visiting = new Set<string>()
-      const visited = new Set<string>()
-      let cyclic = false
-      const visit = (groupId: string): void => {
-        if (visited.has(groupId) || cyclic) return
-        if (visiting.has(groupId)) {
-          cyclic = true
-          return
-        }
-        visiting.add(groupId)
-        for (const dependency of dependencyMap.get(groupId) ?? [])
-          visit(dependency)
-        visiting.delete(groupId)
-        visited.add(groupId)
-      }
-      for (const groupId of groupIds) visit(groupId)
-      if (cyclic)
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'groups'],
-          message: 'repair plan dependencies must be acyclic',
-        })
-      const plannedFindingSet = new Set(assignedFindingIds)
-      const expectedPaths = [
-        ...new Set(
-          cycle.findings
-            .filter(finding => plannedFindingSet.has(finding.findingId))
-            .flatMap(finding =>
-              finding.subjects
-                .map(subject => subject.path)
-                .filter(path =>
-                  CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-                ),
-            ),
-        ),
-      ]
-      const plannedPaths = [
-        ...new Set(
-          cycle.repairPlan.groups.flatMap(group => group.affectedPaths),
-        ),
-      ]
-      if (
-        plannedPaths.length !== expectedPaths.length ||
-        expectedPaths.some(path => !plannedPaths.includes(path as never))
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'groups'],
-          message: 'repair plan paths must cover the finding subjects exactly',
+          message:
+            'repair plan must be the stable canonical repair-graph prefix',
         })
       if (
-        assignedFindingIds.length < expectedFindingIds.length &&
+        cycle.repairPlan.groups.length < derivedRepairGroups.length &&
         cycle.repairPlan.completedPaths.length > 0
       )
         context.addIssue({

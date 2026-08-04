@@ -81,26 +81,25 @@ describe('resource-content worker prompts', () => {
     expect(reviewerPrompt).toContain(
       'never request document names, headings, prose labels or invented duty IDs',
     )
-    expect(reviewerPrompt).toContain('referenceId values from contract.referenceIndex.references')
-    expect(reviewerPrompt).toContain('subject reference must declare the owner')
+    expect(reviewerPrompt).toContain(
+      'referenceId values from contract.referenceIndex.references',
+    )
+    expect(reviewerPrompt).toContain('never submit subjectOwner')
+    expect(reviewerPrompt).toContain('service derives ownership')
     expect(reviewerPrompt).toContain('cannot be resource repair subjects')
     expect(reviewerPrompt).toContain(
-      'exactly one accepted SubmitDocumentReviewCheck',
+      'exactly one accepted SubmitDocumentReviewPacket',
+    )
+    expect(reviewerPrompt).toContain('a rejected call accepts nothing')
+    expect(reviewerPrompt).toContain(
+      'Put each check auditable reasoning directly into its criterion derivations',
+    )
+    expect(reviewerPrompt).toContain('produce a separate transcript')
+    expect(reviewerPrompt).toContain(
+      'evidence and subjects may reference only artifacts listed for that check',
     )
     expect(reviewerPrompt).toContain(
-      'A rejected call is not accepted',
-    )
-    expect(reviewerPrompt).toContain(
-      'Put its auditable reasoning directly into criterion derivations',
-    )
-    expect(reviewerPrompt).toContain(
-      'produce a separate transcript',
-    )
-    expect(reviewerPrompt).toContain(
-      'Evidence and subjects must use only stable referenceId values',
-    )
-    expect(reviewerPrompt).toContain(
-      'Subjects are exactly what requiredAction must change',
+      'A subject is current content that violates authority',
     )
   })
 
@@ -124,6 +123,116 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('scene_state_completeness')
     expect(prompt).toContain('Use only cited document facts')
     expect(prompt).toContain('not final feel or empirical balance')
+    expect(prompt).toContain(
+      'Each assessment contains exactly criterion, status, evidence, derivation and conclusion',
+    )
+    expect(prompt).toContain(
+      'Every evidence or subject entry contains exactly referenceId',
+    )
+    expect(prompt).toContain(
+      'result, note, copied paths and copied anchors are invalid',
+    )
+  })
+
+  test('keeps immutable review context before the active-check suffix', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'initial',
+        reviewAuthority: {
+          confirmedBriefContext: '{"idea":"defend"}',
+          confirmedBriefDigest: 'brief-digest',
+        },
+        reviewArtifacts: [
+          { path: 'docs/GDD.md', content: '# Rules\nStable body' },
+        ],
+        referenceIndex: {
+          references: [{ referenceId: 'ref-1', path: 'docs/GDD.md' }],
+        },
+        currentCheckIds: ['brief_alignment'],
+        criteriaByCheck: { brief_alignment: [] },
+        priorFindings: [],
+      },
+    })
+    const staticStart = prompt.indexOf('--- BEGIN REVIEW STATIC CONTRACT ---')
+    const artifactStart = prompt.indexOf(
+      '--- BEGIN REVIEW ARTIFACT docs/GDD.md ---',
+    )
+    const referenceStart = prompt.indexOf(
+      '--- BEGIN REVIEW REFERENCE INDEX ---',
+    )
+    const activeStart = prompt.indexOf('--- BEGIN REVIEW ACTIVE PACKET ---')
+    expect(staticStart).toBeGreaterThan(-1)
+    expect(artifactStart).toBeGreaterThan(staticStart)
+    expect(referenceStart).toBeGreaterThan(artifactStart)
+    expect(activeStart).toBeGreaterThan(referenceStart)
+    expect(prompt.slice(staticStart, activeStart)).not.toContain(
+      '"currentCheckIds"',
+    )
+    expect(prompt.slice(activeStart)).toContain('brief_alignment')
+    expect(prompt.slice(activeStart)).toContain('"criteriaByCheck"')
+    expect(prompt).toContain('"confirmedBriefContext":{"idea":"defend"}')
+  })
+
+  test('projects only relevant open findings into the active Reviewer packet', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'closure',
+        reviewAuthority: {
+          confirmedBriefContext: '{"idea":"defend"}',
+          confirmedBriefDigest: 'brief-digest',
+        },
+        reviewArtifacts: [
+          { path: 'docs/GDD.md', content: '# Rules\nStable body' },
+        ],
+        referenceIndex: { references: [] },
+        currentCheckIds: ['brief_alignment'],
+        criteriaByCheck: { brief_alignment: [] },
+        artifactPathsByCheck: {
+          brief_alignment: ['docs/GDD.md'],
+        },
+        priorFindings: [
+          {
+            findingId: 'visible-open',
+            checkId: 'brief_alignment',
+            open: true,
+            subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+          },
+          {
+            findingId: 'hidden-closed',
+            checkId: 'brief_alignment',
+            open: false,
+            subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+          },
+          {
+            findingId: 'hidden-unrelated',
+            checkId: 'resource_semantic_fitness',
+            open: true,
+            subjects: [
+              { path: 'assets/asset-manifest.json', anchor: '/requirements' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(prompt).toContain('visible-open')
+    expect(prompt).not.toContain('hidden-closed')
+    expect(prompt).not.toContain('hidden-unrelated')
   })
 
   test('routes complete-review defects to the artifact owner without duplicate findings', () => {
@@ -190,16 +299,14 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Events, waves and numeric configuration')
     expect(prompt).toContain('world, scene, hierarchy and instance placement')
-    expect(prompt).toContain('exactly once as the only mutation')
-    expect(prompt).toContain('Follow the projected target-state instruction')
+    expect(prompt).toContain('CommitCanonicalDocument exactly once')
+    expect(prompt).toContain('service owns document_id, version, updated_at')
     expect(prompt).toContain('compact decision contract')
     expect(prompt).toContain('Reference upstream IDs instead of restating')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
     )
-    expect(prompt).not.toContain(
-      'Call SubmitDocumentAuthorResult exactly once with resolvedFindingIds: []',
-    )
+    expect(prompt).not.toContain('resolvedFindingIds')
   })
 
   test('keeps initial numeric authoring separate from review and repair calculation', () => {
@@ -242,14 +349,18 @@ describe('resource-content worker prompts', () => {
       contract: {
         documentSet: 'foundation',
         authoringMode: 'repair-planning',
-        repairDecisionTask: { finding: { findingId: 'finding' } },
+        repairPlanTask: {
+          groups: [{ findings: [{ findingId: 'finding' }], dependsOn: [] }],
+        },
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(planningPrompt).toContain('contract.repairDecisionTask.finding')
-    expect(planningPrompt).toContain('service owns its identity, subjects, order')
-    expect(planningPrompt).toContain('SubmitDocumentRepairDecision exactly once')
-    expect(planningPrompt).toContain('Do not write or mutate project files')
+    expect(planningPrompt).toContain('contract.repairPlanTask.groups')
+    expect(planningPrompt).toContain('dependsOn')
+    expect(planningPrompt).not.toContain('single accepted finding')
+    expect(planningPrompt).toContain('complete ordered repair graph')
+    expect(planningPrompt).toContain('SubmitDocumentRepairPlan exactly once')
+    expect(planningPrompt).toContain('do not write or mutate project files')
 
     const ownerPrompt = buildWorkerPrompt({
       runId: 'run',
@@ -270,7 +381,8 @@ describe('resource-content worker prompts', () => {
     })
     expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
     expect(ownerPrompt).toContain('locked decisions')
-    expect(ownerPrompt).toContain('resolvedFindingIds: []')
+    expect(ownerPrompt).toContain('CommitCanonicalDocument exactly once')
+    expect(ownerPrompt).toContain('service owns metadata')
   })
 
   test('keeps the checklist minimal and scenario-level', () => {

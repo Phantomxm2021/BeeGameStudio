@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { toProjectRuntimeDisplayModel, toPermissionDisplayModel } from './displayModels'
+import {
+  toProjectRuntimeDisplayModel,
+  toPermissionDisplayModel,
+} from './displayModels'
 
 describe('displayModels', () => {
   it('maps only canonical tool-permission fields', () => {
@@ -37,9 +40,10 @@ describe('displayModels', () => {
         phase: 'IMPLEMENTATION',
         phaseIndex: 6,
         phaseCount: 9,
+        substage: 'CLOSURE_REVIEW',
+        convergencePass: 2,
         reviewMode: 'closure',
         reviewTarget: 'resource',
-        reviewAccepted: true,
         startedAt: '2026-07-30T10:00:00.000Z',
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },
@@ -59,20 +63,23 @@ describe('displayModels', () => {
         status: 'running',
         phaseIndex: 6,
         phaseCount: 9,
+        substage: 'CLOSURE_REVIEW',
+        convergencePass: 2,
         reviewMode: 'closure',
         reviewTarget: 'resource',
-        reviewAccepted: true,
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },
     })
   })
 
   it('does not invent a workflow from transport phase fields', () => {
-    expect(toProjectRuntimeDisplayModel({
-      project_id: 'project-1',
-      phase: 'running',
-      blocked: false,
-    })?.workflow).toBeUndefined()
+    expect(
+      toProjectRuntimeDisplayModel({
+        project_id: 'project-1',
+        phase: 'running',
+        blocked: false,
+      })?.workflow,
+    ).toBeUndefined()
   })
 
   it('preserves a stopped workflow task without converting it to failure', () => {
@@ -103,15 +110,17 @@ describe('displayModels', () => {
   })
 
   it('preserves the canonical obsolete-workflow restart action', () => {
-    expect(toProjectRuntimeDisplayModel({
-      project_id: 'project-1',
-      phase: 'BRIEF_CONFIRMED',
-      blocked: true,
-      workflow: {
-        runId: 'workflow-state-error',
-        status: 'needs_action',
-        nextAction: 'restart',
-      },
-    })?.workflow?.nextAction).toBe('restart')
+    expect(
+      toProjectRuntimeDisplayModel({
+        project_id: 'project-1',
+        phase: 'BRIEF_CONFIRMED',
+        blocked: true,
+        workflow: {
+          runId: 'workflow-state-error',
+          status: 'needs_action',
+          nextAction: 'restart',
+        },
+      })?.workflow?.nextAction,
+    ).toBe('restart')
   })
 })

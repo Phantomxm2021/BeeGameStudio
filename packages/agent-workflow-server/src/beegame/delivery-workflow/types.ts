@@ -10,6 +10,21 @@ export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/acceptance/gameplay-checklist.md',
 ] as const
 
+export const CANONICAL_PROJECT_DOCUMENT_IDS = {
+  'docs/GDD.md': 'GDD',
+  'docs/LEVEL_SCENE_DESIGN.md': 'LEVEL_SCENE_DESIGN',
+  'docs/BALANCE_DESIGN.md': 'BALANCE_DESIGN',
+  'docs/TECHNICAL_DESIGN.md': 'TECHNICAL_DESIGN',
+  'docs/ART_DIRECTION.md': 'ART_DIRECTION',
+  'docs/UI_UX_SPEC.md': 'UI_UX_SPEC',
+  'docs/AUDIO_DESIGN.md': 'AUDIO_DESIGN',
+  'docs/ASSET_PLAN.md': 'ASSET_PLAN',
+  'docs/acceptance/gameplay-checklist.md': 'GAMEPLAY_CHECKLIST',
+} as const satisfies Record<
+  (typeof CANONICAL_PROJECT_DOCUMENTS)[number],
+  string
+>
+
 export const CANONICAL_FOUNDATION_DOCUMENTS = [
   'docs/GDD.md',
   'docs/LEVEL_SCENE_DESIGN.md',
@@ -121,6 +136,19 @@ export const FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS = [
   'acceptance_observability',
 ] as const
 
+export const FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS = [
+  ['brief_alignment', 'cross_document_consistency', 'gameplay_completeness'],
+  ['gameplay_strategy_viability', 'economy_progression_integrity'],
+  ['numeric_balance_feasibility', 'pacing_difficulty_coherence'],
+  [
+    'level_scene_design_integrity',
+    'technical_feasibility',
+    'art_direction_coherence',
+    'ui_audio_consistency',
+  ],
+  ['acceptance_observability'],
+] as const satisfies readonly (readonly FoundationDocumentReviewCheckId[])[]
+
 export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
   'checklist_traceability',
   'resource_semantic_fitness',
@@ -128,6 +156,12 @@ export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
   'resource_content_consistency',
   'implementation_readiness',
 ] as const
+
+export const DOCUMENT_REVIEW_CHECK_PACKETS: readonly (readonly DocumentReviewCheckId[])[] =
+  [
+    ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
+    ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS.map(id => [id]),
+  ]
 
 export const COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS = [
   ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
@@ -225,9 +259,8 @@ export type DocumentReviewFinding = {
   evidence: DocumentReviewEvidence[]
   subjects: DocumentReviewFindingSubject[]
   observation: string
-  blockingReason: string
-  requiredAction: string
-  closureCondition: string
+  blockingImpact: string
+  requiredOutcome: string
 }
 
 export type DocumentReviewApproval = {
@@ -262,7 +295,7 @@ export type DocumentReviewCycle = {
   mode: DocumentReviewMode
   sourceRevision: string
   requiredCheckIds: DocumentReviewCheckId[]
-  /** Ordered cursor for checks accepted in this cycle (not inherited checks). */
+  /** Ordered cursor, including any digest-verified inherited approval prefix. */
   completedCheckIds: DocumentReviewCheckId[]
   checks: DocumentReviewCheck[]
   checkEvidenceDigests: Record<string, Record<string, string>>
@@ -287,7 +320,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 7 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 8 as const
 
 export type ChecklistRemediation = {
   sourceRevision: string
@@ -337,7 +370,7 @@ export type DispatchRecord = {
   request?: WorkerDispatchRequest
   terminalResult?: Record<string, unknown>
   /** Cumulative run usage captured before this worker starts. */
-  startingUsageTotalTokens?: number
+  startingUsage?: WorkflowUsage
   startedAt: string
   finishedAt?: string
 }

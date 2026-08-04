@@ -7,6 +7,7 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { buildWorkerPrompt } from './worker-prompts'
+import { openDocumentReviewFindings } from './document-review-findings'
 import {
   isWorkflowEvidenceFile,
   persistImplementationEvidence,
@@ -15,6 +16,7 @@ import type {
   DeliveryRun,
   DeliveryWorkerPort,
   DispatchRecord,
+  WorkflowUsage,
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore } from './run-store'
@@ -61,6 +63,96 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function usageSnapshot(usage: WorkflowUsage | undefined): WorkflowUsage {
+  return {
+    input_tokens: Math.max(0, usage?.input_tokens ?? 0),
+    cache_read_tokens: Math.max(0, usage?.cache_read_tokens ?? 0),
+    cache_creation_tokens: Math.max(0, usage?.cache_creation_tokens ?? 0),
+    completion_tokens: Math.max(0, usage?.completion_tokens ?? 0),
+    total_tokens: Math.max(0, usage?.total_tokens ?? 0),
+  }
+}
+
+function usageDelta(
+  current: WorkflowUsage | undefined,
+  starting: WorkflowUsage | undefined,
+): WorkflowUsage {
+  const end = usageSnapshot(current)
+  const start = usageSnapshot(starting)
+  return {
+    input_tokens: Math.max(0, end.input_tokens - start.input_tokens),
+    cache_read_tokens: Math.max(
+      0,
+      end.cache_read_tokens - start.cache_read_tokens,
+    ),
+    cache_creation_tokens: Math.max(
+      0,
+      end.cache_creation_tokens - start.cache_creation_tokens,
+    ),
+    completion_tokens: Math.max(
+      0,
+      end.completion_tokens - start.completion_tokens,
+    ),
+    total_tokens: Math.max(0, end.total_tokens - start.total_tokens),
+  }
+}
+
+function reviewerPerformance(input: {
+  dispatch: DispatchRecord
+  request: WorkerDispatchRequest | undefined
+  result: WorkerTerminalResult
+  currentUsage: WorkflowUsage | undefined
+  finishedAt: string
+}): Record<string, unknown> | undefined {
+  if (
+    input.result.workerType !== 'document-reviewer' ||
+    input.request?.workerType !== 'document-reviewer'
+  )
+    return undefined
+  const contract = input.request.contract
+  const artifacts = Array.isArray(contract.reviewArtifacts)
+    ? contract.reviewArtifacts
+    : []
+  const referenceIndex =
+    contract.referenceIndex &&
+    typeof contract.referenceIndex === 'object' &&
+    !Array.isArray(contract.referenceIndex)
+      ? (contract.referenceIndex as Record<string, unknown>)
+      : undefined
+  const references = Array.isArray(referenceIndex?.references)
+    ? referenceIndex.references
+    : []
+  const priorFindings = Array.isArray(contract.priorFindings)
+    ? contract.priorFindings
+    : []
+  const artifactBytes = artifacts.reduce((total, artifact) => {
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact))
+      return total
+    const content = (artifact as Record<string, unknown>).content
+    return (
+      total +
+      (typeof content === 'string'
+        ? new TextEncoder().encode(content).byteLength
+        : 0)
+    )
+  }, 0)
+  const startedAt = Date.parse(input.dispatch.startedAt)
+  const finishedAt = Date.parse(input.finishedAt)
+  return {
+    checkIds: contract.currentCheckIds,
+    durationMs:
+      Number.isFinite(startedAt) && Number.isFinite(finishedAt)
+        ? Math.max(0, finishedAt - startedAt)
+        : 0,
+    usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
+    artifactCount: artifacts.length,
+    artifactBytes,
+    referenceCount: references.length,
+    priorFindingCount: priorFindings.length,
+    rejectedSubmissionCount: input.result.rejectedSubmissionCount,
+  }
+}
+
 function terminalEvidencePath(
   result: WorkerTerminalResult,
 ): string | undefined {
@@ -96,7 +188,9 @@ function assertSingleResourceWorkAuthority(
     cycle?.acceptedSemanticResult && cycle.activeTarget === 'resource',
   )
   const findings = hasAcceptedResourceAuthority
-    ? cycle!.findings.filter(finding => finding.owner === 'resource')
+    ? openDocumentReviewFindings(cycle).filter(
+        finding => finding.owner === 'resource',
+      )
     : []
   if (hasAcceptedResourceAuthority && findings.length === 0) {
     throw new DispatchError(
@@ -270,7 +364,7 @@ export function createDeliveryDispatcher(options: {
       ...(request.taskId ? { taskId: request.taskId } : {}),
       revision: request.revision,
       status: 'running',
-      startingUsageTotalTokens: Math.max(0, run.usage?.total_tokens ?? 0),
+      startingUsage: usageSnapshot(run.usage),
       startedAt: now(),
       request: dispatchRequest,
     })
@@ -407,7 +501,7 @@ export function createDeliveryDispatcher(options: {
         const consumed = Math.max(
           0,
           (run.usage?.total_tokens ?? 0) -
-            (run.activeDispatch.startingUsageTotalTokens ?? 0),
+            (run.activeDispatch.startingUsage?.total_tokens ?? 0),
         )
         if (consumed >= resourceMaxTokens) {
           const reason = `resource worker exceeded its ${resourceMaxTokens} token limit`
@@ -559,6 +653,7 @@ export function createDeliveryDispatcher(options: {
             : result.status === 'blocked'
               ? 'blocked'
               : 'failed'
+    const finishedAt = now()
     const completed = parseDispatchRecord({
       ...run.activeDispatch,
       status,
@@ -566,13 +661,20 @@ export function createDeliveryDispatcher(options: {
         ? { terminalEvidencePath: terminalEvidencePath(result) }
         : {}),
       terminalResult: result as unknown as Record<string, unknown>,
-      finishedAt: now(),
+      finishedAt,
     })
     const updated = {
       ...run,
       activeDispatch: completed,
       thinking: 'idle' as const,
     }
+    const performance = reviewerPerformance({
+      dispatch: run.activeDispatch,
+      request,
+      result,
+      currentUsage: run.usage,
+      finishedAt,
+    })
     await options.store.commit(updated, {
       runId: run.runId,
       type: `dispatch.${status}`,
@@ -581,6 +683,7 @@ export function createDeliveryDispatcher(options: {
       revision: run.revision,
       dispatchId,
       workerType: result.workerType,
+      ...(performance ? { reviewerPerformance: performance } : {}),
     })
     const key = request
       ? idempotencyKey(

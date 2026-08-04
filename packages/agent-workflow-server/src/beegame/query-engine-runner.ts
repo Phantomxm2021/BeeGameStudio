@@ -33,6 +33,7 @@ import { createNativeAssetManifestTool } from './native-asset-manifest-tool'
 import { createNativeImplementationResultTool } from './native-implementation-result-tool'
 import { createNativeValidationResultTool } from './native-validation-result-tool'
 import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
+import { createNativeCanonicalDocumentTool } from './native-canonical-document-tool'
 import { createResourceSelectionClient } from './resource-selection-client'
 import { confirmedResourceLibraryUsage } from './resource-delivery-readiness'
 
@@ -172,9 +173,9 @@ const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
   'SubmitAtomicTaskPlan',
   'SubmitImplementationResult',
   'SubmitValidationResult',
-  'SubmitDocumentAuthorResult',
-  'SubmitDocumentRepairDecision',
-  'SubmitDocumentReviewCheck',
+  'CommitCanonicalDocument',
+  'SubmitDocumentRepairPlan',
+  'SubmitDocumentReviewPacket',
   'SubmitChangeImpactResult',
   'SubmitQuestionAnswerResult',
 ])
@@ -252,9 +253,7 @@ export function requiresBeeGameWorkflowBoundaryCheck(
 export function getBeeGameWorkflowThinkingConfig(
   workerType?: BeeGameSessionRunnerStartInput['workflowWorkerType'],
 ): { type: 'disabled' } | undefined {
-  return workerType === 'document-author' ||
-    workerType === 'document-reviewer' ||
-    workerType === 'atomic-task-planner' ||
+  return workerType === 'atomic-task-planner' ||
     workerType === 'implementation-worker'
     ? { type: 'disabled' }
     : undefined
@@ -790,7 +789,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : undefined
     const workflowResultTool =
       (this.input.workflowWorkerType === 'document-author' &&
-        this.input.workflowDocumentAuthorMode !== 'initial') ||
+        this.input.workflowDocumentAuthorMode === 'repair-planning') ||
       this.input.workflowWorkerType === 'document-reviewer' ||
       this.input.workflowWorkerType === 'change-impact-analyzer' ||
       this.input.workflowWorkerType === 'question-answerer'
@@ -801,16 +800,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
             this.input.workflowDocumentAuthorMode
               ? { documentAuthorMode: this.input.workflowDocumentAuthorMode }
               : {}),
-            ...(this.input.workflowWorkerType === 'document-reviewer' &&
-            this.input.workflowDocumentReviewMode
+            ...(this.input.workflowWorkerType === 'document-author' &&
+            this.input.workflowDocumentAuthorMode === 'repair-planning' &&
+            this.input.workflowDocumentRepairGroupCount
               ? {
-                  documentReviewMode: this.input.workflowDocumentReviewMode,
-                }
-              : {}),
-            ...(this.input.workflowWorkerType === 'document-reviewer' &&
-            this.input.workflowDocumentReviewScope
-              ? {
-                  documentReviewScope: this.input.workflowDocumentReviewScope,
+                  documentRepairGroupCount:
+                    this.input.workflowDocumentRepairGroupCount,
                 }
               : {}),
             ...(this.input.workflowWorkerType === 'document-reviewer' &&
@@ -822,6 +817,16 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               : {}),
           })
         : undefined
+    const canonicalDocumentTool =
+      this.input.workflowWorkerType === 'document-author' &&
+      this.input.workflowDocumentAuthorMode !== 'repair-planning' &&
+      this.input.workflowCanonicalDocumentCommitContract
+        ? createNativeCanonicalDocumentTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+            contract: this.input.workflowCanonicalDocumentCommitContract,
+          })
+        : undefined
     const workflowTools = [
       assetManifestTool,
       resourceTool,
@@ -829,6 +834,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       implementationResultTool,
       validationResultTool,
       workflowResultTool,
+      canonicalDocumentTool,
     ].filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
     const tools = [...nativeTools, ...workflowTools]
     const [commands, discoveredAgentDefinitions] = await Promise.all([
@@ -1503,9 +1509,7 @@ export function selectBeeGameWorkerTools(
     return []
   }
   if (workflowWorkerType === 'document-author') {
-    if (documentAuthorMode === 'repair-planning') return []
-    const documentToolNames = new Set(['Read', 'Write'])
-    return tools.filter(tool => documentToolNames.has(getToolName(tool)))
+    return []
   }
   if (workflowWorkerType === 'resource-preparer') {
     const resourceToolNames = new Set([

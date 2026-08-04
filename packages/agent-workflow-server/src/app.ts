@@ -181,10 +181,12 @@ import type {
   DispatchRecord,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import { DELIVERY_PHASES } from './beegame/delivery-workflow/schema'
+import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
+import { openDocumentReviewFindings } from './beegame/delivery-workflow/document-review-findings'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
+  projectReviewFindingDisplayItems,
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import {
@@ -5584,7 +5586,7 @@ function workflowViewForDisplay(
                       typeof projectDocumentDisplayTasks
                     >[0]['reviewCompletedCheckIds'])
                   : undefined,
-                reviewAccepted:
+                reviewPacketSetComplete:
                   workflow.documentReviewState.activeCycle
                     .acceptedSemanticResult === true,
                 reviewTarget:
@@ -5629,27 +5631,11 @@ function workflowViewForDisplay(
                           ),
                       }
                     : undefined,
-                reviewFindings: Array.isArray(
-                  workflow.documentReviewState.activeCycle.findings,
-                )
-                  ? workflow.documentReviewState.activeCycle.findings.flatMap(
-                      finding =>
-                        isObject(finding) &&
-                        typeof finding.findingId === 'string' &&
-                        typeof finding.requiredAction === 'string' &&
-                        (finding.owner === 'foundation' ||
-                          finding.owner === 'checklist' ||
-                          finding.owner === 'resource')
-                          ? [
-                              {
-                                id: finding.findingId,
-                                title: finding.requiredAction,
-                                owner: finding.owner,
-                              },
-                            ]
-                          : [],
-                    )
-                  : undefined,
+                reviewFindings: projectReviewFindingDisplayItems(
+                  openDocumentReviewFindings(
+                    workflow.documentReviewState.activeCycle,
+                  ),
+                ),
               }
             : {}),
         })
@@ -5668,25 +5654,12 @@ function workflowViewForDisplay(
                     'resource'
                       ? 'resource'
                       : undefined,
-                  reviewFindings: Array.isArray(
-                    workflow.documentReviewState.activeCycle.findings,
-                  )
-                    ? workflow.documentReviewState.activeCycle.findings.flatMap(
-                        finding =>
-                          isObject(finding) &&
-                          typeof finding.findingId === 'string' &&
-                          typeof finding.requiredAction === 'string' &&
-                          finding.owner === 'resource'
-                            ? [
-                                {
-                                  id: finding.findingId,
-                                  title: finding.requiredAction,
-                                  owner: 'resource' as const,
-                                },
-                              ]
-                            : [],
-                      )
-                    : undefined,
+                  reviewFindings: projectReviewFindingDisplayItems(
+                    openDocumentReviewFindings(
+                      workflow.documentReviewState.activeCycle,
+                    ),
+                    'resource',
+                  ),
                 }
               : {}),
           })
@@ -5694,9 +5667,7 @@ function workflowViewForDisplay(
   const completedTaskCount = displayTasks.filter(
     task => isObject(task) && task.status === 'completed',
   ).length
-  const phaseIndex = DELIVERY_PHASES.indexOf(
-    workflow.phase as (typeof DELIVERY_PHASES)[number],
-  )
+  const progress = projectDeliveryProgress(workflow)
   const activeDispatch = isObject(workflow.activeDispatch)
     ? {
         ...(typeof workflow.activeDispatch.workerType === 'string'
@@ -5728,9 +5699,7 @@ function workflowViewForDisplay(
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
     phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
-    ...(phaseIndex >= 0
-      ? { phaseIndex: phaseIndex + 1, phaseCount: DELIVERY_PHASES.length }
-      : {}),
+    ...(progress ?? {}),
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
       : {}),
@@ -5746,9 +5715,6 @@ function workflowViewForDisplay(
             'string'
               ? workflow.documentReviewState.activeCycle.activeTarget
               : undefined,
-          reviewAccepted:
-            workflow.documentReviewState.activeCycle.acceptedSemanticResult ===
-            true,
         }
       : {}),
     tasks: displayTasks,

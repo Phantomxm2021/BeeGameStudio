@@ -154,7 +154,7 @@ describe('document review resource-content subjects', () => {
     const findings = [
       {
         findingId: 'RESOURCE_CONTENT',
-        checkId: 'resource_semantic_fitness' as const,
+        checkId: 'implementation_readiness' as const,
         evidence: [
           { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
         ],
@@ -176,22 +176,21 @@ describe('document review resource-content subjects', () => {
           },
         ],
         observation: 'Mismatch.',
-        blockingReason: 'The resource contract is inconsistent.',
-        requiredAction: 'Correct it.',
-        closureCondition: 'All cited identities agree.',
+        blockingImpact: 'The resource contract is inconsistent.',
+        requiredOutcome: 'All cited identities agree.',
       },
     ]
     const issues = validateDocumentReviewSubmission({
       contract: {
         scope: 'complete',
         mode: 'initial',
-        requiredCheckIds: ['resource_semantic_fitness'],
-        currentCheckId: 'resource_semantic_fitness',
+        requiredCheckIds: ['implementation_readiness'],
+        currentCheckIds: ['implementation_readiness'],
         artifacts,
       },
       checks: [
         {
-          id: 'resource_semantic_fitness',
+          id: 'implementation_readiness',
           status: 'block',
           conclusion: 'The resource contract is inconsistent.',
           evidence: [
@@ -225,7 +224,7 @@ describe('system delivery contract review evidence', () => {
         scope: 'foundation',
         mode: 'initial',
         requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
-        currentCheckId: 'technical_feasibility',
+        currentCheckIds: ['technical_feasibility'],
         artifacts,
       },
       checks,
@@ -251,7 +250,7 @@ describe('system delivery contract review evidence', () => {
           scope: 'foundation',
           mode: 'initial',
           requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
-          currentCheckId: 'technical_feasibility',
+          currentCheckIds: ['technical_feasibility'],
           artifacts,
         },
         checks: foundationChecks(projectEvidence)
@@ -262,7 +261,7 @@ describe('system delivery contract review evidence', () => {
     ).toEqual([])
   })
 
-  test('validates criterion evidence independently and includes it in check invalidation', () => {
+  test('rejects criterion evidence outside the active check dependency', () => {
     const projectEvidence = [{ path: 'docs/GDD.md', anchor: 'Gameplay' }]
     const checks = foundationChecks(projectEvidence).filter(
       check => check.id === 'gameplay_strategy_viability',
@@ -278,18 +277,31 @@ describe('system delivery contract review evidence', () => {
         scope: 'foundation',
         mode: 'initial',
         requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
-        currentCheckId: 'gameplay_strategy_viability',
+        currentCheckIds: ['gameplay_strategy_viability'],
         artifacts,
       },
       checks,
       findings: [],
     })
-    expect(issues).toEqual([])
+    expect(issues).toContain(
+      'document review criterion meaningful_choices references an unavailable artifact',
+    )
+  })
+
+  test('invalidates a check when an uncited dependency changes', () => {
+    const projectEvidence = [{ path: 'docs/GDD.md', anchor: 'Gameplay' }]
+    const checks = foundationChecks(projectEvidence).filter(
+      check => check.id === 'gameplay_strategy_viability',
+    )
+    const dependencyArtifacts = [
+      ...artifacts,
+      { path: 'docs/BALANCE_DESIGN.md', content: '# Balance\n' },
+    ]
     expect(
-      checkEvidenceDigests({ checks, artifacts })[
+      checkEvidenceDigests({ checks, artifacts: dependencyArtifacts })[
         'gameplay_strategy_viability'
       ],
-    ).toHaveProperty('systemDeliveryContract')
+    ).toHaveProperty(['docs/BALANCE_DESIGN.md'])
   })
 })
 

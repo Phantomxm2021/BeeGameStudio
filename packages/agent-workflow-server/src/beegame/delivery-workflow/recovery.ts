@@ -3,6 +3,44 @@ import { computeDocumentRevision, computeResourceRevision } from './revision'
 import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import type { DeliveryRun, DispatchRecord } from './types'
 import type { RunStore } from './run-store'
+import { reconcileCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+
+async function restoreCanonicalDocumentCommit(
+  run: DeliveryRun,
+  workspacePath?: string,
+): Promise<DeliveryRun> {
+  const dispatch = run.activeDispatch
+  if (
+    !workspacePath ||
+    !dispatch ||
+    dispatch.workerType !== 'document-author' ||
+    dispatch.request?.contract.authoringMode === 'repair-planning' ||
+    dispatch.terminalResult
+  )
+    return run
+  const receipt = await reconcileCanonicalDocumentCommitReceipt({
+    workspacePath,
+    dispatchId: dispatch.dispatchId,
+  })
+  if (!receipt) return run
+  const finishedAt = new Date().toISOString()
+  return {
+    ...run,
+    activeDispatch: {
+      ...dispatch,
+      status: 'completed',
+      finishedAt,
+      terminalResult: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [receipt.targetPath],
+        resolvedFindingIds: [],
+      },
+    },
+    blockedReason: undefined,
+    updatedAt: finishedAt,
+  }
+}
 
 function withResourcePreparationAttempt(run: DeliveryRun): DeliveryRun {
   if (
@@ -117,6 +155,10 @@ export async function resumeRun(input: {
     throw new Error('delivery run not found')
   const acquired = await acquireAndLoad(input)
   try {
+    acquired.run = await restoreCanonicalDocumentCommit(
+      acquired.run,
+      input.workspacePath,
+    )
     if (acquired.run.status === 'completed') return acquired.run
     const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
       acquired.run,
@@ -174,11 +216,19 @@ export async function retryRun(input: {
     throw new Error('delivery run not found')
   const acquired = await acquireAndLoad(input)
   try {
+    acquired.run = await restoreCanonicalDocumentCommit(
+      acquired.run,
+      input.workspacePath,
+    )
     // A successful retry can race a duplicate browser request or a stale
     // workflow-card snapshot. The first request has already resumed the same
     // durable run, so repeating it must be an idempotent read rather than an
     // invalid state transition.
-    if (acquired.run.status === 'running') return acquired.run
+    if (
+      acquired.run.status === 'running' &&
+      !acquired.run.activeDispatch?.terminalResult
+    )
+      return acquired.run
     const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
       acquired.run,
     )

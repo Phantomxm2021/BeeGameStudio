@@ -1,4 +1,5 @@
 import { parseDeliveryRun } from './schema'
+import { openDocumentReviewFindings } from './document-review-findings'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -129,7 +130,9 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
     run.phase === 'RESOURCE_PREPARATION' &&
     activeReviewCycle?.acceptedSemanticResult &&
     activeReviewCycle.activeTarget === 'resource' &&
-    !activeReviewCycle.findings.some(finding => finding.owner === 'resource')
+    !openDocumentReviewFindings(activeReviewCycle).some(
+      finding => finding.owner === 'resource',
+    )
   ) {
     throw new WorkflowTransitionError(
       'invariant_violation',
@@ -305,7 +308,11 @@ export function transitionDeliveryRun(
         fail(
           'resource review remediation requires an accepted resource finding batch',
         )
-      if (!activeCycle.findings.some(finding => finding.owner === 'resource'))
+      if (
+        !openDocumentReviewFindings(activeCycle).some(
+          finding => finding.owner === 'resource',
+        )
+      )
         fail(
           'resource review remediation requires at least one resource finding',
         )

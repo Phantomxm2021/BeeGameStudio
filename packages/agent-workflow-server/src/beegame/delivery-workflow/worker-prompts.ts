@@ -39,7 +39,18 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType !== 'document-reviewer')
     return JSON.stringify(request.contract)
-  const { reviewArtifacts, changes, ...contract } = request.contract
+  const {
+    reviewArtifacts,
+    referenceIndex,
+    currentCheckIds,
+    criteriaByCheck,
+    artifactPathsByCheck,
+    priorFindings,
+    activeTarget,
+    changedPaths,
+    changes,
+    ...staticContract
+  } = request.contract
   const artifactBlocks = formatReviewArtifacts(reviewArtifacts)
   const changeBlocks = formatReviewChanges(changes)
   const compactChanges = Array.isArray(changes)
@@ -53,14 +64,102 @@ function formatContract(request: WorkerDispatchRequest): string {
         return change
       })
     : changes
+  const visiblePriorFindings = projectVisiblePriorFindings({
+    priorFindings,
+    currentCheckIds,
+    artifactPathsByCheck,
+  })
   return [
+    '--- BEGIN REVIEW STATIC CONTRACT ---',
     JSON.stringify({
-      ...contract,
+      ...staticContract,
+      reviewAuthority: structuredReviewAuthority(
+        staticContract.reviewAuthority,
+      ),
+    }),
+    '--- END REVIEW STATIC CONTRACT ---',
+    ...artifactBlocks,
+    '--- BEGIN REVIEW REFERENCE INDEX ---',
+    JSON.stringify(referenceIndex),
+    '--- END REVIEW REFERENCE INDEX ---',
+    '--- BEGIN REVIEW ACTIVE PACKET ---',
+    JSON.stringify({
+      currentCheckIds,
+      criteriaByCheck,
+      artifactPathsByCheck,
+      ...(visiblePriorFindings.length
+        ? { priorFindings: visiblePriorFindings }
+        : {}),
+      ...(activeTarget !== undefined ? { activeTarget } : {}),
+      ...(changedPaths !== undefined ? { changedPaths } : {}),
       ...(compactChanges !== undefined ? { changes: compactChanges } : {}),
     }),
-    ...artifactBlocks,
+    '--- END REVIEW ACTIVE PACKET ---',
     ...changeBlocks,
   ].join('\n')
+}
+
+function projectVisiblePriorFindings(input: {
+  priorFindings: unknown
+  currentCheckIds: unknown
+  artifactPathsByCheck: unknown
+}): unknown[] {
+  if (!Array.isArray(input.priorFindings)) return []
+  const currentCheckIds = new Set(
+    Array.isArray(input.currentCheckIds)
+      ? input.currentCheckIds.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [],
+  )
+  const activePaths = new Set<string>()
+  if (
+    input.artifactPathsByCheck &&
+    typeof input.artifactPathsByCheck === 'object' &&
+    !Array.isArray(input.artifactPathsByCheck)
+  )
+    for (const paths of Object.values(input.artifactPathsByCheck))
+      if (Array.isArray(paths))
+        for (const path of paths)
+          if (typeof path === 'string') activePaths.add(path)
+  return input.priorFindings.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const finding = value as Record<string, unknown>
+    if (finding.open !== true) return []
+    const references = [finding.evidence, finding.subjects].flatMap(items =>
+      Array.isArray(items) ? items : [],
+    )
+    const relevant =
+      (typeof finding.checkId === 'string' &&
+        currentCheckIds.has(finding.checkId)) ||
+      references.some(
+        reference =>
+          reference &&
+          typeof reference === 'object' &&
+          !Array.isArray(reference) &&
+          typeof (reference as Record<string, unknown>).path === 'string' &&
+          activePaths.has(
+            (reference as Record<string, unknown>).path as string,
+          ),
+      )
+    if (!relevant) return []
+    const { open: _open, ...visible } = finding
+    return [visible]
+  })
+}
+
+function structuredReviewAuthority(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const authority = value as Record<string, unknown>
+  if (typeof authority.confirmedBriefContext !== 'string') return value
+  try {
+    return {
+      ...authority,
+      confirmedBriefContext: JSON.parse(authority.confirmedBriefContext),
+    }
+  } catch {
+    throw new Error('document review confirmed brief context is invalid')
+  }
 }
 
 function formatReviewArtifacts(value: unknown): string[] {
@@ -103,10 +202,10 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return [
         request.contract.authoringMode === 'initial'
-          ? 'Use the service-projected upstream authority without reloading it. Follow the target-state instruction: read only the assigned target once when it already exists, otherwise write the new target directly. Perform the assigned document Write exactly once with the complete document, required version and updated_at. The completed Write is the terminal action.'
+          ? 'Use the service-projected upstream authority and target baseline without reloading files. Submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns document_id, version, updated_at, atomic persistence and the terminal action.'
           : request.contract.authoringMode === 'repair-planning'
-            ? 'Act only as the read-only Repair Lead for the single accepted finding in contract.repairDecisionTask. Submit one structured repair decision; the service owns its identity, subjects, order and durable plan ledger. Do not write or mutate project files.'
-            : 'Read only the assigned current target exactly once, apply the locked repair decision, then perform exactly one Write for that document. Include every required content change plus the PATCH version and updated_at update in that mutation.',
+            ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one decision per service-owned group; do not write or mutate project files.'
+            : 'Use the service-projected current target, apply only the locked repair decision, then submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns PATCH version, updated_at, atomic persistence and recovery.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
@@ -115,28 +214,30 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               ...(request.contract.checklistRemediation
                 ? [
-                    'This is a bounded checklist correction. Resolve only contract.checklistRemediation issues and increment the checklist PATCH version exactly once with a new updated_at.',
+                    'This is a bounded checklist correction. Resolve only contract.checklistRemediation issues; the service owns the checklist PATCH version and updated_at.',
                   ]
                 : []),
               ...(request.contract.remediation
                 ? [
-                    'Resolve the complete active finding batch in contract.remediation. Increment the checklist PATCH version exactly once and update updated_at.',
+                    'Resolve the complete active finding batch in contract.remediation. The service owns checklist metadata and durable completion.',
                   ]
                 : []),
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
           : request.contract.authoringMode === 'repair-planning'
             ? [
-                'This is the sole planning task for contract.repairDecisionTask.finding.',
-                'Choose one minimal repair decision that closes its stated condition. Its evidence, subjects, required action and closure condition are already immutable service-owned constraints; do not restate them.',
+                'This is the sole planning task for every ordered group in contract.repairPlanTask.groups.',
+                'Produce exactly one minimum decision per group in the supplied order. Evidence, subjects, blocking impacts and required outcomes are immutable service-owned constraints; do not restate them.',
+                'Respect each group dependsOn edge while deciding later groups; preserve earlier outcomes and do not reopen them.',
                 'Do not add unrelated systems, broaden scope, reopen review, calculate exhaustive scenarios, write files, or create a second plan or finding queue.',
-                'Submit the decision through SubmitDocumentRepairDecision exactly once.',
+                'Authority direction is irreversible: when a lower-authority document invented an unapproved product-visible system or obligation, remove or narrow that declaration; do not expand other consumers to support it unless Confirmed Brief, GDD, or the legitimate upstream owner explicitly requires it.',
+                'Submit the complete ordered plan through SubmitDocumentRepairPlan exactly once.',
               ].join(' ')
             : [
                 request.contract.authoringMode === 'initial'
-                  ? `This is one authoring task in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Follow the projected target-state instruction, never read another path, and never reload upstream documents. Write only the smallest decision-level authority needed by downstream documents and later implementation: original design inputs, rules, formulas and directly required boundaries. Do not perform reviewer work, prove complete strategy or numeric feasibility, run full wave/build simulations, enumerate tuning alternatives, optimize for a best solution, create exhaustive derived tables, repair other documents, or attempt to finish the eight-document pass in this session. The Initial Reviewer owns feasibility assessment and an accepted repair cycle owns later corrections.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Read the existing target once as the controlled change baseline. Apply the confirmed change request to this document when it owns or consumes an affected fact; preserve unrelated valid content and increment this existing document PATCH version exactly once.' : ''}`
+                  ? `This is one authoring task in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Use the projected target baseline and never reload project files. Write only the smallest decision-level authority needed by downstream documents and later implementation: original design inputs, rules, formulas and directly required boundaries. Do not perform reviewer work, prove complete strategy or numeric feasibility, run full wave/build simulations, enumerate tuning alternatives, optimize for a best solution, create exhaustive derived tables, repair other documents, or attempt to finish the eight-document pass in this session. The Initial Reviewer owns feasibility assessment and an accepted repair cycle owns later corrections.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Apply the confirmed change request to the projected controlled baseline when this document owns or consumes an affected fact; preserve unrelated valid content. The service owns metadata revision.' : ''}`
                   : 'This is one accepted foundation-remediation batch. Modify only the assigned canonical foundation documents.',
-                'Every foundation document begins with YAML front matter containing document_id, a MAJOR.MINOR.PATCH version and an ISO 8601 UTC updated_at.',
+                'The workflow service adds canonical YAML front matter after accepting the Markdown body; never include or edit document_id, version or updated_at.',
                 'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, formulas, economy, costs, growth, relative value and pressure/capability curves; LEVEL_SCENE_DESIGN owns level sequence, world/scene relationships, spatial topology, scale, routes, regions, spawn/goal points, camera design constraints, scene states and placement rules. Technical owns data consumption, runtime boundaries, loading, state/save, recovery and budgets; Art owns visual language and spatial readability; UI/UX owns information, input, interaction and interface states; Audio owns event-to-cue behavior; Asset Plan owns semantic resource responsibilities, format capabilities, source strategy and replaceable-file requirements.',
                 'Do not duplicate independently changing facts across documents. Events, waves and numeric configuration will be executable JSON after approval; world, scene, hierarchy and instance placement will be executable YAML after approval. Foundation documents define design intent and stable references only, never engine-specific Prefabs/Scenes/components or final JSON/YAML payloads.',
                 'Treat contract.systemDeliveryContract as the fixed BeeGame delivery boundary. Document the project through that one Manifest, those canonical roots, that content schema and those content kinds. Do not define a second Manifest, content root, schema, loader or runtime/source media substitute, even when such alternatives would be internally consistent across all eight documents.',
@@ -146,15 +247,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 'Describe observable duties and target technical constraints. Do not preselect Pack identities, element IDs, source filenames or downloaded paths that have not been observed from the Resource Library.',
                 request.contract.authoringMode === 'initial'
                   ? "For the current fact owner, record only the confirmed brief's minimum authoritative design decisions and directly chosen inputs. GDD states choices, tradeoffs and recovery rules; Balance states sources, sinks, base values and formulas; Level/Scene states the required topology and placements. Do not simulate builds or waves, derive a complete outcome table, tune against every scenario, or judge strategy, economy, numeric, pacing or spatial feasibility. The Initial Reviewer owns those comparisons and may create findings for missing or infeasible authority. Keep the design no more complex than the confirmed brief; when a domain truly does not exist, state that fact instead of inventing one."
-                  : 'Apply only the accepted findings and their closure conditions. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
+                  : 'Apply only the accepted findings and their required outcomes. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
                 ...(request.contract.authoringMode === 'initial'
                   ? [
                       "Write a compact decision contract, not a narrative handbook. Include only this owner's stable IDs, chosen decisions, constraints, formulas, necessary bounds and downstream interface references. Do not repeat the confirmed brief, upstream prose, the fact-owner matrix, the generic system contract, rationale essays, examples, test cases, pseudocode, implementation steps or tuning process. Reference upstream IDs instead of restating their facts. Document completeness is judged across all eight owners by the Initial Reviewer, not by inflating one file.",
+                      'A downstream owner may specialize only product behavior already authorized by the Confirmed Brief, GDD, or its legitimate projected upstream owner. Do not invent a new player-visible system, settings surface, state machine, economy mechanism, resource duty, or obligation that another owner would have to implement.',
                     ]
                   : []),
                 ...(request.contract.repairTask
                   ? [
-                      `Repair exactly ${String(request.contract.foundationDocumentPath)} from contract.repairTask. Treat its groups as locked decisions: do not choose another solution, alter another document, reopen findings, or perform Closure Review. Preserve unrelated content and increment this document PATCH version exactly once with a new updated_at.`,
+                      `Repair exactly ${String(request.contract.foundationDocumentPath)} from contract.repairTask. Treat its groups as locked decisions: do not choose another solution, alter another document, reopen findings, or perform Closure Review. Preserve unrelated content; the service owns metadata and the durable commit.`,
                     ]
                   : []),
                 'Do not create the checklist, asset manifest, resources or implementation.',
@@ -163,21 +265,22 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-reviewer':
       return [
         'Use contract.reviewAuthority plus contract.reviewArtifacts as the complete revision-bound source. The systemDeliveryContract review artifact is fixed system authority: project artifacts may apply it but may not redefine or override it. Do not reread workspace files or modify anything.',
-        'Review only contract.currentCheckId. Put its auditable reasoning directly into criterion derivations, the check conclusion and findings, then submit that one check. Do not inspect or decide later checks, produce a separate transcript, or rely on max-token continuation.',
-        'Produce exactly one accepted SubmitDocumentReviewCheck in this bounded dispatch. A rejected call is not accepted: correct only the current check and resubmit without prose or user confirmation.',
+        'Review exactly the ordered contract.currentCheckIds packet. Put each check auditable reasoning directly into its criterion derivations, conclusion and findings. Do not inspect checks outside the packet, produce a separate transcript, or rely on max-token continuation.',
+        'Produce exactly one accepted SubmitDocumentReviewPacket in this bounded dispatch. Submit one checks array in contract.currentCheckIds order, without check IDs. The packet is transactional: a rejected call accepts nothing, so correct and resubmit the same complete packet without prose or user confirmation.',
         'Report every material defect that blocks an implementable and reviewable game contract: contradictions, missing observable requirements, incomplete strategy, dominated choices, absent counterplay or recovery, broken economy/progression, infeasible numeric bounds, inconsistent formulas, discontinuous difficulty, or invalid resource plans. READY requires no findings.',
-        'Submit a concise check conclusion, evidence and assessments; the service derives the current check ID, status and finding IDs. Evidence and subjects must use only stable referenceId values from contract.referenceIndex.references; never submit path or anchor text. Every finding has one stable findingId, its own exact evidence, exact subjects, observable conflict, blocking reason, required action and closure condition. Subjects are exactly what requiredAction must change; contextual or already-correct artifacts remain finding evidence only. Do not submit checkId, owner, severity, a cycle verdict or another check.',
-        'A subject reference must declare the owner derived for that reference in contract.referenceIndex. Foundation documents may be evidence for a resource defect but cannot be resource repair subjects. Foundation and checklist findings cannot carry resource IDs.',
+        'Apply authority direction before completeness expansion: a lower-authority document cannot authorize a new product-visible system or impose a new obligation on another owner. When it does, subject the overreaching declaration and require deletion or narrowing. Require another consumer to expand only when the Confirmed Brief, GDD, or legitimate upstream fact owner already authorizes that behavior.',
+        'Submit one top-level checks array. Each ordered item contains exactly conclusion, evidence, assessments and findings; never submit its check ID. Each assessment contains exactly criterion, status, evidence, derivation and conclusion, using the exact criterion IDs in contract.criteriaByCheck for that ordered check. Every evidence or subject entry contains exactly referenceId; result, note, copied paths and copied anchors are invalid. The service derives each check ID, check status and check findingIds. For each item, evidence and subjects may reference only artifacts listed for that check in contract.artifactPathsByCheck and must use stable referenceId values from contract.referenceIndex.references. Every finding submits one stable findingId, its own exact evidence and exact subjects plus observation, blockingImpact and one authority-preserving requiredOutcome. A subject is current content that violates authority and must change to reach requiredOutcome; contextual or already-correct authority remains finding evidence only. requiredOutcome states one result, never alternative repairs or editing steps. Do not submit checkId, owner, severity, a cycle verdict or a check outside the packet.',
+        'For each subject, submit its referenceId and only any applicable requirementId, resourceId or contentId; never submit subjectOwner. The service derives ownership from contract.referenceIndex and rejects a reference owned by another repair domain. Foundation documents may be evidence for a resource defect but cannot be resource repair subjects. Foundation and checklist findings cannot carry resource IDs.',
         'Every check must include assessments. Only gameplay_strategy_viability, economy_progression_integrity, numeric_balance_feasibility, pacing_difficulty_coherence and level_scene_design_integrity use their exact three non-empty criterion assessments; every other check must use assessments: []. Every resource-owned finding must carry at least one current requirementId, resourceId or contentId on the corresponding Manifest/content subject.',
-        'contract.priorFindings is the accepted unique-ownership ledger. If the same root defect is already represented by an equal, narrower, or broader canonical subject set under the same owner, cite it as context and do not create another finding ID. Report only a new defect uniquely owned by the current check.',
+        'contract.priorFindings is the accepted unique-ownership ledger. Within this packet, assign a root defect only to the earliest responsible check in contract.currentCheckIds and do not duplicate it in later packet items. If the same root defect is already represented by an accepted finding under the same owner, cite it as context and do not create another finding ID.',
         'For every projected content file, fulfills may contain only exact current Manifest requirement IDs and resources may contain only exact current Manifest resource IDs. Requirement IDs are the sole content-to-approved-duty trace; never request document names, headings, prose labels or invented duty IDs in fulfills, and never request physical paths in either reference array.',
         'Whenever present, cross_document_consistency, technical_feasibility, content_structure_fitness and resource_content_consistency must cite an exact JSON Pointer from the systemDeliveryContract artifact in evidence. Finding subjects still point to the project artifact that must change.',
         request.contract.reviewScope === 'foundation'
           ? 'Review only the eight foundation documents with the twelve fixed checks. brief_alignment compares the confirmed brief and language contract. cross_document_consistency rejects contradictory or duplicated authority and blocks project documents that agree with each other but conflict with systemDeliveryContract. gameplay_completeness covers the complete player loop, state transitions, mechanics and outcomes. The four gameplay/balance checks must submit their exact structured criterion sets: gameplay_strategy_viability proves meaningful choices, checks dominant-strategy risk, and traces counterplay/recovery using GDD rules and Level/Scene spatial support; economy_progression_integrity reconciles Balance sources/sinks, affordability/growth, and exploit/deadlock risk; numeric_balance_feasibility derives Balance outcome bounds, relative value, and formula consistency; pacing_difficulty_coherence compares Balance pressure/capability curves against the Level/Scene sequence plus spikes/recovery. level_scene_design_integrity must submit spatial_gameplay_support, level_progression_coherence and scene_state_completeness, proving that topology, routes, regions, camera constraints, progression and scene states support the approved game. Use only cited document facts, show calculations or comparisons in derivation, and create a blocking finding when missing authoritative inputs prevent a central conclusion. A domain explicitly absent from the approved game may pass only by deriving that no hidden rule or resource flow is needed; do not invent a new subsystem. These checks establish a feasible design interval, not final feel or empirical balance. technical_feasibility compares every documented Manifest, root, schema and loading path against systemDeliveryContract; it covers target constraints, deterministic rules and one resource loading path: a programmatic placeholder is itself an independent replaceable file under the normal resource root, never a runtime/source substitute or second loader. art_direction_coherence covers visual duties, style and Level/Scene spatial readability. ui_audio_consistency covers UI, interaction and audio duties across documented gameplay and scene states. acceptance_observability requires every approved behavior, numeric boundary and scene state to have an observable outcome without requiring a checklist that does not exist yet. Also confirm one many-to-many semantic resource responsibility registry and no speculative Resource Library identity.'
-          : 'Perform the comprehensive pre-implementation review with all seventeen fixed checks: rerun the twelve foundation checks, including every structured gameplay, balance, pacing and level/scene criterion, against the approved documents, then checklist_traceability, resource_semantic_fitness, content_structure_fitness, resource_content_consistency and implementation_readiness against the complete contract. Compare all nine project documents, the Manifest and supplied JSON/YAML content against systemDeliveryContract; agreement among project artifacts does not excuse a conflicting Manifest, root, schema, content kind, fact owner or loading path. Keep remediation ownership exact: a foundation finding targets only a foundation document, a checklist finding targets only the checklist, and every defect whose repair target is the Manifest or JSON/YAML content belongs to the appropriate resource_semantic_fitness, content_structure_fitness, resource_content_consistency or implementation_readiness check with its current semantic IDs. Do not duplicate one content or resource defect under a foundation check. Re-derive the approved game-design criteria from current JSON/YAML numeric, event, wave, world, scene, hierarchy and placement facts where present, but report a disagreement in those derived files through the resource-owned checks; do not replace document authority with implementation or runtime assumptions. Confirm each checklist item traces to approved behavior; resources semantically fulfill duties; content fact ownership follows the contract; Manifest, files and content references agree; every resource is verified and referenced; provenance is exact; and the contract is sufficient to plan implementation. Placeholders are standalone files loaded through the same sole path as final media. Block second Manifests, content roots, schemas or loaders, runtime/source substitutes, duplicate ownership and engine-specific demands. Do not require code, builds or runtime evidence before implementation.',
+          : 'Complete the comprehensive pre-implementation approval ledger of seventeen fixed checks. The service carries the twelve Foundation checks only when every Foundation evidence digest is still current; in that normal case this cycle dispatches only checklist_traceability, resource_semantic_fitness, content_structure_fitness, resource_content_consistency and implementation_readiness. If contract.currentCheckIds contains Foundation checks, their approval was stale and the service is explicitly rebuilding the ordered Foundation prefix. Always review only contract.currentCheckIds. Compare the artifacts assigned to each packet check against systemDeliveryContract; agreement among project artifacts does not excuse a conflicting Manifest, root, schema, content kind, fact owner or loading path. Keep remediation ownership exact: a foundation finding targets only a foundation document, a checklist finding targets only the checklist, and every defect whose repair target is the Manifest or JSON/YAML content belongs to the appropriate resource_semantic_fitness, content_structure_fitness, resource_content_consistency or implementation_readiness check with its current semantic IDs. Do not duplicate one content or resource defect under a foundation check. Resource-owned checks re-derive approved design expectations from current JSON/YAML numeric, event, wave, world, scene, hierarchy and placement facts where needed, but report disagreement in those derived files through the resource-owned check; do not replace document authority with implementation or runtime assumptions. Confirm only the active packet responsibilities: checklist traceability, semantic resource fitness, content fact ownership and structure, Manifest/file/content consistency, or implementation readiness. Placeholders are standalone files loaded through the same sole path as final media. Block second Manifests, content roots, schemas or loaders, runtime/source substitutes, duplicate ownership and engine-specific demands. Do not require code, builds or runtime evidence before implementation.',
         request.contract.reviewMode === 'closure'
-          ? 'This is one check in a bounded Closure Review. Recheck only the current check responsibilities, relevant prior findings and server-provided changes. An unresolved finding preserves the same findingId. A direct repair regression uses a new findingId and only changed paths. Do not reopen unrelated dimensions.'
-          : 'This is one serial check in the single review cycle. Record every blocking defect owned by this check once; the service will continue to the next check and derive the final verdict after all checks.',
+          ? 'This is one transactional packet in a bounded Closure Review. Recheck only the packet responsibilities, relevant prior findings and server-provided changes. An unresolved prior finding preserves the same findingId, check, owner and exact requiredOutcome. A different defect found inside an active check uses a new findingId even when its subject was unchanged. regressionPaths is declared only for a defect directly introduced by the server-provided changed paths. Do not reopen unrelated checks.'
+          : 'This is one serial packet in the single review cycle. Record every blocking defect once under the earliest responsible packet check; the service will continue to the next packet and derive the final verdict after all checks.',
       ].join(' ')
     case 'resource-preparer':
       return [
@@ -220,12 +323,10 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
       return request.contract.authoringMode === 'repair-planning'
-        ? 'Call SubmitDocumentRepairDecision exactly once. Do not write files, return terminal JSON, or add completion prose.'
-        : request.contract.authoringMode === 'remediation'
-          ? 'After the one assigned Write, call SubmitDocumentAuthorResult exactly once with resolvedFindingIds: []. Closure remains owned by the Reviewer.'
-          : 'Write the assigned document exactly once as the only mutation. Read only that target once first when the target-state instruction says it exists. The workflow service derives completion from the durable Write; do not submit a result, return terminal JSON, or add completion prose.'
+        ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
+        : 'Submit the assigned complete Markdown body through CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
     case 'document-reviewer':
-      return 'Produce exactly one accepted SubmitDocumentReviewCheck with check and findings for contract.currentCheckId. Use only stable referenceId values. If validation rejects it, correct the same check; do not return prose or author workflow evidence.'
+      return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'
     case 'resource-preparer':
       return 'Do not author workflow evidence or terminal JSON. End with one concise completion or blocker summary; the workflow derives resourceIds and contentIds from canonical files.'
     case 'atomic-task-planner':

@@ -6,7 +6,9 @@ import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
+  artifactsForDocumentReviewCheck,
   checkEvidenceDigests,
+  documentReviewCheckDependsOnPath,
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
   requiredDocumentReviewCheckIds,
@@ -20,6 +22,16 @@ import {
   computeWorkspaceRevision,
 } from './revision'
 import {
+  mergeDocumentReviewFindingLedger,
+  openDocumentReviewFindingIds,
+  openDocumentReviewFindings,
+} from './document-review-findings'
+import {
+  assertRepairPlanMatchesGraph,
+  deriveFoundationRepairGroups,
+  INITIAL_FOUNDATION_UPSTREAM_PATHS,
+} from './document-repair-graph'
+import {
   buildSystemDeliveryContract,
   SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
 } from './system-delivery-contract'
@@ -29,9 +41,11 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  DOCUMENT_REVIEW_CHECK_PACKETS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type DeliveryRun,
+  type DispatchRecord,
   type DocumentReviewCheck,
   type DocumentReviewCheckId,
   type DocumentReviewCycle,
@@ -41,34 +55,6 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 
-const INITIAL_FOUNDATION_UPSTREAM_PATHS: Record<
-  FoundationDocumentPath,
-  readonly FoundationDocumentPath[]
-> = {
-  'docs/GDD.md': [],
-  'docs/LEVEL_SCENE_DESIGN.md': ['docs/GDD.md'],
-  'docs/BALANCE_DESIGN.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-  'docs/TECHNICAL_DESIGN.md': [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-  ],
-  'docs/ART_DIRECTION.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-  'docs/UI_UX_SPEC.md': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-  'docs/AUDIO_DESIGN.md': [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/UI_UX_SPEC.md',
-  ],
-  'docs/ASSET_PLAN.md': [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/TECHNICAL_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-  ],
-}
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type ReadinessAudit = (
@@ -86,100 +72,257 @@ type Dispatcher = {
 type RemediationTarget = 'foundation' | 'checklist' | 'resource'
 
 const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
-const SYSTEM_CONTRACT_PATH = 'systemDeliveryContract'
+export { deriveFoundationRepairGroups } from './document-repair-graph'
 
-const REVIEW_ARTIFACT_PATHS_BY_CHECK: Record<
-  DocumentReviewCheckId,
-  readonly string[] | 'all'
-> = {
-  brief_alignment: 'all',
-  cross_document_consistency: 'all',
-  gameplay_completeness: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-  ],
-  gameplay_strategy_viability: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-  ],
-  economy_progression_integrity: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
-  numeric_balance_feasibility: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-  ],
-  pacing_difficulty_coherence: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-  ],
-  level_scene_design_integrity: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-  ],
-  technical_feasibility: [
-    SYSTEM_CONTRACT_PATH,
-    'docs/TECHNICAL_DESIGN.md',
-    'docs/ASSET_PLAN.md',
-  ],
-  art_direction_coherence: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/ASSET_PLAN.md',
-  ],
-  ui_audio_consistency: [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-  ],
-  acceptance_observability: 'all',
-  checklist_traceability: 'all',
-  resource_semantic_fitness: 'all',
-  content_structure_fitness: 'all',
-  resource_content_consistency: 'all',
-  implementation_readiness: 'all',
+type FrozenReviewProjection = {
+  workspacePath: string
+  sourceRevision: string
+  artifacts: DocumentReviewArtifact[]
+  referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
+  checkProjections: Map<
+    string,
+    {
+      referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
+      reviewArtifacts: DocumentReviewArtifact[]
+    }
+  >
 }
 
-function artifactsForReviewCheck(
-  artifacts: DocumentReviewArtifact[],
-  checkId: DocumentReviewCheckId,
-): DocumentReviewArtifact[] {
-  const selected = REVIEW_ARTIFACT_PATHS_BY_CHECK[checkId]
-  if (selected === 'all') return artifacts
-  const paths = new Set(selected)
-  return artifacts.filter(
-    artifact => artifact.path === 'reviewAuthority' || paths.has(artifact.path),
+const FROZEN_REVIEW_PROJECTION_CACHE_LIMIT = 16
+const frozenReviewProjectionCache = new Map<string, FrozenReviewProjection>()
+
+function rememberFrozenReviewProjection(input: {
+  workspacePath: string
+  cycle: DocumentReviewCycle
+  artifacts: DocumentReviewArtifact[]
+}): FrozenReviewProjection {
+  const projection: FrozenReviewProjection = {
+    workspacePath: input.workspacePath,
+    sourceRevision: input.cycle.sourceRevision,
+    artifacts: input.artifacts,
+    referenceIndex: buildDocumentReviewWireReferenceIndex(input.artifacts),
+    checkProjections: new Map(),
+  }
+  frozenReviewProjectionCache.delete(input.cycle.cycleId)
+  frozenReviewProjectionCache.set(input.cycle.cycleId, projection)
+  while (
+    frozenReviewProjectionCache.size > FROZEN_REVIEW_PROJECTION_CACHE_LIMIT
+  ) {
+    const oldest = frozenReviewProjectionCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    frozenReviewProjectionCache.delete(oldest)
+  }
+  return projection
+}
+
+function forgetFrozenReviewProjection(cycleId: string): void {
+  frozenReviewProjectionCache.delete(cycleId)
+}
+
+function assertFrozenReviewArtifacts(input: {
+  cycle: DocumentReviewCycle
+  artifacts: DocumentReviewArtifact[]
+}): void {
+  const artifactDigests = documentReviewArtifactDigests(input.artifacts)
+  if (input.cycle.mode === 'initial') {
+    if (
+      !exactStringSet(
+        Object.keys(artifactDigests),
+        Object.keys(input.cycle.sourceArtifactDigests),
+      ) ||
+      Object.entries(artifactDigests).some(
+        ([path, digest]) => input.cycle.sourceArtifactDigests[path] !== digest,
+      )
+    )
+      throw new Error('canonical artifacts changed during document review')
+    return
+  }
+  const changes = artifactDigestChanges(
+    input.cycle.sourceArtifactDigests,
+    input.artifacts,
   )
+  if (
+    !exactStringSet(
+      changes.map(change => change.path),
+      input.cycle.changedPaths,
+    )
+  )
+    throw new Error('document closure diff changed after the cycle was frozen')
 }
 
-const CLOSURE_CHECKS: Record<
+async function frozenReviewProjection(input: {
+  workspacePath: string
+  run: DeliveryRun
+  cycle: DocumentReviewCycle
+}): Promise<FrozenReviewProjection> {
+  const cached = frozenReviewProjectionCache.get(input.cycle.cycleId)
+  if (
+    cached?.workspacePath === input.workspacePath &&
+    cached.sourceRevision === input.cycle.sourceRevision
+  ) {
+    const currentArtifacts = await readDocumentReviewArtifacts(
+      input.workspacePath,
+      input.cycle.scope,
+      reviewAuthority(input.run),
+    )
+    assertFrozenReviewArtifacts({
+      cycle: input.cycle,
+      artifacts: currentArtifacts,
+    })
+    return cached
+  }
+  const artifacts = await readDocumentReviewArtifacts(
+    input.workspacePath,
+    input.cycle.scope,
+    reviewAuthority(input.run),
+  )
+  assertFrozenReviewArtifacts({ cycle: input.cycle, artifacts })
+  return rememberFrozenReviewProjection({
+    workspacePath: input.workspacePath,
+    cycle: input.cycle,
+    artifacts,
+  })
+}
+
+function artifactsForReviewChecks(
+  artifacts: DocumentReviewArtifact[],
+  checkIds: DocumentReviewCheckId[],
+): DocumentReviewArtifact[] {
+  const paths = new Set(
+    checkIds.flatMap(checkId =>
+      artifactsForDocumentReviewCheck(artifacts, checkId).map(
+        artifact => artifact.path,
+      ),
+    ),
+  )
+  return artifacts.filter(artifact => paths.has(artifact.path))
+}
+
+function projectionForChecks(
+  projection: FrozenReviewProjection,
+  checkIds: DocumentReviewCheckId[],
+) {
+  const packetKey = checkIds.join('|')
+  const cached = projection.checkProjections.get(packetKey)
+  if (cached) return cached
+  const artifacts = artifactsForReviewChecks(projection.artifacts, checkIds)
+  const paths = new Set(artifacts.map(artifact => artifact.path))
+  const artifactIds = new Set(
+    projection.referenceIndex.artifacts
+      .filter(artifact => paths.has(artifact.path))
+      .map(artifact => artifact.artifactId),
+  )
+  const value = {
+    referenceIndex: {
+      artifacts: projection.referenceIndex.artifacts.filter(artifact =>
+        artifactIds.has(artifact.artifactId),
+      ),
+      references: projection.referenceIndex.references.filter(reference =>
+        artifactIds.has(reference.artifactId),
+      ),
+      requirementIds: paths.has(CANONICAL_ASSET_MANIFEST)
+        ? projection.referenceIndex.requirementIds
+        : [],
+      resourceIds: paths.has(CANONICAL_ASSET_MANIFEST)
+        ? projection.referenceIndex.resourceIds
+        : [],
+      contentIdsByPath: Object.fromEntries(
+        Object.entries(projection.referenceIndex.contentIdsByPath).filter(
+          ([path]) => paths.has(path),
+        ),
+      ),
+    },
+    reviewArtifacts: artifacts.filter(
+      artifact => artifact.path !== 'reviewAuthority',
+    ),
+  }
+  projection.checkProjections.set(packetKey, value)
+  return value
+}
+
+const CLOSURE_CHECK_CANDIDATES: Record<
   RemediationTarget,
   readonly DocumentReviewCheckId[]
 > = {
   foundation: FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  checklist: [
-    'cross_document_consistency',
-    'acceptance_observability',
-    'checklist_traceability',
-    'implementation_readiness',
-  ],
+  checklist: ['checklist_traceability'],
   resource: [
-    ...GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS,
-    'technical_feasibility',
     'resource_semantic_fitness',
     'content_structure_fitness',
     'resource_content_consistency',
     'implementation_readiness',
   ],
+}
+
+function closureCheckIds(input: {
+  target: RemediationTarget
+  changedPaths: string[]
+  findings: DocumentReviewFinding[]
+  checkEvidenceDigests: Record<string, Record<string, string>>
+}): DocumentReviewCheckId[] {
+  const findingCheckIds = new Set(
+    input.findings
+      .filter(finding => finding.owner === input.target)
+      .map(finding => finding.checkId),
+  )
+  return CLOSURE_CHECK_CANDIDATES[input.target].filter(checkId => {
+    if (findingCheckIds.has(checkId)) return true
+    const acceptedEvidencePaths = Object.keys(
+      input.checkEvidenceDigests[checkId] ?? {},
+    )
+    if (input.changedPaths.some(path => acceptedEvidencePaths.includes(path)))
+      return true
+    return input.changedPaths.some(path =>
+      documentReviewCheckDependsOnPath(checkId, path),
+    )
+  })
+}
+
+function activeDocumentReviewCheckPacket(
+  cycle: DocumentReviewCycle,
+): DocumentReviewCheckId[] {
+  const firstIncompleteCheckId = cycle.requiredCheckIds.find(
+    id => !cycle.completedCheckIds.includes(id),
+  )
+  if (!firstIncompleteCheckId)
+    throw new Error('document review cycle has no incomplete check')
+  const packet = DOCUMENT_REVIEW_CHECK_PACKETS.find(checkIds =>
+    checkIds.includes(firstIncompleteCheckId),
+  )
+  if (!packet) throw new Error('document review check packet is not defined')
+  const currentCheckIds = packet.filter(
+    (checkId): checkId is DocumentReviewCheckId =>
+      cycle.requiredCheckIds.includes(checkId) &&
+      !cycle.completedCheckIds.includes(checkId),
+  )
+  if (!currentCheckIds.length || currentCheckIds[0] !== firstIncompleteCheckId)
+    throw new Error(
+      'document review check packet does not match the cycle cursor',
+    )
+  return currentCheckIds
+}
+
+export function documentReviewerDispatchMatchesActivePacket(
+  run: DeliveryRun,
+  dispatch: DispatchRecord,
+): boolean {
+  if (dispatch.workerType !== 'document-reviewer') return true
+  const cycle = run.documentReviewState.activeCycle
+  const requestedCheckIds = dispatch.request?.contract.currentCheckIds
+  if (
+    !cycle ||
+    cycle.acceptedSemanticResult ||
+    !Array.isArray(requestedCheckIds) ||
+    requestedCheckIds.some(checkId => typeof checkId !== 'string')
+  )
+    return false
+  const expectedCheckIds = activeDocumentReviewCheckPacket(cycle)
+  return (
+    requestedCheckIds.length === expectedCheckIds.length &&
+    requestedCheckIds.every(
+      (checkId, index) => checkId === expectedCheckIds[index],
+    )
+  )
 }
 
 async function defaultAudit(
@@ -204,7 +347,23 @@ function findingsForTarget(
   cycle: DocumentReviewCycle | undefined,
   target: RemediationTarget,
 ): DocumentReviewFinding[] {
-  return cycle?.findings.filter(finding => finding.owner === target) ?? []
+  return openDocumentReviewFindings(cycle).filter(
+    finding => finding.owner === target,
+  )
+}
+
+function findingIdentityLedger(cycle: DocumentReviewCycle) {
+  const openIds = openDocumentReviewFindingIds(cycle)
+  return cycle.findings.map(finding => ({
+    findingId: finding.findingId,
+    checkId: finding.checkId,
+    owner: finding.owner,
+    open: openIds.has(finding.findingId),
+    evidence: finding.evidence,
+    subjects: finding.subjects,
+    blockingImpact: finding.blockingImpact,
+    requiredOutcome: finding.requiredOutcome,
+  }))
 }
 
 function nextTarget(findings: DocumentReviewFinding[]): RemediationTarget {
@@ -344,7 +503,6 @@ function approvalIssues(input: {
   artifacts: DocumentReviewArtifact[]
 }): string[] {
   const required = requiredDocumentReviewCheckIds(input.scope)
-  const currentDigests = documentReviewArtifactDigests(input.artifacts)
   const issues: string[] = []
   for (const id of required) {
     const check = input.checks.find(candidate => candidate.id === id)
@@ -354,16 +512,37 @@ function approvalIssues(input: {
     }
     const evidenceDigests = input.checkEvidenceDigests[id]
     if (
-      !evidenceDigests ||
-      Object.entries(evidenceDigests).some(
-        ([path, digest]) => currentDigests[path] !== digest,
-      )
+      !reviewCheckDigestIsCurrent({
+        checkId: id,
+        storedDigests: evidenceDigests,
+        artifacts: input.artifacts,
+      })
     )
       issues.push(
         `document review check ${id} is stale for the current artifacts`,
       )
   }
   return issues
+}
+
+function reviewCheckDigestIsCurrent(input: {
+  checkId: DocumentReviewCheckId
+  storedDigests: Record<string, string> | undefined
+  artifacts: DocumentReviewArtifact[]
+}): boolean {
+  if (!input.storedDigests) return false
+  const expectedDigests = documentReviewArtifactDigests(
+    artifactsForDocumentReviewCheck(input.artifacts, input.checkId),
+  )
+  return (
+    exactStringSet(
+      Object.keys(input.storedDigests),
+      Object.keys(expectedDigests),
+    ) &&
+    Object.entries(expectedDigests).every(
+      ([path, digest]) => input.storedDigests![path] === digest,
+    )
+  )
 }
 
 type DocumentMetadata = { version: string; updatedAt: string }
@@ -453,8 +632,9 @@ function documentMetadataIssues(input: {
     if (
       !current ||
       typeof previousUpdatedAt !== 'string' ||
-      current.updatedAt === previousUpdatedAt ||
-      !Number.isFinite(Date.parse(current.updatedAt))
+      !Number.isFinite(Date.parse(current.updatedAt)) ||
+      !Number.isFinite(Date.parse(previousUpdatedAt)) ||
+      Date.parse(current.updatedAt) <= Date.parse(previousUpdatedAt)
     )
       issues.push(`${path}: remediation must update updated_at`)
   }
@@ -484,25 +664,69 @@ export async function createInitialDocumentReviewCycle(input: {
     reviewAuthority(input.run),
   )
   const sourceArtifactDigests = documentReviewArtifactDigests(artifacts)
+  const requiredCheckIds = requiredDocumentReviewCheckIds(input.scope)
+  const foundationApproval = input.run.documentReviewState.foundationApproval
+  const inheritedFoundationChecks =
+    input.scope === 'complete' && foundationApproval?.scope === 'foundation'
+      ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.flatMap(checkId => {
+          const check = foundationApproval.checks.find(
+            candidate =>
+              candidate.id === checkId && candidate.status === 'pass',
+          )
+          const evidenceDigests =
+            foundationApproval.checkEvidenceDigests[checkId]
+          if (
+            !check ||
+            !reviewCheckDigestIsCurrent({
+              checkId,
+              storedDigests: evidenceDigests,
+              artifacts,
+            })
+          )
+            return []
+          return [check]
+        })
+      : []
+  const inheritCompleteFoundationApproval =
+    inheritedFoundationChecks.length ===
+    FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.length
+  const checks = inheritCompleteFoundationApproval
+    ? inheritedFoundationChecks
+    : []
+  const completedCheckIds = checks.map(check => check.id)
+  const checkEvidenceDigests = inheritCompleteFoundationApproval
+    ? Object.fromEntries(
+        FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(checkId => [
+          checkId,
+          foundationApproval!.checkEvidenceDigests[checkId]!,
+        ]),
+      )
+    : {}
+  const activeCycle: DocumentReviewCycle = {
+    cycleId,
+    originScope: input.scope,
+    scope: input.scope,
+    mode: 'initial',
+    sourceRevision: input.revision,
+    requiredCheckIds,
+    completedCheckIds,
+    checks,
+    checkEvidenceDigests,
+    findings: [],
+    acceptedSemanticResult: false,
+    changedPaths: [],
+    sourceArtifactDigests,
+  }
+  rememberFrozenReviewProjection({
+    workspacePath: input.workspacePath,
+    cycle: activeCycle,
+    artifacts,
+  })
   return {
     ...input.run,
     documentReviewState: {
       ...input.run.documentReviewState,
-      activeCycle: {
-        cycleId,
-        originScope: input.scope,
-        scope: input.scope,
-        mode: 'initial',
-        sourceRevision: input.revision,
-        requiredCheckIds: requiredDocumentReviewCheckIds(input.scope),
-        completedCheckIds: [],
-        checks: [],
-        checkEvidenceDigests: {},
-        findings: [],
-        acceptedSemanticResult: false,
-        changedPaths: [],
-        sourceArtifactDigests,
-      },
+      activeCycle,
     },
     updatedAt: new Date().toISOString(),
   }
@@ -516,11 +740,12 @@ export async function buildDocumentReviewDispatch(input: {
   if (!cycle || cycle.acceptedSemanticResult)
     throw new Error('document review cycle is not ready for dispatch')
   const authority = reviewAuthority(input.run)
-  const artifacts = await readDocumentReviewArtifacts(
-    input.workspacePath,
-    cycle.scope,
-    authority,
-  )
+  const frozenProjection = await frozenReviewProjection({
+    workspacePath: input.workspacePath,
+    run: input.run,
+    cycle,
+  })
+  const artifacts = frozenProjection.artifacts
   const changes =
     cycle.mode === 'closure'
       ? artifactDigestChanges(cycle.sourceArtifactDigests, artifacts)
@@ -533,12 +758,17 @@ export async function buildDocumentReviewDispatch(input: {
     )
   )
     throw new Error('document closure diff changed after the cycle was frozen')
-  const currentCheckId = cycle.requiredCheckIds.find(
-    id => !cycle.completedCheckIds.includes(id),
+  const currentCheckIds = activeDocumentReviewCheckPacket(cycle)
+  const checkProjection = projectionForChecks(frozenProjection, currentCheckIds)
+  const artifactPathsByCheck = Object.fromEntries(
+    currentCheckIds.map(checkId => [
+      checkId,
+      artifactsForDocumentReviewCheck(frozenProjection.artifacts, checkId).map(
+        artifact => artifact.path,
+      ),
+    ]),
   )
-  if (!currentCheckId)
-    throw new Error('document review cycle has no incomplete check')
-  const checkArtifacts = artifactsForReviewCheck(artifacts, currentCheckId)
+  const findingLedger = findingIdentityLedger(cycle)
   return {
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -554,28 +784,26 @@ export async function buildDocumentReviewDispatch(input: {
       cycleId: cycle.cycleId,
       reviewAuthority: authority,
       requiredCheckIds: cycle.requiredCheckIds,
-      currentCheckId,
-      referenceIndex: buildDocumentReviewWireReferenceIndex(checkArtifacts),
-      reviewArtifacts: checkArtifacts.filter(
-        artifact => artifact.path !== 'reviewAuthority',
+      currentCheckIds,
+      criteriaByCheck: Object.fromEntries(
+        currentCheckIds.map(checkId => [
+          checkId,
+          GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+            checkId as keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+          ] ?? [],
+        ]),
       ),
-      ...(cycle.findings.length
+      artifactPathsByCheck,
+      referenceIndex: checkProjection.referenceIndex,
+      reviewArtifacts: checkProjection.reviewArtifacts,
+      ...(findingLedger.length
         ? {
-            priorFindings: cycle.findings.map(finding => ({
-              findingId: finding.findingId,
-              checkId: finding.checkId,
-              owner: finding.owner,
-              subjects: finding.subjects,
-              blockingReason: finding.blockingReason,
-              requiredAction: finding.requiredAction,
-              closureCondition: finding.closureCondition,
-            })),
+            priorFindings: findingLedger,
           }
         : {}),
       ...(cycle.mode === 'closure'
         ? {
             activeTarget: cycle.activeTarget,
-            priorFindings: findingsForTarget(cycle, cycle.activeTarget!),
             changedPaths: cycle.changedPaths,
             changes: changes.map(change => ({
               path: change.path,
@@ -637,6 +865,34 @@ async function beginDocumentReviewClosure(input: {
       'document remediation changed an artifact owned by another target',
     )
   const cycleId = randomUUID()
+  const activeCycle: DocumentReviewCycle = {
+    cycleId,
+    parentCycleId: previous.cycleId,
+    originScope: previous.originScope,
+    scope,
+    mode: 'closure',
+    sourceRevision: input.currentRevision,
+    requiredCheckIds: closureCheckIds({
+      target,
+      changedPaths,
+      findings: openDocumentReviewFindings(previous),
+      checkEvidenceDigests: previous.checkEvidenceDigests,
+    }),
+    completedCheckIds: [],
+    checks: previous.checks,
+    checkEvidenceDigests: previous.checkEvidenceDigests,
+    findings: previous.findings,
+    activeTarget: target,
+    acceptedSemanticResult: false,
+    changedPaths,
+    sourceArtifactDigests,
+  }
+  forgetFrozenReviewProjection(previous.cycleId)
+  rememberFrozenReviewProjection({
+    workspacePath: input.workspacePath,
+    cycle: activeCycle,
+    artifacts,
+  })
   return {
     ...input.run,
     phase: 'DOCUMENT_REVIEW',
@@ -644,23 +900,7 @@ async function beginDocumentReviewClosure(input: {
       target === 'foundation' ? 'FOUNDATION_REVIEW' : 'CHECKLIST_REVIEW',
     documentReviewState: {
       ...input.run.documentReviewState,
-      activeCycle: {
-        cycleId,
-        parentCycleId: previous.cycleId,
-        originScope: previous.originScope,
-        scope,
-        mode: 'closure',
-        sourceRevision: input.currentRevision,
-        requiredCheckIds: [...CLOSURE_CHECKS[target]],
-        completedCheckIds: [],
-        checks: previous.checks,
-        checkEvidenceDigests: previous.checkEvidenceDigests,
-        findings: previous.findings,
-        activeTarget: target,
-        acceptedSemanticResult: false,
-        changedPaths,
-        sourceArtifactDigests,
-      },
+      activeCycle,
     },
     activeDispatch: undefined,
     blockedReason: undefined,
@@ -695,14 +935,15 @@ export async function startDocumentStage(input: {
       ? findingsForTarget(cycle, 'foundation')
       : []
   const repairPlan = remediationFindings.length ? cycle?.repairPlan : undefined
-  const plannedFindingIds = new Set(
-    repairPlan?.groups.flatMap(group => group.findingIds) ?? [],
-  )
-  const nextPlanningFinding = remediationFindings.find(
-    finding => !plannedFindingIds.has(finding.findingId),
-  )
-  const repairDecisionAuthorityReferences = nextPlanningFinding
-    ? [...nextPlanningFinding.subjects, ...nextPlanningFinding.evidence]
+  const derivedRepairGroups = remediationFindings.length
+    ? deriveFoundationRepairGroups(remediationFindings)
+    : []
+  if (repairPlan)
+    assertRepairPlanMatchesGraph(repairPlan.groups, derivedRepairGroups)
+  const repairPlanAuthorityReferences = derivedRepairGroups.length
+    ? derivedRepairGroups
+        .flatMap(group => group.findings)
+        .flatMap(finding => [...finding.subjects, ...finding.evidence])
         .filter(
           reference =>
             CANONICAL_FOUNDATION_DOCUMENTS.includes(reference.path as never) ||
@@ -718,7 +959,7 @@ export async function startDocumentStage(input: {
         )
     : []
   const repairPlanComplete =
-    remediationFindings.length > 0 && !nextPlanningFinding
+    remediationFindings.length > 0 && Boolean(repairPlan)
   const repairPaths =
     repairPlanComplete && repairPlan
       ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
@@ -767,8 +1008,7 @@ export async function startDocumentStage(input: {
     workerType: 'document-author',
     phase: 'DOCUMENT_DRAFTING',
     taskId: remediationFindings.length
-      ? (repairPath ??
-        `${cycle!.cycleId}:repair-decision:${nextPlanningFinding!.findingId}`)
+      ? (repairPath ?? `${cycle!.cycleId}:repair-plan`)
       : initialPath,
     revision: input.run.revision.document,
     allowedPaths,
@@ -807,10 +1047,15 @@ export async function startDocumentStage(input: {
             }
           : {
               authoringMode: 'repair-planning',
-              repairDecisionTask: {
+              repairPlanTask: {
                 cycleId: cycle!.cycleId,
-                finding: nextPlanningFinding,
-                authorityReferences: repairDecisionAuthorityReferences,
+                groups: derivedRepairGroups.map(group => ({
+                  groupId: group.groupId,
+                  findings: group.findings,
+                  affectedPaths: group.affectedPaths,
+                  dependsOn: group.dependsOn,
+                })),
+                authorityReferences: repairPlanAuthorityReferences,
               },
             }),
       ...(previousDocumentMetadata ? { previousDocumentMetadata } : {}),
@@ -942,16 +1187,6 @@ export async function completeDocumentDraft(input: {
       !allowedPaths.has(normalized as never)
     )
   })
-  const expectedFindingIds = remediationFindings.map(
-    finding => finding.findingId,
-  )
-  const resolvedFindingIds = [
-    ...new Set(input.terminal.resolvedFindingIds ?? []),
-  ]
-  const resolutionComplete = exactStringSet(
-    expectedFindingIds,
-    resolvedFindingIds,
-  )
   const metadataIssues = documentMetadataIssues({
     workspacePath: input.workspacePath,
     writtenPaths: input.terminal.writtenPaths,
@@ -979,10 +1214,8 @@ export async function completeDocumentDraft(input: {
           `document author wrote outside the document scope: ${outOfScope.join(', ')}`,
         ]
       : []),
-    ...(!resolutionComplete
-      ? [
-          'document author did not resolve the exact active review finding batch',
-        ]
+    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
+      ? ['canonical document commit cannot declare finding closure']
       : []),
     ...(remediationFindings.length > 0 &&
     input.terminal.writtenPaths.length === 0
@@ -1057,35 +1290,17 @@ function completeFoundationRepairPlanning(
 ): DeliveryRun {
   if (!cycle || findings.length === 0)
     throw new Error('foundation repair planning has no accepted finding batch')
-  const decision = input.terminal.repairDecision
-  const plannedFindingIds = new Set(
-    cycle.repairPlan?.groups.flatMap(group => group.findingIds) ?? [],
-  )
-  const finding = findings.find(
-    candidate => !plannedFindingIds.has(candidate.findingId),
-  )
-  const affectedPaths = finding
-    ? [
-        ...new Set(
-          finding.subjects.flatMap(subject =>
-            CANONICAL_FOUNDATION_DOCUMENTS.includes(subject.path as never)
-              ? [
-                  subject.path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-                ]
-              : [],
-          ),
-        ),
-      ]
-    : []
+  const submittedPlan = input.terminal.repairPlan
+  const derivedGroups = deriveFoundationRepairGroups(findings)
   const issues = [
-    ...(!finding
-      ? ['document repair decision cursor is already complete']
+    ...(cycle.repairPlan ? ['document repair plan is already complete'] : []),
+    ...(!submittedPlan
+      ? ['document repair planner did not submit a repair plan']
       : []),
-    ...(!decision
-      ? ['document repair planner did not submit a repair decision']
-      : []),
-    ...(finding && affectedPaths.length === 0
-      ? ['document repair finding has no canonical foundation subjects']
+    ...(submittedPlan && submittedPlan.decisions.length !== derivedGroups.length
+      ? [
+          'document repair plan must contain exactly one decision per canonical group',
+        ]
       : []),
     ...(input.terminal.writtenPaths.length
       ? ['document repair planner cannot write project files']
@@ -1102,21 +1317,18 @@ function completeFoundationRepairPlanning(
     documentReviewState: {
       ...input.run.documentReviewState,
       activeCycle:
-        issues.length || !decision || !finding
+        issues.length || !submittedPlan
           ? cycle
           : {
               ...cycle,
               repairPlan: {
-                groups: [
-                  ...(cycle.repairPlan?.groups ?? []),
-                  {
-                    groupId: `repair-${finding.findingId}`,
-                    findingIds: [finding.findingId],
-                    decision: decision.decision,
-                    affectedPaths,
-                    dependsOn: [],
-                  },
-                ],
+                groups: derivedGroups.map((group, index) => ({
+                  groupId: group.groupId,
+                  findingIds: group.findings.map(finding => finding.findingId),
+                  decision: submittedPlan.decisions[index]!.decision,
+                  affectedPaths: group.affectedPaths,
+                  dependsOn: group.dependsOn,
+                })),
                 completedPaths: [],
               },
             },
@@ -1156,7 +1368,7 @@ async function completeFoundationRepairOwner(
     ...(!exactStringSet(writtenPaths, [expectedPath])
       ? [`document repair owner must write exactly ${expectedPath}`]
       : []),
-    ...(input.terminal.repairDecision
+    ...(input.terminal.repairPlan
       ? ['document repair owner cannot replace the accepted repair plan']
       : []),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
@@ -1401,21 +1613,21 @@ export async function reconcileDocumentReview(input: {
     scope,
     reviewAuthority(input.run),
   )
+  const currentCheckIds = activeDocumentReviewCheckPacket(cycle)
   const contractIssues = validateDocumentReviewSubmission({
     contract: {
       scope,
       mode: cycle.mode,
       requiredCheckIds: cycle.requiredCheckIds,
-      currentCheckId: input.terminal.checks[0]!.id,
-      artifacts,
+      currentCheckIds,
+      artifacts: artifactsForReviewChecks(artifacts, currentCheckIds),
       ...(cycle.activeTarget ? { activeTarget: cycle.activeTarget } : {}),
-      ...(cycle.findings.length ? { priorFindings: cycle.findings } : {}),
+      ...(cycle.findings.length
+        ? { priorFindings: findingIdentityLedger(cycle) }
+        : {}),
       ...(cycle.mode === 'closure'
         ? {
-            priorFindings: findingsForTarget(
-              cycle,
-              cycle.activeTarget ?? 'foundation',
-            ),
+            priorFindings: findingIdentityLedger(cycle),
             changedPaths: cycle.changedPaths,
           }
         : {}),
@@ -1426,21 +1638,13 @@ export async function reconcileDocumentReview(input: {
   if (contractIssues.length)
     throw new Error([...new Set(contractIssues)].join('; '))
 
-  const submittedCheck = input.terminal.checks[0]
-  if (!submittedCheck || input.terminal.checks.length !== 1)
-    throw new Error('document reviewer must submit exactly one active check')
-  if (cycle.completedCheckIds.includes(submittedCheck.id))
-    throw new Error('document reviewer cannot replace an accepted check')
-  const existingFindingIds = new Set(
-    cycle.findings.map(finding => finding.findingId),
-  )
+  const submittedCheckIds = input.terminal.checks.map(check => check.id)
+  if (!submittedCheckIds.length)
+    throw new Error('document reviewer must submit one active check packet')
   if (
-    input.terminal.findings.some(finding =>
-      existingFindingIds.has(finding.findingId),
-    )
+    submittedCheckIds.some(checkId => cycle.completedCheckIds.includes(checkId))
   )
-    throw new Error('document reviewer finding ID is already accepted')
-
+    throw new Error('document reviewer cannot replace an accepted check')
   await mkdir(dirname(acceptedEvidencePath), { recursive: true })
   await writeFile(
     acceptedEvidencePath,
@@ -1452,21 +1656,16 @@ export async function reconcileDocumentReview(input: {
     cycle,
     input.terminal.findings,
   )
-  const findings =
-    cycle.mode === 'closure'
-      ? [
-          ...cycle.findings.filter(
-            finding => finding.checkId !== submittedCheck.id,
-          ),
-          ...submittedFindings,
-        ]
-      : [...cycle.findings, ...submittedFindings]
+  const findings = mergeDocumentReviewFindingLedger(
+    cycle.findings,
+    submittedFindings,
+  )
   const submittedDigests = checkEvidenceDigests({
     checks: input.terminal.checks,
     artifacts,
   })
   const mergedChecks = mergeChecks(cycle.checks, input.terminal.checks)
-  const completedCheckIds = [...cycle.completedCheckIds, submittedCheck.id]
+  const completedCheckIds = [...cycle.completedCheckIds, ...submittedCheckIds]
   const mergedDigests = mergeCheckDigests(
     cycle.checkEvidenceDigests,
     submittedDigests,
@@ -1499,6 +1698,7 @@ export async function reconcileDocumentReview(input: {
         id => !completedCheckIds.includes(id),
       ),
     }
+  forgetFrozenReviewProjection(cycle.cycleId)
 
   const verdict = mergedChecks.some(
     check =>
@@ -1556,7 +1756,7 @@ export async function reconcileDocumentReview(input: {
   }
 
   const target = cycle.activeTarget!
-  const untouchedFindings = cycle.findings.filter(
+  const untouchedFindings = openDocumentReviewFindings(acceptedCycle).filter(
     finding => finding.owner !== target,
   )
   if (verdict === 'NEEDS_REVISION') {
@@ -1569,7 +1769,7 @@ export async function reconcileDocumentReview(input: {
       ...acceptedCycle,
       cycleId: randomUUID(),
       parentCycleId: cycle.cycleId,
-      findings: [...untouchedFindings, ...findings],
+      findings,
       activeTarget: target,
       sourceArtifactDigests,
       changedPaths: [],
@@ -1645,6 +1845,11 @@ export async function reconcileDocumentReview(input: {
       queuedTarget,
     )
   }
+
+  if (cycle.originScope === 'complete' && target === 'checklist')
+    return transitionDeliveryRun(base, {
+      type: 'resource_preparation_required',
+    })
 
   const approvalScope = cycle.originScope
   const approvalArtifacts = await readDocumentReviewArtifacts(

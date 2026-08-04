@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   documentReviewCheckSchema,
   documentReviewFindingSchema,
-  documentReviewCheckSubmissionSchemaForMode,
-  documentRepairDecisionSubmissionSchema,
+  documentReviewPacketSubmissionSchemaForContract,
+  documentRepairPlanSubmissionSchema,
 } from './worker-contracts'
 import { GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA } from './types'
 
@@ -15,9 +15,8 @@ const baseFinding = {
   evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
   subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
   observation: 'The documented calculation is inconsistent.',
-  blockingReason: 'The implementation cannot derive one result.',
-  requiredAction: 'Correct the calculation.',
-  closureCondition: 'The documents define one deterministic calculation.',
+  blockingImpact: 'The implementation cannot derive one result.',
+  requiredOutcome: 'The documents define one deterministic calculation.',
 }
 const {
   severity: _submissionSeverity,
@@ -32,11 +31,11 @@ const referenceSubmissionFinding = {
   subjects: [{ referenceId: 'ref-subject' }],
 }
 
-describe('document repair decision contract', () => {
-  test('accepts only the single repair decision', () => {
+describe('document repair plan contract', () => {
+  test('accepts one ordered decision per service-owned group', () => {
     expect(
-      documentRepairDecisionSubmissionSchema.safeParse({
-        decision: 'Apply the smallest consistent correction.',
+      documentRepairPlanSubmissionSchema.safeParse({
+        decisions: [{ decision: 'Apply the smallest consistent correction.' }],
       }).success,
     ).toBe(true)
   })
@@ -52,13 +51,17 @@ describe('document review finding contract', () => {
     expect(() =>
       documentReviewFindingSchema.parse({
         ...baseFinding,
-        subjects: [{
-          path: 'docs/GDD.md',
-          anchor: 'Rules',
-          requirementId: 'RES-1',
-        }],
+        subjects: [
+          {
+            path: 'docs/GDD.md',
+            anchor: 'Rules',
+            requirementId: 'RES-1',
+          },
+        ],
       }),
-    ).toThrow('foundation and checklist findings cannot carry resource subjects')
+    ).toThrow(
+      'foundation and checklist findings cannot carry resource subjects',
+    )
   })
 
   test('requires a current manifest subject for resource findings', () => {
@@ -73,52 +76,82 @@ describe('document review finding contract', () => {
 
   test('does not expose Closure regression fields in Initial Review', () => {
     const submission = {
-      check: {
-        conclusion: 'The delivery contract conflicts.',
-        evidence: [{ referenceId: 'ref-system' }],
-        assessments: [],
-      },
-      findings: [{ ...referenceSubmissionFinding, regressionPaths: ['docs/GDD.md'] }],
+      conclusion: 'The delivery contract conflicts.',
+      evidence: [{ referenceId: 'ref-system' }],
+      assessments: [],
+      findings: [
+        { ...referenceSubmissionFinding, regressionPaths: ['docs/GDD.md'] },
+      ],
     }
     expect(() =>
-      documentReviewCheckSubmissionSchemaForMode(
-        'initial',
-        'complete',
-        'technical_feasibility',
-      ).parse(submission),
+      documentReviewPacketSubmissionSchemaForContract({
+        mode: 'initial',
+        scope: 'complete',
+        currentCheckIds: ['technical_feasibility'],
+      }).parse({ checks: [submission] }),
     ).toThrow()
     expect(
-      documentReviewCheckSubmissionSchemaForMode(
-        'closure',
-        'complete',
-        'technical_feasibility',
-      ).parse(submission)
-        .findings[0],
-    ).toMatchObject({ regressionPaths: ['docs/GDD.md'] })
+      documentReviewPacketSubmissionSchemaForContract({
+        mode: 'closure',
+        scope: 'complete',
+        currentCheckIds: ['technical_feasibility'],
+      }).parse({ checks: [submission] }),
+    ).toMatchObject({
+      checks: [{ findings: [{ regressionPaths: ['docs/GDD.md'] }] }],
+    })
+    expect(() =>
+      documentReviewPacketSubmissionSchemaForContract({
+        mode: 'closure',
+        scope: 'complete',
+        currentCheckIds: ['technical_feasibility'],
+      }).parse({
+        checks: [
+          {
+            ...submission,
+            findings: [{ ...referenceSubmissionFinding, regressionPaths: [] }],
+          },
+        ],
+      }),
+    ).toThrow()
+  })
+
+  test('rejects the retired nested check submission shape', () => {
+    expect(() =>
+      documentReviewPacketSubmissionSchemaForContract({
+        mode: 'initial',
+        scope: 'foundation',
+        currentCheckIds: ['brief_alignment'],
+      }).parse({
+        conclusion: 'The brief is aligned.',
+        evidence: [{ referenceId: 'ref-brief' }],
+        assessments: [],
+        findings: [],
+      }),
+    ).toThrow()
   })
 
   test('does not expose resource ownership or identities in Foundation Review', () => {
     const submission = {
-      check: {
-        id: 'cross_document_consistency',
-        status: 'block',
-        conclusion: 'The foundation documents conflict.',
-        evidence: [{ referenceId: 'ref-system' }],
-        findingIds: ['CALC-1'],
-        assessments: [],
-      },
-      findings: [{
-        ...referenceSubmissionFinding,
-        checkId: 'cross_document_consistency',
-        owner: 'resource',
-        subjects: [{ referenceId: 'ref-audio', resourceId: 'UNREGISTERED-ID' }],
-      }],
+      conclusion: 'The foundation documents conflict.',
+      evidence: [{ referenceId: 'ref-system' }],
+      assessments: [],
+      findings: [
+        {
+          ...referenceSubmissionFinding,
+          checkId: 'cross_document_consistency',
+          owner: 'resource',
+          subjects: [
+            { referenceId: 'ref-audio', resourceId: 'UNREGISTERED-ID' },
+          ],
+        },
+      ],
     }
     expect(() =>
-      documentReviewCheckSubmissionSchemaForMode(
-        'initial',
-        'foundation',
-      ).parse(submission),
+      documentReviewPacketSubmissionSchemaForContract({
+        mode: 'initial',
+        scope: 'foundation',
+        currentCheckIds: ['cross_document_consistency'],
+      }).parse({ checks: [submission] }),
     ).toThrow()
   })
 })
@@ -130,21 +163,25 @@ describe('game design review evidence contract', () => {
     conclusion: 'The documented strategy space is viable.',
     evidence: [{ path: 'docs/GDD.md', anchor: 'Strategy' }],
     findingIds: [],
-    assessments: GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA.gameplay_strategy_viability.map(
-      criterion => ({
-        criterion,
-        status: 'pass' as const,
-        evidence: [{ path: 'docs/GDD.md', anchor: 'Strategy' }],
-        derivation: 'Compared every documented choice, response and recovery path.',
-        conclusion: 'The criterion is supported by the cited design facts.',
-      }),
-    ),
+    assessments:
+      GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA.gameplay_strategy_viability.map(
+        criterion => ({
+          criterion,
+          status: 'pass' as const,
+          evidence: [{ path: 'docs/GDD.md', anchor: 'Strategy' }],
+          derivation:
+            'Compared every documented choice, response and recovery path.',
+          conclusion: 'The criterion is supported by the cited design facts.',
+        }),
+      ),
   }
 
   test('requires structured criteria instead of a prose-only design pass', () => {
     const { assessments: _assessments, ...proseOnly } = strategyCheck
     expect(() => documentReviewCheckSchema.parse(proseOnly)).toThrow()
-    expect(documentReviewCheckSchema.parse(strategyCheck)).toEqual(strategyCheck)
+    expect(documentReviewCheckSchema.parse(strategyCheck)).toEqual(
+      strategyCheck,
+    )
   })
 
   test('requires the complete level and scene design criterion set', () => {
@@ -177,13 +214,15 @@ describe('game design review evidence contract', () => {
   })
 
   test('does not duplicate finding identities inside criterion assessments', () => {
-    expect(() => documentReviewCheckSchema.parse({
-      ...strategyCheck,
-      assessments: strategyCheck.assessments.map(assessment => ({
-        ...assessment,
-        findingIds: [],
-      })),
-    })).toThrow()
+    expect(() =>
+      documentReviewCheckSchema.parse({
+        ...strategyCheck,
+        assessments: strategyCheck.assessments.map(assessment => ({
+          ...assessment,
+          findingIds: [],
+        })),
+      }),
+    ).toThrow()
   })
 
   test('rejects duplicate criteria and check-level status drift', () => {

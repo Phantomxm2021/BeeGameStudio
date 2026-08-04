@@ -32,11 +32,17 @@ export function serializeQueryEngineStartInput(
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
-    ...(input.workflowDocumentReviewMode
-      ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
+    ...(input.workflowDocumentRepairGroupCount
+      ? {
+          workflowDocumentRepairGroupCount:
+            input.workflowDocumentRepairGroupCount,
+        }
       : {}),
-    ...(input.workflowDocumentReviewScope
-      ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+    ...(input.workflowCanonicalDocumentCommitContract
+      ? {
+          workflowCanonicalDocumentCommitContract:
+            input.workflowCanonicalDocumentCommitContract,
+        }
       : {}),
     ...(input.workflowDocumentReviewContract
       ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
@@ -96,11 +102,17 @@ export function deserializeQueryEngineStartInput(
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
-    ...(input.workflowDocumentReviewMode
-      ? { workflowDocumentReviewMode: input.workflowDocumentReviewMode }
+    ...(input.workflowDocumentRepairGroupCount
+      ? {
+          workflowDocumentRepairGroupCount:
+            input.workflowDocumentRepairGroupCount,
+        }
       : {}),
-    ...(input.workflowDocumentReviewScope
-      ? { workflowDocumentReviewScope: input.workflowDocumentReviewScope }
+    ...(input.workflowCanonicalDocumentCommitContract
+      ? {
+          workflowCanonicalDocumentCommitContract:
+            input.workflowCanonicalDocumentCommitContract,
+        }
       : {}),
     ...(input.workflowDocumentReviewContract
       ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }

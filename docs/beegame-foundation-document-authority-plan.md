@@ -9,7 +9,7 @@ BeeGame 在进入 Gameplay Checklist、资源准备和实现之前，必须形�
 - `docs/BALANCE_DESIGN.md`：数值、公式、经济、成长和压力/能力曲线；
 - `docs/LEVEL_SCENE_DESIGN.md`：关卡序列、空间拓扑、场景状态和摆放约束。
 
-其余既有文档保留并强化。禁止再为同一事实增加 `CONTENT_DESIGN`、`RESOURCE_SPEC`、`TEST_PLAN`、`PRODUCTION_PLAN` 或其他平行文档。禁止旧版文档集合并存、旧版 reader、自动补写兼容、feedback/shadow 状态和按项目名或关键词决定文档集合。
+其余既有文档保留并强化。禁止再为同一事实增加 `CONTENT_DESIGN`、`RESOURCE_SPEC`、`TEST_PLAN`、`PRODUCTION_PLAN` 或其他平行文档。运行时只接受本方案的文档集合与状态合同，也不得按项目名或关键词决定文档集合。
 
 ## 2. 唯一 Foundation 文档集合
 
@@ -24,7 +24,7 @@ Foundation 固定为以下八份文档：
 7. `docs/AUDIO_DESIGN.md`
 8. `docs/ASSET_PLAN.md`
 
-八份文档必须在同一个 Foundation Drafting pass 中按固定依赖顺序串行完成；一个 pass 是同一 durable workflow 阶段和同一 Foundation revision，不是一个模型上下文、一个 transport turn 或一个八文档 dispatch。每份文档是一个独立 durable task，只允许一个 active Document Author dispatch、一个 canonical 路径和一次 `Write`。完成后服务端自动推进下一份，八份全部完成前不得启动 Initial Reviewer。每份文档均以 YAML front matter 声明稳定 `document_id`、`MAJOR.MINOR.PATCH` 版本和 ISO 8601 UTC `updated_at`。任一文档缺失、为空、越权拥有事实或缺少核心设计输入，Foundation 不得通过。
+八份文档必须在同一个 Foundation Drafting pass 中按固定依赖顺序串行完成；一个 pass 是同一 durable workflow 阶段和同一 Foundation revision，不是一个模型上下文、一个 transport turn 或一个八文档 dispatch。每份文档是一个独立 durable task，只允许一个 active Document Author dispatch、一个 canonical 路径和一次 `CommitCanonicalDocument`。完成后服务端自动推进下一份，八份全部完成前不得启动 Initial Reviewer。每份文档均以 YAML front matter 声明稳定 `document_id`、`MAJOR.MINOR.PATCH` 版本和 ISO 8601 UTC `updated_at`；三项元数据由 Workflow 服务在唯一提交边界生成，模型只提交 Markdown 正文。任一文档缺失、为空、越权拥有事实或缺少核心设计输入，Foundation 不得通过。
 
 `docs/acceptance/gameplay-checklist.md` 不是 Foundation 文档。它只能在八份文档通过 Foundation Initial Review、必要修复和 Closure Review 后生成。`assets/asset-manifest.json`、资源文件及 JSON/YAML 可执行内容只能在 Checklist 完成后创建。
 
@@ -120,7 +120,7 @@ Foundation 固定执行以下 12 项，其中空间设计检查为本次补齐�
 
 Foundation 固定为 12 项；Comprehensive 仍为 Foundation 与 5 项下游检查的严格并集，固定为 17 项。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
 
-Reviewer 只允许一个 frozen-revision Review Cycle。Cycle 内按固定顺序逐项派发 check；每项原生工具必须在返回 `accepted` 前，使用与持久化相同的唯一 submission contract 校验 active check、固定 criteria、稳定 `referenceId`、finding subject owner 与 Closure 边界。格式或引用错误只能在当前 check dispatch 内修正；已接受的前序 check 不回滚。禁止 `transportCorrection`、并行 Reviewer、反馈式整轮重审或兼容接受分支。
+Reviewer 只允许一个 frozen-revision Review Cycle。12 项 Foundation check 保持固定顺序和独立结论，但按五个事务型 packet 派发：`brief_alignment + cross_document_consistency + gameplay_completeness`；`gameplay_strategy_viability + economy_progression_integrity`；`numeric_balance_feasibility + pacing_difficulty_coherence`；`level_scene_design_integrity + technical_feasibility + art_direction_coherence + ui_audio_consistency`；`acceptance_observability`。策略/经济包共享玩家选择、资源流和成长约束，数值/节奏包共享公式边界、压力/能力曲线与尖峰恢复推导；不得把十二项 assessment 合成一个原子提交。每个 packet 的原生工具必须向模型直接暴露完整 check、assessment、finding 与 reference JSON Schema，并在返回 `accepted` 前使用与持久化相同的唯一 submission contract 校验全部 check、固定 criteria、稳定 `referenceId`、逐 check artifact dependency、finding subject owner 与 Closure 边界；不得以空 item Schema 配合 Prompt 补偿字段合同。任一项非法则整个 packet 零落盘。packet 传输依赖并集只用于减少重复输入，不能扩大任一 check 的 evidence/subject 权限；每项 approval digest 覆盖该 check 的完整依赖而非仅覆盖主动引用。已接受 packet 不回滚。未接受 terminal 的 packet 边界与当前 durable cursor 不一致时必须丢弃并重新派发当前 packet，不得兼容解析或部分接收。不得创建并行 Reviewer、替代提交合同或整轮重审分支。
 
 `level_scene_design_integrity` 必须提交三个固定 criterion：
 
@@ -145,9 +145,11 @@ Reviewer 只允许一个 frozen-revision Review Cycle。Cycle 内按固定顺序
 
 首次 Foundation Author 固定按 `GDD -> LEVEL_SCENE_DESIGN -> BALANCE_DESIGN -> TECHNICAL_DESIGN -> ART_DIRECTION -> UI_UX_SPEC -> AUDIO_DESIGN -> ASSET_PLAN` 串行执行。每个 dispatch 只获得当前文档的唯一允许路径，以及该文档确实依赖且已经完成的上游 canonical 文档；不得获得八份可写路径、不得携带上一份文档的模型对话或压缩摘要，也不得在初稿阶段提出 finding、执行 Closure、模拟 Reviewer 或自行建立修订循环。成功终态只完成当前 durable task，服务端随后创建下一任务；八份完成后才计算完整 Foundation revision。
 
-上游依赖由事实 owner 固定投影，不等同于“此前所有文档”：Level/Scene 读取 GDD；Balance 读取 GDD 与 Level/Scene；Technical 读取 GDD、Level/Scene 与 Balance；Art 读取 GDD 与 Level/Scene；UI/UX 读取 GDD 与 Level/Scene；Audio 读取 GDD、Level/Scene 与 UI/UX；Asset Plan 读取 GDD、Level/Scene、Technical、Art、UI/UX 与 Audio。服务端在启动 Initial Author 前一次性读取这些 canonical 上游文档并作为同一 prompt 的只读 authority block 提供；Author 不得用工具重新装载上游或浏览其他路径。若当前目标不存在，Initial Author 直接执行一次 `Write`；若目标已存在（包括显式重新开始、Change Request 或 finding remediation），Author 必须且只能先 `Read` 当前唯一允许路径一次，以满足底层文件状态守卫并获得实际写入基线，随后执行一次 `Write`。Initial restart 读取到的旧目标只用于建立覆盖前提，不得被提升为当前 run 的产品 authority；Change Request 与 remediation 的当前目标内容则是本次受控修订基线。该读取不产生摘要、临时文件、第二事实源或第二写入通道。
+上游依赖由事实 owner 固定投影，不等同于“此前所有文档”：Level/Scene 读取 GDD；Balance 读取 GDD 与 Level/Scene；Technical 读取 GDD、Level/Scene 与 Balance；Art 读取 GDD 与 Level/Scene；UI/UX 读取 GDD 与 Level/Scene；Audio 读取 GDD、Level/Scene 与 UI/UX；Asset Plan 读取 GDD、Level/Scene、Technical、Art、UI/UX 与 Audio。服务端在启动 Initial Author 前一次性读取这些 canonical 上游文档并作为同一 prompt 的只读 authority block 提供；Author 不得用工具重新装载上游或浏览其他路径。若当前目标不存在，Initial Author 直接执行一次 `CommitCanonicalDocument`；若目标已存在（包括显式重新开始、Change Request 或 finding remediation），Workflow 服务把当前正文作为受控基线投影给 Author，Author 不再通过通用文件工具读取或写入 canonical 文档。Initial restart 的旧目标只用于建立覆盖前提，不得被提升为当前 run 的产品 authority；Change Request 与 remediation 的当前正文则是本次受控修订基线。该投影不产生摘要、临时项目文件、第二事实源或第二写入通道。
 
-Initial Author 的唯一 mutation 是当前目标文件的一次 `Write`；目标已存在时允许且只允许此前对该目标的一次必要 `Read`。该 mutation 完成后，服务端以实际写入路径和 durable 文件校验直接派生完成终态并关闭 worker；不得要求模型再调用 `SubmitDocumentAuthorResult`、复述完成结果或在相同完整 authority 上下文中进行第二次推理。Initial Write 未完成时必须报告实际文件工具失败，不得进入 remediation terminal 解析。`SubmitDocumentAuthorResult` 只属于 accepted finding batch 的 remediation，因为该终态还必须声明完整 resolved finding IDs。初稿与修订因此仍是两个互斥状态，不是双轨。
+Initial Author 与 remediation Author 的唯一 mutation 都是当前目标的一次 `CommitCanonicalDocument`。工具只接受不含 YAML front matter 的完整 Markdown 正文；服务端根据 dispatch 合同唯一确定 `document_id`，为新文档生成 `1.0.0`，为受控修订将现有 PATCH 恰好提升一次，并使用服务端 UTC 时钟生成严格晚于旧值的 `updated_at`。服务端必须在 mutation 前验证目标、基线 digest、正文和最终 metadata，再以临时文件加原子替换写入 canonical 路径。Document Author 不存在通用文件 mutation 或另一个完成终态；成功的 canonical commit 本身就是唯一终态。
+
+每个 commit 在 `.beegame/workflow/document-commits/` 写入以 `dispatchId` 唯一标识的 write-ahead receipt。receipt 只记录 operation identity、目标路径、基线 digest、最终 digest、服务端 metadata 与 `prepared/committed` 状态，是 Workflow 的操作日志，不是产品事实或第二文档权威。顺序固定为：原子写入 prepared receipt、原子替换 canonical 文档、原子标记 committed。恢复时若 receipt 为 committed，或 prepared receipt 的最终 digest 已与 canonical 文件一致，服务端必须幂等接受同一次 commit 并推进原 repair cursor；若 canonical 文件仍等于基线则允许同一 dispatch 继续提交；任何第三种文件状态立即作为并发修改错误拒绝，禁止重新让 LLM 应用同一修订。
 
 首次 Author 只写决策级权威事实：原始设计输入、规则、基础数值、公式、必要配置和直接决定设计是否成立的少量边界。不得把所有可重算面积、比例、距离、构筑模拟、表格派生值或自我审计过程写入 Foundation。后续 JSON/YAML 承载批准设计的完整可执行投影；Foundation 不复制纯执行数据，也不把模拟报告提升为设计权威。
 
@@ -155,26 +157,28 @@ Initial Author 的唯一 mutation 是当前目标文件的一次 `Write`；目�
 
 修复时只允许写 accepted finding 指向且 repair plan 分配给当前 task 的一份 Foundation 文档，并要求该文档 PATCH 版本提升。首次撰写、repair planning 和 finding owner 修复是互斥任务，不共享 prompt 或允许路径。
 
-Foundation 修复 dispatch 只消费已接受 finding、其 closure condition、被分配的 subject 文档，以及 finding 明确引用且确有必要核对的事实 owner；每份读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，回归与 closure condition 的最终判定唯一属于随后一次 Closure Reviewer。
+Foundation 修复 dispatch 只消费已接受 finding、其 required outcome、被分配的 subject 文档，以及 finding 明确引用且确有必要核对的事实 owner；每份读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，required outcome 与回归的最终判定唯一属于随后一次 Closure Reviewer。
 
 Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 
-1. Repair Lead 按 accepted finding ledger 的稳定顺序逐项处理；每个只读 dispatch 只消费一个尚未规划的 finding，避免一个字段错误迫使完整 batch 重传；
-2. Reviewer 必须在每个 finding 上保存精确 evidence；check evidence 只表示整项检查的总体范围，不能替代 finding evidence。Repair Lead 只读取当前 finding 的 subjects、finding evidence 与其明确引用的 System Delivery Contract 片段，并只提交唯一修订决策。accepted finding 的 evidence、subjects、required action 与 closure condition 已是不可变约束，由服务端直接持有，禁止模型重述；不得把“修改 A 或修改 B”继续留给 Document Author；
-3. 服务端从当前 finding 确定性派生 group ID、finding ID、`affectedPaths` 和依赖，将接受的决定追加到原 active review cycle 的唯一 repair plan ledger。模型不得提交这些可派生身份字段；服务端必须保证 ledger 是 accepted findings 的稳定前缀，最终恰好覆盖完整 batch。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
-4. 服务端从 plan 和固定 Foundation owner 顺序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 内容、与该文档相关的 finding 和已锁定决策，并只允许一次 `Write`；
-5. 每份成功写入立即形成 durable checkpoint、提升该文档 PATCH 版本并释放模型上下文。重启只继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；
-6. 全部目标文档完成后，服务端相对 frozen baseline 核对 changed paths、版本和 finding 覆盖，再启动唯一 Closure Reviewer；Closure Reviewer 仍按原 finding ID、closure condition 和 server diff 独立判定。
+1. 服务端先从 accepted finding ledger 确定性构造 repair graph：共享 canonical subject、共享最高事实 owner，或一个 finding 的 subject 是另一 finding evidence 所依赖的 owner 时建立关联；按 Foundation 固定 owner 依赖顺序求连通分量和分量间 DAG。不得使用关键词、正则、项目名或 LLM 摘要分组；
+2. 每个连通分量形成一个 coherent repair group。Repair Lead 的一个只读 dispatch 消费该组完整 findings、精确 subjects/evidence、blocking impact、required outcome 与必要 System Delivery Contract 片段，并只提交一份组内一致的最小修订决策；同一 finding 恰好属于一个 group。不得一个 finding 建一个机械 group，也不得把无关 findings 合成全量巨型计划；
+3. 服务端从 graph 确定性派生 group ID、finding IDs、`affectedPaths` 和 `dependsOn`，模型不得提交这些可派生身份字段。接受的 decision 写入原 active review cycle 的唯一 repair plan ledger；服务端必须保证 ledger 是 graph 拓扑序的稳定前缀，最终恰好覆盖完整 batch。规划依赖 group 时，服务端必须把每个直接依赖 group 已锁定的 `groupId`、finding IDs、affected paths 与 decision 作为只读约束投影给当前 Repair Lead；只提供 `dependsOn` ID 而不提供 decision 属于不完整交接，当前 group 不得重新打开或替换上游 decision。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
+4. 服务端按 repair graph 的拓扑序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 正文、与该文档相关的 finding 和已锁定决策，并只允许一次 `CommitCanonicalDocument`；
+5. 每份成功提交立即以 commit receipt 形成 durable checkpoint、由服务端提升 PATCH 并释放模型上下文。重启只核对 receipt 并继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；
+6. 全部目标文档完成后，服务端相对 frozen baseline 核对 changed paths、版本和 finding 覆盖，再启动唯一 Closure Reviewer；Closure Reviewer 仍按原 finding ID、required outcome 和 server diff 独立判定。同一 prior finding 仍未关闭时必须保持原 ID、check、owner 与 required outcome；已关闭时不再提交。受影响 check 中发现 Initial Review 遗漏的另一缺陷时使用在完整 Cycle ledger 中从未出现的新 ID，不得借用旧 ID，也不得因 subject 未变化而隐藏真实缺陷。Closure packet 通过唯一校验函数原子替换该 packet 对应的 open 引用；完整 finding 身份历史保留在同一 `cycle.findings`，open 集合只由最新 check ledger 的 `findingIds` 派生，不能在工具接受后再由持久化边界以旧 ID 已存在为由拒绝。
 
-Repair plan 只保存在原 active review cycle 内，并在该 cycle 关闭时一并退出活动状态；canonical 文档始终是唯一产品权威。禁止继续保留 `DocumentWorkbench`、多文档修订 dispatch、重试时重新规划或任何兼容执行分支。Initial Author 只锁定 confirmed brief 所需的最小原始设计输入、公式和直接边界；不得在 Reviewer 之前展开完整波次/构筑模拟、逐项候选方案比较、穷举调参或证明全局可行性。完整策略、经济、数值、节奏与空间可行性判断属于 Initial Reviewer；Reviewer 接受 finding 后，Repair Lead 只决定关闭这些 finding 的最小一致修改，不得借修订新增无关系统、扩大玩法范围或重新审计未受影响内容。
+Repair plan 只保存在原 active review cycle 内，并在该 cycle 关闭时一并退出活动状态；canonical 文档始终是唯一产品权威。不得保留临时修订状态、多文档修订 dispatch 或重试时重新规划。Initial Author 只锁定 confirmed brief 所需的最小原始设计输入、公式和直接边界；不得在 Reviewer 之前展开完整波次/构筑模拟、逐项候选方案比较、穷举调参或证明全局可行性。完整策略、经济、数值、节奏与空间可行性判断属于 Initial Reviewer；Reviewer 接受 finding 后，Repair Lead 只决定关闭这些 finding 的最小一致修改，不得借修订新增无关系统、扩大玩法范围或重新审计未受影响内容。
 
-Document Author 的运行时能力声明必须与真实工具完全一致。Author 只保留受限 `Read` 与 `Write`：`Read` 只能命中当前唯一目标且至多成功一次，`Write` 只能命中该目标且至多成功一次；不得提供 `Edit`、`MultiEdit`，也不得通过 Bash、临时项目文件、隐藏脚本或第二写入工具绕过 repair plan 与 canonical 单次写入合同。Repair Lead 只获得结构化 plan terminal，不得获得任何项目写入工具。
+Document Author 的运行时能力声明必须与真实工具完全一致。Author 只获得 `CommitCanonicalDocument`，不得获得通用文件读写、命令执行或第二写入工具。当前目标正文和必要上游 authority 由服务端只读投影。Repair Lead 只获得结构化 plan terminal，不得获得任何项目写入工具。
+
+Foundation 的范围权威必须在 Author、Reviewer 和 Repair Lead 三处一致执行：下游 owner 只能细化 Confirmed Brief、GDD 或其合法上游已经批准的产品行为，不能自行创造新的玩家可见系统、设置面板、状态机、经济机制、资源职责或另一个 owner 必须实现的义务。Reviewer 发现下游越权声明时，finding subject 必须指向该越权声明并要求删除或收窄；只有最高权威明确要求该行为而消费者缺失时，才允许扩建消费者。Repair Lead 不得把“文档彼此一致”解释为新增系统的授权。
 
 同一修复 batch 若在文档 owner task 之间被中断，已完成路径保存在 active cycle 的唯一 repair cursor 中并保持为当前 canonical artifact。恢复时服务端必须同时验证 checkpoint 路径相对 frozen baseline 已发生合法变化；不得仅凭模型声明推进 cursor。已经完成的路径不得再次派发或再次提升版本。Closure diff 始终相对原 frozen baseline 计算。
 
-首次 Document Author、Repair Lead、repair owner task、Document Reviewer 与 Resource Agent 都不使用固定业务墙钟、durable-progress idle、terminal grace、累计 token 或自动修订次数截止线；项目复杂度、网络状态、模型响应时间、累计 token、修订轮次和文件 mutation 间隔都不是失败条件。只有连接断开、worker 进程退出、用户停止或明确终态可以结束 dispatch。每个 dispatch 仍只负责当前有界 task，但不得以 token 预算、经过时间或修订次数强制结束它，也不得依靠上下文压缩或第二续写通道完成另一项任务。Repair Lead 只提交当前 finding 的结构化决定，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable planning/owner task 不等于拆分 finding 或 repair-plan ledger，也不允许第二终态、增量 Edit 或并行修订队列。Document Reviewer 关闭 extended thinking，把唯一可审计推理直接提交在 criterion derivation 与 finding 中。
+首次 Document Author、Repair Lead、repair owner task、Document Reviewer 与 Resource Agent 都不使用固定业务墙钟、durable-progress idle、terminal grace、累计 token 或自动修订次数截止线；项目复杂度、网络状态、模型响应时间、累计 token、修订轮次和文件 mutation 间隔都不是失败条件。只有连接断开、worker 进程退出、用户停止或明确终态可以结束 dispatch。每个 dispatch 仍只负责当前有界 task，但不得以 token 预算、经过时间或修订次数强制结束它，也不得依靠上下文压缩或第二续写通道完成另一项任务。Repair Lead 只提交当前 coherent group 的结构化决定，不写 canonical 文件；每个 repair owner task 只完成当前路径的一次写入。一个 batch 被拆成 durable planning/owner task 不等于拆分 finding 或 repair-plan ledger，也不允许第二终态、增量编辑或并行修订队列。Document Reviewer 保留模型与运行时的正常 thinking 能力；唯一可审计结论仍提交在 criterion derivation 与 finding 中。
 
-Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证、改走第二网络路径或引入 fallback transport。
+Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证或改走第二网络路径。
 
 Checklist Author 必须从八份已批准文档派生**最小充分的场景级验收集合**。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。同一 setup、action 与 observable outcome 下的波次、敌人、输入、资源、cue 或表格行变体必须在一个参数化验收项中核对，不得按每个变体或文档句子机械拆项；一项可以引用多个批准事实，但每个稳定 ID 仍只描述一个可独立判定的场景结果。Author 必须在首次写入前完成分组和计数；常规首个交付目标为 24–40 项，只有批准设计确实包含更多互相独立的可观察场景时才允许超过 40 项，绝对不得超过 64 项。超出上限属于确定性 Checklist 合同错误，必须在进入资源阶段前原地修订，不得把膨胀清单交给 Planner 或 Implementation；禁止先写超限草稿再依赖同一 dispatch 二次改写。
 
@@ -204,11 +208,11 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 实现完成后必须确认：
 
 - 代码和文档中不存在已废弃的缩减文档集合或缩减检查矩阵；
-- 不存在可接受旧六文档项目的 fallback/compat reader；
+- 运行时只接受当前八文档合同；
 - 不存在 GDD 与 Balance 双写数值、GDD/Level 与 YAML 双写场景实例、Asset Plan 与 Manifest 双写资源身份的提示；
 - 不存在按游戏类型、项目名、关键词或正则增删文档/check 的逻辑；
 - 不存在 `LEVEL_DESIGN.md`、`SCENE_DESIGN.md` 等平行文件名；
-- 不存在第二 Balance Reviewer、第二 finding ledger、feedback/shadow 状态或开放式全文返工；
+- 不存在第二 Balance Reviewer、第二 finding ledger、平行修订状态或开放式全文返工；
 - 不存在一次派发八份初稿、`existingDocumentPaths` 兼容续写、初稿 repair group、初稿自审或跨文档模型对话继承；
 - Checklist 与 Manifest 均无法在八文档 Foundation Closure 前创建；
 - placeholder 是正常资源文件，不是源码分支或运行时 substitute；
@@ -218,12 +222,12 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 
 1. Readiness 对七份或任一缺失文档确定性失败，对八份非空合法文档通过。
 2. 首次 Foundation Author 每个 dispatch 只允许写当前 cursor 指向的一份文档，完成后自动推进；Repair Author 只允许写 accepted finding subjects，Checklist Author 只允许写 Checklist。
-3. Foundation Reviewer 必须在同一 Cycle 严格串行接受 12 checks 和 15 structured criteria；Comprehensive 必须严格串行接受 17 checks 和同一 15 criteria。每次只提交当前 check，最终 verdict 由服务端汇总。
+3. Foundation Reviewer 必须在同一 Cycle 通过五个串行事务 packet 接受 12 checks 和 15 structured criteria；Comprehensive 继承新鲜 Foundation 前缀后，对新增 checks 使用单项 packet。每次只提交当前完整 packet，12 项 check 仍分别持久化，最终 verdict 由服务端汇总。
 4. Balance 缺少关键口径、公式或可行边界时产生 foundation finding；不得由 Agent 补造。
 5. Level/Scene 缺少空间支持、关卡曲线或场景状态闭环时产生 foundation finding。
 6. 修复后对应文档 PATCH 版本提升，Closure 只关闭已验证 finding 和直接 regression。
-7. 任一未知 `referenceId` 必须在 `SubmitDocumentReviewCheck` 返回 accepted 前被拒绝；同一 check dispatch 修正后可提交成功，已完成 check 不得丢失或重算。
+7. 任一未知 `referenceId` 必须在 `SubmitDocumentReviewPacket` 返回 accepted 前拒绝整个 packet；同一 packet dispatch 修正后可重新提交，已完成 packet 不得丢失或重算。
 7. Checklist 在 Foundation Closure 前不存在；Manifest 与 JSON/YAML 在 Checklist 完成前不存在。
 8. 服务端、前端、类型检查和 diff 检查通过。
 9. 系统 Chrome 的单项目实测完整经过 Drafting、Initial Review、Repair、Closure 并进入 Checklist；第二项目只有在第一个完成后才能启动。
-10. 日志不存在八文档或多文档 repair 单 dispatch、跨文档上下文压缩、`DocumentWorkbench`、重试重新规划或 Author 自行提出并修复审计问题。
+10. 日志不存在八文档或多文档 repair 单 dispatch、跨文档上下文压缩、临时修订状态、重试重新规划或 Author 自行提出并修复审计问题。

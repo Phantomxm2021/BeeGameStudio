@@ -32,19 +32,17 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
-  test('disables extended thinking for action-oriented workflow workers', () => {
-    expect(getBeeGameWorkflowThinkingConfig('document-author')).toEqual({
-      type: 'disabled',
-    })
+  test('keeps Author and Reviewer thinking while preserving other worker policy', () => {
+    expect(getBeeGameWorkflowThinkingConfig('document-author')).toBeUndefined()
     expect(getBeeGameWorkflowThinkingConfig('atomic-task-planner')).toEqual({
       type: 'disabled',
     })
     expect(getBeeGameWorkflowThinkingConfig('implementation-worker')).toEqual({
       type: 'disabled',
     })
-    expect(getBeeGameWorkflowThinkingConfig('document-reviewer')).toEqual({
-      type: 'disabled',
-    })
+    expect(
+      getBeeGameWorkflowThinkingConfig('document-reviewer'),
+    ).toBeUndefined()
     expect(getBeeGameWorkflowThinkingConfig()).toBeUndefined()
   })
 
@@ -135,14 +133,14 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       { name: 'SearchExtraTools' },
       { name: 'ExecuteExtraTool' },
       { name: 'Task' },
-      { name: 'SubmitDocumentAuthorResult' },
+      { name: 'CommitCanonicalDocument' },
     ]
 
     expect(
       selectBeeGameWorkerTools(tools, 'document-author').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
+    ).toEqual([])
     expect(selectBeeGameWorkerTools(tools, 'document-reviewer')).toEqual([])
 
     expect(
@@ -162,7 +160,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         selectBeeGameWorkerTools(tools, workerType).map(
           tool => (tool as { name: string }).name,
         ),
-      ).toEqual(['Read', 'Task', 'SubmitDocumentAuthorResult'])
+      ).toEqual(['Read', 'Task', 'CommitCanonicalDocument'])
     }
 
     expect(selectBeeGameWorkerTools(tools)).toEqual(tools)
@@ -205,7 +203,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual(['Read', 'Write', 'Glob'])
   })
 
-  test('keeps one target read and write lane without Edit or MultiEdit', () => {
+  test('removes generic file tools from the canonical document lane', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -217,12 +215,12 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       selectBeeGameWorkerTools(tools, 'document-author').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Write'])
+    ).toEqual([])
     expect(
       selectBeeGameWorkerTools(tools, 'document-author', 'remediation').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Write'])
+    ).toEqual([])
     expect(
       selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
     ).toEqual([])
@@ -249,12 +247,12 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     const resourceLibrary = { name: 'ResourceLibrary' }
     const terminalTools = [
       'AssetManifest',
-      'SubmitDocumentRepairDecision',
+      'SubmitDocumentRepairPlan',
       'SubmitAtomicTaskPlan',
       'SubmitImplementationResult',
       'SubmitValidationResult',
-      'SubmitDocumentAuthorResult',
-      'SubmitDocumentReviewCheck',
+      'CommitCanonicalDocument',
+      'SubmitDocumentReviewPacket',
       'SubmitChangeImpactResult',
       'SubmitQuestionAnswerResult',
     ].map(name => ({ name }))

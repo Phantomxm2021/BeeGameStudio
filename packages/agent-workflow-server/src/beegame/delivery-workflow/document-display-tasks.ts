@@ -5,6 +5,7 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  DOCUMENT_REVIEW_CHECK_PACKETS,
   type DocumentWorkflowStep,
   type DocumentReviewCheckId,
 } from './types'
@@ -15,6 +16,39 @@ export type DocumentDisplayTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
   operation: 'write' | 'review' | 'produce'
+}
+
+export type ReviewFindingDisplayItem = {
+  id: string
+  title: string
+  owner: 'foundation' | 'checklist' | 'resource'
+}
+
+export function projectReviewFindingDisplayItems(
+  value: unknown,
+  owner?: ReviewFindingDisplayItem['owner'],
+): ReviewFindingDisplayItem[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(finding => {
+    const record = objectValue(finding)
+    const findingOwner = record?.owner
+    if (
+      typeof record?.findingId !== 'string' ||
+      typeof record.requiredOutcome !== 'string' ||
+      (findingOwner !== 'foundation' &&
+        findingOwner !== 'checklist' &&
+        findingOwner !== 'resource') ||
+      (owner && findingOwner !== owner)
+    )
+      return []
+    return [
+      {
+        id: record.findingId,
+        title: record.requiredOutcome,
+        owner: findingOwner,
+      },
+    ]
+  })
 }
 
 export type AssetDisplayTaskInput = {
@@ -41,7 +75,7 @@ export type DocumentDisplayTaskInput = {
   thinking?: string
   reviewCheckIds?: DocumentReviewCheckId[]
   reviewCompletedCheckIds?: DocumentReviewCheckId[]
-  reviewAccepted?: boolean
+  reviewPacketSetComplete?: boolean
   reviewTarget?: 'foundation' | 'checklist' | 'resource'
   repairPlan?: {
     groups: Array<{ affectedPaths: string[] }>
@@ -101,29 +135,40 @@ export function projectDocumentDisplayTasks(
 
   if (operation === 'review' && input.reviewCheckIds?.length) {
     const completed = new Set(input.reviewCompletedCheckIds ?? [])
-    const activeCheckId = input.reviewCheckIds.find(id => !completed.has(id))
+    const firstIncompleteCheckId = input.reviewCheckIds.find(
+      id => !completed.has(id),
+    )
+    const activeCheckIds = new Set(
+      (
+        DOCUMENT_REVIEW_CHECK_PACKETS.find(packet =>
+          firstIncompleteCheckId
+            ? packet.includes(firstIncompleteCheckId)
+            : false,
+        ) ?? []
+      ).filter(
+        checkId =>
+          input.reviewCheckIds!.includes(checkId) && !completed.has(checkId),
+      ),
+    )
     return input.reviewCheckIds.map(id => ({
       id,
       title: id,
-      status: input.reviewAccepted || completed.has(id)
-        ? 'completed'
-        : id === activeCheckId && active
-          ? 'running'
-          : id === activeCheckId && workflowStopped(input.workflowStatus)
-            ? 'stopped'
-            : id === activeCheckId && input.workflowStatus === 'failed'
-              ? 'failed'
-              : 'pending',
+      status:
+        input.reviewPacketSetComplete || completed.has(id)
+          ? 'completed'
+          : activeCheckIds.has(id) && active
+            ? 'running'
+            : activeCheckIds.has(id) && workflowStopped(input.workflowStatus)
+              ? 'stopped'
+              : activeCheckIds.has(id) && input.workflowStatus === 'failed'
+                ? 'failed'
+                : 'pending',
       attempt: 0,
       operation: 'review',
     }))
   }
 
-  if (
-    operation === 'write' &&
-    input.reviewAccepted &&
-    input.reviewFindings?.length
-  ) {
+  if (operation === 'write' && input.reviewPacketSetComplete) {
     if (input.reviewTarget === 'foundation') {
       if (!input.repairPlan)
         return [
@@ -164,10 +209,10 @@ export function projectDocumentDisplayTasks(
       }))
     }
     const currentOwnerFindings = input.reviewTarget
-      ? input.reviewFindings.filter(
+      ? (input.reviewFindings ?? []).filter(
           finding => finding.owner === input.reviewTarget,
         )
-      : input.reviewFindings
+      : (input.reviewFindings ?? [])
     if (currentOwnerFindings.length)
       return currentOwnerFindings.map(finding => ({
         id: finding.id,

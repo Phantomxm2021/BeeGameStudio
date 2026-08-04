@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createAcceptedComprehensiveReview,
+  createTestDeliveryRun,
+} from './delivery-workflow-test-helpers'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 
 describe('delivery workflow resource entry', () => {
@@ -75,9 +78,8 @@ describe('delivery workflow resource entry', () => {
         },
       ],
       observation: 'The approved duty has no loadable resource.',
-      blockingReason: 'Implementation cannot consume the required visual.',
-      requiredAction: 'Prepare one canonical loadable resource.',
-      closureCondition:
+      blockingImpact: 'Implementation cannot consume the required visual.',
+      requiredOutcome:
         'The same requirement resolves through the canonical manifest.',
     }
     const run = {
@@ -104,16 +106,10 @@ describe('delivery workflow resource entry', () => {
           scope: 'complete' as const,
           mode: 'initial' as const,
           sourceRevision: 'stale-resource',
-          requiredCheckIds: ['resource_content_consistency' as const],
-          completedCheckIds: ['resource_content_consistency' as const],
-          checks: [{
-            id: 'resource_content_consistency' as const,
-            status: 'block' as const,
-            conclusion: 'Resource remediation is required.',
-            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+          ...createAcceptedComprehensiveReview({
+            blockingCheckId: 'resource_content_consistency',
             findingIds: [finding.findingId],
-            assessments: [],
-          }],
+          }),
           checkEvidenceDigests: {},
           findings: [finding],
           activeTarget: 'resource' as const,
@@ -138,8 +134,7 @@ describe('delivery workflow resource entry', () => {
       findings: [
         {
           findingId: finding.findingId,
-          requiredAction: finding.requiredAction,
-          closureCondition: finding.closureCondition,
+          requiredOutcome: finding.requiredOutcome,
         },
       ],
     })
@@ -192,9 +187,8 @@ describe('delivery workflow resource entry', () => {
         },
       ],
       observation: 'The resource contract remains incomplete.',
-      blockingReason: 'The approved resource cannot be consumed.',
-      requiredAction: 'Complete the canonical resource contract.',
-      closureCondition:
+      blockingImpact: 'The approved resource cannot be consumed.',
+      requiredOutcome:
         'The approved resource is loadable through the canonical path.',
     }
     const run = {
@@ -214,16 +208,10 @@ describe('delivery workflow resource entry', () => {
           scope: 'complete' as const,
           mode: 'initial' as const,
           sourceRevision: 'resource-source',
-          requiredCheckIds: ['resource_content_consistency' as const],
-          completedCheckIds: ['resource_content_consistency' as const],
-          checks: [{
-            id: 'resource_content_consistency' as const,
-            status: 'block' as const,
-            conclusion: 'Resource remediation is required.',
-            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+          ...createAcceptedComprehensiveReview({
+            blockingCheckId: 'resource_content_consistency',
             findingIds: [retryFinding.findingId],
-            assessments: [],
-          }],
+          }),
           checkEvidenceDigests: {},
           findings: [retryFinding],
           activeTarget: 'resource' as const,
@@ -292,7 +280,7 @@ describe('delivery workflow resource entry', () => {
             findings: [
               {
                 ...retryFinding,
-                closureCondition: 'A different closure condition.',
+                requiredOutcome: 'A different required outcome.',
               },
             ],
           },

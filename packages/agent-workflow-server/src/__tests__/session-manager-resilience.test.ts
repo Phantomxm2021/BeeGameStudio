@@ -143,7 +143,7 @@ describe('BeeGame session runtime resilience', () => {
               content_block: {
                 type: 'tool_use',
                 id: 'review-terminal-1',
-                name: 'SubmitDocumentReviewCheck',
+                name: 'SubmitDocumentReviewPacket',
                 input: {},
               },
             },
@@ -156,7 +156,7 @@ describe('BeeGame session runtime resilience', () => {
                 {
                   type: 'tool_use',
                   id: 'review-terminal-1',
-                  name: 'SubmitDocumentReviewCheck',
+                  name: 'SubmitDocumentReviewPacket',
                   input: {},
                 },
               ],
@@ -193,7 +193,7 @@ describe('BeeGame session runtime resilience', () => {
       if (
         manager.hasInFlightToolSubmission(
           session.id,
-          'SubmitDocumentReviewCheck',
+          'SubmitDocumentReviewPacket',
         )
       )
         break
@@ -202,7 +202,7 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       manager.hasInFlightToolSubmission(
         session.id,
-        'SubmitDocumentReviewCheck',
+        'SubmitDocumentReviewPacket',
       ),
     ).toBe(true)
     releaseStream()
@@ -210,7 +210,7 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       manager.hasInFlightToolSubmission(
         session.id,
-        'SubmitDocumentReviewCheck',
+        'SubmitDocumentReviewPacket',
       ),
     ).toBe(false)
   })
@@ -763,169 +763,6 @@ describe('BeeGame session runtime resilience', () => {
         workspacePath,
       ),
     ).toEqual([])
-    manager.dispose()
-  })
-
-  test('allows one completed document mutation per path in a dispatch', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-document-mutation-boundary-'))
-    const workspacePath = join(root, 'workspace')
-    await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    let repeatedDecision: DashboardPermissionDecision | undefined
-    let otherDocumentDecision: DashboardPermissionDecision | undefined
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async input => {
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'tool_use',
-                  id: 'document-write-1',
-                  name: 'Write',
-                  input: { file_path: join(workspacePath, 'docs/GDD.md') },
-                },
-              ],
-            },
-          })
-          input.onMessage({
-            type: 'user',
-            message: {
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: 'document-write-1',
-                  content: 'updated',
-                },
-              ],
-            },
-          })
-          repeatedDecision = await input.requestPermission({
-            toolUseID: 'document-write-2',
-            toolName: 'Write',
-            message: 'Rewrite the same document',
-            input: { file_path: join(workspacePath, 'docs/GDD.md') },
-          })
-          otherDocumentDecision = await input.requestPermission({
-            toolUseID: 'document-write-3',
-            toolName: 'Write',
-            message: 'Update another assigned document',
-            input: {
-              file_path: join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-            },
-          })
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-author',
-      workflowAllowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
-    })
-
-    await manager.send(session.id, 'repair documents')
-    await waitForIdle(manager, session.id)
-
-    expect(repeatedDecision).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('one successful mutation'),
-    })
-    expect(otherDocumentDecision).toEqual({
-      behavior: 'allow',
-      scope: 'once',
-    })
-    manager.dispose()
-  })
-
-  test('allows exactly one read of the assigned document target', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-document-read-boundary-'))
-    const workspacePath = join(root, 'workspace')
-    await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    let firstDecision: DashboardPermissionDecision | undefined
-    let repeatedDecision: DashboardPermissionDecision | undefined
-    let outsideDecision: DashboardPermissionDecision | undefined
-    const targetPath = join(workspacePath, 'docs/GDD.md')
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async input => {
-          firstDecision = await input.requestPermission({
-            toolUseID: 'document-read-1',
-            toolName: 'Read',
-            message: 'Read assigned target',
-            input: { file_path: targetPath },
-          })
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'tool_use',
-                  id: 'document-read-1',
-                  name: 'Read',
-                  input: { file_path: targetPath },
-                },
-              ],
-            },
-          })
-          input.onMessage({
-            type: 'user',
-            message: {
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: 'document-read-1',
-                  content: 'current target',
-                },
-              ],
-            },
-          })
-          repeatedDecision = await input.requestPermission({
-            toolUseID: 'document-read-2',
-            toolName: 'Read',
-            message: 'Read assigned target again',
-            input: { file_path: targetPath },
-          })
-          outsideDecision = await input.requestPermission({
-            toolUseID: 'document-read-outside',
-            toolName: 'Read',
-            message: 'Read another document',
-            input: {
-              file_path: join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-            },
-          })
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-author',
-      workflowAllowedPaths: ['docs/GDD.md'],
-    })
-
-    await manager.send(session.id, 'author document')
-    await waitForIdle(manager, session.id)
-
-    expect(firstDecision).toEqual({ behavior: 'allow', scope: 'once' })
-    expect(repeatedDecision).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('exactly one successful read'),
-    })
-    expect(outsideDecision).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('one assigned canonical target'),
-    })
     manager.dispose()
   })
 

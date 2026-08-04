@@ -26,6 +26,7 @@ describe('WorkflowCard', () => {
           currentPhase: 'DOCUMENT_REVIEW',
           phaseIndex: 3,
           phaseCount: 9,
+          substage: 'INITIAL_REVIEW',
           documentStep: 'FOUNDATION_REVIEW',
           worker: 'document-reviewer',
           thinking: '正在检查当前文档版本。',
@@ -42,7 +43,7 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getByText('基础文档审计')).toBeInTheDocument();
+    expect(screen.getByText('基础文档初审')).toBeInTheDocument();
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-icon', 'grip');
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
@@ -80,10 +81,7 @@ describe('WorkflowCard', () => {
     );
 
     expect(screen.getByText('已停止')).toBeInTheDocument();
-    expect(screen.getByLabelText('任务状态：已停止')).toHaveAttribute(
-      'data-task-icon',
-      'task-stopped',
-    );
+    expect(screen.getByLabelText('任务状态：已停止')).toHaveAttribute('data-task-icon', 'task-stopped');
     expect(screen.queryByText('编写失败')).not.toBeInTheDocument();
   });
 
@@ -97,7 +95,10 @@ describe('WorkflowCard', () => {
           documentStep: 'FOUNDATION_REVIEW',
           reviewMode: 'closure',
           reviewTarget: 'foundation',
-          reviewAccepted: false,
+          phaseIndex: 4,
+          phaseCount: 11,
+          substage: 'CLOSURE_REVIEW',
+          convergencePass: 2,
           tasks: [
             {
               id: 'brief_alignment',
@@ -110,7 +111,8 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getByText('复核修复与回归')).toBeInTheDocument();
+    expect(screen.getByText('基础文档收敛')).toBeInTheDocument();
+    expect(screen.getByText('第 2 轮 · Closure Review')).toBeInTheDocument();
     expect(screen.getByText('审计：简报一致性')).toBeInTheDocument();
 
     rerender(
@@ -122,11 +124,15 @@ describe('WorkflowCard', () => {
           documentStep: 'FOUNDATION_DRAFTING',
           reviewMode: 'initial',
           reviewTarget: 'foundation',
-          reviewAccepted: true,
+          phaseIndex: 4,
+          phaseCount: 11,
+          substage: 'REPAIR_PLANNING',
+          convergencePass: 1,
         }}
       />,
     );
-    expect(screen.getByText('修复基础文档')).toBeInTheDocument();
+    expect(screen.getByText('基础文档收敛')).toBeInTheDocument();
+    expect(screen.getByText('第 1 轮 · 制定修订方案')).toBeInTheDocument();
   });
 
   it('renders fixed game-design review tasks as user-facing labels', () => {
@@ -271,7 +277,14 @@ describe('WorkflowCard', () => {
     const taskRegion = screen.getByTestId('workflow-card-task-region');
     expect(messageRegion).toHaveClass('scrollbar-premium', 'max-h-20', 'overflow-y-auto');
     expect(messageRegion).not.toHaveClass('scroll-fade');
-    expect(taskRegion).toHaveClass('scroll-fade', 'scroll-fade-y', 'scroll-fade-6', 'scrollbar-premium', 'max-h-[17.5rem]', 'overflow-y-auto');
+    expect(taskRegion).toHaveClass(
+      'scroll-fade',
+      'scroll-fade-y',
+      'scroll-fade-6',
+      'scrollbar-premium',
+      'max-h-[17.5rem]',
+      'overflow-y-auto',
+    );
     expect(screen.getByText('正在处理任务列表。')).toHaveClass('text-xs');
     expect(screen.getByText('任务 13')).toBeInTheDocument();
   });
@@ -375,7 +388,10 @@ describe('WorkflowCard', () => {
     );
 
     expect(screen.getByLabelText(`工作流状态：${label}`)).toHaveAttribute('data-icon', icon);
-    expect(screen.getByLabelText(`工作流状态：${label}`)).toHaveAttribute('data-animation', status === 'running' ? 'loop' : 'once');
+    expect(screen.getByLabelText(`工作流状态：${label}`)).toHaveAttribute(
+      'data-animation',
+      status === 'running' ? 'loop' : 'once',
+    );
   });
 
   it('does not render token usage in the workflow card', () => {
