@@ -5,11 +5,13 @@ import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
   normalizeDocumentReviewCheckSubmission,
+  projectDocumentReviewReference,
   REVIEW_AUTHORITY_ARTIFACT_PATH,
   type DocumentReviewArtifact,
   type DocumentReviewCheckSubmission,
   type DocumentReviewSubmissionContract,
 } from './delivery-workflow/document-review-input'
+import { SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH } from './delivery-workflow/system-delivery-contract'
 import type {
   DeliveryWorkerPort,
   DispatchRecord,
@@ -17,6 +19,7 @@ import type {
 } from './delivery-workflow/types'
 import {
   CANONICAL_ASSET_MANIFEST,
+  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   type DocumentReviewCheckId,
@@ -78,12 +81,17 @@ function reviewerSubmissionContract(
           return []
         const record = finding as Record<string, unknown>
         return typeof record.findingId === 'string' &&
+          typeof record.checkId === 'string' &&
+          COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS.includes(
+            record.checkId as never,
+          ) &&
           (record.owner === 'foundation' ||
             record.owner === 'checklist' ||
             record.owner === 'resource')
           ? [
               {
                 findingId: record.findingId,
+                checkId: record.checkId as DocumentReviewCheckId,
                 owner: record.owner as 'foundation' | 'checklist' | 'resource',
                 ...(Array.isArray(record.subjects)
                   ? { subjects: record.subjects }
@@ -145,16 +153,6 @@ export async function buildDocumentAuthorAuthorityBlock(
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
   if (request.contract.authoringMode === 'repair-planning') {
-    const remediation = request.contract.remediation
-    if (
-      !remediation ||
-      typeof remediation !== 'object' ||
-      Array.isArray(remediation)
-    )
-      throw new Error('document repair planning authority is invalid')
-    const findings = (remediation as Record<string, unknown>).findings
-    if (!Array.isArray(findings) || findings.length !== 1)
-      throw new Error('document repair planning findings are invalid')
     const repairDecisionTask = request.contract.repairDecisionTask
     if (
       !repairDecisionTask ||
@@ -162,30 +160,58 @@ export async function buildDocumentAuthorAuthorityBlock(
       Array.isArray(repairDecisionTask)
     )
       throw new Error('document repair decision task is invalid')
-    const authorityPaths = (repairDecisionTask as Record<string, unknown>)
-      .authorityPaths
+    const authorityReferences = (repairDecisionTask as Record<string, unknown>)
+      .authorityReferences
     if (
-      !Array.isArray(authorityPaths) ||
-      authorityPaths.length === 0 ||
-      authorityPaths.some(
-        path =>
+      !Array.isArray(authorityReferences) ||
+      authorityReferences.length === 0 ||
+      authorityReferences.some(reference => {
+        if (
+          !reference ||
+          typeof reference !== 'object' ||
+          Array.isArray(reference)
+        )
+          return true
+        const { path, anchor } = reference as Record<string, unknown>
+        return (
           typeof path !== 'string' ||
-          !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-      )
+          typeof anchor !== 'string' ||
+          (!CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never) &&
+            path !== SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH)
+        )
+      })
     )
-      throw new Error('document repair decision authority paths are invalid')
-    const sourcePaths = [...new Set(authorityPaths as string[])]
-    const documents = await Promise.all(
-      sourcePaths.map(async path => ({
-        path,
-        content: await readFile(resolve(request.workspacePath, path), 'utf8'),
-      })),
+      throw new Error(
+        'document repair decision authority references are invalid',
+      )
+    const references = authorityReferences as Array<{
+      path: string
+      anchor: string
+    }>
+    const sections = await Promise.all(
+      references.map(async reference => {
+        const content =
+          reference.path === SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH
+            ? `${JSON.stringify(request.contract.systemDeliveryContract)}\n`
+            : await readFile(
+                resolve(request.workspacePath, reference.path),
+                'utf8',
+              )
+        return {
+          ...reference,
+          content: projectDocumentReviewReference(
+            content,
+            reference.path,
+            reference.anchor,
+          ),
+        }
+      }),
     )
     return [
       'The workflow service projected the current accepted finding and its exact subject/evidence authority below. Act only as the Repair Lead: lock the smallest consistent decision for this finding. Do not write project files, reopen review, or expand scope.',
-      ...documents.map(
-        document =>
-          `--- BEGIN REPAIR AUTHORITY: ${document.path} ---\n${document.content}\n--- END REPAIR AUTHORITY: ${document.path} ---`,
+      ...sections.map(
+        section =>
+          `--- BEGIN REPAIR AUTHORITY: ${section.path} ${section.anchor} ---\n${section.content}\n--- END REPAIR AUTHORITY: ${section.path} ${section.anchor} ---`,
       ),
     ].join('\n\n')
   }
@@ -750,7 +776,8 @@ function createDeterministicDocumentAuthorTerminal(input: {
     const errors: string[] = []
     for (const candidate of candidates) {
       try {
-        const repairDecision = documentRepairDecisionSubmissionSchema.parse(candidate)
+        const repairDecision =
+          documentRepairDecisionSubmissionSchema.parse(candidate)
         return documentAuthorTerminalSchema.parse({
           workerType: 'document-author',
           status: 'completed',

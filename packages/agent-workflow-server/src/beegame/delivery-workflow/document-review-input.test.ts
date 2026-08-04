@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildDocumentReviewReferenceIndex,
+  buildDocumentReviewWireReferenceIndex,
   checkEvidenceDigests,
+  projectDocumentReviewReference,
   validateDocumentReviewSubmission,
 } from './document-review-input'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
@@ -53,6 +55,29 @@ describe('document review exact reference index', () => {
       resourceIds: ['res.ui.iconography'],
       contentIdsByPath: { 'assets/content/world.yaml': 'content.world' },
     })
+  })
+
+  test('uses one artifact dictionary and projects only the accepted authority section', () => {
+    const artifacts = [
+      {
+        path: 'docs/GDD.md',
+        content: '# Game\n## Rules\nKeep this.\n### Detail\nKeep detail.\n## Economy\nDo not include.\n',
+      },
+    ]
+    const wire = buildDocumentReviewWireReferenceIndex(artifacts)
+    expect(wire.artifacts).toEqual([
+      { artifactId: 'a0', path: 'docs/GDD.md' },
+    ])
+    expect(wire.references.every(reference => !('path' in reference))).toBe(
+      true,
+    )
+    expect(
+      projectDocumentReviewReference(
+        artifacts[0]!.content,
+        artifacts[0]!.path,
+        '## Rules',
+      ),
+    ).toBe('## Rules\nKeep this.\n### Detail\nKeep detail.')
   })
 })
 
@@ -130,6 +155,9 @@ describe('document review resource-content subjects', () => {
       {
         findingId: 'RESOURCE_CONTENT',
         checkId: 'resource_semantic_fitness' as const,
+        evidence: [
+          { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
+        ],
         subjects: [
           {
             path: 'assets/asset-manifest.json',

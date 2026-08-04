@@ -286,9 +286,11 @@ describe('single-track document review workflow', () => {
       ]),
     )
     expect(request.contract.referenceIndex).toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ path: 'docs/GDD.md' }),
+      ]),
       references: expect.arrayContaining([
         expect.objectContaining({
-          path: 'docs/GDD.md',
           subjectOwner: 'foundation',
         }),
       ]),
@@ -366,9 +368,10 @@ describe('single-track document review workflow', () => {
     expect(request.contract.priorFindings).toEqual([
       expect.objectContaining({
         findingId: 'owned-root',
+        checkId: 'brief_alignment',
         owner: 'foundation',
         subjects: acceptedFinding.subjects,
-        observation: acceptedFinding.observation,
+        blockingReason: acceptedFinding.blockingReason,
         requiredAction: acceptedFinding.requiredAction,
         closureCondition: acceptedFinding.closureCondition,
       }),
@@ -581,7 +584,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Keep scope fixed'],
           decision: 'Correct only the current finding.',
         },
       },
@@ -605,6 +607,11 @@ describe('single-track document review workflow', () => {
       checkId: 'numeric_balance_feasibility',
       owner: 'foundation',
       path: 'docs/BALANCE_DESIGN.md',
+      evidence: [
+        { path: 'docs/BALANCE_DESIGN.md', anchor: 'Spec' },
+        { path: 'docs/ART_DIRECTION.md', anchor: 'Spec' },
+        { path: 'docs/AUDIO_DESIGN.md', anchor: 'Spec' },
+      ],
     })
     const checks = checksWithBlocks('foundation', {
       numeric_balance_feasibility: ['shared-threshold-conflict'],
@@ -650,10 +657,10 @@ describe('single-track document review workflow', () => {
       finding: expect.objectContaining({
         findingId: 'shared-threshold-conflict',
       }),
-      authorityPaths: [
-        'docs/BALANCE_DESIGN.md',
-        'docs/ART_DIRECTION.md',
-        'docs/AUDIO_DESIGN.md',
+      authorityReferences: [
+        { path: 'docs/BALANCE_DESIGN.md', anchor: 'Spec' },
+        { path: 'docs/ART_DIRECTION.md', anchor: 'Spec' },
+        { path: 'docs/AUDIO_DESIGN.md', anchor: 'Spec' },
       ],
     })
 
@@ -666,7 +673,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Preserve presentation mappings'],
           decision: 'Correct the shared threshold at its Balance authority.',
         },
       },
@@ -746,7 +752,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Keep scope fixed'],
           decision: 'Correct the current accepted finding.',
         },
       },
@@ -818,7 +823,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Keep unrelated gameplay rules'],
           decision: 'Correct the GDD authority.',
         },
       },
@@ -844,7 +848,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Keep unrelated balance values'],
           decision: 'Correct the Balance authority.',
         },
       },
@@ -994,7 +997,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Preserve unrelated GDD authority'],
           decision: 'Correct the cited GDD authority conflict.',
         },
       },
@@ -1125,7 +1127,6 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairDecision: {
-          invariants: ['Preserve unrelated foundation authority'],
           decision: 'Correct the cited foundation gap in GDD.',
         },
       },
@@ -1648,6 +1649,7 @@ function reviewFinding(input: {
   anchor?: string
   requirementId?: string
   regressionPaths?: string[]
+  evidence?: Array<{ path: string; anchor: string }>
 }) {
   return {
     findingId: input.findingId,
@@ -1657,6 +1659,12 @@ function reviewFinding(input: {
     ...(input.regressionPaths
       ? { regressionPaths: input.regressionPaths }
       : {}),
+    evidence: input.evidence ?? [
+      {
+        path: input.path,
+        anchor: input.anchor ?? (input.path.endsWith('.md') ? 'Spec' : '$'),
+      },
+    ],
     subjects: [
       {
         path: input.path,

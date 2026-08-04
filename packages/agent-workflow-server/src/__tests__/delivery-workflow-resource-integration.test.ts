@@ -75,6 +75,7 @@ describe('v7 resource-content workflow', () => {
               checkId: 'resource_content_consistency' as const,
               severity: 'blocking' as const,
               owner: 'resource' as const,
+              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
               subjects: [
                 {
                   path: 'assets/asset-manifest.json',
@@ -137,6 +138,7 @@ describe('v7 resource-content workflow', () => {
           checkId: 'resource_content_consistency' as const,
           severity: 'blocking' as const,
           owner: 'resource' as const,
+          evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
           subjects: [
             {
               path: 'assets/asset-manifest.json',

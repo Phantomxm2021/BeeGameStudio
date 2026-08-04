@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
-  buildDocumentReviewReferenceIndex,
+  buildDocumentReviewWireReferenceIndex,
   checkEvidenceDigests,
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
@@ -19,7 +19,10 @@ import {
   computeResourceRevision,
   computeWorkspaceRevision,
 } from './revision'
-import { buildSystemDeliveryContract } from './system-delivery-contract'
+import {
+  buildSystemDeliveryContract,
+  SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+} from './system-delivery-contract'
 import { transitionDeliveryRun } from './transition'
 import {
   CANONICAL_ASSET_MANIFEST,
@@ -154,8 +157,7 @@ function artifactsForReviewCheck(
   if (selected === 'all') return artifacts
   const paths = new Set(selected)
   return artifacts.filter(
-    artifact =>
-      artifact.path === 'reviewAuthority' || paths.has(artifact.path),
+    artifact => artifact.path === 'reviewAuthority' || paths.has(artifact.path),
   )
 }
 
@@ -553,12 +555,22 @@ export async function buildDocumentReviewDispatch(input: {
       reviewAuthority: authority,
       requiredCheckIds: cycle.requiredCheckIds,
       currentCheckId,
-      referenceIndex: buildDocumentReviewReferenceIndex(checkArtifacts),
+      referenceIndex: buildDocumentReviewWireReferenceIndex(checkArtifacts),
       reviewArtifacts: checkArtifacts.filter(
         artifact => artifact.path !== 'reviewAuthority',
       ),
       ...(cycle.findings.length
-        ? { priorFindings: cycle.findings }
+        ? {
+            priorFindings: cycle.findings.map(finding => ({
+              findingId: finding.findingId,
+              checkId: finding.checkId,
+              owner: finding.owner,
+              subjects: finding.subjects,
+              blockingReason: finding.blockingReason,
+              requiredAction: finding.requiredAction,
+              closureCondition: finding.closureCondition,
+            })),
+          }
         : {}),
       ...(cycle.mode === 'closure'
         ? {
@@ -689,30 +701,34 @@ export async function startDocumentStage(input: {
   const nextPlanningFinding = remediationFindings.find(
     finding => !plannedFindingIds.has(finding.findingId),
   )
-  const repairDecisionAuthorityPaths = nextPlanningFinding
-    ? [
-        ...new Set(
-          [
-            ...nextPlanningFinding.subjects.map(subject => subject.path),
-            ...(cycle?.checks.find(
-              check => check.id === nextPlanningFinding.checkId,
-            )?.evidence.map(item => item.path) ?? []),
-          ].filter(path =>
-            CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-          ),
-        ),
-      ]
+  const repairDecisionAuthorityReferences = nextPlanningFinding
+    ? [...nextPlanningFinding.subjects, ...nextPlanningFinding.evidence]
+        .filter(
+          reference =>
+            CANONICAL_FOUNDATION_DOCUMENTS.includes(reference.path as never) ||
+            reference.path === SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
+        )
+        .filter(
+          (reference, index, all) =>
+            all.findIndex(
+              candidate =>
+                candidate.path === reference.path &&
+                candidate.anchor === reference.anchor,
+            ) === index,
+        )
     : []
   const repairPlanComplete =
     remediationFindings.length > 0 && !nextPlanningFinding
-  const repairPaths = repairPlanComplete && repairPlan
-    ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-        repairPlan.groups.some(group => group.affectedPaths.includes(path)),
-      )
-    : []
-  const repairPath = repairPlanComplete && repairPlan
-    ? repairPaths.find(path => !repairPlan.completedPaths.includes(path))
-    : undefined
+  const repairPaths =
+    repairPlanComplete && repairPlan
+      ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+          repairPlan.groups.some(group => group.affectedPaths.includes(path)),
+        )
+      : []
+  const repairPath =
+    repairPlanComplete && repairPlan
+      ? repairPaths.find(path => !repairPlan.completedPaths.includes(path))
+      : undefined
   const initialPath = remediationFindings.length
     ? undefined
     : CANONICAL_FOUNDATION_DOCUMENTS[
@@ -751,7 +767,8 @@ export async function startDocumentStage(input: {
     workerType: 'document-author',
     phase: 'DOCUMENT_DRAFTING',
     taskId: remediationFindings.length
-      ? (repairPath ?? `${cycle!.cycleId}:repair-decision:${nextPlanningFinding!.findingId}`)
+      ? (repairPath ??
+        `${cycle!.cycleId}:repair-decision:${nextPlanningFinding!.findingId}`)
       : initialPath,
     revision: input.run.revision.document,
     allowedPaths,
@@ -793,18 +810,9 @@ export async function startDocumentStage(input: {
               repairDecisionTask: {
                 cycleId: cycle!.cycleId,
                 finding: nextPlanningFinding,
-                authorityPaths: repairDecisionAuthorityPaths,
+                authorityReferences: repairDecisionAuthorityReferences,
               },
             }),
-      ...(remediationFindings.length && !repairPath && nextPlanningFinding
-        ? {
-            remediation: {
-              cycleId: cycle!.cycleId,
-              sourceRevision: cycle!.sourceRevision,
-              findings: [nextPlanningFinding],
-            },
-          }
-        : {}),
       ...(previousDocumentMetadata ? { previousDocumentMetadata } : {}),
     },
   })
@@ -1061,15 +1069,21 @@ function completeFoundationRepairPlanning(
         ...new Set(
           finding.subjects.flatMap(subject =>
             CANONICAL_FOUNDATION_DOCUMENTS.includes(subject.path as never)
-              ? [subject.path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]]
+              ? [
+                  subject.path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+                ]
               : [],
           ),
         ),
       ]
     : []
   const issues = [
-    ...(!finding ? ['document repair decision cursor is already complete'] : []),
-    ...(!decision ? ['document repair planner did not submit a repair decision'] : []),
+    ...(!finding
+      ? ['document repair decision cursor is already complete']
+      : []),
+    ...(!decision
+      ? ['document repair planner did not submit a repair decision']
+      : []),
     ...(finding && affectedPaths.length === 0
       ? ['document repair finding has no canonical foundation subjects']
       : []),
@@ -1098,7 +1112,6 @@ function completeFoundationRepairPlanning(
                   {
                     groupId: `repair-${finding.findingId}`,
                     findingIds: [finding.findingId],
-                    invariants: decision.invariants,
                     decision: decision.decision,
                     affectedPaths,
                     dependsOn: [],
@@ -1421,7 +1434,11 @@ export async function reconcileDocumentReview(input: {
   const existingFindingIds = new Set(
     cycle.findings.map(finding => finding.findingId),
   )
-  if (input.terminal.findings.some(finding => existingFindingIds.has(finding.findingId)))
+  if (
+    input.terminal.findings.some(finding =>
+      existingFindingIds.has(finding.findingId),
+    )
+  )
     throw new Error('document reviewer finding ID is already accepted')
 
   await mkdir(dirname(acceptedEvidencePath), { recursive: true })

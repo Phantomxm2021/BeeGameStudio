@@ -7,6 +7,7 @@ const finding = {
   checkId: 'technical_feasibility',
   severity: 'blocking',
   owner: 'foundation',
+  evidence: [{ path: 'systemDeliveryContract', anchor: '/roots/content' }],
   subjects: [{ path: 'docs/TECHNICAL_DESIGN.md', anchor: 'Resources' }],
   observation: 'The documented delivery root conflicts with system authority.',
   blockingReason: 'Implementation would have two content roots.',
@@ -16,19 +17,16 @@ const finding = {
 function submission(systemReferenceId = 'ref-system', documentReferenceId = 'ref-document') {
   return {
     check: {
-      id: 'technical_feasibility',
-      status: 'block',
       conclusion: 'The project contract conflicts with system authority.',
       evidence: [
         { referenceId: systemReferenceId },
         { referenceId: documentReferenceId },
       ],
-      findingIds: ['CONTRACT-1'],
       assessments: [],
     },
     findings: [{
       findingId: finding.findingId,
-      checkId: finding.checkId,
+      evidence: [{ referenceId: systemReferenceId }],
       subjects: [{ referenceId: documentReferenceId }],
       observation: finding.observation,
       blockingReason: finding.blockingReason,

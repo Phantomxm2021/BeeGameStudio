@@ -5,6 +5,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+  type DocumentReviewCheckId,
   type DocumentReviewCriterionId,
   type GameDesignDocumentReviewCheckId,
 } from './types'
@@ -16,6 +17,16 @@ const documentReviewFindingShape = {
   checkId: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
   severity: z.literal('blocking'),
   owner: z.enum(['foundation', 'checklist', 'resource']),
+  evidence: z
+    .array(
+      z
+        .object({
+          path: z.string().min(1),
+          anchor: z.string().trim().min(1),
+        })
+        .strict(),
+    )
+    .min(1),
   subjects: z
     .array(
       z
@@ -93,7 +104,7 @@ export const documentReviewFindingSchema = z
 
 const documentReviewSubmissionFindingShape = {
   findingId: documentReviewFindingShape.findingId,
-  checkId: documentReviewFindingShape.checkId,
+  evidence: documentReviewFindingShape.evidence,
   subjects: documentReviewFindingShape.subjects,
   observation: documentReviewFindingShape.observation,
   blockingReason: documentReviewFindingShape.blockingReason,
@@ -120,7 +131,7 @@ function documentReviewCheckSubmissionFindingSchema(
   return z
     .object({
       findingId: documentReviewSubmissionFindingShape.findingId,
-      checkId: documentReviewSubmissionFindingShape.checkId,
+      evidence: z.array(documentReviewReferenceSchema).min(1),
       subjects,
       observation: documentReviewSubmissionFindingShape.observation,
       blockingReason: documentReviewSubmissionFindingShape.blockingReason,
@@ -141,68 +152,60 @@ const documentReviewCriterionIds = Object.values(
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
 ).flat() as DocumentReviewCriterionId[]
 
-const documentReviewCheckSubmissionSchema = z
-  .object({
-    id: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
-    status: z.enum(['pass', 'block']),
-    conclusion: z.string().trim().min(1),
-    evidence: z.array(documentReviewReferenceSchema).min(1),
-    findingIds: z.array(z.string().trim().min(1)),
-    assessments: z
-      .array(
-        z
-          .object({
-            criterion: z.enum(documentReviewCriterionIds),
-            status: z.enum(['pass', 'block']),
-            evidence: z.array(documentReviewReferenceSchema).min(1),
-            derivation: z.string().trim().min(1),
-            conclusion: z.string().trim().min(1),
+function documentReviewCheckSubmissionSchemaForCheck(
+  currentCheckId: (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number],
+) {
+  return z
+    .object({
+      conclusion: z.string().trim().min(1),
+      evidence: z.array(documentReviewReferenceSchema).min(1),
+      assessments: z
+        .array(
+          z
+            .object({
+              criterion: z.enum(documentReviewCriterionIds),
+              status: z.enum(['pass', 'block']),
+              evidence: z.array(documentReviewReferenceSchema).min(1),
+              derivation: z.string().trim().min(1),
+              conclusion: z.string().trim().min(1),
+            })
+            .strict(),
+        )
+        .max(3),
+    })
+    .strict()
+    .superRefine((check, context) => {
+      const criteria =
+        GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+          currentCheckId as GameDesignDocumentReviewCheckId
+        ]
+      if (!criteria) {
+        if (check.assessments.length)
+          context.addIssue({
+            code: 'custom',
+            path: ['assessments'],
+            message: 'non-design review checks cannot submit assessments',
           })
-          .strict(),
+        return
+      }
+      const submitted = check.assessments.map(item => item.criterion)
+      if (
+        submitted.length !== criteria.length ||
+        new Set(submitted).size !== criteria.length ||
+        criteria.some(id => !submitted.includes(id))
       )
-      .max(3),
-  })
-  .strict()
-  .superRefine((check, context) => {
-    const criteria = GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
-      check.id as GameDesignDocumentReviewCheckId
-    ]
-    if (!criteria) {
-      if (check.assessments.length)
         context.addIssue({
           code: 'custom',
           path: ['assessments'],
-          message: 'non-design review checks cannot submit assessments',
+          message: `design review check ${currentCheckId} requires its exact criterion set`,
         })
-      return
-    }
-    const submitted = check.assessments.map(item => item.criterion)
-    if (
-      submitted.length !== criteria.length ||
-      new Set(submitted).size !== criteria.length ||
-      criteria.some(id => !submitted.includes(id))
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['assessments'],
-        message: `design review check ${check.id} requires its exact criterion set`,
-      })
-    if (
-      (check.status === 'block') !==
-      check.assessments.some(item => item.status === 'block')
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['status'],
-        message: 'check status must match assessment statuses',
-      })
-  })
+    })
+}
 
 export { documentReviewCheckSchema } from './document-review-check-schema'
 
 export const documentRepairDecisionSubmissionSchema = z
   .object({
-    invariants: z.array(z.string().trim().min(1)).min(1),
     decision: z.string().trim().min(1),
   })
   .strict()
@@ -225,8 +228,8 @@ export const documentAuthorSubmissionSchema = z
 
 function requireConsistentDocumentReviewCheck(
   value: {
-    check: { id: string; status: 'pass' | 'block'; findingIds: string[] }
-    findings: Array<{ findingId: string; checkId: string }>
+    check: { assessments: Array<{ status: 'pass' | 'block' }> }
+    findings: Array<{ findingId: string }>
   },
   context: z.RefinementCtx,
 ): void {
@@ -237,44 +240,28 @@ function requireConsistentDocumentReviewCheck(
       path: ['findings'],
       message: 'document review finding codes must be unique',
     })
-  const knownFindingIds = new Set(findingIds)
-  if (value.check.status === 'pass' && value.check.findingIds.length > 0)
-    context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: 'passing check cannot reference findings' })
-  if (value.check.status === 'block' && value.check.findingIds.length === 0)
-    context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: 'blocking check requires findings' })
-  const referencedFindingIds = new Set(value.check.findingIds)
-  for (const findingId of value.check.findingIds)
-    if (!knownFindingIds.has(findingId))
-      context.addIssue({ code: 'custom', path: ['check', 'findingIds'], message: `unknown document review finding ID: ${findingId}` })
-  for (const [index, finding] of value.findings.entries())
-    if (!referencedFindingIds.has(finding.findingId))
-      context.addIssue({
-        code: 'custom',
-        path: ['findings', index, 'findingId'],
-        message: 'every finding must be referenced by a blocking check',
-      })
-  for (const [index, finding] of value.findings.entries()) {
-    if (
-      finding.checkId !== value.check.id ||
-      !value.check.findingIds.includes(finding.findingId)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['findings', index, 'checkId'],
-        message: 'finding checkId must reference the finding ID',
-      })
-  }
+  const assessmentBlocks = value.check.assessments.some(
+    item => item.status === 'block',
+  )
+  if (
+    value.check.assessments.length > 0 &&
+    assessmentBlocks !== value.findings.length > 0
+  )
+    context.addIssue({
+      code: 'custom',
+      path: ['findings'],
+      message: 'blocked design assessments and findings must agree',
+    })
 }
 
 function documentReviewCheckSubmissionContractSchema<
   FindingSchema extends z.ZodType<{
     findingId: string
-    checkId: string
   }>,
->(findingSchema: FindingSchema) {
+>(findingSchema: FindingSchema, currentCheckId: DocumentReviewCheckId) {
   return z
     .object({
-      check: documentReviewCheckSubmissionSchema,
+      check: documentReviewCheckSubmissionSchemaForCheck(currentCheckId),
       findings: z.array(findingSchema),
     })
     .strict()
@@ -284,9 +271,11 @@ function documentReviewCheckSubmissionContractSchema<
 export function documentReviewCheckSubmissionSchemaForMode(
   mode: 'initial' | 'closure',
   scope: 'foundation' | 'complete' = 'complete',
+  currentCheckId: DocumentReviewCheckId = COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS[0],
 ) {
   return documentReviewCheckSubmissionContractSchema(
     documentReviewCheckSubmissionFindingSchema(mode, scope),
+    currentCheckId,
   )
 }
 
@@ -306,16 +295,36 @@ export const documentReviewerTerminalSchema = base
     const findings = value.findings
     const findingIds = new Set(findings.map(finding => finding.findingId))
     if (new Set(checks.map(check => check.id)).size !== checks.length)
-      context.addIssue({ code: 'custom', path: ['checks'], message: 'document review check IDs must be unique' })
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message: 'document review check IDs must be unique',
+      })
     for (const [index, check] of checks.entries()) {
       if (check.status === 'pass' && check.findingIds.length)
-        context.addIssue({ code: 'custom', path: ['checks', index, 'findingIds'], message: 'passing checks cannot reference findings' })
-      if (check.status === 'block' && (!check.findingIds.length || check.findingIds.some(id => !findingIds.has(id))))
-        context.addIssue({ code: 'custom', path: ['checks', index, 'findingIds'], message: 'blocking checks require known findings' })
+        context.addIssue({
+          code: 'custom',
+          path: ['checks', index, 'findingIds'],
+          message: 'passing checks cannot reference findings',
+        })
+      if (
+        check.status === 'block' &&
+        (!check.findingIds.length ||
+          check.findingIds.some(id => !findingIds.has(id)))
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['checks', index, 'findingIds'],
+          message: 'blocking checks require known findings',
+        })
     }
     const blocked = checks.some(check => check.status === 'block')
     if ((value.verdict === 'READY') !== (!blocked && findings.length === 0))
-      context.addIssue({ code: 'custom', path: ['verdict'], message: 'document review verdict does not match the canonical ledger' })
+      context.addIssue({
+        code: 'custom',
+        path: ['verdict'],
+        message: 'document review verdict does not match the canonical ledger',
+      })
   })
 
 export const resourcePreparerTerminalSchema = base

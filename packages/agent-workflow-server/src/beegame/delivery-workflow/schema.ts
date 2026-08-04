@@ -196,6 +196,16 @@ export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFindi
       severity: z.literal('blocking'),
       owner: z.enum(['foundation', 'checklist', 'resource']),
       regressionPaths: z.array(z.string().min(1)).optional(),
+      evidence: z
+        .array(
+          z
+            .object({
+              path: z.string().min(1),
+              anchor: z.string().min(1),
+            })
+            .strict(),
+        )
+        .min(1),
       subjects: z
         .array(
           z
@@ -276,7 +286,6 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
               .object({
                 groupId: z.string().trim().min(1),
                 findingIds: z.array(z.string().trim().min(1)).min(1),
-                invariants: z.array(z.string().trim().min(1)).min(1),
                 decision: z.string().trim().min(1),
                 affectedPaths: z
                   .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
@@ -312,7 +321,8 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
       context.addIssue({
         code: 'custom',
         path: ['completedCheckIds'],
-        message: 'document review completed checks must be the required-order prefix',
+        message:
+          'document review completed checks must be the required-order prefix',
       })
     if (
       cycle.mode === 'initial' &&
@@ -438,7 +448,8 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         context.addIssue({
           code: 'custom',
           path: ['repairPlan', 'completedPaths'],
-          message: 'document repair cannot start before every finding has a decision',
+          message:
+            'document repair cannot start before every finding has a decision',
         })
       const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         cycle.repairPlan!.groups.some(group =>

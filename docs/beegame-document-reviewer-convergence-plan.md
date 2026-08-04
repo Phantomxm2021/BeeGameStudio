@@ -83,7 +83,7 @@ COMPREHENSIVE_CHECKS = FOUNDATION_CHECKS + COMPREHENSIVE_ADDITIONS
 
 ### 3.4 游戏设计推导证据
 
-`gameplay_strategy_viability`、`economy_progression_integrity`、`numeric_balance_feasibility`、`pacing_difficulty_coherence` 与 `level_scene_design_integrity` 不是对文档中是否出现相关章节的关键词检查。每项 check 必须提交以下固定 criterion，且每个 criterion 必须有独立状态、精确 artifact evidence、推导过程和结论。父 check 的 evidence 支撑总体结论，criterion evidence 支撑各自推导；两者都独立验证 artifact 与 anchor，不要求重复同一证据项。服务端将两层 evidence 的 artifact digest 合并为该 check 的唯一失效依据。Finding 只由父 check 的 `findingIds` 统一关联，criterion 不重复提交 `findingIds`：
+`gameplay_strategy_viability`、`economy_progression_integrity`、`numeric_balance_feasibility`、`pacing_difficulty_coherence` 与 `level_scene_design_integrity` 不是对文档中是否出现相关章节的关键词检查。每项 check 必须提交以下固定 criterion，且每个 criterion 必须有独立状态、精确 artifact evidence、推导过程和结论。父 check 的 evidence 支撑总体结论，criterion evidence 支撑各自推导；两者都独立验证 artifact 与 anchor，不要求重复同一证据项。服务端将两层 evidence 的 artifact digest 合并为该 check 的唯一失效依据，并从本次 findings 确定性派生父 check 的 finding 关联；criterion 不重复提交 finding 身份：
 
 | Check | 固定 criterion |
 | --- | --- |
@@ -123,14 +123,14 @@ Reviewer 只接收服务端生成的当前 revision 投影：
 - prior findings、当前 repair batch 和 server diff；
 - Comprehensive 阶段的 canonical v7 Manifest；
 - 从内容文件安全解析出的 `schema`、`id`、`kind`、`fulfills`、`resources` 与文件路径；
-- 从同一批 frozen artifacts 确定性派生的稳定 `referenceId` 索引：服务端维护 `referenceId -> canonical path + exact anchor` 映射；Reviewer 的 evidence 与 subject 只提交 `referenceId`，不得手抄路径或标题；
+- 从同一批 frozen artifacts 确定性派生的稳定 `referenceId` 索引：wire view 用一次性 artifact dictionary 保存路径，各 reference 只携带 artifact ID 与 exact anchor；服务端仍维护 `referenceId -> canonical path + exact anchor` 唯一映射。Reviewer 的 evidence 与 subject 只提交 `referenceId`，不得手抄路径或标题；
 - 当前 Catalog provenance 和确定性资源门禁结果。
 
 投影是 request view，不落盘、不成为第二份合同。它不得截断语义 ID，不保存候选搜索历史，不包含 Agent 自报验证结论，也不包含构建日志或运行验收事实。
 
 Reviewer 的可审计推理只写入当前 check submission 的 conclusion、criterion derivation/conclusion 与 finding 字段。运行时必须关闭 extended thinking，禁止生成与 submission 竞争输出预算的第二份长推理。每个 dispatch 必须且只能提交当前 check；不能提交其他 check、整轮 verdict 或整轮报告，也不能依靠 `max_tokens` 续写或提高输出上限完成另一项检查。Reviewer 不存在 wall-clock deadline 或 terminal grace deadline；只要 worker 进程、模型流、工具调用或终态提交仍然存活，Workflow 不得按经过时长停止它。连接断开、进程退出等基础设施失活只能中断当前 check 并保留 durable cursor，不能把项目复杂度记录为失败。
 
-稳定引用索引只用于让 Reviewer 选择 frozen artifacts 已存在的身份，不产生新事实。`evidence` 是形成判断时读取的事实范围，不代表文件必须修改；finding `subjects` 是 `requiredAction` 确认必须实际改变并由 Closure 核对 diff 的完整修订范围。已经正确引用唯一事实 owner、仅用于证明冲突或约束修法的消费者文档只能列入 evidence，不得列入 subjects。服务端在接受当前 check 时将 `referenceId` 唯一解析为 canonical path/anchor 后写入同一个 Review Cycle；不存在自由文本锚点兼容、模糊匹配或自动修正。Foundation 文档可以作为 resource check 的 evidence，但不能成为 resource finding 的修复 subject。
+稳定引用索引只用于让 Reviewer 选择 frozen artifacts 已存在的身份，不产生新事实。check `evidence` 是整项检查的总体事实范围，criterion `evidence` 是对应推导的事实范围；每个 finding 还必须独立提交形成该 finding 所需的精确 `evidence`。finding `subjects` 是 `requiredAction` 确认必须实际改变并由 Closure 核对 diff 的完整修订范围。已经正确引用唯一事实 owner、仅用于证明冲突或约束修法的消费者文档只能列入 finding evidence，不得列入 subjects。服务端在接受当前 check 时将 `referenceId` 唯一解析为 canonical path/anchor 后写入同一个 Review Cycle；不存在自由文本锚点兼容、模糊匹配或自动修正。Repair Lead 只读取当前 finding 的 subjects、finding evidence 及其明确引用的 System Delivery Contract 片段，不得以 check evidence 扩大到整份文档。Foundation 文档可以作为 resource check 的 evidence，但不能成为 resource finding 的修复 subject。
 
 同一根缺陷只能由固定顺序中最先发现它的 check 建立一个 finding。后续 check 必须获得此前已接受 finding 的 ID、owner、canonical subjects、问题、required action 与 closure condition；若当前判断依赖同一缺陷，只引用该既有 finding 作为阻塞上下文，不得以新 ID 重复提交。唯一归属由固定 check 职责和完整 prior finding 语义约束，服务端继续严格拒绝 finding ID 重用；不得仅凭 subject 相同、子集或超集推断两个问题语义相同，因为同一章节可以合法包含多个独立缺陷，也不得使用关键词、正则或自然语言相似度猜测重复关系。
 
@@ -179,7 +179,7 @@ System Delivery Contract 由服务端当前常量结构化生成，是只读 req
 
 `owner` 与 `severity` 不是 Reviewer 可填写的第二份事实：服务端按固定 `checkId` 矩阵唯一派生 `foundation`、`checklist` 或 `resource`，并将所有 finding 定义为 blocking。Foundation subject 只能引用八份基础文档；Checklist subject 只能引用验收清单；Resource subject 只能引用 Manifest requirement/resource ID 或内容文件 ID。Reviewer 若引用不存在的 ID，terminal 无效，不能把格式错误伪装成业务 finding。
 
-提交工具必须按当前 scope 与 mode 生成唯一 Schema：Foundation 只暴露文档 `path/anchor`；Comprehensive 才暴露资源语义 ID；Initial 不暴露 `regressionPaths`；Closure 才允许它引用 server 提供的 changed paths。工具输入不得暴露可由 check 矩阵派生的 `owner`、固定为 blocking 的 `severity`，或 criterion 层重复的 `findingIds`。禁止用一份宽松 Schema 同时承载四种协议后再靠提示词约束。
+提交工具必须按当前 scope 与 mode 生成唯一 Schema：Foundation 只暴露文档 `path/anchor`；Comprehensive 才暴露资源语义 ID；Initial 不暴露 `regressionPaths`；Closure 才允许它引用 server 提供的 changed paths。工具输入不得暴露可由当前 dispatch 派生的 check `id/status/findingIds`、finding `checkId/owner/severity`，也不得要求模型重复提交已经存在于当前 finding 的约束。服务端从当前 check、assessment 与 findings 确定性派生这些字段。禁止用一份宽松 Schema 同时承载四种协议后再靠提示词约束。
 
 ## 6. 审计原则
 
@@ -213,7 +213,7 @@ Reviewer 审计可观察需求、资源引用与内容结构，不得要求 Pref
 1. Initial Review 对当前 scope 执行一次完整审计。
 2. 原生 terminal 工具在返回 accepted 前，用唯一 revision-bound submission contract 验证 check coverage、criteria、anchors、subjects 与 closure；最终持久化只复用同一校验器并确认 frozen revision 未变化。
 3. findings 按 `foundation -> checklist -> resource` 分组；每次只派发当前最上游 owner 的完整 batch。
-4. Foundation Repair Lead 按 accepted finding ledger 的稳定顺序逐项决策；每个只读 dispatch 只接收一个尚未规划的 finding，提交该 finding 的不可变约束与唯一最小修订决策。服务端从 finding identity 确定性派生 group ID、finding ID、affected paths 与依赖，把每次接受的决定追加到原 active cycle 的唯一 repair plan ledger；不得让模型一次重传完整 batch 或手写可由服务端派生的身份字段。
+4. Foundation Repair Lead 按 accepted finding ledger 的稳定顺序逐项决策；每个只读 dispatch 只接收一个尚未规划的 finding，并只提交唯一最小修订决策。accepted finding 的 evidence、subjects、required action 与 closure condition 已是不可变约束，服务端直接持有，禁止在 Repair Lead 输出中重述。服务端从 finding identity 确定性派生 group ID、finding ID、affected paths 与依赖，把每次接受的决定追加到原 active cycle 的唯一 repair plan ledger；不得让模型一次重传完整 batch 或手写可由服务端派生的身份字段。
 5. 全部 accepted findings 恰好获得一个决定后，服务端从该唯一 plan ledger 派生串行 document repair cursor；每个 Foundation Owner task 只修改一份 canonical 文档并形成 durable checkpoint。完整 batch、finding ledger、repair plan ledger 和 Closure 均只有一个，不得把逐 finding planning dispatch、owner task 建成第二队列或并行 lane。
 6. Closure Review 只复核 prior findings、server diff、固定受影响 checks 和直接 regression。
 7. 已关闭 finding 不得在同一 revision 以新 ID 重新提出，除非 diff 产生了可证明的新冲突。

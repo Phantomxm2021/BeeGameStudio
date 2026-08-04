@@ -64,7 +64,7 @@ const documentRepairDecisionDefinition = {
   description:
     'Submit the single repair decision for the current accepted finding.',
   prompt:
-    'Call exactly once. State the immutable constraints and lock one minimal decision for contract.repairDecisionTask.finding. The service owns finding identity, affected paths, ordering and ledger persistence. Do not write project files, reopen review, add unrelated design, or return prose.',
+    'Call exactly once with only one minimal decision for contract.repairDecisionTask.finding. Its evidence, subjects, required action and closure condition are immutable service-owned constraints. Do not repeat them, write project files, reopen review, add unrelated design, or return prose.',
   message: '提交文档修订决策',
 } as const
 
@@ -86,6 +86,7 @@ export function createNativeWorkflowResultTool(options: {
       ? documentReviewCheckSubmissionSchemaForMode(
           options.documentReviewMode ?? 'initial',
           options.documentReviewScope ?? 'foundation',
+          options.documentReviewContract?.currentCheckId,
         )
       : definition.schema
   return options.buildTool({
@@ -113,6 +114,7 @@ export function createNativeWorkflowResultTool(options: {
         const submission = documentReviewCheckSubmissionSchemaForMode(
           options.documentReviewMode ?? 'initial',
           options.documentReviewScope ?? 'foundation',
+          options.documentReviewContract.currentCheckId,
         ).parse(input)
         const normalized = normalizeDocumentReviewCheckSubmission({
           contract: options.documentReviewContract,

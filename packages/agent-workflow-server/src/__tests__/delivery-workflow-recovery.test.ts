@@ -97,6 +97,7 @@ describe('delivery workflow recovery', () => {
           checkId: 'brief_alignment',
           severity: 'blocking',
           owner: 'foundation',
+          evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
           observation: 'A required behavior is missing.',
           blockingReason: 'The behavior cannot be implemented uniquely.',
@@ -164,6 +165,7 @@ describe('delivery workflow recovery', () => {
               checkId: 'brief_alignment',
               severity: 'blocking',
               owner: 'foundation',
+              evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
               subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
               observation: 'A required rule is missing.',
               blockingReason: 'The behavior cannot be implemented uniquely.',
@@ -244,6 +246,7 @@ describe('delivery workflow recovery', () => {
               checkId: 'resource_content_consistency',
               severity: 'blocking',
               owner: 'resource',
+              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
               subjects: [
                 {
                   path: 'assets/asset-manifest.json',

@@ -214,12 +214,15 @@ export type DocumentReviewFindingSubject = {
   contentId?: string
 }
 
+export type DocumentReviewEvidence = { path: string; anchor: string }
+
 export type DocumentReviewFinding = {
   findingId: string
   checkId: DocumentReviewCheckId
   severity: 'blocking'
   owner: 'foundation' | 'checklist' | 'resource'
   regressionPaths?: string[]
+  evidence: DocumentReviewEvidence[]
   subjects: DocumentReviewFindingSubject[]
   observation: string
   blockingReason: string
@@ -239,7 +242,6 @@ export type DocumentReviewApproval = {
 export type DocumentRepairGroup = {
   groupId: string
   findingIds: string[]
-  invariants: string[]
   decision: string
   affectedPaths: FoundationDocumentPath[]
   dependsOn: string[]
@@ -285,7 +287,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 6 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 7 as const
 
 export type ChecklistRemediation = {
   sourceRevision: string

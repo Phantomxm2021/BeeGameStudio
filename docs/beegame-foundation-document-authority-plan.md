@@ -160,7 +160,7 @@ Foundation 修复 dispatch 只消费已接受 finding、其 closure condition、
 Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 
 1. Repair Lead 按 accepted finding ledger 的稳定顺序逐项处理；每个只读 dispatch 只消费一个尚未规划的 finding，避免一个字段错误迫使完整 batch 重传；
-2. Repair Lead 只提交该 finding 不可改变的权威约束与唯一修订决策；不得把“修改 A 或修改 B”继续留给 Document Author。Reviewer check 的 `evidence` 表示判断所依赖的完整事实范围；finding 的 `subjects` 则是 `requiredAction` 已确认必须实际改变的完整修订范围；
+2. Reviewer 必须在每个 finding 上保存精确 evidence；check evidence 只表示整项检查的总体范围，不能替代 finding evidence。Repair Lead 只读取当前 finding 的 subjects、finding evidence 与其明确引用的 System Delivery Contract 片段，并只提交唯一修订决策。accepted finding 的 evidence、subjects、required action 与 closure condition 已是不可变约束，由服务端直接持有，禁止模型重述；不得把“修改 A 或修改 B”继续留给 Document Author；
 3. 服务端从当前 finding 确定性派生 group ID、finding ID、`affectedPaths` 和依赖，将接受的决定追加到原 active review cycle 的唯一 repair plan ledger。模型不得提交这些可派生身份字段；服务端必须保证 ledger 是 accepted findings 的稳定前缀，最终恰好覆盖完整 batch。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
 4. 服务端从 plan 和固定 Foundation owner 顺序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 内容、与该文档相关的 finding 和已锁定决策，并只允许一次 `Write`；
 5. 每份成功写入立即形成 durable checkpoint、提升该文档 PATCH 版本并释放模型上下文。重启只继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；

@@ -51,6 +51,29 @@ export type DocumentReviewReferenceIndex = {
   contentIdsByPath: Record<string, string>
 }
 
+export function buildDocumentReviewWireReferenceIndex(
+  artifacts: DocumentReviewArtifact[],
+) {
+  const index = buildDocumentReviewReferenceIndex(artifacts)
+  const paths = [...new Set(index.references.map(reference => reference.path))]
+  const artifactIdByPath = new Map(
+    paths.map((path, position) => [path, `a${position}`] as const),
+  )
+  return {
+    artifacts: paths.map(path => ({
+      artifactId: artifactIdByPath.get(path)!,
+      path,
+    })),
+    references: index.references.map(({ path, ...reference }) => ({
+      ...reference,
+      artifactId: artifactIdByPath.get(path)!,
+    })),
+    requirementIds: index.requirementIds,
+    resourceIds: index.resourceIds,
+    contentIdsByPath: index.contentIdsByPath,
+  }
+}
+
 export type DocumentReviewSubmissionContract = {
   scope: DocumentReviewScope
   mode: 'initial' | 'closure'
@@ -60,6 +83,7 @@ export type DocumentReviewSubmissionContract = {
   activeTarget?: 'foundation' | 'checklist' | 'resource'
   priorFindings?: Array<{
     findingId: string
+    checkId?: DocumentReviewCheckId
     owner: 'foundation' | 'checklist' | 'resource'
     subjects?: DocumentReviewFinding['subjects']
     observation?: string
@@ -277,6 +301,74 @@ function exactJsonPointerExists(content: string, pointer: string): boolean {
   return true
 }
 
+/** Project one exact accepted reference without reloading its whole artifact. */
+export function projectDocumentReviewReference(
+  content: string,
+  path: string,
+  anchor: string,
+): string {
+  if (path.endsWith('.md')) {
+    const lines = content.split('\n')
+    const start = lines.findIndex(line => {
+      const candidate = line.trimStart()
+      let markerLength = 0
+      while (candidate[markerLength] === '#') markerLength += 1
+      if (markerLength === 0 || candidate[markerLength] !== ' ') return false
+      const heading = candidate.slice(markerLength + 1).trim()
+      return anchor === heading || anchor === candidate.trim()
+    })
+    if (start < 0)
+      throw new Error(`missing exact repair authority: ${path} ${anchor}`)
+    const heading = lines[start]!.trimStart()
+    let level = 0
+    while (heading[level] === '#') level += 1
+    let end = lines.length
+    for (let index = start + 1; index < lines.length; index += 1) {
+      const candidate = lines[index]!.trimStart()
+      let candidateLevel = 0
+      while (candidate[candidateLevel] === '#') candidateLevel += 1
+      if (
+        candidateLevel > 0 &&
+        candidate[candidateLevel] === ' ' &&
+        candidateLevel <= level
+      ) {
+        end = index
+        break
+      }
+    }
+    return lines.slice(start, end).join('\n').trim()
+  }
+  if (
+    path.endsWith('.json') ||
+    path === SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH
+  ) {
+    let value: unknown = JSON.parse(content)
+    if (anchor !== '$') {
+      if (!anchor.startsWith('/'))
+        throw new Error(`invalid repair authority pointer: ${anchor}`)
+      for (const rawToken of anchor.slice(1).split('/')) {
+        const token = decodeJsonPointerToken(rawToken)
+        if (Array.isArray(value)) {
+          const index = Number(token)
+          if (!Number.isInteger(index) || index < 0 || index >= value.length)
+            throw new Error(`missing exact repair authority: ${path} ${anchor}`)
+          value = value[index]
+        } else {
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            !Object.hasOwn(value, token)
+          )
+            throw new Error(`missing exact repair authority: ${path} ${anchor}`)
+          value = (value as Record<string, unknown>)[token]
+        }
+      }
+    }
+    return JSON.stringify(value)
+  }
+  return content.trim()
+}
+
 function structuredContentId(
   content: string,
   yaml: boolean,
@@ -459,7 +551,7 @@ type ReviewSubjectReferenceInput = ReviewReferenceInput & {
 }
 
 export type DocumentReviewCheckSubmission = {
-  check: Omit<DocumentReviewCheck, 'evidence' | 'assessments'> & {
+  check: Pick<DocumentReviewCheck, 'conclusion'> & {
     evidence: ReviewReferenceInput[]
     assessments: Array<
       Omit<DocumentReviewCheck['assessments'][number], 'evidence'> & {
@@ -468,7 +560,11 @@ export type DocumentReviewCheckSubmission = {
     >
   }
   findings: Array<
-    Omit<DocumentReviewFinding, 'severity' | 'owner' | 'subjects'> & {
+    Omit<
+      DocumentReviewFinding,
+      'severity' | 'owner' | 'checkId' | 'evidence' | 'subjects'
+    > & {
+      evidence: ReviewReferenceInput[]
       subjects: ReviewSubjectReferenceInput[]
     }
   >
@@ -486,13 +582,18 @@ export function normalizeDocumentReviewCheckSubmission(input: {
   const resolveReference = (value: ReviewReferenceInput) => {
     const reference = references.get(value.referenceId)
     if (!reference)
-      throw new Error(`unknown document review referenceId: ${value.referenceId}`)
+      throw new Error(
+        `unknown document review referenceId: ${value.referenceId}`,
+      )
     return { path: reference.path, anchor: reference.anchor }
   }
-  if (input.submission.check.id !== input.contract.currentCheckId)
-    throw new Error('document review submission is not for the active check')
+  const findingIds = input.submission.findings.map(finding => finding.findingId)
+  const status = findingIds.length > 0 ? 'block' : 'pass'
   const check: DocumentReviewCheck = {
     ...input.submission.check,
+    id: input.contract.currentCheckId,
+    status,
+    findingIds,
     evidence: input.submission.check.evidence.map(resolveReference),
     assessments: input.submission.check.assessments.map(assessment => ({
       ...assessment,
@@ -501,15 +602,18 @@ export function normalizeDocumentReviewCheckSubmission(input: {
   }
   const findings = input.submission.findings.map(finding => ({
     ...finding,
+    checkId: input.contract.currentCheckId,
     severity: 'blocking' as const,
-    owner: DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[finding.checkId],
+    owner: DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[input.contract.currentCheckId],
+    evidence: finding.evidence.map(resolveReference),
     subjects: finding.subjects.map(subject => {
       const reference = references.get(subject.referenceId)
       if (!reference)
         throw new Error(
           `unknown document review subject referenceId: ${subject.referenceId}`,
         )
-      const expectedOwner = DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[finding.checkId]
+      const expectedOwner =
+        DOCUMENT_REVIEW_OWNER_BY_CHECK_ID[input.contract.currentCheckId]
       if (reference.subjectOwner !== expectedOwner)
         throw new Error(
           `document review subject ${subject.referenceId} is not owned by ${expectedOwner}`,
@@ -560,6 +664,28 @@ function validateReviewFindingSubjects(input: {
   const contentIds = new Set(contentIdsByPath.values())
   const issues: string[] = []
   for (const finding of input.findings) {
+    for (const evidence of finding.evidence) {
+      const artifact = input.artifacts.find(item => item.path === evidence.path)
+      if (!artifact) {
+        issues.push(
+          `document review finding ${finding.findingId} has unavailable evidence`,
+        )
+        continue
+      }
+      const anchorExists =
+        evidence.path === REVIEW_AUTHORITY_ARTIFACT_PATH
+          ? evidence.anchor === '$'
+          : evidence.path.endsWith('.md')
+            ? exactMarkdownHeadingExists(artifact.content, evidence.anchor)
+            : evidence.path.endsWith('.json') ||
+                evidence.path === SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH
+              ? exactJsonPointerExists(artifact.content, evidence.anchor)
+              : contentIdsByPath.get(evidence.path) === evidence.anchor
+      if (!anchorExists)
+        issues.push(
+          `document review finding ${finding.findingId} has missing exact evidence`,
+        )
+    }
     for (const subject of finding.subjects) {
       const artifact = input.artifacts.find(item => item.path === subject.path)
       if (!artifact) {

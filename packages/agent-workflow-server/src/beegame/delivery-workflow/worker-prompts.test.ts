@@ -242,12 +242,12 @@ describe('resource-content worker prompts', () => {
       contract: {
         documentSet: 'foundation',
         authoringMode: 'repair-planning',
-        remediation: { findings: [] },
+        repairDecisionTask: { finding: { findingId: 'finding' } },
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
     expect(planningPrompt).toContain('contract.repairDecisionTask.finding')
-    expect(planningPrompt).toContain('service owns identity, subjects, ordering')
+    expect(planningPrompt).toContain('service owns its identity, subjects, order')
     expect(planningPrompt).toContain('SubmitDocumentRepairDecision exactly once')
     expect(planningPrompt).toContain('Do not write or mutate project files')
 

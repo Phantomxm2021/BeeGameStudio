@@ -12,6 +12,7 @@ const baseFinding = {
   checkId: 'technical_feasibility' as const,
   severity: 'blocking' as const,
   owner: 'foundation' as const,
+  evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
   subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
   observation: 'The documented calculation is inconsistent.',
   blockingReason: 'The implementation cannot derive one result.',
@@ -21,24 +22,20 @@ const baseFinding = {
 const {
   severity: _submissionSeverity,
   owner: _submissionOwner,
+  checkId: _submissionCheckId,
+  evidence: _submissionEvidence,
   ...submissionFinding
 } = baseFinding
 const referenceSubmissionFinding = {
   ...submissionFinding,
+  evidence: [{ referenceId: 'ref-evidence' }],
   subjects: [{ referenceId: 'ref-subject' }],
 }
 
 describe('document repair decision contract', () => {
-  test('rejects a string-shaped invariants field within the current finding only', () => {
+  test('accepts only the single repair decision', () => {
     expect(
       documentRepairDecisionSubmissionSchema.safeParse({
-        invariants: '["Preserve approved authority"]',
-        decision: 'Apply the smallest consistent correction.',
-      }).success,
-    ).toBe(false)
-    expect(
-      documentRepairDecisionSubmissionSchema.safeParse({
-        invariants: ['Preserve approved authority'],
         decision: 'Apply the smallest consistent correction.',
       }).success,
     ).toBe(true)
@@ -77,20 +74,25 @@ describe('document review finding contract', () => {
   test('does not expose Closure regression fields in Initial Review', () => {
     const submission = {
       check: {
-        id: 'technical_feasibility',
-        status: 'block',
         conclusion: 'The delivery contract conflicts.',
         evidence: [{ referenceId: 'ref-system' }],
-        findingIds: ['CALC-1'],
         assessments: [],
       },
       findings: [{ ...referenceSubmissionFinding, regressionPaths: ['docs/GDD.md'] }],
     }
     expect(() =>
-      documentReviewCheckSubmissionSchemaForMode('initial').parse(submission),
+      documentReviewCheckSubmissionSchemaForMode(
+        'initial',
+        'complete',
+        'technical_feasibility',
+      ).parse(submission),
     ).toThrow()
     expect(
-      documentReviewCheckSubmissionSchemaForMode('closure').parse(submission)
+      documentReviewCheckSubmissionSchemaForMode(
+        'closure',
+        'complete',
+        'technical_feasibility',
+      ).parse(submission)
         .findings[0],
     ).toMatchObject({ regressionPaths: ['docs/GDD.md'] })
   })

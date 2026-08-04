@@ -464,6 +464,7 @@ describe('delivery worker session credentials', () => {
       checkId: 'cross_document_consistency',
       severity: 'blocking',
       owner: 'foundation',
+      evidence: [{ path: 'systemDeliveryContract', anchor: '/roots/content' }],
       subjects: [
         { path: 'docs/GDD.md', anchor: 'Rules' },
         { path: 'docs/TECHNICAL_DESIGN.md', anchor: 'Rules' },
@@ -486,7 +487,7 @@ describe('delivery worker session credentials', () => {
     )!.referenceId
     const findingInput = {
       findingId: finding.findingId,
-      checkId: finding.checkId,
+      evidence: [{ referenceId: systemReferenceId }],
       subjects: [{ referenceId: gddReferenceId }],
       observation: finding.observation,
       blockingReason: finding.blockingReason,
@@ -513,14 +514,11 @@ describe('delivery worker session credentials', () => {
               toolName: 'SubmitDocumentReviewCheck',
               input: {
                 check: {
-                  id: 'cross_document_consistency',
-                  status: 'block',
                   conclusion: 'The documents conflict.',
                   evidence: [
                     { referenceId: systemReferenceId },
                     { referenceId: gddReferenceId },
                   ],
-                  findingIds: ['document-conflict'],
                   assessments: [],
                 },
                 findings: [findingInput],
