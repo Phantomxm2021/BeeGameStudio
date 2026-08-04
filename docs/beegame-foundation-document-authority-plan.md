@@ -182,7 +182,7 @@ Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 
 
 Checklist Author 必须从八份已批准文档派生**最小充分的场景级验收集合**。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。同一 setup、action 与 observable outcome 下的波次、敌人、输入、资源、cue 或表格行变体必须在一个参数化验收项中核对，不得按每个变体或文档句子机械拆项；一项可以引用多个批准事实，但每个稳定 ID 仍只描述一个可独立判定的场景结果。Author 必须在首次写入前完成分组和计数；常规首个交付目标为 24–40 项，只有批准设计确实包含更多互相独立的可观察场景时才允许超过 40 项，绝对不得超过 64 项。超出上限属于确定性 Checklist 合同错误，必须在进入资源阶段前原地修订，不得把膨胀清单交给 Planner 或 Implementation；禁止先写超限草稿再依赖同一 dispatch 二次改写。
 
-Resource Agent 必须读取完整的八份已批准 Foundation 文档，但每份只提供第 3 节规定的事实：`ASSET_PLAN.md` 与 `ART_DIRECTION.md` 提供资源职责和表现约束，`LEVEL_SCENE_DESIGN.md` 提供 YAML 空间事实，`GDD.md`、`BALANCE_DESIGN.md`、`UI_UX_SPEC.md`、`AUDIO_DESIGN.md` 与 `TECHNICAL_DESIGN.md` 分别提供其 JSON/加载投影所需事实。Agent 不得复制数值进 Manifest、不得让 JSON/YAML 越权重定义设计，也不得读取未批准或平行文档。首次内容写入前必须完成完整 JSON/YAML 集合规划，并将互相独立的文件写入合并到一个并行工具批次；只有具体写入失败才补写，不得逐文件重新携带完整上下文循环规划。
+Resource Production 的输入按唯一任务边界投影，不能把八份全文重复交给每个 Agent。Resource Planner 只获得已批准的 `ASSET_PLAN.md`、`ART_DIRECTION.md`、`TECHNICAL_DESIGN.md` 和确认简报；Foundation Review 必须保证 Asset Plan 已经覆盖其他 owner 批准的全部资源职责。Resource Curator 只获得资源职责、表现约束和目标格式能力；Resource Content Author 才获得八份已批准 Foundation 文档中与 JSON/YAML owner 对应的事实，其中 `LEVEL_SCENE_DESIGN.md` 提供 YAML 空间事实，`GDD.md`、`BALANCE_DESIGN.md`、`UI_UX_SPEC.md`、`AUDIO_DESIGN.md` 与 `TECHNICAL_DESIGN.md` 分别提供其 JSON/加载投影所需事实。任何 Agent 都不得复制数值进 Manifest、让 JSON/YAML 越权重定义设计或读取未批准/平行文档。首次内容写入前必须完成完整 JSON/YAML 集合规划，并将互相独立的文件写入合并到一个并行工具批次；只有具体写入失败才补写，不得逐文件重新携带完整上下文循环规划。
 
 Resource Production 首次建立 `project_target.asset_format_capabilities` 时必须从已批准的 `ASSET_PLAN.md` 与目标运行环境推导。后续资源修复只有在替换同一稳定 resource ID、且新文件格式由已批准 Asset Plan 明确允许时，才能在同一 Manifest 中**追加**该直接文件扩展名；不得移除既有格式，也不得修改 platform、runtime、资源库策略或三个 canonical root。该追加与替换资源必须作为同一次 Manifest 修订提交，不创建第二 target、第二 Manifest 或兼容读取分支。除此之外的 `project_target` 变化均为阻塞错误。
 
@@ -197,7 +197,7 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 3. 更新 Foundation Author prompt/contract，分离互斥的首次撰写、Repair Lead planning 与单文档 finding 修复；初稿与 owner task 都只写当前文档，彻底删除全量 Workbench 指令与工具。
 4. 新增 `level_scene_design_integrity`、三个固定 criterion、固定 owner 和结构化 Schema；Foundation/Comprehensive 数量改为 12/17。
 5. 更新 Reviewer prompt、Closure 受影响 check 计算和 evidence digest，纳入 Balance 与 Level/Scene。
-6. 更新 Checklist Author、Resource Agent、Atomic Planner 与 Implementation 输入，消费八文档批准集合。
+6. 更新 Checklist Author、三个 Resource Production task、Atomic Planner 与 Implementation 输入，使每个消费者只获得其 owner 所需的八文档批准事实投影。
 7. 更新 Workflow Card 文档名称、Reviewer task、数量、状态和 icon。
 8. 更新架构与 Reviewer 文档中所有六文档/11/16陈述，删除旧矩阵和旧假设，不保留兼容分支。
 9. 更新单元、集成和前端测试；禁止硬编码具体游戏名、日志文本或测试项目内容到生产逻辑。

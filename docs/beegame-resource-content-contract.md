@@ -141,17 +141,20 @@ data:
 
 ## 6. Workflow 所有权
 
-### Resource Agent
+### Resource Production Agents
 
-- 浏览资源库并选择、下载真实资源；
-- 为缺失内容创建独立 provisional 文件；
-- 编写或修订 `assets/content/**/*.json|yaml`；
-- 调用目标资源构建器生成必要的可丢弃产物；
-- 不写玩法代码。
+同一 Resource Production phase 只允许三个串行、能力隔离的任务：
+
+- Resource Planner 只提交 Manifest plan，不访问 Catalog 或内容文件；
+- Resource Curator 浏览 Pack、检查元素、下载真实资源，并为缺失内容创建独立 provisional 文件；
+- Resource Content Author 只编写或修订 `assets/content/**/*.json|yaml`；若编排时发现原料缺口，只提交结构化缺口，由唯一 Resource Curator 补齐；
+- 三者都不写玩法代码，也不建立第二份资源事实。
+
+每个任务提交 canonical artifact 后立即结束 dispatch。服务根据 Manifest 和内容文件派生下一个任务，不依靠 Worker prose、历史失败或固定次数续跑。
 
 ### Resource service
 
-- 提供 Catalog、精确下载、依赖、provenance、路径和完整性事实；
+- 提供 Pack 摘要、所选 Pack 元素检查、精确下载、依赖、provenance、路径和完整性事实；
 - 不选择美术适用性，不自动绑定 requirement。
 
 ### Workflow service
