@@ -43,11 +43,23 @@ export class WorkflowStoreError extends Error {
       | 'invalid'
       | 'obsolete'
       | 'io'
-      | 'conflict',
+      | 'conflict'
+      | 'recovery_checkpoint_missing'
+      | 'recovery_checkpoint_conflict'
+      | 'recovery_artifact_digest_mismatch'
+      | 'recovery_snapshot_changed',
   ) {
     super(message)
     this.name = 'WorkflowStoreError'
   }
+}
+
+export type WorkflowSnapshotInspection = {
+  rawText: string
+  digest: string
+  parsedValue?: unknown
+  currentRun?: DeliveryRun
+  error?: WorkflowStoreError
 }
 
 function now(): string {
@@ -69,6 +81,91 @@ function storageReadError(path: string, error: unknown): WorkflowStoreError {
     `unable to read workflow state at ${path}: ${detail}`,
     'io',
   )
+}
+
+/** Read and classify run.json without migrating, flushing markers or rewriting it. */
+export async function inspectWorkflowSnapshot(input: {
+  snapshotPath: string
+  ownerId?: string
+}): Promise<WorkflowSnapshotInspection> {
+  let rawText: string
+  try {
+    rawText = await readFile(input.snapshotPath, 'utf8')
+  } catch (error) {
+    throw storageReadError(input.snapshotPath, error)
+  }
+  const digest = createHash('sha256').update(rawText).digest('hex')
+  let parsedValue: unknown
+  try {
+    parsedValue = JSON.parse(rawText) as unknown
+  } catch (error) {
+    return {
+      rawText,
+      digest,
+      error: new WorkflowStoreError(
+        `workflow snapshot JSON is invalid at ${input.snapshotPath}: ${error instanceof Error ? error.message : String(error)}`,
+        'invalid',
+      ),
+    }
+  }
+  const snapshotVersion =
+    parsedValue &&
+    typeof parsedValue === 'object' &&
+    !Array.isArray(parsedValue)
+      ? (parsedValue as Record<string, unknown>).schemaVersion
+      : undefined
+  if (
+    typeof snapshotVersion === 'number' &&
+    Number.isInteger(snapshotVersion) &&
+    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
+  )
+    return {
+      rawText,
+      digest,
+      parsedValue,
+      error: new WorkflowStoreError(
+        `unsupported workflow snapshot schema version ${snapshotVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        'obsolete',
+      ),
+    }
+  if (
+    typeof snapshotVersion === 'number' &&
+    Number.isInteger(snapshotVersion) &&
+    snapshotVersion > DELIVERY_RUN_SCHEMA_VERSION
+  )
+    return {
+      rawText,
+      digest,
+      parsedValue,
+      error: new WorkflowStoreError(
+        `workflow snapshot schema version ${snapshotVersion} is newer than current version ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        'invalid',
+      ),
+    }
+  try {
+    const currentRun = parseDeliveryRun(parsedValue)
+    if (input.ownerId && currentRun.ownerId !== input.ownerId)
+      return {
+        rawText,
+        digest,
+        parsedValue,
+        error: new WorkflowStoreError(
+          'workflow ownership mismatch',
+          'ownership',
+        ),
+      }
+    return { rawText, digest, parsedValue, currentRun }
+  } catch (error) {
+    return {
+      rawText,
+      digest,
+      parsedValue,
+      error: new WorkflowStoreError(
+        `workflow snapshot schema is invalid at ${input.snapshotPath}: ${error instanceof Error ? error.message : String(error)}`,
+        'invalid',
+      ),
+    }
+  }
 }
 
 const mutationQueues = new Map<string, Promise<void>>()
@@ -356,6 +453,13 @@ export function createRunStore(workspacePath: string, ownerId: string) {
 
   async function load(options?: { migrate?: boolean }): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, () => loadUnlocked(options))
+  }
+
+  async function inspectSnapshot(): Promise<WorkflowSnapshotInspection> {
+    return inspectWorkflowSnapshot({
+      snapshotPath: filePaths.snapshot,
+      ownerId,
+    })
   }
 
   async function saveUnlocked(
@@ -707,6 +811,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     workspacePath: resolve(workspacePath),
     ownerId,
     paths: filePaths,
+    inspectWorkflowSnapshot: inspectSnapshot,
     load,
     save,
     commit,

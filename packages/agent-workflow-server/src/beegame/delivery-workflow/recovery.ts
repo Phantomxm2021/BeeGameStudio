@@ -9,6 +9,12 @@ import {
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 
+export {
+  inspectWorkflowSnapshot,
+  projectExactResumeRun,
+  type WorkflowSnapshotInspection,
+} from './recovery-projector'
+
 async function restoreCanonicalDocumentCommit(
   run: DeliveryRun,
   workspacePath?: string,
