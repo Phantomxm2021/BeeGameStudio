@@ -13,7 +13,10 @@ import {
   reconcileCurrentResourcePreparation,
   startResourcePreparation,
 } from './resource-stage'
-import { computeResourceInventoryRevision } from './revision'
+import {
+  computeResourceContentDigest,
+  computeResourceInventoryRevision,
+} from './revision'
 import { resolveResourceProductionTask } from './resource-task-resolver'
 import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
 
@@ -139,6 +142,10 @@ describe('resource production task resolver', () => {
         resourceProductionState: {
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_GATE',
+          contentReceipt: {
+            contentDigest: await computeResourceContentDigest(workspace),
+            acceptedAt: '2026-08-05T00:00:00.000Z',
+          },
         },
       },
       workspacePath: workspace,

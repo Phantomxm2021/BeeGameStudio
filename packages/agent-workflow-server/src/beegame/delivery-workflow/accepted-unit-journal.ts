@@ -6,6 +6,29 @@ import type {
 
 const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
 
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
+  if (!value || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record)
+    .sort()
+    .map(key => `${JSON.stringify(key)}:${stableValue(record[key])}`)
+    .join(',')}}`
+}
+
+function approvalIdentity(
+  approval: DeliveryRun['documentReviewState']['checklistApproval'],
+): string | undefined {
+  if (!approval) return undefined
+  return stableValue({
+    scope: approval.scope,
+    revision: approval.revision,
+    evidencePath: approval.evidencePath,
+    checks: approval.checks,
+    checkEvidenceDigests: approval.checkEvidenceDigests,
+  })
+}
+
 function unit(
   value: Omit<AcceptedWorkflowUnit, 'eventSchemaVersion'>,
 ): AcceptedWorkflowUnit {
@@ -40,7 +63,7 @@ function acceptedReviewUnits(
       next.documentReviewState.comprehensiveApproval,
     ],
   ].find(([previousApproval, nextApproval]) =>
-    Boolean(nextApproval && nextApproval !== previousApproval),
+    approvalIdentity(previousApproval) !== approvalIdentity(nextApproval),
   )?.[1]
   const completedCheckIds = after?.completedCheckIds ?? approval?.checks.map(
     check => check.id,
@@ -95,7 +118,8 @@ function acceptedChecklistUnit(
 ): AcceptedWorkflowUnit[] {
   const before = previous.documentReviewState.checklistApproval
   const approval = next.documentReviewState.checklistApproval
-  if (!approval || approval === before) return []
+  if (!approval || approvalIdentity(before) === approvalIdentity(approval))
+    return []
   const dependencyDigests =
     approval.checkEvidenceDigests.checklist_traceability ?? {}
   return [
@@ -145,7 +169,9 @@ function acceptedResourceUnits(
     )
   if (
     before.currentTask === 'RESOURCE_CONTENT' &&
-    after.currentTask === 'RESOURCE_GATE'
+    after.currentTask === 'RESOURCE_GATE' &&
+    after.contentReceipt &&
+    after.contentReceipt.contentDigest !== before.contentReceipt?.contentDigest
   )
     units.push(
       unit({
@@ -153,10 +179,10 @@ function acceptedResourceUnits(
         kind: 'resource-content',
         phase: next.phase,
         predecessorUnitIds: ['resource:inventory'],
-        inputRevision: next.revision.resource ?? next.revision.document,
-        dependencyDigests: {},
-        acceptedAt: next.updatedAt,
-        payload: {},
+        inputRevision: after.contentReceipt.contentDigest,
+        dependencyDigests: { content: after.contentReceipt.contentDigest },
+        acceptedAt: after.contentReceipt.acceptedAt,
+        payload: { contentDigest: after.contentReceipt.contentDigest },
       }),
     )
   const gate = next.evidence.resourcePreparation

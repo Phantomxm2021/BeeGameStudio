@@ -137,6 +137,33 @@ export async function computeResourceRevision(
   return hash.digest('hex')
 }
 
+/** Hash the current canonical content root independently from resource inventory. */
+export async function computeResourceContentDigest(
+  workspacePath: string,
+): Promise<string> {
+  const root = resolve(workspacePath)
+  let manifest: ReturnType<typeof readBeeGameAssetManifestSync> | undefined
+  try {
+    manifest = readBeeGameAssetManifestSync(root)
+  } catch {
+    // Content cannot be accepted until the Manifest is available.
+  }
+  const contentRoot = isRecord(manifest?.project_target)
+    ? manifest.project_target.content_root
+    : undefined
+  const contentFiles: string[] = []
+  if (typeof contentRoot === 'string')
+    await collectFiles(root, join(root, contentRoot), contentFiles).catch(
+      () => undefined,
+    )
+  const digest = await digestFiles(root, contentFiles, '<missing>')
+  return createHash('sha256')
+    .update(typeof contentRoot === 'string' ? contentRoot : '<missing>')
+    .update('\0')
+    .update(digest)
+    .digest('hex')
+}
+
 /** Hash only the canonical Manifest and its registered local resource files. */
 export async function computeResourceInventoryRevision(
   workspacePath: string,

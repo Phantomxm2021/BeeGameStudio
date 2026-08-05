@@ -151,7 +151,7 @@ function migrateActiveDispatch(snapshot: SnapshotRecord): void {
     )
 }
 
-function migrateVersion11(snapshot: SnapshotRecord): SnapshotRecord {
+function migrateVersion11To12(snapshot: SnapshotRecord): SnapshotRecord {
   const migrated = structuredClone(snapshot)
   const state = migrated.documentReviewState
   if (!isRecord(state)) invalid('documentReviewState is invalid')
@@ -159,7 +159,21 @@ function migrateVersion11(snapshot: SnapshotRecord): SnapshotRecord {
   migrateApprovalChecks(state)
   migrateActiveCycle(state)
   migrateActiveDispatch(migrated)
-  migrated.schemaVersion = DELIVERY_RUN_SCHEMA_VERSION
+  migrated.schemaVersion = 12
+  return migrated
+}
+
+function migrateVersion12To13(snapshot: SnapshotRecord): SnapshotRecord {
+  const migrated = structuredClone(snapshot)
+  if (migrated.pendingEvents !== undefined)
+    invalid('version-12 snapshot contains an unsupported pending events marker')
+  const pendingEvent = migrated.pendingEvent
+  if (pendingEvent !== undefined) {
+    if (!isRecord(pendingEvent)) invalid('pendingEvent is invalid')
+    migrated.pendingEvents = [pendingEvent]
+    delete migrated.pendingEvent
+  }
+  migrated.schemaVersion = 13
   return migrated
 }
 
@@ -187,17 +201,22 @@ export function migrateWorkflowSnapshot(
       )
     }
   }
-  if (value.schemaVersion !== 11)
+  if (value.schemaVersion !== 11 && value.schemaVersion !== 12)
     throw new SnapshotMigrationError(
       'unsupported_version',
       `workflow snapshot schema version ${value.schemaVersion} is unsupported`,
     )
 
-  const migrated = migrateVersion11(value)
+  const migratedFrom = value.schemaVersion
+  let migrated = structuredClone(value)
+  if (migrated.schemaVersion === 11)
+    migrated = migrateVersion11To12(migrated)
+  if (migrated.schemaVersion === 12)
+    migrated = migrateVersion12To13(migrated)
   try {
     return {
       value: parseDeliveryRun(migrated),
-      migratedFrom: 11,
+      migratedFrom,
     }
   } catch (error) {
     if (error instanceof SnapshotMigrationError) throw error

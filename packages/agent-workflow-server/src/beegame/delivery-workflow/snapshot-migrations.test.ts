@@ -112,7 +112,7 @@ describe('workflow snapshot migrations', () => {
     const result = migrateWorkflowSnapshot(version11Snapshot())
 
     expect(result.migratedFrom).toBe(11)
-    expect(result.value).toMatchObject({ schemaVersion: 12 })
+    expect(result.value).toMatchObject({ schemaVersion: 13 })
     expect(activeCycle(result.value).requiredCheckIds).toEqual([
       ...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
     ])

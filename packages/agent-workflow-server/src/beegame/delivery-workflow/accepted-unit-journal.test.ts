@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
+import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { parseDeliveryRun } from './schema'
 import {
@@ -132,7 +133,14 @@ describe('accepted workflow unit journal', () => {
 
     const afterContent = {
       ...afterInventory,
-      resourceProductionState: { ...afterInventory.resourceProductionState, currentTask: 'RESOURCE_GATE' as const },
+      resourceProductionState: {
+        ...afterInventory.resourceProductionState,
+        currentTask: 'RESOURCE_GATE' as const,
+        contentReceipt: {
+          contentDigest: 'content-digest',
+          acceptedAt: '2026-08-05T00:00:00.000Z',
+        },
+      },
     }
     expect(deriveAcceptedWorkflowUnits(afterInventory, afterContent)).toEqual([
       expect.objectContaining({ unitId: 'resource:content', kind: 'resource-content' }),
@@ -247,6 +255,110 @@ describe('accepted workflow unit journal', () => {
     ])
   })
 
+  test('does not re-derive an approval after a JSON round trip', () => {
+    const baseline = createTestDeliveryRun({
+      runId: 'round-trip-run',
+      projectId: 'round-trip-project',
+      ownerId: 'accepted-unit-owner',
+      checklistApproved: true,
+    })
+    const persisted = JSON.parse(JSON.stringify(baseline)) as DeliveryRun
+    const next = JSON.parse(
+      JSON.stringify({ ...persisted, currentMessage: 'unchanged acceptance' }),
+    ) as DeliveryRun
+
+    expect(deriveAcceptedWorkflowUnits(persisted, next)).toEqual([])
+  })
+
+  test('controller persistence does not append accepted events or redispatch accepted work after a JSON round trip', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-controller-'))
+    const base = createTestDeliveryRun({
+      runId: 'controller-round-trip-run',
+      projectId: 'controller-round-trip-project',
+      ownerId: 'accepted-unit-owner',
+      checklistApproved: true,
+    })
+    const store = createRunStore(workspace, base.ownerId)
+    await store.save(base)
+    const withoutApproval = {
+      ...base,
+      documentReviewState: {
+        ...base.documentReviewState,
+        checklistApproval: undefined,
+      },
+    }
+    const acceptedUnits = deriveAcceptedWorkflowUnits(withoutApproval, base)
+    for (const [index, unit] of acceptedUnits.entries())
+      await store.appendEvent({
+        eventId: `accepted-before-${index}`,
+        runId: base.runId,
+        type: 'workflow.unit.accepted',
+        phase: unit.phase,
+        status: base.status,
+        revision: base.revision,
+        createdAt: unit.acceptedAt,
+        projectId: base.projectId,
+        ownerId: base.ownerId,
+        unit,
+      })
+
+    const startedWorkers: string[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: base.ownerId,
+      workerPort: {
+        async start(request) {
+          startedWorkers.push(request.workerType)
+          return { sessionId: 'controller-round-trip', dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await controller.requestChange(
+      JSON.parse(JSON.stringify(base)) as DeliveryRun,
+      'A durable change request.',
+    )
+
+    expect(
+      (await store.readEvents()).filter(
+        event => event.type === 'workflow.unit.accepted',
+      ),
+    ).toHaveLength(acceptedUnits.length)
+    expect(startedWorkers).toEqual(['change-impact-analyzer'])
+  })
+
+  test('records the canonical content digest when content is accepted before the gate', () => {
+    const before = {
+      ...run(),
+      phase: 'RESOURCE_PREPARATION' as const,
+      resourceProductionState: { currentTask: 'RESOURCE_CONTENT' as const },
+    }
+    const after = {
+      ...before,
+      resourceProductionState: {
+        currentTask: 'RESOURCE_GATE' as const,
+        contentReceipt: {
+          contentDigest: 'content-digest',
+          acceptedAt: '2026-08-05T00:00:00.000Z',
+        },
+      },
+    }
+
+    expect(deriveAcceptedWorkflowUnits(before, after)).toEqual([
+      expect.objectContaining({
+        unitId: 'resource:content',
+        inputRevision: 'content-digest',
+        dependencyDigests: { content: 'content-digest' },
+        payload: { contentDigest: 'content-digest' },
+      }),
+    ])
+  })
+
   test('rejects a pending accepted event whose payload does not match its kind', () => {
     const base = run()
     expect(() =>
@@ -314,6 +426,38 @@ describe('accepted workflow unit journal', () => {
     ])
     expect(await readFile(store.paths.snapshot, 'utf8')).not.toContain(
       'pendingEvents',
+    )
+  })
+
+  test('migrates a version-12 singular marker, flushes it once, and removes it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-v12-marker-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const base = run()
+    const event = {
+      eventId: 'v12-marker-event',
+      runId: base.runId,
+      type: 'workflow.progress',
+      phase: base.phase,
+      status: base.status,
+      revision: base.revision,
+      createdAt: '2026-08-05T00:00:00.000Z',
+    }
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({ ...base, schemaVersion: 12, pendingEvent: event })}\n`,
+      'utf8',
+    )
+
+    await expect(store.load({ migrate: true })).resolves.toMatchObject({
+      schemaVersion: 13,
+      runId: base.runId,
+    })
+    expect((await store.readEvents()).map(entry => entry.eventId)).toEqual([
+      'v12-marker-event',
+    ])
+    expect(await readFile(store.paths.snapshot, 'utf8')).not.toContain(
+      'pendingEvent',
     )
   })
 })

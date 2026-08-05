@@ -165,6 +165,13 @@ const resourceProductionStateSchema = z
       })
       .strict()
       .optional(),
+    contentReceipt: z
+      .object({
+        contentDigest: z.string().min(1),
+        acceptedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -634,7 +641,7 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
       .object({
         ...acceptedWorkflowUnitBase,
         kind: z.literal('resource-content'),
-        payload: z.object({}).strict(),
+        payload: z.object({ contentDigest: z.string().min(1) }).strict(),
       })
       .strict(),
     z

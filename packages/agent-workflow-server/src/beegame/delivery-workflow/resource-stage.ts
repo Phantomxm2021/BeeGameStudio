@@ -15,12 +15,14 @@ import {
 } from '../resource-delivery-readiness'
 import {
   computeResourceInventoryRevision,
+  computeResourceContentDigest,
   computeResourceRevision,
 } from './revision'
 import { resolveResourceProductionTask } from './resource-task-resolver'
 import { transitionDeliveryRun } from './transition'
 import {
   type DeliveryRun,
+  type ResourceContentReceipt,
   type ResourceProductionTask,
   type WorkerDispatchRequest,
 } from './types'
@@ -28,6 +30,16 @@ import type { WorkerTerminalResult } from './worker-contracts'
 
 type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 type ResourceAudit = ResourceDeliveryReadiness
+
+export async function resourceContentReceiptMatchesWorkspace(
+  workspacePath: string,
+  receipt: ResourceContentReceipt,
+): Promise<boolean> {
+  return (
+    receipt.contentDigest ===
+    (await computeResourceContentDigest(workspacePath))
+  )
+}
 
 export function resourcePreparationAllowedPaths(
   task: ResourceProductionTask,
@@ -290,6 +302,10 @@ export async function completeResourceTask(input: {
     resourceProductionState: {
       ...input.run.resourceProductionState,
       currentTask: 'RESOURCE_GATE',
+      contentReceipt: {
+        contentDigest: await computeResourceContentDigest(input.workspacePath),
+        acceptedAt: new Date().toISOString(),
+      },
     },
   }
   const resolution = await resolveResourceProductionTask({
@@ -323,10 +339,25 @@ export async function reconcileCurrentResourcePreparation(input: {
         currentTask: resolution.task,
         ...(resolution.inventoryReceiptValid
           ? {}
-          : { inventoryReceipt: undefined }),
+          : { inventoryReceipt: undefined, contentReceipt: undefined }),
       },
     }
   }
+
+  const contentReceipt = input.run.resourceProductionState.contentReceipt
+  if (
+    !contentReceipt ||
+    !(await resourceContentReceiptMatchesWorkspace(
+      input.workspacePath,
+      contentReceipt,
+    ))
+  )
+    return {
+      ...input.run,
+      status: 'needs_action',
+      blockedReason:
+        'resource content receipt is missing or its canonical content digest changed before the resource gate',
+    }
 
   const readiness = auditResourcesForPreparation({
     workspacePath: input.workspacePath,

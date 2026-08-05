@@ -4,7 +4,7 @@
 
 **Goal:** Recover every managed BeeGame Workflow from its exact durable interruption unit without rerunning accepted work.
 
-**Architecture:** Increment the persisted protocol to version 12, apply a one-way raw snapshot migration before current-schema execution, and journal accepted semantic units so one current run can be reconstructed even when `run.json` is invalid. The recovery projector creates the sole current `DeliveryRun`; the existing controller then resumes only the one unaccepted active unit.
+**Architecture:** The persisted protocol is version 13. Apply one-way raw snapshot migrations before current-schema execution, including the 11→12 review-topology transformation followed by the 12→13 marker transformation, and journal accepted semantic units so one current run can be reconstructed even when `run.json` is invalid. The recovery projector creates the sole current `DeliveryRun`; the existing controller then resumes only the one unaccepted active unit.
 
 **Tech Stack:** TypeScript, Bun, Zod, append-only JSONL Workflow journal, React, Vitest.
 
@@ -21,7 +21,7 @@
 
 ---
 
-### Task 1: Version 12 and deterministic version-11 migration
+### Task 1: Version 13 and deterministic legacy migration chain
 
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.ts`
@@ -42,7 +42,7 @@ Use a synthetic version-11 complete Review fixture with 16 required IDs, 12 comp
 ```ts
 const result = migrateWorkflowSnapshot(version11Snapshot)
 expect(result.migratedFrom).toBe(11)
-expect(result.value).toMatchObject({ schemaVersion: 12 })
+expect(result.value).toMatchObject({ schemaVersion: 13 })
 expect(activeCycle(result.value).requiredCheckIds).toEqual([
   ...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
 ])
@@ -78,7 +78,7 @@ export function migrateWorkflowSnapshot(
 ): SnapshotMigrationResult
 ```
 
-Set `DELIVERY_RUN_SCHEMA_VERSION = 12`. In 11→12, filter protocol-owned required-ID arrays through the current ID set. Reject unknown completed/current checks, terminal checks, accepted approval checks or finding owners. Preserve current-recognized approvals, evidence, revisions, tasks, usage, timestamps and active semantic unit. Do not name the retired ID in production code. Validate the transformed object with `parseDeliveryRun` before returning.
+Set `DELIVERY_RUN_SCHEMA_VERSION = 13`. In 11→12, filter protocol-owned required-ID arrays through the current ID set; then always apply the deterministic 12→13 conversion before validation. The 12→13 conversion atomically converts a singular `pendingEvent` into `pendingEvents`, removes the singular field, and never permits both fields in the current runtime. Reject unknown completed/current checks, terminal checks, accepted approval checks or finding owners. Preserve current-recognized approvals, evidence, revisions, tasks, usage, timestamps and active semantic unit. Do not name the retired ID in production code. Validate the fully migrated object with `parseDeliveryRun` before returning.
 
 - [ ] **Step 4: Add explicit mutable loading**
 
@@ -154,7 +154,7 @@ Give each kind a strict Zod payload. Review payload owns one check, its findings
 
 - [ ] **Step 4: Replace the singular pending marker**
 
-Replace `pendingEvent` with `pendingEvents?: WorkflowEvent[]`; never support both. One state commit writes its ordinary event plus one `workflow.unit.accepted` event per new unit into the snapshot marker, appends every event idempotently, then removes the marker. Loading flushes the complete marker first.
+The current version is 13. Convert version-12 `pendingEvent` snapshots through the sole 12→13 migration into `pendingEvents?: WorkflowEvent[]`; current runtime parsing never supports both fields. One state commit writes its ordinary event plus one `workflow.unit.accepted` event per new unit into the snapshot marker, appends every event idempotently, then removes the marker. Loading flushes the complete marker first.
 
 - [ ] **Step 5: Emit acceptance only after reconciliation**
 
@@ -346,7 +346,7 @@ git commit -m "feat: expose exact workflow recovery action"
 
 - [ ] **Step 1: Add a structural version guard**
 
-Compute a deterministic fingerprint from persisted enum values and strict schema topology. Store its expected value beside version 12. A fingerprint change without version/migration change fails with a direct instruction to increment `DELIVERY_RUN_SCHEMA_VERSION`. Do not inspect source text with regex.
+Compute a deterministic fingerprint from persisted enum values and strict schema topology. Store its expected value beside version 13. A fingerprint change without version/migration change fails with a direct instruction to increment `DELIVERY_RUN_SCHEMA_VERSION`. Do not inspect source text with regex.
 
 - [ ] **Step 2: Complete the exact-resume matrix**
 
@@ -383,4 +383,3 @@ Update the approved spec with measured test counts and guarantees, then:
 git add packages/agent-workflow-server/src apps/frontend/src docs/superpowers/specs/2026-08-05-workflow-exact-resume-recovery-design.md
 git commit -m "test: enforce exact workflow resume recovery"
 ```
-

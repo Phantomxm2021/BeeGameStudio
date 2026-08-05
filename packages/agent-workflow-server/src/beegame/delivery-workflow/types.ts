@@ -347,7 +347,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 12 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 13 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -370,9 +370,15 @@ export type ResourceInventoryReceipt = {
   acceptedAt: string
 }
 
+export type ResourceContentReceipt = {
+  contentDigest: string
+  acceptedAt: string
+}
+
 export type ResourceProductionState = {
   currentTask: ResourceProductionTask
   inventoryReceipt?: ResourceInventoryReceipt
+  contentReceipt?: ResourceContentReceipt
 }
 
 export type Revision = {

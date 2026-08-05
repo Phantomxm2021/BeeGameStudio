@@ -244,6 +244,7 @@ function enterResourcePreparation(
       ? {
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_PLAN',
+          contentReceipt: undefined,
         }
       : { currentTask: 'RESOURCE_PLAN' },
     documentReviewState: {
