@@ -472,7 +472,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     // Recover a previous marker before replacing the snapshot. This keeps a
     // failed append retryable and prevents a later commit from overwriting
     // an event that was waiting for journal recovery.
-    await loadUnlocked({ migrate: true })
+    await loadUnlocked()
     return persistCommitUnlocked(run, event)
   }
 
@@ -600,7 +600,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     dispatchId: string,
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
-      const run = await loadUnlocked({ migrate: true })
+      const run = await loadUnlocked()
       if (!run || run.runId !== runId) return run
       if (
         run.status !== 'running' ||
@@ -633,7 +633,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     },
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
-      const run = await loadUnlocked({ migrate: true })
+      const run = await loadUnlocked()
       if (!run || run.runId !== runId) return run
       if (
         progress.dispatchId &&

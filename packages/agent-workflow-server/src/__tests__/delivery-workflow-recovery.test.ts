@@ -741,6 +741,106 @@ describe('delivery workflow recovery', () => {
     })
   })
 
+  test('stale worker usage does not migrate or rewrite a version-11 snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-usage-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'stale-usage-run',
+      projectId: 'stale-usage-project',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    const snapshot = JSON.stringify({
+      ...initial,
+      schemaVersion: 11,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      activeDispatch: {
+        dispatchId: 'stale-usage-dispatch',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: '2026-08-05T00:00:00.000Z',
+      },
+    })
+    await writeFile(store.paths.snapshot, snapshot, 'utf8')
+
+    await expect(
+      store.addWorkflowUsage(
+        initial.runId,
+        {
+          input_tokens: 1,
+          cache_read_tokens: 0,
+          cache_creation_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 1,
+        },
+        'stale-usage-dispatch',
+      ),
+    ).rejects.toMatchObject({ code: 'obsolete' })
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshot)
+  })
+
+  test('stale worker progress does not migrate or rewrite a version-11 snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-progress-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'stale-progress-run',
+      projectId: 'stale-progress-project',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    const snapshot = JSON.stringify({
+      ...initial,
+      schemaVersion: 11,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      activeDispatch: {
+        dispatchId: 'stale-progress-dispatch',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: '2026-08-05T00:00:00.000Z',
+      },
+    })
+    await writeFile(store.paths.snapshot, snapshot, 'utf8')
+
+    await expect(
+      store.updateProgress(initial.runId, {
+        dispatchId: 'stale-progress-dispatch',
+        message: 'stale worker progress',
+        durable: true,
+      }),
+    ).rejects.toMatchObject({ code: 'obsolete' })
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshot)
+  })
+
+  test('ordinary workflow commits do not migrate or rewrite a version-11 snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-commit-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'stale-commit-run',
+      projectId: 'stale-commit-project',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    const snapshot = JSON.stringify({ ...initial, schemaVersion: 11 })
+    await writeFile(store.paths.snapshot, snapshot, 'utf8')
+
+    await expect(
+      store.commit(initial, {
+        runId: initial.runId,
+        type: 'workflow.progress',
+        phase: initial.phase,
+        status: initial.status,
+        revision: initial.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'obsolete' })
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshot)
+  })
+
   test('does not allow an older server to load a newer snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-newer-'))
     const store = createRunStore(workspace, 'owner-1')
