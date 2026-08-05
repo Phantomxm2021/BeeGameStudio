@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import {
   mkdir,
   open,
@@ -30,6 +31,7 @@ export type { WorkflowEvent } from './types'
 export type WorkflowLock = {
   ownerId: string
   runId: string
+  leaseId: string
   acquiredAt: string
   heartbeatAt: string
 }
@@ -169,6 +171,7 @@ export async function inspectWorkflowSnapshot(input: {
 }
 
 const mutationQueues = new Map<string, Promise<void>>()
+const activeLockLeases = new Set<string>()
 
 async function enqueueMutation<T>(
   key: string,
@@ -637,11 +640,30 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         throw storageReadError(filePaths.snapshot, error)
       }
       const currentDigest = createHash('sha256').update(source).digest('hex')
-      if (currentDigest !== input.expectedDigest)
+      if (currentDigest !== input.expectedDigest) {
+        let current: DeliveryRun
+        try {
+          current = parseDeliveryRun(JSON.parse(source) as unknown)
+        } catch {
+          throw new WorkflowStoreError(
+            'workflow snapshot changed before expected-digest replacement',
+            'recovery_snapshot_changed',
+          )
+        }
+        if (
+          isDeepStrictEqual(
+            JSON.parse(source) as unknown,
+            JSON.parse(
+              JSON.stringify({ ...input.run, updatedAt: current.updatedAt }),
+            ) as unknown,
+          )
+        )
+          return current
         throw new WorkflowStoreError(
           'workflow snapshot changed before expected-digest replacement',
           'recovery_snapshot_changed',
         )
+      }
       return persistCommitUnlocked(input.run, input.event, input.acceptedUnits)
     })
   }
@@ -657,72 +679,93 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     runId: string,
     sessionIsOpen: () => Promise<boolean> = async () => true,
   ): Promise<WorkflowLock> {
-    const timestamp = now()
-    try {
-      const existing = JSON.parse(
-        await readFile(filePaths.lock, 'utf8'),
-      ) as WorkflowLock
-      if (
-        existing.ownerId !== ownerId ||
-        existing.runId !== runId ||
-        (await sessionIsOpen())
-      ) {
+    return enqueueMutation(filePaths.lock, async () => {
+      const timestamp = now()
+      try {
+        const existing = JSON.parse(
+          await readFile(filePaths.lock, 'utf8'),
+        ) as WorkflowLock
+        if (
+          !existing.leaseId ||
+          activeLockLeases.has(existing.leaseId) ||
+          existing.ownerId !== ownerId ||
+          existing.runId !== runId ||
+          (await sessionIsOpen())
+        ) {
+          throw new WorkflowStoreError('workflow project is locked', 'locked')
+        }
+        // Only a lock whose worker is proven closed and whose lease is not
+        // active in this process may be replaced after a process restart.
+        await unlink(filePaths.lock)
+      } catch (error) {
+        if (error instanceof WorkflowStoreError) throw error
+      }
+      const value: WorkflowLock = {
+        ownerId,
+        runId,
+        leaseId: randomUUID(),
+        acquiredAt: timestamp,
+        heartbeatAt: timestamp,
+      }
+      try {
+        await writeFile(filePaths.lock, `${JSON.stringify(value)}\n`, {
+          flag: 'wx',
+        })
+      } catch {
         throw new WorkflowStoreError('workflow project is locked', 'locked')
       }
-      // A process may have exited after acquiring the lock. Once the caller
-      // has confirmed that the associated worker is closed, the stale lock is
-      // recoverable; leaving it in place would make resume permanently fail.
-      await unlink(filePaths.lock)
-    } catch (error) {
-      if (error instanceof WorkflowStoreError) throw error
-    }
-    const value: WorkflowLock = {
-      ownerId,
-      runId,
-      acquiredAt: timestamp,
-      heartbeatAt: timestamp,
-    }
-    try {
-      await writeFile(filePaths.lock, `${JSON.stringify(value)}\n`, {
-        flag: 'wx',
-      })
-    } catch {
-      throw new WorkflowStoreError('workflow project is locked', 'locked')
-    }
-    return value
+      activeLockLeases.add(value.leaseId)
+      return value
+    })
   }
 
-  async function heartbeat(runId: string): Promise<WorkflowLock> {
-    let value: WorkflowLock
-    try {
-      value = JSON.parse(await readFile(filePaths.lock, 'utf8')) as WorkflowLock
-    } catch {
-      throw new WorkflowStoreError('workflow lock is missing', 'locked')
-    }
-    if (value.ownerId !== ownerId || value.runId !== runId)
-      throw new WorkflowStoreError(
-        'workflow lock ownership mismatch',
-        'ownership',
+  async function heartbeat(lease: WorkflowLock): Promise<WorkflowLock> {
+    return enqueueMutation(filePaths.lock, async () => {
+      let value: WorkflowLock
+      try {
+        value = JSON.parse(
+          await readFile(filePaths.lock, 'utf8'),
+        ) as WorkflowLock
+      } catch {
+        throw new WorkflowStoreError('workflow lock is missing', 'locked')
+      }
+      if (
+        value.ownerId !== ownerId ||
+        value.runId !== lease.runId ||
+        value.leaseId !== lease.leaseId
       )
-    const updated = { ...value, heartbeatAt: now() }
-    await durableWrite(filePaths.lock, `${JSON.stringify(updated)}\n`)
-    return updated
+        throw new WorkflowStoreError(
+          'workflow lock ownership mismatch',
+          'ownership',
+        )
+      const updated = { ...value, heartbeatAt: now() }
+      await durableWrite(filePaths.lock, `${JSON.stringify(updated)}\n`)
+      return updated
+    })
   }
 
-  async function unlock(runId: string): Promise<void> {
-    try {
-      const value = JSON.parse(
-        await readFile(filePaths.lock, 'utf8'),
-      ) as WorkflowLock
-      if (value.ownerId !== ownerId || value.runId !== runId)
+  async function unlock(lease: WorkflowLock): Promise<void> {
+    return enqueueMutation(filePaths.lock, async () => {
+      let value: WorkflowLock
+      try {
+        value = JSON.parse(
+          await readFile(filePaths.lock, 'utf8'),
+        ) as WorkflowLock
+      } catch {
+        throw new WorkflowStoreError('workflow lock is missing', 'locked')
+      }
+      if (
+        value.ownerId !== ownerId ||
+        value.runId !== lease.runId ||
+        value.leaseId !== lease.leaseId
+      )
         throw new WorkflowStoreError(
           'workflow lock ownership mismatch',
           'ownership',
         )
       await unlink(filePaths.lock)
-    } catch (error) {
-      if (error instanceof WorkflowStoreError) throw error
-    }
+      activeLockLeases.delete(lease.leaseId)
+    })
   }
 
   async function reconcile(

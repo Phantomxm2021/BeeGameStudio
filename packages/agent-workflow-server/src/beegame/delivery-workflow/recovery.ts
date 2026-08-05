@@ -270,6 +270,7 @@ async function reconcileActiveCanonicalReceipt(input: {
           : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[targetIndex - 1]}`],
       inputRevision: documentRevision,
       dependencyDigests: { [targetPath]: receipt.finalDigest },
+      dispatchId: identity.dispatchId,
       receiptRef: `.beegame/workflow/document-commits/${identity.dispatchId}.json`,
       acceptedAt,
       payload: { path: targetPath, revision: documentRevision },
@@ -408,6 +409,8 @@ async function reconcileActiveCanonicalReceipt(input: {
       predecessorUnitIds: ['resource:inventory'],
       inputRevision: contentDigest,
       dependencyDigests: { content: contentDigest },
+      dispatchId: identity.dispatchId,
+      receiptRef: `.beegame/workflow/resource-content-commits/${identity.dispatchId}.json`,
       acceptedAt,
       payload: { contentDigest },
     }
@@ -840,14 +843,25 @@ async function acquireAndLoad(input: {
   runId: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<{ run: DeliveryRun; unlock: () => Promise<void> }> {
-  const run = await input.store.load()
-  if (!run || run.runId !== input.runId)
-    throw new Error('delivery run not found')
-  await input.store.lock(run.runId, async () => {
-    if (run.activeDispatch?.status !== 'running') return false
-    return input.sessionIsOpen ? input.sessionIsOpen(run.activeDispatch) : true
+  const lease = await input.store.lock(input.runId, async () => {
+    const current = await input.store.load()
+    if (!current || current.runId !== input.runId) return false
+    if (current.activeDispatch?.status !== 'running') return false
+    return input.sessionIsOpen
+      ? input.sessionIsOpen(current.activeDispatch)
+      : true
   })
-  return { run, unlock: () => input.store.unlock(run.runId) }
+  try {
+    const run = await input.store.reconcile(
+      input.sessionIsOpen ?? (async () => false),
+    )
+    if (!run || run.runId !== input.runId)
+      throw new Error('delivery run not found')
+    return { run, unlock: () => input.store.unlock(lease) }
+  } catch (error) {
+    await input.store.unlock(lease)
+    throw error
+  }
 }
 
 export async function resumeRun(input: {
@@ -856,18 +870,13 @@ export async function resumeRun(input: {
   workspacePath?: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun> {
-  const reconciled = await input.store.reconcile(
-    input.sessionIsOpen ?? (async () => false),
-  )
-  if (!reconciled || reconciled.runId !== input.runId)
-    throw new Error('delivery run not found')
-  if (
-    reconciled.status === 'completed' ||
-    reconciled.activeDispatch?.status === 'running'
-  )
-    return reconciled
   const acquired = await acquireAndLoad(input)
   try {
+    if (
+      acquired.run.status === 'completed' ||
+      acquired.run.activeDispatch?.status === 'running'
+    )
+      return acquired.run
     acquired.run = await restoreCanonicalDocumentCommit(
       acquired.run,
       input.workspacePath,
@@ -926,11 +935,6 @@ export async function retryRun(input: {
   taskId?: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun> {
-  const reconciled = await input.store.reconcile(
-    input.sessionIsOpen ?? (async () => false),
-  )
-  if (!reconciled || reconciled.runId !== input.runId)
-    throw new Error('delivery run not found')
   const acquired = await acquireAndLoad(input)
   try {
     acquired.run = await restoreCanonicalDocumentCommit(

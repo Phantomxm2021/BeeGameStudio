@@ -806,9 +806,53 @@ async function createStaleReviewerRecoveryFixture() {
     workspacePath,
     confirmedBriefDigest,
   )
-  const workspaceRevision = await computeWorkspaceRevision(workspacePath)
   const inventoryRevision =
     await computeResourceInventoryRevision(workspacePath)
+  const resourceContentDispatchId = 'fixture-resource-content'
+  const resourceContentTool = createNativeResourceContentTool({
+    buildTool: definition => definition,
+    workspacePath,
+    contract: {
+      dispatchId: resourceContentDispatchId,
+      inventoryRevision,
+      baselineResourceRevision: await computeResourceRevision(
+        workspacePath,
+        '',
+      ),
+      requiredRequirementIds: ['fixture-requirement'],
+      verifiedResourceIds: ['fixture-resource'],
+      inventoryBindings: [
+        {
+          requirementId: 'fixture-requirement',
+          resourceIds: ['fixture-resource'],
+        },
+      ],
+      protectedPaths: [],
+    },
+    assertMutationAuthority: () => undefined,
+  }) as { call(value: unknown): Promise<unknown> }
+  await resourceContentTool.call({
+    action: 'commit',
+    documents: [
+      {
+        path: 'assets/content/resource-registry.json',
+        schema: 'beegame-content-v1',
+        id: 'fixture-resource-registry',
+        kind: 'resource-registry',
+        fulfills: ['fixture-requirement'],
+        resources: ['fixture-resource'],
+        data: {
+          bindings: [
+            {
+              requirementId: 'fixture-requirement',
+              resourceIds: ['fixture-resource'],
+            },
+          ],
+        },
+      },
+    ],
+  })
+  const workspaceRevision = await computeWorkspaceRevision(workspacePath)
   const contentDigest = await computeResourceContentDigest(workspacePath)
   const resourceRevision = await computeResourceRevision(
     workspacePath,
@@ -885,6 +929,8 @@ async function createStaleReviewerRecoveryFixture() {
           : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[index - 1]}`],
       inputRevision: documentRevision,
       dependencyDigests: {},
+      dispatchId: `fixture-document-${index}`,
+      receiptRef: `.beegame/workflow/document-commits/fixture-document-${index}.json`,
       acceptedAt: RECOVERY_ACCEPTED_AT,
       payload: { path, revision: documentRevision },
     })),
@@ -966,6 +1012,8 @@ async function createStaleReviewerRecoveryFixture() {
       predecessorUnitIds: ['resource:inventory'],
       inputRevision: contentDigest,
       dependencyDigests: { content: contentDigest },
+      dispatchId: resourceContentDispatchId,
+      receiptRef: `.beegame/workflow/resource-content-commits/${resourceContentDispatchId}.json`,
       acceptedAt: RECOVERY_ACCEPTED_AT,
       payload: { contentDigest },
     },
@@ -3569,7 +3617,7 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('atomically permits only one reconstructed replacement for an expected snapshot digest', async () => {
+  test('converges identical reconstructed replacements on the committed winner', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-cas-'))
     const firstStore = createRunStore(workspace, 'owner-1')
     const secondStore = createRunStore(workspace, 'owner-1')
@@ -3614,18 +3662,89 @@ describe('delivery workflow recovery', () => {
 
     expect(
       results.filter(result => result.status === 'fulfilled'),
-    ).toHaveLength(1)
+    ).toHaveLength(2)
     expect(results.filter(result => result.status === 'rejected')).toHaveLength(
-      1,
+      0,
     )
-    expect(results.find(result => result.status === 'rejected')).toMatchObject({
-      reason: { code: 'recovery_snapshot_changed' },
-    })
     expect(
       (await firstStore.readEvents()).filter(
         event => event.type === 'workflow.run.reconstructed',
       ),
     ).toHaveLength(1)
+  })
+
+  test('requires the exact lock lease to release a successor lock', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-lock-lease-'))
+    const store = createRunStore(workspace, 'owner-1')
+    await store.save(
+      createTestDeliveryRun({
+        runId: 'run-1',
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+      }),
+    )
+    const first = await store.lock('run-1', async () => false)
+    const successor = { ...first, leaseId: 'successor-lease' }
+    await writeFile(store.paths.lock, `${JSON.stringify(successor)}\n`)
+
+    await expect(store.unlock(first)).rejects.toMatchObject({
+      code: 'ownership',
+    })
+    expect(JSON.parse(await readFile(store.paths.lock, 'utf8'))).toEqual(
+      successor,
+    )
+    await expect(store.unlock(successor)).resolves.toBeUndefined()
+  })
+
+  test('reloads the winner after acquiring the mutation lease', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-lock-reload-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const competingStore = createRunStore(workspace, 'owner-1')
+    const stopped = {
+      ...createTestDeliveryRun({
+        runId: 'run-1',
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+      }),
+      status: 'stopped' as const,
+      blockedReason: 'interrupted',
+    }
+    await store.save(stopped)
+    let winnerCommitted = false
+    const winner = {
+      ...stopped,
+      status: 'running' as const,
+      blockedReason: undefined,
+      currentMessage: 'winner already resumed',
+    }
+    const racedStore: typeof store = {
+      ...store,
+      lock: async (...args) => {
+        if (!winnerCommitted) {
+          winnerCommitted = true
+          await competingStore.commit(winner, {
+            runId: winner.runId,
+            type: 'winner.resumed',
+            phase: winner.phase,
+            status: winner.status,
+            revision: winner.revision,
+          })
+        }
+        return store.lock(...args)
+      },
+    }
+
+    await expect(
+      retryRun({ store: racedStore, runId: stopped.runId }),
+    ).resolves.toMatchObject({
+      status: 'running',
+      currentMessage: 'winner already resumed',
+    })
+    expect(
+      (await store.readEvents()).filter(
+        event => event.type === 'run.retry_requested',
+      ),
+    ).toHaveLength(0)
   })
 
   test('does not let reconstructed replacement overwrite a terminal commit that won the storage lane', async () => {
