@@ -613,6 +613,8 @@ async function createProjectionFixture(
     resourceRevision,
     task,
     implementedTask: implemented.tasks[0],
+    completedComprehensiveCycle:
+      afterComprehensive.documentReviewState.activeCycle,
     implementationAudit: audited.evidence.implementationAudit,
     acceptance: accepted.evidence.acceptance,
   }
@@ -838,6 +840,44 @@ describe('workflow exact-resume recovery projector', () => {
         repairPasses: fixture.snapshot.documentReviewState.repairPasses,
         checklistApproval:
           fixture.snapshot.documentReviewState.checklistApproval,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a raw completed task before any atomic plan was accepted', async () => {
+    const fixture = await createProjectionFixture()
+    expect(
+      fixture.events.some(
+        event =>
+          (event as WorkflowUnitAcceptedEvent).unit.unitId === 'plan:atomic',
+      ),
+    ).toBe(false)
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'IMPLEMENTATION' as const,
+      documentStep: undefined,
+      activeDispatch: undefined,
+      activeTaskId: undefined,
+      revision: {
+        ...fixture.snapshot.revision,
+        implementation: fixture.snapshot.revision.workspace,
+      },
+      tasks: [fixture.implementedTask],
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+        activeCycle: fixture.completedComprehensiveCycle,
       },
     }
     await writeFile(

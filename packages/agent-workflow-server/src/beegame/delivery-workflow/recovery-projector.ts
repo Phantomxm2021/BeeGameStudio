@@ -898,6 +898,50 @@ function snapshotTasks(
   return tasks
 }
 
+function assertRawCompletedClaimsHaveAcceptedProof(input: {
+  snapshot: Record<string, unknown> | undefined
+  proofs: Map<string, ProvenUnit>
+}): void {
+  if (Array.isArray(input.snapshot?.tasks))
+    for (const value of input.snapshot.tasks) {
+      const rawTask = record(value)
+      if (rawTask?.status !== 'completed') continue
+      let task: AtomicTask
+      try {
+        task = parseAtomicTask(value)
+      } catch {
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'snapshot completed task is outside the current schema',
+        )
+      }
+      if (!input.proofs.has(`implementation:${task.id}`))
+        recoveryError(
+          'recovery_checkpoint_missing',
+          `snapshot-completed task ${task.id} has no accepted terminal`,
+        )
+    }
+
+  const evidence = record(input.snapshot?.evidence)
+  for (const claim of [
+    {
+      value: record(evidence?.implementationAudit),
+      unitId: IMPLEMENTATION_AUDIT_UNIT_ID,
+      label: 'Implementation Audit',
+    },
+    {
+      value: record(evidence?.acceptance),
+      unitId: ACCEPTANCE_UNIT_ID,
+      label: 'Acceptance',
+    },
+  ])
+    if (claim.value?.status === 'passed' && !input.proofs.has(claim.unitId))
+      recoveryError(
+        'recovery_checkpoint_missing',
+        `snapshot-passed ${claim.label} has no accepted terminal`,
+      )
+}
+
 function assertSnapshotCompletedClaims(input: {
   snapshot: Record<string, unknown> | undefined
   proofs: Map<string, ProvenUnit>
@@ -1767,6 +1811,7 @@ export async function projectExactResumeRun(input: {
     historicalChecklistFact({ snapshot, proofs })
     historicalResourceFacts({ snapshot, proofs, revision })
   }
+  assertRawCompletedClaimsHaveAcceptedProof({ snapshot, proofs })
   const taskIds = planTaskIds(proofs)
   const tasks = snapshotTasks(snapshot, taskIds)
   assertSnapshotCompletedClaims({ snapshot, proofs, tasks })
