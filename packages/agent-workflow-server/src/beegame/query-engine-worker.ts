@@ -57,6 +57,9 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
         ...(message.confirmedBriefContext
           ? { confirmedBriefContext: message.confirmedBriefContext }
           : {}),
+        ...(message.workflowDocumentReviewContract
+          ? { workflowDocumentReviewContract: message.workflowDocumentReviewContract }
+          : {}),
         signal: abortController.signal,
         onMessage: sdkMessage => send({
           type: 'turn.message',

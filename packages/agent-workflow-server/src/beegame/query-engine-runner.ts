@@ -783,6 +783,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               ? {
                   documentReviewContract:
                     this.input.workflowDocumentReviewContract,
+                  getDocumentReviewContract: () =>
+                    this.currentSubmitInput?.workflowDocumentReviewContract ??
+                    this.input.workflowDocumentReviewContract,
                 }
               : {}),
           })

@@ -292,6 +292,7 @@ export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   /** User-confirmed context exposed read-only to platform contract tools. */
   confirmedBriefContext?: string
+  workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -874,6 +875,25 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record || !authToken) return
     record.authToken = authToken
+  }
+
+  rebindWorkflowReviewer(input: {
+    sessionId: string
+    dispatchId: string
+    contract: DocumentReviewSubmissionContract
+  }): void {
+    const record = this.sessions.get(input.sessionId)
+    if (!record) throw new Error('Session not found')
+    if (
+      !record.workflowWorker ||
+      record.workflowWorkerType !== 'document-reviewer' ||
+      record.session.status !== 'running' ||
+      record.session.turnStatus !== 'idle'
+    )
+      throw new Error('Reviewer execution session is not reusable')
+    record.workflowDispatchId = input.dispatchId
+    record.workflowDocumentReviewContract = input.contract
+    record.session.updatedAt = new Date()
   }
 
   metadata(sessionId: string): BeeGameSessionInternalMetadata | undefined {
@@ -1471,6 +1491,12 @@ export class BeeGameSessionManager {
       prompt,
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }
+        : {}),
+      ...(record.workflowDocumentReviewContract
+        ? {
+            workflowDocumentReviewContract:
+              record.workflowDocumentReviewContract,
+          }
         : {}),
       signal,
       onMessage: message => {

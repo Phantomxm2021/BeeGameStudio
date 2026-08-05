@@ -148,7 +148,7 @@ Reviewer 只允许一个 frozen-revision Review Cycle。12 项 Foundation check 
 
 首次 Foundation Author 固定按 `GDD -> LEVEL_SCENE_DESIGN -> BALANCE_DESIGN -> TECHNICAL_DESIGN -> ART_DIRECTION -> UI_UX_SPEC -> AUDIO_DESIGN -> ASSET_PLAN` 串行执行。每个 dispatch 只获得当前文档的唯一允许路径，以及该文档确实依赖且已经完成的上游 canonical 文档；不得获得八份可写路径、不得携带上一份文档的模型对话或压缩摘要，也不得在初稿阶段提出 finding、执行 Closure、模拟 Reviewer 或自行建立修订循环。成功终态只完成当前 durable task，服务端随后创建下一任务；八份完成后才计算完整 Foundation revision。
 
-上游依赖由事实 owner 固定投影，不等同于“此前所有文档”：Level/Scene 读取 GDD；Balance 读取 GDD 与 Level/Scene；Technical 读取 GDD、Level/Scene 与 Balance；Art 读取 GDD 与 Level/Scene；UI/UX 读取 GDD 与 Level/Scene；Audio 读取 GDD、Level/Scene 与 UI/UX；Asset Plan 读取 GDD、Level/Scene、Technical、Art、UI/UX 与 Audio。服务端在启动 Initial Author 前一次性读取这些 canonical 上游文档并作为同一 prompt 的只读 authority block 提供；Author 不得用工具重新装载上游或浏览其他路径。若当前目标不存在，Initial Author 直接执行一次 `CommitCanonicalDocument`；若目标已存在（包括显式重新开始、Change Request 或 finding remediation），Workflow 服务把当前正文作为受控基线投影给 Author，Author 不再通过通用文件工具读取或写入 canonical 文档。Initial restart 的旧目标只用于建立覆盖前提，不得被提升为当前 run 的产品 authority；Change Request 与 remediation 的当前正文则是本次受控修订基线。该投影不产生摘要、临时项目文件、第二事实源或第二写入通道。
+上游依赖由事实 owner 固定投影，不等同于“此前所有文档”：Level/Scene 读取 GDD；Balance 读取 GDD 与 Level/Scene；Technical 读取 GDD、Level/Scene 与 Balance；Art 读取 GDD 与 Level/Scene；UI/UX 读取 GDD 与 Level/Scene；Audio 读取 GDD、Level/Scene 与 UI/UX；Asset Plan 读取 GDD、Level/Scene、Technical、Art、UI/UX 与 Audio。首次 Author 读取这些已经按本方案收敛为紧凑 decision contract 的完整 canonical 上游文档；在没有独立、稳定、服务端可验证的 section identity 合同前，不得使用关键词、正则、LLM 摘要或项目内容猜测章节并截断权威。Repair Lead 与 remediation 已拥有 accepted exact reference，必须只投影对应章节和当前目标，不得退回完整 repair batch。Author 不得用工具重新装载上游或浏览其他路径。若当前目标不存在，Initial Author 直接执行一次 `CommitCanonicalDocument`；若目标已存在（包括显式重新开始、Change Request 或 finding remediation），Workflow 服务把当前正文作为受控基线投影给 Author，Author 不再通过通用文件工具读取或写入 canonical 文档。Initial restart 的旧目标只用于建立覆盖前提，不得被提升为当前 run 的产品 authority；Change Request 与 remediation 的当前正文则是本次受控修订基线。该投影不产生摘要、临时项目文件、第二事实源或第二写入通道。
 
 Initial Author 与 remediation Author 的唯一 mutation 都是当前目标的一次 `CommitCanonicalDocument`。工具只接受不含 YAML front matter 的完整 Markdown 正文；服务端根据 dispatch 合同唯一确定 `document_id`，为新文档生成 `1.0.0`，为受控修订将现有 PATCH 恰好提升一次，并使用服务端 UTC 时钟生成严格晚于旧值的 `updated_at`。服务端必须在 mutation 前验证目标、基线 digest、正文和最终 metadata，再以临时文件加原子替换写入 canonical 路径。Document Author 不存在通用文件 mutation 或另一个完成终态；成功的 canonical commit 本身就是唯一终态。
 
@@ -160,7 +160,7 @@ Initial Author 与 remediation Author 的唯一 mutation 都是当前目标的�
 
 修复时只允许写 accepted finding 指向且 repair plan 分配给当前 task 的一份 Foundation 文档，并要求该文档 PATCH 版本提升。首次撰写、repair planning 和 finding owner 修复是互斥任务，不共享 prompt 或允许路径。
 
-Foundation 修复 dispatch 只消费已接受 finding、其 required outcome、被分配的 subject 文档，以及 finding 明确引用且确有必要核对的事实 owner；每份读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，required outcome 与回归的最终判定唯一属于随后一次 Closure Reviewer。
+Foundation 修复 dispatch 只消费当前目标正文，以及服务端从唯一 repair plan 按该目标确定性投影的 locked decisions、finding ID、required outcome、subjects 和必要 authority references；不得把完整 repair batch、其他目标的决定或已由 Repair Lead 消化的重复 observation/blocking impact 交给每个 Author。每份权威章节读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，required outcome 与回归的最终判定唯一属于随后一次 Closure Reviewer。
 
 Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 

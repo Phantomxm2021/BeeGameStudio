@@ -57,6 +57,31 @@ describe('process-isolated QueryEngine runner', () => {
     })
   })
 
+  test('forwards the active reviewer packet contract on every isolated turn', () => {
+    const workflowDocumentReviewContract = {
+      scope: 'foundation' as const,
+      mode: 'initial' as const,
+      requiredCheckIds: ['brief_alignment' as const],
+      currentCheckIds: ['brief_alignment' as const],
+      artifacts: [{ path: 'docs/GDD.md', content: '# Rules\n' }],
+    }
+    const message = createQueryEngineTurnSubmitMessage('turn-review', {
+      prompt: 'review the active packet',
+      workflowDocumentReviewContract,
+      signal: new AbortController().signal,
+      onMessage() {},
+      async requestPermission() {
+        return { behavior: 'deny' }
+      },
+    })
+
+    expect(message).toMatchObject({
+      type: 'turn.submit',
+      turnId: 'turn-review',
+      workflowDocumentReviewContract,
+    })
+  })
+
   test('preserves the sole document review contract across process serialization', () => {
     const serialized = serializeQueryEngineStartInput({
       sessionId: 'document-reviewer',

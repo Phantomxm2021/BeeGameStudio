@@ -21,8 +21,10 @@ import { commitCanonicalDocument } from '../beegame/native-canonical-document-to
 
 function reviewerContract(
   atomicCheckId: DocumentReviewCheckId = 'cross_document_consistency',
+  cycleId = 'cycle-review',
 ) {
   return {
+    cycleId,
     reviewScope: 'foundation' as const,
     reviewMode: 'initial' as const,
     requiredCheckIds: [atomicCheckId],
@@ -696,6 +698,130 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('reuses one frozen-revision reviewer execution session across serial packets', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-review-session-reuse-'),
+    )
+    const artifacts = reviewerContract().reviewArtifacts
+    const systemReferenceId = buildDocumentReviewReferenceIndex([
+      { path: 'reviewAuthority', content: 'Confirmed brief' },
+      ...artifacts,
+    ]).references.find(
+      reference => reference.path === 'systemDeliveryContract',
+    )!.referenceId
+    const session = {
+      id: 'review-session',
+      status: 'running' as const,
+      turnStatus: 'idle' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const events: ReturnType<BeeGameSessionManager['events']> = []
+    const prompts: string[] = []
+    let activeDispatchId = ''
+    let startCount = 0
+    let rebindCount = 0
+    const sessions = {
+      start(input: { workflowDispatchId: string }) {
+        startCount += 1
+        activeDispatchId = input.workflowDispatchId
+        return session
+      },
+      get() {
+        return session
+      },
+      rebindWorkflowReviewer(input: { dispatchId: string }) {
+        rebindCount += 1
+        activeDispatchId = input.dispatchId
+      },
+      updateAuthToken() {},
+      async sendWithDisplay(_sessionId: string, prompt: string) {
+        prompts.push(prompt)
+        events.push({
+          id: `tool-${activeDispatchId}`,
+          type: 'tool.completed',
+          text: '',
+          createdAt: new Date(),
+          payload: {
+            toolName: 'SubmitDocumentReviewPacket',
+            input: {
+              checks: [
+                {
+                  conclusion: 'The current authority is consistent.',
+                  evidence: [{ referenceId: systemReferenceId }],
+                  assessments: [],
+                  findings: [],
+                },
+              ],
+            },
+          },
+        } as never)
+      },
+      events() {
+        return events
+      },
+      hasInFlightToolSubmission() {
+        return false
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    const request = (
+      dispatchId: string,
+      currentCheckId: 'cross_document_consistency' | 'technical_feasibility',
+      cycleId = 'cycle-review',
+    ): WorkerDispatchRequest => ({
+      dispatchId,
+      runId: 'run-review-session',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'frozen-revision-1',
+      allowedPaths: [],
+      contract: {
+        ...reviewerContract(currentCheckId, cycleId),
+        requiredCheckIds: [
+          'cross_document_consistency',
+          'technical_feasibility',
+        ],
+      },
+    })
+    try {
+      await port.start(request('review-packet-1', 'cross_document_consistency'))
+      await port.submit('review-packet-1', 'full frozen projection')
+      await port.waitForTerminal?.('review-packet-1')
+      await port.close?.('review-packet-1')
+
+      await port.start(request('review-packet-2', 'technical_feasibility'))
+      await port.submit('review-packet-2', 'must be replaced')
+      await port.waitForTerminal?.('review-packet-2')
+
+      await port.close?.('review-packet-2')
+      await port.start(
+        request(
+          'review-packet-new-cycle',
+          'cross_document_consistency',
+          'cycle-review-2',
+        ),
+      )
+      await port.submit('review-packet-new-cycle', 'new frozen projection')
+      await port.waitForTerminal?.('review-packet-new-cycle')
+
+      expect(startCount).toBe(2)
+      expect(rebindCount).toBe(1)
+      expect(prompts).toHaveLength(3)
+      expect(prompts[0]).toStartWith('full frozen projection')
+      expect(prompts[1]).toContain(
+        'Continue the same frozen-revision Reviewer execution session',
+      )
+      expect(prompts[1]).not.toContain('BEGIN REVIEW REFERENCE INDEX')
+      expect(prompts[2]).toStartWith('new frozen projection')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('reconstructs every design check with the same assessments accepted by its active contract', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-design-review-result-'),
@@ -745,8 +871,6 @@ describe('delivery worker session credentials', () => {
               input: {
                 checks: [
                   {
-                    conclusion: 'The design criterion set is supported.',
-                    evidence: [{ referenceId: evidenceReferenceId }],
                     assessments: criteria.map(criterion => ({
                       criterion,
                       status: 'pass',
@@ -770,7 +894,7 @@ describe('delivery worker session credentials', () => {
           workspacePath,
           workerType: 'document-reviewer',
           phase: 'DOCUMENT_REVIEW',
-          revision: 'revision-1',
+          revision: `revision-${atomicCheckId}`,
           allowedPaths: [],
           contract,
         })

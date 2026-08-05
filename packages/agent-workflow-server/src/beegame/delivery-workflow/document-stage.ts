@@ -79,13 +79,6 @@ type FrozenReviewProjection = {
   sourceRevision: string
   artifacts: DocumentReviewArtifact[]
   referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
-  checkProjections: Map<
-    string,
-    {
-      referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
-      reviewArtifacts: DocumentReviewArtifact[]
-    }
-  >
 }
 
 const FROZEN_REVIEW_PROJECTION_CACHE_LIMIT = 16
@@ -101,7 +94,6 @@ function rememberFrozenReviewProjection(input: {
     sourceRevision: input.cycle.sourceRevision,
     artifacts: input.artifacts,
     referenceIndex: buildDocumentReviewWireReferenceIndex(input.artifacts),
-    checkProjections: new Map(),
   }
   frozenReviewProjectionCache.delete(input.cycle.cycleId)
   frozenReviewProjectionCache.set(input.cycle.cycleId, projection)
@@ -196,48 +188,6 @@ function artifactsForReviewChecks(
     ),
   )
   return artifacts.filter(artifact => paths.has(artifact.path))
-}
-
-function projectionForChecks(
-  projection: FrozenReviewProjection,
-  checkIds: DocumentReviewCheckId[],
-) {
-  const packetKey = checkIds.join('|')
-  const cached = projection.checkProjections.get(packetKey)
-  if (cached) return cached
-  const artifacts = artifactsForReviewChecks(projection.artifacts, checkIds)
-  const paths = new Set(artifacts.map(artifact => artifact.path))
-  const artifactIds = new Set(
-    projection.referenceIndex.artifacts
-      .filter(artifact => paths.has(artifact.path))
-      .map(artifact => artifact.artifactId),
-  )
-  const value = {
-    referenceIndex: {
-      artifacts: projection.referenceIndex.artifacts.filter(artifact =>
-        artifactIds.has(artifact.artifactId),
-      ),
-      references: projection.referenceIndex.references.filter(reference =>
-        artifactIds.has(reference.artifactId),
-      ),
-      requirementIds: paths.has(CANONICAL_ASSET_MANIFEST)
-        ? projection.referenceIndex.requirementIds
-        : [],
-      resourceIds: paths.has(CANONICAL_ASSET_MANIFEST)
-        ? projection.referenceIndex.resourceIds
-        : [],
-      contentIdsByPath: Object.fromEntries(
-        Object.entries(projection.referenceIndex.contentIdsByPath).filter(
-          ([path]) => paths.has(path),
-        ),
-      ),
-    },
-    reviewArtifacts: artifacts.filter(
-      artifact => artifact.path !== 'reviewAuthority',
-    ),
-  }
-  projection.checkProjections.set(packetKey, value)
-  return value
 }
 
 const CLOSURE_CHECK_CANDIDATES: Record<
@@ -761,7 +711,6 @@ export async function buildDocumentReviewDispatch(input: {
   )
     throw new Error('document closure diff changed after the cycle was frozen')
   const currentCheckIds = activeDocumentReviewCheckPacket(cycle)
-  const checkProjection = projectionForChecks(frozenProjection, currentCheckIds)
   const artifactPathsByCheck = Object.fromEntries(
     currentCheckIds.map(checkId => [
       checkId,
@@ -796,8 +745,10 @@ export async function buildDocumentReviewDispatch(input: {
         ]),
       ),
       artifactPathsByCheck,
-      referenceIndex: checkProjection.referenceIndex,
-      reviewArtifacts: checkProjection.reviewArtifacts,
+      referenceIndex: frozenProjection.referenceIndex,
+      reviewArtifacts: frozenProjection.artifacts.filter(
+        artifact => artifact.path !== 'reviewAuthority',
+      ),
       ...(findingLedger.length
         ? {
             priorFindings: findingLedger,
@@ -1043,16 +994,29 @@ export async function startDocumentStage(input: {
               foundationDocumentPath: repairPath,
               repairTask: {
                 cycleId: cycle!.cycleId,
-                groups: repairPlan!.groups.filter(group =>
-                  group.affectedPaths.includes(repairPath),
-                ),
-                findings: remediationFindings.filter(finding =>
-                  repairPlan!.groups.some(
-                    group =>
-                      group.affectedPaths.includes(repairPath) &&
-                      group.findingIds.includes(finding.findingId),
-                  ),
-                ),
+                groups: repairPlan!.groups
+                  .filter(group => group.affectedPaths.includes(repairPath))
+                  .map(group => ({
+                    groupId: group.groupId,
+                    decision: group.decision,
+                    findingIds: group.findingIds,
+                  })),
+                findings: remediationFindings
+                  .filter(finding =>
+                    repairPlan!.groups.some(
+                      group =>
+                        group.affectedPaths.includes(repairPath) &&
+                        group.findingIds.includes(finding.findingId),
+                    ),
+                  )
+                  .map(finding => ({
+                    findingId: finding.findingId,
+                    checkId: finding.checkId,
+                    requiredOutcome: finding.requiredOutcome,
+                    subjects: finding.subjects.filter(
+                      subject => subject.path === repairPath,
+                    ),
+                  })),
               },
             }
           : {

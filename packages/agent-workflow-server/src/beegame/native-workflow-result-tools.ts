@@ -2,6 +2,7 @@ import {
   changeImpactSubmissionSchema,
   documentRepairPlanSubmissionSchemaForGroupCount,
   documentReviewPacketSubmissionSchemaForContract,
+  documentReviewPacketWireSchema,
   questionAnswerSubmissionSchema,
   resourceContentSubmissionSchema,
 } from './delivery-workflow/worker-contracts'
@@ -26,7 +27,7 @@ const definitions = {
     description:
       'Submit the current transactional document review packet and its structured findings.',
     prompt:
-      'Submit exactly contract.currentCheckIds as one ordered checks array. Each check contains exactly conclusion, evidence, assessments and findings, without an id. Each assessment contains exactly criterion, status, evidence, derivation and conclusion and uses the criterion IDs supplied for that check. Every evidence or subject entry contains exactly referenceId; result, note, paths, anchors and subjectOwner are invalid. Each finding contains findingId, evidence, subjects, observation, blockingImpact and one authority-preserving requiredOutcome; regressionPaths is allowed only in Closure Review. In Closure, an unresolved prior finding preserves its findingId and exact requiredOutcome; a different defect inside an active check uses a new findingId, and regressionPaths is present only when the changed paths directly introduced it. The service derives check identity, check status, check findingIds and subject ownership. A rejected call accepts nothing: correct the same packet without prose or user confirmation. The workflow atomically persists every check in the packet to the single review cycle and derives the final verdict only after every required check is accepted.',
+      'Submit exactly contract.currentCheckIds as one ordered checks array. Design checks contain assessments and findings; the service derives their check-level status, evidence and conclusion. Non-design checks additionally contain conclusion and evidence and have an empty assessments array. Each assessment contains exactly criterion, status, evidence, derivation and conclusion and uses the criterion IDs supplied for that check. Every evidence or subject entry contains exactly referenceId. Each finding contains findingId, evidence, subjects, observation, blockingImpact and one authority-preserving requiredOutcome; regressionPaths is allowed only in Closure Review. The service derives check identity, finding IDs and subject ownership. A rejected call accepts nothing: correct the same packet without prose or user confirmation.',
     message: '提交文档审阅结果',
   },
   'change-impact-analyzer': {
@@ -70,6 +71,7 @@ export function createNativeWorkflowResultTool(options: {
   buildTool: BuildTool
   workerType: WorkflowResultWorker
   documentReviewContract?: DocumentReviewSubmissionContract
+  getDocumentReviewContract?: () => DocumentReviewSubmissionContract | undefined
   documentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   documentRepairGroupCount?: number
 }): unknown {
@@ -95,7 +97,7 @@ export function createNativeWorkflowResultTool(options: {
       : definitions[options.workerType]
   const schema =
     options.workerType === 'document-reviewer'
-      ? documentReviewPacketSubmissionSchemaForContract(documentReviewContract!)
+      ? documentReviewPacketWireSchema
       : options.workerType === 'document-author'
         ? documentRepairPlanSubmissionSchemaForGroupCount(
             options.documentRepairGroupCount!,
@@ -121,8 +123,12 @@ export function createNativeWorkflowResultTool(options: {
     },
     async call(input: unknown) {
       if (options.workerType === 'document-reviewer') {
+        const activeContract =
+          options.getDocumentReviewContract?.() ?? documentReviewContract
+        if (!activeContract)
+          throw new Error('document reviewer active contract is missing')
         parseAndValidateDocumentReviewPacketSubmission({
-          contract: documentReviewContract!,
+          contract: activeContract,
           submission: input,
         })
       }

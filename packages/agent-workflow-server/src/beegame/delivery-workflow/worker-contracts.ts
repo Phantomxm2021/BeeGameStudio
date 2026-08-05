@@ -174,40 +174,6 @@ const documentReviewCheckSubmissionShape = {
     .max(3),
 }
 
-function documentReviewCheckSubmissionSchemaForCheck(
-  atomicCheckId: DocumentReviewCheckId,
-) {
-  return z
-    .object(documentReviewCheckSubmissionShape)
-    .strict()
-    .superRefine((check, context) => {
-      const criteria =
-        GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
-          atomicCheckId as GameDesignDocumentReviewCheckId
-        ]
-      if (!criteria) {
-        if (check.assessments.length)
-          context.addIssue({
-            code: 'custom',
-            path: ['assessments'],
-            message: 'non-design review checks cannot submit assessments',
-          })
-        return
-      }
-      const submitted = check.assessments.map(item => item.criterion)
-      if (
-        submitted.length !== criteria.length ||
-        new Set(submitted).size !== criteria.length ||
-        criteria.some(id => !submitted.includes(id))
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['assessments'],
-          message: `design review check ${atomicCheckId} requires its exact criterion set`,
-        })
-    })
-}
-
 export { documentReviewCheckSchema } from './document-review-check-schema'
 
 export const documentRepairPlanSubmissionSchema = z
@@ -243,56 +209,6 @@ export const documentAuthorTerminalSchema = z
   })
   .strict()
 
-function requireConsistentDocumentReviewCheck(
-  value: {
-    assessments: Array<{ status: 'pass' | 'block' }>
-    findings: Array<{ findingId: string }>
-  },
-  context: z.RefinementCtx,
-): void {
-  const findingIds = value.findings.map(finding => finding.findingId)
-  if (new Set(findingIds).size !== findingIds.length)
-    context.addIssue({
-      code: 'custom',
-      path: ['findings'],
-      message: 'document review finding codes must be unique',
-    })
-  const assessmentBlocks = value.assessments.some(
-    item => item.status === 'block',
-  )
-  if (
-    value.assessments.length > 0 &&
-    assessmentBlocks !== value.findings.length > 0
-  )
-    context.addIssue({
-      code: 'custom',
-      path: ['findings'],
-      message: 'blocked design assessments and findings must agree',
-    })
-}
-
-function documentReviewCheckSubmissionContractSchema<
-  FindingSchema extends z.ZodType<{
-    findingId: string
-  }>,
->(findingSchema: FindingSchema, atomicCheckId: DocumentReviewCheckId) {
-  const checkSchema = documentReviewCheckSubmissionSchemaForCheck(atomicCheckId)
-  return z
-    .object({
-      ...checkSchema.shape,
-      findings: z.array(findingSchema),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      const { findings: _findings, ...check } = value
-      const parsed = checkSchema.safeParse(check)
-      if (!parsed.success)
-        for (const issue of parsed.error.issues)
-          context.addIssue({ ...issue, path: issue.path })
-    })
-    .superRefine(requireConsistentDocumentReviewCheck)
-}
-
 function visibleDocumentReviewCheckSubmissionSchema<
   FindingSchema extends z.ZodType<{
     findingId: string
@@ -301,18 +217,83 @@ function visibleDocumentReviewCheckSubmissionSchema<
   findingSchema: FindingSchema,
   criterionIds: readonly DocumentReviewCriterionId[],
 ) {
+  const designCheck = criterionIds.length > 0
   return z
     .object({
-      conclusion: documentReviewCheckSubmissionShape.conclusion,
-      evidence: documentReviewCheckSubmissionShape.evidence,
+      ...(designCheck
+        ? {}
+        : {
+            conclusion: documentReviewCheckSubmissionShape.conclusion,
+            evidence: documentReviewCheckSubmissionShape.evidence,
+          }),
       assessments: z
         .array(documentReviewAssessmentSubmissionSchema(criterionIds))
-        .max(criterionIds.length ? 3 : 0),
+        .length(designCheck ? criterionIds.length : 0),
       findings: z.array(findingSchema),
     })
     .strict()
-    .superRefine(requireConsistentDocumentReviewCheck)
+    .superRefine((value, context) => {
+      if (!designCheck) return
+      const assessmentBlocks = value.assessments.some(
+        assessment => assessment.status === 'block',
+      )
+      if (assessmentBlocks !== value.findings.length > 0)
+        context.addIssue({
+          code: 'custom',
+          path: ['findings'],
+          message: 'blocked design assessments and findings must agree',
+        })
+    })
 }
+
+const fixedDocumentReviewFindingWireSchema = z
+  .object({
+    findingId: documentReviewSubmissionFindingShape.findingId,
+    evidence: z.array(documentReviewReferenceSchema).min(1),
+    subjects: z
+      .array(
+        z
+          .object({
+            referenceId: z.string().trim().min(1),
+            requirementId: z.string().min(1).optional(),
+            resourceId: z.string().min(1).optional(),
+            contentId: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+    observation: documentReviewSubmissionFindingShape.observation,
+    blockingImpact: documentReviewSubmissionFindingShape.blockingImpact,
+    requiredOutcome: documentReviewSubmissionFindingShape.requiredOutcome,
+    regressionPaths: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict()
+
+/** Stable model-facing wire schema. Contract-specific semantics stay server-owned. */
+export const documentReviewPacketWireSchema = z
+  .object({
+    checks: z
+      .array(
+        z
+          .object({
+            conclusion:
+              documentReviewCheckSubmissionShape.conclusion.optional(),
+            evidence: documentReviewCheckSubmissionShape.evidence.optional(),
+            assessments: z
+              .array(
+                documentReviewAssessmentSubmissionSchema(
+                  documentReviewCriterionIds,
+                ),
+              )
+              .max(3),
+            findings: z.array(fixedDocumentReviewFindingWireSchema),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(4),
+  })
+  .strict()
 
 export function documentReviewPacketSubmissionSchemaForContract(contract: {
   mode: 'initial' | 'closure'
@@ -323,41 +304,32 @@ export function documentReviewPacketSubmissionSchemaForContract(contract: {
     contract.mode,
     contract.scope,
   )
-  const packetCriterionIds = [
-    ...new Set(
-      contract.currentCheckIds.flatMap(
-        checkId =>
-          GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
-            checkId as GameDesignDocumentReviewCheckId
-          ] ?? [],
-      ),
-    ),
-  ]
-  const visibleCheckSchema = visibleDocumentReviewCheckSubmissionSchema(
-    findingSchema,
-    packetCriterionIds,
-  )
-  return z
-    .object({
-      checks: z
-        .array(visibleCheckSchema)
-        .length(contract.currentCheckIds.length),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      for (const [index, checkId] of contract.currentCheckIds.entries()) {
-        const parsed = documentReviewCheckSubmissionContractSchema(
-          findingSchema,
-          checkId,
-        ).safeParse(value.checks[index])
-        if (!parsed.success)
-          for (const issue of parsed.error.issues)
-            context.addIssue({
-              ...issue,
-              path: ['checks', index, ...issue.path],
-            })
-      }
-    })
+  return documentReviewPacketWireSchema.superRefine((value, context) => {
+    if (value.checks.length !== contract.currentCheckIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message: 'document review packet must exactly cover currentCheckIds',
+      })
+      return
+    }
+    for (const [index, checkId] of contract.currentCheckIds.entries()) {
+      const criterionIds =
+        GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+          checkId as GameDesignDocumentReviewCheckId
+        ] ?? []
+      const parsed = visibleDocumentReviewCheckSubmissionSchema(
+        findingSchema,
+        criterionIds,
+      ).safeParse(value.checks[index])
+      if (!parsed.success)
+        for (const issue of parsed.error.issues)
+          context.addIssue({
+            ...issue,
+            path: ['checks', index, ...issue.path],
+          })
+    }
+  })
 }
 
 export const documentReviewerTerminalSchema = base

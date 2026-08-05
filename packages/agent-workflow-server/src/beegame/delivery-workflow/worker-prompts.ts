@@ -39,6 +39,45 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   ].join('\n')
 }
 
+export function buildReviewerContinuationPrompt(
+  request: WorkerDispatchRequest,
+): string {
+  if (request.workerType !== 'document-reviewer')
+    throw new Error('reviewer continuation requires a reviewer request')
+  const {
+    currentCheckIds,
+    criteriaByCheck,
+    artifactPathsByCheck,
+    priorFindings,
+    activeTarget,
+    changedPaths,
+    changes,
+  } = request.contract
+  const visiblePriorFindings = projectVisiblePriorFindings({
+    priorFindings,
+    currentCheckIds,
+    artifactPathsByCheck,
+    mode: request.contract.reviewMode,
+  })
+  return [
+    'Continue the same frozen-revision Reviewer execution session. The authority artifacts and reference index already in this conversation remain the only review source. Review only this next durable packet; do not repeat earlier checks or emit a cycle verdict.',
+    '--- BEGIN REVIEW ACTIVE PACKET ---',
+    JSON.stringify({
+      currentCheckIds,
+      criteriaByCheck,
+      artifactPathsByCheck,
+      ...(visiblePriorFindings.length
+        ? { priorFindings: visiblePriorFindings }
+        : {}),
+      ...(activeTarget !== undefined ? { activeTarget } : {}),
+      ...(changedPaths !== undefined ? { changedPaths } : {}),
+      ...(changes !== undefined ? { changes } : {}),
+    }),
+    '--- END REVIEW ACTIVE PACKET ---',
+    terminalInstruction(request),
+  ].join('\n')
+}
+
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType !== 'document-reviewer')
     return JSON.stringify(request.contract)
@@ -71,6 +110,7 @@ function formatContract(request: WorkerDispatchRequest): string {
     priorFindings,
     currentCheckIds,
     artifactPathsByCheck,
+    mode: staticContract.reviewMode,
   })
   return [
     '--- BEGIN REVIEW STATIC CONTRACT ---',
@@ -106,6 +146,7 @@ function projectVisiblePriorFindings(input: {
   priorFindings: unknown
   currentCheckIds: unknown
   artifactPathsByCheck: unknown
+  mode: unknown
 }): unknown[] {
   if (!Array.isArray(input.priorFindings)) return []
   const currentCheckIds = new Set(
@@ -147,7 +188,18 @@ function projectVisiblePriorFindings(input: {
       )
     if (!relevant) return []
     const { open: _open, ...visible } = finding
-    return [visible]
+    const currentOwnerCheck =
+      input.mode === 'closure' &&
+      typeof visible.checkId === 'string' &&
+      currentCheckIds.has(visible.checkId)
+    if (currentOwnerCheck) return [visible]
+    const {
+      observation: _observation,
+      blockingImpact: _blockingImpact,
+      regressionPaths: _regressionPaths,
+      ...dedupeProjection
+    } = visible
+    return [dedupeProjection]
   })
 }
 
@@ -272,7 +324,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Produce exactly one accepted SubmitDocumentReviewPacket in this bounded dispatch. Submit one checks array in contract.currentCheckIds order, without check IDs. The packet is transactional: a rejected call accepts nothing, so correct and resubmit the same complete packet without prose or user confirmation.',
         'Report every material defect that blocks an implementable and reviewable game contract: contradictions, missing observable requirements, incomplete strategy, dominated choices, absent counterplay or recovery, broken economy/progression, infeasible numeric bounds, inconsistent formulas, discontinuous difficulty, or invalid resource plans. READY requires no findings.',
         'Apply authority direction before completeness expansion: a lower-authority document cannot authorize a new product-visible system or impose a new obligation on another owner. When it does, subject the overreaching declaration and require deletion or narrowing. Require another consumer to expand only when the Confirmed Brief, GDD, or legitimate upstream fact owner already authorizes that behavior.',
-        'Submit one top-level checks array. Each ordered item contains exactly conclusion, evidence, assessments and findings; never submit its check ID. Each assessment contains exactly criterion, status, evidence, derivation and conclusion, using the exact criterion IDs in contract.criteriaByCheck for that ordered check. Every evidence or subject entry contains exactly referenceId; result, note, copied paths and copied anchors are invalid. The service derives each check ID, check status and check findingIds. For each item, evidence and subjects may reference only artifacts listed for that check in contract.artifactPathsByCheck and must use stable referenceId values from contract.referenceIndex.references. Every finding submits one stable findingId, its own exact evidence and exact subjects plus observation, blockingImpact and one authority-preserving requiredOutcome. A subject is current content that violates authority and must change to reach requiredOutcome; contextual or already-correct authority remains finding evidence only. requiredOutcome states one result, never alternative repairs or editing steps. Do not submit checkId, owner, severity, a cycle verdict or a check outside the packet.',
+        'Submit one top-level checks array and never submit a check ID. For a design check, submit exactly assessments and findings; the service derives check-level status, evidence and conclusion. For a non-design check, additionally submit conclusion and evidence and use an empty assessments array. Each assessment contains exactly criterion, status, evidence, derivation and conclusion, using the exact criterion IDs in contract.criteriaByCheck for that ordered check. Every evidence or subject entry contains exactly referenceId; result, note, copied paths and copied anchors are invalid. The service derives each check ID, check status and check findingIds. For each item, evidence and subjects may reference only artifacts listed for that check in contract.artifactPathsByCheck and must use stable referenceId values from contract.referenceIndex.references. Every finding submits one stable findingId, its own exact evidence and exact subjects plus observation, blockingImpact and one authority-preserving requiredOutcome. A subject is current content that violates authority and must change to reach requiredOutcome; contextual or already-correct authority remains finding evidence only. requiredOutcome states one result, never alternative repairs or editing steps. Do not submit checkId, owner, severity, a cycle verdict or a check outside the packet.',
         'For each subject, submit its referenceId and only any applicable requirementId, resourceId or contentId; never submit subjectOwner. The service derives ownership from contract.referenceIndex and rejects a reference owned by another repair domain. Foundation documents may be evidence for a resource defect but cannot be resource repair subjects. Foundation and checklist findings cannot carry resource IDs.',
         'Every check must include assessments. Only gameplay_strategy_viability, economy_progression_integrity, numeric_balance_feasibility, pacing_difficulty_coherence and level_scene_design_integrity use their exact three non-empty criterion assessments; every other check must use assessments: []. Every resource-owned finding must carry at least one current requirementId, resourceId or contentId on the corresponding Manifest/content subject.',
         'contract.priorFindings is the accepted unique-ownership ledger. Within this packet, assign a root defect only to the earliest responsible check in contract.currentCheckIds and do not duplicate it in later packet items. If the same root defect is already represented by an accepted finding under the same owner, cite it as context and do not create another finding ID.',

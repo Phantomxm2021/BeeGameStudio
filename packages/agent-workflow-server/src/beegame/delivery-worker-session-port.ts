@@ -24,6 +24,7 @@ import {
 } from './delivery-workflow/types'
 import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
 import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-contracts'
+import { buildReviewerContinuationPrompt } from './delivery-workflow/worker-prompts'
 import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
@@ -419,9 +420,94 @@ export function createBeeGameDeliveryWorkerPort(input: {
   const sessions = new Map<string, string>()
   const records = new Map<string, DispatchRecord>()
   const requests = new Map<string, WorkerDispatchRequest>()
+  const eventOffsets = new Map<string, number>()
+  const reviewerContinuationDispatches = new Set<string>()
+  const reviewerSessionKeysByDispatch = new Map<string, string>()
+  const reviewerSessions = new Map<
+    string,
+    { sessionId: string; workspacePath: string }
+  >()
+  const sessionEvents = (sessionId: string) =>
+    typeof input.sessions.events === 'function'
+      ? input.sessions.events(sessionId)
+      : []
+  const disposeWorkflowSession = async (sessionId: string) => {
+    if (typeof input.sessions.disposeWorkflowWorker === 'function')
+      await input.sessions.disposeWorkflowWorker(sessionId)
+    else if (typeof input.sessions.stop === 'function')
+      input.sessions.stop(sessionId)
+  }
+  const reviewerSessionKey = (request: WorkerDispatchRequest) =>
+    request.workerType === 'document-reviewer'
+      ? [
+          request.runId,
+          request.contract.cycleId,
+          request.revision,
+          request.contract.reviewScope,
+          request.contract.reviewMode,
+        ].join(':')
+      : undefined
+  const disposeReviewerSessions = async (
+    workspacePath: string,
+    keepKey?: string,
+  ) => {
+    for (const [key, pooled] of [...reviewerSessions.entries()]) {
+      if (pooled.workspacePath !== workspacePath || key === keepKey) continue
+      await disposeWorkflowSession(pooled.sessionId)
+      reviewerSessions.delete(key)
+    }
+  }
   return {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
+      const reviewSessionKey = reviewerSessionKey(request)
+      await disposeReviewerSessions(request.workspacePath, reviewSessionKey)
+      if (request.workerType === 'document-reviewer' && reviewSessionKey) {
+        const pooled = reviewerSessions.get(reviewSessionKey)
+        let pooledSession = pooled
+          ? input.sessions.get(pooled.sessionId)
+          : undefined
+        while (
+          pooledSession?.status === 'running' &&
+          pooledSession.turnStatus === 'running'
+        ) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          pooledSession = input.sessions.get(pooled!.sessionId)
+        }
+        if (
+          pooled &&
+          pooledSession?.status === 'running' &&
+          pooledSession.turnStatus === 'idle'
+        ) {
+          const contract = reviewerSubmissionContract(request)
+          if (!contract)
+            throw new Error('document reviewer submission contract is missing')
+          input.sessions.rebindWorkflowReviewer({
+            sessionId: pooled.sessionId,
+            dispatchId,
+            contract,
+          })
+          sessions.set(dispatchId, pooled.sessionId)
+          requests.set(dispatchId, request)
+          eventOffsets.set(dispatchId, sessionEvents(pooled.sessionId).length)
+          reviewerContinuationDispatches.add(dispatchId)
+          reviewerSessionKeysByDispatch.set(dispatchId, reviewSessionKey)
+          records.set(dispatchId, {
+            dispatchId,
+            workerType: request.workerType,
+            phase: request.phase,
+            ...(request.taskId ? { taskId: request.taskId } : {}),
+            revision: request.revision,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+          })
+          return { sessionId: pooled.sessionId, dispatchId }
+        }
+        if (pooled) {
+          await disposeWorkflowSession(pooled.sessionId)
+          reviewerSessions.delete(reviewSessionKey)
+        }
+      }
       const canonicalDocumentCommitContract =
         await buildCanonicalDocumentCommitContract(request, dispatchId)
       if (request.workerType === 'atomic-task-planner') {
@@ -483,6 +569,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
       })
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, request)
+      eventOffsets.set(dispatchId, 0)
+      if (reviewSessionKey) {
+        reviewerSessions.set(reviewSessionKey, {
+          sessionId: session.id,
+          workspacePath: request.workspacePath,
+        })
+        reviewerSessionKeysByDispatch.set(dispatchId, reviewSessionKey)
+      }
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -568,7 +662,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
       ]
         .filter(Boolean)
         .join('\n\n')
-      await input.sessions.sendWithDisplay(sessionId, workerPrompt, {
+      const effectivePrompt = reviewerContinuationDispatches.has(dispatchId)
+        ? buildReviewerContinuationPrompt(request!)
+        : workerPrompt
+      await input.sessions.sendWithDisplay(sessionId, effectivePrompt, {
         taskType: taskTypeForWorker(
           records.get(dispatchId)?.workerType ?? 'question-answerer',
           request?.contract.authoringMode,
@@ -601,14 +698,26 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async close(dispatchId) {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) return
+      const reviewSessionKey = reviewerSessionKeysByDispatch.get(dispatchId)
       try {
         const session = input.sessions.get(sessionId)
-        if (session?.status === 'running') input.sessions.stop(sessionId)
-        await input.sessions.disposeWorkflowWorker(sessionId)
+        const keepReviewerSession = Boolean(
+          reviewSessionKey &&
+            reviewerSessions.get(reviewSessionKey)?.sessionId === sessionId &&
+            session?.status === 'running',
+        )
+        if (!keepReviewerSession) {
+          if (session?.status === 'running') input.sessions.stop(sessionId)
+          await disposeWorkflowSession(sessionId)
+          if (reviewSessionKey) reviewerSessions.delete(reviewSessionKey)
+        }
       } finally {
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
+        eventOffsets.delete(dispatchId)
+        reviewerContinuationDispatches.delete(dispatchId)
+        reviewerSessionKeysByDispatch.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -649,7 +758,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
             sessionId,
             terminalToolName,
           ),
-        ) || hasInFlightTool(input.sessions.events(sessionId), terminalToolName)
+        ) ||
+        hasInFlightTool(
+          sessionEvents(sessionId).slice(eventOffsets.get(dispatchId) ?? 0),
+          terminalToolName,
+        )
       )
     },
     async waitForTerminal(dispatchId) {
@@ -658,7 +771,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
       // Recovery policy belongs to the dispatcher. A transport-level fixed
       // deadline would fail a worker that is still making durable progress.
       while (true) {
-        const events = input.sessions.events(sessionId)
+        const events = sessionEvents(sessionId).slice(
+          eventOffsets.get(dispatchId) ?? 0,
+        )
         const request = requests.get(dispatchId)
         // The accepted structured submission is the workflow terminal event.
         // Waiting for the SDK turn/result envelope after that point creates a

@@ -689,8 +689,8 @@ type ReviewSubjectReferenceInput = ReviewReferenceInput & {
 }
 
 export type DocumentReviewAtomicCheckSubmission = {
-  conclusion: string
-  evidence: ReviewReferenceInput[]
+  conclusion?: string
+  evidence?: ReviewReferenceInput[]
   assessments: Array<
     Omit<DocumentReviewCheck['assessments'][number], 'evidence'> & {
       evidence: ReviewReferenceInput[]
@@ -731,12 +731,29 @@ export function normalizeDocumentReviewPacketSubmission(input: {
   const normalized = input.submission.checks.map((submission, index) => {
     const checkId = input.contract.currentCheckIds[index]!
     const findingIds = submission.findings.map(finding => finding.findingId)
+    const designCheck = submission.assessments.length > 0
+    const derivedEvidence = designCheck
+      ? [
+          ...new Map(
+            submission.assessments
+              .flatMap(assessment => assessment.evidence)
+              .map(reference => [reference.referenceId, reference]),
+          ).values(),
+        ]
+      : (submission.evidence ?? [])
+    const derivedConclusion = designCheck
+      ? submission.assessments
+          .map(
+            assessment => `${assessment.criterion}: ${assessment.conclusion}`,
+          )
+          .join(' ')
+      : submission.conclusion!
     const check: DocumentReviewCheck = {
-      conclusion: submission.conclusion,
+      conclusion: derivedConclusion,
       id: checkId,
       status: findingIds.length > 0 ? 'block' : 'pass',
       findingIds,
-      evidence: submission.evidence.map(resolveReference),
+      evidence: derivedEvidence.map(resolveReference),
       assessments: submission.assessments.map(assessment => ({
         ...assessment,
         evidence: assessment.evidence.map(resolveReference),
