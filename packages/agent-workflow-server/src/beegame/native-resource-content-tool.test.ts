@@ -175,6 +175,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).resolves.toBeUndefined()
   })
@@ -196,6 +197,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).resolves.toMatchObject({ status: 'committed' })
   })
@@ -219,6 +221,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).resolves.toMatchObject({ status: 'committed' })
     await expect(access(receipt.backupRoot)).rejects.toThrow()
@@ -246,6 +249,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).resolves.toMatchObject({ status: 'committed' })
     expect(
@@ -278,6 +282,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).resolves.toMatchObject({ status: 'committed' })
     expect(
@@ -288,6 +293,56 @@ describe('native canonical resource content commit', () => {
         ),
       ),
     ).toMatchObject({ id: 'registry' })
+  })
+
+  test('does not advance a prepared receipt after its exact dispatch authority expired', async () => {
+    let authorityChecks = 0
+    const workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/content/original.txt'), 'original')
+    await commitRegistryOnly(workspace)
+    const contentRoot = join(workspace, 'assets/content')
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await rename(contentRoot, receipt.stagingRoot)
+    await mkdir(contentRoot, { recursive: true })
+    await writeFile(join(contentRoot, 'current.txt'), 'current')
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+        assertMutationAuthority() {
+          authorityChecks += 1
+          if (authorityChecks > 1)
+            throw new Error('resource content dispatch authority expired')
+        },
+      }),
+    ).rejects.toThrow('resource content dispatch authority expired')
+    expect(authorityChecks).toBe(2)
+
+    expect(await readFile(join(contentRoot, 'current.txt'), 'utf8')).toBe(
+      'current',
+    )
+    expect(
+      JSON.parse(
+        await readFile(
+          join(receipt.stagingRoot, 'resource-registry.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ id: 'registry' })
+    await expect(access(receipt.backupRoot)).rejects.toThrow()
+    expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+      status: 'prepared',
+    })
   })
 
   test('rolls back without discarding prepared authority when staging is unavailable', async () => {
@@ -308,6 +363,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).rejects.toThrow('staged publication is unavailable')
     expect(
@@ -347,6 +403,7 @@ describe('native canonical resource content commit', () => {
       reconcileResourceContentCommitReceipt({
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
+        assertMutationAuthority: () => undefined,
       }),
     ).rejects.toThrow('transaction paths are invalid')
     expect(await readFile(join(unrelatedPath, 'sentinel'), 'utf8')).toBe('keep')

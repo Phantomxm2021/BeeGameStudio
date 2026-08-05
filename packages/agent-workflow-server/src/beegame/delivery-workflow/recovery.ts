@@ -181,6 +181,7 @@ async function reconcileActiveCanonicalReceipt(input: {
   ownerId: string
   projectId: string
   confirmedBriefContext: string
+  assertMutationAuthority?: () => void | Promise<void>
 }): Promise<ReconciledProjectionSource> {
   const snapshot = snapshotRecord(input.inspection.parsedValue)
   const dispatch = snapshotRecord(snapshot?.activeDispatch)
@@ -333,12 +334,16 @@ async function reconcileActiveCanonicalReceipt(input: {
   }
 
   if (dispatch.workerType === 'resource-content-author') {
-    const dispatchId = stringValue(dispatch.dispatchId)
-    if (!dispatchId)
-      recoveryConflict('active Resource Content dispatch has no identity')
+    const identity = assertActiveRequestIdentity({
+      ...input,
+      snapshot,
+      dispatch,
+      request,
+    })
     const receipt = await reconcileResourceContentCommitReceipt({
       workspacePath: input.workspacePath,
-      dispatchId,
+      dispatchId: identity.dispatchId,
+      assertMutationAuthority: input.assertMutationAuthority,
     })
     if (!receipt)
       return {
@@ -346,12 +351,6 @@ async function reconcileActiveCanonicalReceipt(input: {
         events: input.events,
         acceptedUnits: [],
       }
-    const identity = assertActiveRequestIdentity({
-      ...input,
-      snapshot,
-      dispatch,
-      request,
-    })
     const contract = snapshotRecord(request.contract)
     const resourceState = snapshotRecord(snapshot.resourceProductionState)
     const inventory = snapshotRecord(resourceState?.inventoryReceipt)
@@ -630,60 +629,91 @@ export async function recoverAndResumeRun(input: {
             stoppedSource.currentRun.activeDispatch?.status !== 'running',
         }
       }
-      const migratedSource = migrationInspection(stoppedSource)
-      const events = await input.store.readEvents()
-      const reconciled = await reconcileActiveCanonicalReceipt({
-        inspection: migratedSource,
-        events,
-        workspacePath,
-        ownerId: input.ownerId,
-        projectId: input.projectId,
-        confirmedBriefContext: input.confirmedBriefContext,
-      })
-      const projection = await projectExactResumeRun({
-        inspection: reconciled.inspection,
-        events: reconciled.events,
-        workspacePath,
-        ownerId: input.ownerId,
-        projectId: input.projectId,
-        confirmedBriefContext: input.confirmedBriefContext,
-        ...(reconciled.receiptReconciliation
-          ? { receiptReconciliation: reconciled.receiptReconciliation }
-          : {}),
-      })
-      const createdAt = new Date().toISOString()
-      const reconstructedEvent: WorkflowEvent = {
-        eventId: randomUUID(),
-        runId: projection.run.runId,
-        type: 'workflow.run.reconstructed',
-        phase: projection.run.phase,
-        status: projection.run.status,
-        revision: projection.run.revision,
-        createdAt,
-        projectId: projection.run.projectId,
-        ownerId: projection.run.ownerId,
-        sourceSnapshotDigest: stoppedSource.digest,
-        replayedUnitIds: projection.replayedUnitIds,
-        ...(projection.activeUnitId
-          ? { activeUnitId: projection.activeUnitId }
-          : {}),
-      }
-      const persisted = await input.store.replaceSnapshotIfDigest({
-        expectedDigest: stoppedSource.digest,
-        run: projection.run,
-        event: reconstructedEvent,
-        acceptedUnits: reconciled.acceptedUnits,
-      })
-      if (persisted.runId !== projection.run.runId)
+      const stoppedRecord = snapshotRecord(stoppedSource.parsedValue)
+      const runId = stringValue(stoppedRecord?.runId)
+      if (!runId)
         throw new WorkflowStoreError(
-          'reconstructed workflow snapshot could not be reloaded',
-          'io',
+          'workflow recovery requires an exact durable run identity',
+          'recovery_checkpoint_missing',
         )
-      return {
-        run: persisted,
-        resume:
-          persisted.status !== 'completed' &&
-          persisted.activeDispatch?.status !== 'running',
+      const lease = await input.store.lock(runId, async () => false)
+      try {
+        const lockedSource = await input.store.inspectWorkflowSnapshot()
+        assertRecoveryAuthority({ ...input, inspection: lockedSource })
+        if (lockedSource.currentRun) {
+          return {
+            run: lockedSource.currentRun,
+            resume:
+              lockedSource.currentRun.status !== 'completed' &&
+              lockedSource.currentRun.activeDispatch?.status !== 'running',
+          }
+        }
+        const migratedSource = migrationInspection(lockedSource)
+        const events = await input.store.readEvents()
+        const assertMutationAuthority = async () => {
+          const current = await input.store.inspectWorkflowSnapshot()
+          if (current.digest !== lockedSource.digest)
+            recoveryConflict(
+              'workflow snapshot changed during canonical receipt recovery',
+            )
+        }
+        const reconciled = await reconcileActiveCanonicalReceipt({
+          inspection: migratedSource,
+          events,
+          workspacePath,
+          ownerId: input.ownerId,
+          projectId: input.projectId,
+          confirmedBriefContext: input.confirmedBriefContext,
+          assertMutationAuthority,
+        })
+        const projection = await projectExactResumeRun({
+          inspection: reconciled.inspection,
+          events: reconciled.events,
+          workspacePath,
+          ownerId: input.ownerId,
+          projectId: input.projectId,
+          confirmedBriefContext: input.confirmedBriefContext,
+          ...(reconciled.receiptReconciliation
+            ? { receiptReconciliation: reconciled.receiptReconciliation }
+            : {}),
+        })
+        const createdAt = new Date().toISOString()
+        const reconstructedEvent: WorkflowEvent = {
+          eventId: randomUUID(),
+          runId: projection.run.runId,
+          type: 'workflow.run.reconstructed',
+          phase: projection.run.phase,
+          status: projection.run.status,
+          revision: projection.run.revision,
+          createdAt,
+          projectId: projection.run.projectId,
+          ownerId: projection.run.ownerId,
+          sourceSnapshotDigest: lockedSource.digest,
+          replayedUnitIds: projection.replayedUnitIds,
+          ...(projection.activeUnitId
+            ? { activeUnitId: projection.activeUnitId }
+            : {}),
+        }
+        const persisted = await input.store.replaceSnapshotIfDigest({
+          expectedDigest: lockedSource.digest,
+          run: projection.run,
+          event: reconstructedEvent,
+          acceptedUnits: reconciled.acceptedUnits,
+          lease,
+        })
+        if (persisted.runId !== projection.run.runId)
+          throw new WorkflowStoreError(
+            'reconstructed workflow snapshot could not be reloaded',
+            'io',
+          )
+        return {
+          run: persisted,
+          resume:
+            persisted.status !== 'completed' &&
+            persisted.activeDispatch?.status !== 'running',
+        }
+      } finally {
+        await input.store.unlock(lease)
       }
     },
   )
@@ -736,6 +766,7 @@ async function restoreCanonicalDocumentCommit(
 async function restoreResourceContentCommit(
   run: DeliveryRun,
   workspacePath?: string,
+  store?: RunStore,
 ): Promise<DeliveryRun> {
   const dispatch = run.activeDispatch
   if (
@@ -745,9 +776,26 @@ async function restoreResourceContentCommit(
     dispatch.terminalResult
   )
     return run
+  const assertMutationAuthority = async () => {
+    if (!store)
+      recoveryConflict(
+        'Resource Content receipt recovery has no workflow store authority',
+      )
+    const current = (await store.inspectWorkflowSnapshot()).currentRun
+    if (
+      !current ||
+      current.runId !== run.runId ||
+      current.activeDispatch?.dispatchId !== dispatch.dispatchId ||
+      current.activeDispatch.terminalResult
+    )
+      recoveryConflict(
+        'Resource Content receipt recovery lost exact dispatch authority',
+      )
+  }
   const receipt = await reconcileResourceContentCommitReceipt({
     workspacePath,
     dispatchId: dispatch.dispatchId,
+    assertMutationAuthority,
   })
   if (!receipt) return run
   const finishedAt = new Date().toISOString()
@@ -890,6 +938,7 @@ export async function resumeRun(input: {
     acquired.run = await restoreResourceContentCommit(
       acquired.run,
       input.workspacePath,
+      input.store,
     )
     if (acquired.run.status === 'completed') return acquired.run
     const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
@@ -955,6 +1004,7 @@ export async function retryRun(input: {
     acquired.run = await restoreResourceContentCommit(
       acquired.run,
       input.workspacePath,
+      input.store,
     )
     // A successful retry can race a duplicate browser request or a stale
     // workflow-card snapshot. The first request has already resumed the same

@@ -3934,60 +3934,44 @@ describe('delivery workflow recovery', () => {
     ).toBe(false)
   })
 
-  test('uses the RunStore expected-digest CAS for the final reconstruction write', async () => {
+  test('holds one exact lease from journal read through reconstruction commit', async () => {
     const fixture = await createStaleReviewerRecoveryFixture()
     workspace = fixture.workspacePath
-    const competingStore = createRunStore(
-      fixture.workspacePath,
-      RECOVERY_OWNER_ID,
-    )
+    let journalLeaseId: string | undefined
     let casCalls = 0
     const racedStore: typeof fixture.store = {
       ...fixture.store,
+      readEvents: async (...args) => {
+        const lease = JSON.parse(
+          await readFile(fixture.store.paths.lock, 'utf8'),
+        ) as { leaseId: string; runId: string; processId: number }
+        expect(lease.runId).toBe(RECOVERY_RUN_ID)
+        expect(lease.processId).toBe(process.pid)
+        journalLeaseId = lease.leaseId
+        return fixture.store.readEvents(...args)
+      },
       replaceSnapshotIfDigest: async input => {
         casCalls += 1
-        await competingStore.replaceSnapshotIfDigest({
-          expectedDigest: input.expectedDigest,
-          run: fixture.journalRun,
-          event: {
-            eventId: 'competing-workflow-commit',
-            runId: fixture.journalRun.runId,
-            type: 'workflow.progress',
-            phase: fixture.journalRun.phase,
-            status: fixture.journalRun.status,
-            revision: fixture.journalRun.revision,
-            createdAt: new Date().toISOString(),
-            durableProgress: true,
-          },
-        })
+        expect(input.lease?.leaseId).toBe(journalLeaseId)
         return fixture.store.replaceSnapshotIfDigest(input)
       },
     }
 
-    await expect(
-      recoverAndResumeRun({
-        store: racedStore,
-        workspacePath: fixture.workspacePath,
-        ownerId: RECOVERY_OWNER_ID,
-        projectId: RECOVERY_PROJECT_ID,
-        confirmedBriefContext: RECOVERY_BRIEF,
-        stopWorkspaceWorkers: async () => undefined,
-        resumeCurrentRun: async () => {
-          throw new Error('CAS conflict must not resume')
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
+    await recoverAndResumeRun({
+      store: racedStore,
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: async () => undefined,
+    })
 
     expect(casCalls).toBe(1)
-    expect(await competingStore.load()).toMatchObject({
-      runId: fixture.journalRun.runId,
-      phase: fixture.journalRun.phase,
-    })
-    expect(
-      (await competingStore.readEvents()).some(
-        event => event.type === 'workflow.run.reconstructed',
-      ),
-    ).toBe(false)
+    expect(journalLeaseId).toBeTruthy()
+    await expect(
+      readFile(fixture.store.paths.lock, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   test('serializes simultaneous exact-resume recovery and dispatches only the active review unit', async () => {

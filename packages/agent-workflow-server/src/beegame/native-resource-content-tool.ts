@@ -368,6 +368,7 @@ async function replaceContentRoot(input: {
         receiptPath,
         receipt: priorReceipt,
         contentRoot: input.contentRoot,
+        assertMutationAuthority: input.assertMutationAuthority,
       })
       if (recovered) {
         if (recovered.finalRootDigest !== finalRootDigest)
@@ -495,12 +496,15 @@ async function recoverPreparedResourceContentCommit(input: {
   receiptPath: string
   receipt: ResourceContentCommitReceipt
   contentRoot: string
+  assertMutationAuthority: () => void | Promise<void>
 }): Promise<ResourceContentCommitReceipt | undefined> {
   assertPreparedResourceContentPaths(input.receipt, input.contentRoot)
+  await input.assertMutationAuthority()
   const rootMatches =
     existsSync(input.contentRoot) &&
     digestDirectory(input.contentRoot) === input.receipt.finalRootDigest
   if (rootMatches) {
+    await input.assertMutationAuthority()
     await rm(input.receipt.stagingRoot, { recursive: true, force: true })
     await rm(input.receipt.backupRoot, { recursive: true, force: true })
     const committed = { ...input.receipt, status: 'committed' as const }
@@ -512,6 +516,7 @@ async function recoverPreparedResourceContentCommit(input: {
     existsSync(input.receipt.stagingRoot) &&
     digestDirectory(input.receipt.stagingRoot) === input.receipt.finalRootDigest
   if (stagingMatches) {
+    await input.assertMutationAuthority()
     if (existsSync(input.contentRoot)) {
       if (existsSync(input.receipt.backupRoot))
         throw new Error(
@@ -526,6 +531,7 @@ async function recoverPreparedResourceContentCommit(input: {
     return committed
   }
 
+  await input.assertMutationAuthority()
   if (!existsSync(input.contentRoot) && existsSync(input.receipt.backupRoot))
     await rename(input.receipt.backupRoot, input.contentRoot)
   await rm(input.receipt.stagingRoot, { recursive: true, force: true })
@@ -557,6 +563,7 @@ function assertPreparedResourceContentPaths(
 export async function reconcileResourceContentCommitReceipt(input: {
   workspacePath: string
   dispatchId: string
+  assertMutationAuthority?: () => void | Promise<void>
 }): Promise<ResourceContentTerminalReceipt | undefined> {
   const receiptPath = resourceContentReceiptPath(
     input.workspacePath,
@@ -575,12 +582,18 @@ export async function reconcileResourceContentCommitReceipt(input: {
     input.workspacePath,
     manifest.project_target?.content_root ?? 'assets/content',
   )
-  if (receipt.status === 'prepared')
+  if (receipt.status === 'prepared') {
+    if (!input.assertMutationAuthority)
+      throw new Error(
+        'Resource Content prepared commit recovery requires exact dispatch authority.',
+      )
     return recoverPreparedResourceContentCommit({
       receiptPath,
       receipt,
       contentRoot,
+      assertMutationAuthority: input.assertMutationAuthority,
     })
+  }
   if (
     !existsSync(contentRoot) ||
     digestDirectory(contentRoot) !== receipt.finalRootDigest
