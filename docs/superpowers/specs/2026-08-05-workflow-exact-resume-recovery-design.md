@@ -239,9 +239,12 @@ migration; an unregistered new version fails with an instruction to register
 its fingerprint and migration.
 
 The automated worker checkpoint matrix covers all 11 persisted worker types at
-five interruption points: before dispatch, while open, terminal accepted,
-canonical receipt persisted and unit accepted. These are 55 real on-disk
-restart cases plus one coverage-shape assertion. Every case reconstructs fresh
+their real durable interruption points. Every worker covers before dispatch,
+while open, terminal accepted and unit accepted. The two workers with an
+independent canonical commit receipt (`document-author` and
+`resource-content-author`) additionally cover receipt persisted before terminal
+acceptance. These are 46 real on-disk restart cases plus one coverage-shape
+assertion; no receipt is invented for the other nine worker contracts. Every case reconstructs fresh
 RunStore/controller/dispatcher instances and enters through `resumeRun`.
 Before dispatch starts exactly one semantic dispatch, an open duplicate retains
 one, and terminal-, receipt- and unit-accepted checkpoints never increase the
@@ -262,8 +265,8 @@ units alone advance mutable task status and evidence. This lets a complete
 journal reconstruct a truncated `run.json` without a fallback path or second
 ledger, while contradictory topology fails closed.
 
-On 2026-08-06 the complete server command measured 565 passing tests across 67
-files, 0 failures and 1595 assertions. The required frontend command measured
+On 2026-08-06 the complete server command measured 556 passing tests across 67
+files, 0 failures and 1579 assertions. The required frontend command measured
 116 passing tests across 2 files and 0 failures. Server and repository
 TypeScript checks both exited 0; Biome checked 46 required files with no fixes
 remaining; `git diff --check` exited 0. The anti-pollution scan found only this

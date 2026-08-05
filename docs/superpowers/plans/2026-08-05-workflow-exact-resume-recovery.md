@@ -361,7 +361,7 @@ Compute a deterministic fingerprint from persisted enum values and strict schema
 
 - [ ] **Step 2: Complete the exact-resume matrix**
 
-For every worker type, test interruption before dispatch, while open, after terminal acceptance, after canonical receipt and after unit acceptance. Also test obsolete version, same-version invalid state, truncated JSON with complete journal, stale worker, duplicate Continue and restart during reconstruction. Every accepted unit dispatch count must remain unchanged.
+For every worker type, test interruption before dispatch, while open, after terminal acceptance and after unit acceptance. For `document-author` and `resource-content-author`, which alone own an independently persisted canonical commit receipt, additionally test the receipt-only crash window before terminal acceptance. Do not invent a receipt contract for other workers. Also test obsolete version, same-version invalid state, truncated JSON with complete journal, stale worker, duplicate Continue and restart during reconstruction. Every accepted unit dispatch count must remain unchanged.
 
 - [ ] **Step 3: Run complete verification**
 

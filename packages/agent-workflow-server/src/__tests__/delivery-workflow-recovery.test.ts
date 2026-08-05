@@ -78,8 +78,23 @@ const EXACT_RESUME_WORKER_CHECKPOINTS = [
   'unit-accepted',
 ] as const
 
+const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
+  'document-author',
+  'resource-content-author',
+]
+
 type ExactResumeWorkerCheckpoint =
   (typeof EXACT_RESUME_WORKER_CHECKPOINTS)[number]
+
+function exactResumeCheckpointsForWorker(
+  workerType: DispatchWorkerType,
+): ExactResumeWorkerCheckpoint[] {
+  return EXACT_RESUME_WORKER_CHECKPOINTS.filter(
+    checkpoint =>
+      checkpoint !== 'canonical-receipt' ||
+      CANONICAL_RECEIPT_WORKERS.includes(workerType),
+  )
+}
 
 function matrixAtomicTask(): AtomicTask {
   return {
@@ -1254,10 +1269,19 @@ describe('delivery workflow recovery', () => {
       'canonical-receipt',
       'unit-accepted',
     ])
+    expect(
+      WORKER_TYPES.flatMap(workerType =>
+        exactResumeCheckpointsForWorker(workerType),
+      ),
+    ).toHaveLength(46)
+    expect(CANONICAL_RECEIPT_WORKERS).toEqual([
+      'document-author',
+      'resource-content-author',
+    ])
   })
 
   for (const workerType of WORKER_TYPES) {
-    for (const checkpoint of EXACT_RESUME_WORKER_CHECKPOINTS) {
+    for (const checkpoint of exactResumeCheckpointsForWorker(workerType)) {
       test(`${workerType} keeps semantic dispatch count stable at ${checkpoint}`, async () => {
         workspace = await mkdtemp(join(tmpdir(), 'beegame-worker-matrix-'))
         const run = await createWorkerRecoveryRun({
@@ -1323,14 +1347,16 @@ describe('delivery workflow recovery', () => {
             workspacePath: workspace,
             request: originalRequest,
           })
-          const terminalOnlyDispatcher = createDeliveryDispatcher({
-            store,
-            workerPort,
-          })
-          await terminalOnlyDispatcher.completeDispatch(
-            active!.dispatchId,
-            terminal,
-          )
+          if (checkpoint !== 'canonical-receipt') {
+            const terminalOnlyDispatcher = createDeliveryDispatcher({
+              store,
+              workerPort,
+            })
+            await terminalOnlyDispatcher.completeDispatch(
+              active!.dispatchId,
+              terminal,
+            )
+          }
           await resumeFromDisk(false)
           if (checkpoint === 'unit-accepted') await resumeFromDisk(false)
         }
