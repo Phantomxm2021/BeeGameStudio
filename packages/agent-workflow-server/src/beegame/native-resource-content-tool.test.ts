@@ -200,6 +200,42 @@ describe('native canonical resource content commit', () => {
     await expect(access(receipt.backupRoot)).rejects.toThrow()
   })
 
+  test('publishes recorded staging after a crash before the root rename', async () => {
+    const workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/content/baseline.txt'), 'baseline')
+    await commitRegistryOnly(workspace)
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await rename(join(workspace, 'assets/content'), receipt.stagingRoot)
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/content/baseline.txt'), 'baseline')
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+      }),
+    ).resolves.toMatchObject({ status: 'committed' })
+    expect(
+      JSON.parse(
+        await readFile(
+          join(workspace, 'assets/content/resource-registry.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ id: 'registry' })
+    await expect(access(receipt.stagingRoot)).rejects.toThrow()
+    await expect(access(receipt.backupRoot)).rejects.toThrow()
+  })
+
   test('publishes a prepared staging root after a crash removed the canonical root', async () => {
     const workspace = await createWorkspace()
     await commitRegistryOnly(workspace)
