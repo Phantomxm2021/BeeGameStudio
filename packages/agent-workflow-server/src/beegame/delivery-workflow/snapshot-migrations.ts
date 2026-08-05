@@ -77,6 +77,97 @@ function requireCurrentCheckRecords(value: unknown, field: string): void {
   }
 }
 
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0)
+    invalid(`${field} must be a non-empty string`)
+  return value
+}
+
+function requireNonEmptyStrings(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) invalid(`${field} must be an array`)
+  return value.map((item, index) =>
+    requireNonEmptyString(item, `${field}[${index}]`),
+  )
+}
+
+function removeVersion11Fields(snapshot: SnapshotRecord): void {
+  if (snapshot.parentRunId !== undefined)
+    requireNonEmptyString(snapshot.parentRunId, 'parentRunId')
+  if (snapshot.reviewedDocumentPaths !== undefined)
+    requireNonEmptyStrings(
+      snapshot.reviewedDocumentPaths,
+      'reviewedDocumentPaths',
+    )
+  if (snapshot.checklistRemediation !== undefined) {
+    const remediation = snapshot.checklistRemediation
+    if (!isRecord(remediation)) invalid('checklistRemediation is invalid')
+    const allowedKeys = new Set(['sourceRevision', 'attempt', 'issues'])
+    if (Object.keys(remediation).some(key => !allowedKeys.has(key)))
+      invalid('checklistRemediation contains unsupported fields')
+    requireNonEmptyString(
+      remediation.sourceRevision,
+      'checklistRemediation.sourceRevision',
+    )
+    if (
+      !Number.isInteger(remediation.attempt) ||
+      Number(remediation.attempt) < 1
+    )
+      invalid('checklistRemediation.attempt must be a positive integer')
+    const issues = requireNonEmptyStrings(
+      remediation.issues,
+      'checklistRemediation.issues',
+    )
+    if (issues.length === 0)
+      invalid('checklistRemediation.issues must not be empty')
+  }
+
+  delete snapshot.parentRunId
+  delete snapshot.reviewedDocumentPaths
+  delete snapshot.checklistRemediation
+}
+
+function migrateHistoricalRepairPlan(cycle: SnapshotRecord): void {
+  const repairPlan = cycle.repairPlan
+  if (repairPlan === undefined) return
+  if (!isRecord(repairPlan) || !Array.isArray(repairPlan.groups))
+    invalid('documentReviewState.activeCycle.repairPlan is invalid')
+
+  repairPlan.groups = repairPlan.groups.map((group, index) => {
+    const field = `documentReviewState.activeCycle.repairPlan.groups[${index}]`
+    if (!isRecord(group)) invalid(`${field} is invalid`)
+    const hasHistoricalDecision = Object.hasOwn(group, 'decision')
+    const hasHistoricalPaths = Object.hasOwn(group, 'affectedPaths')
+    const hasCurrentDecision = Object.hasOwn(group, 'groupDecision')
+    const hasCurrentPaths = Object.hasOwn(group, 'pathDecisions')
+    const isHistorical = hasHistoricalDecision && hasHistoricalPaths
+    const isCurrent = hasCurrentDecision && hasCurrentPaths
+    if (
+      (!isHistorical && !isCurrent) ||
+      hasHistoricalDecision !== hasHistoricalPaths ||
+      hasCurrentDecision !== hasCurrentPaths ||
+      (isHistorical && isCurrent)
+    )
+      invalid(`${field} has an unsupported repair decision shape`)
+    if (isCurrent) return group
+
+    const decision = requireNonEmptyString(group.decision, `${field}.decision`)
+    const affectedPaths = requireNonEmptyStrings(
+      group.affectedPaths,
+      `${field}.affectedPaths`,
+    )
+    if (affectedPaths.length === 0)
+      invalid(`${field}.affectedPaths must not be empty`)
+    const migrated: SnapshotRecord = {
+      ...group,
+      groupDecision: decision,
+      pathDecisions: affectedPaths.map(path => ({ path, decision })),
+    }
+    delete migrated.decision
+    delete migrated.affectedPaths
+    return migrated
+  })
+}
+
 function migrateApprovalChecks(state: SnapshotRecord): void {
   for (const key of [
     'foundationApproval',
@@ -131,6 +222,8 @@ function migrateActiveCycle(state: SnapshotRecord): void {
         'documentReviewState.activeCycle.findings contains an unproven accepted owner',
       )
   }
+
+  migrateHistoricalRepairPlan(cycle)
 }
 
 function migrateActiveDispatch(snapshot: SnapshotRecord): void {
@@ -152,18 +245,25 @@ function migrateActiveDispatch(snapshot: SnapshotRecord): void {
       )
   }
 
-  if (
-    isRecord(dispatch.terminalResult) &&
-    dispatch.terminalResult.checks !== undefined
-  )
-    requireCurrentCheckRecords(
-      dispatch.terminalResult.checks,
-      'activeDispatch.terminalResult.checks',
-    )
+  if (isRecord(dispatch.terminalResult)) {
+    if (dispatch.terminalResult.checks !== undefined)
+      requireCurrentCheckRecords(
+        dispatch.terminalResult.checks,
+        'activeDispatch.terminalResult.checks',
+      )
+    if (dispatch.terminalResult.reviewedDocumentPaths !== undefined) {
+      requireNonEmptyStrings(
+        dispatch.terminalResult.reviewedDocumentPaths,
+        'activeDispatch.terminalResult.reviewedDocumentPaths',
+      )
+      delete dispatch.terminalResult.reviewedDocumentPaths
+    }
+  }
 }
 
 function migrateVersion11To12(snapshot: SnapshotRecord): SnapshotRecord {
   const migrated = structuredClone(snapshot)
+  removeVersion11Fields(migrated)
   const state = migrated.documentReviewState
   if (!isRecord(state)) invalid('documentReviewState is invalid')
 
