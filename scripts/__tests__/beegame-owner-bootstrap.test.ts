@@ -7,10 +7,11 @@ import {
 
 describe('BeeGame owner bootstrap', () => {
   test('parses and normalizes bootstrap owner emails', () => {
-    expect(parseBootstrapOwnerEmails(' Admin@Example.com, founder@example.com ,,admin@example.com ')).toEqual([
-      'admin@example.com',
-      'founder@example.com',
-    ])
+    expect(
+      parseBootstrapOwnerEmails(
+        ' Admin@Example.com, founder@example.com ,,admin@example.com ',
+      ),
+    ).toEqual(['admin@example.com', 'founder@example.com'])
   })
 
   test('upserts owner invite rows without exposing credentials', async () => {
@@ -81,19 +82,24 @@ describe('BeeGame owner bootstrap', () => {
       'create or replace function public.beegame_is_platform_owner_id(target_user_id uuid)',
     )
     expect(schema).toContain(
-      "insert into public.beegame_platform_settings (key, config, updated_at)",
+      'insert into public.beegame_platform_settings (key, config, updated_at)',
     )
-    expect(schema).toContain("select 'runtime_settings', s.settings, s.updated_at")
+    expect(schema).toContain(
+      "select 'runtime_settings', s.settings, s.updated_at",
+    )
     expect(schema).toContain('public.beegame_is_platform_owner_id(owner_id)')
     expect(schema).not.toContain('runtime_settings_owner_id uuid;')
   })
 
   test('keeps OAuth invitation redemption independent from the removed credit-account system', async () => {
     const migration = await Bun.file(
-      new URL('../../docs/beegame-supabase-invitations-migration.sql', import.meta.url),
+      new URL(
+        '../../docs/beegame-supabase-invitations-migration.sql',
+        import.meta.url,
+      ),
     ).text()
 
-    expect(migration).not.toContain("else\n      return new;")
+    expect(migration).not.toContain('else\n      return new;')
     expect(migration).toContain(
       "jsonb_build_object('beegame_invitation_redeemed_at', now())",
     )

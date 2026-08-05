@@ -198,9 +198,7 @@ function matrixPassingChecks(
     | undefined
   return ids.map(id => {
     const existing = available.find(check => check.id === id)!
-    const allowedPaths = new Set(
-      matrixStringArray(artifactPathsByCheck?.[id]),
-    )
+    const allowedPaths = new Set(matrixStringArray(artifactPathsByCheck?.[id]))
     const availableEvidence = references.filter(reference =>
       allowedPaths.has(reference.path),
     )
@@ -297,9 +295,7 @@ async function matrixTerminal(input: {
     }
   }
   if (request.workerType === 'document-reviewer') {
-    const currentCheckIds = matrixStringArray(
-      request.contract.currentCheckIds,
-    )
+    const currentCheckIds = matrixStringArray(request.contract.currentCheckIds)
     return {
       workerType: request.workerType,
       revision: request.revision,
@@ -358,10 +354,7 @@ async function matrixTerminal(input: {
           resourceIds: ['matrix-resource'],
         },
       ],
-      writtenPaths: [
-        'assets/asset-manifest.json',
-        'assets/runtime/matrix.dat',
-      ],
+      writtenPaths: ['assets/asset-manifest.json', 'assets/runtime/matrix.dat'],
       taskMetrics,
     }
   }
