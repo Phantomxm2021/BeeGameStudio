@@ -244,6 +244,7 @@ async function commitResourceContent(input: {
     submittedDocuments: submitted,
     protectedDocuments,
     contract: input.contract,
+    assertMutationAuthority: input.assertMutationAuthority,
   })
   return {
     data: {
@@ -315,6 +316,7 @@ async function replaceContentRoot(input: {
     content: Uint8Array
   }>
   contract: ResourceContentCommitContract
+  assertMutationAuthority: () => void | Promise<void>
 }): Promise<void> {
   const nonce = randomUUID()
   const stagingRoot = `${input.contentRoot}.staging-${nonce}`
@@ -376,6 +378,7 @@ async function replaceContentRoot(input: {
       }
     }
     await assertResourceRevisions(input.workspacePath, input.contract)
+    await input.assertMutationAuthority()
     const prepared = {
       schema: 'beegame-resource-content-commit-v1' as const,
       dispatchId: input.contract.dispatchId,

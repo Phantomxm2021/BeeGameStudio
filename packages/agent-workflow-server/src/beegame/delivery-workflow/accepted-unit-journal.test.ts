@@ -989,38 +989,6 @@ describe('accepted workflow unit journal', () => {
     )
   })
 
-  test('migrates a version-12 singular marker, flushes it once, and removes it', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-v12-marker-'))
-    const store = createRunStore(workspace, 'accepted-unit-owner')
-    const base = run()
-    const event = {
-      eventId: 'v12-marker-event',
-      runId: base.runId,
-      type: 'workflow.progress',
-      phase: base.phase,
-      status: base.status,
-      revision: base.revision,
-      createdAt: '2026-08-05T00:00:00.000Z',
-    }
-    await mkdir(store.paths.directory, { recursive: true })
-    await writeFile(
-      store.paths.snapshot,
-      `${JSON.stringify({ ...base, schemaVersion: 12, pendingEvent: event })}\n`,
-      'utf8',
-    )
-
-    await expect(store.load({ migrate: true })).resolves.toMatchObject({
-      schemaVersion: 13,
-      runId: base.runId,
-    })
-    expect((await store.readEvents()).map(entry => entry.eventId)).toEqual([
-      'v12-marker-event',
-    ])
-    expect(await readFile(store.paths.snapshot, 'utf8')).not.toContain(
-      'pendingEvent',
-    )
-  })
-
   test('rejects an invalid tasks.planned receipt before appending it', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'task-graph-write-'))
     const base = run()

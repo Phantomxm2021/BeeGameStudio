@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -600,6 +601,73 @@ describe('native canonical resource content commit', () => {
     await expect(
       readFile(
         join(workspace, 'assets/content/resource-registry.json'),
+        'utf8',
+      ),
+    ).rejects.toThrow()
+  })
+
+  test('rejects a dispatch replaced while canonical content is staging', async () => {
+    const workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/content/sentinel.txt'), 'original')
+    let active = true
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: {
+        dispatchId: 'dispatch-replaced-during-staging',
+        inventoryRevision: await computeResourceInventoryRevision(workspace),
+        baselineResourceRevision: await computeResourceRevision(workspace, ''),
+        requiredRequirementIds: ['req-model'],
+        verifiedResourceIds: ['res-model'],
+        inventoryBindings: [
+          { requirementId: 'req-model', resourceIds: ['res-model'] },
+        ],
+        protectedPaths: [],
+      },
+      assertMutationAuthority() {
+        if (!active) throw new Error('dispatch was replaced')
+      },
+    }) as Tool
+
+    const commit = tool.call({
+      action: 'commit',
+      documents: [
+        {
+          path: 'assets/content/resource-registry.json',
+          schema: 'beegame-content-v1',
+          id: 'registry',
+          kind: 'resource-registry',
+          fulfills: ['req-model'],
+          resources: ['res-model'],
+          data: {
+            bindings: [
+              { requirementId: 'req-model', resourceIds: ['res-model'] },
+            ],
+            stagingPayload: 'x'.repeat(16 * 1024 * 1024),
+          },
+        },
+      ],
+    })
+
+    while (
+      !(await readdir(join(workspace, 'assets'))).some(name =>
+        name.startsWith('content.staging-'),
+      )
+    )
+      await Bun.sleep(1)
+    active = false
+
+    await expect(commit).rejects.toThrow('dispatch was replaced')
+    expect(
+      await readFile(join(workspace, 'assets/content/sentinel.txt'), 'utf8'),
+    ).toBe('original')
+    await expect(
+      readFile(
+        join(
+          workspace,
+          '.beegame/workflow/resource-content-commits/dispatch-replaced-during-staging.json',
+        ),
         'utf8',
       ),
     ).rejects.toThrow()

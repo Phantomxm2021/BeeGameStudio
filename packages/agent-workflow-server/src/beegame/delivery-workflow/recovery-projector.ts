@@ -72,7 +72,6 @@ type RecoveryErrorCode =
 
 type ProvenUnit = {
   unit: AcceptedWorkflowUnit
-  source: 'journal' | 'snapshot'
 }
 
 type RecoveryJournalMetadata = {
@@ -471,7 +470,7 @@ function checkpointComparable(unit: AcceptedWorkflowUnit): unknown {
   }
 }
 
-function addSnapshotProof(
+function assertSnapshotClaimMatchesJournal(
   proofs: Map<string, ProvenUnit>,
   unit: AcceptedWorkflowUnit,
 ): void {
@@ -482,18 +481,19 @@ function addSnapshotProof(
       `snapshot checkpoint ${unit.unitId} does not satisfy the current schema`,
     )
   const existing = proofs.get(unit.unitId)
-  if (existing) {
-    if (
-      stableValue(checkpointComparable(existing.unit)) !==
-      stableValue(checkpointComparable(parsed.data))
+  if (!existing)
+    recoveryError(
+      'recovery_checkpoint_missing',
+      `snapshot-completed ${unit.unitId} has no accepted journal event`,
     )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        `snapshot and journal contradict ${unit.unitId}`,
-      )
-    return
-  }
-  proofs.set(unit.unitId, { unit: parsed.data, source: 'snapshot' })
+  if (
+    stableValue(checkpointComparable(existing.unit)) !==
+    stableValue(checkpointComparable(parsed.data))
+  )
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      `snapshot and journal contradict ${unit.unitId}`,
+    )
 }
 
 function snapshotTimestamp(snapshot: Record<string, unknown>): string {
@@ -603,7 +603,7 @@ function historicalReviewFacts(input: {
         'recovery_checkpoint_conflict',
         `historical review checkpoint ${unitId} is invalid`,
       )
-    addSnapshotProof(input.proofs, currentUnit.data)
+    assertSnapshotClaimMatchesJournal(input.proofs, currentUnit.data)
   }
 }
 
@@ -656,7 +656,7 @@ function historicalResourceFacts(input: {
         catalogObserved: inventory.catalogObserved,
       },
     } as AcceptedWorkflowUnit
-    addSnapshotProof(input.proofs, unit)
+    assertSnapshotClaimMatchesJournal(input.proofs, unit)
   }
   const content = record(state?.contentReceipt)
   const journalContent = input.proofs.get(RESOURCE_CONTENT_UNIT_ID)?.unit
@@ -682,18 +682,10 @@ function historicalResourceFacts(input: {
         'snapshot and journal contradict the Resource Gate revision',
       )
     if (!journalGate)
-      addSnapshotProof(input.proofs, {
-        eventSchemaVersion: 1,
-        unitId: RESOURCE_GATE_UNIT_ID,
-        kind: 'resource-gate',
-        phase: 'DOCUMENT_REVIEW',
-        predecessorUnitIds: [RESOURCE_CONTENT_UNIT_ID],
-        inputRevision: evidence.revision as string,
-        dependencyDigests: {},
-        receiptRef: evidence.path as string,
-        acceptedAt: evidence.observedAt as string,
-        payload: { receiptRef: evidence.path },
-      })
+      recoveryError(
+        'recovery_checkpoint_missing',
+        'snapshot-passed Resource Gate has no accepted journal event',
+      )
   }
 }
 
@@ -708,7 +700,7 @@ function historicalChecklistFact(input: {
   if (!approval) return
   const reviewProof = input.proofs.get(reviewUnitId('checklist_traceability'))
   if (!reviewProof) return
-  addSnapshotProof(input.proofs, {
+  assertSnapshotClaimMatchesJournal(input.proofs, {
     eventSchemaVersion: 1,
     unitId: CHECKLIST_UNIT_ID,
     kind: 'checklist',
@@ -2046,10 +2038,7 @@ export async function projectExactResumeRun(input: {
     sha256(input.confirmedBriefContext),
   )
   const proofs = new Map<string, ProvenUnit>(
-    acceptedEvents.map(event => [
-      event.unit.unitId,
-      { unit: event.unit, source: 'journal' as const },
-    ]),
+    acceptedEvents.map(event => [event.unit.unitId, { unit: event.unit }]),
   )
   if (snapshot) {
     await historicalDocumentFacts({

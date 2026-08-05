@@ -22,6 +22,7 @@ import {
 import {
   WorkflowStoreError,
   type RunStore,
+  type WorkflowLock,
   type WorkflowSnapshotInspection,
 } from './run-store'
 import {
@@ -842,9 +843,13 @@ async function acquireAndLoad(input: {
   store: RunStore
   runId: string
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
-}): Promise<{ run: DeliveryRun; unlock: () => Promise<void> }> {
+}): Promise<{
+  run: DeliveryRun
+  lease: WorkflowLock
+  unlock: () => Promise<void>
+}> {
   const lease = await input.store.lock(input.runId, async () => {
-    const current = await input.store.load()
+    const current = (await input.store.inspectWorkflowSnapshot()).currentRun
     if (!current || current.runId !== input.runId) return false
     if (current.activeDispatch?.status !== 'running') return false
     return input.sessionIsOpen
@@ -854,10 +859,11 @@ async function acquireAndLoad(input: {
   try {
     const run = await input.store.reconcile(
       input.sessionIsOpen ?? (async () => false),
+      lease,
     )
     if (!run || run.runId !== input.runId)
       throw new Error('delivery run not found')
-    return { run, unlock: () => input.store.unlock(lease) }
+    return { run, lease, unlock: () => input.store.unlock(lease) }
   } catch (error) {
     await input.store.unlock(lease)
     throw error
@@ -916,13 +922,18 @@ export async function resumeRun(input: {
             { type: 'retry' },
           )
         : acquired.run)
-    return input.store.commit(resumed, {
-      runId: resumed.runId,
-      type: 'run.resumed',
-      phase: resumed.phase,
-      status: resumed.status,
-      revision: resumed.revision,
-    })
+    return input.store.commit(
+      resumed,
+      {
+        runId: resumed.runId,
+        type: 'run.resumed',
+        phase: resumed.phase,
+        status: resumed.status,
+        revision: resumed.revision,
+      },
+      undefined,
+      acquired.lease,
+    )
   } finally {
     await acquired.unlock()
   }
@@ -977,14 +988,19 @@ export async function retryRun(input: {
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
       )
-    return input.store.commit(resumed, {
-      runId: resumed.runId,
-      type: 'run.retry_requested',
-      phase: resumed.phase,
-      status: resumed.status,
-      revision: resumed.revision,
-      taskId: input.taskId,
-    })
+    return input.store.commit(
+      resumed,
+      {
+        runId: resumed.runId,
+        type: 'run.retry_requested',
+        phase: resumed.phase,
+        status: resumed.status,
+        revision: resumed.revision,
+        taskId: input.taskId,
+      },
+      undefined,
+      acquired.lease,
+    )
   } finally {
     await acquired.unlock()
   }
@@ -1023,14 +1039,19 @@ export async function stopRun(input: {
         acquired.run.activeDispatch.dispatchId,
         input.reason,
       )
-    return input.store.commit(persisted, {
-      runId: persisted.runId,
-      type: 'run.stopped',
-      phase: persisted.phase,
-      status: persisted.status,
-      revision: persisted.revision,
-      reason: input.reason,
-    })
+    return input.store.commit(
+      persisted,
+      {
+        runId: persisted.runId,
+        type: 'run.stopped',
+        phase: persisted.phase,
+        status: persisted.status,
+        revision: persisted.revision,
+        reason: input.reason,
+      },
+      undefined,
+      acquired.lease,
+    )
   } finally {
     await acquired.unlock()
   }

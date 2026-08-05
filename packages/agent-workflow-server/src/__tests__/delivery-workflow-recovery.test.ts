@@ -2368,33 +2368,6 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
 
-  test('only replaces an obsolete snapshot after explicit migration', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-migrate-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-migrate',
-      projectId: 'project-migrate',
-      ownerId: 'owner-1',
-    })
-    await mkdir(store.paths.directory, { recursive: true })
-    const obsoleteSnapshot = JSON.stringify({ ...initial, schemaVersion: 11 })
-    await writeFile(store.paths.snapshot, obsoleteSnapshot, 'utf8')
-
-    await expect(store.load()).rejects.toMatchObject({ code: 'obsolete' })
-    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
-
-    await expect(store.load({ migrate: true })).resolves.toMatchObject({
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      runId: initial.runId,
-    })
-    expect(
-      JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
-    ).toMatchObject({
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      runId: initial.runId,
-    })
-  })
-
   test('stale worker usage does not migrate or rewrite a version-11 snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-usage-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -3738,6 +3711,50 @@ describe('delivery workflow recovery', () => {
         event => event.type === 'run.retry_requested',
       ),
     ).toHaveLength(0)
+  })
+
+  test('fences terminal snapshot writes for the complete recovery lease', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-write-fence-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const competingStore = createRunStore(workspace, 'owner-1')
+    const stopped = {
+      ...createTestDeliveryRun({
+        runId: 'run-1',
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+      }),
+      status: 'stopped' as const,
+      blockedReason: 'interrupted',
+    }
+    await store.save(stopped)
+    let competingWrite: Promise<DeliveryRun> | undefined
+    const racedStore: typeof store = {
+      ...store,
+      commit: async (...args) => {
+        competingWrite ??= competingStore.commit(
+          {
+            ...stopped,
+            status: 'failed',
+            blockedReason: 'late terminal result',
+          },
+          {
+            runId: stopped.runId,
+            type: 'run.failed',
+            phase: stopped.phase,
+            status: 'failed',
+            revision: stopped.revision,
+            reason: 'late terminal result',
+          },
+        )
+        await expect(competingWrite).rejects.toMatchObject({ code: 'locked' })
+        return store.commit(...args)
+      },
+    }
+
+    await expect(
+      retryRun({ store: racedStore, runId: stopped.runId }),
+    ).resolves.toMatchObject({ status: 'running' })
+    await expect(store.load()).resolves.toMatchObject({ status: 'running' })
   })
 
   test('does not let reconstructed replacement overwrite a terminal commit that won the storage lane', async () => {

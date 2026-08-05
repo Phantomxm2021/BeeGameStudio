@@ -850,6 +850,27 @@ describe('workflow exact-resume recovery projector', () => {
     expect(projection.sourceSnapshotDigest).toBe(inspection.digest)
   })
 
+  for (const unitId of [
+    'review:brief_alignment',
+    CHECKLIST_UNIT_ID,
+    'resource:inventory',
+    'resource:gate',
+  ])
+    test(`does not synthesize accepted proof for ${unitId} from snapshot completion fields`, async () => {
+      const fixture = await createProjectionFixture()
+      const inspection = await inspect(fixture)
+      const events = fixture.journalEvents.filter(
+        event =>
+          event.type !== 'workflow.unit.accepted' ||
+          (event as WorkflowUnitAcceptedEvent).unit.unitId !== unitId,
+      )
+
+      await expectRecoveryError(
+        projectExactResumeRun(projectInput(fixture, inspection, events)),
+        'recovery_checkpoint_missing',
+      )
+    })
+
   test('does not infer Document Drafting from an empty accepted prefix without durable active-unit proof', async () => {
     const fixture = await createProjectionFixture()
     const snapshot = {
