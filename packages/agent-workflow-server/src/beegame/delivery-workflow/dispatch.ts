@@ -18,7 +18,7 @@ import type {
   WorkflowUsage,
   WorkerDispatchRequest,
 } from './types'
-import type { RunStore } from './run-store'
+import type { RunStore, WorkflowLock } from './run-store'
 
 export type DispatchCredits = {
   reserve?: (
@@ -274,6 +274,10 @@ export function createDeliveryDispatcher(options: {
   const terminalReconciliations = new Set<Promise<void>>()
   let dispatchTail: Promise<void> = Promise.resolve()
 
+  async function acquireDispatchLease(runId: string): Promise<WorkflowLock> {
+    return options.store.mutationLock(runId)
+  }
+
   function trackTerminalReconciliation(operation: Promise<void>): void {
     let tracked!: Promise<void>
     tracked = operation.finally(() => terminalReconciliations.delete(tracked))
@@ -355,21 +359,11 @@ export function createDeliveryDispatcher(options: {
     }
     if (run.activeDispatch?.status === 'running') {
       const existing = run.activeDispatch
-      const existingKey = [...byKey.entries()].find(
-        ([, record]) => record.dispatchId === existing.dispatchId,
-      )?.[0]
       if (
-        existingKey ===
-        idempotencyKey(
-          request,
-          Math.max(
-            1,
-            existing.taskId
-              ? (run.tasks.find(task => task.id === existing.taskId)?.attempt ??
-                  1)
-              : 1,
-          ),
-        )
+        existing.phase === request.phase &&
+        existing.revision === request.revision &&
+        existing.taskId === request.taskId &&
+        existing.workerType === request.workerType
       )
         return existing
       throw new DispatchError(
@@ -414,29 +408,58 @@ export function createDeliveryDispatcher(options: {
     requests.set(record.dispatchId, request)
     let startedDispatchId: string | undefined
     try {
-      await options.store.commit(
-        {
-          ...run,
-          activeDispatch: record,
-          lastProgressAt: record.startedAt,
-          currentMessage: undefined,
-          currentItemId:
-            request.workerType === 'document-author' && request.taskId
-              ? request.taskId
-              : undefined,
-          thinking: 'working',
-        },
-        {
-          runId: run.runId,
-          type: 'dispatch.started',
-          phase: run.phase,
-          status: run.status,
-          revision: run.revision,
-          dispatchId: record.dispatchId,
-          workerType: request.workerType,
-          taskId: request.taskId,
-        },
-      )
+      const lease = await acquireDispatchLease(run.runId)
+      try {
+        const current = await options.store.load(lease)
+        if (!current || current.runId !== run.runId)
+          throw new DispatchError('not_found', 'delivery run does not exist')
+        assertSingleResourceWorkAuthority(request, current)
+        if (current.status !== 'running')
+          throw new DispatchError('blocked', 'delivery run is not running')
+        if (current.activeDispatch) {
+          const active = current.activeDispatch
+          if (
+            active.phase === request.phase &&
+            active.revision === request.revision &&
+            active.taskId === request.taskId &&
+            active.workerType === request.workerType
+          ) {
+            forgetDispatch(record.dispatchId)
+            return active
+          }
+          throw new DispatchError(
+            'duplicate',
+            'another delivery worker is already running',
+          )
+        }
+        await options.store.commit(
+          {
+            ...current,
+            activeDispatch: record,
+            lastProgressAt: record.startedAt,
+            currentMessage: undefined,
+            currentItemId:
+              request.workerType === 'document-author' && request.taskId
+                ? request.taskId
+                : undefined,
+            thinking: 'working',
+          },
+          {
+            runId: current.runId,
+            type: 'dispatch.started',
+            phase: current.phase,
+            status: current.status,
+            revision: current.revision,
+            dispatchId: record.dispatchId,
+            workerType: request.workerType,
+            taskId: request.taskId,
+          },
+          undefined,
+          lease,
+        )
+      } finally {
+        await options.store.unlock(lease)
+      }
       await options.credits?.reserve?.(key, request)
       const started = await options.workerPort.start(dispatchRequest)
       startedDispatchId = started.dispatchId

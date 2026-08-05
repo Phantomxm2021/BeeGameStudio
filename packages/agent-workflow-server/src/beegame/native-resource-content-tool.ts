@@ -394,11 +394,17 @@ async function replaceContentRoot(input: {
     await writeReceipt(receiptPath, prepared)
     const hadExistingRoot = existsSync(input.contentRoot)
     if (hadExistingRoot) await rename(input.contentRoot, backupRoot)
+    let published = false
     try {
       await rename(stagingRoot, input.contentRoot)
+      published = true
+      await input.assertMutationAuthority()
     } catch (error) {
+      if (published && existsSync(input.contentRoot))
+        await rename(input.contentRoot, stagingRoot)
       if (hadExistingRoot && !existsSync(input.contentRoot))
         await rename(backupRoot, input.contentRoot)
+      await rm(receiptPath, { force: true })
       throw error
     }
     if (hadExistingRoot) await rm(backupRoot, { recursive: true, force: true })
@@ -517,7 +523,8 @@ async function recoverPreparedResourceContentCommit(input: {
     digestDirectory(input.receipt.stagingRoot) === input.receipt.finalRootDigest
   if (stagingMatches) {
     await input.assertMutationAuthority()
-    if (existsSync(input.contentRoot)) {
+    const hadExistingRoot = existsSync(input.contentRoot)
+    if (hadExistingRoot) {
       if (existsSync(input.receipt.backupRoot))
         throw new Error(
           'Resource Content prepared commit has conflicting canonical and backup roots.',
@@ -525,6 +532,14 @@ async function recoverPreparedResourceContentCommit(input: {
       await rename(input.contentRoot, input.receipt.backupRoot)
     }
     await rename(input.receipt.stagingRoot, input.contentRoot)
+    try {
+      await input.assertMutationAuthority()
+    } catch (error) {
+      await rename(input.contentRoot, input.receipt.stagingRoot)
+      if (hadExistingRoot)
+        await rename(input.receipt.backupRoot, input.contentRoot)
+      throw error
+    }
     await rm(input.receipt.backupRoot, { recursive: true, force: true })
     const committed = { ...input.receipt, status: 'committed' as const }
     await writeReceipt(input.receiptPath, committed)

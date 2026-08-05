@@ -730,6 +730,66 @@ describe('native canonical resource content commit', () => {
     ).rejects.toThrow()
   })
 
+  test('rolls back publication when authority is lost at the commit boundary', async () => {
+    const workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    await writeFile(join(workspace, 'assets/content/sentinel.txt'), 'original')
+    let checks = 0
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: {
+        dispatchId: 'dispatch-lost-at-publication',
+        inventoryRevision: await computeResourceInventoryRevision(workspace),
+        baselineResourceRevision: await computeResourceRevision(workspace, ''),
+        requiredRequirementIds: ['req-model'],
+        verifiedResourceIds: ['res-model'],
+        inventoryBindings: [
+          { requirementId: 'req-model', resourceIds: ['res-model'] },
+        ],
+        protectedPaths: [],
+      },
+      assertMutationAuthority() {
+        checks += 1
+        if (checks === 4) throw new Error('dispatch stopped at publication')
+      },
+    }) as Tool
+
+    await expect(
+      tool.call({
+        action: 'commit',
+        documents: [
+          {
+            path: 'assets/content/resource-registry.json',
+            schema: 'beegame-content-v1',
+            id: 'registry',
+            kind: 'resource-registry',
+            fulfills: ['req-model'],
+            resources: ['res-model'],
+            data: {
+              bindings: [
+                { requirementId: 'req-model', resourceIds: ['res-model'] },
+              ],
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow('dispatch stopped at publication')
+    expect(checks).toBe(4)
+    expect(
+      await readFile(join(workspace, 'assets/content/sentinel.txt'), 'utf8'),
+    ).toBe('original')
+    await expect(
+      readFile(
+        join(
+          workspace,
+          '.beegame/workflow/resource-content-commits/dispatch-lost-at-publication.json',
+        ),
+        'utf8',
+      ),
+    ).rejects.toThrow()
+  })
+
   test('requires registry bindings to equal the frozen inventory receipt', async () => {
     const workspace = await createWorkspace()
     const tool = createNativeResourceContentTool({

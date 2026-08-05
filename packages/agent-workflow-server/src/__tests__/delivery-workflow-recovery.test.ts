@@ -2771,6 +2771,59 @@ describe('delivery workflow recovery', () => {
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
   })
 
+  test('claims the first dispatch durably across independent dispatcher instances', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-cross-process-'))
+    const firstStore = createRunStore(workspace, 'owner-1')
+    const secondStore = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
+    })
+    await firstStore.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    const started: string[] = []
+    const workerPort = {
+      async start(request: WorkerDispatchRequest) {
+        started.push(request.dispatchId!)
+        return {
+          sessionId: request.dispatchId!,
+          dispatchId: request.dispatchId!,
+        }
+      },
+      async submit() {},
+      async stop() {},
+      async status() {
+        throw new Error('not used')
+      },
+    }
+    const first = createDeliveryDispatcher({ store: firstStore, workerPort })
+    const second = createDeliveryDispatcher({ store: secondStore, workerPort })
+    const request: WorkerDispatchRequest = {
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'resource-curator',
+      phase: 'RESOURCE_PREPARATION',
+      revision: initial.revision.document,
+      allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
+      contract: {},
+    }
+
+    const [left, right] = await Promise.all([
+      first.dispatch(request),
+      second.dispatch(request),
+    ])
+
+    expect(right.dispatchId).toBe(left.dispatchId)
+    expect(started).toEqual([left.dispatchId])
+    expect((await firstStore.load())?.activeDispatch?.dispatchId).toBe(
+      left.dispatchId,
+    )
+  })
+
   test('starts a fresh retry dispatch even while an explicitly stopped transport is still closing', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-stale-key-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -3681,6 +3734,7 @@ describe('delivery workflow recovery', () => {
         runId: initial.runId,
         leaseId: 'dead-process-lease',
         processId: 2_147_483_647,
+        purpose: 'recovery',
         acquiredAt: initial.createdAt,
         heartbeatAt: initial.createdAt,
       })}\n`,
@@ -3809,8 +3863,8 @@ describe('delivery workflow recovery', () => {
       status: stopped.status,
       revision: stopped.revision,
     }
+    const pendingLoad = competingStore.load()
     const mutations = [
-      () => competingStore.load(),
       () => competingStore.save(stopped),
       () => competingStore.appendEvent(progressEvent),
       () => competingStore.commit(stopped, progressEvent),
@@ -3842,7 +3896,7 @@ describe('delivery workflow recovery', () => {
     for (const mutate of mutations)
       await expect(mutate()).rejects.toMatchObject({ code: 'locked' })
     await store.unlock(lease)
-    await expect(store.load()).resolves.toMatchObject({ status: 'stopped' })
+    await expect(pendingLoad).resolves.toMatchObject({ status: 'stopped' })
   })
 
   test('does not let reconstructed replacement overwrite a terminal commit that won the storage lane', async () => {

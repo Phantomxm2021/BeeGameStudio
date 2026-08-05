@@ -29,6 +29,7 @@ export type WorkflowLock = {
   runId: string
   leaseId: string
   processId: number
+  purpose: 'mutation' | 'recovery'
   acquiredAt: string
   heartbeatAt: string
 }
@@ -342,26 +343,35 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       typeof (value as WorkflowLock).ownerId !== 'string' ||
       typeof (value as WorkflowLock).runId !== 'string' ||
       typeof (value as WorkflowLock).leaseId !== 'string' ||
-      !Number.isInteger((value as WorkflowLock).processId)
+      !Number.isInteger((value as WorkflowLock).processId) ||
+      ((value as WorkflowLock).purpose !== 'mutation' &&
+        (value as WorkflowLock).purpose !== 'recovery')
     )
       throw new WorkflowStoreError('workflow project is locked', 'locked')
     return value as WorkflowLock
   }
 
-  function createLease(runId: string): WorkflowLock {
+  function createLease(
+    runId: string,
+    purpose: WorkflowLock['purpose'],
+  ): WorkflowLock {
     const timestamp = now()
     return {
       ownerId,
       runId,
       leaseId: randomUUID(),
       processId: process.pid,
+      purpose,
       acquiredAt: timestamp,
       heartbeatAt: timestamp,
     }
   }
 
-  async function writeExclusiveLease(runId: string): Promise<WorkflowLock> {
-    const lease = createLease(runId)
+  async function writeExclusiveLease(
+    runId: string,
+    purpose: WorkflowLock['purpose'],
+  ): Promise<WorkflowLock> {
+    const lease = createLease(runId, purpose)
     await mkdir(filePaths.directory, { recursive: true })
     try {
       await writeFile(filePaths.lock, `${JSON.stringify(lease)}\n`, {
@@ -374,7 +384,59 @@ export function createRunStore(workspacePath: string, ownerId: string) {
   }
 
   async function acquireMutationLease(runId: string): Promise<WorkflowLock> {
-    return enqueueMutation(filePaths.lock, () => writeExclusiveLease(runId))
+    while (true) {
+      try {
+        return await enqueueMutation(filePaths.lock, () =>
+          writeExclusiveLease(runId, 'mutation'),
+        )
+      } catch (error) {
+        if (!(error instanceof WorkflowStoreError) || error.code !== 'locked')
+          throw error
+        let active: WorkflowLock
+        try {
+          active = parseLock(JSON.parse(await readFile(filePaths.lock, 'utf8')))
+        } catch (readError) {
+          if (isMissingFile(readError)) continue
+          throw error
+        }
+        if (active.purpose === 'recovery') throw error
+        if (!processIsAlive(active.processId)) {
+          try {
+            await enqueueMutation(filePaths.lock, async () => {
+              const current = parseLock(
+                JSON.parse(await readFile(filePaths.lock, 'utf8')),
+              )
+              if (
+                current.leaseId === active.leaseId &&
+                current.processId === active.processId &&
+                current.purpose === 'mutation'
+              )
+                await unlink(filePaths.lock)
+            })
+          } catch (reclaimError) {
+            if (!isMissingFile(reclaimError)) throw reclaimError
+          }
+          continue
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+    }
+  }
+
+  async function acquireReadableLease(runId: string): Promise<WorkflowLock> {
+    while (true) {
+      try {
+        return await acquireMutationLease(runId)
+      } catch (error) {
+        if (!(error instanceof WorkflowStoreError) || error.code !== 'locked')
+          throw error
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+    }
+  }
+
+  async function mutationLock(runId: string): Promise<WorkflowLock> {
+    return acquireMutationLease(runId)
   }
 
   async function assertMutationLease(
@@ -406,15 +468,17 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       )
   }
 
-  async function withMutationLease<T>(
+  async function runMutation<T>(
     runId: string,
     lease: WorkflowLock | undefined,
     operation: () => Promise<T>,
   ): Promise<T> {
     const ownedLease = lease ?? (await acquireMutationLease(runId))
     try {
-      await assertMutationLease(runId, ownedLease)
-      return await operation()
+      return await enqueueMutation(filePaths.snapshot, async () => {
+        await assertMutationLease(runId, ownedLease)
+        return operation()
+      })
     } finally {
       if (!lease) await unlock(ownedLease)
     }
@@ -523,19 +587,23 @@ export function createRunStore(workspacePath: string, ownerId: string) {
   }
 
   async function load(lease?: WorkflowLock): Promise<DeliveryRun | null> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      let runId = lease?.runId ?? 'unknown'
-      if (!lease)
-        try {
-          const raw = JSON.parse(
-            await readFile(filePaths.snapshot, 'utf8'),
-          ) as Record<string, unknown>
-          if (typeof raw.runId === 'string') runId = raw.runId
-        } catch (error) {
-          if (isMissingFile(error)) return null
-        }
-      return withMutationLease(runId, lease, loadUnlocked)
-    })
+    let runId = lease?.runId ?? 'unknown'
+    if (!lease)
+      try {
+        const raw = JSON.parse(
+          await readFile(filePaths.snapshot, 'utf8'),
+        ) as Record<string, unknown>
+        if (typeof raw.runId === 'string') runId = raw.runId
+      } catch (error) {
+        if (isMissingFile(error)) return null
+      }
+    if (lease) return runMutation(runId, lease, loadUnlocked)
+    const readLease = await acquireReadableLease(runId)
+    try {
+      return await runMutation(runId, readLease, loadUnlocked)
+    } finally {
+      await unlock(readLease)
+    }
   }
 
   async function inspectSnapshot(): Promise<WorkflowSnapshotInspection> {
@@ -617,9 +685,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     run: DeliveryRun,
     lease?: WorkflowLock,
   ): Promise<DeliveryRun> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(run.runId, lease, () => saveUnlocked(run))
-    })
+    return runMutation(run.runId, lease, () => saveUnlocked(run))
   }
 
   async function appendEvent(
@@ -632,11 +698,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       eventId: event.eventId ?? randomUUID(),
       createdAt: event.createdAt ?? now(),
     })
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(record.runId, lease, () =>
-        appendEventUnlocked(record),
-      )
-    })
+    return runMutation(record.runId, lease, () => appendEventUnlocked(record))
   }
 
   async function persistCommitUnlocked(
@@ -707,11 +769,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     acceptedUnits?: AcceptedWorkflowUnit[],
     lease?: WorkflowLock,
   ): Promise<DeliveryRun> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(run.runId, lease, () =>
-        commitUnlocked(run, event, acceptedUnits),
-      )
-    })
+    return runMutation(run.runId, lease, () =>
+      commitUnlocked(run, event, acceptedUnits),
+    )
   }
 
   async function replaceSnapshotIfDigest(input: {
@@ -722,50 +782,44 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     acceptedUnits?: AcceptedWorkflowUnit[]
     lease?: WorkflowLock
   }): Promise<DeliveryRun> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(input.run.runId, input.lease, async () => {
-        let source: string
-        try {
-          source = await readFile(filePaths.snapshot, 'utf8')
-        } catch (error) {
-          if (isMissingFile(error))
-            throw new WorkflowStoreError(
-              'workflow snapshot disappeared before expected-digest replacement',
-              'recovery_snapshot_changed',
-            )
-          throw storageReadError(filePaths.snapshot, error)
-        }
-        const currentDigest = createHash('sha256').update(source).digest('hex')
-        if (currentDigest !== input.expectedDigest) {
-          let current: DeliveryRun
-          try {
-            current = parseDeliveryRun(JSON.parse(source) as unknown)
-          } catch {
-            throw new WorkflowStoreError(
-              'workflow snapshot changed before expected-digest replacement',
-              'recovery_snapshot_changed',
-            )
-          }
-          if (
-            isDeepStrictEqual(
-              JSON.parse(source) as unknown,
-              JSON.parse(
-                JSON.stringify({ ...input.run, updatedAt: current.updatedAt }),
-              ) as unknown,
-            )
+    return runMutation(input.run.runId, input.lease, async () => {
+      let source: string
+      try {
+        source = await readFile(filePaths.snapshot, 'utf8')
+      } catch (error) {
+        if (isMissingFile(error))
+          throw new WorkflowStoreError(
+            'workflow snapshot disappeared before expected-digest replacement',
+            'recovery_snapshot_changed',
           )
-            return current
+        throw storageReadError(filePaths.snapshot, error)
+      }
+      const currentDigest = createHash('sha256').update(source).digest('hex')
+      if (currentDigest !== input.expectedDigest) {
+        let current: DeliveryRun
+        try {
+          current = parseDeliveryRun(JSON.parse(source) as unknown)
+        } catch {
           throw new WorkflowStoreError(
             'workflow snapshot changed before expected-digest replacement',
             'recovery_snapshot_changed',
           )
         }
-        return persistCommitUnlocked(
-          input.run,
-          input.event,
-          input.acceptedUnits,
+        if (
+          isDeepStrictEqual(
+            JSON.parse(source) as unknown,
+            JSON.parse(
+              JSON.stringify({ ...input.run, updatedAt: current.updatedAt }),
+            ) as unknown,
+          )
         )
-      })
+          return current
+        throw new WorkflowStoreError(
+          'workflow snapshot changed before expected-digest replacement',
+          'recovery_snapshot_changed',
+        )
+      }
+      return persistCommitUnlocked(input.run, input.event, input.acceptedUnits)
     })
   }
 
@@ -780,29 +834,73 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     runId: string,
     sessionIsOpen: () => Promise<boolean> = async () => true,
   ): Promise<WorkflowLock> {
-    return enqueueMutation(filePaths.lock, async () => {
+    while (true) {
       try {
-        const existing = parseLock(
-          JSON.parse(await readFile(filePaths.lock, 'utf8')),
-        )
-        if (
-          existing.ownerId !== ownerId ||
-          existing.runId !== runId ||
-          processIsAlive(existing.processId) ||
-          (await sessionIsOpen())
-        ) {
-          throw new WorkflowStoreError('workflow project is locked', 'locked')
-        }
-        // A recovery lease is reclaimable only when its exact owner process
-        // is dead and the associated worker session is proven closed.
-        await unlink(filePaths.lock)
+        return await enqueueMutation(filePaths.lock, async () => {
+          try {
+            const existing = parseLock(
+              JSON.parse(await readFile(filePaths.lock, 'utf8')),
+            )
+            if (existing.purpose === 'mutation')
+              throw new WorkflowStoreError(
+                'workflow project is locked',
+                'locked',
+              )
+            if (
+              existing.ownerId !== ownerId ||
+              existing.runId !== runId ||
+              processIsAlive(existing.processId) ||
+              (await sessionIsOpen())
+            )
+              throw new WorkflowStoreError(
+                'workflow project is locked',
+                'locked',
+              )
+            // A recovery lease is reclaimable only when its exact owner process
+            // is dead and the associated worker session is proven closed.
+            await unlink(filePaths.lock)
+          } catch (error) {
+            if (error instanceof WorkflowStoreError) throw error
+            if (!isMissingFile(error))
+              throw new WorkflowStoreError(
+                'workflow project is locked',
+                'locked',
+              )
+          }
+          return writeExclusiveLease(runId, 'recovery')
+        })
       } catch (error) {
-        if (error instanceof WorkflowStoreError) throw error
-        if (!isMissingFile(error))
-          throw new WorkflowStoreError('workflow project is locked', 'locked')
+        if (!(error instanceof WorkflowStoreError) || error.code !== 'locked')
+          throw error
+        let active: WorkflowLock
+        try {
+          active = parseLock(JSON.parse(await readFile(filePaths.lock, 'utf8')))
+        } catch (readError) {
+          if (isMissingFile(readError)) continue
+          throw error
+        }
+        if (active.purpose === 'recovery') throw error
+        if (!processIsAlive(active.processId)) {
+          try {
+            await enqueueMutation(filePaths.lock, async () => {
+              const current = parseLock(
+                JSON.parse(await readFile(filePaths.lock, 'utf8')),
+              )
+              if (
+                current.leaseId === active.leaseId &&
+                current.processId === active.processId &&
+                current.purpose === 'mutation'
+              )
+                await unlink(filePaths.lock)
+            })
+          } catch (reclaimError) {
+            if (!isMissingFile(reclaimError)) throw reclaimError
+          }
+          continue
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
       }
-      return writeExclusiveLease(runId)
-    })
+    }
   }
 
   async function heartbeat(lease: WorkflowLock): Promise<WorkflowLock> {
@@ -861,35 +959,33 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     const inspection = await inspectSnapshot()
     if (!inspection.currentRun) return load(lease)
     const runId = lease?.runId ?? inspection.currentRun.runId
-    return enqueueMutation(filePaths.snapshot, () =>
-      withMutationLease(runId, lease, async () => {
-        const run = await loadUnlocked()
-        if (!run?.activeDispatch || run.activeDispatch.status !== 'running')
-          return run
-        if (await sessionIsOpen(run.activeDispatch)) return run
-        const interrupted = {
-          ...run,
-          status: 'stopped' as const,
-          thinking: 'idle' as const,
-          blockedReason:
-            'server stopped before the active worker produced a terminal result',
-          activeDispatch: {
-            ...run.activeDispatch,
-            status: 'interrupted' as const,
-            finishedAt: now(),
-          },
-        }
-        return commitUnlocked(interrupted, {
-          runId: interrupted.runId,
-          type: 'run.stopped',
-          phase: interrupted.phase,
-          status: interrupted.status,
-          revision: interrupted.revision,
-          dispatchId: interrupted.activeDispatch?.dispatchId,
-          reason: interrupted.blockedReason,
-        })
-      }),
-    )
+    return runMutation(runId, lease, async () => {
+      const run = await loadUnlocked()
+      if (!run?.activeDispatch || run.activeDispatch.status !== 'running')
+        return run
+      if (await sessionIsOpen(run.activeDispatch)) return run
+      const interrupted = {
+        ...run,
+        status: 'stopped' as const,
+        thinking: 'idle' as const,
+        blockedReason:
+          'server stopped before the active worker produced a terminal result',
+        activeDispatch: {
+          ...run.activeDispatch,
+          status: 'interrupted' as const,
+          finishedAt: now(),
+        },
+      }
+      return commitUnlocked(interrupted, {
+        runId: interrupted.runId,
+        type: 'run.stopped',
+        phase: interrupted.phase,
+        status: interrupted.status,
+        revision: interrupted.revision,
+        dispatchId: interrupted.activeDispatch?.dispatchId,
+        reason: interrupted.blockedReason,
+      })
+    })
   }
 
   async function addWorkflowUsage(
@@ -897,25 +993,23 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     delta: WorkflowUsage,
     dispatchId: string,
   ): Promise<DeliveryRun | null> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(runId, undefined, async () => {
-        const run = await loadUnlocked()
-        if (!run || run.runId !== runId) return run
-        if (
-          run.status !== 'running' ||
-          run.activeDispatch?.status !== 'running' ||
-          run.activeDispatch.dispatchId !== dispatchId
-        )
-          return null
-        const next = { ...run, usage: addUsage(run.usage, delta) }
-        return commitUnlocked(next, {
-          runId: next.runId,
-          type: 'usage.updated',
-          phase: next.phase,
-          status: next.status,
-          revision: next.revision,
-          usage: next.usage,
-        })
+    return runMutation(runId, undefined, async () => {
+      const run = await loadUnlocked()
+      if (!run || run.runId !== runId) return run
+      if (
+        run.status !== 'running' ||
+        run.activeDispatch?.status !== 'running' ||
+        run.activeDispatch.dispatchId !== dispatchId
+      )
+        return null
+      const next = { ...run, usage: addUsage(run.usage, delta) }
+      return commitUnlocked(next, {
+        runId: next.runId,
+        type: 'usage.updated',
+        phase: next.phase,
+        status: next.status,
+        revision: next.revision,
+        usage: next.usage,
       })
     })
   }
@@ -932,51 +1026,49 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       durable?: boolean
     },
   ): Promise<DeliveryRun | null> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      return withMutationLease(runId, undefined, async () => {
-        const run = await loadUnlocked()
-        if (!run || run.runId !== runId) return run
-        if (
-          progress.dispatchId &&
-          (run.status !== 'running' || run.activeDispatch?.status !== 'running')
-        )
-          return run
-        if (
-          progress.dispatchId &&
-          run.activeDispatch?.dispatchId !== progress.dispatchId
-        )
-          return run
-        const message = progress.message
-          ? sanitizeWorkflowDisplayMessage(progress.message)
-          : ''
-        const next = {
-          ...run,
-          ...(progress.durable === false ? {} : { lastProgressAt: now() }),
-          ...(message ? { currentMessage: message } : {}),
-          ...(progress.thinking ? { thinking: progress.thinking } : {}),
-          ...(progress.currentItemId === null
-            ? { currentItemId: undefined }
-            : progress.currentItemId
-              ? { currentItemId: progress.currentItemId }
-              : {}),
-        }
-        return commitUnlocked(next, {
-          runId: next.runId,
-          type: 'workflow.progress',
-          phase: next.phase,
-          status: next.status,
-          revision: next.revision,
-          ...(message ? { message } : {}),
-          ...(progress.thinking ? { thinking: progress.thinking } : {}),
-          ...(progress.workerType ? { workerType: progress.workerType } : {}),
-          ...(progress.dispatchId ? { dispatchId: progress.dispatchId } : {}),
-          ...(progress.currentItemId !== undefined
+    return runMutation(runId, undefined, async () => {
+      const run = await loadUnlocked()
+      if (!run || run.runId !== runId) return run
+      if (
+        progress.dispatchId &&
+        (run.status !== 'running' || run.activeDispatch?.status !== 'running')
+      )
+        return run
+      if (
+        progress.dispatchId &&
+        run.activeDispatch?.dispatchId !== progress.dispatchId
+      )
+        return run
+      const message = progress.message
+        ? sanitizeWorkflowDisplayMessage(progress.message)
+        : ''
+      const next = {
+        ...run,
+        ...(progress.durable === false ? {} : { lastProgressAt: now() }),
+        ...(message ? { currentMessage: message } : {}),
+        ...(progress.thinking ? { thinking: progress.thinking } : {}),
+        ...(progress.currentItemId === null
+          ? { currentItemId: undefined }
+          : progress.currentItemId
             ? { currentItemId: progress.currentItemId }
             : {}),
-          ...(progress.durable !== undefined
-            ? { durableProgress: progress.durable }
-            : {}),
-        })
+      }
+      return commitUnlocked(next, {
+        runId: next.runId,
+        type: 'workflow.progress',
+        phase: next.phase,
+        status: next.status,
+        revision: next.revision,
+        ...(message ? { message } : {}),
+        ...(progress.thinking ? { thinking: progress.thinking } : {}),
+        ...(progress.workerType ? { workerType: progress.workerType } : {}),
+        ...(progress.dispatchId ? { dispatchId: progress.dispatchId } : {}),
+        ...(progress.currentItemId !== undefined
+          ? { currentItemId: progress.currentItemId }
+          : {}),
+        ...(progress.durable !== undefined
+          ? { durableProgress: progress.durable }
+          : {}),
       })
     })
   }
@@ -993,6 +1085,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     appendEvent,
     readEvents,
     lock,
+    mutationLock,
     heartbeat,
     unlock,
     reconcile,
