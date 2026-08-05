@@ -689,27 +689,28 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
   ])
 
 export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEvent> =
-  z.object({
-    eventId: z.string().min(1),
-    runId: z.string().min(1),
-    type: z.literal('workflow.unit.accepted'),
-    phase: z.enum(DELIVERY_PHASES),
-    documentStep: z
-      .enum([
-        'FOUNDATION_DRAFTING',
-        'FOUNDATION_REVIEW',
-        'CHECKLIST_DRAFTING',
-        'CHECKLIST_REVIEW',
-        'COMPREHENSIVE_REVIEW',
-      ])
-      .optional(),
-    status: z.enum(DELIVERY_RUN_STATUSES),
-    revision: revisionSchema,
-    createdAt: z.string().datetime(),
-    projectId: z.string().min(1),
-    ownerId: z.string().min(1),
-    unit: acceptedWorkflowUnitSchema,
-  })
+  z
+    .object({
+      eventId: z.string().min(1),
+      runId: z.string().min(1),
+      type: z.literal('workflow.unit.accepted'),
+      phase: z.enum(DELIVERY_PHASES),
+      documentStep: z
+        .enum([
+          'FOUNDATION_DRAFTING',
+          'FOUNDATION_REVIEW',
+          'CHECKLIST_DRAFTING',
+          'CHECKLIST_REVIEW',
+          'COMPREHENSIVE_REVIEW',
+        ])
+        .optional(),
+      status: z.enum(DELIVERY_RUN_STATUSES),
+      revision: revisionSchema,
+      createdAt: z.string().datetime(),
+      projectId: z.string().min(1),
+      ownerId: z.string().min(1),
+      unit: acceptedWorkflowUnitSchema,
+    })
     .catchall(z.unknown()) as z.ZodType<WorkflowUnitAcceptedEvent>
 
 const pendingWorkflowEventsSchema = z

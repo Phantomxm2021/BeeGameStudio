@@ -865,27 +865,111 @@ function planTaskIds(proofs: Map<string, ProvenUnit>): string[] | undefined {
   return taskIds
 }
 
-function snapshotTasks(
-  snapshot: Record<string, unknown> | undefined,
-  taskIds: string[] | undefined,
-): AtomicTask[] {
+function parseTaskGraph(value: unknown, source: 'snapshot' | 'journal') {
+  if (!Array.isArray(value)) return undefined
+  const tasks: AtomicTask[] = []
+  for (const task of value) {
+    try {
+      tasks.push(parseAtomicTask(task))
+    } catch {
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        `${source} atomic task graph is outside the current schema`,
+      )
+    }
+  }
+  return tasks
+}
+
+function taskPlanTopology(task: AtomicTask) {
+  return {
+    id: task.id,
+    title: task.title,
+    checklistIds: task.checklistIds,
+    resourceIds: task.resourceIds,
+    contentIds: task.contentIds,
+    dependsOn: task.dependsOn,
+    allowedPaths: task.allowedPaths,
+    expectedArtifacts: task.expectedArtifacts,
+    verification: task.verification,
+  }
+}
+
+function sameTaskPlan(left: AtomicTask[], right: AtomicTask[]): boolean {
+  return (
+    stableValue(left.map(taskPlanTopology)) ===
+    stableValue(right.map(taskPlanTopology))
+  )
+}
+
+function journalTasks(input: {
+  events: WorkflowEvent[]
+  runId?: string
+  taskIds: string[]
+}): AtomicTask[] | undefined {
+  let acceptedGraph: AtomicTask[] | undefined
+  for (const event of input.events) {
+    if (
+      event.type !== 'tasks.planned' ||
+      (input.runId && event.runId !== input.runId)
+    )
+      continue
+    if (event.taskGraph === undefined) continue
+    const candidate = parseTaskGraph(event.taskGraph, 'journal')
+    if (!candidate)
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'tasks.planned journal receipt has an invalid task graph',
+      )
+    if (
+      !sameStrings(
+        candidate.map(task => task.id),
+        input.taskIds,
+      )
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'tasks.planned journal receipt contradicts the accepted plan',
+      )
+    if (acceptedGraph && !sameTaskPlan(acceptedGraph, candidate))
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'tasks.planned journal receipts contain contradictory task graphs',
+      )
+    acceptedGraph = candidate
+  }
+  return acceptedGraph
+}
+
+function snapshotTasks(input: {
+  snapshot: Record<string, unknown> | undefined
+  taskIds: string[] | undefined
+  events: WorkflowEvent[]
+  runId?: string
+}): AtomicTask[] {
+  const { snapshot, taskIds } = input
   if (!taskIds) return []
-  if (!Array.isArray(snapshot?.tasks))
+  const snapshotGraph = parseTaskGraph(snapshot?.tasks, 'snapshot')
+  const journalGraph = journalTasks({
+    events: input.events,
+    runId: input.runId,
+    taskIds,
+  })
+  if (!snapshotGraph && !journalGraph)
     recoveryError(
       'recovery_checkpoint_missing',
       'accepted atomic plan has no recoverable current task graph',
     )
-  const tasks: AtomicTask[] = []
-  for (const value of snapshot.tasks) {
-    try {
-      tasks.push(parseAtomicTask(value))
-    } catch {
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'snapshot atomic task graph is outside the current schema',
-      )
-    }
-  }
+  if (
+    snapshotGraph &&
+    journalGraph &&
+    !sameTaskPlan(snapshotGraph, journalGraph)
+  )
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      'snapshot atomic task graph contradicts its journal receipt',
+    )
+  const tasks = snapshotGraph ?? journalGraph!
   if (
     !sameStrings(
       tasks.map(task => task.id),
@@ -1931,7 +2015,12 @@ export async function projectExactResumeRun(input: {
   }
   assertRawCompletedClaimsHaveAcceptedProof({ snapshot, proofs })
   const taskIds = planTaskIds(proofs)
-  const tasks = snapshotTasks(snapshot, taskIds)
+  const tasks = snapshotTasks({
+    snapshot,
+    taskIds,
+    events: input.events,
+    runId: journalMetadata.runId,
+  })
   assertSnapshotCompletedClaims({ snapshot, proofs, tasks })
   const graph = completeUnitGraph({ taskIds })
   const replayedUnitIds = assertCurrentUnitGraph({

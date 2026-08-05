@@ -119,17 +119,18 @@ describe('workflow snapshot migrations', () => {
     expect(activeCycle(result.value).completedCheckIds).toEqual([
       ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
     ])
-    expect(activeDispatch(result.value).activeDispatch.request.contract.currentCheckIds).toEqual([
-      'resource_semantic_fitness',
-    ])
+    expect(
+      activeDispatch(result.value).activeDispatch.request.contract
+        .currentCheckIds,
+    ).toEqual(['resource_semantic_fitness'])
     expect(resourceEvidence(result.value).status).toBe('passed')
   })
 
   test('rejects an unknown completed check without changing the source snapshot', () => {
     const snapshot = version11Snapshot()
-    ;(snapshot.documentReviewState.activeCycle!.completedCheckIds as string[]).push(
-      RETIRED_PENDING_CHECK_ID,
-    )
+    ;(
+      snapshot.documentReviewState.activeCycle!.completedCheckIds as string[]
+    ).push(RETIRED_PENDING_CHECK_ID)
     const sourceBytes = JSON.stringify(snapshot)
 
     expect(() => migrateWorkflowSnapshot(snapshot)).toThrow(

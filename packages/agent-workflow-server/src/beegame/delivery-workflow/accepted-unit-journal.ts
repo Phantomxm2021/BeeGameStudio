@@ -8,7 +8,8 @@ const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
 
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
-  if (!value || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  if (!value || typeof value !== 'object')
+    return JSON.stringify(value) ?? 'null'
   const record = value as Record<string, unknown>
   return `{${Object.keys(record)
     .sort()
@@ -35,7 +36,10 @@ function unit(
   return { eventSchemaVersion: 1, ...value }
 }
 
-function priorDocumentUnitId(paths: readonly string[], index: number): string[] {
+function priorDocumentUnitId(
+  paths: readonly string[],
+  index: number,
+): string[] {
   return index > 0 ? [`document:${paths[index - 1]}`] : []
 }
 
@@ -62,18 +66,18 @@ function acceptedReviewUnits(
       previous.documentReviewState.comprehensiveApproval,
       next.documentReviewState.comprehensiveApproval,
     ],
-  ].find(([previousApproval, nextApproval]) =>
-    approvalIdentity(previousApproval) !== approvalIdentity(nextApproval),
+  ].find(
+    ([previousApproval, nextApproval]) =>
+      approvalIdentity(previousApproval) !== approvalIdentity(nextApproval),
   )?.[1]
-  const completedCheckIds = after?.completedCheckIds ?? approval?.checks.map(
-    check => check.id,
-  )
+  const completedCheckIds =
+    after?.completedCheckIds ?? approval?.checks.map(check => check.id)
   const sourceRevision = after?.sourceRevision ?? approval?.revision
   if (!completedCheckIds || !sourceRevision) return []
   const completedBefore = new Set(before?.completedCheckIds ?? [])
-  const checks = new Map((after?.checks ?? approval?.checks ?? []).map(
-    check => [check.id, check],
-  ))
+  const checks = new Map(
+    (after?.checks ?? approval?.checks ?? []).map(check => [check.id, check]),
+  )
   const findingsByCheckId = new Map<DocumentReviewCheckId, unknown[]>(
     completedCheckIds.map(id => [id, []]),
   )
@@ -109,7 +113,9 @@ function acceptedReviewUnits(
         },
       })
     })
-    .filter((candidate): candidate is AcceptedWorkflowUnit => Boolean(candidate))
+    .filter((candidate): candidate is AcceptedWorkflowUnit =>
+      Boolean(candidate),
+    )
 }
 
 function acceptedChecklistUnit(

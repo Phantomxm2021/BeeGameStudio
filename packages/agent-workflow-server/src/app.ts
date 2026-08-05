@@ -5393,7 +5393,8 @@ function lastProvenWorkflowSummary(
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
-    if (!parsed.success || parsed.data.unit.phase !== parsed.data.phase) continue
+    if (!parsed.success || parsed.data.unit.phase !== parsed.data.phase)
+      continue
     const { unit } = parsed.data
     const itemId =
       unit.kind === 'document'

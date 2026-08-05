@@ -113,7 +113,9 @@ function migrateActiveCycle(state: SnapshotRecord): void {
       typeof finding.checkId !== 'string' ||
       typeof finding.owner !== 'string'
     )
-      invalid('documentReviewState.activeCycle.findings contains an invalid finding')
+      invalid(
+        'documentReviewState.activeCycle.findings contains an invalid finding',
+      )
     if (!currentCheckIds.has(finding.checkId))
       ambiguous(
         'documentReviewState.activeCycle.findings contains an unproven accepted check',
@@ -144,7 +146,10 @@ function migrateActiveDispatch(snapshot: SnapshotRecord): void {
       )
   }
 
-  if (isRecord(dispatch.terminalResult) && dispatch.terminalResult.checks !== undefined)
+  if (
+    isRecord(dispatch.terminalResult) &&
+    dispatch.terminalResult.checks !== undefined
+  )
     requireCurrentCheckRecords(
       dispatch.terminalResult.checks,
       'activeDispatch.terminalResult.checks',
@@ -209,10 +214,8 @@ export function migrateWorkflowSnapshot(
 
   const migratedFrom = value.schemaVersion
   let migrated = structuredClone(value)
-  if (migrated.schemaVersion === 11)
-    migrated = migrateVersion11To12(migrated)
-  if (migrated.schemaVersion === 12)
-    migrated = migrateVersion12To13(migrated)
+  if (migrated.schemaVersion === 11) migrated = migrateVersion11To12(migrated)
+  if (migrated.schemaVersion === 12) migrated = migrateVersion12To13(migrated)
   try {
     return {
       value: parseDeliveryRun(migrated),

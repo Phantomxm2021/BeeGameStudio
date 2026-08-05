@@ -45,14 +45,19 @@ function reviewRun(completedCheckIds: string[]): DeliveryRun {
         mode: 'initial',
         sourceRevision: 'document-revision',
         requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
-        completedCheckIds: completedCheckIds as typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[number][],
-        checks: checks as DeliveryRun['documentReviewState']['activeCycle'] extends infer _ ? any : never,
+        completedCheckIds:
+          completedCheckIds as (typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS)[number][],
+        checks:
+          checks as DeliveryRun['documentReviewState']['activeCycle'] extends infer _
+            ? any
+            : never,
         checkEvidenceDigests: Object.fromEntries(
           completedCheckIds.map(id => [id, { 'docs/GDD.md': 'digest' }]),
         ),
         findings: [],
         acceptedSemanticResult:
-          completedCheckIds.length === FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.length,
+          completedCheckIds.length ===
+          FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.length,
         changedPaths: [],
         sourceArtifactDigests: { 'docs/GDD.md': 'digest' },
       },
@@ -121,16 +126,21 @@ describe('accepted workflow unit journal', () => {
       ...beforeChecklist,
       documentReviewState: {
         ...beforeChecklist.documentReviewState,
-        checklistApproval: approvedChecklist.documentReviewState
-          .checklistApproval,
+        checklistApproval:
+          approvedChecklist.documentReviewState.checklistApproval,
       },
     }
-    expect(deriveAcceptedWorkflowUnits(beforeChecklist, afterChecklist)).toEqual([
+    expect(
+      deriveAcceptedWorkflowUnits(beforeChecklist, afterChecklist),
+    ).toEqual([
       expect.objectContaining({
         unitId: 'review:checklist_traceability',
         kind: 'review-check',
       }),
-      expect.objectContaining({ unitId: 'checklist:docs/acceptance/gameplay-checklist.md', kind: 'checklist' }),
+      expect.objectContaining({
+        unitId: 'checklist:docs/acceptance/gameplay-checklist.md',
+        kind: 'checklist',
+      }),
     ])
 
     const beforeInventory = run()
@@ -141,14 +151,21 @@ describe('accepted workflow unit journal', () => {
         currentTask: 'RESOURCE_CONTENT' as const,
         inventoryReceipt: {
           revision: 'inventory-revision',
-          bindings: [{ requirementId: 'requirement-1', resourceIds: ['resource-1'] }],
+          bindings: [
+            { requirementId: 'requirement-1', resourceIds: ['resource-1'] },
+          ],
           catalogObserved: true,
           acceptedAt: '2026-08-05T00:00:00.000Z',
         },
       },
     }
-    expect(deriveAcceptedWorkflowUnits(beforeInventory, afterInventory)).toEqual([
-      expect.objectContaining({ unitId: 'resource:inventory', kind: 'resource-inventory' }),
+    expect(
+      deriveAcceptedWorkflowUnits(beforeInventory, afterInventory),
+    ).toEqual([
+      expect.objectContaining({
+        unitId: 'resource:inventory',
+        kind: 'resource-inventory',
+      }),
     ])
 
     const afterContent = {
@@ -163,7 +180,10 @@ describe('accepted workflow unit journal', () => {
       },
     }
     expect(deriveAcceptedWorkflowUnits(afterInventory, afterContent)).toEqual([
-      expect.objectContaining({ unitId: 'resource:content', kind: 'resource-content' }),
+      expect.objectContaining({
+        unitId: 'resource:content',
+        kind: 'resource-content',
+      }),
     ])
 
     const afterGate = {
@@ -182,15 +202,37 @@ describe('accepted workflow unit journal', () => {
       },
     }
     expect(deriveAcceptedWorkflowUnits(afterContent, afterGate)).toEqual([
-      expect.objectContaining({ unitId: 'resource:gate', kind: 'resource-gate' }),
+      expect.objectContaining({
+        unitId: 'resource:gate',
+        kind: 'resource-gate',
+      }),
     ])
 
     const planned = {
       ...afterGate,
       phase: 'IMPLEMENTATION' as const,
-      tasks: [{
-        id: 'task-1', title: 'Task', checklistIds: ['check-1'], resourceIds: ['resource-1'], contentIds: ['content-1'], dependsOn: [], allowedPaths: ['src/'], expectedArtifacts: ['src/file.ts'], verification: [{ kind: 'test' as const, commandOrAction: 'bun test', expectedResult: 'pass' }], status: 'pending' as const, attempt: 0, evidenceRefs: [],
-      }],
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Task',
+          checklistIds: ['check-1'],
+          resourceIds: ['resource-1'],
+          contentIds: ['content-1'],
+          dependsOn: [],
+          allowedPaths: ['src/'],
+          expectedArtifacts: ['src/file.ts'],
+          verification: [
+            {
+              kind: 'test' as const,
+              commandOrAction: 'bun test',
+              expectedResult: 'pass',
+            },
+          ],
+          status: 'pending' as const,
+          attempt: 0,
+          evidenceRefs: [],
+        },
+      ],
     }
     expect(deriveAcceptedWorkflowUnits(afterGate, planned)).toEqual([
       expect.objectContaining({ unitId: 'plan:atomic', kind: 'atomic-plan' }),
@@ -198,29 +240,63 @@ describe('accepted workflow unit journal', () => {
 
     const implemented = {
       ...planned,
-      tasks: planned.tasks.map(task => ({ ...task, status: 'completed' as const, completedRevision: 'implementation-revision', evidenceRefs: ['.beegame/workflow/evidence/task-1.json'] })),
-      revision: { ...planned.revision, implementation: 'implementation-revision' },
+      tasks: planned.tasks.map(task => ({
+        ...task,
+        status: 'completed' as const,
+        completedRevision: 'implementation-revision',
+        evidenceRefs: ['.beegame/workflow/evidence/task-1.json'],
+      })),
+      revision: {
+        ...planned.revision,
+        implementation: 'implementation-revision',
+      },
     }
     expect(deriveAcceptedWorkflowUnits(planned, implemented)).toEqual([
-      expect.objectContaining({ unitId: 'implementation:task-1', kind: 'implementation-task' }),
+      expect.objectContaining({
+        unitId: 'implementation:task-1',
+        kind: 'implementation-task',
+      }),
     ])
 
     const audited = {
       ...implemented,
       phase: 'ACCEPTANCE' as const,
-      evidence: { implementationAudit: { path: '.beegame/workflow/evidence/audit.json', kind: 'implementation_audit' as const, revision: 'implementation-revision', status: 'passed' as const, observedAt: '2026-08-05T00:00:00.000Z' } },
+      evidence: {
+        implementationAudit: {
+          path: '.beegame/workflow/evidence/audit.json',
+          kind: 'implementation_audit' as const,
+          revision: 'implementation-revision',
+          status: 'passed' as const,
+          observedAt: '2026-08-05T00:00:00.000Z',
+        },
+      },
     }
     expect(deriveAcceptedWorkflowUnits(implemented, audited)).toEqual([
-      expect.objectContaining({ unitId: 'audit:implementation', kind: 'implementation-audit' }),
+      expect.objectContaining({
+        unitId: 'audit:implementation',
+        kind: 'implementation-audit',
+      }),
     ])
 
     const accepted = {
       ...audited,
       phase: 'DELIVERY' as const,
-      evidence: { ...audited.evidence, acceptance: { path: '.beegame/workflow/evidence/acceptance.json', kind: 'acceptance' as const, revision: 'implementation-revision', status: 'passed' as const, observedAt: '2026-08-05T00:00:00.000Z' } },
+      evidence: {
+        ...audited.evidence,
+        acceptance: {
+          path: '.beegame/workflow/evidence/acceptance.json',
+          kind: 'acceptance' as const,
+          revision: 'implementation-revision',
+          status: 'passed' as const,
+          observedAt: '2026-08-05T00:00:00.000Z',
+        },
+      },
     }
     expect(deriveAcceptedWorkflowUnits(audited, accepted)).toEqual([
-      expect.objectContaining({ unitId: 'acceptance:delivery', kind: 'acceptance' }),
+      expect.objectContaining({
+        unitId: 'acceptance:delivery',
+        kind: 'acceptance',
+      }),
     ])
   })
 
@@ -228,20 +304,34 @@ describe('accepted workflow unit journal', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-journal-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')
     const before = run()
-    const next = { ...before, foundationDraftState: { completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]] } }
+    const next = {
+      ...before,
+      foundationDraftState: {
+        completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
+      },
+    }
     const acceptedUnits = deriveAcceptedWorkflowUnits(before, next)
 
-    await store.commit(next, {
-      runId: next.runId, type: 'document.reconciled', phase: next.phase,
-      status: next.status, revision: next.revision,
-    }, acceptedUnits)
+    await store.commit(
+      next,
+      {
+        runId: next.runId,
+        type: 'document.reconciled',
+        phase: next.phase,
+        status: next.status,
+        revision: next.revision,
+      },
+      acceptedUnits,
+    )
 
     const events = await store.readEvents()
     expect(events.map(event => event.type)).toEqual([
       'document.reconciled',
       'workflow.unit.accepted',
     ])
-    expect(events.filter(event => event.type === 'workflow.unit.accepted')).toHaveLength(1)
+    expect(
+      events.filter(event => event.type === 'workflow.unit.accepted'),
+    ).toHaveLength(1)
     expect((await store.load())?.pendingEvents).toBeUndefined()
   })
 
@@ -329,7 +419,10 @@ describe('accepted workflow unit journal', () => {
       workerPort: {
         async start(request) {
           startedWorkers.push(request.workerType)
-          return { sessionId: 'controller-round-trip', dispatchId: request.dispatchId! }
+          return {
+            sessionId: 'controller-round-trip',
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {},
         async stop() {},
@@ -384,28 +477,30 @@ describe('accepted workflow unit journal', () => {
     expect(() =>
       parseDeliveryRun({
         ...base,
-        pendingEvents: [{
-          eventId: 'invalid-accepted-event',
-          runId: base.runId,
-          type: 'workflow.unit.accepted',
-          phase: base.phase,
-          status: base.status,
-          revision: base.revision,
-          createdAt: '2026-08-05T00:00:00.000Z',
-          projectId: base.projectId,
-          ownerId: base.ownerId,
-          unit: {
-            eventSchemaVersion: 1,
-            unitId: 'document:docs/GDD.md',
-            kind: 'document',
+        pendingEvents: [
+          {
+            eventId: 'invalid-accepted-event',
+            runId: base.runId,
+            type: 'workflow.unit.accepted',
             phase: base.phase,
-            predecessorUnitIds: [],
-            inputRevision: base.revision.document,
-            dependencyDigests: {},
-            acceptedAt: '2026-08-05T00:00:00.000Z',
-            payload: { receiptRef: 'not-a-document-payload' },
+            status: base.status,
+            revision: base.revision,
+            createdAt: '2026-08-05T00:00:00.000Z',
+            projectId: base.projectId,
+            ownerId: base.ownerId,
+            unit: {
+              eventSchemaVersion: 1,
+              unitId: 'document:docs/GDD.md',
+              kind: 'document',
+              phase: base.phase,
+              predecessorUnitIds: [],
+              inputRevision: base.revision.document,
+              dependencyDigests: {},
+              acceptedAt: '2026-08-05T00:00:00.000Z',
+              payload: { receiptRef: 'not-a-document-payload' },
+            },
           },
-        }],
+        ],
       }),
     ).toThrow()
   })
@@ -416,19 +511,31 @@ describe('accepted workflow unit journal', () => {
     const before = run()
     const next = {
       ...before,
-      foundationDraftState: { completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]] },
+      foundationDraftState: {
+        completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
+      },
     }
     const unit = deriveAcceptedWorkflowUnits(before, next)[0]
     const ordinary = {
-      eventId: 'ordinary-event', runId: next.runId, type: 'document.reconciled',
-      phase: next.phase, status: next.status, revision: next.revision,
+      eventId: 'ordinary-event',
+      runId: next.runId,
+      type: 'document.reconciled',
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
       createdAt: '2026-08-05T00:00:00.000Z',
     }
     const accepted = {
-      eventId: 'accepted-event', runId: next.runId,
-      type: 'workflow.unit.accepted', phase: unit.phase, status: next.status,
-      revision: next.revision, createdAt: unit.acceptedAt,
-      projectId: next.projectId, ownerId: next.ownerId, unit,
+      eventId: 'accepted-event',
+      runId: next.runId,
+      type: 'workflow.unit.accepted',
+      phase: unit.phase,
+      status: next.status,
+      revision: next.revision,
+      createdAt: unit.acceptedAt,
+      projectId: next.projectId,
+      ownerId: next.ownerId,
+      unit,
     }
     await mkdir(store.paths.directory, { recursive: true })
     await writeFile(

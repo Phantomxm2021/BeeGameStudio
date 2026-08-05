@@ -126,11 +126,7 @@ export function reconcileImplementationAudit(input: {
   exact(expected, input.terminal.auditedTaskIds, 'task')
   exact(input.expectedChecklistIds, input.terminal.checklistIds, 'checklist')
   exact(input.expectedResourceIds, input.terminal.resourceIds, 'resource')
-  exact(
-    input.expectedContentIds,
-    input.terminal.contentIds,
-    'content',
-  )
+  exact(input.expectedContentIds, input.terminal.contentIds, 'content')
   const knownTaskIds = new Set(expected)
   if (
     input.terminal.findings.some(finding =>
@@ -248,11 +244,7 @@ export async function reconcileAcceptance(input: {
     'task',
   )
   exact(input.expectedResourceIds, input.terminal.resourceIds, 'resource')
-  exact(
-    input.expectedContentIds,
-    input.terminal.contentIds,
-    'content',
-  )
+  exact(input.expectedContentIds, input.terminal.contentIds, 'content')
   const knownTaskIds = new Set(input.run.tasks.map(task => task.id))
   if (
     input.terminal.findings.some(finding =>

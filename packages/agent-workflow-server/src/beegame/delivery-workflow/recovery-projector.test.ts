@@ -497,6 +497,16 @@ async function createProjectionFixture(
     },
     acceptedUnits,
   )
+  if (acceptedRank >= 1)
+    await store.appendEvent({
+      runId: RUN_ID,
+      type: 'tasks.planned',
+      phase: 'IMPLEMENTATION',
+      status: 'running',
+      revision,
+      taskGraph: [task],
+      createdAt: ACCEPTED_AT,
+    })
   const journalEvents = await store.readEvents()
   const events = journalEvents.filter(
     (event): event is WorkflowUnitAcceptedEvent =>
@@ -1216,6 +1226,45 @@ describe('workflow exact-resume recovery projector', () => {
       fixture.implementationAudit,
     )
     expect(projection.run.evidence.acceptance).toEqual(fixture.acceptance)
+  })
+
+  test('projects truncated JSON when the accepted journal proves the complete run', async () => {
+    const fixture = await createProjectionFixture('acceptance')
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+
+    const projection = await projectExactResumeRun(
+      projectInput(fixture, inspection),
+    )
+
+    expect(inspection.parsedValue).toBeUndefined()
+    expect(projection.activeUnitId).toBeUndefined()
+    expect(projection.run).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      phase: 'DELIVERY',
+      status: 'completed',
+    })
+    expect(projection.run.tasks[0]?.status).toBe('completed')
+    expect(projection.run.evidence.implementationAudit).toEqual(
+      fixture.implementationAudit,
+    )
+    expect(projection.run.evidence.acceptance).toEqual(fixture.acceptance)
+  })
+
+  test('rejects a malformed task graph receipt instead of treating it as absent', async () => {
+    const fixture = await createProjectionFixture('plan')
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.map(event =>
+      event.type === 'tasks.planned'
+        ? { ...event, taskGraph: 'invalid-task-graph' }
+        : event,
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_conflict',
+    )
   })
 
   test('reports a missing checkpoint when historical resource content has no v13 digest receipt', async () => {

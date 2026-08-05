@@ -106,10 +106,7 @@ const displayTaskTitle = (task: WorkflowCardTask): string => {
   return title;
 };
 
-const displayRecoveryUnitTitle = (
-  kind?: WorkflowRecoveryUnitKind,
-  itemId?: string,
-): string | undefined => {
+const displayRecoveryUnitTitle = (kind?: WorkflowRecoveryUnitKind, itemId?: string): string | undefined => {
   switch (kind) {
     case 'document':
     case 'review-check':
@@ -380,9 +377,7 @@ export function WorkflowCard({
     ? displayRecoveryUnitTitle(workflow.lastProvenUnitKind, workflow.lastProvenItemId)
     : undefined;
   const recoveryMessage = '已验证的工作流检查点可继续恢复。';
-  const failureMessage = isRecoverable
-    ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。'
-    : workflow.block?.message;
+  const failureMessage = isRecoverable ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。' : workflow.block?.message;
   const message = isRecoverable
     ? recoveryMessage
     : workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';

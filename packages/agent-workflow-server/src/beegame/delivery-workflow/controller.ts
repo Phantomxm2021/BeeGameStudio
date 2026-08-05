@@ -103,15 +103,19 @@ export function createDeliveryWorkflowController(input: {
     const acceptedUnits = previous
       ? deriveAcceptedWorkflowUnits(previous, run)
       : []
-    const committed = await store.commit(run, {
-      runId: run.runId,
-      type: eventType,
-      phase: run.phase,
-      status: run.status,
-      revision: run.revision,
-      activeTaskId: run.activeTaskId,
-      ...details,
-    }, acceptedUnits)
+    const committed = await store.commit(
+      run,
+      {
+        runId: run.runId,
+        type: eventType,
+        phase: run.phase,
+        status: run.status,
+        revision: run.revision,
+        activeTaskId: run.activeTaskId,
+        ...details,
+      },
+      acceptedUnits,
+    )
     scheduleOrphanedHandoffRecovery(committed)
     return committed
   }
@@ -424,7 +428,7 @@ export function createDeliveryWorkflowController(input: {
         facts: await contractFactsFor(next),
         workspacePath: input.workspacePath,
       })
-      await persist(next, 'tasks.planned')
+      await persist(next, 'tasks.planned', { taskGraph: next.tasks })
       await startNextImplementationTask({
         run: next,
         workspacePath: input.workspacePath,

@@ -37,9 +37,11 @@ import {
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type AcceptedWorkflowUnit,
   type DeliveryRun,
+  type DispatchWorkerType,
   type DocumentReviewCheck,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
+import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
@@ -64,6 +66,80 @@ const RECOVERY_BRIEF = JSON.stringify({
 })
 const RECOVERY_ACCEPTED_AT = '2026-08-05T00:00:00.000Z'
 const RETIRED_PENDING_CHECK_ID = 'retired-pending-check'
+
+const EXACT_RESUME_WORKER_CHECKPOINTS = [
+  'before-dispatch',
+  'open',
+  'terminal-accepted',
+  'canonical-receipt',
+  'unit-accepted',
+] as const
+
+type ExactResumeWorkerCheckpoint =
+  (typeof EXACT_RESUME_WORKER_CHECKPOINTS)[number]
+
+const WORKER_CHECKPOINT_PHASES: Readonly<
+  Record<DispatchWorkerType, DeliveryRun['phase']>
+> = {
+  'document-author': 'DOCUMENT_DRAFTING',
+  'document-reviewer': 'DOCUMENT_REVIEW',
+  'resource-planner': 'RESOURCE_PREPARATION',
+  'resource-curator': 'RESOURCE_PREPARATION',
+  'resource-content-author': 'RESOURCE_PREPARATION',
+  'atomic-task-planner': 'ATOMIC_TASK_PLANNING',
+  'implementation-worker': 'IMPLEMENTATION',
+  'implementation-auditor': 'IMPLEMENTATION_AUDIT',
+  'acceptance-validator': 'ACCEPTANCE',
+  'change-impact-analyzer': 'DELIVERY',
+  'question-answerer': 'DELIVERY',
+}
+
+function workerCheckpointRequest(input: {
+  run: DeliveryRun
+  workspacePath: string
+  workerType: DispatchWorkerType
+}): WorkerDispatchRequest {
+  return {
+    runId: input.run.runId,
+    ownerId: input.run.ownerId,
+    projectId: input.run.projectId,
+    workspacePath: input.workspacePath,
+    workerType: input.workerType,
+    phase: input.run.phase,
+    revision: input.run.revision.document,
+    contract: {},
+  }
+}
+
+function acceptedCheckpointDispatch(input: {
+  request: WorkerDispatchRequest
+  checkpoint: Extract<
+    ExactResumeWorkerCheckpoint,
+    'terminal-accepted' | 'canonical-receipt'
+  >
+}): NonNullable<DeliveryRun['activeDispatch']> {
+  const dispatchId = `${input.request.workerType}-${input.checkpoint}`
+  return {
+    dispatchId,
+    workerType: input.request.workerType,
+    phase: input.request.phase,
+    revision: input.request.revision,
+    status: 'completed',
+    ...(input.checkpoint === 'canonical-receipt'
+      ? {
+          terminalEvidencePath:
+            '.beegame/workflow/evidence/synthetic-receipt.json',
+        }
+      : {}),
+    terminalResult: {
+      workerType: input.request.workerType,
+      status: 'completed',
+    },
+    request: { ...input.request, dispatchId },
+    startedAt: RECOVERY_ACCEPTED_AT,
+    finishedAt: RECOVERY_ACCEPTED_AT,
+  }
+}
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
@@ -602,6 +678,103 @@ describe('delivery workflow recovery', () => {
   afterEach(async () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
+
+  test('defines every exact-resume checkpoint for every persisted worker type', () => {
+    expect(WORKER_TYPES).toHaveLength(11)
+    expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
+      'before-dispatch',
+      'open',
+      'terminal-accepted',
+      'canonical-receipt',
+      'unit-accepted',
+    ])
+  })
+
+  for (const workerType of WORKER_TYPES) {
+    for (const checkpoint of EXACT_RESUME_WORKER_CHECKPOINTS) {
+      test(`${workerType} keeps semantic dispatch count stable at ${checkpoint}`, async () => {
+        workspace = await mkdtemp(join(tmpdir(), 'beegame-worker-matrix-'))
+        const initial = createTestDeliveryRun({
+          runId: `matrix-run-${workerType}`,
+          projectId: 'synthetic-matrix-project',
+          ownerId: 'synthetic-matrix-owner',
+          confirmedBriefContext: RECOVERY_BRIEF,
+          checklistApproved: true,
+        })
+        const run: DeliveryRun = {
+          ...initial,
+          phase: WORKER_CHECKPOINT_PHASES[workerType],
+        }
+        const store = createRunStore(workspace, run.ownerId)
+        const request = workerCheckpointRequest({
+          run,
+          workspacePath: workspace,
+          workerType,
+        })
+        const started: WorkerDispatchRequest[] = []
+        const workerPort = {
+          async start(startedRequest: WorkerDispatchRequest) {
+            started.push(startedRequest)
+            return {
+              sessionId: startedRequest.dispatchId!,
+              dispatchId: startedRequest.dispatchId!,
+            }
+          },
+          async submit() {},
+          async stop() {},
+          async status() {
+            throw new Error('not used')
+          },
+        }
+
+        if (checkpoint === 'unit-accepted') {
+          const acceptedRun: DeliveryRun = {
+            ...run,
+            phase: 'DELIVERY',
+            status: 'completed',
+            completedAt: RECOVERY_ACCEPTED_AT,
+            updatedAt: RECOVERY_ACCEPTED_AT,
+            activeDispatch: undefined,
+          }
+          await store.save(acceptedRun)
+          const controller = createDeliveryWorkflowController({
+            workspacePath: workspace,
+            ownerId: run.ownerId,
+            workerPort,
+          })
+          await controller.resume(acceptedRun)
+          expect(started).toHaveLength(0)
+          return
+        }
+
+        if (
+          checkpoint === 'terminal-accepted' ||
+          checkpoint === 'canonical-receipt'
+        ) {
+          const acceptedDispatch = acceptedCheckpointDispatch({
+            request,
+            checkpoint,
+          })
+          await store.save({ ...run, activeDispatch: acceptedDispatch })
+          const dispatcher = createDeliveryDispatcher({ store, workerPort })
+          const resumed = await dispatcher.dispatch(request)
+          expect(resumed.dispatchId).toBe(acceptedDispatch.dispatchId)
+          expect(started).toHaveLength(0)
+          return
+        }
+
+        await store.save(run)
+        const dispatcher = createDeliveryDispatcher({ store, workerPort })
+        const first = await dispatcher.dispatch(request)
+        expect(started).toHaveLength(1)
+        if (checkpoint === 'before-dispatch') return
+
+        const duplicate = await dispatcher.dispatch(request)
+        expect(duplicate.dispatchId).toBe(first.dispatchId)
+        expect(started).toHaveLength(1)
+      })
+    }
+  }
 
   test('recovers a committed canonical document without redispatching its semantic repair', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-receipt-'))
