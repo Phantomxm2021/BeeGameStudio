@@ -99,8 +99,7 @@ export function createNativeResourceContentTool(options: {
     alwaysLoad: true,
     inputSchema,
     isConcurrencySafe: () => false,
-    isReadOnly: (input: ResourceContentInput) =>
-      input.action === 'needs_inventory',
+    isReadOnly: () => false,
     async description() {
       return 'Validate and commit the complete canonical JSON/YAML content set, or report the exact requirements missing verified inventory.'
     },
@@ -118,6 +117,7 @@ export function createNativeResourceContentTool(options: {
           workspacePath: options.workspacePath,
           contract: options.contract,
           input: parsed.data,
+          assertMutationAuthority: options.assertMutationAuthority,
         })
       await options.assertMutationAuthority()
       return commitResourceContent({
@@ -144,6 +144,7 @@ async function submitMissingInventory(input: {
   workspacePath: string
   contract: ResourceContentCommitContract
   input: Extract<ResourceContentInput, { action: 'needs_inventory' }>
+  assertMutationAuthority: () => void | Promise<void>
 }) {
   const { contract } = input
   const verified = new Set(contract.verifiedResourceIds)
@@ -161,6 +162,7 @@ async function submitMissingInventory(input: {
     throw new Error(
       `needs_inventory must contain the exact missing requirement IDs: ${expected.join(', ') || '<none>'}.`,
     )
+  await input.assertMutationAuthority()
   await writeReceipt(
     resourceContentReceiptPath(input.workspacePath, contract.dispatchId),
     {
@@ -216,9 +218,15 @@ async function commitResourceContent(input: {
       throw new Error(
         `Protected content path cannot be replaced: ${normalized}.`,
       )
-    return readContentDocument(input.workspacePath, normalized)
+    return {
+      document: readContentDocument(input.workspacePath, normalized),
+      content: readFileSync(resolve(input.workspacePath, normalized)),
+    }
   })
-  const completeSet = [...protectedDocuments, ...submitted]
+  const completeSet = [
+    ...protectedDocuments.map(item => item.document),
+    ...submitted,
+  ]
   const audit = validateBeeGameContentDocuments(completeSet, manifest)
   if (!audit.valid)
     throw new Error(
@@ -230,7 +238,8 @@ async function commitResourceContent(input: {
   await replaceContentRoot({
     workspacePath: input.workspacePath,
     contentRoot,
-    documents: completeSet,
+    submittedDocuments: submitted,
+    protectedDocuments,
     contract: input.contract,
   })
   return {
@@ -297,7 +306,11 @@ function readContentDocument(
 async function replaceContentRoot(input: {
   workspacePath: string
   contentRoot: string
-  documents: BeeGameContentDocument[]
+  submittedDocuments: BeeGameContentDocument[]
+  protectedDocuments: Array<{
+    document: BeeGameContentDocument
+    content: Uint8Array
+  }>
   contract: ResourceContentCommitContract
 }): Promise<void> {
   const nonce = randomUUID()
@@ -310,7 +323,16 @@ async function replaceContentRoot(input: {
   )
   await mkdir(stagingRoot, { recursive: true })
   try {
-    for (const document of input.documents) {
+    for (const item of input.protectedDocuments) {
+      const relativePath = relative(
+        input.contentRoot,
+        resolve(input.workspacePath, item.document.path),
+      )
+      const target = resolve(stagingRoot, relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, item.content)
+    }
+    for (const document of input.submittedDocuments) {
       const relativePath = relative(
         input.contentRoot,
         resolve(input.workspacePath, document.path),
@@ -337,10 +359,18 @@ async function replaceContentRoot(input: {
     )
       return
     if (priorReceipt?.status === 'prepared') {
-      if (!existsSync(input.contentRoot) && existsSync(priorReceipt.backupRoot))
-        await rename(priorReceipt.backupRoot, input.contentRoot)
-      await rm(priorReceipt.stagingRoot, { recursive: true, force: true })
-      await rm(priorReceipt.backupRoot, { recursive: true, force: true })
+      const recovered = await recoverPreparedResourceContentCommit({
+        receiptPath,
+        receipt: priorReceipt,
+        contentRoot: input.contentRoot,
+      })
+      if (recovered) {
+        if (recovered.finalRootDigest !== finalRootDigest)
+          throw new Error(
+            'Resource Content dispatch was already prepared with different content.',
+          )
+        return
+      }
     }
     await assertResourceRevisions(input.workspacePath, input.contract)
     const prepared = {
@@ -351,7 +381,7 @@ async function replaceContentRoot(input: {
       finalRootDigest,
       stagingRoot,
       backupRoot,
-      writtenPaths: input.documents.map(document => document.path),
+      writtenPaths: input.submittedDocuments.map(document => document.path),
     }
     await writeReceipt(receiptPath, prepared)
     const hadExistingRoot = existsSync(input.contentRoot)
@@ -428,6 +458,69 @@ function readCommitReceipt(
   return value
 }
 
+async function recoverPreparedResourceContentCommit(input: {
+  receiptPath: string
+  receipt: ResourceContentCommitReceipt
+  contentRoot: string
+}): Promise<ResourceContentCommitReceipt | undefined> {
+  assertPreparedResourceContentPaths(input.receipt, input.contentRoot)
+  const rootMatches =
+    existsSync(input.contentRoot) &&
+    digestDirectory(input.contentRoot) === input.receipt.finalRootDigest
+  if (rootMatches) {
+    await rm(input.receipt.stagingRoot, { recursive: true, force: true })
+    await rm(input.receipt.backupRoot, { recursive: true, force: true })
+    const committed = { ...input.receipt, status: 'committed' as const }
+    await writeReceipt(input.receiptPath, committed)
+    return committed
+  }
+
+  const stagingMatches =
+    existsSync(input.receipt.stagingRoot) &&
+    digestDirectory(input.receipt.stagingRoot) === input.receipt.finalRootDigest
+  if (stagingMatches) {
+    if (existsSync(input.contentRoot)) {
+      if (existsSync(input.receipt.backupRoot))
+        throw new Error(
+          'Resource Content prepared commit has conflicting canonical and backup roots.',
+        )
+      await rename(input.contentRoot, input.receipt.backupRoot)
+    }
+    await rename(input.receipt.stagingRoot, input.contentRoot)
+    await rm(input.receipt.backupRoot, { recursive: true, force: true })
+    const committed = { ...input.receipt, status: 'committed' as const }
+    await writeReceipt(input.receiptPath, committed)
+    return committed
+  }
+
+  if (!existsSync(input.contentRoot) && existsSync(input.receipt.backupRoot))
+    await rename(input.receipt.backupRoot, input.contentRoot)
+  await rm(input.receipt.stagingRoot, { recursive: true, force: true })
+  throw new Error(
+    'Resource Content prepared commit rolled back because its staged publication is unavailable.',
+  )
+}
+
+function assertPreparedResourceContentPaths(
+  receipt: ResourceContentCommitReceipt,
+  contentRoot: string,
+): void {
+  const stagingPrefix = `${contentRoot}.staging-`
+  const backupPrefix = `${contentRoot}.backup-`
+  const isRecordedSibling = (path: string, prefix: string) =>
+    resolve(path) === path &&
+    dirname(path) === dirname(contentRoot) &&
+    path.startsWith(prefix) &&
+    path.length > prefix.length
+  if (
+    !isRecordedSibling(receipt.stagingRoot, stagingPrefix) ||
+    !isRecordedSibling(receipt.backupRoot, backupPrefix)
+  )
+    throw new Error(
+      'Resource Content prepared commit transaction paths are invalid.',
+    )
+}
+
 export async function reconcileResourceContentCommitReceipt(input: {
   workspacePath: string
   dispatchId: string
@@ -446,15 +539,18 @@ export async function reconcileResourceContentCommitReceipt(input: {
     input.workspacePath,
     manifest.project_target?.content_root ?? 'assets/content',
   )
+  if (receipt.status === 'prepared')
+    return recoverPreparedResourceContentCommit({
+      receiptPath,
+      receipt,
+      contentRoot,
+    })
   if (
     !existsSync(contentRoot) ||
     digestDirectory(contentRoot) !== receipt.finalRootDigest
   )
     return undefined
-  if (receipt.status === 'committed') return receipt
-  const committed = { ...receipt, status: 'committed' as const }
-  await writeReceipt(receiptPath, committed)
-  return committed
+  return receipt
 }
 
 export function createResourceContentTerminalFromReceipt(input: {

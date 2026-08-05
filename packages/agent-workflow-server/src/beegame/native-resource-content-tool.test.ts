@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeBeeGameAssetManifest } from './asset-contracts'
@@ -14,6 +22,7 @@ import {
 
 type Tool = {
   call(input: unknown): Promise<{ data: Record<string, unknown> }>
+  isReadOnly(input: unknown): boolean
   mapToolResultToToolResultBlockParam(
     output: unknown,
     toolUseID: string,
@@ -167,6 +176,122 @@ describe('native canonical resource content commit', () => {
     ).resolves.toMatchObject({ status: 'committed' })
   })
 
+  test('removes the recorded backup after a prepared root was published', async () => {
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await mkdir(receipt.backupRoot, { recursive: true })
+    await writeFile(join(receipt.backupRoot, 'previous.json'), 'previous bytes')
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+      }),
+    ).resolves.toMatchObject({ status: 'committed' })
+    await expect(access(receipt.backupRoot)).rejects.toThrow()
+  })
+
+  test('publishes a prepared staging root after a crash removed the canonical root', async () => {
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await rename(join(workspace, 'assets/content'), receipt.stagingRoot)
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+      }),
+    ).resolves.toMatchObject({ status: 'committed' })
+    expect(
+      JSON.parse(
+        await readFile(
+          join(workspace, 'assets/content/resource-registry.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ id: 'registry' })
+  })
+
+  test('rolls back without discarding prepared authority when staging is unavailable', async () => {
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await rename(join(workspace, 'assets/content'), receipt.backupRoot)
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+      }),
+    ).rejects.toThrow('staged publication is unavailable')
+    expect(
+      JSON.parse(
+        await readFile(
+          join(workspace, 'assets/content/resource-registry.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ id: 'registry' })
+    expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+      status: 'prepared',
+    })
+  })
+
+  test('rejects prepared receipt roots outside the canonical transaction paths', async () => {
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    const unrelatedPath = join(workspace, 'unrelated')
+    await mkdir(unrelatedPath)
+    await writeFile(join(unrelatedPath, 'sentinel'), 'keep')
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify(
+        { ...receipt, status: 'prepared', backupRoot: unrelatedPath },
+        null,
+        2,
+      )}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+      }),
+    ).rejects.toThrow('transaction paths are invalid')
+    expect(await readFile(join(unrelatedPath, 'sentinel'), 'utf8')).toBe('keep')
+  })
+
   test('rejects a receipt whose embedded dispatch identity does not match its path', async () => {
     const workspace = await createWorkspace()
     await commitRegistryOnly(workspace)
@@ -309,6 +434,67 @@ describe('native canonical resource content commit', () => {
     ).toMatchObject({ status: 'committed' })
   })
 
+  test('copies protected content byte-for-byte and excludes it from written paths', async () => {
+    const workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+    const protectedYaml =
+      '# preserved comment\nschema: beegame-content-v1\nid: world\nkind: world-definition\nfulfills: []\nresources: []\ndata:\n  worlds:\n    main:\n      instances: [] # keep inline comment\n'
+    await writeFile(join(workspace, 'assets/content/world.yaml'), protectedYaml)
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: {
+        dispatchId: 'dispatch-protected',
+        inventoryRevision: await computeResourceInventoryRevision(workspace),
+        baselineResourceRevision: await computeResourceRevision(workspace, ''),
+        requiredRequirementIds: ['req-model'],
+        verifiedResourceIds: ['res-model'],
+        inventoryBindings: [
+          { requirementId: 'req-model', resourceIds: ['res-model'] },
+        ],
+        protectedPaths: ['assets/content/world.yaml'],
+      },
+      assertMutationAuthority: () => undefined,
+    }) as Tool
+
+    const result = await tool.call({
+      action: 'commit',
+      documents: [
+        {
+          path: 'assets/content/resource-registry.json',
+          schema: 'beegame-content-v1',
+          id: 'registry',
+          kind: 'resource-registry',
+          fulfills: ['req-model'],
+          resources: ['res-model'],
+          data: {
+            bindings: [
+              { requirementId: 'req-model', resourceIds: ['res-model'] },
+            ],
+          },
+        },
+      ],
+    })
+
+    expect(
+      await readFile(join(workspace, 'assets/content/world.yaml'), 'utf8'),
+    ).toBe(protectedYaml)
+    expect(result.data.writtenPaths).toEqual([
+      'assets/content/resource-registry.json',
+    ])
+    expect(
+      JSON.parse(
+        await readFile(
+          join(
+            workspace,
+            '.beegame/workflow/resource-content-commits/dispatch-protected.json',
+          ),
+          'utf8',
+        ),
+      ).writtenPaths,
+    ).toEqual(['assets/content/resource-registry.json'])
+  })
+
   test('rejects a stale dispatch immediately before publication', async () => {
     const workspace = await createWorkspace()
     let checks = 0
@@ -436,5 +622,49 @@ describe('native canonical resource content commit', () => {
         missingRequirementIds: ['req-audio'],
       },
     })
+  })
+
+  test('checks mutation authority before persisting needs_inventory', async () => {
+    const workspace = await createWorkspace({ includeMissingAudio: true })
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: {
+        dispatchId: 'dispatch-stale-needs-inventory',
+        inventoryRevision: await computeResourceInventoryRevision(workspace),
+        baselineResourceRevision: await computeResourceRevision(workspace, ''),
+        requiredRequirementIds: ['req-model', 'req-audio'],
+        verifiedResourceIds: ['res-model'],
+        inventoryBindings: [
+          { requirementId: 'req-model', resourceIds: ['res-model'] },
+        ],
+        protectedPaths: [],
+      },
+      assertMutationAuthority() {
+        throw new Error('dispatch is no longer active')
+      },
+    }) as Tool
+
+    expect(
+      tool.isReadOnly({
+        action: 'needs_inventory',
+        missingRequirementIds: ['req-audio'],
+      }),
+    ).toBe(false)
+    await expect(
+      tool.call({
+        action: 'needs_inventory',
+        missingRequirementIds: ['req-audio'],
+      }),
+    ).rejects.toThrow('dispatch is no longer active')
+    await expect(
+      readFile(
+        join(
+          workspace,
+          '.beegame/workflow/resource-content-commits/dispatch-stale-needs-inventory.json',
+        ),
+        'utf8',
+      ),
+    ).rejects.toThrow()
   })
 })
