@@ -739,12 +739,39 @@ describe('workflow exact-resume recovery projector', () => {
   test('continues Document Drafting only when the exact unfinished document is durably identified', async () => {
     const fixture = await createProjectionFixture()
     const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const dispatchId = 'active-foundation-draft'
+    const request = {
+      dispatchId,
+      runId: fixture.snapshot.runId,
+      ownerId: OWNER_ID,
+      projectId: PROJECT_ID,
+      workspacePath: fixture.workspacePath,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: activePath,
+      revision: fixture.snapshot.revision.document,
+      allowedPaths: [activePath],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: activePath,
+      },
+    }
     const snapshot = {
       ...fixture.snapshot,
       phase: 'DOCUMENT_DRAFTING' as const,
       documentStep: 'FOUNDATION_DRAFTING' as const,
       currentItemId: activePath,
-      activeDispatch: undefined,
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: activePath,
+        revision: fixture.snapshot.revision.document,
+        status: 'running' as const,
+        startedAt: fixture.snapshot.updatedAt,
+        request,
+      },
       foundationDraftState: { completedPaths: [] },
       documentReviewState: {
         repairPasses: { foundation: 0, checklist: 0, resource: 0 },
@@ -771,6 +798,123 @@ describe('workflow exact-resume recovery projector', () => {
       documentStep: 'FOUNDATION_DRAFTING',
       currentItemId: activePath,
     })
+  })
+
+  test('rejects a stale canonical document current item after the drafting phase', async () => {
+    const fixture = await createProjectionFixture()
+    const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const dispatchId = 'stale-foundation-draft'
+    const request = {
+      dispatchId,
+      runId: fixture.snapshot.runId,
+      ownerId: OWNER_ID,
+      projectId: PROJECT_ID,
+      workspacePath: fixture.workspacePath,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: activePath,
+      revision: fixture.snapshot.revision.document,
+      allowedPaths: [activePath],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: activePath,
+      },
+    }
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'RESOURCE_PREPARATION' as const,
+      documentStep: undefined,
+      currentItemId: activePath,
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: activePath,
+        revision: fixture.snapshot.revision.document,
+        status: 'running' as const,
+        startedAt: fixture.snapshot.updatedAt,
+        request,
+      },
+      foundationDraftState: { completedPaths: [] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_CONTENT' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const metadataEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, metadataEvents)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
+  test('rejects a drafting hint whose current item and active dispatch identities differ', async () => {
+    const fixture = await createProjectionFixture()
+    const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const dispatchedPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const dispatchId = 'conflicting-foundation-draft'
+    const request = {
+      dispatchId,
+      runId: fixture.snapshot.runId,
+      ownerId: OWNER_ID,
+      projectId: PROJECT_ID,
+      workspacePath: fixture.workspacePath,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: dispatchedPath,
+      revision: fixture.snapshot.revision.document,
+      allowedPaths: [dispatchedPath],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: dispatchedPath,
+      },
+    }
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: activePath,
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: dispatchedPath,
+        revision: fixture.snapshot.revision.document,
+        status: 'running' as const,
+        startedAt: fixture.snapshot.updatedAt,
+        request,
+      },
+      foundationDraftState: { completedPaths: [] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const metadataEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, metadataEvents)),
+      'recovery_checkpoint_conflict',
+    )
   })
 
   test('uses matching canonical document receipts to recover historical completed paths', async () => {

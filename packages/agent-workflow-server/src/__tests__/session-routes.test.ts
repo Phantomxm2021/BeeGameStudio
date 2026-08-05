@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { createHash } from 'node:crypto'
 import {
   mkdir,
@@ -26,6 +26,7 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -534,6 +535,23 @@ describe('delivery workflow session continuation', () => {
     const workspace = join(projectsRoot, 'users', ownerId, projectId)
     await mkdir(workspace, { recursive: true })
     let workflowWorkerStarts = 0
+    let workflowControllerResumeCalls = 0
+    const createDeliveryController =
+      deliveryControllerModule.createDeliveryWorkflowController
+    const controllerFactory = spyOn(
+      deliveryControllerModule,
+      'createDeliveryWorkflowController',
+    ).mockImplementation(input => {
+      const controller = createDeliveryController(input)
+      const resume = controller.resume
+      return {
+        ...controller,
+        resume: run => {
+          workflowControllerResumeCalls += 1
+          return resume(run)
+        },
+      }
+    })
     const runner: BeeGameSessionRunner = {
       start: async input => {
         if (input.workflowWorker) workflowWorkerStarts += 1
@@ -706,7 +724,14 @@ describe('delivery workflow session continuation', () => {
       expect(validProjectBoundaries.map(response => response.status)).toEqual([
         200, 202,
       ])
+      await new Promise(resolve => setTimeout(resolve, 0))
       expect(workflowWorkerStarts).toBe(1)
+      expect(workflowControllerResumeCalls).toBe(1)
+      expect(
+        (await store.readEvents()).filter(
+          event => event.type === 'run.resumed',
+        ),
+      ).toHaveLength(1)
 
       const currentSnapshot = JSON.parse(
         await readFile(store.paths.snapshot, 'utf8'),
@@ -776,21 +801,47 @@ describe('delivery workflow session continuation', () => {
       ])
       expect(workflowWorkerStarts).toBe(startsBeforeHardFail)
 
+      const recoverablePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+      const recoverableDispatchId = 'recoverable-foundation-draft'
+      const recoverableRequest = {
+        dispatchId: recoverableDispatchId,
+        runId: journalRun.runId,
+        ownerId,
+        projectId,
+        workspacePath: workspace,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: recoverablePath,
+        revision: journalRun.revision.document,
+        allowedPaths: [recoverablePath],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode: 'initial',
+          foundationDocumentPath: recoverablePath,
+        },
+      }
+      const recoverableSnapshot = {
+        ...journalRun,
+        schemaVersion: 12,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        documentStep: 'FOUNDATION_DRAFTING' as const,
+        status: 'running' as const,
+        currentItemId: recoverablePath,
+        activeDispatch: {
+          dispatchId: recoverableDispatchId,
+          workerType: 'document-author' as const,
+          phase: 'DOCUMENT_DRAFTING' as const,
+          taskId: recoverablePath,
+          revision: journalRun.revision.document,
+          status: 'running' as const,
+          startedAt: journalRun.updatedAt,
+          request: recoverableRequest,
+        },
+      }
+      const eventsBeforeRecoverable = await readFile(store.paths.events, 'utf8')
       await writeFile(
         store.paths.snapshot,
-        `${JSON.stringify(
-          {
-            ...journalRun,
-            schemaVersion: 12,
-            phase: 'DOCUMENT_DRAFTING',
-            documentStep: 'FOUNDATION_DRAFTING',
-            status: 'running',
-            currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
-            activeDispatch: undefined,
-          },
-          null,
-          2,
-        )}\n`,
+        `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
       )
       const startsBeforeInvalidRecovery = workflowWorkerStarts
       const recoveredInvalid = await app.request(
@@ -804,7 +855,28 @@ describe('delivery workflow session continuation', () => {
           event => event.type === 'workflow.run.reconstructed',
         ),
       ).toHaveLength(1)
+
+      await writeFile(store.paths.events, eventsBeforeRecoverable)
+      await writeFile(
+        store.paths.snapshot,
+        `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
+      )
+      const startsBeforeRetryRecovery = workflowWorkerStarts
+      const resumesBeforeRetryRecovery = workflowControllerResumeCalls
+      const recoveredRetry = await app.request(
+        `/api/projects/${projectId}/workflow/retry`,
+        { method: 'POST' },
+      )
+      expect(recoveredRetry.status).toBe(202)
+      expect(workflowWorkerStarts).toBe(startsBeforeRetryRecovery + 1)
+      expect(workflowControllerResumeCalls).toBe(resumesBeforeRetryRecovery + 1)
+      expect(
+        (await store.readEvents()).filter(
+          event => event.type === 'workflow.run.reconstructed',
+        ),
+      ).toHaveLength(1)
     } finally {
+      controllerFactory.mockRestore()
       for (const cleanup of cleanups) cleanup()
     }
   })

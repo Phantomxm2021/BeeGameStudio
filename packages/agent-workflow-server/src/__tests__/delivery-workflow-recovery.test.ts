@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -2986,43 +2993,172 @@ describe('delivery workflow recovery', () => {
     ).toHaveLength(1)
   })
 
-  test('restarts safely after worker stopping interrupts reconstruction', async () => {
+  test('restarts a persisted reconstruction marker with fresh store and dispatcher instances', async () => {
     const fixture = await createStaleReviewerRecoveryFixture()
     workspace = fixture.workspacePath
-    const source = await readFile(fixture.store.paths.snapshot, 'utf8')
-
-    await expect(
-      recoverAndResumeRun({
-        store: fixture.store,
-        workspacePath: fixture.workspacePath,
-        ownerId: RECOVERY_OWNER_ID,
-        projectId: RECOVERY_PROJECT_ID,
-        confirmedBriefContext: RECOVERY_BRIEF,
-        stopWorkspaceWorkers: async () => {
-          throw new Error('worker transport did not stop')
+    const journalEvents = await fixture.store.readEvents()
+    await writeFile(
+      fixture.store.paths.events,
+      `${journalEvents
+        .filter(event => event.type !== 'workflow.unit.accepted')
+        .map(event => JSON.stringify(event))
+        .join('\n')}\n`,
+    )
+    const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const dispatchId = 'fixture-document-0'
+    const request: WorkerDispatchRequest = {
+      dispatchId,
+      runId: RECOVERY_RUN_ID,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      workspacePath: fixture.workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: activePath,
+      revision: fixture.journalRun.revision.document,
+      allowedPaths: [activePath],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: activePath,
+      },
+    }
+    await writeFile(
+      fixture.store.paths.snapshot,
+      `${JSON.stringify(
+        {
+          ...fixture.journalRun,
+          schemaVersion: 12,
+          phase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          status: 'running',
+          currentItemId: activePath,
+          foundationDraftState: { completedPaths: [] },
+          documentReviewState: {
+            repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+          },
+          resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+          evidence: {},
+          activeDispatch: {
+            dispatchId,
+            workerType: 'document-author',
+            phase: 'DOCUMENT_DRAFTING',
+            taskId: activePath,
+            revision: fixture.journalRun.revision.document,
+            status: 'running',
+            startedAt: fixture.journalRun.updatedAt,
+            request,
+          },
         },
-        resumeCurrentRun: async () => undefined,
+        null,
+        2,
+      )}\n`,
+    )
+    const firstStarted: WorkerDispatchRequest[] = []
+    const firstController = createDeliveryWorkflowController({
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      workerPort: {
+        async start(request) {
+          firstStarted.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await chmod(fixture.store.paths.events, 0o444)
+    try {
+      await expect(
+        recoverAndResumeRun({
+          store: fixture.store,
+          workspacePath: fixture.workspacePath,
+          ownerId: RECOVERY_OWNER_ID,
+          projectId: RECOVERY_PROJECT_ID,
+          confirmedBriefContext: RECOVERY_BRIEF,
+          stopWorkspaceWorkers: async () => undefined,
+          resumeCurrentRun: run => firstController.resume(run),
+        }),
+      ).rejects.toBeInstanceOf(Error)
+    } finally {
+      await chmod(fixture.store.paths.events, 0o644)
+    }
+    const interruptedSnapshot = JSON.parse(
+      await readFile(fixture.store.paths.snapshot, 'utf8'),
+    ) as DeliveryRun
+    expect(interruptedSnapshot.pendingEvents).toEqual([
+      expect.objectContaining({ type: 'workflow.run.reconstructed' }),
+      expect.objectContaining({
+        type: 'workflow.unit.accepted',
+        unit: expect.objectContaining({ unitId: `document:${activePath}` }),
       }),
-    ).rejects.toMatchObject({ code: 'recovery_worker_stop_failed' })
-    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(source)
+    ])
+    expect(firstStarted).toHaveLength(0)
 
-    let resumeCalls = 0
+    const restartedStore = createRunStore(
+      fixture.workspacePath,
+      RECOVERY_OWNER_ID,
+    )
+    const restarted: WorkerDispatchRequest[] = []
+    const restartedController = createDeliveryWorkflowController({
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      workerPort: {
+        async start(request) {
+          restarted.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
     await recoverAndResumeRun({
-      store: fixture.store,
+      store: restartedStore,
       workspacePath: fixture.workspacePath,
       ownerId: RECOVERY_OWNER_ID,
       projectId: RECOVERY_PROJECT_ID,
       confirmedBriefContext: RECOVERY_BRIEF,
       stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: async () => {
-        resumeCalls += 1
+      resumeCurrentRun: run => restartedController.resume(run),
+    })
+    const events = await restartedStore.readEvents()
+    expect(
+      events.filter(event => event.type === 'workflow.run.reconstructed'),
+    ).toHaveLength(1)
+    const accepted = events.filter(
+      event => event.type === 'workflow.unit.accepted',
+    )
+    expect(accepted).toHaveLength(1)
+    expect(accepted[0]).toMatchObject({
+      unit: { unitId: `document:${activePath}` },
+    })
+    expect(restarted).toHaveLength(1)
+    expect(restarted[0]).toMatchObject({
+      workerType: 'document-author',
+      taskId: nextPath,
+      contract: { foundationDocumentPath: nextPath },
+    })
+    const durable = await restartedStore.load()
+    expect(durable).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      activeDispatch: {
+        workerType: 'document-author',
+        status: 'running',
       },
     })
-    expect(resumeCalls).toBe(1)
-    expect(
-      (await fixture.store.readEvents()).filter(
-        event => event.type === 'workflow.run.reconstructed',
-      ),
-    ).toHaveLength(1)
+    expect(durable?.pendingEvents).toBeUndefined()
   })
 })

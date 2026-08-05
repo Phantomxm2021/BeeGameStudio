@@ -1253,6 +1253,47 @@ function rawActiveUnitId(
   snapshot: Record<string, unknown> | undefined,
 ): string | undefined {
   if (!snapshot) return undefined
+  const dispatch = record(snapshot.activeDispatch)
+  const currentItemId = stringValue(snapshot.currentItemId)
+  if (
+    currentItemId &&
+    CANONICAL_FOUNDATION_DOCUMENTS.includes(currentItemId as never)
+  ) {
+    if (
+      snapshot.phase !== 'DOCUMENT_DRAFTING' ||
+      snapshot.documentStep !== 'FOUNDATION_DRAFTING'
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'canonical document current item contradicts the raw workflow phase',
+      )
+    const request = record(dispatch?.request)
+    if (!dispatch || !request)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        'unfinished canonical document has no active dispatch proof',
+      )
+    const contract = record(request.contract)
+    if (
+      dispatch.status !== 'running' ||
+      dispatch.workerType !== 'document-author' ||
+      dispatch.phase !== 'DOCUMENT_DRAFTING' ||
+      dispatch.taskId !== currentItemId ||
+      request.dispatchId !== dispatch.dispatchId ||
+      request.runId !== snapshot.runId ||
+      request.workerType !== dispatch.workerType ||
+      request.phase !== dispatch.phase ||
+      request.taskId !== currentItemId ||
+      contract?.documentSet !== 'foundation' ||
+      contract.authoringMode !== 'initial' ||
+      contract.foundationDocumentPath !== currentItemId
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'canonical document current item contradicts its active dispatch proof',
+      )
+    return documentUnitId(currentItemId)
+  }
   const cycle = record(record(snapshot.documentReviewState)?.activeCycle)
   const completed = new Set(stringArray(cycle?.completedCheckIds) ?? [])
   if (snapshot.phase === 'DOCUMENT_REVIEW' && cycle) {
@@ -1262,7 +1303,6 @@ function rawActiveUnitId(
     const next = required.find(id => !completed.has(id))
     if (next) return reviewUnitId(next as DocumentReviewCheckId)
   }
-  const dispatch = record(snapshot.activeDispatch)
   const contract = record(record(dispatch?.request)?.contract)
   const currentChecks = (stringArray(contract?.currentCheckIds) ?? []).filter(
     id => CURRENT_REVIEW_CHECK_IDS.has(id as DocumentReviewCheckId),
@@ -1271,12 +1311,6 @@ function rawActiveUnitId(
     return reviewUnitId(currentChecks[0] as DocumentReviewCheckId)
   const activeTaskId = stringValue(snapshot.activeTaskId)
   if (activeTaskId) return `implementation:${activeTaskId}`
-  const currentItemId = stringValue(snapshot.currentItemId)
-  if (
-    currentItemId &&
-    CANONICAL_FOUNDATION_DOCUMENTS.includes(currentItemId as never)
-  )
-    return documentUnitId(currentItemId)
   const resourceTask = stringValue(
     record(snapshot.resourceProductionState)?.currentTask,
   )
@@ -1762,6 +1796,7 @@ export async function projectExactResumeRun(input: {
   ownerId: string
   projectId: string
   confirmedBriefContext: string
+  receiptReconciledActiveUnitId?: string
 }): Promise<{
   run: DeliveryRun
   activeUnitId?: string
@@ -1826,7 +1861,8 @@ export async function projectExactResumeRun(input: {
     journal: acceptedEvents,
   })
   const activeUnitId = graph[replayedUnitIds.length]
-  const hintedActiveUnitId = rawActiveUnitId(snapshot)
+  const hintedActiveUnitId =
+    input.receiptReconciledActiveUnitId ?? rawActiveUnitId(snapshot)
   if (hintedActiveUnitId && hintedActiveUnitId !== activeUnitId) {
     const hintedPosition = graph.indexOf(hintedActiveUnitId)
     if (hintedPosition > replayedUnitIds.length)

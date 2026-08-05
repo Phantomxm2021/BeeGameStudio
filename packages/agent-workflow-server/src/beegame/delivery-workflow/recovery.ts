@@ -149,6 +149,7 @@ type ReconciledProjectionSource = {
   inspection: WorkflowSnapshotInspection
   events: WorkflowEvent[]
   acceptedUnits: AcceptedWorkflowUnit[]
+  activeUnitId?: string
 }
 
 async function reconcileActiveCanonicalReceipt(input: {
@@ -268,11 +269,15 @@ async function reconcileActiveCanonicalReceipt(input: {
           }),
       updatedAt: acceptedAt,
     }
+    const activeUnitId = nextPath
+      ? `document:${nextPath}`
+      : `review:${FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[0]}`
     if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
       return {
         inspection: { ...input.inspection, parsedValue },
         events: input.events,
         acceptedUnits: [],
+        activeUnitId,
       }
     return {
       inspection: { ...input.inspection, parsedValue },
@@ -281,6 +286,7 @@ async function reconcileActiveCanonicalReceipt(input: {
         acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
       ],
       acceptedUnits: [unit],
+      activeUnitId,
     }
   }
 
@@ -597,6 +603,9 @@ export async function recoverAndResumeRun(input: {
         ownerId: input.ownerId,
         projectId: input.projectId,
         confirmedBriefContext: input.confirmedBriefContext,
+        ...(reconciled.activeUnitId
+          ? { receiptReconciledActiveUnitId: reconciled.activeUnitId }
+          : {}),
       })
       const createdAt = new Date().toISOString()
       const reconstructedEvent: WorkflowEvent = {

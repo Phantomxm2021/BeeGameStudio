@@ -782,6 +782,18 @@ export function createAgentWorkflowApp(
                 sessionIsOpen,
               })
       if (input.mode === 'retry') {
+        const durable = await store.load()
+        if (durable?.runId === current.runId) {
+          if (durable.status === 'completed') return durable
+          if (
+            durable.status === 'running' &&
+            durable.activeDispatch?.status === 'running' &&
+            durable.activeDispatch.dispatchId ===
+              current.activeDispatch?.dispatchId &&
+            (await sessionIsOpen(durable.activeDispatch))
+          )
+            return durable
+        }
         scheduleDeliveryResume({ controller, store, run: current })
         return current
       }
