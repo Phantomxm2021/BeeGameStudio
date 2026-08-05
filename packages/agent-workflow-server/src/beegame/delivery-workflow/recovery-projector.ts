@@ -7,6 +7,7 @@ import {
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
 } from './document-review-input'
+import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './document-repair-graph'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -1249,9 +1250,14 @@ async function validateAcceptedArtifacts(input: {
   }
 }
 
-function rawActiveUnitId(
-  snapshot: Record<string, unknown> | undefined,
-): string | undefined {
+function rawActiveUnitId(input: {
+  snapshot: Record<string, unknown> | undefined
+  workspacePath: string
+  ownerId: string
+  projectId: string
+  confirmedBriefContext: string
+}): string | undefined {
+  const snapshot = input.snapshot
   if (!snapshot) return undefined
   const dispatch = record(snapshot.activeDispatch)
   const currentItemId = stringValue(snapshot.currentItemId)
@@ -1274,19 +1280,66 @@ function rawActiveUnitId(
         'unfinished canonical document has no active dispatch proof',
       )
     const contract = record(request.contract)
+    const dispatchId = stringValue(dispatch.dispatchId)
+    const runId = stringValue(snapshot.runId)
+    const dispatchTaskId = stringValue(dispatch.taskId)
+    const requestTaskId = stringValue(request.taskId)
+    const dispatchRevision = stringValue(dispatch.revision)
+    const requestRevision = stringValue(request.revision)
+    const documentRevision = stringValue(record(snapshot.revision)?.document)
+    const requestWorkspacePath = stringValue(request.workspacePath)
+    const allowedPaths = stringArray(request.allowedPaths)
+    const completedPaths = stringArray(
+      record(snapshot.foundationDraftState)?.completedPaths,
+    )
+    const targetIndex = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
+      currentItemId as never,
+    )
+    const expectedBriefDigest = sha256(input.confirmedBriefContext)
+    const upstreamPaths = stringArray(contract?.upstreamDocumentPaths)
     if (
+      !dispatchId ||
+      !runId ||
+      !dispatchTaskId ||
+      !requestTaskId ||
+      !dispatchRevision ||
+      !requestRevision ||
+      !documentRevision ||
+      !requestWorkspacePath ||
       dispatch.status !== 'running' ||
       dispatch.workerType !== 'document-author' ||
       dispatch.phase !== 'DOCUMENT_DRAFTING' ||
-      dispatch.taskId !== currentItemId ||
-      request.dispatchId !== dispatch.dispatchId ||
-      request.runId !== snapshot.runId ||
+      dispatchTaskId !== currentItemId ||
+      request.dispatchId !== dispatchId ||
+      request.runId !== runId ||
+      request.ownerId !== input.ownerId ||
+      request.projectId !== input.projectId ||
+      snapshot.ownerId !== input.ownerId ||
+      snapshot.projectId !== input.projectId ||
+      resolve(requestWorkspacePath) !== resolve(input.workspacePath) ||
       request.workerType !== dispatch.workerType ||
       request.phase !== dispatch.phase ||
-      request.taskId !== currentItemId ||
+      requestTaskId !== currentItemId ||
+      requestRevision !== dispatchRevision ||
+      dispatchRevision !== documentRevision ||
+      snapshot.confirmedBriefDigest !== expectedBriefDigest ||
+      contract?.confirmedBriefDigest !== expectedBriefDigest ||
       contract?.documentSet !== 'foundation' ||
       contract.authoringMode !== 'initial' ||
-      contract.foundationDocumentPath !== currentItemId
+      contract.foundationDocumentPath !== currentItemId ||
+      !allowedPaths ||
+      !sameStrings(allowedPaths, [currentItemId]) ||
+      !upstreamPaths ||
+      !sameStrings(
+        upstreamPaths,
+        INITIAL_FOUNDATION_UPSTREAM_PATHS[currentItemId as never],
+      ) ||
+      !completedPaths ||
+      targetIndex < 0 ||
+      !sameStrings(
+        completedPaths,
+        CANONICAL_FOUNDATION_DOCUMENTS.slice(0, targetIndex),
+      )
     )
       recoveryError(
         'recovery_checkpoint_conflict',
@@ -1324,6 +1377,19 @@ function rawActiveUnitId(
     return IMPLEMENTATION_AUDIT_UNIT_ID
   if (snapshot.phase === 'ACCEPTANCE') return ACCEPTANCE_UNIT_ID
   return undefined
+}
+
+export function proveExactRawActiveUnitId(input: {
+  inspection: WorkflowSnapshotInspection
+  workspacePath: string
+  ownerId: string
+  projectId: string
+  confirmedBriefContext: string
+}): string | undefined {
+  return rawActiveUnitId({
+    ...input,
+    snapshot: rawSnapshotRecord(input.inspection),
+  })
 }
 
 function usageFromSnapshot(
@@ -1796,7 +1862,10 @@ export async function projectExactResumeRun(input: {
   ownerId: string
   projectId: string
   confirmedBriefContext: string
-  receiptReconciledActiveUnitId?: string
+  receiptReconciliation?: {
+    sourceInspection: WorkflowSnapshotInspection
+    successorActiveUnitId: string
+  }
 }): Promise<{
   run: DeliveryRun
   activeUnitId?: string
@@ -1804,6 +1873,17 @@ export async function projectExactResumeRun(input: {
   sourceSnapshotDigest: string
 }> {
   await assertSnapshotUnchanged(input)
+  if (
+    input.receiptReconciliation &&
+    (input.receiptReconciliation.sourceInspection.digest !==
+      input.inspection.digest ||
+      input.receiptReconciliation.sourceInspection.rawText !==
+        input.inspection.rawText)
+  )
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      'receipt reconciliation does not belong to the projected raw snapshot',
+    )
   const snapshot = rawSnapshotRecord(input.inspection)
   const snapshotRunId = assertSnapshotIdentity({
     snapshot,
@@ -1861,8 +1941,32 @@ export async function projectExactResumeRun(input: {
     journal: acceptedEvents,
   })
   const activeUnitId = graph[replayedUnitIds.length]
-  const hintedActiveUnitId =
-    input.receiptReconciledActiveUnitId ?? rawActiveUnitId(snapshot)
+  const rawProofInspection =
+    input.receiptReconciliation?.sourceInspection ?? input.inspection
+  const rawProofActiveUnitId = proveExactRawActiveUnitId({
+    inspection: rawProofInspection,
+    workspacePath: input.workspacePath,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    confirmedBriefContext: input.confirmedBriefContext,
+  })
+  let hintedActiveUnitId = rawProofActiveUnitId
+  if (input.receiptReconciliation) {
+    if (!rawProofActiveUnitId)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        'receipt reconciliation has no exact raw active-unit proof',
+      )
+    if (
+      replayedUnitIds.at(-1) !== rawProofActiveUnitId ||
+      input.receiptReconciliation.successorActiveUnitId !== activeUnitId
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'receipt reconciliation does not advance the proven raw active unit',
+      )
+    hintedActiveUnitId = input.receiptReconciliation.successorActiveUnitId
+  }
   if (hintedActiveUnitId && hintedActiveUnitId !== activeUnitId) {
     const hintedPosition = graph.indexOf(hintedActiveUnitId)
     if (hintedPosition > replayedUnitIds.length)

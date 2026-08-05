@@ -11,6 +11,7 @@ import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type AcceptedWorkflowUnit,
   type DeliveryRun,
@@ -23,7 +24,10 @@ import {
   type RunStore,
   type WorkflowSnapshotInspection,
 } from './run-store'
-import { projectExactResumeRun } from './recovery-projector'
+import {
+  projectExactResumeRun,
+  proveExactRawActiveUnitId,
+} from './recovery-projector'
 import {
   migrateWorkflowSnapshot,
   SnapshotMigrationError,
@@ -127,17 +131,31 @@ function assertActiveRequestIdentity(input: {
   const dispatchId = stringValue(input.dispatch.dispatchId)
   const runId = stringValue(input.snapshot.runId)
   const requestWorkspace = stringValue(input.request.workspacePath)
+  const dispatchTaskId = stringValue(input.dispatch.taskId)
+  const requestTaskId = stringValue(input.request.taskId)
+  const dispatchRevision = stringValue(input.dispatch.revision)
+  const requestRevision = stringValue(input.request.revision)
   if (
     !dispatchId ||
     !runId ||
+    !dispatchTaskId ||
+    !requestTaskId ||
+    !dispatchRevision ||
+    !requestRevision ||
+    input.snapshot.ownerId !== input.ownerId ||
+    input.snapshot.projectId !== input.projectId ||
     input.request.dispatchId !== dispatchId ||
     input.request.runId !== runId ||
     input.request.ownerId !== input.ownerId ||
     input.request.projectId !== input.projectId ||
     !requestWorkspace ||
     resolve(requestWorkspace) !== resolve(input.workspacePath) ||
+    input.dispatch.status !== 'running' ||
+    input.snapshot.phase !== input.dispatch.phase ||
     input.request.workerType !== input.dispatch.workerType ||
-    input.request.phase !== input.dispatch.phase
+    input.request.phase !== input.dispatch.phase ||
+    requestTaskId !== dispatchTaskId ||
+    requestRevision !== dispatchRevision
   )
     recoveryConflict(
       'active dispatch request does not match the owned recovery checkpoint',
@@ -149,7 +167,10 @@ type ReconciledProjectionSource = {
   inspection: WorkflowSnapshotInspection
   events: WorkflowEvent[]
   acceptedUnits: AcceptedWorkflowUnit[]
-  activeUnitId?: string
+  receiptReconciliation?: {
+    sourceInspection: WorkflowSnapshotInspection
+    successorActiveUnitId: string
+  }
 }
 
 async function reconcileActiveCanonicalReceipt(input: {
@@ -171,19 +192,6 @@ async function reconcileActiveCanonicalReceipt(input: {
     }
 
   if (dispatch.workerType === 'document-author') {
-    const dispatchId = stringValue(dispatch.dispatchId)
-    if (!dispatchId)
-      recoveryConflict('active canonical document dispatch has no identity')
-    const receipt = await reconcileCanonicalDocumentCommitReceipt({
-      workspacePath: input.workspacePath,
-      dispatchId,
-    })
-    if (!receipt)
-      return {
-        inspection: input.inspection,
-        events: input.events,
-        acceptedUnits: [],
-      }
     const identity = assertActiveRequestIdentity({
       ...input,
       snapshot,
@@ -198,20 +206,46 @@ async function reconcileActiveCanonicalReceipt(input: {
     const targetIndex = targetPath
       ? CANONICAL_FOUNDATION_DOCUMENTS.indexOf(targetPath as never)
       : -1
+    const rawActiveUnitId = proveExactRawActiveUnitId({
+      inspection: input.inspection,
+      workspacePath: input.workspacePath,
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      confirmedBriefContext: input.confirmedBriefContext,
+    })
     if (
-      request.phase !== 'DOCUMENT_DRAFTING' ||
-      request.taskId !== targetPath ||
+      rawActiveUnitId !== `document:${targetPath}` ||
       contract?.authoringMode !== 'initial' ||
       !completedPaths ||
       targetIndex < 0 ||
       !sameStrings(
         completedPaths,
         CANONICAL_FOUNDATION_DOCUMENTS.slice(0, targetIndex),
-      ) ||
-      receipt.targetPath !== targetPath
+      )
     )
       recoveryConflict(
         'canonical document receipt does not prove the exact active drafting unit',
+      )
+    const receipt = await reconcileCanonicalDocumentCommitReceipt({
+      workspacePath: input.workspacePath,
+      dispatchId: identity.dispatchId,
+    })
+    if (!receipt)
+      return {
+        inspection: input.inspection,
+        events: input.events,
+        acceptedUnits: [],
+      }
+    if (
+      receipt.dispatchId !== identity.dispatchId ||
+      receipt.targetPath !== targetPath ||
+      receipt.documentId !==
+        CANONICAL_PROJECT_DOCUMENT_IDS[
+          targetPath as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
+        ]
+    )
+      recoveryConflict(
+        'canonical document receipt contradicts the proven active dispatch',
       )
     const confirmedBriefDigest = createHash('sha256')
       .update(input.confirmedBriefContext)
@@ -277,7 +311,10 @@ async function reconcileActiveCanonicalReceipt(input: {
         inspection: { ...input.inspection, parsedValue },
         events: input.events,
         acceptedUnits: [],
-        activeUnitId,
+        receiptReconciliation: {
+          sourceInspection: input.inspection,
+          successorActiveUnitId: activeUnitId,
+        },
       }
     return {
       inspection: { ...input.inspection, parsedValue },
@@ -286,7 +323,10 @@ async function reconcileActiveCanonicalReceipt(input: {
         acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
       ],
       acceptedUnits: [unit],
-      activeUnitId,
+      receiptReconciliation: {
+        sourceInspection: input.inspection,
+        successorActiveUnitId: activeUnitId,
+      },
     }
   }
 
@@ -603,8 +643,8 @@ export async function recoverAndResumeRun(input: {
         ownerId: input.ownerId,
         projectId: input.projectId,
         confirmedBriefContext: input.confirmedBriefContext,
-        ...(reconciled.activeUnitId
-          ? { receiptReconciledActiveUnitId: reconciled.activeUnitId }
+        ...(reconciled.receiptReconciliation
+          ? { receiptReconciliation: reconciled.receiptReconciliation }
           : {}),
       })
       const createdAt = new Date().toISOString()

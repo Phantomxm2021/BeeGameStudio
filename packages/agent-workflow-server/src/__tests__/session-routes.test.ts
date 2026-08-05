@@ -815,9 +815,11 @@ describe('delivery workflow session continuation', () => {
         revision: journalRun.revision.document,
         allowedPaths: [recoverablePath],
         contract: {
+          confirmedBriefDigest: journalRun.confirmedBriefDigest,
           documentSet: 'foundation',
           authoringMode: 'initial',
           foundationDocumentPath: recoverablePath,
+          upstreamDocumentPaths: [],
         },
       }
       const recoverableSnapshot = {

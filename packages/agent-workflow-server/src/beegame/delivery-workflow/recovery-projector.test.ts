@@ -752,9 +752,11 @@ describe('workflow exact-resume recovery projector', () => {
       revision: fixture.snapshot.revision.document,
       allowedPaths: [activePath],
       contract: {
+        confirmedBriefDigest: fixture.snapshot.confirmedBriefDigest,
         documentSet: 'foundation',
         authoringMode: 'initial',
         foundationDocumentPath: activePath,
+        upstreamDocumentPaths: [],
       },
     }
     const snapshot = {
