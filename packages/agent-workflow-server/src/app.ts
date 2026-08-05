@@ -165,6 +165,7 @@ import {
   WorkflowStoreError,
 } from './beegame/delivery-workflow/run-store'
 import {
+  recoverAndResumeRun,
   reconcileRunOnStartup,
   resumeRun,
   retryRun,
@@ -657,6 +658,120 @@ export function createAgentWorkflowApp(
           })
         }
       })
+    })
+  }
+  const stopWorkspaceWorkflowWorkers = async (input: {
+    workspacePath: string
+    userId: string
+  }): Promise<void> => {
+    const workspacePath = resolve(input.workspacePath)
+    const workers = beeGameSessions
+      .list(input.userId, { includeWorkflowWorkers: true })
+      .filter(
+        session =>
+          beeGameSessions.isWorkflowWorker(session.id) &&
+          resolve(session.cwd) === workspacePath,
+      )
+    for (const worker of workers)
+      if (worker.status === 'running') beeGameSessions.stop(worker.id)
+    await Promise.all(
+      workers.map(worker => beeGameSessions.disposeWorkflowWorker(worker.id)),
+    )
+  }
+  const continueBeeGameDeliveryWorkflow = async (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    mode: 'resume' | 'retry'
+    taskId?: string
+    confirmedBriefContext?: string
+    modelConfigId?: string
+    language?: BeeGameSessionLanguage
+  }): Promise<DeliveryRun | undefined> => {
+    const store = createRunStore(input.workspacePath, input.user.id)
+    let inspection
+    try {
+      inspection = await store.inspectWorkflowSnapshot()
+    } catch (error) {
+      if (error instanceof WorkflowStoreError && error.code === 'io') {
+        const missing = await store.load()
+        if (!missing) return undefined
+      }
+      throw error
+    }
+    const rawSnapshot =
+      inspection.parsedValue &&
+      typeof inspection.parsedValue === 'object' &&
+      !Array.isArray(inspection.parsedValue)
+        ? (inspection.parsedValue as Record<string, unknown>)
+        : undefined
+    const confirmedBriefContext =
+      input.confirmedBriefContext?.trim() ||
+      inspection.currentRun?.confirmedBriefContext ||
+      (typeof rawSnapshot?.confirmedBriefContext === 'string'
+        ? rawSnapshot.confirmedBriefContext
+        : undefined)
+    const controller = getDeliveryController({
+      request: input.request,
+      user: input.user,
+      projectId: input.projectId,
+      workspacePath: input.workspacePath,
+      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
+      ...(input.language ? { language: input.language } : {}),
+    })
+    const sessionIsOpen = async (dispatch: DispatchRecord) => {
+      try {
+        return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
+      } catch {
+        return false
+      }
+    }
+    if (inspection.currentRun) {
+      if (inspection.currentRun.projectId !== input.projectId)
+        throw new WorkflowStoreError(
+          'workflow snapshot does not belong to the owned project',
+          'recovery_checkpoint_conflict',
+        )
+      const current =
+        input.mode === 'retry'
+          ? await retryRun({
+              store,
+              runId: inspection.currentRun.runId,
+              workspacePath: input.workspacePath,
+              ...(input.taskId ? { taskId: input.taskId } : {}),
+              sessionIsOpen,
+            })
+          : await resumeRun({
+              store,
+              runId: inspection.currentRun.runId,
+              workspacePath: input.workspacePath,
+              sessionIsOpen,
+            })
+      if (input.mode === 'retry') {
+        scheduleDeliveryResume({ controller, store, run: current })
+        return current
+      }
+      await controller.resume(current)
+      return (await store.load()) ?? current
+    }
+    if (!confirmedBriefContext)
+      throw new WorkflowStoreError(
+        'workflow recovery requires confirmed brief authority',
+        'recovery_checkpoint_missing',
+      )
+    return recoverAndResumeRun({
+      store,
+      workspacePath: input.workspacePath,
+      ownerId: input.user.id,
+      projectId: input.projectId,
+      confirmedBriefContext,
+      stopWorkspaceWorkers: async () =>
+        stopWorkspaceWorkflowWorkers({
+          workspacePath: input.workspacePath,
+          userId: input.user.id,
+        }),
+      resumeCurrentRun: run => controller.resume(run),
     })
   }
   const startBeeGameDeliveryWorkflow = async (input: {
@@ -2364,29 +2479,16 @@ export function createAgentWorkflowApp(
       )
       if (!project?.root_path)
         return c.json({ error: 'Project not found' }, 404)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
-      const store = createRunStore(project.root_path, user.id)
-      const controller = getDeliveryController({
+      const resumed = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
-        projectId: run.projectId,
+        projectId: project.id,
         workspacePath: project.root_path,
+        mode: 'resume',
       })
-      const resumed = await resumeRun({
-        store,
-        runId: run.runId,
-        workspacePath: project.root_path,
-        sessionIsOpen: async dispatch => {
-          try {
-            return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-          } catch {
-            return false
-          }
-        },
-      })
-      await controller.resume(resumed)
-      return c.json((await store.load()) ?? resumed)
+      return resumed
+        ? c.json(resumed)
+        : c.json({ error: 'document_review_not_started' }, 409)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -2405,32 +2507,19 @@ export function createAgentWorkflowApp(
       )
       if (!project?.root_path)
         return c.json({ error: 'Project not found' }, 404)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
-      const store = createRunStore(project.root_path, user.id)
-      const controller = getDeliveryController({
+      const retried = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
-        projectId: run.projectId,
+        projectId: project.id,
         workspacePath: project.root_path,
-      })
-      const retried = await retryRun({
-        store,
-        runId: run.runId,
-        workspacePath: project.root_path,
+        mode: 'retry',
         ...(taskId ? { taskId } : {}),
-        sessionIsOpen: async dispatch => {
-          try {
-            return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-          } catch {
-            return false
-          }
-        },
       })
-      scheduleDeliveryResume({ controller, store, run: retried })
-      return c.json(retried, 202)
+      return retried
+        ? c.json(retried, 202)
+        : c.json({ error: 'document_review_not_started' }, 409)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -3406,24 +3495,8 @@ export function createAgentWorkflowApp(
         }
       },
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
-      resumeDeliveryWorkflow: async input => {
-        const store = createRunStore(input.workspacePath, input.user.id)
-        const controller = getDeliveryController(input)
-        const reconciled = await reconcileRunOnStartup({
-          store,
-          sessionIsOpen: async dispatch => {
-            try {
-              return await controller.dispatcher.workerIsOpen(
-                dispatch.dispatchId,
-              )
-            } catch {
-              return false
-            }
-          },
-        })
-        await controller.resume(reconciled ?? input.run)
-        return (await store.load()) ?? reconciled ?? input.run
-      },
+      resumeDeliveryWorkflow: input =>
+        continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
       requestDeliveryChange: async input => {
         const controller = getDeliveryController(input)
         return controller.requestChange(input.run, input.message)
@@ -6265,7 +6338,7 @@ function registerBeeGameSessionRoutes(
       user: BeeGameUserContext
       projectId: string
       workspacePath: string
-      run: import('./beegame/delivery-workflow/types').DeliveryRun
+      confirmedBriefContext?: string
       modelConfigId?: string
       language?: BeeGameSessionLanguage
     }) => Promise<unknown>
@@ -6950,30 +7023,31 @@ function registerBeeGameSessionRoutes(
       if (session) {
         const metadata = beeGameSessions.metadata(session.id)
         if (metadata?.projectId) {
-          const store = createRunStore(
-            session.cwd,
-            options.getCurrentUser(c.req.raw).id,
-          )
-          const run = await store.load()
-          if (run) {
+          if (options.resumeDeliveryWorkflow) {
             const user = options.getCurrentUser(c.req.raw)
-            if (options.resumeDeliveryWorkflow) {
-              return c.json(
-                await options.resumeDeliveryWorkflow({
-                  request: c.req.raw,
-                  user,
-                  projectId: run.projectId,
-                  workspacePath: session.cwd,
-                  run,
-                  ...(session.modelConfigId
-                    ? { modelConfigId: session.modelConfigId }
-                    : {}),
-                  ...(language ? { language } : {}),
-                }),
-              )
-            }
-            const reconciled = await reconcileRunOnStartup({ store })
-            return c.json(reconciled ?? run)
+            const confirmedBriefContext = beeGameSessions
+              .transcript(session.id)
+              .toReversed()
+              .find(
+                event =>
+                  isObject(event.payload) &&
+                  event.payload.displayKind === 'confirmed_brief' &&
+                  typeof event.payload.confirmedBriefContext === 'string',
+              )?.payload?.confirmedBriefContext
+            const resumed = await options.resumeDeliveryWorkflow({
+              request: c.req.raw,
+              user,
+              projectId: metadata.projectId,
+              workspacePath: session.cwd,
+              ...(typeof confirmedBriefContext === 'string'
+                ? { confirmedBriefContext }
+                : {}),
+              ...(session.modelConfigId
+                ? { modelConfigId: session.modelConfigId }
+                : {}),
+              ...(language ? { language } : {}),
+            })
+            if (resumed !== undefined) return c.json(resumed)
           }
           return c.json(
             {

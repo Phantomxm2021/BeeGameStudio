@@ -1,8 +1,24 @@
+import { randomUUID } from 'node:crypto'
+import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
 import { computeDocumentRevision, computeResourceRevision } from './revision'
 import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
-import type { DeliveryRun, DispatchRecord } from './types'
-import type { RunStore } from './run-store'
+import {
+  DELIVERY_RUN_SCHEMA_VERSION,
+  type DeliveryRun,
+  type DispatchRecord,
+  type WorkflowEvent,
+} from './types'
+import {
+  WorkflowStoreError,
+  type RunStore,
+  type WorkflowSnapshotInspection,
+} from './run-store'
+import { projectExactResumeRun } from './recovery-projector'
+import {
+  migrateWorkflowSnapshot,
+  SnapshotMigrationError,
+} from './snapshot-migrations'
 import { reconcileCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 import {
   createResourceContentTerminalFromReceipt,
@@ -14,6 +30,261 @@ export {
   projectExactResumeRun,
   type WorkflowSnapshotInspection,
 } from './recovery-projector'
+
+const workspaceRecoveryQueues = new Map<string, Promise<void>>()
+const workspaceResumeQueues = new Map<string, Promise<DeliveryRun>>()
+
+export class WorkflowRecoveryTransactionError extends Error {
+  constructor(
+    message: string,
+    readonly code: 'recovery_worker_stop_failed',
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'WorkflowRecoveryTransactionError'
+  }
+}
+
+function snapshotRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function assertRecoveryAuthority(input: {
+  inspection: WorkflowSnapshotInspection
+  ownerId: string
+  projectId: string
+  confirmedBriefContext: string
+}): void {
+  if (!input.confirmedBriefContext.trim())
+    throw new WorkflowStoreError(
+      'workflow recovery requires confirmed brief authority',
+      'recovery_checkpoint_missing',
+    )
+  if (input.inspection.error?.code === 'ownership') throw input.inspection.error
+  const snapshot = snapshotRecord(input.inspection.parsedValue)
+  const schemaVersion = snapshot?.schemaVersion
+  if (
+    typeof schemaVersion === 'number' &&
+    Number.isInteger(schemaVersion) &&
+    schemaVersion > DELIVERY_RUN_SCHEMA_VERSION
+  )
+    throw (
+      input.inspection.error ??
+      new WorkflowStoreError(
+        `workflow snapshot schema version ${schemaVersion} is newer than current version ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        'invalid',
+      )
+    )
+  const ownerId =
+    input.inspection.currentRun?.ownerId ??
+    (typeof snapshot?.ownerId === 'string' ? snapshot.ownerId : undefined)
+  if (ownerId && ownerId !== input.ownerId)
+    throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
+  const projectId =
+    input.inspection.currentRun?.projectId ??
+    (typeof snapshot?.projectId === 'string' ? snapshot.projectId : undefined)
+  if (projectId && projectId !== input.projectId)
+    throw new WorkflowStoreError(
+      'workflow snapshot does not belong to the owned project',
+      'recovery_checkpoint_conflict',
+    )
+  const confirmedBriefContext =
+    input.inspection.currentRun?.confirmedBriefContext ??
+    (typeof snapshot?.confirmedBriefContext === 'string'
+      ? snapshot.confirmedBriefContext
+      : undefined)
+  if (
+    confirmedBriefContext &&
+    confirmedBriefContext !== input.confirmedBriefContext
+  )
+    throw new WorkflowStoreError(
+      'workflow confirmed brief authority conflicts with recovery input',
+      'recovery_checkpoint_conflict',
+    )
+}
+
+function migrationInspection(
+  inspection: WorkflowSnapshotInspection,
+): WorkflowSnapshotInspection {
+  if (inspection.error?.code !== 'obsolete') return inspection
+  try {
+    const migrated = migrateWorkflowSnapshot(inspection.parsedValue)
+    return {
+      ...inspection,
+      parsedValue: migrated.value,
+      currentRun: migrated.value as DeliveryRun,
+      error: undefined,
+    }
+  } catch (error) {
+    if (
+      error instanceof SnapshotMigrationError &&
+      error.code === 'ambiguous_completed_unit'
+    )
+      throw new WorkflowStoreError(
+        error.message,
+        'recovery_checkpoint_conflict',
+      )
+    throw new WorkflowStoreError(
+      error instanceof Error
+        ? error.message
+        : 'workflow snapshot migration failed',
+      error instanceof SnapshotMigrationError &&
+        error.code === 'unsupported_version'
+        ? 'obsolete'
+        : 'invalid',
+    )
+  }
+}
+
+async function withWorkspaceRecoveryLock<T>(
+  workspacePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(workspacePath)
+  const previous = workspaceRecoveryQueues.get(key) ?? Promise.resolve()
+  const queued = previous.catch(() => undefined).then(operation)
+  const marker = queued.then(
+    () => undefined,
+    () => undefined,
+  )
+  workspaceRecoveryQueues.set(key, marker)
+  try {
+    return await queued
+  } finally {
+    if (workspaceRecoveryQueues.get(key) === marker)
+      workspaceRecoveryQueues.delete(key)
+  }
+}
+
+async function resumeWorkspaceOnce(input: {
+  key: string
+  store: RunStore
+  run: DeliveryRun
+  resumeCurrentRun: (run: DeliveryRun) => Promise<void>
+}): Promise<DeliveryRun> {
+  const existing = workspaceResumeQueues.get(input.key)
+  if (existing) return existing
+  const pending = (async () => {
+    await input.resumeCurrentRun(input.run)
+    const current = await input.store.load()
+    return current?.runId === input.run.runId ? current : input.run
+  })()
+  workspaceResumeQueues.set(input.key, pending)
+  try {
+    return await pending
+  } finally {
+    if (workspaceResumeQueues.get(input.key) === pending)
+      workspaceResumeQueues.delete(input.key)
+  }
+}
+
+export async function recoverAndResumeRun(input: {
+  store: RunStore
+  workspacePath: string
+  ownerId: string
+  projectId: string
+  confirmedBriefContext: string
+  stopWorkspaceWorkers: (reason: string) => Promise<void>
+  resumeCurrentRun: (run: DeliveryRun) => Promise<void>
+}): Promise<DeliveryRun> {
+  const workspacePath = resolve(input.workspacePath)
+  if (resolve(input.store.workspacePath) !== workspacePath)
+    throw new WorkflowStoreError(
+      'workflow store does not belong to the recovery workspace',
+      'ownership',
+    )
+  const transaction = await withWorkspaceRecoveryLock(
+    workspacePath,
+    async (): Promise<{ run: DeliveryRun; resume: boolean }> => {
+      const source = await input.store.inspectWorkflowSnapshot()
+      assertRecoveryAuthority({ ...input, inspection: source })
+      if (source.currentRun) {
+        return {
+          run: source.currentRun,
+          resume:
+            source.currentRun.status !== 'completed' &&
+            source.currentRun.activeDispatch?.status !== 'running',
+        }
+      }
+      try {
+        await input.stopWorkspaceWorkers(
+          'recovering obsolete or invalid delivery workflow',
+        )
+      } catch (error) {
+        throw new WorkflowRecoveryTransactionError(
+          'stale workflow workers could not be stopped',
+          'recovery_worker_stop_failed',
+          { cause: error },
+        )
+      }
+
+      const stoppedSource = await input.store.inspectWorkflowSnapshot()
+      if (stoppedSource.digest !== source.digest)
+        throw new WorkflowStoreError(
+          'workflow snapshot changed while stale workers were stopping',
+          'recovery_snapshot_changed',
+        )
+      const migratedSource = migrationInspection(source)
+      const projection = await projectExactResumeRun({
+        inspection: migratedSource,
+        events: await input.store.readEvents(),
+        workspacePath,
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        confirmedBriefContext: input.confirmedBriefContext,
+      })
+      const beforeReplacement = await input.store.inspectWorkflowSnapshot()
+      if (beforeReplacement.digest !== source.digest)
+        throw new WorkflowStoreError(
+          'workflow snapshot changed during reconstruction',
+          'recovery_snapshot_changed',
+        )
+
+      const createdAt = new Date().toISOString()
+      const reconstructedEvent: WorkflowEvent = {
+        eventId: randomUUID(),
+        runId: projection.run.runId,
+        type: 'workflow.run.reconstructed',
+        phase: projection.run.phase,
+        status: projection.run.status,
+        revision: projection.run.revision,
+        createdAt,
+        projectId: projection.run.projectId,
+        ownerId: projection.run.ownerId,
+        sourceSnapshotDigest: source.digest,
+        replayedUnitIds: projection.replayedUnitIds,
+        ...(projection.activeUnitId
+          ? { activeUnitId: projection.activeUnitId }
+          : {}),
+      }
+      await input.store.save({
+        ...projection.run,
+        pendingEvents: [reconstructedEvent],
+      })
+      const persisted = await input.store.load()
+      if (!persisted || persisted.runId !== projection.run.runId)
+        throw new WorkflowStoreError(
+          'reconstructed workflow snapshot could not be reloaded',
+          'io',
+        )
+      return {
+        run: persisted,
+        resume:
+          persisted.status !== 'completed' &&
+          persisted.activeDispatch?.status !== 'running',
+      }
+    },
+  )
+  if (!transaction.resume) return transaction.run
+  return resumeWorkspaceOnce({
+    key: workspacePath,
+    store: input.store,
+    run: transaction.run,
+    resumeCurrentRun: input.resumeCurrentRun,
+  })
+}
 
 async function restoreCanonicalDocumentCommit(
   run: DeliveryRun,

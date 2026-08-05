@@ -1,22 +1,37 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  recoverAndResumeRun,
   reconcileRunOnStartup,
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
-import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
+import {
+  computeDocumentRevision,
+  computeResourceContentDigest,
+  computeWorkspaceRevision,
+} from '../beegame/delivery-workflow/revision'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
 } from './delivery-workflow-test-helpers'
 import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
+  CANONICAL_PROJECT_DOCUMENTS,
+  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
+  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  type AcceptedWorkflowUnit,
+  type DeliveryRun,
+  type DocumentReviewCheck,
+  type WorkflowUnitAcceptedEvent,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
@@ -29,6 +44,369 @@ import {
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
+import {
+  artifactsForDocumentReviewCheck,
+  documentReviewArtifactDigests,
+  readDocumentReviewArtifacts,
+} from '../beegame/delivery-workflow/document-review-input'
+
+const RECOVERY_OWNER_ID = 'recovery-owner'
+const RECOVERY_PROJECT_ID = 'recovery-project'
+const RECOVERY_RUN_ID = 'recovery-run'
+const RECOVERY_BRIEF = 'Confirmed recovery test authority.'
+const RECOVERY_ACCEPTED_AT = '2026-08-05T00:00:00.000Z'
+const RETIRED_PENDING_CHECK_ID = 'retired-pending-check'
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+async function createStaleReviewerRecoveryFixture() {
+  const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-exact-resume-'))
+  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
+    await commitCanonicalDocument({
+      workspacePath,
+      contract: {
+        dispatchId: `fixture-document-${index}`,
+        targetPath: path,
+        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+        operation: 'create',
+        baselineDigest: null,
+      },
+      body: path === 'docs/GDD.md' ? '# Recovery authority' : '# Fixture',
+    })
+
+  const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
+  const documentRevision = await computeDocumentRevision(
+    workspacePath,
+    confirmedBriefDigest,
+  )
+  const workspaceRevision = await computeWorkspaceRevision(workspacePath)
+  const inventoryRevision =
+    await computeResourceInventoryRevision(workspacePath)
+  const contentDigest = await computeResourceContentDigest(workspacePath)
+  const resourceRevision = await computeResourceRevision(
+    workspacePath,
+    documentRevision,
+  )
+  const revision = {
+    document: documentRevision,
+    resource: resourceRevision,
+    workspace: workspaceRevision,
+  }
+  const authority = {
+    confirmedBriefContext: RECOVERY_BRIEF,
+    confirmedBriefDigest,
+  }
+  const allChecks = createAcceptedComprehensiveReview().checks
+  const foundationChecks = allChecks.slice(
+    0,
+    FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.length,
+  )
+  const checklistCheck: DocumentReviewCheck = {
+    id: 'checklist_traceability',
+    status: 'pass',
+    conclusion: 'The Checklist is traceable.',
+    evidence: [{ path: 'docs/acceptance/gameplay-checklist.md', anchor: '$' }],
+    findingIds: [],
+    assessments: [],
+  }
+  const foundationArtifacts = await readDocumentReviewArtifacts(
+    workspacePath,
+    'foundation',
+    authority,
+  )
+  const checklistArtifacts = await readDocumentReviewArtifacts(
+    workspacePath,
+    'checklist',
+    authority,
+  )
+  const comprehensiveArtifacts = await readDocumentReviewArtifacts(
+    workspacePath,
+    'complete',
+    authority,
+  )
+  const dependencyDigests = new Map<string, Record<string, string>>()
+  for (const check of [...foundationChecks, checklistCheck]) {
+    const artifacts =
+      check.id === 'checklist_traceability'
+        ? checklistArtifacts
+        : foundationArtifacts
+    dependencyDigests.set(
+      check.id,
+      documentReviewArtifactDigests(
+        artifactsForDocumentReviewCheck(artifacts, check.id),
+      ),
+    )
+  }
+  for (const check of allChecks)
+    if (!dependencyDigests.has(check.id))
+      dependencyDigests.set(
+        check.id,
+        documentReviewArtifactDigests(
+          artifactsForDocumentReviewCheck(comprehensiveArtifacts, check.id),
+        ),
+      )
+
+  const acceptedUnits: AcceptedWorkflowUnit[] = [
+    ...CANONICAL_FOUNDATION_DOCUMENTS.map((path, index) => ({
+      eventSchemaVersion: 1 as const,
+      unitId: `document:${path}`,
+      kind: 'document' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      predecessorUnitIds:
+        index === 0
+          ? []
+          : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[index - 1]}`],
+      inputRevision: documentRevision,
+      dependencyDigests: {},
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: { path, revision: documentRevision },
+    })),
+    ...foundationChecks.map((check, index) => ({
+      eventSchemaVersion: 1 as const,
+      unitId: `review:${check.id}`,
+      kind: 'review-check' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      predecessorUnitIds:
+        index === 0 ? [] : [`review:${foundationChecks[index - 1]!.id}`],
+      inputRevision: documentRevision,
+      dependencyDigests: dependencyDigests.get(check.id)!,
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: {
+        check,
+        findings: [],
+        dependencyDigests: {
+          [check.id]: dependencyDigests.get(check.id)!,
+        },
+      },
+    })),
+    {
+      eventSchemaVersion: 1,
+      unitId: 'review:checklist_traceability',
+      kind: 'review-check',
+      phase: 'DOCUMENT_REVIEW',
+      predecessorUnitIds: [],
+      inputRevision: documentRevision,
+      dependencyDigests: dependencyDigests.get(checklistCheck.id)!,
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: {
+        check: checklistCheck,
+        findings: [],
+        dependencyDigests: {
+          checklist_traceability: dependencyDigests.get(checklistCheck.id)!,
+        },
+      },
+    },
+    {
+      eventSchemaVersion: 1,
+      unitId: 'checklist:docs/acceptance/gameplay-checklist.md',
+      kind: 'checklist',
+      phase: 'DOCUMENT_REVIEW',
+      predecessorUnitIds: ['review:checklist_traceability'],
+      inputRevision: documentRevision,
+      dependencyDigests: dependencyDigests.get(checklistCheck.id)!,
+      receiptRef: '.beegame/workflow/evidence/checklist.json',
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: {
+        revision: documentRevision,
+        evidencePath: '.beegame/workflow/evidence/checklist.json',
+        checkIds: ['checklist_traceability'],
+      },
+    },
+    {
+      eventSchemaVersion: 1,
+      unitId: 'resource:inventory',
+      kind: 'resource-inventory',
+      phase: 'RESOURCE_PREPARATION',
+      predecessorUnitIds: ['checklist:docs/acceptance/gameplay-checklist.md'],
+      inputRevision: inventoryRevision,
+      dependencyDigests: {},
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: {
+        bindings: [
+          {
+            requirementId: 'fixture-requirement',
+            resourceIds: ['fixture-resource'],
+          },
+        ],
+        catalogObserved: true,
+      },
+    },
+    {
+      eventSchemaVersion: 1,
+      unitId: 'resource:content',
+      kind: 'resource-content',
+      phase: 'RESOURCE_PREPARATION',
+      predecessorUnitIds: ['resource:inventory'],
+      inputRevision: contentDigest,
+      dependencyDigests: { content: contentDigest },
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: { contentDigest },
+    },
+    {
+      eventSchemaVersion: 1,
+      unitId: 'resource:gate',
+      kind: 'resource-gate',
+      phase: 'DOCUMENT_REVIEW',
+      predecessorUnitIds: ['resource:content'],
+      inputRevision: resourceRevision,
+      dependencyDigests: {},
+      receiptRef: '.beegame/workflow/evidence/resource-gate.json',
+      acceptedAt: RECOVERY_ACCEPTED_AT,
+      payload: { receiptRef: '.beegame/workflow/evidence/resource-gate.json' },
+    },
+  ]
+  const checklistApproval = {
+    scope: 'checklist' as const,
+    revision: documentRevision,
+    checks: [checklistCheck],
+    checkEvidenceDigests: {
+      checklist_traceability: dependencyDigests.get(checklistCheck.id)!,
+    },
+    evidencePath: '.beegame/workflow/evidence/checklist.json',
+    approvedAt: RECOVERY_ACCEPTED_AT,
+  }
+  const base = createTestDeliveryRun({
+    runId: RECOVERY_RUN_ID,
+    projectId: RECOVERY_PROJECT_ID,
+    ownerId: RECOVERY_OWNER_ID,
+    confirmedBriefContext: RECOVERY_BRIEF,
+    checklistApproved: true,
+  })
+  const usage = {
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
+  const journalRun: DeliveryRun = {
+    ...base,
+    revision,
+    usage,
+    documentReviewState: { ...base.documentReviewState, checklistApproval },
+  }
+  const store = createRunStore(workspacePath, RECOVERY_OWNER_ID)
+  await store.commit(journalRun, {
+    runId: journalRun.runId,
+    type: 'run.created',
+    phase: journalRun.phase,
+    status: journalRun.status,
+    revision,
+    projectId: journalRun.projectId,
+    ownerId: journalRun.ownerId,
+    createdAt: journalRun.createdAt,
+  })
+  await store.commit(
+    journalRun,
+    {
+      runId: journalRun.runId,
+      type: 'usage.updated',
+      phase: journalRun.phase,
+      status: journalRun.status,
+      revision,
+      usage,
+      createdAt: RECOVERY_ACCEPTED_AT,
+    },
+    acceptedUnits,
+  )
+
+  const snapshot = {
+    ...journalRun,
+    schemaVersion: 11,
+    phase: 'DOCUMENT_REVIEW' as const,
+    documentStep: 'COMPREHENSIVE_REVIEW' as const,
+    evidence: {
+      resourcePreparation: {
+        path: '.beegame/workflow/evidence/resource-gate.json',
+        kind: 'resource_preparation' as const,
+        revision: resourceRevision,
+        status: 'passed' as const,
+        observedAt: RECOVERY_ACCEPTED_AT,
+      },
+    },
+    resourceProductionState: {
+      currentTask: 'RESOURCE_GATE' as const,
+      inventoryReceipt: {
+        revision: inventoryRevision,
+        bindings: [
+          {
+            requirementId: 'fixture-requirement',
+            resourceIds: ['fixture-resource'],
+          },
+        ],
+        catalogObserved: true,
+        acceptedAt: RECOVERY_ACCEPTED_AT,
+      },
+      contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
+    },
+    documentReviewState: {
+      ...journalRun.documentReviewState,
+      checklistApproval,
+      activeCycle: {
+        cycleId: 'stale-review-cycle',
+        originScope: 'complete' as const,
+        scope: 'complete' as const,
+        mode: 'initial' as const,
+        sourceRevision: resourceRevision,
+        requiredCheckIds: [
+          ...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+          RETIRED_PENDING_CHECK_ID,
+        ],
+        completedCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        checks: foundationChecks,
+        checkEvidenceDigests: Object.fromEntries(
+          foundationChecks.map(check => [
+            check.id,
+            dependencyDigests.get(check.id)!,
+          ]),
+        ),
+        findings: [],
+        acceptedSemanticResult: false,
+        changedPaths: [],
+        sourceArtifactDigests: {},
+      },
+    },
+    activeDispatch: {
+      dispatchId: 'stale-reviewer-dispatch',
+      workerType: 'document-reviewer' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      revision: resourceRevision,
+      status: 'running' as const,
+      startedAt: RECOVERY_ACCEPTED_AT,
+      request: {
+        dispatchId: 'stale-reviewer-dispatch',
+        runId: RECOVERY_RUN_ID,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        workspacePath,
+        workerType: 'document-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        revision: resourceRevision,
+        contract: {
+          requiredCheckIds: [
+            ...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+            RETIRED_PENDING_CHECK_ID,
+          ],
+          currentCheckIds: ['resource_semantic_fitness' as const],
+        },
+      },
+    },
+  }
+  await writeFile(
+    store.paths.snapshot,
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+  )
+  return {
+    workspacePath,
+    store,
+    snapshot,
+    dependencyDigests,
+    allChecks,
+    resourceRevision,
+  }
+}
 
 describe('delivery workflow recovery', () => {
   let workspace = ''
@@ -735,7 +1113,9 @@ describe('delivery workflow recovery', () => {
       schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
       runId: initial.runId,
     })
-    expect(JSON.parse(await readFile(store.paths.snapshot, 'utf8'))).toMatchObject({
+    expect(
+      JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
+    ).toMatchObject({
       schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
       runId: initial.runId,
     })
@@ -1865,5 +2245,261 @@ describe('delivery workflow recovery', () => {
       workerType: 'document-author',
       status: 'running',
     })
+  })
+
+  test('serializes simultaneous exact-resume recovery and dispatches only the active review unit', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    let stopCalls = 0
+    let resumeCalls = 0
+    let releaseResume!: () => void
+    const resumeGate = new Promise<void>(resolve => {
+      releaseResume = resolve
+    })
+    let markResumeStarted!: () => void
+    const resumeStarted = new Promise<void>(resolve => {
+      markResumeStarted = resolve
+    })
+    const resumeCurrentRun = async (run: DeliveryRun) => {
+      resumeCalls += 1
+      expect(run.activeDispatch).toBeUndefined()
+      expect(run.currentItemId).toBe('resource_semantic_fitness')
+      markResumeStarted()
+      await resumeGate
+      const current = await fixture.store.load()
+      if (current?.activeDispatch) return
+      await fixture.store.save({
+        ...run,
+        activeDispatch: {
+          dispatchId: 'current-reviewer-dispatch',
+          workerType: 'document-reviewer',
+          phase: 'DOCUMENT_REVIEW',
+          revision: fixture.resourceRevision,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        },
+      })
+    }
+    const recover = () =>
+      recoverAndResumeRun({
+        store: fixture.store,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => {
+          stopCalls += 1
+          const duringStop = JSON.parse(
+            await readFile(fixture.store.paths.snapshot, 'utf8'),
+          ) as { schemaVersion: number }
+          expect(duringStop.schemaVersion).toBe(11)
+        },
+        resumeCurrentRun,
+      })
+    const pending = Promise.all([recover(), recover()])
+
+    await resumeStarted
+    await Promise.resolve()
+    releaseResume()
+    const results = await pending
+
+    expect(results.map(run => run.runId)).toEqual([
+      RECOVERY_RUN_ID,
+      RECOVERY_RUN_ID,
+    ])
+    expect(stopCalls).toBe(1)
+    expect(resumeCalls).toBe(1)
+    expect(await fixture.store.load()).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      runId: RECOVERY_RUN_ID,
+      currentItemId: 'resource_semantic_fitness',
+      activeDispatch: {
+        dispatchId: 'current-reviewer-dispatch',
+        status: 'running',
+      },
+    })
+    expect(
+      (await fixture.store.readEvents()).filter(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toHaveLength(1)
+  })
+
+  test('reconciles a terminal accepted while stopping before retrying reconstruction', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const activeIndex = fixture.allChecks.findIndex(
+      check => check.id === 'resource_semantic_fitness',
+    )
+    const acceptedCheck = fixture.allChecks[activeIndex]!
+    const nextCheck = fixture.allChecks[activeIndex + 1]!
+    let mutatedDuringStop = false
+
+    await expect(
+      recoverAndResumeRun({
+        store: fixture.store,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => {
+          const dependencyDigests = fixture.dependencyDigests.get(
+            acceptedCheck.id,
+          )!
+          await fixture.store.appendEvent({
+            eventId: 'terminal-during-stop',
+            runId: RECOVERY_RUN_ID,
+            type: 'workflow.unit.accepted',
+            phase: 'DOCUMENT_REVIEW',
+            status: 'running',
+            revision: fixture.snapshot.revision,
+            createdAt: new Date().toISOString(),
+            projectId: RECOVERY_PROJECT_ID,
+            ownerId: RECOVERY_OWNER_ID,
+            unit: {
+              eventSchemaVersion: 1,
+              unitId: `review:${acceptedCheck.id}`,
+              kind: 'review-check',
+              phase: 'DOCUMENT_REVIEW',
+              predecessorUnitIds: [
+                `review:${FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.at(-1)}`,
+              ],
+              inputRevision: fixture.resourceRevision,
+              dependencyDigests,
+              acceptedAt: new Date().toISOString(),
+              payload: {
+                check: acceptedCheck,
+                findings: [],
+                dependencyDigests: {
+                  [acceptedCheck.id]: dependencyDigests,
+                },
+              },
+            },
+          } satisfies WorkflowUnitAcceptedEvent)
+          const activeCycle = fixture.snapshot.documentReviewState.activeCycle!
+          await writeFile(
+            fixture.store.paths.snapshot,
+            `${JSON.stringify(
+              {
+                ...fixture.snapshot,
+                activeDispatch: undefined,
+                documentReviewState: {
+                  ...fixture.snapshot.documentReviewState,
+                  activeCycle: {
+                    ...activeCycle,
+                    completedCheckIds: [
+                      ...activeCycle.completedCheckIds,
+                      acceptedCheck.id,
+                    ],
+                    checks: [...activeCycle.checks, acceptedCheck],
+                    checkEvidenceDigests: {
+                      ...activeCycle.checkEvidenceDigests,
+                      [acceptedCheck.id]: dependencyDigests,
+                    },
+                  },
+                },
+              },
+              null,
+              2,
+            )}\n`,
+          )
+          mutatedDuringStop = true
+        },
+        resumeCurrentRun: async () => {
+          throw new Error('changed source must not resume')
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
+    expect(mutatedDuringStop).toBe(true)
+
+    let resumedUnit: string | undefined
+    const recovered = await recoverAndResumeRun({
+      store: fixture.store,
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: async run => {
+        resumedUnit = run.currentItemId
+      },
+    })
+
+    expect(recovered.currentItemId).toBe(nextCheck.id)
+    expect(resumedUnit).toBe(nextCheck.id)
+    expect(
+      (await fixture.store.readEvents()).filter(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toHaveLength(1)
+  })
+
+  test('preserves a source snapshot that changes before atomic replacement', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const before = await readFile(fixture.store.paths.snapshot, 'utf8')
+    const changed = `${before}\n`
+
+    await expect(
+      recoverAndResumeRun({
+        store: fixture.store,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => {
+          await writeFile(fixture.store.paths.snapshot, changed)
+        },
+        resumeCurrentRun: async () => {
+          throw new Error('changed source must not resume')
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
+    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(changed)
+    expect(
+      (await fixture.store.readEvents()).some(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toBe(false)
+  })
+
+  test('restarts safely after worker stopping interrupts reconstruction', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const source = await readFile(fixture.store.paths.snapshot, 'utf8')
+
+    await expect(
+      recoverAndResumeRun({
+        store: fixture.store,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => {
+          throw new Error('worker transport did not stop')
+        },
+        resumeCurrentRun: async () => undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'recovery_worker_stop_failed' })
+    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(source)
+
+    let resumeCalls = 0
+    await recoverAndResumeRun({
+      store: fixture.store,
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: async () => {
+        resumeCalls += 1
+      },
+    })
+    expect(resumeCalls).toBe(1)
+    expect(
+      (await fixture.store.readEvents()).filter(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toHaveLength(1)
   })
 })
