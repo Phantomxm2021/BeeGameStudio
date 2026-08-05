@@ -434,7 +434,6 @@ declare
   profile_avatar_url text;
   initial_role text;
   invited_platform_owner boolean;
-  initial_included_credits integer := 300;
 begin
   invited_platform_owner := exists (
     select 1
@@ -457,8 +456,6 @@ begin
       end if;
     elsif coalesce(new.raw_app_meta_data->>'provider', 'email') = 'email' then
       raise exception 'Invitation code is required';
-    else
-      initial_included_credits := 0;
     end if;
   end if;
   profile_name := coalesce(
