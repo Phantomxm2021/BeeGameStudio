@@ -3757,6 +3757,65 @@ describe('delivery workflow recovery', () => {
     await expect(store.load()).resolves.toMatchObject({ status: 'running' })
   })
 
+  test('fences every snapshot mutation entry point while recovery owns the lease', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-all-writes-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const competingStore = createRunStore(workspace, 'owner-1')
+    const stopped = {
+      ...createTestDeliveryRun({
+        runId: 'run-1',
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+      }),
+      status: 'stopped' as const,
+      blockedReason: 'interrupted',
+    }
+    await store.save(stopped)
+    const digest = (await store.inspectWorkflowSnapshot()).digest
+    const lease = await store.lock(stopped.runId, async () => false)
+    const progressEvent = {
+      runId: stopped.runId,
+      type: 'workflow.progress' as const,
+      phase: stopped.phase,
+      status: stopped.status,
+      revision: stopped.revision,
+    }
+    const mutations = [
+      () => competingStore.load(),
+      () => competingStore.save(stopped),
+      () => competingStore.appendEvent(progressEvent),
+      () => competingStore.commit(stopped, progressEvent),
+      () =>
+        competingStore.replaceSnapshotIfDigest({
+          expectedDigest: digest,
+          run: stopped,
+          event: progressEvent,
+        }),
+      () =>
+        competingStore.addWorkflowUsage(
+          stopped.runId,
+          {
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 1,
+          },
+          'late-dispatch',
+        ),
+      () =>
+        competingStore.updateProgress(stopped.runId, {
+          dispatchId: 'late-dispatch',
+          message: 'late progress',
+        }),
+    ]
+
+    for (const mutate of mutations)
+      await expect(mutate()).rejects.toMatchObject({ code: 'locked' })
+    await store.unlock(lease)
+    await expect(store.load()).resolves.toMatchObject({ status: 'stopped' })
+  })
+
   test('does not let reconstructed replacement overwrite a terminal commit that won the storage lane', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-terminal-cas-'))
     const terminalStore = createRunStore(workspace, 'owner-1')
