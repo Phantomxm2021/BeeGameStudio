@@ -7,7 +7,7 @@ import {
 } from './document-repair-graph'
 import type {
   AtomicTask,
-  ChecklistRemediation,
+  AcceptedWorkflowUnit,
   DocumentReviewApproval,
   DocumentReviewCheck,
   DocumentReviewCycle,
@@ -19,8 +19,10 @@ import type {
   EvidenceRef,
   FoundationDraftState,
   Revision,
+  TasksPlannedEvent,
   TaskVerification,
   WorkflowEvent,
+  WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
 import {
@@ -160,6 +162,13 @@ const resourceProductionStateSchema = z
             .strict(),
         ),
         catalogObserved: z.boolean(),
+        acceptedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
+    contentReceipt: z
+      .object({
+        contentDigest: z.string().min(1),
         acceptedAt: z.string().datetime(),
       })
       .strict()
@@ -304,9 +313,16 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
               .object({
                 groupId: z.string().trim().min(1),
                 findingIds: z.array(z.string().trim().min(1)).min(1),
-                decision: z.string().trim().min(1),
-                affectedPaths: z
-                  .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
+                groupDecision: z.string().trim().min(1),
+                pathDecisions: z
+                  .array(
+                    z
+                      .object({
+                        path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+                        decision: z.string().trim().min(1),
+                      })
+                      .strict(),
+                  )
                   .min(1),
                 dependsOn: z.array(z.string().trim().min(1)),
               })
@@ -457,7 +473,7 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         })
       const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         cycle.repairPlan!.groups.some(group =>
-          group.affectedPaths.includes(path),
+          group.pathDecisions.some(pathDecision => pathDecision.path === path),
         ),
       )
       const completedPrefix = repairPaths.slice(
@@ -509,14 +525,6 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
         })
   })
 
-const checklistRemediationSchema: z.ZodType<ChecklistRemediation> = z
-  .object({
-    sourceRevision: z.string().min(1),
-    attempt: z.number().int().positive(),
-    issues: z.array(z.string().min(1)).min(1),
-  })
-  .strict()
-
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
@@ -559,13 +567,214 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   })
   .catchall(z.unknown()) as z.ZodType<WorkflowEvent>
 
+export const tasksPlannedEventSchema: z.ZodType<TasksPlannedEvent> = z
+  .object({
+    eventId: z.string().min(1),
+    runId: z.string().min(1),
+    type: z.literal('tasks.planned'),
+    phase: z.literal('IMPLEMENTATION'),
+    status: z.literal('running'),
+    revision: revisionSchema,
+    activeTaskId: z.string().min(1).optional(),
+    taskGraph: z.array(atomicTaskSchema).min(1),
+    createdAt: z.string().datetime(),
+  })
+  .strict()
+
+const acceptedWorkflowUnitBase = {
+  eventSchemaVersion: z.literal(1),
+  unitId: z.string().min(1),
+  phase: z.enum(DELIVERY_PHASES),
+  predecessorUnitIds: z.array(z.string().min(1)),
+  inputRevision: z.string().min(1),
+  dependencyDigests: z.record(z.string(), z.string().min(1)),
+  dispatchId: z.string().min(1).optional(),
+  receiptRef: z.string().min(1).optional(),
+  acceptedAt: z.string().datetime(),
+}
+
+const receiptPayloadSchema = z
+  .object({ receiptRef: z.string().min(1) })
+  .strict()
+
+export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
+  z.discriminatedUnion('kind', [
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('document'),
+        dispatchId: z.string().min(1),
+        receiptRef: z.string().min(1),
+        payload: z
+          .object({ path: z.string().min(1), revision: z.string().min(1) })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('review-check'),
+        payload: z
+          .object({
+            check: persistedDocumentReviewCheckSchema,
+            findings: z.array(persistedDocumentReviewFindingSchema),
+            dependencyDigests: checkEvidenceDigestsSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('checklist'),
+        payload: z
+          .object({
+            revision: z.string().min(1),
+            evidencePath: z.string().min(1),
+            checkIds: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-inventory'),
+        payload: z
+          .object({
+            bindings: z.array(
+              z
+                .object({
+                  requirementId: z.string().min(1),
+                  resourceIds: z.array(z.string().min(1)).min(1),
+                })
+                .strict(),
+            ),
+            catalogObserved: z.boolean(),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-content'),
+        dispatchId: z.string().min(1),
+        receiptRef: z.string().min(1),
+        payload: z.object({ contentDigest: z.string().min(1) }).strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-gate'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('atomic-plan'),
+        payload: z
+          .object({ taskIds: z.array(z.string().min(1)).min(1) })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('implementation-task'),
+        payload: z
+          .object({
+            taskId: z.string().min(1),
+            evidenceRefs: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('implementation-audit'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('acceptance'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+  ])
+
+export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEvent> =
+  z
+    .object({
+      eventId: z.string().min(1),
+      runId: z.string().min(1),
+      type: z.literal('workflow.unit.accepted'),
+      phase: z.enum(DELIVERY_PHASES),
+      documentStep: z
+        .enum([
+          'FOUNDATION_DRAFTING',
+          'FOUNDATION_REVIEW',
+          'CHECKLIST_DRAFTING',
+          'CHECKLIST_REVIEW',
+          'COMPREHENSIVE_REVIEW',
+        ])
+        .optional(),
+      status: z.enum(DELIVERY_RUN_STATUSES),
+      revision: revisionSchema,
+      createdAt: z.string().datetime(),
+      projectId: z.string().min(1),
+      ownerId: z.string().min(1),
+      unit: acceptedWorkflowUnitSchema,
+    })
+    .catchall(z.unknown()) as z.ZodType<WorkflowUnitAcceptedEvent>
+
+export function parseWorkflowEvent(value: unknown): WorkflowEvent {
+  const event = workflowEventSchema.parse(value)
+  if (event.type === 'workflow.unit.accepted')
+    return workflowUnitAcceptedEventSchema.parse(value)
+  if (event.type === 'tasks.planned') {
+    const parsed = tasksPlannedEventSchema.safeParse(value)
+    if (!parsed.success)
+      throw new Error(`invalid tasks.planned workflow event: ${parsed.error}`)
+    return parsed.data
+  }
+  return event
+}
+
+const pendingWorkflowEventsSchema = z
+  .array(workflowEventSchema)
+  .min(1)
+  .superRefine((events, context) => {
+    for (const [index, event] of events.entries()) {
+      if (
+        event.type !== 'workflow.unit.accepted' &&
+        event.type !== 'tasks.planned'
+      )
+        continue
+      const parsed =
+        event.type === 'workflow.unit.accepted'
+          ? workflowUnitAcceptedEventSchema.safeParse(event)
+          : tasksPlannedEventSchema.safeParse(event)
+      if (!parsed.success)
+        context.addIssue({
+          code: 'custom',
+          path: [index],
+          message: `${event.type} event is invalid`,
+        })
+    }
+  })
+
 export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .object({
     schemaVersion: z.literal(DELIVERY_RUN_SCHEMA_VERSION),
     runId: z.string().min(1),
     projectId: z.string().min(1),
     ownerId: z.string().min(1),
-    parentRunId: z.string().min(1).optional(),
     confirmedBriefDigest: z.string().min(1),
     confirmedBriefContext: z.string().min(1),
     changeRequest: z.string().min(1).optional(),
@@ -589,7 +798,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     revision: revisionSchema,
     activeTaskId: z.string().min(1).optional(),
     currentItemId: z.string().min(1).optional(),
-    reviewedDocumentPaths: z.array(z.string().min(1)).optional(),
     tasks: z.array(atomicTaskSchema),
     activeDispatch: dispatchRecordSchema.optional(),
     evidence: z
@@ -602,12 +810,11 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     documentReviewState: documentReviewStateSchema,
     foundationDraftState: foundationDraftStateSchema,
     resourceProductionState: resourceProductionStateSchema,
-    checklistRemediation: checklistRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
     lastProgressAt: z.string().datetime().optional(),
-    pendingEvent: workflowEventSchema.optional(),
+    pendingEvents: pendingWorkflowEventsSchema.optional(),
     lastAnswer: z.string().min(1).optional(),
     blockedReason: z.string().min(1).optional(),
     createdAt: z.string().datetime(),
@@ -650,7 +857,8 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     const checklistApproval = run.documentReviewState.checklistApproval
     if (
       requiresFrozenChecklistApproval &&
-      (!checklistApproval || checklistApproval.revision !== run.revision.document)
+      (!checklistApproval ||
+        checklistApproval.revision !== run.revision.document)
     )
       context.addIssue({
         code: 'custom',

@@ -85,7 +85,10 @@ function assertCoverage(
       )
   for (const id of facts.contentIds)
     if (!coveredContent.has(id))
-      throw new AtomicTaskPlanError('coverage', `content is not consumed by an atomic task: ${id}`)
+      throw new AtomicTaskPlanError(
+        'coverage',
+        `content is not consumed by an atomic task: ${id}`,
+      )
   assertUniqueOwners(tasks, 'checklistIds', 'checklist item')
   assertSupportTasksFeedOwnedWork(tasks)
 }

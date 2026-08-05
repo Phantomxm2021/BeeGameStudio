@@ -13,7 +13,10 @@ import {
   reconcileCurrentResourcePreparation,
   startResourcePreparation,
 } from './resource-stage'
-import { computeResourceInventoryRevision } from './revision'
+import {
+  computeResourceContentDigest,
+  computeResourceInventoryRevision,
+} from './revision'
 import { resolveResourceProductionTask } from './resource-task-resolver'
 import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
 
@@ -139,6 +142,10 @@ describe('resource production task resolver', () => {
         resourceProductionState: {
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_GATE',
+          contentReceipt: {
+            contentDigest: await computeResourceContentDigest(workspace),
+            acceptedAt: '2026-08-05T00:00:00.000Z',
+          },
         },
       },
       workspacePath: workspace,
@@ -224,8 +231,20 @@ describe('resource production task resolver', () => {
     })
     expect(request).toMatchObject({
       workerType: 'resource-content-author',
-      contract: { preservedPaths: [] },
+      contract: {
+        schema: 'beegame-content-v1',
+        requiredRequirementIds: ['world.visual'],
+        verifiedResourceIds: ['world-resource'],
+        inventoryBindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+        preservedPaths: [],
+      },
     })
+    expect(request).not.toHaveProperty('contract.manifestPath')
     expect(request).not.toHaveProperty('protectedPaths')
   })
 })
@@ -285,7 +304,14 @@ async function writeContent(workspace: string): Promise<void> {
       kind: 'resource-registry',
       fulfills: ['world.visual'],
       resources: ['world-resource'],
-      data: { world: 'world-resource' },
+      data: {
+        bindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+      },
     })}\n`,
   )
 }

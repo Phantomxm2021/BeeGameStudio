@@ -61,13 +61,12 @@ describe('document review exact reference index', () => {
     const artifacts = [
       {
         path: 'docs/GDD.md',
-        content: '# Game\n## Rules\nKeep this.\n### Detail\nKeep detail.\n## Economy\nDo not include.\n',
+        content:
+          '# Game\n## Rules\nKeep this.\n### Detail\nKeep detail.\n## Economy\nDo not include.\n',
       },
     ]
     const wire = buildDocumentReviewWireReferenceIndex(artifacts)
-    expect(wire.artifacts).toEqual([
-      { artifactId: 'a0', path: 'docs/GDD.md' },
-    ])
+    expect(wire.artifacts).toEqual([{ artifactId: 'a0', path: 'docs/GDD.md' }])
     expect(wire.references.every(reference => !('path' in reference))).toBe(
       true,
     )
@@ -140,6 +139,10 @@ describe('document review resource-content subjects', () => {
   test('accepts current requirement, resource and content IDs', () => {
     const artifacts = [
       {
+        path: 'systemDeliveryContract',
+        content: JSON.stringify(buildSystemDeliveryContract()),
+      },
+      {
         path: 'assets/asset-manifest.json',
         content: JSON.stringify({
           requirements: [{ id: 'world.layout' }],
@@ -154,7 +157,7 @@ describe('document review resource-content subjects', () => {
     const findings = [
       {
         findingId: 'RESOURCE_CONTENT',
-        checkId: 'implementation_readiness' as const,
+        checkId: 'resource_content_consistency' as const,
         evidence: [
           { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
         ],
@@ -184,16 +187,20 @@ describe('document review resource-content subjects', () => {
       contract: {
         scope: 'complete',
         mode: 'initial',
-        requiredCheckIds: ['implementation_readiness'],
-        currentCheckIds: ['implementation_readiness'],
+        requiredCheckIds: ['resource_content_consistency'],
+        currentCheckIds: ['resource_content_consistency'],
         artifacts,
       },
       checks: [
         {
-          id: 'implementation_readiness',
+          id: 'resource_content_consistency',
           status: 'block',
           conclusion: 'The resource contract is inconsistent.',
           evidence: [
+            {
+              path: 'systemDeliveryContract',
+              anchor: '/canonicalAssetManifest/path',
+            },
             { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
           ],
           findingIds: ['RESOURCE_CONTENT'],

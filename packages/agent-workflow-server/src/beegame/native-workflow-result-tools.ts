@@ -1,10 +1,11 @@
 import {
   changeImpactSubmissionSchema,
-  documentRepairPlanSubmissionSchemaForGroupCount,
+  documentRepairPlanSubmissionSchemaForContract,
   documentReviewPacketSubmissionSchemaForContract,
+  documentReviewPacketWireSchema,
   questionAnswerSubmissionSchema,
-  resourceContentSubmissionSchema,
 } from './delivery-workflow/worker-contracts'
+import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
 import {
   parseAndValidateDocumentReviewPacketSubmission,
   type DocumentReviewSubmissionContract,
@@ -17,7 +18,6 @@ type WorkflowResultWorker =
   | 'document-reviewer'
   | 'change-impact-analyzer'
   | 'question-answerer'
-  | 'resource-content-author'
 
 const definitions = {
   'document-reviewer': {
@@ -26,7 +26,7 @@ const definitions = {
     description:
       'Submit the current transactional document review packet and its structured findings.',
     prompt:
-      'Submit exactly contract.currentCheckIds as one ordered checks array. Each check contains exactly conclusion, evidence, assessments and findings, without an id. Each assessment contains exactly criterion, status, evidence, derivation and conclusion and uses the criterion IDs supplied for that check. Every evidence or subject entry contains exactly referenceId; result, note, paths, anchors and subjectOwner are invalid. Each finding contains findingId, evidence, subjects, observation, blockingImpact and one authority-preserving requiredOutcome; regressionPaths is allowed only in Closure Review. In Closure, an unresolved prior finding preserves its findingId and exact requiredOutcome; a different defect inside an active check uses a new findingId, and regressionPaths is present only when the changed paths directly introduced it. The service derives check identity, check status, check findingIds and subject ownership. A rejected call accepts nothing: correct the same packet without prose or user confirmation. The workflow atomically persists every check in the packet to the single review cycle and derives the final verdict only after every required check is accepted.',
+      'Submit exactly contract.currentCheckIds as one ordered checks array. Design checks contain assessments and findings; the service derives their check-level status, evidence and conclusion. Non-design checks additionally contain conclusion and evidence and have an empty assessments array. Each assessment contains exactly criterion, status, evidence, one decision-dense derivation and one direct conclusion and uses the criterion IDs supplied for that check. Do not summarize documents or repeat evidence prose. Every evidence or subject entry contains exactly referenceId. Each finding contains findingId, evidence, subjects, observation, blockingImpact and one authority-preserving requiredOutcome; regressionPaths is allowed only in Closure Review. The service derives check identity, finding IDs and subject ownership. A rejected call accepts nothing: correct the same packet without prose or user confirmation.',
     message: '提交文档审阅结果',
   },
   'change-impact-analyzer': {
@@ -45,24 +45,15 @@ const definitions = {
       'Call exactly once with the answer. The workflow service owns canonical evidence.',
     message: '提交问题回答',
   },
-  'resource-content-author': {
-    name: 'SubmitResourceContentResult',
-    schema: resourceContentSubmissionSchema,
-    description:
-      'Submit completion of the canonical JSON/YAML content set or exact missing resource requirements.',
-    prompt:
-      'Call exactly once. completed requires the complete canonical JSON/YAML set and an empty missingRequirementIds array. needs_inventory requires exact current Manifest requirement IDs and does not authorize resource mutation.',
-    message: '提交资源内容结果',
-  },
 } as const
 
 const documentRepairPlanDefinition = {
   name: 'SubmitDocumentRepairPlan',
   schema: undefined,
   description:
-    'Submit one ordered repair decision for every service-owned coherent finding group.',
+    'Submit one ordered group decision and its exact coordinated path decisions for every service-owned coherent finding group.',
   prompt:
-    'Call exactly once with a decisions array aligned by position to contract.repairPlanTask.groups. Each decision must be the minimum internally consistent repair for that group and preserve earlier dependency outcomes. Do not repeat service-owned identities, write project files, reopen review, add unrelated design, or return prose.',
+    'Call exactly once with a decisions array aligned by position to contract.repairPlanTask.groups. For each group submit one groupDecision and one pathDecision for every path that must change. Cover all subjectPaths; add only candidatePaths required to keep downstream references consistent. Do not repeat service-owned identities, write project files, reopen review, add unrelated design, or return prose.',
   message: '提交文档修订方案',
 } as const
 
@@ -70,8 +61,9 @@ export function createNativeWorkflowResultTool(options: {
   buildTool: BuildTool
   workerType: WorkflowResultWorker
   documentReviewContract?: DocumentReviewSubmissionContract
+  getDocumentReviewContract?: () => DocumentReviewSubmissionContract | undefined
   documentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  documentRepairGroupCount?: number
+  documentRepairPlanContract?: DocumentRepairPlanSubmissionContract
 }): unknown {
   const documentReviewContract = options.documentReviewContract
   if (options.workerType === 'document-reviewer' && !documentReviewContract)
@@ -86,19 +78,19 @@ export function createNativeWorkflowResultTool(options: {
   if (
     options.workerType === 'document-author' &&
     options.documentAuthorMode === 'repair-planning' &&
-    !options.documentRepairGroupCount
+    !options.documentRepairPlanContract
   )
-    throw new Error('document repair plan group count is missing')
+    throw new Error('document repair plan contract is missing')
   const definition =
     options.workerType === 'document-author'
       ? documentRepairPlanDefinition
       : definitions[options.workerType]
   const schema =
     options.workerType === 'document-reviewer'
-      ? documentReviewPacketSubmissionSchemaForContract(documentReviewContract!)
+      ? documentReviewPacketWireSchema
       : options.workerType === 'document-author'
-        ? documentRepairPlanSubmissionSchemaForGroupCount(
-            options.documentRepairGroupCount!,
+        ? documentRepairPlanSubmissionSchemaForContract(
+            options.documentRepairPlanContract!,
           )
         : definition.schema
   return options.buildTool({
@@ -121,8 +113,12 @@ export function createNativeWorkflowResultTool(options: {
     },
     async call(input: unknown) {
       if (options.workerType === 'document-reviewer') {
+        const activeContract =
+          options.getDocumentReviewContract?.() ?? documentReviewContract
+        if (!activeContract)
+          throw new Error('document reviewer active contract is missing')
         parseAndValidateDocumentReviewPacketSubmission({
-          contract: documentReviewContract!,
+          contract: activeContract,
           submission: input,
         })
       }

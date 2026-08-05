@@ -38,7 +38,9 @@ export async function evaluateWorkflowDeliveryGate(input: {
   ) {
     return {
       allowed: false,
-      issues: ['Current workflow has no current comprehensive review approval.'],
+      issues: [
+        'Current workflow has no current comprehensive review approval.',
+      ],
     }
   }
   if (run.evidence.resourcePreparation?.status !== 'passed') {

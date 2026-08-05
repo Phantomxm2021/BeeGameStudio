@@ -46,6 +46,9 @@ export function createQueryEngineTurnSubmitMessage(
     ...(input.confirmedBriefContext
       ? { confirmedBriefContext: input.confirmedBriefContext }
       : {}),
+    ...(input.workflowDocumentReviewContract
+      ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
+      : {}),
   }
 }
 

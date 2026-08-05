@@ -156,8 +156,12 @@ export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
   'resource_semantic_fitness',
   'content_structure_fitness',
   'resource_content_consistency',
-  'implementation_readiness',
 ] as const
+
+export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_PACKETS = [
+  ['resource_semantic_fitness'],
+  ['content_structure_fitness', 'resource_content_consistency'],
+] as const satisfies readonly (readonly ComprehensiveDocumentReviewAdditionalCheckId[])[]
 
 export const CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS = [
   'checklist_traceability',
@@ -167,7 +171,7 @@ export const DOCUMENT_REVIEW_CHECK_PACKETS: readonly (readonly DocumentReviewChe
   [
     ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
     CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-    ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS.map(id => [id]),
+    ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_PACKETS,
   ]
 
 export const COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS = [
@@ -185,6 +189,8 @@ export type DocumentReviewScope = 'foundation' | 'checklist' | 'complete'
 export type DocumentReviewMode = 'initial' | 'closure'
 export type FoundationDocumentReviewCheckId =
   (typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS)[number]
+export type ComprehensiveDocumentReviewAdditionalCheckId =
+  (typeof COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS)[number]
 export type ComprehensiveDocumentReviewCheckId =
   (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number]
 export type ChecklistDocumentReviewCheckId =
@@ -202,7 +208,6 @@ export const DOCUMENT_REVIEW_OWNER_BY_CHECK_ID = Object.fromEntries([
   ['resource_semantic_fitness', 'resource'] as const,
   ['content_structure_fitness', 'resource'] as const,
   ['resource_content_consistency', 'resource'] as const,
-  ['implementation_readiness', 'resource'] as const,
 ]) as Record<DocumentReviewCheckId, 'foundation' | 'checklist' | 'resource'>
 
 export const GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA = {
@@ -293,8 +298,11 @@ export type DocumentReviewApproval = {
 export type DocumentRepairGroup = {
   groupId: string
   findingIds: string[]
-  decision: string
-  affectedPaths: FoundationDocumentPath[]
+  groupDecision: string
+  pathDecisions: Array<{
+    path: FoundationDocumentPath
+    decision: string
+  }>
   dependsOn: string[]
 }
 
@@ -339,7 +347,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 11 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 13 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -362,15 +370,15 @@ export type ResourceInventoryReceipt = {
   acceptedAt: string
 }
 
+export type ResourceContentReceipt = {
+  contentDigest: string
+  acceptedAt: string
+}
+
 export type ResourceProductionState = {
   currentTask: ResourceProductionTask
   inventoryReceipt?: ResourceInventoryReceipt
-}
-
-export type ChecklistRemediation = {
-  sourceRevision: string
-  attempt: number
-  issues: string[]
+  contentReceipt?: ResourceContentReceipt
 }
 
 export type Revision = {
@@ -436,6 +444,31 @@ export type WorkflowUsage = {
   total_tokens: number
 }
 
+export type AcceptedWorkflowUnit = {
+  eventSchemaVersion: 1
+  unitId: string
+  kind:
+    | 'document'
+    | 'review-check'
+    | 'checklist'
+    | 'resource-inventory'
+    | 'resource-content'
+    | 'resource-gate'
+    | 'atomic-plan'
+    | 'implementation-task'
+    | 'implementation-audit'
+    | 'acceptance'
+  phase: DeliveryPhase
+  predecessorUnitIds: string[]
+  inputRevision: string
+  dependencyDigests: Record<string, string>
+  /** Exact worker dispatch that produced a receipt-backed accepted unit. */
+  dispatchId?: string
+  receiptRef?: string
+  acceptedAt: string
+  payload: unknown
+}
+
 /**
  * A journal record that is also safe to keep temporarily in the run snapshot.
  * The snapshot marker makes a commit recoverable if the process exits after
@@ -453,12 +486,26 @@ export type WorkflowEvent = {
   [key: string]: unknown
 }
 
+export type WorkflowUnitAcceptedEvent = WorkflowEvent & {
+  type: 'workflow.unit.accepted'
+  projectId: string
+  ownerId: string
+  unit: AcceptedWorkflowUnit
+}
+
+export type TasksPlannedEvent = WorkflowEvent & {
+  type: 'tasks.planned'
+  phase: 'IMPLEMENTATION'
+  status: 'running'
+  activeTaskId?: string
+  taskGraph: AtomicTask[]
+}
+
 export type DeliveryRun = {
   schemaVersion: typeof DELIVERY_RUN_SCHEMA_VERSION
   runId: string
   projectId: string
   ownerId: string
-  parentRunId?: string
   confirmedBriefDigest: string
   confirmedBriefContext: string
   changeRequest?: string
@@ -473,8 +520,6 @@ export type DeliveryRun = {
   activeTaskId?: string
   /** Canonical project artifact currently being processed by a document worker. */
   currentItemId?: string
-  /** Canonical artifacts successfully read by the active document-reviewer dispatch. */
-  reviewedDocumentPaths?: string[]
   tasks: AtomicTask[]
   activeDispatch?: DispatchRecord
   evidence: {
@@ -488,16 +533,14 @@ export type DeliveryRun = {
   foundationDraftState: FoundationDraftState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
-  /** Deterministic checklist-structure issues carried across bounded author retries. */
-  checklistRemediation?: ChecklistRemediation
   usage?: WorkflowUsage
   /** Latest durable progress text for the workflow card. */
   currentMessage?: string
   thinking?: 'working' | 'waiting' | 'idle'
   /** Last worker activity observed by the durable progress channel. */
   lastProgressAt?: string
-  /** Internal write-ahead marker; removed once the matching journal entry exists. */
-  pendingEvent?: WorkflowEvent
+  /** Internal write-ahead marker; removed once every matching journal entry exists. */
+  pendingEvents?: WorkflowEvent[]
   lastAnswer?: string
   blockedReason?: string
   createdAt: string

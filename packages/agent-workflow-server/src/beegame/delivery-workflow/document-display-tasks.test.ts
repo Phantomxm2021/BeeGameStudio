@@ -21,11 +21,6 @@ describe('review finding display projection', () => {
         owner: 'resource',
         requiredOutcome: 'The resource contract is complete.',
       },
-      {
-        findingId: 'retired-shape',
-        owner: 'foundation',
-        requiredAction: 'This retired field must not be projected.',
-      },
     ]
     expect(projectReviewFindingDisplayItems(findings)).toEqual([
       {
@@ -121,6 +116,24 @@ describe('resource-content display tasks', () => {
 })
 
 describe('document repair display tasks', () => {
+  test('leaves review tasks pending without Cycle check progress', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-display-'))
+    try {
+      const input = {
+        workspacePath: workspace,
+        documentStep: 'FOUNDATION_REVIEW' as const,
+        workflowStatus: 'running',
+        thinking: 'working' as const,
+      }
+      const tasks = projectDocumentDisplayTasks(input)
+      expect(tasks.find(task => task.id === 'docs/GDD.md')?.status).toBe(
+        'pending',
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('shows every check in the sole active review packet as running', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-display-'))
     try {
@@ -152,6 +165,31 @@ describe('document repair display tasks', () => {
         'running',
         'pending',
         'pending',
+      ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('shows both content-integration checks in the same active packet', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-display-'))
+    try {
+      const tasks = projectDocumentDisplayTasks({
+        workspacePath: workspace,
+        documentStep: 'COMPREHENSIVE_REVIEW',
+        workflowStatus: 'running',
+        thinking: 'working',
+        reviewCheckIds: [
+          'resource_semantic_fitness',
+          'content_structure_fitness',
+          'resource_content_consistency',
+        ],
+        reviewCompletedCheckIds: ['resource_semantic_fitness'],
+      })
+      expect(tasks.map(task => [task.id, task.status])).toEqual([
+        ['resource_semantic_fitness', 'completed'],
+        ['content_structure_fitness', 'running'],
+        ['resource_content_consistency', 'running'],
       ])
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -267,7 +305,7 @@ describe('document repair display tasks', () => {
         repairPlan: {
           groups: [
             {
-              affectedPaths: [
+              paths: [
                 'docs/GDD.md',
                 'docs/BALANCE_DESIGN.md',
                 'docs/UI_UX_SPEC.md',

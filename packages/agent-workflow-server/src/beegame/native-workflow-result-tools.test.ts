@@ -74,7 +74,7 @@ describe('native document review result tool', () => {
     )
     expect(
       item.properties.assessments.items.properties.criterion.enum,
-    ).not.toContain('outcome_bounds')
+    ).toContain('outcome_bounds')
     expect(Object.keys(item.properties.findings.items.properties)).toEqual([
       'findingId',
       'evidence',
@@ -82,6 +82,7 @@ describe('native document review result tool', () => {
       'observation',
       'blockingImpact',
       'requiredOutcome',
+      'regressionPaths',
     ])
   })
 
@@ -146,8 +147,12 @@ describe('native document review result tool', () => {
         call({
           checks: [
             {
-              conclusion: 'The active check passes.',
-              evidence: [{ referenceId: evidenceReferenceId }],
+              ...(criteria.length
+                ? {}
+                : {
+                    conclusion: 'The active check passes.',
+                    evidence: [{ referenceId: evidenceReferenceId }],
+                  }),
               assessments: criteria.map(criterion => ({
                 criterion,
                 status: 'pass',
@@ -198,8 +203,6 @@ describe('native document review result tool', () => {
         },
       })
       const checks = currentCheckIds.map(checkId => ({
-        conclusion: `${checkId} passes.`,
-        evidence: [{ referenceId }],
         assessments: GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[checkId].map(
           criterion => ({
             criterion,
@@ -240,7 +243,7 @@ describe('native document review result tool', () => {
             index === 1 ? { ...check, assessments: [] } : check,
           ),
         }),
-      ).rejects.toThrow('requires its exact criterion set')
+      ).rejects.toThrow()
       await expect(call({ checks })).resolves.toEqual({
         data: { accepted: true, workerType: 'document-reviewer' },
       })
@@ -310,7 +313,7 @@ describe('native document review result tool', () => {
     })
   })
 
-  test('exposes an Initial schema without Closure regression fields', async () => {
+  test('keeps one fixed schema while rejecting Closure fields in Initial Review', async () => {
     let definition: Record<string, unknown> | undefined
     createNativeWorkflowResultTool({
       workerType: 'document-reviewer',
@@ -327,21 +330,22 @@ describe('native document review result tool', () => {
       },
     })
     const schema = definition!.inputSchema as { parse(value: unknown): unknown }
-    expect(() =>
-      schema.parse({
-        checks: [
-          {
-            ...submission(),
-            findings: [
-              {
-                ...submission().findings[0],
-                regressionPaths: ['docs/TECHNICAL_DESIGN.md'],
-              },
-            ],
-          },
-        ],
-      }),
-    ).toThrow()
+    const value = {
+      checks: [
+        {
+          ...submission(),
+          findings: [
+            {
+              ...submission().findings[0],
+              regressionPaths: ['docs/TECHNICAL_DESIGN.md'],
+            },
+          ],
+        },
+      ],
+    }
+    expect(() => schema.parse(value)).not.toThrow()
+    const call = definition!.call as (value: unknown) => Promise<unknown>
+    await expect(call(value)).rejects.toThrow()
     const prompt = await (definition!.prompt as () => Promise<string>)()
     expect(prompt).toContain(
       'Initial Review findings cannot contain regressionPaths',
@@ -487,7 +491,7 @@ describe('native document review result tool', () => {
 })
 
 describe('native document repair plan result tool', () => {
-  test('requires the service-owned group count', () => {
+  test('requires the service-owned repair plan contract', () => {
     expect(() =>
       createNativeWorkflowResultTool({
         workerType: 'document-author',
@@ -496,7 +500,7 @@ describe('native document repair plan result tool', () => {
           return value
         },
       }),
-    ).toThrow('document repair plan group count is missing')
+    ).toThrow('document repair plan contract is missing')
   })
 
   test('rejects incomplete plans before accepting the same tool call', async () => {
@@ -504,7 +508,18 @@ describe('native document repair plan result tool', () => {
     createNativeWorkflowResultTool({
       workerType: 'document-author',
       documentAuthorMode: 'repair-planning',
-      documentRepairGroupCount: 2,
+      documentRepairPlanContract: {
+        groups: [
+          {
+            subjectPaths: ['docs/GDD.md'],
+            candidatePaths: ['docs/GDD.md', 'docs/UI_UX_SPEC.md'],
+          },
+          {
+            subjectPaths: ['docs/BALANCE_DESIGN.md'],
+            candidatePaths: ['docs/BALANCE_DESIGN.md'],
+          },
+        ],
+      },
       buildTool(value) {
         definition = value
         return value
@@ -512,13 +527,39 @@ describe('native document repair plan result tool', () => {
     })
     const call = definition!.call as (value: unknown) => Promise<unknown>
     await expect(
-      call({ decisions: [{ decision: 'Repair the first group.' }] }),
+      call({
+        decisions: [
+          {
+            groupDecision: 'Repair the first group.',
+            pathDecisions: [
+              { path: 'docs/GDD.md', decision: 'Repair the GDD.' },
+            ],
+          },
+        ],
+      }),
     ).rejects.toThrow('requires exactly 2 decisions')
     await expect(
       call({
         decisions: [
-          { decision: 'Repair the first group.' },
-          { decision: 'Repair the dependent group.' },
+          {
+            groupDecision: 'Repair the first group.',
+            pathDecisions: [
+              { path: 'docs/GDD.md', decision: 'Repair the GDD.' },
+              {
+                path: 'docs/UI_UX_SPEC.md',
+                decision: 'Update the downstream UI reference.',
+              },
+            ],
+          },
+          {
+            groupDecision: 'Repair the dependent group.',
+            pathDecisions: [
+              {
+                path: 'docs/BALANCE_DESIGN.md',
+                decision: 'Repair Balance.',
+              },
+            ],
+          },
         ],
       }),
     ).resolves.toEqual({

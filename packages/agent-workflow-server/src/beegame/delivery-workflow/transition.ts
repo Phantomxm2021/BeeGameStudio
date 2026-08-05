@@ -244,6 +244,7 @@ function enterResourcePreparation(
       ? {
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_PLAN',
+          contentReceipt: undefined,
         }
       : { currentTask: 'RESOURCE_PLAN' },
     documentReviewState: {
@@ -273,7 +274,6 @@ export function transitionDeliveryRun(
         documentReviewState: {
           repairPasses: { foundation: 0, checklist: 0, resource: 0 },
         },
-        checklistRemediation: undefined,
         updatedAt: timestamp(),
       }
       break

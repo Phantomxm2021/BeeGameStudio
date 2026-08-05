@@ -5,6 +5,7 @@ import type {
   DashboardPermissionRequest,
   DashboardSDKMessage,
 } from './session-manager'
+import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 
 export type SerializedQueryEngineStartInput = Omit<
@@ -25,6 +26,7 @@ export type QueryEngineParentMessage =
     turnId: string
     prompt: BeeGamePromptInput
     confirmedBriefContext?: string
+    workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   }
   | { type: 'turn.stop'; turnId?: string }
   | {

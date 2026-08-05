@@ -32,10 +32,20 @@ const referenceSubmissionFinding = {
 }
 
 describe('document repair plan contract', () => {
-  test('accepts one ordered decision per service-owned group', () => {
+  test('accepts one ordered group decision with explicit path decisions', () => {
     expect(
       documentRepairPlanSubmissionSchema.safeParse({
-        decisions: [{ decision: 'Apply the smallest consistent correction.' }],
+        decisions: [
+          {
+            groupDecision: 'Apply the smallest consistent correction.',
+            pathDecisions: [
+              {
+                path: 'docs/GDD.md',
+                decision: 'Correct the defect at its authority owner.',
+              },
+            ],
+          },
+        ],
       }).success,
     ).toBe(true)
   })
@@ -111,21 +121,6 @@ describe('document review finding contract', () => {
             findings: [{ ...referenceSubmissionFinding, regressionPaths: [] }],
           },
         ],
-      }),
-    ).toThrow()
-  })
-
-  test('rejects the retired nested check submission shape', () => {
-    expect(() =>
-      documentReviewPacketSubmissionSchemaForContract({
-        mode: 'initial',
-        scope: 'foundation',
-        currentCheckIds: ['brief_alignment'],
-      }).parse({
-        conclusion: 'The brief is aligned.',
-        evidence: [{ referenceId: 'ref-brief' }],
-        assessments: [],
-        findings: [],
       }),
     ).toThrow()
   })

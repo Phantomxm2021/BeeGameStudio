@@ -10,7 +10,6 @@ export type ChangeRoute =
 export type PersistedChangeRequest = {
   requestId: string
   message: string
-  parentRunId: string
   revision: string
   route: ChangeRoute
   affectedRequirementIds: string[]
@@ -51,7 +50,6 @@ export async function createChangeRequest(input: {
   const request: PersistedChangeRequest = {
     requestId: randomUUID(),
     message: input.message,
-    parentRunId: input.run.runId,
     revision: input.run.revision.workspace,
     ...classification,
     createdAt: now(),

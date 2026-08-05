@@ -32,19 +32,28 @@ export function serializeQueryEngineStartInput(
     ...(input.workflowProtectedPaths
       ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
       : {}),
+    ...(input.workflowReadOnlyPaths
+      ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
+      : {}),
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
-    ...(input.workflowDocumentRepairGroupCount
+    ...(input.workflowDocumentRepairPlanContract
       ? {
-          workflowDocumentRepairGroupCount:
-            input.workflowDocumentRepairGroupCount,
+          workflowDocumentRepairPlanContract:
+            input.workflowDocumentRepairPlanContract,
         }
       : {}),
     ...(input.workflowCanonicalDocumentCommitContract
       ? {
           workflowCanonicalDocumentCommitContract:
             input.workflowCanonicalDocumentCommitContract,
+        }
+      : {}),
+    ...(input.workflowResourceContentCommitContract
+      ? {
+          workflowResourceContentCommitContract:
+            input.workflowResourceContentCommitContract,
         }
       : {}),
     ...(input.workflowDocumentReviewContract
@@ -92,19 +101,28 @@ export function deserializeQueryEngineStartInput(
     ...(input.workflowProtectedPaths
       ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
       : {}),
+    ...(input.workflowReadOnlyPaths
+      ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
+      : {}),
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
-    ...(input.workflowDocumentRepairGroupCount
+    ...(input.workflowDocumentRepairPlanContract
       ? {
-          workflowDocumentRepairGroupCount:
-            input.workflowDocumentRepairGroupCount,
+          workflowDocumentRepairPlanContract:
+            input.workflowDocumentRepairPlanContract,
         }
       : {}),
     ...(input.workflowCanonicalDocumentCommitContract
       ? {
           workflowCanonicalDocumentCommitContract:
             input.workflowCanonicalDocumentCommitContract,
+        }
+      : {}),
+    ...(input.workflowResourceContentCommitContract
+      ? {
+          workflowResourceContentCommitContract:
+            input.workflowResourceContentCommitContract,
         }
       : {}),
     ...(input.workflowDocumentReviewContract

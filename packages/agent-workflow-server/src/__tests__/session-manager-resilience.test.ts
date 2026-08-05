@@ -79,6 +79,7 @@ describe('BeeGame session runtime resilience', () => {
       ['Write', {}],
       ['AssetManifest', { action: 'author_provisional_resources' }],
       ['ResourceLibrary', { action: 'import_resources' }],
+      ['CommitResourceContent', { action: 'commit' }],
     ] as const) {
       expect(
         isResourceWorkerDurableProgress({
@@ -106,6 +107,74 @@ describe('BeeGame session runtime resilience', () => {
         createdAt: new Date(),
       }),
     ).toBe(false)
+  })
+
+  test('workflow stop barrier drains the active turn and durable usage', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-stop-barrier-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const run = createTestDeliveryRun({
+      runId: 'run-stop-barrier',
+      projectId: 'project-stop-barrier',
+      ownerId: 'user-1',
+    })
+    const dispatchId = 'dispatch-stop-barrier'
+    const store = createRunStore(workspacePath, 'user-1')
+    await store.save({
+      ...run,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      status: 'running',
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: run.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+    let releaseTurn!: () => void
+    let turnStarted!: () => void
+    const started = new Promise<void>(resolve => {
+      turnStarted = resolve
+    })
+    const turnGate = new Promise<void>(resolve => {
+      releaseTurn = resolve
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ onMessage }) => {
+          onMessage(usageMessage(7))
+          turnStarted()
+          await turnGate
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: run.runId,
+      workflowDispatchId: dispatchId,
+      workflowWorkerType: 'document-author',
+    })
+    await manager.send(session.id, 'run assigned unit')
+    await started
+    manager.stop(session.id)
+    let barrierSettled = false
+    const barrier = manager.waitForWorkflowWorkerIdle(session.id).then(() => {
+      barrierSettled = true
+    })
+    await Promise.resolve()
+    expect(barrierSettled).toBe(false)
+    releaseTurn()
+    await barrier
+
+    expect((await store.load())?.usage?.total_tokens).toBe(7)
+    manager.dispose()
   })
 
   test('preserves structured transport retryability across worker boundaries', () => {
@@ -213,6 +282,101 @@ describe('BeeGame session runtime resilience', () => {
         'SubmitDocumentReviewPacket',
       ),
     ).toBe(false)
+  })
+
+  test('ends accepted reviewer output without destroying the reusable execution session', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-review-terminal-stop-'))
+    const workspacePath = join(root, 'workspace')
+    let startCount = 0
+    let submitCount = 0
+    let stopCount = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => {
+        startCount += 1
+        return {
+          submit: async input => {
+            submitCount += 1
+            if (submitCount > 1) return
+            input.onMessage({
+              type: 'assistant',
+              message: {
+                content: [
+                  {
+                    type: 'tool_use',
+                    id: 'review-terminal-1',
+                    name: 'SubmitDocumentReviewPacket',
+                    input: {},
+                  },
+                ],
+              },
+            })
+            input.onMessage({
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'review-terminal-1',
+                    content: 'accepted',
+                  },
+                ],
+              },
+            })
+            await new Promise<void>(resolve => {
+              if (input.signal.aborted) resolve()
+              else
+                input.signal.addEventListener('abort', () => resolve(), {
+                  once: true,
+                })
+            })
+          },
+          stop: () => {
+            stopCount += 1
+          },
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'review documents')
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (
+        manager
+          .events(session.id)
+          .some(
+            event =>
+              event.type === 'tool.completed' &&
+              event.payload?.toolName === 'SubmitDocumentReviewPacket',
+          )
+      )
+        break
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    expect(
+      manager.finishWorkflowTurnAfterAcceptedTool(
+        session.id,
+        'SubmitDocumentReviewPacket',
+      ),
+    ).toBe(true)
+    await waitForIdle(manager, session.id)
+
+    expect(manager.get(session.id)).toMatchObject({
+      status: 'running',
+      turnStatus: 'idle',
+    })
+    await manager.send(session.id, 'next review packet')
+    await waitForIdle(manager, session.id)
+    expect(startCount).toBe(1)
+    expect(submitCount).toBe(2)
+    expect(stopCount).toBeGreaterThanOrEqual(1)
   })
 
   test('publishes structural resource activity without claiming durable progress', async () => {
@@ -651,7 +815,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('protects already committed content files during artifact-derived continuation', async () => {
+  test('rejects every generic Resource Content mutation', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-content-continuation-'))
     const workspacePath = join(root, 'workspace')
     await writeBeeGameAssetManifest(workspacePath, {
@@ -702,12 +866,73 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(preserved).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('already committed successfully'),
+      message: expect.stringContaining('only through CommitResourceContent'),
     })
-    expect(missing).toEqual({
-      behavior: 'allow',
-      scope: 'once',
+    expect(missing).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('only through CommitResourceContent'),
     })
+    manager.dispose()
+  })
+
+  test('restricts Resource Content reads and probes the active dispatch in the parent process', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-content-authority-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let allowedRead: DashboardPermissionDecision | undefined
+    let deniedRead: DashboardPermissionDecision | undefined
+    let authority: DashboardPermissionDecision | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          allowedRead = await startInput.requestPermission?.({
+            toolUseID: 'read-gdd',
+            toolName: 'Read',
+            message: 'Read fact owner',
+            input: { file_path: 'docs/GDD.md' },
+          })
+          deniedRead = await startInput.requestPermission?.({
+            toolUseID: 'read-manifest',
+            toolName: 'Read',
+            message: 'Read manifest',
+            input: { file_path: 'assets/asset-manifest.json' },
+          })
+          authority = await startInput.requestPermission?.({
+            toolUseID: 'authority',
+            toolName: 'CommitResourceContentAuthority',
+            message: 'Verify dispatch',
+            input: { dispatchId: 'dispatch-content' },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-content',
+      workflowWorkerType: 'resource-content-author',
+      workflowReadOnlyPaths: ['docs/GDD.md'],
+      workflowResourceContentCommitContract: {
+        dispatchId: 'dispatch-content',
+        inventoryRevision: 'inventory-revision',
+        baselineResourceRevision: 'baseline-resource-revision',
+        requiredRequirementIds: [],
+        verifiedResourceIds: [],
+        inventoryBindings: [],
+        protectedPaths: [],
+      },
+    })
+
+    await manager.send(session.id, 'author content')
+    await waitForIdle(manager, session.id)
+
+    expect(allowedRead).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(deniedRead).toMatchObject({ behavior: 'deny' })
+    expect(authority).toEqual({ behavior: 'allow', scope: 'once' })
     manager.dispose()
   })
 

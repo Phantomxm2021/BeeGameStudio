@@ -165,6 +165,7 @@ import {
   WorkflowStoreError,
 } from './beegame/delivery-workflow/run-store'
 import {
+  recoverAndResumeRun,
   reconcileRunOnStartup,
   resumeRun,
   retryRun,
@@ -189,6 +190,7 @@ import {
   projectReviewFindingDisplayItems,
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
+import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
 type JsonObject = Record<string, unknown>
 
@@ -543,9 +545,12 @@ export function createAgentWorkflowApp(
     {
       controller: ReturnType<typeof createDeliveryWorkflowController>
       authContext: { credential?: BeeGameSessionCredential }
+      ownerId: string
+      workspacePath: string
     }
   >()
   const deliveryStartQueues = new Map<string, Promise<void>>()
+  const deliveryContinuationQueues = new Map<string, Promise<void>>()
   const getDeliveryController = (input: {
     request: Request
     user: BeeGameUserContext
@@ -601,22 +606,10 @@ export function createAgentWorkflowApp(
     deliveryControllers.set(key, {
       controller,
       authContext: deliveryAuthContext,
+      ownerId: input.user.id,
+      workspacePath: workspaceKey,
     })
     return controller
-  }
-  const ensureDeliveryProgress = async (input: {
-    request: Request
-    user: BeeGameUserContext
-    workspacePath: string
-    run: DeliveryRun
-  }): Promise<void> => {
-    const controller = getDeliveryController({
-      request: input.request,
-      user: input.user,
-      projectId: input.run.projectId,
-      workspacePath: input.workspacePath,
-    })
-    await controller.ensureProgress(input.run)
   }
   const scheduleDeliveryResume = (input: {
     controller: ReturnType<typeof getDeliveryController>
@@ -658,6 +651,200 @@ export function createAgentWorkflowApp(
         }
       })
     })
+  }
+  const stopWorkspaceWorkflowWorkers = async (input: {
+    workspacePath: string
+    userId: string
+    controller: ReturnType<typeof getDeliveryController>
+  }): Promise<void> => {
+    const workspacePath = resolve(input.workspacePath)
+    const workerIds = new Set<string>()
+    const controllers = new Set([
+      input.controller,
+      ...[...deliveryControllers.values()]
+        .filter(
+          entry =>
+            entry.ownerId === input.userId &&
+            entry.workspacePath === workspacePath,
+        )
+        .map(entry => entry.controller),
+    ])
+    let terminalDrainSettled = false
+    const terminalDrain = Promise.all(
+      [...controllers].map(controller =>
+        controller.dispatcher.waitForTerminalReconciliation(),
+      ),
+    ).finally(() => {
+      terminalDrainSettled = true
+    })
+    while (!terminalDrainSettled) {
+      const workers = beeGameSessions
+        .list(input.userId, { includeWorkflowWorkers: true })
+        .filter(
+          session =>
+            beeGameSessions.isWorkflowWorker(session.id) &&
+            resolve(session.cwd) === workspacePath,
+        )
+      for (const worker of workers) {
+        workerIds.add(worker.id)
+        if (worker.status === 'running') beeGameSessions.stop(worker.id)
+      }
+      await Promise.all(
+        workers.map(worker =>
+          beeGameSessions.waitForWorkflowWorkerIdle(worker.id),
+        ),
+      )
+      if (!terminalDrainSettled)
+        await Promise.race([
+          terminalDrain.catch(() => undefined),
+          new Promise(resolve => setTimeout(resolve, 10)),
+        ])
+    }
+    await terminalDrain
+    await Promise.all(
+      [...workerIds].map(workerId =>
+        beeGameSessions.disposeWorkflowWorker(workerId),
+      ),
+    )
+  }
+  const continueBeeGameDeliveryWorkflowUnlocked = async (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    mode: 'resume' | 'retry'
+    taskId?: string
+    confirmedBriefContext?: string
+    modelConfigId?: string
+    language?: BeeGameSessionLanguage
+  }): Promise<DeliveryRun | undefined> => {
+    const store = createRunStore(input.workspacePath, input.user.id)
+    let inspection
+    try {
+      inspection = await store.inspectWorkflowSnapshot()
+    } catch (error) {
+      if (error instanceof WorkflowStoreError && error.code === 'io') {
+        const missing = await store.load()
+        if (!missing) return undefined
+      }
+      throw error
+    }
+    const rawSnapshot =
+      inspection.parsedValue &&
+      typeof inspection.parsedValue === 'object' &&
+      !Array.isArray(inspection.parsedValue)
+        ? (inspection.parsedValue as Record<string, unknown>)
+        : undefined
+    const confirmedBriefContext =
+      input.confirmedBriefContext?.trim() ||
+      inspection.currentRun?.confirmedBriefContext ||
+      (typeof rawSnapshot?.confirmedBriefContext === 'string'
+        ? rawSnapshot.confirmedBriefContext
+        : undefined)
+    const controller = getDeliveryController({
+      request: input.request,
+      user: input.user,
+      projectId: input.projectId,
+      workspacePath: input.workspacePath,
+      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
+      ...(input.language ? { language: input.language } : {}),
+    })
+    const sessionIsOpen = async (dispatch: DispatchRecord) => {
+      if (beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId)) return true
+      try {
+        return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
+      } catch {
+        return false
+      }
+    }
+    if (inspection.currentRun) {
+      if (inspection.currentRun.projectId !== input.projectId)
+        throw new WorkflowStoreError(
+          'workflow snapshot does not belong to the owned project',
+          'recovery_checkpoint_conflict',
+        )
+      const current =
+        input.mode === 'retry'
+          ? await retryRun({
+              store,
+              runId: inspection.currentRun.runId,
+              workspacePath: input.workspacePath,
+              ...(input.taskId ? { taskId: input.taskId } : {}),
+              sessionIsOpen,
+            })
+          : inspection.currentRun.status === 'completed' ||
+              (inspection.currentRun.activeDispatch?.status === 'running' &&
+                (await sessionIsOpen(inspection.currentRun.activeDispatch)))
+            ? inspection.currentRun
+            : await resumeRun({
+                store,
+                runId: inspection.currentRun.runId,
+                workspacePath: input.workspacePath,
+                sessionIsOpen,
+              })
+      if (input.mode === 'retry') {
+        const durable = await store.load()
+        if (durable?.runId === current.runId) {
+          if (durable.status === 'completed') return durable
+          if (
+            durable.status === 'running' &&
+            durable.activeDispatch?.status === 'running' &&
+            durable.activeDispatch.dispatchId ===
+              current.activeDispatch?.dispatchId &&
+            (await sessionIsOpen(durable.activeDispatch))
+          )
+            return durable
+        }
+        scheduleDeliveryResume({ controller, store, run: current })
+        return current
+      }
+      if (
+        current.status === 'completed' ||
+        current.activeDispatch?.status === 'running'
+      )
+        return current
+      await controller.resume(current)
+      return (await store.load()) ?? current
+    }
+    if (!confirmedBriefContext)
+      throw new WorkflowStoreError(
+        'workflow recovery requires confirmed brief authority',
+        'recovery_checkpoint_missing',
+      )
+    return recoverAndResumeRun({
+      store,
+      workspacePath: input.workspacePath,
+      ownerId: input.user.id,
+      projectId: input.projectId,
+      confirmedBriefContext,
+      stopWorkspaceWorkers: async () =>
+        stopWorkspaceWorkflowWorkers({
+          workspacePath: input.workspacePath,
+          userId: input.user.id,
+          controller,
+        }),
+      resumeCurrentRun: run => controller.resume(run),
+    })
+  }
+  const continueBeeGameDeliveryWorkflow = async (
+    input: Parameters<typeof continueBeeGameDeliveryWorkflowUnlocked>[0],
+  ): Promise<DeliveryRun | undefined> => {
+    const key = `${input.user.id}:${resolve(input.workspacePath)}`
+    const previous = deliveryContinuationQueues.get(key) ?? Promise.resolve()
+    const queued = previous
+      .catch(() => undefined)
+      .then(() => continueBeeGameDeliveryWorkflowUnlocked(input))
+    const marker = queued.then(
+      () => undefined,
+      () => undefined,
+    )
+    deliveryContinuationQueues.set(key, marker)
+    try {
+      return await queued
+    } finally {
+      if (deliveryContinuationQueues.get(key) === marker)
+        deliveryContinuationQueues.delete(key)
+    }
   }
   const startBeeGameDeliveryWorkflow = async (input: {
     request: Request
@@ -2238,13 +2425,6 @@ export function createAgentWorkflowApp(
         beeGamePreviews,
         previewCapabilities,
         dashboardRepository,
-        ensureWorkflowProgress: (workspacePath, run) =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run,
-          }),
       })
       c.header('Cache-Control', 'no-store')
       return c.json(state)
@@ -2276,17 +2456,7 @@ export function createAgentWorkflowApp(
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath) return c.json({ workflow: null, events: [] })
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id, {
-        sessionIsOpen: async dispatch =>
-          beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-        ensureProgress: recovered =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run: recovered,
-          }),
-      })
+      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents()).filter(
@@ -2328,17 +2498,7 @@ export function createAgentWorkflowApp(
       if (!workspacePath) return c.json({ events: [] })
       const after = c.req.query('after') || undefined
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id, {
-        sessionIsOpen: async dispatch =>
-          beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-        ensureProgress: recovered =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run: recovered,
-          }),
-      })
+      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents(after)).filter(
@@ -2364,29 +2524,16 @@ export function createAgentWorkflowApp(
       )
       if (!project?.root_path)
         return c.json({ error: 'Project not found' }, 404)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
-      const store = createRunStore(project.root_path, user.id)
-      const controller = getDeliveryController({
+      const resumed = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
-        projectId: run.projectId,
+        projectId: project.id,
         workspacePath: project.root_path,
+        mode: 'resume',
       })
-      const resumed = await resumeRun({
-        store,
-        runId: run.runId,
-        workspacePath: project.root_path,
-        sessionIsOpen: async dispatch => {
-          try {
-            return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-          } catch {
-            return false
-          }
-        },
-      })
-      await controller.resume(resumed)
-      return c.json((await store.load()) ?? resumed)
+      return resumed
+        ? c.json(resumed)
+        : c.json({ error: 'document_review_not_started' }, 409)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -2405,32 +2552,19 @@ export function createAgentWorkflowApp(
       )
       if (!project?.root_path)
         return c.json({ error: 'Project not found' }, 404)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
-      const store = createRunStore(project.root_path, user.id)
-      const controller = getDeliveryController({
+      const retried = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
-        projectId: run.projectId,
+        projectId: project.id,
         workspacePath: project.root_path,
-      })
-      const retried = await retryRun({
-        store,
-        runId: run.runId,
-        workspacePath: project.root_path,
+        mode: 'retry',
         ...(taskId ? { taskId } : {}),
-        sessionIsOpen: async dispatch => {
-          try {
-            return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-          } catch {
-            return false
-          }
-        },
       })
-      scheduleDeliveryResume({ controller, store, run: retried })
-      return c.json(retried, 202)
+      return retried
+        ? c.json(retried, 202)
+        : c.json({ error: 'document_review_not_started' }, 409)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -3406,24 +3540,8 @@ export function createAgentWorkflowApp(
         }
       },
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
-      resumeDeliveryWorkflow: async input => {
-        const store = createRunStore(input.workspacePath, input.user.id)
-        const controller = getDeliveryController(input)
-        const reconciled = await reconcileRunOnStartup({
-          store,
-          sessionIsOpen: async dispatch => {
-            try {
-              return await controller.dispatcher.workerIsOpen(
-                dispatch.dispatchId,
-              )
-            } catch {
-              return false
-            }
-          },
-        })
-        await controller.resume(reconciled ?? input.run)
-        return (await store.load()) ?? reconciled ?? input.run
-      },
+      resumeDeliveryWorkflow: input =>
+        continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
       requestDeliveryChange: async input => {
         const controller = getDeliveryController(input)
         return controller.requestChange(input.run, input.message)
@@ -4743,10 +4861,6 @@ async function getBeeGameProjectRuntimeState(input: {
   beeGamePreviews: BeeGamePreviewManager
   previewCapabilities: PreviewCapabilityManager
   dashboardRepository: DashboardRepository
-  ensureWorkflowProgress?: (
-    workspacePath: string,
-    run: DeliveryRun,
-  ) => Promise<void>
 }): Promise<JsonObject> {
   const sessionRef = await resolveBeeGameProjectSessionReference(input)
   if (!sessionRef) {
@@ -4754,14 +4868,6 @@ async function getBeeGameProjectRuntimeState(input: {
       ? await readBeeGameWorkflowSnapshot(
           input.project.root_path,
           input.user.id,
-          {
-            sessionIsOpen: async dispatch =>
-              input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-            ensureProgress: input.ensureWorkflowProgress
-              ? run =>
-                  input.ensureWorkflowProgress!(input.project.root_path!, run)
-              : undefined,
-          },
         )
       : null
     const usage = workflow
@@ -4811,13 +4917,6 @@ async function getBeeGameProjectRuntimeState(input: {
   const workflowSnapshot = await readBeeGameWorkflowSnapshot(
     sessionRef.workspacePath,
     input.user.id,
-    {
-      sessionIsOpen: async dispatch =>
-        input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-      ensureProgress: input.ensureWorkflowProgress
-        ? run => input.ensureWorkflowProgress!(sessionRef.workspacePath, run)
-        : undefined,
-    },
   )
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
@@ -4936,46 +5035,41 @@ async function getBeeGameProjectRuntimeState(input: {
 async function readBeeGameWorkflowSnapshot(
   workspacePath: string,
   ownerId: string,
-  options: {
-    sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
-    ensureProgress?: (run: DeliveryRun) => Promise<void>
-  } = {},
 ): Promise<JsonObject | null> {
   try {
-    const progressRecoveryGraceMs = 1_000
     const store = createRunStore(workspacePath, ownerId)
-    const run = await store.load()
-    if (!run) return null
-    let reconciled =
-      run.activeDispatch?.status === 'running'
-        ? await store.reconcile(options.sessionIsOpen)
-        : run
-    if (
-      reconciled?.status === 'running' &&
-      reconciled.activeDispatch?.status !== 'running' &&
-      options.ensureProgress &&
-      (!Number.isFinite(Date.parse(reconciled.updatedAt)) ||
-        Date.now() - Date.parse(reconciled.updatedAt) >=
-          progressRecoveryGraceMs)
-    ) {
-      try {
-        await options.ensureProgress(reconciled)
-      } catch (error) {
-        // A normal terminal handoff can race a polling request. If another
-        // controller won that idempotent dispatch race, the workflow is
-        // already healthy and the read should expose its active worker.
-        const current = await store.load()
-        if (current?.activeDispatch?.status !== 'running') throw error
+    let inspection
+    try {
+      inspection = await store.inspectWorkflowSnapshot()
+    } catch (error) {
+      if (error instanceof WorkflowStoreError && error.code === 'io') {
+        try {
+          await stat(store.paths.snapshot)
+        } catch (cause) {
+          if (
+            cause &&
+            typeof cause === 'object' &&
+            'code' in cause &&
+            cause.code === 'ENOENT'
+          )
+            return null
+        }
       }
-      reconciled = await store.load()
+      throw error
     }
-    if (!reconciled) return null
+    if (!inspection.currentRun)
+      return createWorkflowStateErrorView(
+        inspection.error ??
+          new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
+        lastProvenWorkflowSummary(await store.readEvents()),
+      )
+    const { pendingEvents: _pendingEvents, ...run } = inspection.currentRun
     const timing = workflowElapsedTiming(
       await store.readEvents(),
-      reconciled as DeliveryRun,
+      run as DeliveryRun,
     )
     return {
-      ...(reconciled as unknown as JsonObject),
+      ...(run as unknown as JsonObject),
       ...timing,
     }
   } catch (error) {
@@ -5276,7 +5370,52 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
 const WORKFLOW_STATE_ERROR_TRACE_LIMIT = 100
 const workflowStateErrorTraceByDetail = new Map<string, string>()
 
-function createWorkflowStateErrorView(error: unknown): JsonObject {
+type LastProvenWorkflowSummary = {
+  lastProvenPhase: string
+  lastProvenUnitId: string
+  lastProvenUnitKind:
+    | 'document'
+    | 'review-check'
+    | 'checklist'
+    | 'resource-inventory'
+    | 'resource-content'
+    | 'resource-gate'
+    | 'atomic-plan'
+    | 'implementation-task'
+    | 'implementation-audit'
+    | 'acceptance'
+  lastProvenItemId?: string
+}
+
+function lastProvenWorkflowSummary(
+  events: WorkflowEvent[],
+): LastProvenWorkflowSummary | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
+    if (!parsed.success || parsed.data.unit.phase !== parsed.data.phase)
+      continue
+    const { unit } = parsed.data
+    const itemId =
+      unit.kind === 'document'
+        ? (unit.payload as { path: string }).path
+        : unit.kind === 'review-check'
+          ? (unit.payload as { check: { id: string } }).check.id
+          : undefined
+    return {
+      lastProvenPhase: unit.phase,
+      lastProvenUnitId: unit.unitId,
+      lastProvenUnitKind: unit.kind,
+      ...(itemId ? { lastProvenItemId: itemId } : {}),
+    }
+  }
+  return undefined
+}
+
+function createWorkflowStateErrorView(
+  error: unknown,
+  lastProven?: LastProvenWorkflowSummary,
+): JsonObject {
   const detail = error instanceof Error ? error.message : String(error)
   let traceId = workflowStateErrorTraceByDetail.get(detail)
   if (!traceId) {
@@ -5296,8 +5435,8 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
       detail,
     })
   }
-  const obsolete =
-    error instanceof WorkflowStoreError && error.code === 'obsolete'
+  const recoverable =
+    error instanceof WorkflowStoreError && error.code === 'invalid'
   const now = new Date().toISOString()
   return {
     runId: 'workflow-state-error',
@@ -5306,9 +5445,10 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
     tasks: [],
     evidence: {},
     workflowStateError: true,
-    workflowStateObsolete: obsolete,
-    blockedReason: obsolete
-      ? `当前项目的工作流协议已失效，无法继续运行。请创建全新项目以启动当前工作流。诊断编号：${traceId}`
+    ...(recoverable ? { recoverable: true } : {}),
+    ...(recoverable && lastProven ? lastProven : {}),
+    blockedReason: recoverable
+      ? `工作流需要恢复。请点击继续以从已验证的检查点恢复。诊断编号：${traceId}`
       : `当前项目的工作流状态无效，无法安全继续。诊断编号：${traceId}`,
     // Detailed schema diagnostics stay in the server log. The user-facing
     // workflow card must never render internal JSON validation output.
@@ -5367,7 +5507,8 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
-  if (workflow.workflowStateError === true) return undefined
+  if (workflow.workflowStateError === true)
+    return workflow.recoverable === true ? 'resume' : undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
   const acceptedReviewIsBounded =
@@ -5428,11 +5569,6 @@ function workflowViewForDisplay(
                   typeof path === 'string' ? [path] : [],
                 )
               : undefined,
-          reviewedDocumentPaths: Array.isArray(workflow.reviewedDocumentPaths)
-            ? workflow.reviewedDocumentPaths.flatMap(path =>
-                typeof path === 'string' ? [path] : [],
-              )
-            : undefined,
           documentStep:
             typeof workflow.documentStep === 'string'
               ? (workflow.documentStep as Parameters<
@@ -5490,12 +5626,15 @@ function workflowViewForDisplay(
                           workflow.documentReviewState.activeCycle.repairPlan.groups.flatMap(
                             group =>
                               isObject(group) &&
-                              Array.isArray(group.affectedPaths)
+                              Array.isArray(group.pathDecisions)
                                 ? [
                                     {
-                                      affectedPaths: group.affectedPaths.filter(
-                                        (path): path is string =>
-                                          typeof path === 'string',
+                                      paths: group.pathDecisions.flatMap(
+                                        pathDecision =>
+                                          isObject(pathDecision) &&
+                                          typeof pathDecision.path === 'string'
+                                            ? [pathDecision.path]
+                                            : [],
                                       ),
                                     },
                                   ]
@@ -5611,6 +5750,19 @@ function workflowViewForDisplay(
       : {}),
     ...(typeof workflow.workflowStateError === 'boolean'
       ? { workflowStateError: workflow.workflowStateError }
+      : {}),
+    ...(workflow.recoverable === true ? { recoverable: true } : {}),
+    ...(typeof workflow.lastProvenPhase === 'string'
+      ? { lastProvenPhase: workflow.lastProvenPhase }
+      : {}),
+    ...(typeof workflow.lastProvenUnitId === 'string'
+      ? { lastProvenUnitId: workflow.lastProvenUnitId }
+      : {}),
+    ...(typeof workflow.lastProvenUnitKind === 'string'
+      ? { lastProvenUnitKind: workflow.lastProvenUnitKind }
+      : {}),
+    ...(typeof workflow.lastProvenItemId === 'string'
+      ? { lastProvenItemId: workflow.lastProvenItemId }
       : {}),
     ...(typeof workflow.createdAt === 'string'
       ? { createdAt: workflow.createdAt }
@@ -6267,7 +6419,7 @@ function registerBeeGameSessionRoutes(
       user: BeeGameUserContext
       projectId: string
       workspacePath: string
-      run: import('./beegame/delivery-workflow/types').DeliveryRun
+      confirmedBriefContext?: string
       modelConfigId?: string
       language?: BeeGameSessionLanguage
     }) => Promise<unknown>
@@ -6952,30 +7104,31 @@ function registerBeeGameSessionRoutes(
       if (session) {
         const metadata = beeGameSessions.metadata(session.id)
         if (metadata?.projectId) {
-          const store = createRunStore(
-            session.cwd,
-            options.getCurrentUser(c.req.raw).id,
-          )
-          const run = await store.load()
-          if (run) {
+          if (options.resumeDeliveryWorkflow) {
             const user = options.getCurrentUser(c.req.raw)
-            if (options.resumeDeliveryWorkflow) {
-              return c.json(
-                await options.resumeDeliveryWorkflow({
-                  request: c.req.raw,
-                  user,
-                  projectId: run.projectId,
-                  workspacePath: session.cwd,
-                  run,
-                  ...(session.modelConfigId
-                    ? { modelConfigId: session.modelConfigId }
-                    : {}),
-                  ...(language ? { language } : {}),
-                }),
-              )
-            }
-            const reconciled = await reconcileRunOnStartup({ store })
-            return c.json(reconciled ?? run)
+            const confirmedBriefContext = beeGameSessions
+              .transcript(session.id)
+              .toReversed()
+              .find(
+                event =>
+                  isObject(event.payload) &&
+                  event.payload.displayKind === 'confirmed_brief' &&
+                  typeof event.payload.confirmedBriefContext === 'string',
+              )?.payload?.confirmedBriefContext
+            const resumed = await options.resumeDeliveryWorkflow({
+              request: c.req.raw,
+              user,
+              projectId: metadata.projectId,
+              workspacePath: session.cwd,
+              ...(typeof confirmedBriefContext === 'string'
+                ? { confirmedBriefContext }
+                : {}),
+              ...(session.modelConfigId
+                ? { modelConfigId: session.modelConfigId }
+                : {}),
+              ...(language ? { language } : {}),
+            })
+            if (resumed !== undefined) return c.json(resumed)
           }
           return c.json(
             {

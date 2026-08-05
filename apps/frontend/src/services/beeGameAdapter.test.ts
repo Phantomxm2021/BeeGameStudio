@@ -246,6 +246,19 @@ describe('beeGameAdapter prompt rules', () => {
     );
   });
 
+  it('continues a recoverable workflow through the project resume endpoint once', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: 'running' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.resumeWorkflow('project recovery');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project%20recovery/workflow/resume',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('does not migrate browser-local project metadata into the canonical project repository', async () => {
     localStorage.setItem('beegame-adapter-projects', JSON.stringify([
       {

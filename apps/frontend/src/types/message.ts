@@ -50,6 +50,18 @@ export interface WorkflowCardTask {
 
 export type WorkflowCardAction = 'resume' | 'retry'
 
+export type WorkflowRecoveryUnitKind =
+  | 'document'
+  | 'review-check'
+  | 'checklist'
+  | 'resource-inventory'
+  | 'resource-content'
+  | 'resource-gate'
+  | 'atomic-plan'
+  | 'implementation-task'
+  | 'implementation-audit'
+  | 'acceptance'
+
 export interface WorkflowCardPayload {
   runId: string
   status: WorkflowCardStatus
@@ -84,6 +96,16 @@ export interface WorkflowCardPayload {
   /** Start of the current active interval; absent while paused or terminal. */
   activeSince?: string
   nextAction?: WorkflowCardAction
+  /** True only when the server can recover from the durable workflow state. */
+  recoverable?: boolean
+  /** Last phase proven by the durable accepted-unit journal. */
+  lastProvenPhase?: string
+  /** Last accepted current-protocol unit proven by the durable journal. */
+  lastProvenUnitId?: string
+  /** Current-protocol kind parsed from the accepted-unit contract. */
+  lastProvenUnitKind?: WorkflowRecoveryUnitKind
+  /** Safe canonical item identity only for document and review units. */
+  lastProvenItemId?: string
   block?: {
     message: string
     nextAction?: string

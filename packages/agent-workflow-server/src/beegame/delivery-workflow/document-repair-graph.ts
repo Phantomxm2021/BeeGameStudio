@@ -37,19 +37,32 @@ export const INITIAL_FOUNDATION_UPSTREAM_PATHS: Record<
 export type DerivedRepairGroup = {
   groupId: string
   findings: DocumentReviewFinding[]
-  affectedPaths: FoundationDocumentPath[]
+  subjectPaths: FoundationDocumentPath[]
+  candidatePaths: FoundationDocumentPath[]
   dependsOn: string[]
 }
 
 export function deriveFoundationRepairGroups(
   findings: DocumentReviewFinding[],
 ): DerivedRepairGroup[] {
-  const canonicalFindings = findings.map(finding => ({
-    finding,
-    paths: CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+  const canonicalFindings = findings.map(finding => {
+    const paths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
       finding.subjects.some(subject => subject.path === path),
-    ),
-  }))
+    )
+    const evidencePaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+      finding.evidence.some(reference => reference.path === path),
+    )
+    const highestFactOwner = CANONICAL_FOUNDATION_DOCUMENTS.find(
+      candidate =>
+        (paths.includes(candidate) || evidencePaths.includes(candidate)) &&
+        paths.every(
+          subjectPath =>
+            subjectPath === candidate ||
+            INITIAL_FOUNDATION_UPSTREAM_PATHS[subjectPath].includes(candidate),
+        ),
+    )
+    return { finding, paths, evidencePaths, highestFactOwner }
+  })
   if (canonicalFindings.some(item => item.paths.length === 0))
     throw new Error('foundation repair finding has no canonical subject')
 
@@ -71,9 +84,17 @@ export function deriveFoundationRepairGroups(
   }
   for (let left = 0; left < canonicalFindings.length; left += 1) {
     for (let right = left + 1; right < canonicalFindings.length; right += 1) {
+      const leftFinding = canonicalFindings[left]!
+      const rightFinding = canonicalFindings[right]!
       if (
-        canonicalFindings[left]!.paths.some(path =>
-          canonicalFindings[right]!.paths.includes(path),
+        leftFinding.paths.some(path => rightFinding.paths.includes(path)) ||
+        (leftFinding.highestFactOwner !== undefined &&
+          leftFinding.highestFactOwner === rightFinding.highestFactOwner) ||
+        leftFinding.paths.some(path =>
+          rightFinding.evidencePaths.includes(path),
+        ) ||
+        rightFinding.paths.some(path =>
+          leftFinding.evidencePaths.includes(path),
         )
       )
         union(left, right)
@@ -89,21 +110,28 @@ export function deriveFoundationRepairGroups(
   const groups = [...components.values()]
     .map(component => ({
       findings: component.map(item => item.finding),
-      affectedPaths: CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+      subjectPaths: CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         component.some(item => item.paths.includes(path)),
       ),
     }))
     .sort((left, right) => {
       const leftIndex = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
-        left.affectedPaths[0]!,
+        left.subjectPaths[0]!,
       )
       const rightIndex = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
-        right.affectedPaths[0]!,
+        right.subjectPaths[0]!,
       )
       return leftIndex - rightIndex
     })
     .map((group, index) => ({
       ...group,
+      candidatePaths: CANONICAL_FOUNDATION_DOCUMENTS.filter(
+        path =>
+          group.subjectPaths.includes(path) ||
+          INITIAL_FOUNDATION_UPSTREAM_PATHS[path].some(upstream =>
+            group.subjectPaths.includes(upstream),
+          ),
+      ),
       groupId: `repair-group-${index + 1}`,
       dependsOn: [] as string[],
     }))
@@ -111,9 +139,9 @@ export function deriveFoundationRepairGroups(
     group.dependsOn = groups
       .filter(candidate => candidate.groupId !== group.groupId)
       .filter(candidate =>
-        group.affectedPaths.some(path =>
+        group.subjectPaths.some(path =>
           INITIAL_FOUNDATION_UPSTREAM_PATHS[path].some(upstream =>
-            candidate.affectedPaths.includes(upstream),
+            candidate.subjectPaths.includes(upstream),
           ),
         ),
       )
@@ -135,6 +163,14 @@ function exactStringSet(
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
+export function repairGroupAffectedPaths(
+  group: Pick<DocumentRepairGroup, 'pathDecisions'>,
+): FoundationDocumentPath[] {
+  return CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+    group.pathDecisions.some(pathDecision => pathDecision.path === path),
+  )
+}
+
 export function repairPlanMatchesCanonicalGraph(
   groups: readonly DocumentRepairGroup[],
   derived: readonly DerivedRepairGroup[],
@@ -149,7 +185,13 @@ export function repairPlanMatchesCanonicalGraph(
           group.findingIds,
           expected.findings.map(finding => finding.findingId),
         ) &&
-        exactStringSet(group.affectedPaths, expected.affectedPaths) &&
+        group.pathDecisions.length === repairGroupAffectedPaths(group).length &&
+        expected.subjectPaths.every(path =>
+          repairGroupAffectedPaths(group).includes(path),
+        ) &&
+        repairGroupAffectedPaths(group).every((path: FoundationDocumentPath) =>
+          expected.candidatePaths.includes(path),
+        ) &&
         exactStringSet(group.dependsOn, expected.dependsOn),
     )
   })

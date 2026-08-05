@@ -7,10 +7,11 @@ import {
 
 describe('BeeGame owner bootstrap', () => {
   test('parses and normalizes bootstrap owner emails', () => {
-    expect(parseBootstrapOwnerEmails(' Admin@Example.com, founder@example.com ,,admin@example.com ')).toEqual([
-      'admin@example.com',
-      'founder@example.com',
-    ])
+    expect(
+      parseBootstrapOwnerEmails(
+        ' Admin@Example.com, founder@example.com ,,admin@example.com ',
+      ),
+    ).toEqual(['admin@example.com', 'founder@example.com'])
   })
 
   test('upserts owner invite rows without exposing credentials', async () => {
@@ -80,27 +81,29 @@ describe('BeeGame owner bootstrap', () => {
     expect(schema).toContain(
       'create or replace function public.beegame_is_platform_owner_id(target_user_id uuid)',
     )
-    expect(schema).toContain('runtime_settings_owner_id uuid;')
-    expect(schema).toContain('platform_owner_with_runtime_settings uuid;')
     expect(schema).toContain(
-      'runtime_settings_owner_id := coalesce(platform_owner_with_runtime_settings, config_owner_id);',
+      'insert into public.beegame_platform_settings (key, config, updated_at)',
     )
-    expect(schema).toContain('where owner_id = runtime_settings_owner_id')
+    expect(schema).toContain(
+      "select 'runtime_settings', s.settings, s.updated_at",
+    )
     expect(schema).toContain('public.beegame_is_platform_owner_id(owner_id)')
+    expect(schema).not.toContain('runtime_settings_owner_id uuid;')
   })
 
-  test('keeps OAuth invitation-free accounts at zero credits until redemption', async () => {
+  test('keeps OAuth invitation redemption independent from the removed credit-account system', async () => {
     const migration = await Bun.file(
-      new URL('../../docs/beegame-supabase-invitations-migration.sql', import.meta.url),
+      new URL(
+        '../../docs/beegame-supabase-invitations-migration.sql',
+        import.meta.url,
+      ),
     ).text()
 
-    expect(migration).not.toContain("else\n      return new;")
-    expect(migration).toContain('initial_included_credits := 0;')
-    expect(migration).toMatch(
-      /insert into public\.beegame_credit_accounts \(user_id, included_credits\)[\s\S]*values \(canonical_account_id, initial_included_credits\)/,
+    expect(migration).not.toContain('else\n      return new;')
+    expect(migration).toContain(
+      "jsonb_build_object('beegame_invitation_redeemed_at', now())",
     )
-    expect(migration).toMatch(
-      /create or replace function public\.beegame_redeem_oauth_invitation\(p_nonce text\)[\s\S]*insert into public\.beegame_credit_accounts \(user_id\)[\s\S]*on conflict \(user_id\) do update[\s\S]*included_credits = greatest\(/,
-    )
+    expect(migration).not.toContain('beegame_credit_accounts')
+    expect(migration).not.toContain('initial_included_credits')
   })
 })

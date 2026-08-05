@@ -159,7 +159,6 @@ describe('delivery workflow resource entry', () => {
         },
       ],
     })
-    expect(persisted).not.toHaveProperty('resourceRemediation')
     expect(dispatched?.contract.remediation).toMatchObject({
       kind: 'document_review',
       cycleId: 'resource-cycle',
@@ -340,25 +339,6 @@ describe('delivery workflow resource entry', () => {
       ownerId: 'owner-resource-authority',
     })
     await controller.store.save(run)
-
-    await expect(
-      controller.dispatcher.dispatch({
-        runId: run.runId,
-        ownerId: run.ownerId,
-        projectId: run.projectId,
-        workspacePath: workspace,
-        workerType: 'resource-curator',
-        phase: 'RESOURCE_PREPARATION',
-        revision: run.revision.document,
-        contract: {
-          preparationRetry: {
-            sourceRevision: run.revision.document,
-            attempt: 2,
-            issues: ['resource gate remains incomplete'],
-          },
-        },
-      }),
-    ).rejects.toThrow('resource preparation retry contracts are retired')
 
     await expect(
       controller.dispatcher.dispatch({

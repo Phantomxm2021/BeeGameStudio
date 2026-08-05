@@ -209,6 +209,86 @@ describe('WorkflowCard', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
   });
 
+  it('shows a recoverable workflow at its proven unit and continues once without internal diagnostics', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_recovery',
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'DOCUMENT_REVIEW',
+          lastProvenUnitId: 'review:resource_semantic_fitness',
+          lastProvenUnitKind: 'review-check',
+          lastProvenItemId: 'resource_semantic_fitness',
+          thinking: '{"issues":[{"code":"invalid_type"}]}',
+          block: { message: 'ZodError: internal diagnostic payload' },
+          nextAction: 'resume',
+        }}
+        onAction={onAction}
+      />,
+    );
+
+    expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
+    expect(screen.getByText(/资源语义适配/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    expect(screen.queryByText(/invalid_type|ZodError|internal diagnostic payload/)).not.toBeInTheDocument();
+    expect(screen.queryByText('review:resource_semantic_fitness')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(onAction).toHaveBeenCalledTimes(1));
+    expect(onAction).toHaveBeenCalledWith('resume');
+  });
+
+  it('does not render an unknown recovery unit ID', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_unknown_recovery_unit',
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'DOCUMENT_REVIEW',
+          lastProvenUnitId: 'retired:unknown-unit',
+          nextAction: 'resume',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
+    expect(screen.queryByText('retired:unknown-unit')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['document', 'docs/GDD.md', '游戏设计文档 GDD'],
+    ['review-check', 'resource_semantic_fitness', '资源语义适配'],
+    ['checklist', undefined, 'Gameplay Checklist'],
+    ['resource-inventory', undefined, '资源清单'],
+    ['resource-content', undefined, '资源内容'],
+    ['resource-gate', undefined, '资源准入审计'],
+    ['atomic-plan', undefined, '原子任务规划'],
+    ['implementation-task', undefined, '实现任务'],
+    ['implementation-audit', undefined, '实现审计'],
+    ['acceptance', undefined, '运行验收'],
+  ] as const)('renders the safe title for a %s canonical recovery unit', (kind, itemId, title) => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: `run_recovery_${kind}`,
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'IMPLEMENTATION',
+          lastProvenUnitId: 'internal-unit-id-must-not-render',
+          lastProvenUnitKind: kind,
+          lastProvenItemId: itemId,
+          nextAction: 'resume',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(new RegExp(title))).toBeInTheDocument();
+    expect(screen.queryByText('internal-unit-id-must-not-render')).not.toBeInTheDocument();
+  });
+
   it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {
     const writeText = vi.fn().mockRejectedValue(new Error('Clipboard permission denied'));
     Object.defineProperty(navigator, 'clipboard', {

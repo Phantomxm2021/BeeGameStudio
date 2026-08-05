@@ -23,7 +23,12 @@ import { PauseIcon } from '../ui/pause';
 import { ScanTextIcon } from '../ui/scan-text';
 import { XIcon } from '../ui/x';
 import { useToastContext } from '../../contexts/ToastContext';
-import type { WorkflowCardAction, WorkflowCardPayload, WorkflowCardTask } from '../../types/message';
+import type {
+  WorkflowCardAction,
+  WorkflowCardPayload,
+  WorkflowCardTask,
+  WorkflowRecoveryUnitKind,
+} from '../../types/message';
 
 const statusLabel: Record<WorkflowCardPayload['status'], string> = {
   draft: '准备中',
@@ -91,7 +96,6 @@ const documentTitle: Record<string, string> = {
   resource_semantic_fitness: '资源语义适配',
   content_structure_fitness: '内容结构适配',
   resource_content_consistency: '资源与内容一致性',
-  implementation_readiness: '实现就绪性',
 };
 
 const displayTaskTitle = (task: WorkflowCardTask): string => {
@@ -100,6 +104,30 @@ const displayTaskTitle = (task: WorkflowCardTask): string => {
   if (task.operation === 'produce') return `资源：${title}`;
   if (task.operation === 'assemble') return `组合：${title}`;
   return title;
+};
+
+const displayRecoveryUnitTitle = (kind?: WorkflowRecoveryUnitKind, itemId?: string): string | undefined => {
+  switch (kind) {
+    case 'document':
+    case 'review-check':
+      return itemId ? documentTitle[itemId] : undefined;
+    case 'checklist':
+      return 'Gameplay Checklist';
+    case 'resource-inventory':
+      return '资源清单';
+    case 'resource-content':
+      return '资源内容';
+    case 'resource-gate':
+      return '资源准入审计';
+    case 'atomic-plan':
+      return '原子任务规划';
+    case 'implementation-task':
+      return '实现任务';
+    case 'implementation-audit':
+      return '实现审计';
+    case 'acceptance':
+      return '运行验收';
+  }
 };
 
 const formatDuration = (milliseconds: number): string => {
@@ -339,11 +367,20 @@ export function WorkflowCard({
   const [now, setNow] = useState(() => Date.now());
   const [actionState, setActionState] = useState<'idle' | 'pending'>('idle');
   const [actionError, setActionError] = useState('');
+  const isRecoverable = workflow.recoverable === true;
   const isActive = ['draft', 'running', 'verifying'].includes(workflow.status);
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(workflow.status);
   const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(workflow.status) && Boolean(workflow.block);
   const tasks = workflow.tasks ?? [];
-  const message = workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
+  const recoveryPhaseTitle = isRecoverable ? stageLabel[workflow.lastProvenPhase || ''] : undefined;
+  const recoveryUnitTitle = isRecoverable
+    ? displayRecoveryUnitTitle(workflow.lastProvenUnitKind, workflow.lastProvenItemId)
+    : undefined;
+  const recoveryMessage = '已验证的工作流检查点可继续恢复。';
+  const failureMessage = isRecoverable ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。' : workflow.block?.message;
+  const message = isRecoverable
+    ? recoveryMessage
+    : workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
   const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(
     message || '',
   );
@@ -378,8 +415,9 @@ export function WorkflowCard({
               : workflow.substage === 'CHECKLIST_DRAFTING'
                 ? '编写验收清单'
                 : undefined;
-  const stageTitle =
-    workflow.substage && [4, 6].includes(Number(workflow.phaseIndex))
+  const stageTitle = isRecoverable
+    ? '工作流需要恢复'
+    : workflow.substage && [4, 6].includes(Number(workflow.phaseIndex))
       ? convergenceTitle
       : substageTitle ||
         stageLabel[workflow.documentStep || ''] ||
@@ -436,7 +474,7 @@ export function WorkflowCard({
   };
 
   const handleCopyFailure = async () => {
-    const message = workflow.block?.message;
+    const message = failureMessage;
     if (!message) return;
     const copied = await copyText(message);
     if (copied) showSuccess('错误信息已复制');
@@ -463,6 +501,11 @@ export function WorkflowCard({
                   ) : null}
                 </div>
                 {convergencePosition ? <p className="mt-1 text-xs text-zinc-400">{convergencePosition}</p> : null}
+                {isRecoverable && (recoveryPhaseTitle || recoveryUnitTitle) ? (
+                  <p className="mt-1 text-xs text-zinc-400">
+                    {[recoveryPhaseTitle, recoveryUnitTitle].filter(Boolean).join(' · ')}
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
@@ -481,7 +524,7 @@ export function WorkflowCard({
                       role="tooltip"
                       className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-rose-400/20 bg-zinc-950/95 p-3 text-xs leading-5 text-rose-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                     >
-                      <p>{workflow.block.message}</p>
+                      <p>{failureMessage}</p>
                       {workflow.block.nextAction ? (
                         <p className="mt-1 text-rose-200/70">下一步：{workflow.block.nextAction}</p>
                       ) : null}
@@ -611,11 +654,7 @@ export function WorkflowCard({
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
                 >
                   <RotateCcw className={`h-3.5 w-3.5 ${actionState === 'pending' ? 'animate-spin' : ''}`} />
-                  {actionState === 'pending'
-                    ? '处理中…'
-                    : workflow.nextAction === 'resume'
-                      ? '继续'
-                      : '重试'}
+                  {actionState === 'pending' ? '处理中…' : workflow.nextAction === 'resume' ? '继续' : '重试'}
                 </button>
               ) : null}
             </div>

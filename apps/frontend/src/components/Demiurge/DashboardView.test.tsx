@@ -94,6 +94,7 @@ let capturedRightSidebarProps: Record<string, any> | null = null;
 let capturedTopBarProps: Record<string, any> | null = null;
 let capturedSideMenuProps: Record<string, any> | null = null;
 let capturedUseChatOptions: Record<string, any> | null = null;
+let renderWorkflowCard = false;
 let mockedPhaseInfo = {
   current_phase: 0,
   phase_name: 'phase_0',
@@ -216,8 +217,9 @@ vi.mock('../../hooks/useToast', () => ({
   }),
 }));
 
-vi.mock('../../services/api', () => ({
-  api: {
+vi.mock('../../services/api', async () => {
+  const { beeGameAdapter } = await vi.importActual<typeof import('../../services/beeGameAdapter')>('../../services/beeGameAdapter');
+  return { api: {
     getProjectPreviewAccess: apiMocks.getProjectPreviewAccess,
     startProjectPreview: apiMocks.startProjectPreview,
     restartProjectPreview: apiMocks.restartProjectPreview,
@@ -226,10 +228,10 @@ vi.mock('../../services/api', () => ({
     deployProject: apiMocks.deployProject,
     rollbackProjectDeployment: apiMocks.rollbackProjectDeployment,
     requestProjectAction: apiMocks.requestProjectAction,
-    resumeWorkflow: apiMocks.resumeWorkflow,
+    resumeWorkflow: beeGameAdapter.resumeWorkflow,
     retryWorkflow: apiMocks.retryWorkflow,
-  },
-}));
+  }};
+});
 
 vi.mock('../../services/creditsApi', () => ({
   getCreditBalance: apiMocks.getCreditBalance,
@@ -277,12 +279,16 @@ vi.mock('./SideMenu', () => ({
   },
 }));
 
-vi.mock('./RightSidebar', () => ({
-  RightSidebar: (props: Record<string, any>) => {
+vi.mock('./RightSidebar', async () => {
+  const { WorkflowCard } = await vi.importActual<typeof import('./WorkflowCard')>('./WorkflowCard');
+  return { RightSidebar: (props: Record<string, any>) => {
     capturedRightSidebarProps = props;
+    if (renderWorkflowCard && props.projectStatus?.workflow) {
+      return <WorkflowCard workflow={props.projectStatus.workflow} onAction={props.onWorkflowAction} />;
+    }
     return <div data-testid="right-sidebar" />;
-  },
-}));
+  }};
+});
 
 describe('DashboardView runtime loading', () => {
   afterEach(() => {
@@ -292,6 +298,7 @@ describe('DashboardView runtime loading', () => {
     capturedTopBarProps = null;
     capturedSideMenuProps = null;
     capturedUseChatOptions = null;
+    renderWorkflowCard = false;
     mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] };
     mockedMessages = [];
     mockedTokenUsage = {};
@@ -418,6 +425,39 @@ describe('DashboardView runtime loading', () => {
     expect(apiMocks.retryWorkflow).toHaveBeenCalledWith('proj_1');
     expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
     expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
+  });
+
+  it('continues a recoverable workflow through the real API client exactly once', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'running' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderWorkflowCard = true;
+    mockedProjectStatus = {
+      project_id: 'proj_1',
+      phase: 'paused',
+      blocked: true,
+      workflow: {
+        runId: 'run_recovery_transport',
+        status: 'needs_action',
+        recoverable: true,
+        lastProvenPhase: 'RESOURCE_PREPARATION',
+        lastProvenUnitId: 'resource:content',
+        lastProvenUnitKind: 'resource-content',
+        nextAction: 'resume',
+      },
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '继续' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/proj_1/workflow/resume',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   it('covers the dashboard while the server is starting the project runtime', async () => {

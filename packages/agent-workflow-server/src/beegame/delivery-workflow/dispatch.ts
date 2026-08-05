@@ -18,7 +18,7 @@ import type {
   WorkflowUsage,
   WorkerDispatchRequest,
 } from './types'
-import type { RunStore } from './run-store'
+import type { RunStore, WorkflowLock } from './run-store'
 
 export type DispatchCredits = {
   reserve?: (
@@ -47,11 +47,19 @@ function idempotencyKey(
   request: WorkerDispatchRequest,
   attempt: number,
 ): string {
+  const reviewerPacketIdentity =
+    request.workerType === 'document-reviewer'
+      ? JSON.stringify({
+          cycleId: request.contract.cycleId,
+          mode: request.contract.reviewMode,
+          checkIds: request.contract.currentCheckIds,
+        })
+      : undefined
   const lane =
     request.workerType === 'document-author'
       ? `document:${String(request.contract.documentSet ?? 'foundation')}`
       : request.workerType === 'document-reviewer'
-        ? `review:${String(request.contract.reviewScope ?? 'complete')}`
+        ? `review:${String(request.contract.reviewScope ?? 'complete')}:${reviewerPacketIdentity}`
         : request.workerType
   return `${request.runId}:${request.phase}:${request.workerType}:${lane}:${request.taskId ?? request.phase}:${request.revision}:${attempt}`
 }
@@ -213,12 +221,6 @@ function assertSingleResourceWorkAuthority(
     request.workerType !== 'resource-content-author'
   )
     return
-  if ('preparationRetry' in request.contract) {
-    throw new DispatchError(
-      'blocked',
-      'resource preparation retry contracts are retired',
-    )
-  }
   const remediation = request.contract.remediation
   const cycle = run.documentReviewState.activeCycle
   const hasAcceptedResourceAuthority = Boolean(
@@ -269,7 +271,25 @@ export function createDeliveryDispatcher(options: {
   const requests = new Map<string, WorkerDispatchRequest>()
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
+  const terminalReconciliations = new Set<Promise<void>>()
   let dispatchTail: Promise<void> = Promise.resolve()
+
+  async function acquireDispatchLease(runId: string): Promise<WorkflowLock> {
+    return options.store.mutationLock(runId)
+  }
+
+  function trackTerminalReconciliation(operation: Promise<void>): void {
+    let tracked!: Promise<void>
+    tracked = operation.finally(() => terminalReconciliations.delete(tracked))
+    terminalReconciliations.add(tracked)
+    void tracked.catch(() => undefined)
+  }
+
+  async function waitForTerminalReconciliation(): Promise<void> {
+    await dispatchTail
+    while (terminalReconciliations.size)
+      await Promise.allSettled([...terminalReconciliations])
+  }
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -339,21 +359,11 @@ export function createDeliveryDispatcher(options: {
     }
     if (run.activeDispatch?.status === 'running') {
       const existing = run.activeDispatch
-      const existingKey = [...byKey.entries()].find(
-        ([, record]) => record.dispatchId === existing.dispatchId,
-      )?.[0]
       if (
-        existingKey ===
-        idempotencyKey(
-          request,
-          Math.max(
-            1,
-            existing.taskId
-              ? (run.tasks.find(task => task.id === existing.taskId)?.attempt ??
-                  1)
-              : 1,
-          ),
-        )
+        existing.phase === request.phase &&
+        existing.revision === request.revision &&
+        existing.taskId === request.taskId &&
+        existing.workerType === request.workerType
       )
         return existing
       throw new DispatchError(
@@ -398,32 +408,58 @@ export function createDeliveryDispatcher(options: {
     requests.set(record.dispatchId, request)
     let startedDispatchId: string | undefined
     try {
-      await options.store.commit(
-        {
-          ...run,
-          activeDispatch: record,
-          lastProgressAt: record.startedAt,
-          currentMessage: undefined,
-          currentItemId:
-            request.workerType === 'document-author' && request.taskId
-              ? request.taskId
-              : undefined,
-          ...(request.workerType === 'document-reviewer'
-            ? { reviewedDocumentPaths: [] }
-            : {}),
-          thinking: 'working',
-        },
-        {
-          runId: run.runId,
-          type: 'dispatch.started',
-          phase: run.phase,
-          status: run.status,
-          revision: run.revision,
-          dispatchId: record.dispatchId,
-          workerType: request.workerType,
-          taskId: request.taskId,
-        },
-      )
+      const lease = await acquireDispatchLease(run.runId)
+      try {
+        const current = await options.store.load(lease)
+        if (!current || current.runId !== run.runId)
+          throw new DispatchError('not_found', 'delivery run does not exist')
+        assertSingleResourceWorkAuthority(request, current)
+        if (current.status !== 'running')
+          throw new DispatchError('blocked', 'delivery run is not running')
+        if (current.activeDispatch) {
+          const active = current.activeDispatch
+          if (
+            active.phase === request.phase &&
+            active.revision === request.revision &&
+            active.taskId === request.taskId &&
+            active.workerType === request.workerType
+          ) {
+            forgetDispatch(record.dispatchId)
+            return active
+          }
+          throw new DispatchError(
+            'duplicate',
+            'another delivery worker is already running',
+          )
+        }
+        await options.store.commit(
+          {
+            ...current,
+            activeDispatch: record,
+            lastProgressAt: record.startedAt,
+            currentMessage: undefined,
+            currentItemId:
+              request.workerType === 'document-author' && request.taskId
+                ? request.taskId
+                : undefined,
+            thinking: 'working',
+          },
+          {
+            runId: current.runId,
+            type: 'dispatch.started',
+            phase: current.phase,
+            status: current.status,
+            revision: current.revision,
+            dispatchId: record.dispatchId,
+            workerType: request.workerType,
+            taskId: request.taskId,
+          },
+          undefined,
+          lease,
+        )
+      } finally {
+        await options.store.unlock(lease)
+      }
       await options.credits?.reserve?.(key, request)
       const started = await options.workerPort.start(dispatchRequest)
       startedDispatchId = started.dispatchId
@@ -431,18 +467,45 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker returned a dispatch id that does not match the durable dispatch',
         )
+      const current = await options.store.load()
+      if (
+        !current ||
+        current.runId !== run.runId ||
+        current.status !== 'running' ||
+        current.activeDispatch?.status !== 'running' ||
+        current.activeDispatch.dispatchId !== record.dispatchId
+      ) {
+        releaseDispatch(record.dispatchId, {
+          stopReason: 'delivery dispatch lost durable authority before submit',
+        })
+        if (current?.activeDispatch) return current.activeDispatch
+        throw new DispatchError(
+          'blocked',
+          'delivery dispatch lost durable authority before submit',
+        )
+      }
       // Supervision starts as soon as the durable dispatch owns a transport.
       // submit() spans the complete model turn, so attaching these observers
       // after awaiting it would leave thinking/tool execution unsupervised.
       if (options.workerPort.waitForTerminal) {
-        void options.workerPort
-          .waitForTerminal(record.dispatchId)
-          .then(terminal => thisComplete(terminal))
-          .catch(error =>
-            isWorkerNeedsActionError(error)
-              ? thisNeedsAction(error.message)
-              : thisFail(error),
-          )
+        trackTerminalReconciliation(
+          options.workerPort
+            .waitForTerminal(record.dispatchId)
+            .then(async terminal => {
+              await completeDispatch(record.dispatchId, terminal)
+            })
+            .catch(async error => {
+              if (isWorkerNeedsActionError(error))
+                await markDispatchNeedsAction(record.dispatchId, error.message)
+              else {
+                const reason =
+                  error instanceof Error
+                    ? error.message
+                    : 'worker did not produce a terminal result'
+                await markDispatchFailed(record.dispatchId, reason)
+              }
+            }),
+        )
       }
       await options.workerPort.submit(dispatchId, buildWorkerPrompt(request))
     } catch (error) {
@@ -467,22 +530,6 @@ export function createDeliveryDispatcher(options: {
       throw error
     }
     return record
-
-    function thisComplete(terminal: unknown): void {
-      void completeDispatch(record.dispatchId, terminal).catch(() => undefined)
-    }
-    function thisFail(error: unknown): void {
-      const reason =
-        error instanceof Error
-          ? error.message
-          : 'worker did not produce a terminal result'
-      void markDispatchFailed(record.dispatchId, reason).catch(() => undefined)
-    }
-    function thisNeedsAction(reason: string): void {
-      void markDispatchNeedsAction(record.dispatchId, reason).catch(
-        () => undefined,
-      )
-    }
   }
 
   function isWorkerNeedsActionError(error: unknown): error is Error {
@@ -701,7 +748,10 @@ export function createDeliveryDispatcher(options: {
     return { record: completed, result }
   }
 
-  async function replayTerminal(record: DispatchRecord): Promise<void> {
+  async function replayTerminal(
+    record: DispatchRecord,
+    onTerminal = options.onTerminal,
+  ): Promise<void> {
     if (
       !['completed', 'failed', 'blocked'].includes(record.status) ||
       !record.terminalResult
@@ -722,7 +772,7 @@ export function createDeliveryDispatcher(options: {
         : 1
       const key = request ? idempotencyKey(request, attempt) : record.dispatchId
       await options.credits?.settle?.(key, result)
-      await options.onTerminal?.(record, result, record.request)
+      await onTerminal?.(record, result, record.request)
     } catch (error) {
       const reason =
         error instanceof Error
@@ -892,6 +942,7 @@ export function createDeliveryDispatcher(options: {
     stop,
     status,
     workerIsOpen,
+    waitForTerminalReconciliation,
     idempotencyKey,
   }
 }

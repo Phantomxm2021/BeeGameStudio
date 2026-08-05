@@ -44,11 +44,15 @@ export type BeeGameContentAudit = {
   issues: string[]
 }
 
+export type BeeGameContentDocument = {
+  path: string
+  value: unknown
+}
+
 export function auditBeeGameContent(
   workspacePath: string,
   manifest: BeeGameAssetManifest,
 ): BeeGameContentAudit {
-  const issues: string[] = []
   const target = manifest.project_target
   if (!target)
     return {
@@ -78,7 +82,46 @@ export function auditBeeGameContent(
       referencedResourceIds: [],
       issues: [`Content root does not exist: ${target.content_root}.`],
     }
+  const documents: BeeGameContentDocument[] = []
+  const parseIssues: string[] = []
+  const parseInvalidPaths: string[] = []
+  for (const absolute of listContentFiles(contentRoot)) {
+    const path = relative(workspace, absolute).split(sep).join('/')
+    let value: unknown
+    try {
+      const text = readFileSync(absolute, 'utf8')
+      if (extname(absolute).toLowerCase() === '.json') value = JSON.parse(text)
+      else {
+        const document = parseDocument(text, { uniqueKeys: true })
+        if (document.errors.length)
+          throw new Error(document.errors.map(error => error.message).join(' '))
+        value = document.toJS({ maxAliasCount: 0 })
+      }
+    } catch (error) {
+      parseIssues.push(
+        `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      parseInvalidPaths.push(path)
+      continue
+    }
+    documents.push({ path, value })
+  }
+  const audit = validateBeeGameContentDocuments(documents, manifest)
+  if (parseIssues.length === 0) return audit
+  return {
+    ...audit,
+    valid: false,
+    invalidPaths: [...new Set([...parseInvalidPaths, ...audit.invalidPaths])],
+    hasGlobalIssues: audit.hasGlobalIssues || documents.length === 0,
+    issues: [...parseIssues, ...audit.issues],
+  }
+}
 
+export function validateBeeGameContentDocuments(
+  documents: BeeGameContentDocument[],
+  manifest: BeeGameAssetManifest,
+): BeeGameContentAudit {
+  const issues: string[] = []
   const requirementIds = new Set(manifest.requirements.map(item => item.id))
   const requiredRequirementIds = new Set(
     manifest.requirements
@@ -95,28 +138,22 @@ export function auditBeeGameContent(
   const validPaths: string[] = []
   const invalidPaths: string[] = []
   const ids = new Set<string>()
-  for (const absolute of listContentFiles(contentRoot)) {
+  const paths = new Set<string>()
+  let registryCount = 0
+  for (const document of documents) {
+    const path = document.path.replaceAll('\\', '/')
     const issueStart = issues.length
-    const path = relative(workspace, absolute).split(sep).join('/')
-    const extension = extname(absolute).toLowerCase()
-    let value: unknown
-    try {
-      const text = readFileSync(absolute, 'utf8')
-      if (extname(absolute).toLowerCase() === '.json') value = JSON.parse(text)
-      else {
-        const document = parseDocument(text, { uniqueKeys: true })
-        if (document.errors.length)
-          throw new Error(document.errors.map(error => error.message).join(' '))
-        value = document.toJS({ maxAliasCount: 0 })
-      }
-    } catch (error) {
-      issues.push(
-        `${path}: ${error instanceof Error ? error.message : String(error)}`,
-      )
+    if (!path || paths.has(path)) {
+      issues.push(`${path || '<empty>'}: duplicate or empty content path.`)
+      invalidPaths.push(path)
       continue
     }
+    paths.add(path)
+    const extension = extname(path).toLowerCase()
+    const value = document.value
     if (!isRecord(value)) {
       issues.push(`${path}: content root must be an object.`)
+      invalidPaths.push(path)
       continue
     }
     const unknown = Object.keys(value).filter(
@@ -161,6 +198,8 @@ export function auditBeeGameContent(
         `${path}: resources must be an array of unique non-empty strings.`,
       )
     if (!('data' in value)) issues.push(`${path}: data is required.`)
+    else if (!isRecord(value.data))
+      issues.push(`${path}: data must be an object.`)
     for (const requirementId of fulfills)
       if (!requirementIds.has(requirementId))
         issues.push(`${path}: unknown requirement: ${requirementId}.`)
@@ -170,6 +209,18 @@ export function auditBeeGameContent(
       else if (!verifiedResourceIds.has(resourceId))
         issues.push(`${path}: resource is not verified: ${resourceId}.`)
     }
+    if (kind === 'resource-registry') {
+      registryCount += 1
+      validateResourceRegistry({
+        path,
+        value,
+        fulfills,
+        resources,
+        requirementIds,
+        verifiedResourceIds,
+        issues,
+      })
+    }
     if (id && kind) files.push({ path, id, kind, fulfills, resources })
     if (issues.length === issueStart) validPaths.push(path)
     else invalidPaths.push(path)
@@ -177,6 +228,13 @@ export function auditBeeGameContent(
   let hasGlobalIssues = false
   if (!files.length) {
     issues.push('Content root has no JSON or YAML content files.')
+    hasGlobalIssues = true
+  }
+  if (
+    (requiredRequirementIds.size > 0 || resourceIds.size > 0) &&
+    registryCount !== 1
+  ) {
+    issues.push('Content set must contain exactly one resource-registry.')
     hasGlobalIssues = true
   }
 
@@ -203,6 +261,83 @@ export function auditBeeGameContent(
     referencedResourceIds: [...referenced],
     issues,
   }
+}
+
+function validateResourceRegistry(input: {
+  path: string
+  value: Record<string, unknown>
+  fulfills: string[]
+  resources: string[]
+  requirementIds: Set<string>
+  verifiedResourceIds: Set<string>
+  issues: string[]
+}): void {
+  const data = input.value.data
+  if (!isRecord(data) || !Array.isArray(data.bindings)) {
+    input.issues.push(
+      `${input.path}: resource-registry data.bindings must be an array.`,
+    )
+    return
+  }
+  const boundRequirements = new Set<string>()
+  const boundResources = new Set<string>()
+  for (const binding of data.bindings) {
+    if (!isRecord(binding)) {
+      input.issues.push(`${input.path}: registry binding must be an object.`)
+      continue
+    }
+    const unknown = Object.keys(binding).filter(
+      key => !['requirementId', 'resourceIds'].includes(key),
+    )
+    if (unknown.length)
+      input.issues.push(
+        `${input.path}: registry binding has unknown fields: ${unknown.join(', ')}.`,
+      )
+    const requirementId = text(binding.requirementId)
+    const resourceIds = stringList(binding.resourceIds)
+    if (!requirementId) {
+      input.issues.push(
+        `${input.path}: registry requirementId must be a trimmed non-empty string.`,
+      )
+      continue
+    }
+    if (!input.requirementIds.has(requirementId))
+      input.issues.push(
+        `${input.path}: unknown registry requirement: ${requirementId}.`,
+      )
+    if (boundRequirements.has(requirementId))
+      input.issues.push(
+        `${input.path}: duplicate registry requirement: ${requirementId}.`,
+      )
+    boundRequirements.add(requirementId)
+    if (
+      !Array.isArray(binding.resourceIds) ||
+      resourceIds.length === 0 ||
+      resourceIds.length !== binding.resourceIds.length
+    )
+      input.issues.push(
+        `${input.path}: registry resourceIds must be an array of unique non-empty strings.`,
+      )
+    for (const resourceId of resourceIds) {
+      boundResources.add(resourceId)
+      if (!input.verifiedResourceIds.has(resourceId))
+        input.issues.push(
+          `${input.path}: unknown or unverified registry resource: ${resourceId}.`,
+        )
+    }
+  }
+  if (!sameSet(boundRequirements, new Set(input.fulfills)))
+    input.issues.push(
+      `${input.path}: registry bindings must exactly match top-level fulfills.`,
+    )
+  if (!sameSet(boundResources, new Set(input.resources)))
+    input.issues.push(
+      `${input.path}: registry bindings must exactly match top-level resources.`,
+    )
+}
+
+function sameSet(left: Set<string>, right: Set<string>): boolean {
+  return left.size === right.size && [...left].every(value => right.has(value))
 }
 
 function listContentFiles(root: string): string[] {

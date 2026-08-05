@@ -152,17 +152,24 @@ export async function startNextImplementationTask(input: {
   })
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
   const contract = auditAssetContract(input.workspacePath)
-  const resourcesById = new Map(manifest.resources.map(resource => [resource.id, resource]))
-  const contentById = new Map(contract.content.files.map(file => [file.id, file]))
+  const resourcesById = new Map(
+    manifest.resources.map(resource => [resource.id, resource]),
+  )
+  const contentById = new Map(
+    contract.content.files.map(file => [file.id, file]),
+  )
   const resources = task.resourceIds.map(id => {
     const resource = resourcesById.get(id)
     if (!resource || resource.status !== 'verified')
-      throw new Error(`implementation task references unavailable resource ${id}`)
+      throw new Error(
+        `implementation task references unavailable resource ${id}`,
+      )
     return { id, rootPath: resource.root_path, filePaths: resource.file_paths }
   })
   const content = task.contentIds.map(id => {
     const file = contentById.get(id)
-    if (!file) throw new Error(`implementation task references unknown content ${id}`)
+    if (!file)
+      throw new Error(`implementation task references unknown content ${id}`)
     return file
   })
   const request: WorkerDispatchRequest = {

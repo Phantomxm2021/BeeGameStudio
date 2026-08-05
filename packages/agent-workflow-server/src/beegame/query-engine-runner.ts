@@ -28,6 +28,10 @@ import {
   type ResourceLibraryAction,
 } from './native-resource-library-call'
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
+import {
+  createNativeResourceContentTool,
+  resourceContentCommitContractSchema,
+} from './native-resource-content-tool'
 import { createNativeAtomicTaskPlanTool } from './native-atomic-task-plan-tool'
 import { createNativeAssetManifestTool } from './native-asset-manifest-tool'
 import { CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS } from './configured-provisional-resource-adapters'
@@ -181,7 +185,7 @@ const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
   'SubmitDocumentReviewPacket',
   'SubmitChangeImpactResult',
   'SubmitQuestionAnswerResult',
-  'SubmitResourceContentResult',
+  'CommitResourceContent',
 ])
 
 const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
@@ -206,6 +210,11 @@ export function requiresBeeGameWorkflowBoundaryCheck(
   if (WORKFLOW_FILE_MUTATION_TOOLS.has(toolName)) return true
   if (WORKFLOW_EXTERNAL_WEB_TOOLS.has(toolName)) return true
   if (input.workflowWorkerType === 'document-author' && toolName === 'Read')
+    return true
+  if (
+    input.workflowWorkerType === 'resource-content-author' &&
+    toolName === 'Read'
+  )
     return true
   if (
     input.workflowWorkerType === 'implementation-worker' &&
@@ -736,6 +745,39 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
             fetchImpl: PLATFORM_SERVICE_FETCH,
           })
         : undefined
+    const resourceContentTool =
+      this.input.workflowWorkerType === 'resource-content-author'
+        ? createNativeResourceContentTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+            contract: resourceContentCommitContractSchema.parse(
+              this.input.workflowResourceContentCommitContract,
+            ),
+            assertMutationAuthority: async () => {
+              const requestPermission =
+                this.input.requestPermission ??
+                this.currentSubmitInput?.requestPermission
+              if (!requestPermission)
+                throw new Error(
+                  'Resource Content mutation authority is unavailable.',
+                )
+              const contract = resourceContentCommitContractSchema.parse(
+                this.input.workflowResourceContentCommitContract,
+              )
+              const decision = await requestPermission({
+                toolUseID: `resource-content-authority:${contract.dispatchId}`,
+                toolName: 'CommitResourceContentAuthority',
+                message: 'Verify the active Resource Content dispatch.',
+                input: { dispatchId: contract.dispatchId },
+              })
+              if (decision.behavior !== 'allow')
+                throw new Error(
+                  decision.message ??
+                    'Resource Content dispatch is no longer active.',
+                )
+            },
+          })
+        : undefined
     const atomicTaskPlanTool =
       this.input.workflowWorkerType === 'atomic-task-planner'
         ? createNativeAtomicTaskPlanTool({
@@ -761,8 +803,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         this.input.workflowDocumentAuthorMode === 'repair-planning') ||
       this.input.workflowWorkerType === 'document-reviewer' ||
       this.input.workflowWorkerType === 'change-impact-analyzer' ||
-      this.input.workflowWorkerType === 'question-answerer' ||
-      this.input.workflowWorkerType === 'resource-content-author'
+      this.input.workflowWorkerType === 'question-answerer'
         ? createNativeWorkflowResultTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workerType: this.input.workflowWorkerType,
@@ -772,16 +813,19 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               : {}),
             ...(this.input.workflowWorkerType === 'document-author' &&
             this.input.workflowDocumentAuthorMode === 'repair-planning' &&
-            this.input.workflowDocumentRepairGroupCount
+            this.input.workflowDocumentRepairPlanContract
               ? {
-                  documentRepairGroupCount:
-                    this.input.workflowDocumentRepairGroupCount,
+                  documentRepairPlanContract:
+                    this.input.workflowDocumentRepairPlanContract,
                 }
               : {}),
             ...(this.input.workflowWorkerType === 'document-reviewer' &&
             this.input.workflowDocumentReviewContract
               ? {
                   documentReviewContract:
+                    this.input.workflowDocumentReviewContract,
+                  getDocumentReviewContract: () =>
+                    this.currentSubmitInput?.workflowDocumentReviewContract ??
                     this.input.workflowDocumentReviewContract,
                 }
               : {}),
@@ -800,6 +844,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const workflowTools = [
       assetManifestTool,
       resourceTool,
+      resourceContentTool,
       atomicTaskPlanTool,
       implementationResultTool,
       validationResultTool,
@@ -1477,16 +1522,7 @@ export function selectBeeGameWorkerTools(
     return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
   }
   if (workflowWorkerType === 'resource-content-author') {
-    const resourceToolNames = new Set([
-      'Glob',
-      'Grep',
-      'LS',
-      'NotebookRead',
-      'Read',
-      'Write',
-      'Edit',
-      'MultiEdit',
-    ])
+    const resourceToolNames = new Set(['Read'])
     return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
   }
   if (

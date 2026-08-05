@@ -19,15 +19,12 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('JSON')
     expect(prompt).toContain('YAML')
     expect(prompt).toContain('complete engine-neutral JSON/YAML content')
-    expect(prompt).toContain('events, waves and numeric configuration as JSON')
-    expect(prompt).toContain(
-      'world, scene, hierarchy and instance placement as YAML',
-    )
-    expect(prompt).toContain('event-definitions, wave-definitions')
-    expect(prompt).toContain('fulfills contains only exact requirement IDs')
-    expect(prompt).toContain('reference every Manifest resource ID')
-    expect(prompt).toContain('Do not browse the Catalog')
-    expect(prompt).toContain('SubmitResourceContentResult exactly once')
+    expect(prompt).toContain('JSON owns only contract.jsonKinds')
+    expect(prompt).toContain('YAML owns only contract.yamlKinds')
+    expect(prompt).toContain('contract.requiredRequirementIds')
+    expect(prompt).toContain('contract.verifiedResourceIds')
+    expect(prompt).toContain('browse the Catalog')
+    expect(prompt).toContain('CommitResourceContent exactly once')
   })
 
   test('requires authors and reviewers to keep one resource loading path', () => {
@@ -249,6 +246,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain(
       'Do not duplicate one content or resource defect under a foundation check',
     )
+    expect(prompt).toContain(
+      'three additions in two serial packets: resource_semantic_fitness, then content_structure_fitness with resource_content_consistency',
+    )
   })
 
   test('keeps resource remediation inside the same Curator task', () => {
@@ -414,9 +414,11 @@ describe('resource-content worker prompts', () => {
       contract: {},
     })
     expect(prompt).toContain('contract.authorityPaths')
-    expect(prompt).toContain('Do not browse the Catalog')
-    expect(prompt).toContain('Plan the complete JSON/YAML file set')
-    expect(prompt).toContain('one parallel tool batch')
-    expect(prompt).toContain('only for a specific failed write')
+    expect(prompt).toContain('browse the Catalog')
+    expect(prompt).toContain('Plan the complete project-required content set')
+    expect(prompt).toContain(
+      'validates the merged set before replacing any file',
+    )
+    expect(prompt).toContain('Do not use generic file mutation tools')
   })
 })
