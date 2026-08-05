@@ -1,6 +1,6 @@
 # Workflow Exact-Resume Recovery Design
 
-**Status:** Proposed authority for implementation  
+**Status:** Approved authority for implementation
 **Date:** 2026-08-05  
 **Scope:** BeeGame durable delivery Workflow only
 
@@ -22,6 +22,9 @@ Recovery reconstructs orchestration state. It never reconstructs project output 
 8. Recovery produces exactly one current-schema run. No old runtime, fallback Workflow, compatibility execution branch, second ledger or feedback loop may remain active.
 9. If the system cannot prove whether a unit was accepted, it must report `recovery_checkpoint_missing`; it must not silently rerun the unit or pretend it completed.
 10. Every breaking persisted-state change increments `DELIVERY_RUN_SCHEMA_VERSION` in the same commit.
+11. The ordered graph identifies what may follow an accepted prefix, but it does not prove that the following unit started. Recovery may enter Document Drafting only when durable snapshot or dispatch identity proves that the exact unfinished unit is a current canonical document unit.
+12. Every GET/read surface is observational: it never flushes a pending marker, reconciles a worker, persists progress, or dispatches work.
+13. Concurrent or queued Continue requests persist one continuation decision. Later requests return the same current run without invoking the controller again once durable state owns the continuation.
 
 ## 3. Why the current design fails
 
@@ -80,15 +83,16 @@ The journal is not a second Workflow. It records accepted facts only and cannot 
 It performs this fixed sequence:
 
 1. Acquire a workspace recovery lock that does not require parsing `run.json`.
-2. Stop every open Workflow worker session owned by the workspace.
-3. Reconcile accepted document/content receipts that were committed before interruption.
-4. Replay accepted-unit events in durable order.
-5. Verify every replayed unit against the current unit schema, predecessor relation, receipt and dependency digest.
-6. Inspect the invalid raw snapshot only for current-recognized semantic facts not yet journaled by historical versions. Accept such facts only when their current schema and all referenced digests validate; ignore unknown pending topology.
-7. Derive the longest contiguous accepted unit prefix and the one active unaccepted unit.
-8. Build one current-schema `DeliveryRun` with the original project identity, confirmed brief, start time and cumulative usage.
-9. Append `workflow.run.reconstructed` containing the invalid snapshot digest, resulting run ID, accepted prefix and active unit.
-10. Atomically replace `run.json`, release the recovery lock and resume through the normal current controller.
+2. Inspect and hash the invalid source without flushing or rewriting it.
+3. Stop every open Workflow worker session owned by the workspace. The stop is a barrier: it waits for each active turn, deterministic terminal reconciliation and commit, and usage flush.
+4. Inspect the now-stable source again and reconcile any active canonical document or Resource Content receipt committed before its terminal reached `run.json`.
+5. Replay accepted-unit events in durable order.
+6. Verify every replayed unit against the current unit schema, predecessor relation, receipt and dependency digest.
+7. Inspect the invalid raw snapshot only for current-recognized semantic facts not yet journaled by historical versions. Accept such facts only when their current schema and all referenced digests validate; ignore unknown pending topology.
+8. Derive the longest contiguous accepted unit prefix and require durable identity for the exact unfinished active unit. The first graph node after the prefix is a consistency check, not fallback authority.
+9. Build one current-schema `DeliveryRun` with the original project identity, confirmed brief, start time and cumulative usage.
+10. Ask `RunStore` to compare the expected source digest and write the reconstructed run plus `workflow.run.reconstructed` in the same storage mutation critical section.
+11. Release the recovery lock and resume through the normal current controller.
 
 The projector contains no LLM, keyword matching, regular expressions, project-specific names or platform-specific rules.
 
@@ -128,11 +132,11 @@ Recovery uses the ordered current unit graph, not file existence alone.
 - Resource inventory, content commit and Resource Gate remain separate accepted units.
 - Implementation task completion requires its accepted task evidence, not merely changed source files.
 
-The first unit after the contiguous accepted prefix is the only continuation target. Recovery cannot jump over an unproven unit and cannot reopen an earlier accepted unit.
+The durable active-unit identity must equal the first unit after the contiguous accepted prefix. Recovery cannot infer a started unit from topology alone, jump over an unproven unit or reopen an earlier accepted unit. In particular, a missing active-unit proof never means “start from Document Drafting.”
 
-## 7. Current project result
+## 7. Synthetic acceptance result
 
-For `commander-tower-defense--bcdc5340e96e`, the recoverable facts establish:
+The regression fixture establishes:
 
 - Foundation documents completed;
 - all 12 Foundation Review checks completed;
@@ -141,17 +145,19 @@ For `commander-tower-defense--bcdc5340e96e`, the recoverable facts establish:
 - Comprehensive Review entered;
 - `resource_semantic_fitness` is the active unit and has no accepted terminal.
 
-The version-11 to current transformation must remove the retired pending check from required topology, preserve the 12 completed checks and all prior accepted units, stop dispatch `b4ac1377-a187-40e7-af72-22c9e9c2d3cf`, and resume with a new current-protocol dispatch for `resource_semantic_fitness`. No earlier work may run.
+The version-11 to current transformation must remove the synthetic retired pending check from required topology, preserve the 12 completed checks and all prior accepted units, stop the fixture's stale dispatch, and resume with one new current-protocol dispatch for `resource_semantic_fitness`. No earlier work may run.
 
 ## 8. Concurrency and atomicity
 
-Recovery is serialized per workspace independently of the ordinary run lock. It compares the raw snapshot digest before replacement so two Continue requests cannot reconstruct different runs.
+Recovery is serialized per workspace independently of the ordinary run lock. `RunStore` performs the expected-digest comparison and replacement inside one mutation critical section, so a terminal or ordinary commit cannot land between the final comparison and write.
 
 The operation is idempotent:
 
 - if another request already wrote the same current projection, return it;
 - if a current worker already owns the reconstructed active unit, do not dispatch another;
 - if an accepted receipt appears while recovery is running, reconcile it before deciding to re-dispatch;
+- if a terminal is accepted while workers are stopping, wait for its controller reconciliation/commit and project from the resulting durable state;
+- if a Continue request queued behind the winner, read and return the winner's current run without another resume event or controller call;
 - a crash before atomic replacement leaves the old snapshot and journal intact;
 - a crash after replacement is handled by normal startup reconciliation.
 
@@ -191,7 +197,15 @@ Every test asserts that accepted unit dispatch counts remain unchanged and only 
 
 Cover obsolete version, current-version schema rejection, unknown fields, removed pending unit, truncated JSON, stale active dispatch, duplicate Continue requests and server restart during reconstruction.
 
-### 10.4 Current regression fixture
+Use the real controller and dispatcher for dispatch-count assertions. Cover the final compare/write race with two real `RunStore` instances, restart after reconstruction, and a terminal accepted during the stop barrier. Do not manufacture `activeDispatch` in a resume callback.
+
+### 10.4 Read and HTTP boundaries
+
+- Project resume, project retry and session Continue each cover valid current state, recoverable invalid/obsolete state and hard failures.
+- Repeated or queued Continue requests produce one durable resume and one active-unit dispatch.
+- Project Workflow, Workflow events and runtime-state GETs preserve `run.json`, `events.jsonl` and dispatch counts byte-for-byte, including snapshots with pending markers and orphaned-looking dispatches.
+
+### 10.5 Current regression fixture
 
 Use a synthetic version-11 16-check fixture with the same semantic state shape as the diagnosed project. Assert reconstruction yields 15 current checks, 12 completed Foundation checks, `resource_semantic_fitness` as the sole active unit, preserved Resource Gate evidence and zero dispatches for every earlier phase.
 
@@ -205,7 +219,8 @@ Implementation must remove:
 - any resume/retry path that can only operate after strict full-run parsing;
 - schema-changing code that does not register a version increment;
 - alternate restart logic that clears documents, resources or accepted state;
+- any invalid-state branch that selects Document Drafting without exact durable active-unit proof;
+- polling/read logic that flushes markers, reconciles terminals or starts work;
 - compatibility execution, fallback Workflow, duplicate state ledger and feedback-driven recovery.
 
 After reconstruction, only the current-schema run, accepted-unit journal and canonical receipts participate in execution.
-

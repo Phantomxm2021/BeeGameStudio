@@ -544,9 +544,12 @@ export function createAgentWorkflowApp(
     {
       controller: ReturnType<typeof createDeliveryWorkflowController>
       authContext: { credential?: BeeGameSessionCredential }
+      ownerId: string
+      workspacePath: string
     }
   >()
   const deliveryStartQueues = new Map<string, Promise<void>>()
+  const deliveryContinuationQueues = new Map<string, Promise<void>>()
   const getDeliveryController = (input: {
     request: Request
     user: BeeGameUserContext
@@ -602,22 +605,10 @@ export function createAgentWorkflowApp(
     deliveryControllers.set(key, {
       controller,
       authContext: deliveryAuthContext,
+      ownerId: input.user.id,
+      workspacePath: workspaceKey,
     })
     return controller
-  }
-  const ensureDeliveryProgress = async (input: {
-    request: Request
-    user: BeeGameUserContext
-    workspacePath: string
-    run: DeliveryRun
-  }): Promise<void> => {
-    const controller = getDeliveryController({
-      request: input.request,
-      user: input.user,
-      projectId: input.run.projectId,
-      workspacePath: input.workspacePath,
-    })
-    await controller.ensureProgress(input.run)
   }
   const scheduleDeliveryResume = (input: {
     controller: ReturnType<typeof getDeliveryController>
@@ -663,22 +654,59 @@ export function createAgentWorkflowApp(
   const stopWorkspaceWorkflowWorkers = async (input: {
     workspacePath: string
     userId: string
+    controller: ReturnType<typeof getDeliveryController>
   }): Promise<void> => {
     const workspacePath = resolve(input.workspacePath)
-    const workers = beeGameSessions
-      .list(input.userId, { includeWorkflowWorkers: true })
-      .filter(
-        session =>
-          beeGameSessions.isWorkflowWorker(session.id) &&
-          resolve(session.cwd) === workspacePath,
+    const workerIds = new Set<string>()
+    const controllers = new Set([
+      input.controller,
+      ...[...deliveryControllers.values()]
+        .filter(
+          entry =>
+            entry.ownerId === input.userId &&
+            entry.workspacePath === workspacePath,
+        )
+        .map(entry => entry.controller),
+    ])
+    let terminalDrainSettled = false
+    const terminalDrain = Promise.all(
+      [...controllers].map(controller =>
+        controller.dispatcher.waitForTerminalReconciliation(),
+      ),
+    ).finally(() => {
+      terminalDrainSettled = true
+    })
+    while (!terminalDrainSettled) {
+      const workers = beeGameSessions
+        .list(input.userId, { includeWorkflowWorkers: true })
+        .filter(
+          session =>
+            beeGameSessions.isWorkflowWorker(session.id) &&
+            resolve(session.cwd) === workspacePath,
+        )
+      for (const worker of workers) {
+        workerIds.add(worker.id)
+        if (worker.status === 'running') beeGameSessions.stop(worker.id)
+      }
+      await Promise.all(
+        workers.map(worker =>
+          beeGameSessions.waitForWorkflowWorkerIdle(worker.id),
+        ),
       )
-    for (const worker of workers)
-      if (worker.status === 'running') beeGameSessions.stop(worker.id)
+      if (!terminalDrainSettled)
+        await Promise.race([
+          terminalDrain.catch(() => undefined),
+          new Promise(resolve => setTimeout(resolve, 10)),
+        ])
+    }
+    await terminalDrain
     await Promise.all(
-      workers.map(worker => beeGameSessions.disposeWorkflowWorker(worker.id)),
+      [...workerIds].map(workerId =>
+        beeGameSessions.disposeWorkflowWorker(workerId),
+      ),
     )
   }
-  const continueBeeGameDeliveryWorkflow = async (input: {
+  const continueBeeGameDeliveryWorkflowUnlocked = async (input: {
     request: Request
     user: BeeGameUserContext
     projectId: string
@@ -721,6 +749,7 @@ export function createAgentWorkflowApp(
       ...(input.language ? { language: input.language } : {}),
     })
     const sessionIsOpen = async (dispatch: DispatchRecord) => {
+      if (beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId)) return true
       try {
         return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
       } catch {
@@ -742,16 +771,25 @@ export function createAgentWorkflowApp(
               ...(input.taskId ? { taskId: input.taskId } : {}),
               sessionIsOpen,
             })
-          : await resumeRun({
-              store,
-              runId: inspection.currentRun.runId,
-              workspacePath: input.workspacePath,
-              sessionIsOpen,
-            })
+          : inspection.currentRun.status === 'completed' ||
+              (inspection.currentRun.activeDispatch?.status === 'running' &&
+                (await sessionIsOpen(inspection.currentRun.activeDispatch)))
+            ? inspection.currentRun
+            : await resumeRun({
+                store,
+                runId: inspection.currentRun.runId,
+                workspacePath: input.workspacePath,
+                sessionIsOpen,
+              })
       if (input.mode === 'retry') {
         scheduleDeliveryResume({ controller, store, run: current })
         return current
       }
+      if (
+        current.status === 'completed' ||
+        current.activeDispatch?.status === 'running'
+      )
+        return current
       await controller.resume(current)
       return (await store.load()) ?? current
     }
@@ -770,9 +808,30 @@ export function createAgentWorkflowApp(
         stopWorkspaceWorkflowWorkers({
           workspacePath: input.workspacePath,
           userId: input.user.id,
+          controller,
         }),
       resumeCurrentRun: run => controller.resume(run),
     })
+  }
+  const continueBeeGameDeliveryWorkflow = async (
+    input: Parameters<typeof continueBeeGameDeliveryWorkflowUnlocked>[0],
+  ): Promise<DeliveryRun | undefined> => {
+    const key = `${input.user.id}:${resolve(input.workspacePath)}`
+    const previous = deliveryContinuationQueues.get(key) ?? Promise.resolve()
+    const queued = previous
+      .catch(() => undefined)
+      .then(() => continueBeeGameDeliveryWorkflowUnlocked(input))
+    const marker = queued.then(
+      () => undefined,
+      () => undefined,
+    )
+    deliveryContinuationQueues.set(key, marker)
+    try {
+      return await queued
+    } finally {
+      if (deliveryContinuationQueues.get(key) === marker)
+        deliveryContinuationQueues.delete(key)
+    }
   }
   const startBeeGameDeliveryWorkflow = async (input: {
     request: Request
@@ -2353,13 +2412,6 @@ export function createAgentWorkflowApp(
         beeGamePreviews,
         previewCapabilities,
         dashboardRepository,
-        ensureWorkflowProgress: (workspacePath, run) =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run,
-          }),
       })
       c.header('Cache-Control', 'no-store')
       return c.json(state)
@@ -2391,17 +2443,7 @@ export function createAgentWorkflowApp(
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath) return c.json({ workflow: null, events: [] })
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id, {
-        sessionIsOpen: async dispatch =>
-          beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-        ensureProgress: recovered =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run: recovered,
-          }),
-      })
+      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents()).filter(
@@ -2443,17 +2485,7 @@ export function createAgentWorkflowApp(
       if (!workspacePath) return c.json({ events: [] })
       const after = c.req.query('after') || undefined
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id, {
-        sessionIsOpen: async dispatch =>
-          beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-        ensureProgress: recovered =>
-          ensureDeliveryProgress({
-            request: c.req.raw,
-            user,
-            workspacePath,
-            run: recovered,
-          }),
-      })
+      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents(after)).filter(
@@ -4816,10 +4848,6 @@ async function getBeeGameProjectRuntimeState(input: {
   beeGamePreviews: BeeGamePreviewManager
   previewCapabilities: PreviewCapabilityManager
   dashboardRepository: DashboardRepository
-  ensureWorkflowProgress?: (
-    workspacePath: string,
-    run: DeliveryRun,
-  ) => Promise<void>
 }): Promise<JsonObject> {
   const sessionRef = await resolveBeeGameProjectSessionReference(input)
   if (!sessionRef) {
@@ -4827,14 +4855,6 @@ async function getBeeGameProjectRuntimeState(input: {
       ? await readBeeGameWorkflowSnapshot(
           input.project.root_path,
           input.user.id,
-          {
-            sessionIsOpen: async dispatch =>
-              input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-            ensureProgress: input.ensureWorkflowProgress
-              ? run =>
-                  input.ensureWorkflowProgress!(input.project.root_path!, run)
-              : undefined,
-          },
         )
       : null
     const usage = workflow
@@ -4884,13 +4904,6 @@ async function getBeeGameProjectRuntimeState(input: {
   const workflowSnapshot = await readBeeGameWorkflowSnapshot(
     sessionRef.workspacePath,
     input.user.id,
-    {
-      sessionIsOpen: async dispatch =>
-        input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-      ensureProgress: input.ensureWorkflowProgress
-        ? run => input.ensureWorkflowProgress!(sessionRef.workspacePath, run)
-        : undefined,
-    },
   )
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
@@ -5009,46 +5022,40 @@ async function getBeeGameProjectRuntimeState(input: {
 async function readBeeGameWorkflowSnapshot(
   workspacePath: string,
   ownerId: string,
-  options: {
-    sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
-    ensureProgress?: (run: DeliveryRun) => Promise<void>
-  } = {},
 ): Promise<JsonObject | null> {
   try {
-    const progressRecoveryGraceMs = 1_000
     const store = createRunStore(workspacePath, ownerId)
-    const run = await store.load()
-    if (!run) return null
-    let reconciled =
-      run.activeDispatch?.status === 'running'
-        ? await store.reconcile(options.sessionIsOpen)
-        : run
-    if (
-      reconciled?.status === 'running' &&
-      reconciled.activeDispatch?.status !== 'running' &&
-      options.ensureProgress &&
-      (!Number.isFinite(Date.parse(reconciled.updatedAt)) ||
-        Date.now() - Date.parse(reconciled.updatedAt) >=
-          progressRecoveryGraceMs)
-    ) {
-      try {
-        await options.ensureProgress(reconciled)
-      } catch (error) {
-        // A normal terminal handoff can race a polling request. If another
-        // controller won that idempotent dispatch race, the workflow is
-        // already healthy and the read should expose its active worker.
-        const current = await store.load()
-        if (current?.activeDispatch?.status !== 'running') throw error
+    let inspection
+    try {
+      inspection = await store.inspectWorkflowSnapshot()
+    } catch (error) {
+      if (error instanceof WorkflowStoreError && error.code === 'io') {
+        try {
+          await stat(store.paths.snapshot)
+        } catch (cause) {
+          if (
+            cause &&
+            typeof cause === 'object' &&
+            'code' in cause &&
+            cause.code === 'ENOENT'
+          )
+            return null
+        }
       }
-      reconciled = await store.load()
+      throw error
     }
-    if (!reconciled) return null
+    if (!inspection.currentRun)
+      return createWorkflowStateErrorView(
+        inspection.error ??
+          new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
+      )
+    const { pendingEvents: _pendingEvents, ...run } = inspection.currentRun
     const timing = workflowElapsedTiming(
       await store.readEvents(),
-      reconciled as DeliveryRun,
+      run as DeliveryRun,
     )
     return {
-      ...(reconciled as unknown as JsonObject),
+      ...(run as unknown as JsonObject),
       ...timing,
     }
   } catch (error) {

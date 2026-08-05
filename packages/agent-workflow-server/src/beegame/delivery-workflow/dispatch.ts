@@ -271,7 +271,21 @@ export function createDeliveryDispatcher(options: {
   const requests = new Map<string, WorkerDispatchRequest>()
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
+  const terminalReconciliations = new Set<Promise<void>>()
   let dispatchTail: Promise<void> = Promise.resolve()
+
+  function trackTerminalReconciliation(operation: Promise<void>): void {
+    let tracked!: Promise<void>
+    tracked = operation.finally(() => terminalReconciliations.delete(tracked))
+    terminalReconciliations.add(tracked)
+    void tracked.catch(() => undefined)
+  }
+
+  async function waitForTerminalReconciliation(): Promise<void> {
+    await dispatchTail
+    while (terminalReconciliations.size)
+      await Promise.allSettled([...terminalReconciliations])
+  }
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -451,14 +465,24 @@ export function createDeliveryDispatcher(options: {
       // submit() spans the complete model turn, so attaching these observers
       // after awaiting it would leave thinking/tool execution unsupervised.
       if (options.workerPort.waitForTerminal) {
-        void options.workerPort
-          .waitForTerminal(record.dispatchId)
-          .then(terminal => thisComplete(terminal))
-          .catch(error =>
-            isWorkerNeedsActionError(error)
-              ? thisNeedsAction(error.message)
-              : thisFail(error),
-          )
+        trackTerminalReconciliation(
+          options.workerPort
+            .waitForTerminal(record.dispatchId)
+            .then(async terminal => {
+              await completeDispatch(record.dispatchId, terminal)
+            })
+            .catch(async error => {
+              if (isWorkerNeedsActionError(error))
+                await markDispatchNeedsAction(record.dispatchId, error.message)
+              else {
+                const reason =
+                  error instanceof Error
+                    ? error.message
+                    : 'worker did not produce a terminal result'
+                await markDispatchFailed(record.dispatchId, reason)
+              }
+            }),
+        )
       }
       await options.workerPort.submit(dispatchId, buildWorkerPrompt(request))
     } catch (error) {
@@ -483,22 +507,6 @@ export function createDeliveryDispatcher(options: {
       throw error
     }
     return record
-
-    function thisComplete(terminal: unknown): void {
-      void completeDispatch(record.dispatchId, terminal).catch(() => undefined)
-    }
-    function thisFail(error: unknown): void {
-      const reason =
-        error instanceof Error
-          ? error.message
-          : 'worker did not produce a terminal result'
-      void markDispatchFailed(record.dispatchId, reason).catch(() => undefined)
-    }
-    function thisNeedsAction(reason: string): void {
-      void markDispatchNeedsAction(record.dispatchId, reason).catch(
-        () => undefined,
-      )
-    }
   }
 
   function isWorkerNeedsActionError(error: unknown): error is Error {
@@ -911,6 +919,7 @@ export function createDeliveryDispatcher(options: {
     stop,
     status,
     workerIsOpen,
+    waitForTerminalReconciliation,
     idempotencyKey,
   }
 }

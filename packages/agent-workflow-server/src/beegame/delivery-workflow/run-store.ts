@@ -358,9 +358,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return record
   }
 
-  async function loadUnlocked(options: { migrate?: boolean } = {}): Promise<
-    DeliveryRun | null
-  > {
+  async function loadUnlocked(
+    options: { migrate?: boolean } = {},
+  ): Promise<DeliveryRun | null> {
     let snapshotText: string
     try {
       snapshotText = await readFile(filePaths.snapshot, 'utf8')
@@ -399,7 +399,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         migrated = result.migratedFrom !== undefined
       } catch (error) {
         const detail =
-          error instanceof Error ? error.message : 'workflow snapshot migration failed'
+          error instanceof Error
+            ? error.message
+            : 'workflow snapshot migration failed'
         throw new WorkflowStoreError(
           `workflow snapshot migration failed at ${filePaths.snapshot}: ${detail}`,
           error instanceof SnapshotMigrationError &&
@@ -451,7 +453,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return run
   }
 
-  async function load(options?: { migrate?: boolean }): Promise<DeliveryRun | null> {
+  async function load(options?: {
+    migrate?: boolean
+  }): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, () => loadUnlocked(options))
   }
 
@@ -558,19 +562,20 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     } as WorkflowEvent
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
-      ...acceptedUnits.map(unit =>
-        ({
-          eventId: randomUUID(),
-          runId: run.runId,
-          type: 'workflow.unit.accepted',
-          phase: unit.phase,
-          status: run.status,
-          revision: run.revision,
-          createdAt: unit.acceptedAt,
-          projectId: run.projectId,
-          ownerId: run.ownerId,
-          unit,
-        }) satisfies WorkflowUnitAcceptedEvent,
+      ...acceptedUnits.map(
+        unit =>
+          ({
+            eventId: randomUUID(),
+            runId: run.runId,
+            type: 'workflow.unit.accepted',
+            phase: unit.phase,
+            status: run.status,
+            revision: run.revision,
+            createdAt: unit.acceptedAt,
+            projectId: run.projectId,
+            ownerId: run.ownerId,
+            unit,
+          }) satisfies WorkflowUnitAcceptedEvent,
       ),
     ]
     // The pending marker is written together with the new authoritative
@@ -610,6 +615,35 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return enqueueMutation(filePaths.snapshot, () =>
       commitUnlocked(run, event, acceptedUnits),
     )
+  }
+
+  async function replaceSnapshotIfDigest(input: {
+    expectedDigest: string
+    run: DeliveryRun
+    event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
+      Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>
+    acceptedUnits?: AcceptedWorkflowUnit[]
+  }): Promise<DeliveryRun> {
+    return enqueueMutation(filePaths.snapshot, async () => {
+      let source: string
+      try {
+        source = await readFile(filePaths.snapshot, 'utf8')
+      } catch (error) {
+        if (isMissingFile(error))
+          throw new WorkflowStoreError(
+            'workflow snapshot disappeared before expected-digest replacement',
+            'recovery_snapshot_changed',
+          )
+        throw storageReadError(filePaths.snapshot, error)
+      }
+      const currentDigest = createHash('sha256').update(source).digest('hex')
+      if (currentDigest !== input.expectedDigest)
+        throw new WorkflowStoreError(
+          'workflow snapshot changed before expected-digest replacement',
+          'recovery_snapshot_changed',
+        )
+      return persistCommitUnlocked(input.run, input.event, input.acceptedUnits)
+    })
   }
 
   async function readEvents(afterEventId?: string): Promise<WorkflowEvent[]> {
@@ -815,6 +849,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     load,
     save,
     commit,
+    replaceSnapshotIfDigest,
     appendEvent,
     readEvents,
     lock,

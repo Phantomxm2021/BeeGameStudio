@@ -863,6 +863,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async waitForTerminal(dispatchId) {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
+      let closedTurnDrained = false
       // Recovery policy belongs to the dispatcher. A transport-level fixed
       // deadline would fail a worker that is still making durable progress.
       while (true) {
@@ -954,6 +955,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
           if (request)
             return createDeterministicStructuredTerminal({ request, events })
           throw new Error('worker has no structured terminal result channel')
+        }
+        if (
+          typeof input.sessions.isWorkflowWorkerOpen === 'function' &&
+          !input.sessions.isWorkflowWorkerOpen(dispatchId)
+        ) {
+          if (!closedTurnDrained) {
+            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+            closedTurnDrained = true
+            continue
+          }
+          throw new Error(
+            'worker stopped before producing a durable terminal result',
+          )
         }
         await new Promise(resolve => setTimeout(resolve, 250))
       }

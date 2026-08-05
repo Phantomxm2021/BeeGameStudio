@@ -1,13 +1,22 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
-import { computeDocumentRevision, computeResourceRevision } from './revision'
+import {
+  computeDocumentRevision,
+  computeResourceContentDigest,
+  computeResourceRevision,
+  computeWorkspaceRevision,
+} from './revision'
 import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  type AcceptedWorkflowUnit,
   type DeliveryRun,
   type DispatchRecord,
   type WorkflowEvent,
+  type WorkflowUnitAcceptedEvent,
 } from './types'
 import {
   WorkflowStoreError,
@@ -49,6 +58,347 @@ function snapshotRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value
+    : undefined
+}
+
+function sameStrings(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
+}
+
+function recoveryConflict(message: string): never {
+  throw new WorkflowStoreError(message, 'recovery_checkpoint_conflict')
+}
+
+function acceptedUnitAlreadyJournaled(
+  events: WorkflowEvent[],
+  unitId: string,
+): boolean {
+  return events.some(
+    event =>
+      event.type === 'workflow.unit.accepted' &&
+      snapshotRecord(event.unit)?.unitId === unitId,
+  )
+}
+
+function acceptedEvent(input: {
+  unit: AcceptedWorkflowUnit
+  runId: string
+  ownerId: string
+  projectId: string
+  revision: DeliveryRun['revision']
+}): WorkflowUnitAcceptedEvent {
+  return {
+    eventId: randomUUID(),
+    runId: input.runId,
+    type: 'workflow.unit.accepted',
+    phase: input.unit.phase,
+    status: 'running',
+    revision: input.revision,
+    createdAt: input.unit.acceptedAt,
+    projectId: input.projectId,
+    ownerId: input.ownerId,
+    unit: input.unit,
+  }
+}
+
+function assertActiveRequestIdentity(input: {
+  snapshot: Record<string, unknown>
+  dispatch: Record<string, unknown>
+  request: Record<string, unknown>
+  workspacePath: string
+  ownerId: string
+  projectId: string
+}): { dispatchId: string; runId: string } {
+  const dispatchId = stringValue(input.dispatch.dispatchId)
+  const runId = stringValue(input.snapshot.runId)
+  const requestWorkspace = stringValue(input.request.workspacePath)
+  if (
+    !dispatchId ||
+    !runId ||
+    input.request.dispatchId !== dispatchId ||
+    input.request.runId !== runId ||
+    input.request.ownerId !== input.ownerId ||
+    input.request.projectId !== input.projectId ||
+    !requestWorkspace ||
+    resolve(requestWorkspace) !== resolve(input.workspacePath) ||
+    input.request.workerType !== input.dispatch.workerType ||
+    input.request.phase !== input.dispatch.phase
+  )
+    recoveryConflict(
+      'active dispatch request does not match the owned recovery checkpoint',
+    )
+  return { dispatchId, runId }
+}
+
+type ReconciledProjectionSource = {
+  inspection: WorkflowSnapshotInspection
+  events: WorkflowEvent[]
+  acceptedUnits: AcceptedWorkflowUnit[]
+}
+
+async function reconcileActiveCanonicalReceipt(input: {
+  inspection: WorkflowSnapshotInspection
+  events: WorkflowEvent[]
+  workspacePath: string
+  ownerId: string
+  projectId: string
+  confirmedBriefContext: string
+}): Promise<ReconciledProjectionSource> {
+  const snapshot = snapshotRecord(input.inspection.parsedValue)
+  const dispatch = snapshotRecord(snapshot?.activeDispatch)
+  const request = snapshotRecord(dispatch?.request)
+  if (!snapshot || !dispatch || !request)
+    return {
+      inspection: input.inspection,
+      events: input.events,
+      acceptedUnits: [],
+    }
+
+  if (dispatch.workerType === 'document-author') {
+    const dispatchId = stringValue(dispatch.dispatchId)
+    if (!dispatchId)
+      recoveryConflict('active canonical document dispatch has no identity')
+    const receipt = await reconcileCanonicalDocumentCommitReceipt({
+      workspacePath: input.workspacePath,
+      dispatchId,
+    })
+    if (!receipt)
+      return {
+        inspection: input.inspection,
+        events: input.events,
+        acceptedUnits: [],
+      }
+    const identity = assertActiveRequestIdentity({
+      ...input,
+      snapshot,
+      dispatch,
+      request,
+    })
+    const contract = snapshotRecord(request.contract)
+    const targetPath = stringValue(contract?.foundationDocumentPath)
+    const completedPaths = stringArray(
+      snapshotRecord(snapshot.foundationDraftState)?.completedPaths,
+    )
+    const targetIndex = targetPath
+      ? CANONICAL_FOUNDATION_DOCUMENTS.indexOf(targetPath as never)
+      : -1
+    if (
+      request.phase !== 'DOCUMENT_DRAFTING' ||
+      request.taskId !== targetPath ||
+      contract?.authoringMode !== 'initial' ||
+      !completedPaths ||
+      targetIndex < 0 ||
+      !sameStrings(
+        completedPaths,
+        CANONICAL_FOUNDATION_DOCUMENTS.slice(0, targetIndex),
+      ) ||
+      receipt.targetPath !== targetPath
+    )
+      recoveryConflict(
+        'canonical document receipt does not prove the exact active drafting unit',
+      )
+    const confirmedBriefDigest = createHash('sha256')
+      .update(input.confirmedBriefContext)
+      .digest('hex')
+    const [documentRevision, workspaceRevision] = await Promise.all([
+      computeDocumentRevision(input.workspacePath, confirmedBriefDigest),
+      computeWorkspaceRevision(input.workspacePath),
+    ])
+    const revision = {
+      document: documentRevision,
+      workspace: workspaceRevision,
+    }
+    const acceptedAt = receipt.updatedAt
+    const unit: AcceptedWorkflowUnit = {
+      eventSchemaVersion: 1,
+      unitId: `document:${targetPath}`,
+      kind: 'document',
+      phase: 'DOCUMENT_DRAFTING',
+      predecessorUnitIds:
+        targetIndex === 0
+          ? []
+          : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[targetIndex - 1]}`],
+      inputRevision: documentRevision,
+      dependencyDigests: { [targetPath]: receipt.finalDigest },
+      receiptRef: `.beegame/workflow/document-commits/${identity.dispatchId}.json`,
+      acceptedAt,
+      payload: { path: targetPath, revision: documentRevision },
+    }
+    const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[targetIndex + 1]
+    const documentReviewState =
+      snapshotRecord(snapshot.documentReviewState) ?? {}
+    const parsedValue = {
+      ...snapshot,
+      revision,
+      status: 'running',
+      activeDispatch: undefined,
+      foundationDraftState: { completedPaths: [...completedPaths, targetPath] },
+      ...(nextPath
+        ? {
+            phase: 'DOCUMENT_DRAFTING',
+            documentStep: 'FOUNDATION_DRAFTING',
+            currentItemId: nextPath,
+          }
+        : {
+            phase: 'DOCUMENT_REVIEW',
+            documentStep: 'FOUNDATION_REVIEW',
+            currentItemId: FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[0],
+            documentReviewState: {
+              ...documentReviewState,
+              activeCycle: {
+                requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+                completedCheckIds: [],
+              },
+            },
+          }),
+      updatedAt: acceptedAt,
+    }
+    if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
+      return {
+        inspection: { ...input.inspection, parsedValue },
+        events: input.events,
+        acceptedUnits: [],
+      }
+    return {
+      inspection: { ...input.inspection, parsedValue },
+      events: [
+        ...input.events,
+        acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
+      ],
+      acceptedUnits: [unit],
+    }
+  }
+
+  if (dispatch.workerType === 'resource-content-author') {
+    const dispatchId = stringValue(dispatch.dispatchId)
+    if (!dispatchId)
+      recoveryConflict('active Resource Content dispatch has no identity')
+    const receipt = await reconcileResourceContentCommitReceipt({
+      workspacePath: input.workspacePath,
+      dispatchId,
+    })
+    if (!receipt)
+      return {
+        inspection: input.inspection,
+        events: input.events,
+        acceptedUnits: [],
+      }
+    const identity = assertActiveRequestIdentity({
+      ...input,
+      snapshot,
+      dispatch,
+      request,
+    })
+    const contract = snapshotRecord(request.contract)
+    const resourceState = snapshotRecord(snapshot.resourceProductionState)
+    const inventory = snapshotRecord(resourceState?.inventoryReceipt)
+    if (
+      request.phase !== 'RESOURCE_PREPARATION' ||
+      contract?.task !== 'RESOURCE_CONTENT' ||
+      resourceState?.currentTask !== 'RESOURCE_CONTENT' ||
+      !inventory ||
+      contract.inventoryRevision !== inventory.revision
+    )
+      recoveryConflict(
+        'Resource Content receipt does not prove the exact active production unit',
+      )
+    const confirmedBriefDigest = createHash('sha256')
+      .update(input.confirmedBriefContext)
+      .digest('hex')
+    const [documentRevision, workspaceRevision] = await Promise.all([
+      computeDocumentRevision(input.workspacePath, confirmedBriefDigest),
+      computeWorkspaceRevision(input.workspacePath),
+    ])
+    const revision = {
+      document: documentRevision,
+      workspace: workspaceRevision,
+    }
+    const acceptedAt = new Date().toISOString()
+    if (receipt.action === 'needs_inventory') {
+      const parsedValue = {
+        ...snapshot,
+        revision,
+        status: 'running',
+        activeDispatch: undefined,
+        resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
+        updatedAt: acceptedAt,
+      }
+      return {
+        inspection: { ...input.inspection, parsedValue },
+        events: input.events,
+        acceptedUnits: [],
+      }
+    }
+    const terminal = createResourceContentTerminalFromReceipt({
+      workspacePath: input.workspacePath,
+      revision: stringValue(dispatch.revision) ?? documentRevision,
+      receipt,
+    })
+    if (terminal.status !== 'completed')
+      recoveryConflict('Resource Content receipt is not a committed terminal')
+    const contentDigest = await computeResourceContentDigest(
+      input.workspacePath,
+    )
+    const unit: AcceptedWorkflowUnit = {
+      eventSchemaVersion: 1,
+      unitId: 'resource:content',
+      kind: 'resource-content',
+      phase: 'RESOURCE_PREPARATION',
+      predecessorUnitIds: ['resource:inventory'],
+      inputRevision: contentDigest,
+      dependencyDigests: { content: contentDigest },
+      acceptedAt,
+      payload: { contentDigest },
+    }
+    const parsedValue = {
+      ...snapshot,
+      revision,
+      phase: 'RESOURCE_PREPARATION',
+      status: 'running',
+      activeDispatch: undefined,
+      resourceProductionState: {
+        ...resourceState,
+        currentTask: 'RESOURCE_GATE',
+        contentReceipt: { contentDigest, acceptedAt },
+      },
+      updatedAt: acceptedAt,
+    }
+    if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
+      return {
+        inspection: { ...input.inspection, parsedValue },
+        events: input.events,
+        acceptedUnits: [],
+      }
+    return {
+      inspection: { ...input.inspection, parsedValue },
+      events: [
+        ...input.events,
+        acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
+      ],
+      acceptedUnits: [unit],
+    }
+  }
+
+  return {
+    inspection: input.inspection,
+    events: input.events,
+    acceptedUnits: [],
+  }
 }
 
 function assertRecoveryAuthority(input: {
@@ -221,27 +571,33 @@ export async function recoverAndResumeRun(input: {
       }
 
       const stoppedSource = await input.store.inspectWorkflowSnapshot()
-      if (stoppedSource.digest !== source.digest)
-        throw new WorkflowStoreError(
-          'workflow snapshot changed while stale workers were stopping',
-          'recovery_snapshot_changed',
-        )
-      const migratedSource = migrationInspection(source)
-      const projection = await projectExactResumeRun({
+      assertRecoveryAuthority({ ...input, inspection: stoppedSource })
+      if (stoppedSource.currentRun) {
+        return {
+          run: stoppedSource.currentRun,
+          resume:
+            stoppedSource.currentRun.status !== 'completed' &&
+            stoppedSource.currentRun.activeDispatch?.status !== 'running',
+        }
+      }
+      const migratedSource = migrationInspection(stoppedSource)
+      const events = await input.store.readEvents()
+      const reconciled = await reconcileActiveCanonicalReceipt({
         inspection: migratedSource,
-        events: await input.store.readEvents(),
+        events,
         workspacePath,
         ownerId: input.ownerId,
         projectId: input.projectId,
         confirmedBriefContext: input.confirmedBriefContext,
       })
-      const beforeReplacement = await input.store.inspectWorkflowSnapshot()
-      if (beforeReplacement.digest !== source.digest)
-        throw new WorkflowStoreError(
-          'workflow snapshot changed during reconstruction',
-          'recovery_snapshot_changed',
-        )
-
+      const projection = await projectExactResumeRun({
+        inspection: reconciled.inspection,
+        events: reconciled.events,
+        workspacePath,
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        confirmedBriefContext: input.confirmedBriefContext,
+      })
       const createdAt = new Date().toISOString()
       const reconstructedEvent: WorkflowEvent = {
         eventId: randomUUID(),
@@ -253,18 +609,19 @@ export async function recoverAndResumeRun(input: {
         createdAt,
         projectId: projection.run.projectId,
         ownerId: projection.run.ownerId,
-        sourceSnapshotDigest: source.digest,
+        sourceSnapshotDigest: stoppedSource.digest,
         replayedUnitIds: projection.replayedUnitIds,
         ...(projection.activeUnitId
           ? { activeUnitId: projection.activeUnitId }
           : {}),
       }
-      await input.store.save({
-        ...projection.run,
-        pendingEvents: [reconstructedEvent],
+      const persisted = await input.store.replaceSnapshotIfDigest({
+        expectedDigest: stoppedSource.digest,
+        run: projection.run,
+        event: reconstructedEvent,
+        acceptedUnits: reconciled.acceptedUnits,
       })
-      const persisted = await input.store.load()
-      if (!persisted || persisted.runId !== projection.run.runId)
+      if (persisted.runId !== projection.run.runId)
         throw new WorkflowStoreError(
           'reconstructed workflow snapshot could not be reloaded',
           'io',
@@ -455,6 +812,11 @@ export async function resumeRun(input: {
   )
   if (!reconciled || reconciled.runId !== input.runId)
     throw new Error('delivery run not found')
+  if (
+    reconciled.status === 'completed' ||
+    reconciled.activeDispatch?.status === 'running'
+  )
+    return reconciled
   const acquired = await acquireAndLoad(input)
   try {
     acquired.run = await restoreCanonicalDocumentCommit(

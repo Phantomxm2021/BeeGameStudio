@@ -706,6 +706,73 @@ describe('workflow exact-resume recovery projector', () => {
     expect(projection.sourceSnapshotDigest).toBe(inspection.digest)
   })
 
+  test('does not infer Document Drafting from an empty accepted prefix without durable active-unit proof', async () => {
+    const fixture = await createProjectionFixture()
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: undefined,
+      activeDispatch: undefined,
+      foundationDraftState: { completedPaths: [] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const metadataEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, metadataEvents)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('continues Document Drafting only when the exact unfinished document is durably identified', async () => {
+    const fixture = await createProjectionFixture()
+    const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: activePath,
+      activeDispatch: undefined,
+      foundationDraftState: { completedPaths: [] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const metadataEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    const projection = await projectExactResumeRun(
+      projectInput(fixture, inspection, metadataEvents),
+    )
+
+    expect(projection.activeUnitId).toBe(`document:${activePath}`)
+    expect(projection.run).toMatchObject({
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      currentItemId: activePath,
+    })
+  })
+
   test('uses matching canonical document receipts to recover historical completed paths', async () => {
     const fixture = await createProjectionFixture()
     const inspection = await inspect(fixture)
@@ -1216,21 +1283,18 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
-  test('projects malformed JSON when the accepted journal is complete', async () => {
+  test('rejects malformed JSON without durable active-unit proof even when the accepted journal is contiguous', async () => {
     const fixture = await createProjectionFixture()
     await writeFile(fixture.snapshotPath, '{"schemaVersion":')
     const inspection = await inspect(fixture)
 
-    const projection = await projectExactResumeRun(
-      projectInput(fixture, inspection),
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
     )
 
     expect(inspection.parsedValue).toBeUndefined()
     expect(inspection.error?.code).toBe('invalid')
-    expect(projection.activeUnitId).toBe('review:resource_semantic_fitness')
-    expect(projection.run.activeDispatch).toBeUndefined()
-    expect(projection.run.createdAt).toBe(fixture.snapshot.createdAt)
-    expect(projection.run.usage).toEqual(fixture.snapshot.usage)
   })
 
   test('rejects raw start and usage that contradict the event journal', async () => {

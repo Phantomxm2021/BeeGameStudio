@@ -31,7 +31,6 @@ import {
   type AcceptedWorkflowUnit,
   type DeliveryRun,
   type DocumentReviewCheck,
-  type WorkflowUnitAcceptedEvent,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
@@ -53,7 +52,9 @@ import {
 const RECOVERY_OWNER_ID = 'recovery-owner'
 const RECOVERY_PROJECT_ID = 'recovery-project'
 const RECOVERY_RUN_ID = 'recovery-run'
-const RECOVERY_BRIEF = 'Confirmed recovery test authority.'
+const RECOVERY_BRIEF = JSON.stringify({
+  goal: 'Exercise durable exact-resume authority.',
+})
 const RECOVERY_ACCEPTED_AT = '2026-08-05T00:00:00.000Z'
 const RETIRED_PENDING_CHECK_ID = 'retired-pending-check'
 
@@ -75,6 +76,31 @@ async function createStaleReviewerRecoveryFixture() {
       },
       body: path === 'docs/GDD.md' ? '# Recovery authority' : '# Fixture',
     })
+  await writeBeeGameAssetManifest(workspacePath, {
+    version: 8,
+    project_target: {
+      asset_format_capabilities: ['dat', 'json'],
+      resource_library_usage: 'optional',
+      runtime_asset_root: 'assets/runtime',
+      content_root: 'assets/content',
+      generated_asset_root: 'assets/generated',
+    },
+    requirements: [{ id: 'fixture-requirement', required: true }],
+    resources: [],
+  })
+  await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+  await writeFile(join(workspacePath, 'assets/runtime/fixture.dat'), 'fixture')
+  await registerBeeGameAuthoredResources(workspacePath, [
+    {
+      id: 'fixture-resource',
+      root_path: 'assets/runtime/fixture.dat',
+      file_paths: ['assets/runtime/fixture.dat'],
+      provisional: true,
+      reason: 'Synthetic recovery authority.',
+      selection_reason: ['Provides deterministic inventory coverage.'],
+      asset_kind: 'data',
+    },
+  ])
 
   const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
   const documentRevision = await computeDocumentRevision(
@@ -402,6 +428,7 @@ async function createStaleReviewerRecoveryFixture() {
     workspacePath,
     store,
     snapshot,
+    journalRun,
     dependencyDigests,
     allChecks,
     resourceRevision,
@@ -481,6 +508,306 @@ describe('delivery workflow recovery', () => {
         writtenPaths: ['docs/GDD.md'],
       },
     })
+  })
+
+  test('reconciles an invalid snapshots active canonical document receipt before projection', async () => {
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-invalid-document-receipt-'),
+    )
+    const ownerId = 'owner-1'
+    const projectId = 'project-1'
+    const runId = 'run-1'
+    const store = createRunStore(workspace, ownerId)
+    const firstPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const dispatchId = 'committed-document-dispatch'
+    await commitCanonicalDocument({
+      workspacePath: workspace,
+      contract: {
+        dispatchId,
+        targetPath: firstPath,
+        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[firstPath],
+        operation: 'create',
+        baselineDigest: null,
+      },
+      body: '# Synthetic authority',
+    })
+    const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
+    const revision = {
+      document: await computeDocumentRevision(workspace, confirmedBriefDigest),
+      workspace: await computeWorkspaceRevision(workspace),
+    }
+    const usage = {
+      input_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    }
+    const journalRun = {
+      ...createTestDeliveryRun({
+        runId,
+        projectId,
+        ownerId,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        foundationDraftComplete: false,
+      }),
+      revision,
+      usage,
+    }
+    await store.commit(journalRun, {
+      runId,
+      type: 'run.created',
+      phase: journalRun.phase,
+      status: journalRun.status,
+      revision,
+      projectId,
+      ownerId,
+      createdAt: journalRun.createdAt,
+    })
+    await store.commit(journalRun, {
+      runId,
+      type: 'usage.updated',
+      phase: journalRun.phase,
+      status: journalRun.status,
+      revision,
+      usage,
+      createdAt: journalRun.updatedAt,
+    })
+    const request: WorkerDispatchRequest = {
+      dispatchId,
+      runId,
+      ownerId,
+      projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: firstPath,
+      revision: revision.document,
+      allowedPaths: [firstPath],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: firstPath,
+      },
+    }
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify(
+        {
+          ...journalRun,
+          schemaVersion: 12,
+          phase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          currentItemId: firstPath,
+          activeDispatch: {
+            dispatchId,
+            workerType: 'document-author',
+            phase: 'DOCUMENT_DRAFTING',
+            taskId: firstPath,
+            revision: revision.document,
+            status: 'running',
+            startedAt: journalRun.updatedAt,
+            request,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    const started: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(nextRequest) {
+          started.push(nextRequest)
+          return {
+            sessionId: nextRequest.dispatchId!,
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    const recovered = await recoverAndResumeRun({
+      store,
+      workspacePath: workspace,
+      ownerId,
+      projectId,
+      confirmedBriefContext: RECOVERY_BRIEF,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: run => controller.resume(run),
+    })
+
+    expect(recovered.foundationDraftState.completedPaths).toEqual([firstPath])
+    expect(started).toHaveLength(1)
+    expect(started[0]).toMatchObject({
+      workerType: 'document-author',
+      taskId: nextPath,
+      contract: { foundationDocumentPath: nextPath },
+    })
+    expect(started.some(candidate => candidate.taskId === firstPath)).toBe(
+      false,
+    )
+    const accepted = (await store.readEvents()).filter(
+      event =>
+        event.type === 'workflow.unit.accepted' &&
+        (event.unit as AcceptedWorkflowUnit).unitId === `document:${firstPath}`,
+    )
+    expect(accepted).toHaveLength(1)
+  })
+
+  test('reconciles an obsolete snapshots active Resource Content receipt before projection', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const dispatchId = 'committed-resource-content-dispatch'
+    const inventoryReceipt =
+      fixture.snapshot.resourceProductionState.inventoryReceipt
+    const commitContract = {
+      dispatchId,
+      inventoryRevision: inventoryReceipt.revision,
+      baselineResourceRevision: await computeResourceRevision(workspace, ''),
+      requiredRequirementIds: ['fixture-requirement'],
+      verifiedResourceIds: ['fixture-resource'],
+      inventoryBindings: inventoryReceipt.bindings,
+      protectedPaths: [],
+    }
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: commitContract,
+      assertMutationAuthority: () => undefined,
+    }) as { call(input: unknown): Promise<unknown> }
+    await tool.call({
+      action: 'commit',
+      documents: [
+        {
+          path: 'assets/content/resource-registry.json',
+          schema: 'beegame-content-v1',
+          id: 'resource-registry',
+          kind: 'resource-registry',
+          fulfills: ['fixture-requirement'],
+          resources: ['fixture-resource'],
+          data: {
+            bindings: [
+              {
+                requirementId: 'fixture-requirement',
+                resourceIds: ['fixture-resource'],
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const retainedEvents = (await fixture.store.readEvents()).filter(
+      event =>
+        event.type !== 'workflow.unit.accepted' ||
+        !['resource:content', 'resource:gate'].includes(
+          (event.unit as AcceptedWorkflowUnit).unitId,
+        ),
+    )
+    await writeFile(
+      fixture.store.paths.events,
+      `${retainedEvents.map(event => JSON.stringify(event)).join('\n')}\n`,
+    )
+    const request: WorkerDispatchRequest = {
+      dispatchId,
+      runId: RECOVERY_RUN_ID,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      workspacePath: workspace,
+      workerType: 'resource-content-author',
+      phase: 'RESOURCE_PREPARATION',
+      taskId: 'RESOURCE_CONTENT',
+      revision: fixture.snapshot.revision.document,
+      contract: {
+        ...commitContract,
+        task: 'RESOURCE_CONTENT',
+        preservedPaths: [],
+      },
+    }
+    await writeFile(
+      fixture.store.paths.snapshot,
+      `${JSON.stringify(
+        {
+          ...fixture.snapshot,
+          schemaVersion: 12,
+          phase: 'RESOURCE_PREPARATION',
+          documentStep: undefined,
+          currentItemId: undefined,
+          evidence: {},
+          documentReviewState: {
+            ...fixture.snapshot.documentReviewState,
+            activeCycle: undefined,
+          },
+          resourceProductionState: {
+            currentTask: 'RESOURCE_CONTENT',
+            inventoryReceipt,
+          },
+          activeDispatch: {
+            dispatchId,
+            workerType: 'resource-content-author',
+            phase: 'RESOURCE_PREPARATION',
+            taskId: 'RESOURCE_CONTENT',
+            revision: request.revision,
+            status: 'running',
+            startedAt: RECOVERY_ACCEPTED_AT,
+            request,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    const started: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: RECOVERY_OWNER_ID,
+      workerPort: {
+        async start(nextRequest) {
+          started.push(nextRequest)
+          return {
+            sessionId: nextRequest.dispatchId!,
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    const recovered = await recoverAndResumeRun({
+      store: fixture.store,
+      workspacePath: workspace,
+      ownerId: RECOVERY_OWNER_ID,
+      projectId: RECOVERY_PROJECT_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: run => controller.resume(run),
+    })
+
+    expect(
+      recovered.resourceProductionState.contentReceipt?.contentDigest,
+    ).toBe(await computeResourceContentDigest(workspace))
+    expect(
+      started.some(request => request.workerType === 'resource-content-author'),
+    ).toBe(false)
+    expect(
+      (await fixture.store.readEvents()).filter(
+        event =>
+          event.type === 'workflow.unit.accepted' &&
+          (event.unit as AcceptedWorkflowUnit).unitId === 'resource:content',
+      ),
+    ).toHaveLength(1)
   })
 
   test('recovers and consumes a committed resource content dispatch without redispatching the author', async () => {
@@ -2051,6 +2378,95 @@ describe('delivery workflow recovery', () => {
     ).not.toBe(reviewer)
   })
 
+  test('terminal emitted during transport stop drains through the real dispatcher commit and handler', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-terminal-drain-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-terminal-drain',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      currentItemId: path,
+    })
+    let releaseTerminal!: () => void
+    const terminalGate = new Promise<void>(resolve => {
+      releaseTerminal = resolve
+    })
+    let terminalHandlerStarted!: () => void
+    const handlerStarted = new Promise<void>(resolve => {
+      terminalHandlerStarted = resolve
+    })
+    let releaseHandler!: () => void
+    const handlerGate = new Promise<void>(resolve => {
+      releaseHandler = resolve
+    })
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+        async waitForTerminal() {
+          await terminalGate
+          return {
+            workerType: 'document-author',
+            status: 'completed',
+            writtenPaths: [path],
+            resolvedFindingIds: [],
+          }
+        },
+      },
+      async onTerminal() {
+        terminalHandlerStarted()
+        await handlerGate
+      },
+    })
+    await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: initial.revision.document,
+      allowedPaths: [path],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: path,
+      },
+    })
+    let drained = false
+    const drain = dispatcher.waitForTerminalReconciliation().then(() => {
+      drained = true
+    })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    const stopTransport = () => releaseTerminal()
+    stopTransport()
+    await handlerStarted
+    expect((await store.load())?.activeDispatch?.status).toBe('completed')
+    expect(drained).toBe(false)
+    releaseHandler()
+    await drain
+    expect(drained).toBe(true)
+  })
+
   test('hands the next reviewer packet through the dispatcher without stopping the cycle session', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-packet-handoff-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -2247,39 +2663,244 @@ describe('delivery workflow recovery', () => {
     })
   })
 
+  test('atomically permits only one reconstructed replacement for an expected snapshot digest', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-cas-'))
+    const firstStore = createRunStore(workspace, 'owner-1')
+    const secondStore = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    await firstStore.save(initial)
+    const expectedDigest = (await firstStore.inspectWorkflowSnapshot()).digest
+    const replacement = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+    }
+    const replace = (store: typeof firstStore, eventId: string) =>
+      store.replaceSnapshotIfDigest({
+        expectedDigest,
+        run: replacement,
+        event: {
+          eventId,
+          runId: replacement.runId,
+          type: 'workflow.run.reconstructed',
+          phase: replacement.phase,
+          status: replacement.status,
+          revision: replacement.revision,
+          createdAt: new Date().toISOString(),
+          projectId: replacement.projectId,
+          ownerId: replacement.ownerId,
+          sourceSnapshotDigest: expectedDigest,
+          replayedUnitIds: [],
+          activeUnitId: `document:${CANONICAL_FOUNDATION_DOCUMENTS[0]}`,
+        },
+      })
+
+    const results = await Promise.allSettled([
+      replace(firstStore, 'reconstructed-a'),
+      replace(secondStore, 'reconstructed-b'),
+    ])
+
+    expect(
+      results.filter(result => result.status === 'fulfilled'),
+    ).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(
+      1,
+    )
+    expect(results.find(result => result.status === 'rejected')).toMatchObject({
+      reason: { code: 'recovery_snapshot_changed' },
+    })
+    expect(
+      (await firstStore.readEvents()).filter(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toHaveLength(1)
+  })
+
+  test('does not let reconstructed replacement overwrite a terminal commit that won the storage lane', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-terminal-cas-'))
+    const terminalStore = createRunStore(workspace, 'owner-1')
+    const recoveryStore = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    const startedAt = new Date().toISOString()
+    const running = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+      activeDispatch: {
+        dispatchId: 'dispatch-1',
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        revision: initial.revision.document,
+        status: 'running' as const,
+        startedAt,
+      },
+    }
+    await terminalStore.save(running)
+    const expectedDigest = (await recoveryStore.inspectWorkflowSnapshot())
+      .digest
+    const completed = {
+      ...running,
+      activeDispatch: {
+        ...running.activeDispatch,
+        status: 'completed' as const,
+        finishedAt: new Date().toISOString(),
+        terminalResult: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
+          resolvedFindingIds: [],
+        },
+      },
+    }
+
+    const terminalCommit = terminalStore.commit(completed, {
+      eventId: 'terminal-commit',
+      runId: completed.runId,
+      type: 'dispatch.completed',
+      phase: completed.phase,
+      status: completed.status,
+      revision: completed.revision,
+      dispatchId: completed.activeDispatch.dispatchId,
+      createdAt: new Date().toISOString(),
+    })
+    const reconstruction = recoveryStore.replaceSnapshotIfDigest({
+      expectedDigest,
+      run: { ...running, activeDispatch: undefined },
+      event: {
+        eventId: 'late-reconstruction',
+        runId: running.runId,
+        type: 'workflow.run.reconstructed',
+        phase: running.phase,
+        status: running.status,
+        revision: running.revision,
+        createdAt: new Date().toISOString(),
+        projectId: running.projectId,
+        ownerId: running.ownerId,
+        sourceSnapshotDigest: expectedDigest,
+        replayedUnitIds: [],
+        activeUnitId: `document:${CANONICAL_FOUNDATION_DOCUMENTS[0]}`,
+      },
+    })
+
+    await terminalCommit
+    await expect(reconstruction).rejects.toMatchObject({
+      code: 'recovery_snapshot_changed',
+    })
+    expect(await terminalStore.load()).toMatchObject({
+      activeDispatch: {
+        dispatchId: 'dispatch-1',
+        status: 'completed',
+      },
+    })
+    expect(
+      (await terminalStore.readEvents()).some(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toBe(false)
+  })
+
+  test('uses the RunStore expected-digest CAS for the final reconstruction write', async () => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const competingStore = createRunStore(
+      fixture.workspacePath,
+      RECOVERY_OWNER_ID,
+    )
+    let casCalls = 0
+    const racedStore: typeof fixture.store = {
+      ...fixture.store,
+      replaceSnapshotIfDigest: async input => {
+        casCalls += 1
+        await competingStore.replaceSnapshotIfDigest({
+          expectedDigest: input.expectedDigest,
+          run: fixture.journalRun,
+          event: {
+            eventId: 'competing-workflow-commit',
+            runId: fixture.journalRun.runId,
+            type: 'workflow.progress',
+            phase: fixture.journalRun.phase,
+            status: fixture.journalRun.status,
+            revision: fixture.journalRun.revision,
+            createdAt: new Date().toISOString(),
+            durableProgress: true,
+          },
+        })
+        return fixture.store.replaceSnapshotIfDigest(input)
+      },
+    }
+
+    await expect(
+      recoverAndResumeRun({
+        store: racedStore,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => undefined,
+        resumeCurrentRun: async () => {
+          throw new Error('CAS conflict must not resume')
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
+
+    expect(casCalls).toBe(1)
+    expect(await competingStore.load()).toMatchObject({
+      runId: fixture.journalRun.runId,
+      phase: fixture.journalRun.phase,
+    })
+    expect(
+      (await competingStore.readEvents()).some(
+        event => event.type === 'workflow.run.reconstructed',
+      ),
+    ).toBe(false)
+  })
+
   test('serializes simultaneous exact-resume recovery and dispatches only the active review unit', async () => {
     const fixture = await createStaleReviewerRecoveryFixture()
     workspace = fixture.workspacePath
     let stopCalls = 0
-    let resumeCalls = 0
-    let releaseResume!: () => void
-    const resumeGate = new Promise<void>(resolve => {
-      releaseResume = resolve
+    const started: WorkerDispatchRequest[] = []
+    let releaseSubmit!: () => void
+    const submitGate = new Promise<void>(resolve => {
+      releaseSubmit = resolve
     })
-    let markResumeStarted!: () => void
-    const resumeStarted = new Promise<void>(resolve => {
-      markResumeStarted = resolve
+    let markSubmitStarted!: () => void
+    const submitStarted = new Promise<void>(resolve => {
+      markSubmitStarted = resolve
     })
-    const resumeCurrentRun = async (run: DeliveryRun) => {
-      resumeCalls += 1
-      expect(run.activeDispatch).toBeUndefined()
-      expect(run.currentItemId).toBe('resource_semantic_fitness')
-      markResumeStarted()
-      await resumeGate
-      const current = await fixture.store.load()
-      if (current?.activeDispatch) return
-      await fixture.store.save({
-        ...run,
-        activeDispatch: {
-          dispatchId: 'current-reviewer-dispatch',
-          workerType: 'document-reviewer',
-          phase: 'DOCUMENT_REVIEW',
-          revision: fixture.resourceRevision,
-          status: 'running',
-          startedAt: new Date().toISOString(),
+    const controller = createDeliveryWorkflowController({
+      workspacePath: fixture.workspacePath,
+      ownerId: RECOVERY_OWNER_ID,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
-      })
-    }
+        async submit() {
+          markSubmitStarted()
+          await submitGate
+        },
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
     const recover = () =>
       recoverAndResumeRun({
         store: fixture.store,
@@ -2294,13 +2915,13 @@ describe('delivery workflow recovery', () => {
           ) as { schemaVersion: number }
           expect(duringStop.schemaVersion).toBe(11)
         },
-        resumeCurrentRun,
+        resumeCurrentRun: run => controller.resume(run),
       })
     const pending = Promise.all([recover(), recover()])
 
-    await resumeStarted
+    await submitStarted
     await Promise.resolve()
-    releaseResume()
+    releaseSubmit()
     const results = await pending
 
     expect(results.map(run => run.runId)).toEqual([
@@ -2308,13 +2929,21 @@ describe('delivery workflow recovery', () => {
       RECOVERY_RUN_ID,
     ])
     expect(stopCalls).toBe(1)
-    expect(resumeCalls).toBe(1)
+    expect(started).toHaveLength(1)
+    expect(started[0]).toMatchObject({
+      workerType: 'document-reviewer',
+      contract: { currentCheckIds: ['resource_semantic_fitness'] },
+    })
+    expect(
+      started.some(request =>
+        FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.includes(request.taskId as never),
+      ),
+    ).toBe(false)
     expect(await fixture.store.load()).toMatchObject({
       schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
       runId: RECOVERY_RUN_ID,
-      currentItemId: 'resource_semantic_fitness',
       activeDispatch: {
-        dispatchId: 'current-reviewer-dispatch',
+        workerType: 'document-reviewer',
         status: 'running',
       },
     })
@@ -2325,142 +2954,36 @@ describe('delivery workflow recovery', () => {
     ).toHaveLength(1)
   })
 
-  test('reconciles a terminal accepted while stopping before retrying reconstruction', async () => {
+  test('restarts projection from source bytes changed while workers stop', async () => {
     const fixture = await createStaleReviewerRecoveryFixture()
     workspace = fixture.workspacePath
-    const activeIndex = fixture.allChecks.findIndex(
-      check => check.id === 'resource_semantic_fitness',
-    )
-    const acceptedCheck = fixture.allChecks[activeIndex]!
-    const nextCheck = fixture.allChecks[activeIndex + 1]!
-    let mutatedDuringStop = false
+    const before = await readFile(fixture.store.paths.snapshot, 'utf8')
+    const changed = `${before}\n`
 
-    await expect(
-      recoverAndResumeRun({
-        store: fixture.store,
-        workspacePath: fixture.workspacePath,
-        ownerId: RECOVERY_OWNER_ID,
-        projectId: RECOVERY_PROJECT_ID,
-        confirmedBriefContext: RECOVERY_BRIEF,
-        stopWorkspaceWorkers: async () => {
-          const dependencyDigests = fixture.dependencyDigests.get(
-            acceptedCheck.id,
-          )!
-          await fixture.store.appendEvent({
-            eventId: 'terminal-during-stop',
-            runId: RECOVERY_RUN_ID,
-            type: 'workflow.unit.accepted',
-            phase: 'DOCUMENT_REVIEW',
-            status: 'running',
-            revision: fixture.snapshot.revision,
-            createdAt: new Date().toISOString(),
-            projectId: RECOVERY_PROJECT_ID,
-            ownerId: RECOVERY_OWNER_ID,
-            unit: {
-              eventSchemaVersion: 1,
-              unitId: `review:${acceptedCheck.id}`,
-              kind: 'review-check',
-              phase: 'DOCUMENT_REVIEW',
-              predecessorUnitIds: [
-                `review:${FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.at(-1)}`,
-              ],
-              inputRevision: fixture.resourceRevision,
-              dependencyDigests,
-              acceptedAt: new Date().toISOString(),
-              payload: {
-                check: acceptedCheck,
-                findings: [],
-                dependencyDigests: {
-                  [acceptedCheck.id]: dependencyDigests,
-                },
-              },
-            },
-          } satisfies WorkflowUnitAcceptedEvent)
-          const activeCycle = fixture.snapshot.documentReviewState.activeCycle!
-          await writeFile(
-            fixture.store.paths.snapshot,
-            `${JSON.stringify(
-              {
-                ...fixture.snapshot,
-                activeDispatch: undefined,
-                documentReviewState: {
-                  ...fixture.snapshot.documentReviewState,
-                  activeCycle: {
-                    ...activeCycle,
-                    completedCheckIds: [
-                      ...activeCycle.completedCheckIds,
-                      acceptedCheck.id,
-                    ],
-                    checks: [...activeCycle.checks, acceptedCheck],
-                    checkEvidenceDigests: {
-                      ...activeCycle.checkEvidenceDigests,
-                      [acceptedCheck.id]: dependencyDigests,
-                    },
-                  },
-                },
-              },
-              null,
-              2,
-            )}\n`,
-          )
-          mutatedDuringStop = true
-        },
-        resumeCurrentRun: async () => {
-          throw new Error('changed source must not resume')
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
-    expect(mutatedDuringStop).toBe(true)
-
-    let resumedUnit: string | undefined
+    let resumeCalls = 0
     const recovered = await recoverAndResumeRun({
       store: fixture.store,
       workspacePath: fixture.workspacePath,
       ownerId: RECOVERY_OWNER_ID,
       projectId: RECOVERY_PROJECT_ID,
       confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: async run => {
-        resumedUnit = run.currentItemId
+      stopWorkspaceWorkers: async () => {
+        await writeFile(fixture.store.paths.snapshot, changed)
+      },
+      resumeCurrentRun: async () => {
+        resumeCalls += 1
       },
     })
-
-    expect(recovered.currentItemId).toBe(nextCheck.id)
-    expect(resumedUnit).toBe(nextCheck.id)
+    expect(recovered.runId).toBe(RECOVERY_RUN_ID)
+    expect(resumeCalls).toBe(1)
+    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).not.toBe(
+      changed,
+    )
     expect(
       (await fixture.store.readEvents()).filter(
         event => event.type === 'workflow.run.reconstructed',
       ),
     ).toHaveLength(1)
-  })
-
-  test('preserves a source snapshot that changes before atomic replacement', async () => {
-    const fixture = await createStaleReviewerRecoveryFixture()
-    workspace = fixture.workspacePath
-    const before = await readFile(fixture.store.paths.snapshot, 'utf8')
-    const changed = `${before}\n`
-
-    await expect(
-      recoverAndResumeRun({
-        store: fixture.store,
-        workspacePath: fixture.workspacePath,
-        ownerId: RECOVERY_OWNER_ID,
-        projectId: RECOVERY_PROJECT_ID,
-        confirmedBriefContext: RECOVERY_BRIEF,
-        stopWorkspaceWorkers: async () => {
-          await writeFile(fixture.store.paths.snapshot, changed)
-        },
-        resumeCurrentRun: async () => {
-          throw new Error('changed source must not resume')
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'recovery_snapshot_changed' })
-    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(changed)
-    expect(
-      (await fixture.store.readEvents()).some(
-        event => event.type === 'workflow.run.reconstructed',
-      ),
-    ).toBe(false)
   })
 
   test('restarts safely after worker stopping interrupts reconstruction', async () => {

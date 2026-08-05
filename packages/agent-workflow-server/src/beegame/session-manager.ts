@@ -397,6 +397,8 @@ type SessionRecord = {
   /** Serializes workflow usage writes without blocking the SDK callback. */
   workflowUsageWriteTail: Promise<void>
   workflowUsageWriteError?: Error
+  /** The complete active model turn, including final event/usage callbacks. */
+  activeTurn?: Promise<void>
   /** Serializes usage billing events without blocking the SDK callback. */
   usageWriteTail: Promise<void>
   usageWriteActive: boolean
@@ -1122,11 +1124,16 @@ export class BeeGameSessionManager {
           : {}),
       })
 
-      void this.runDirectTurn(
+      let activeTurn!: Promise<void>
+      activeTurn = this.runDirectTurn(
         record,
         preparedPrompt.prompt,
         preparedPrompt.attachmentDirectory,
-      )
+      ).finally(() => {
+        if (record.activeTurn === activeTurn) record.activeTurn = undefined
+      })
+      record.activeTurn = activeTurn
+      void activeTurn.catch(() => undefined)
       return cloneSession(record.session)
     } catch (error) {
       if (!turnAccepted) {
@@ -1198,7 +1205,7 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
     if (record.session.status === 'running') this.stop(sessionId)
-    await this.flushWorkflowUsage(sessionId)
+    await this.waitForWorkflowWorkerIdle(sessionId)
     await rm(record.transcriptPath, { force: true })
     await rm(
       getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
@@ -1214,6 +1221,15 @@ export class BeeGameSessionManager {
     if (record.workflowUsageWriteError) {
       throw record.workflowUsageWriteError
     }
+  }
+
+  async waitForWorkflowWorkerIdle(sessionId: string): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.workflowWorker) return
+    await record.activeTurn
+    await record.workflowUsageWriteTail
+    await record.usageWriteTail
+    if (record.workflowUsageWriteError) throw record.workflowUsageWriteError
   }
 
   dispose(): void {

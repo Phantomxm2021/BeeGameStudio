@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -18,6 +25,7 @@ import {
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -517,7 +525,7 @@ describe('HttpOnly session routes', () => {
 })
 
 describe('delivery workflow session continuation', () => {
-  it('routes simultaneous Continue mutations through one exact-resume boundary', async () => {
+  it('persists simultaneous Continue mutations as exactly one resume', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-session-continue-'))
     temporaryDirectories.push(root)
     const projectsRoot = join(root, 'projects')
@@ -530,7 +538,10 @@ describe('delivery workflow session continuation', () => {
       start: async input => {
         if (input.workflowWorker) workflowWorkerStarts += 1
         return {
-          submit: async () => undefined,
+          submit: async ({ signal }) =>
+            new Promise<void>(resolve => {
+              signal.addEventListener('abort', () => resolve(), { once: true })
+            }),
           stop: () => undefined,
         }
       },
@@ -619,6 +630,11 @@ describe('delivery workflow session continuation', () => {
       const store = createRunStore(workspace, ownerId)
       const journalRun = {
         ...run,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        documentStep: 'FOUNDATION_DRAFTING' as const,
+        currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+        status: 'stopped' as const,
+        blockedReason: 'Synthetic interrupted turn.',
         usage,
         revision: {
           document: documentRevision,
@@ -641,16 +657,6 @@ describe('delivery workflow session continuation', () => {
         revision: journalRun.revision,
         usage,
       })
-      const obsoleteSnapshotText = `${JSON.stringify(
-        {
-          ...journalRun,
-          schemaVersion: 12,
-        },
-        null,
-        2,
-      )}\n`
-      await writeFile(store.paths.snapshot, obsoleteSnapshotText)
-
       const responses = await Promise.all([
         app.request(`/api/beegame-sessions/${session.id}/continue`, {
           method: 'POST',
@@ -684,6 +690,115 @@ describe('delivery workflow session continuation', () => {
           status: 'running',
         },
       })
+      expect(
+        (await store.readEvents()).filter(
+          event => event.type === 'run.resumed',
+        ),
+      ).toHaveLength(1)
+      const validProjectBoundaries = await Promise.all([
+        app.request(`/api/projects/${projectId}/workflow/resume`, {
+          method: 'POST',
+        }),
+        app.request(`/api/projects/${projectId}/workflow/retry`, {
+          method: 'POST',
+        }),
+      ])
+      expect(validProjectBoundaries.map(response => response.status)).toEqual([
+        200, 202,
+      ])
+      expect(workflowWorkerStarts).toBe(1)
+
+      const currentSnapshot = JSON.parse(
+        await readFile(store.paths.snapshot, 'utf8'),
+      ) as Record<string, unknown>
+      const firstEvent = (await store.readEvents())[0]!
+      await writeFile(
+        store.paths.snapshot,
+        `${JSON.stringify(
+          { ...currentSnapshot, pendingEvents: [firstEvent] },
+          null,
+          2,
+        )}\n`,
+      )
+      const snapshotBeforeReads = await readFile(store.paths.snapshot, 'utf8')
+      const eventsBeforeReads = await readFile(store.paths.events, 'utf8')
+      const filesBeforeReads = (
+        await readdir(workspace, { recursive: true })
+      ).toSorted()
+      const startsBeforeReads = workflowWorkerStarts
+      const readResponses = await Promise.all([
+        app.request(`/api/projects/${projectId}/workflow`),
+        app.request(`/api/projects/${projectId}/workflow/events`),
+        app.request(`/api/projects/${projectId}/runtime-state`),
+      ])
+      expect(readResponses.map(response => response.status)).toEqual([
+        200, 200, 200,
+      ])
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(
+        snapshotBeforeReads,
+      )
+      expect(await readFile(store.paths.events, 'utf8')).toBe(eventsBeforeReads)
+      expect(
+        (await readdir(workspace, { recursive: true })).toSorted(),
+      ).toEqual(filesBeforeReads)
+      expect(workflowWorkerStarts).toBe(startsBeforeReads)
+
+      await writeFile(
+        store.paths.snapshot,
+        `${JSON.stringify(
+          {
+            ...journalRun,
+            schemaVersion: 12,
+            phase: 'DOCUMENT_DRAFTING',
+            documentStep: 'FOUNDATION_DRAFTING',
+            status: 'running',
+            currentItemId: undefined,
+            activeDispatch: undefined,
+          },
+          null,
+          2,
+        )}\n`,
+      )
+      const startsBeforeHardFail = workflowWorkerStarts
+      const hardFailBoundaries = await Promise.all([
+        app.request(`/api/projects/${projectId}/workflow/resume`, {
+          method: 'POST',
+        }),
+        app.request(`/api/projects/${projectId}/workflow/retry`, {
+          method: 'POST',
+        }),
+        app.request(`/api/beegame-sessions/${session.id}/continue`, {
+          method: 'POST',
+        }),
+      ])
+      expect(hardFailBoundaries.map(response => response.status)).toEqual([
+        409, 409, 400,
+      ])
+      expect(workflowWorkerStarts).toBe(startsBeforeHardFail)
+
+      await writeFile(
+        store.paths.snapshot,
+        `${JSON.stringify(
+          {
+            ...journalRun,
+            schemaVersion: 12,
+            phase: 'DOCUMENT_DRAFTING',
+            documentStep: 'FOUNDATION_DRAFTING',
+            status: 'running',
+            currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+            activeDispatch: undefined,
+          },
+          null,
+          2,
+        )}\n`,
+      )
+      const startsBeforeInvalidRecovery = workflowWorkerStarts
+      const recoveredInvalid = await app.request(
+        `/api/projects/${projectId}/workflow/resume`,
+        { method: 'POST' },
+      )
+      expect(recoveredInvalid.status).toBe(200)
+      expect(workflowWorkerStarts).toBe(startsBeforeInvalidRecovery + 1)
       expect(
         (await store.readEvents()).filter(
           event => event.type === 'workflow.run.reconstructed',

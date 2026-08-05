@@ -15,6 +15,9 @@
 - Recovery must not rewrite or reacquire documents, Checklist, Manifest modules, resources, JSON/YAML content or implementation files.
 - Recovery produces one current run; no old runtime, fallback Workflow, second execution ledger or feedback loop may remain.
 - Missing proof returns `recovery_checkpoint_missing`; it never causes silent replay.
+- The graph successor is not active-unit proof. Invalid/obsolete state may enter Document Drafting only when durable current-unit or dispatch identity proves that exact unfinished canonical document unit.
+- GET/read routes never flush pending markers, reconcile workers, persist progress or dispatch work.
+- Concurrent and queued Continue requests persist one resume decision and return the same current run without a second controller call.
 - Every breaking persisted-state change increments `DELIVERY_RUN_SCHEMA_VERSION` in the same commit.
 - Do not use regex, keyword inference, real project content, log text, project names or platform-specific logic.
 - Authority: `docs/superpowers/specs/2026-08-05-workflow-exact-resume-recovery-design.md`.
@@ -236,7 +239,7 @@ export async function projectExactResumeRun(input: {
 }>
 ```
 
-Replay the longest contiguous accepted-unit sequence under the current unit graph. Validate dependency digests and receipts. Historical raw state contributes only current-recognized accepted facts that pass current schemas/digests. Unknown pending topology is ignored; unknown completed work is a conflict. Preserve original start time, cumulative usage and exact active unit; output one current run without an active dispatch.
+Replay the longest contiguous accepted-unit sequence under the current unit graph. Validate dependency digests and receipts. Historical raw state contributes only current-recognized accepted facts that pass current schemas/digests. Unknown pending topology is ignored; unknown completed work is a conflict. Require durable identity for the exact unfinished active unit and verify that it equals the graph successor; never select the graph successor as fallback authority. Preserve original start time, cumulative usage and exact active unit; output one current run without an active dispatch.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -249,26 +252,32 @@ git commit -m "feat: reconstruct exact workflow resume state"
 ### Task 4: Serialize recovery and resume one unit
 
 **Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/session-manager.ts`
 - Modify: `packages/agent-workflow-server/src/app.ts`
 - Modify: `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts`
+- Modify: `packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts`
 - Modify: `packages/agent-workflow-server/src/__tests__/session-routes.test.ts`
 
 **Interfaces:**
 - Produces: `recoverAndResumeRun(input): Promise<DeliveryRun>`.
 - Consumes: projector, workspace worker stop callback and current controller resume.
 
-- [ ] **Step 1: Write failing concurrency tests**
+- [x] **Step 1: Write failing storage and barrier tests**
 
-Cover two simultaneous Continue requests, stale Reviewer, terminal arriving during stop, source mutation before replacement and restart during reconstruction. Assert one reconstructed run and at most one active-unit dispatch.
+Use two real `RunStore` instances to race the same expected digest and assert exactly one replacement/event. With a real session turn plus real controller/dispatcher, prove worker stop waits for the active turn, terminal reconciliation/commit and usage flush. Cover a terminal landing at the final replacement boundary and restart after reconstruction.
 
-- [ ] **Step 2: Verify red state**
+- [x] **Step 2: Verify red state**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
 ```
 
-- [ ] **Step 3: Implement the recovery transaction**
+- [x] **Step 3: Implement the atomic recovery transaction**
 
 ```ts
 export async function recoverAndResumeRun(input: {
@@ -282,19 +291,21 @@ export async function recoverAndResumeRun(input: {
 }): Promise<DeliveryRun>
 ```
 
-Acquire a workspace lock independent of `runId`; inspect/hash; stop workspace workers; reconcile receipts; project; compare source digest; atomically write `workflow.run.reconstructed`; release; resume through the current controller. Duplicate calls return the same current run.
+Add a `RunStore` expected-digest replacement API whose compare and write share the snapshot mutation queue. Acquire a workspace lock independent of `runId`; inspect/hash; stop workspace workers through a barrier that drains active turns, dispatcher terminal handlers and usage writes; inspect again; reconcile active canonical document/Resource Content receipts; project; use the RunStore CAS to write `workflow.run.reconstructed`; release; resume through the current controller. A late terminal either commits before projection or wins the CAS and is never overwritten.
 
-- [ ] **Step 4: Route all continuation through one boundary**
+- [x] **Step 4: Enforce exact proof, continuation and read boundaries**
 
-Valid runs use existing resume/retry. Obsolete or invalid runs call `recoverAndResumeRun` from project resume, project retry and session continue. Ownership, newer-version and missing-authority failures remain hard failures. No recovery route enters document drafting or creates a project.
+Valid runs use existing resume/retry. Obsolete or invalid runs call `recoverAndResumeRun` from project resume, project retry and session continue. Serialize the entire continuation decision per owned workspace; if durable current state already owns an active dispatch, return it without writing another resume event or invoking the controller. Ownership, newer-version, missing authority and missing exact active-unit proof remain hard failures. No recovery route enters Document Drafting unless the durable interruption unit itself is a current canonical document unit.
 
-- [ ] **Step 5: Verify and commit**
+Make `readBeeGameWorkflowSnapshot` use only snapshot inspection plus event reads. Project Workflow, Workflow events and runtime-state GETs must not call `load`, `reconcile`, `ensureProgress` or any dispatch path. Test byte-identical snapshot/event files and unchanged dispatch counts.
 
-Assert the synthetic 16-check run produces one new `resource_semantic_fitness` dispatch and zero earlier-unit dispatches.
+- [x] **Step 5: Verify and commit**
+
+With the real controller/dispatcher, assert the synthetic 16-check run produces one new `resource_semantic_fitness` dispatch and zero earlier-unit dispatches. Add project resume, project retry and session Continue HTTP tests for valid, recoverable invalid/obsolete and hard-fail inputs. Remove the old test that recovered an unproven snapshot to Document Drafting; replace it with hard-fail and exact-drafting-proof cases.
 
 ```bash
-/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
-git add packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts packages/agent-workflow-server/src/app.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
+/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
+git add packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.ts packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts packages/agent-workflow-server/src/beegame/session-manager.ts packages/agent-workflow-server/src/app.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts docs/superpowers/specs/2026-08-05-workflow-exact-resume-recovery-design.md docs/superpowers/plans/2026-08-05-workflow-exact-resume-recovery.md
 git commit -m "feat: resume invalid workflows at exact unit"
 ```
 

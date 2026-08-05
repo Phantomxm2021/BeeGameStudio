@@ -1351,6 +1351,7 @@ function buildProjectionRun(input: {
   activeUnitId?: string
   revision: Revision
   tasks: AtomicTask[]
+  activeSourceArtifactDigests?: Record<string, string>
   ownerId: string
   projectId: string
   confirmedBriefContext: string
@@ -1506,10 +1507,12 @@ function buildProjectionRun(input: {
   const activeReviewUnits = activeReviewIds
     ? acceptedReviewUnits(input.replayedUnitIds, input.proofs, activeReviewIds)
     : []
-  const sourceArtifactDigests = Object.assign(
-    {},
-    ...activeReviewUnits.map(unit => unit.dependencyDigests),
-  ) as Record<string, string>
+  const sourceArtifactDigests =
+    input.activeSourceArtifactDigests ??
+    (Object.assign(
+      {},
+      ...activeReviewUnits.map(unit => unit.dependencyDigests),
+    ) as Record<string, string>)
   const activeCycle = activeReviewIds
     ? {
         cycleId:
@@ -1845,6 +1848,32 @@ export async function projectExactResumeRun(input: {
     confirmedBriefDigest: sha256(input.confirmedBriefContext),
     documentRevision: revision.document,
   })
+  if (activeUnitId && !hintedActiveUnitId)
+    recoveryError(
+      'recovery_checkpoint_missing',
+      'snapshot has no durable identity for the exact unfinished unit',
+    )
+  const activeReviewScope = FOUNDATION_REVIEW_UNIT_IDS.includes(
+    activeUnitId ?? '',
+  )
+    ? ('foundation' as const)
+    : activeUnitId === reviewUnitId('checklist_traceability')
+      ? ('checklist' as const)
+      : COMPREHENSIVE_ADDITIONAL_UNIT_IDS.includes(activeUnitId ?? '')
+        ? ('complete' as const)
+        : undefined
+  const activeSourceArtifactDigests = activeReviewScope
+    ? documentReviewArtifactDigests(
+        await readDocumentReviewArtifacts(
+          input.workspacePath,
+          activeReviewScope,
+          {
+            confirmedBriefContext: input.confirmedBriefContext,
+            confirmedBriefDigest: sha256(input.confirmedBriefContext),
+          },
+        ),
+      )
+    : undefined
   const run = buildProjectionRun({
     snapshot,
     acceptedEvents,
@@ -1854,6 +1883,7 @@ export async function projectExactResumeRun(input: {
     activeUnitId,
     revision,
     tasks,
+    ...(activeSourceArtifactDigests ? { activeSourceArtifactDigests } : {}),
     ownerId: input.ownerId,
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,
