@@ -43,7 +43,7 @@ The service derives JSON versus YAML serialization from the canonical kind. It v
 - path remains under the single content root and matches the kind format;
 - `schema` is exactly `beegame-content-v1`;
 - IDs and paths are unique;
-- all required kinds exist exactly once in the merged candidate set;
+- the merged candidate set is non-empty and every file kind/format belongs to the engine-neutral allowed set; the shared layer does not force every project to instantiate every allowed kind;
 - `fulfills` contains only current requirement IDs and covers every required requirement;
 - `resources` contains only verified current resource IDs and references every Manifest resource;
 - `resource-registry.data.bindings` is the sole binding representation and contains exact current requirement and resource IDs;
@@ -64,8 +64,7 @@ An invalid tool call leaves canonical files unchanged and remains in the current
 ## Acceptance
 
 - An invalid envelope, invented requirement ID, unknown resource ID, missing kind, missing coverage, or invalid resource-registry binding is rejected before any file mutation.
-- A valid tool call writes the complete set and cannot later fail under a different content validator.
+- A valid tool call writes the complete project-required set and cannot later fail under a different content validator.
 - Resource Content Author has no generic mutation tools and no access requirement to Manifest modules.
 - Initial authoring uses one commit tool call rather than eleven serial writes.
 - The workflow retains one Resource Production state, one inventory receipt, one content set, and one terminal channel.
-

@@ -17,7 +17,7 @@
 - Test: `packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts`
 
 - [ ] Add a failing test proving a document without `schema` and a resource registry with invented requirement IDs are rejected by the same in-memory validator.
-- [ ] Add a failing test proving the complete eleven-kind set, exact required coverage, verified resource coverage, and canonical `data.bindings` pass.
+- [ ] Add a failing test proving a project-required mixed JSON/YAML set, exact required coverage, verified resource coverage, and canonical `data.bindings` pass without forcing unused kinds.
 - [ ] Extract one validator that accepts parsed documents plus a Manifest; make filesystem audit parse files and delegate to it.
 - [ ] Run the content and asset contract tests and confirm the red-green cycle.
 
@@ -66,4 +66,3 @@
 - [ ] Scan for `SubmitResourceContentResult`, generic Resource Content mutation access, alternative content validators, compatibility parsers, retry limits, and duplicate ledgers.
 - [ ] Run all agent-workflow server tests and TypeScript checks.
 - [ ] Start the local stack, verify the UI and terminal behavior in Chrome without modifying an example project, then stop ports 62173–62177.
-
