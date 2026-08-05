@@ -272,7 +272,13 @@ export function createDeliveryWorkflowController(input: {
       const saved = await persist(
         {
           ...next,
+          status: 'completed',
           lastAnswer: result.answer,
+          changeRequest: undefined,
+          changeRoute: undefined,
+          changeAffectedRequirementIds: undefined,
+          changeAffectedChecklistIds: undefined,
+          changeRationale: undefined,
           blockedReason: undefined,
         },
         'question.answered',

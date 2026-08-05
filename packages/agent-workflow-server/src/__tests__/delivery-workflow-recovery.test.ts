@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import {
   recoverAndResumeRun,
   reconcileRunOnStartup,
+  resumeRun,
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
@@ -35,7 +36,9 @@ import {
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type AcceptedWorkflowUnit,
+  type AtomicTask,
   type DeliveryRun,
   type DispatchWorkerType,
   type DocumentReviewCheck,
@@ -78,66 +81,629 @@ const EXACT_RESUME_WORKER_CHECKPOINTS = [
 type ExactResumeWorkerCheckpoint =
   (typeof EXACT_RESUME_WORKER_CHECKPOINTS)[number]
 
-const WORKER_CHECKPOINT_PHASES: Readonly<
-  Record<DispatchWorkerType, DeliveryRun['phase']>
-> = {
-  'document-author': 'DOCUMENT_DRAFTING',
-  'document-reviewer': 'DOCUMENT_REVIEW',
-  'resource-planner': 'RESOURCE_PREPARATION',
-  'resource-curator': 'RESOURCE_PREPARATION',
-  'resource-content-author': 'RESOURCE_PREPARATION',
-  'atomic-task-planner': 'ATOMIC_TASK_PLANNING',
-  'implementation-worker': 'IMPLEMENTATION',
-  'implementation-auditor': 'IMPLEMENTATION_AUDIT',
-  'acceptance-validator': 'ACCEPTANCE',
-  'change-impact-analyzer': 'DELIVERY',
-  'question-answerer': 'DELIVERY',
-}
-
-function workerCheckpointRequest(input: {
-  run: DeliveryRun
-  workspacePath: string
-  workerType: DispatchWorkerType
-}): WorkerDispatchRequest {
+function matrixAtomicTask(): AtomicTask {
   return {
-    runId: input.run.runId,
-    ownerId: input.run.ownerId,
-    projectId: input.run.projectId,
-    workspacePath: input.workspacePath,
-    workerType: input.workerType,
-    phase: input.run.phase,
-    revision: input.run.revision.document,
-    contract: {},
+    id: 'matrix-task',
+    title: 'Synthetic task',
+    checklistIds: ['CHECK-001'],
+    resourceIds: [],
+    contentIds: ['matrix-content'],
+    dependsOn: [],
+    allowedPaths: ['src/'],
+    expectedArtifacts: ['src/output.ts'],
+    verification: [
+      {
+        kind: 'test',
+        commandOrAction: 'synthetic verification',
+        expectedResult: 'synthetic success',
+      },
+    ],
+    status: 'pending',
+    attempt: 0,
+    evidenceRefs: [],
   }
 }
 
-function acceptedCheckpointDispatch(input: {
+async function writeMatrixContent(workspacePath: string): Promise<void> {
+  await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
+  await writeFile(
+    join(workspacePath, 'assets/content/matrix.json'),
+    JSON.stringify({
+      schema: 'beegame-content-v1',
+      id: 'matrix-content',
+      kind: 'resource-registry',
+      fulfills: ['matrix-requirement'],
+      resources: ['matrix-resource'],
+      data: {
+        bindings: [
+          {
+            requirementId: 'matrix-requirement',
+            resourceIds: ['matrix-resource'],
+          },
+        ],
+      },
+    }),
+  )
+}
+
+async function writeMatrixEvidence(
+  workspacePath: string,
+  name: string,
+): Promise<string> {
+  const path = `.beegame/workflow/evidence/${name}.json`
+  await mkdir(join(workspacePath, '.beegame/workflow/evidence'), {
+    recursive: true,
+  })
+  await writeFile(join(workspacePath, path), '{}')
+  return path
+}
+
+function matrixStringArray(value: unknown): string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value
+    : []
+}
+
+function matrixPassingChecks(
+  ids: string[],
+  request: WorkerDispatchRequest,
+): DocumentReviewCheck[] {
+  const available = createAcceptedComprehensiveReview().checks
+  const referenceIndex = request.contract.referenceIndex as
+    | {
+        artifacts?: Array<{ artifactId?: unknown; path?: unknown }>
+        references?: Array<{ artifactId?: unknown; anchor?: unknown }>
+      }
+    | undefined
+  const pathByArtifactId = new Map(
+    (referenceIndex?.artifacts ?? []).flatMap(artifact =>
+      typeof artifact.artifactId === 'string' &&
+      typeof artifact.path === 'string'
+        ? [[artifact.artifactId, artifact.path] as const]
+        : [],
+    ),
+  )
+  const references = (referenceIndex?.references ?? []).flatMap(reference => {
+    const path =
+      typeof reference.artifactId === 'string'
+        ? pathByArtifactId.get(reference.artifactId)
+        : undefined
+    return path && typeof reference.anchor === 'string'
+      ? [{ path, anchor: reference.anchor }]
+      : []
+  })
+  const artifactPathsByCheck = request.contract.artifactPathsByCheck as
+    | Record<string, unknown>
+    | undefined
+  return ids.map(id => {
+    const existing = available.find(check => check.id === id)!
+    const allowedPaths = new Set(
+      matrixStringArray(artifactPathsByCheck?.[id]),
+    )
+    const availableEvidence = references.filter(reference =>
+      allowedPaths.has(reference.path),
+    )
+    const systemContractEvidence = availableEvidence.find(
+      evidence => evidence.path === 'systemDeliveryContract',
+    )
+    const documentEvidence = availableEvidence.find(
+      evidence => evidence.path !== 'systemDeliveryContract',
+    )
+    const evidence = [documentEvidence, systemContractEvidence].filter(
+      (value): value is { path: string; anchor: string } => Boolean(value),
+    )
+    return {
+      ...existing,
+      evidence,
+      assessments:
+        id in GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+          ? GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+              id as keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
+            ].map(criterion => ({
+              criterion,
+              status: 'pass' as const,
+              evidence,
+              derivation: 'Compared the synthetic authority records.',
+              conclusion: 'The synthetic invariant is satisfied.',
+            }))
+          : [],
+    }
+  })
+}
+
+function matrixFrontmatterValue(
+  content: string,
+  field: string,
+): string | undefined {
+  const lines = content.split('\n')
+  if (lines[0]?.trim() !== '---') return undefined
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    if (line.trim() === '---') return undefined
+    const separator = line.indexOf(':')
+    if (separator < 1 || line.slice(0, separator).trim() !== field) continue
+    const raw = line.slice(separator + 1).trim()
+    if (!raw) return undefined
+    const quoted =
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    return quoted ? raw.slice(1, -1).trim() : raw
+  }
+  return undefined
+}
+
+async function matrixTerminal(input: {
+  workspacePath: string
   request: WorkerDispatchRequest
-  checkpoint: Extract<
-    ExactResumeWorkerCheckpoint,
-    'terminal-accepted' | 'canonical-receipt'
-  >
-}): NonNullable<DeliveryRun['activeDispatch']> {
-  const dispatchId = `${input.request.workerType}-${input.checkpoint}`
+}) {
+  const { request, workspacePath } = input
+  const evidencePath = await writeMatrixEvidence(
+    workspacePath,
+    `${request.workerType}-${request.dispatchId}`,
+  )
+  const taskMetrics = {
+    catalogPayloadBytes: 0,
+    catalogCallTypes: [],
+    canonicalMutationCount: 1,
+  }
+  if (request.workerType === 'document-author') {
+    const targetPath = request.taskId!
+    const baseline = await readFile(join(workspacePath, targetPath), 'utf8')
+    const baselineVersion = matrixFrontmatterValue(baseline, 'version')
+    const baselineUpdatedAt = matrixFrontmatterValue(baseline, 'updated_at')
+    await commitCanonicalDocument({
+      workspacePath,
+      contract: {
+        dispatchId: request.dispatchId!,
+        targetPath,
+        documentId:
+          CANONICAL_PROJECT_DOCUMENT_IDS[
+            targetPath as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
+          ],
+        operation: 'revise',
+        baselineDigest: sha256(baseline),
+        baselineVersion,
+        baselineUpdatedAt,
+      },
+      body: '# Spec\nSynthetic revision.',
+    })
+    return {
+      workerType: request.workerType,
+      status: 'completed' as const,
+      writtenPaths: [targetPath],
+      resolvedFindingIds: [],
+    }
+  }
+  if (request.workerType === 'document-reviewer') {
+    const currentCheckIds = matrixStringArray(
+      request.contract.currentCheckIds,
+    )
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      verdict: 'READY' as const,
+      checks: matrixPassingChecks(currentCheckIds, request),
+      checklistIds: matrixStringArray(request.contract.checklistIds),
+      findings: [],
+      evidencePath,
+      rejectedSubmissionCount: 0,
+    }
+  }
+  if (request.workerType === 'resource-planner') {
+    await writeBeeGameAssetManifest(workspacePath, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['dat', 'json'],
+        resource_library_usage: 'optional',
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [{ id: 'matrix-requirement', required: true }],
+      resources: [],
+    })
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'completed' as const,
+      writtenPaths: ['assets/asset-manifest.json'],
+      taskMetrics,
+    }
+  }
+  if (request.workerType === 'resource-curator') {
+    await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+    await writeFile(join(workspacePath, 'assets/runtime/matrix.dat'), 'data')
+    await registerBeeGameAuthoredResources(workspacePath, [
+      {
+        id: 'matrix-resource',
+        root_path: 'assets/runtime/matrix.dat',
+        file_paths: ['assets/runtime/matrix.dat'],
+        provisional: true,
+        reason: 'Synthetic matrix authority.',
+        selection_reason: ['Covers the synthetic requirement.'],
+        asset_kind: 'data',
+      },
+    ])
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'completed' as const,
+      catalogObserved: true,
+      resourceIds: ['matrix-resource'],
+      bindings: [
+        {
+          requirementId: 'matrix-requirement',
+          resourceIds: ['matrix-resource'],
+        },
+      ],
+      writtenPaths: [
+        'assets/asset-manifest.json',
+        'assets/runtime/matrix.dat',
+      ],
+      taskMetrics,
+    }
+  }
+  if (request.workerType === 'resource-content-author') {
+    await writeMatrixContent(workspacePath)
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'completed' as const,
+      contentIds: ['matrix-content'],
+      writtenPaths: ['assets/content/matrix.json'],
+      missingRequirementIds: [],
+      taskMetrics,
+    }
+  }
+  if (request.workerType === 'atomic-task-planner')
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'completed' as const,
+      tasks: [matrixAtomicTask()],
+      evidencePath,
+    }
+  if (request.workerType === 'implementation-worker') {
+    await mkdir(join(workspacePath, 'src'), { recursive: true })
+    await writeFile(join(workspacePath, 'src/output.ts'), 'export {}\n')
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      taskId: request.taskId!,
+      status: 'completed' as const,
+      changedPaths: ['src/output.ts'],
+      verifiedArtifacts: ['src/output.ts'],
+      verificationResults: [
+        {
+          verificationIndex: 0,
+          status: 'passed' as const,
+          observations: ['Synthetic verification passed.'],
+        },
+      ],
+      evidenceRefs: [evidencePath],
+      evidencePath,
+    }
+  }
+  const checklistIds = matrixStringArray(request.contract.checklistIds)
+  const resourceIds = matrixStringArray(request.contract.resourceIds)
+  const contentIds = matrixStringArray(request.contract.contentIds)
+  if (request.workerType === 'implementation-auditor')
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'passed' as const,
+      auditedTaskIds: ['matrix-task'],
+      checklistIds,
+      resourceIds,
+      contentIds,
+      findings: [],
+      evidencePath,
+    }
+  if (request.workerType === 'acceptance-validator')
+    return {
+      workerType: request.workerType,
+      revision: request.revision,
+      status: 'passed' as const,
+      validatedTaskIds: ['matrix-task'],
+      checklistIds,
+      resourceIds,
+      contentIds,
+      findings: [],
+      evidencePath,
+    }
+  if (request.workerType === 'change-impact-analyzer')
+    return {
+      workerType: request.workerType,
+      classification: 'question' as const,
+      affectedRequirementIds: [],
+      affectedChecklistIds: [],
+      rationale: 'The synthetic request is informational.',
+      evidencePath,
+    }
   return {
-    dispatchId,
-    workerType: input.request.workerType,
-    phase: input.request.phase,
-    revision: input.request.revision,
-    status: 'completed',
-    ...(input.checkpoint === 'canonical-receipt'
-      ? {
-          terminalEvidencePath:
-            '.beegame/workflow/evidence/synthetic-receipt.json',
-        }
-      : {}),
-    terminalResult: {
-      workerType: input.request.workerType,
-      status: 'completed',
+    workerType: request.workerType,
+    answer: 'Synthetic answer.',
+    evidencePath,
+  }
+}
+
+function matrixWorkerUnitKey(request: WorkerDispatchRequest): string {
+  return stableMatrixValue({
+    workerType: request.workerType,
+    taskId: request.taskId,
+    currentCheckIds: request.contract.currentCheckIds,
+  })
+}
+
+function stableMatrixValue(value: unknown): string {
+  if (Array.isArray(value))
+    return `[${value.map(item => stableMatrixValue(item)).join(',')}]`
+  if (!value || typeof value !== 'object')
+    return JSON.stringify(value) ?? 'null'
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record)
+    .sort()
+    .map(key => `${JSON.stringify(key)}:${stableMatrixValue(record[key])}`)
+    .join(',')}}`
+}
+
+async function createWorkerRecoveryRun(input: {
+  workspacePath: string
+  workerType: DispatchWorkerType
+}): Promise<DeliveryRun> {
+  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
+    await commitCanonicalDocument({
+      workspacePath: input.workspacePath,
+      contract: {
+        dispatchId: `matrix-document-${index}`,
+        targetPath: path,
+        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+        operation: 'create',
+        baselineDigest: null,
+      },
+      body: path.endsWith('gameplay-checklist.md')
+        ? '# Acceptance\n- [ ] CHECK-001 source: docs/GDD.md implement: Execute the synthetic action expected: observable result evidence: runtime\n'
+        : '# Spec\nSynthetic authority.',
+    })
+
+  const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    confirmedBriefDigest,
+  )
+  let workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const needsManifest = ![
+    'document-author',
+    'document-reviewer',
+    'resource-planner',
+  ].includes(input.workerType)
+  const needsInventoryGap = input.workerType === 'resource-curator'
+  const needsDeliveryArtifacts = [
+    'atomic-task-planner',
+    'implementation-worker',
+    'implementation-auditor',
+    'acceptance-validator',
+  ].includes(input.workerType)
+  const needsVerifiedInventory =
+    input.workerType === 'resource-content-author' || needsDeliveryArtifacts
+  if (needsManifest) {
+    await writeBeeGameAssetManifest(input.workspacePath, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['dat', 'json'],
+        resource_library_usage: 'optional',
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements:
+        needsInventoryGap || needsVerifiedInventory
+          ? [{ id: 'matrix-requirement', required: true }]
+          : [],
+      resources: [],
+    })
+  }
+  if (needsVerifiedInventory) {
+    await mkdir(join(input.workspacePath, 'assets/runtime'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(input.workspacePath, 'assets/runtime/matrix.dat'),
+      'synthetic',
+    )
+    await registerBeeGameAuthoredResources(input.workspacePath, [
+      {
+        id: 'matrix-resource',
+        root_path: 'assets/runtime/matrix.dat',
+        file_paths: ['assets/runtime/matrix.dat'],
+        provisional: true,
+        reason: 'Synthetic matrix authority.',
+        selection_reason: ['Covers the synthetic requirement.'],
+        asset_kind: 'data',
+      },
+    ])
+  }
+  if (needsDeliveryArtifacts) await writeMatrixContent(input.workspacePath)
+  workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const inventoryRevision = needsManifest
+    ? await computeResourceInventoryRevision(input.workspacePath)
+    : undefined
+  const contentDigest = needsManifest
+    ? await computeResourceContentDigest(input.workspacePath)
+    : undefined
+  const resourceRevision = needsManifest
+    ? await computeResourceRevision(input.workspacePath, documentRevision)
+    : undefined
+  const initial = createTestDeliveryRun({
+    runId: `matrix-run-${input.workerType}`,
+    projectId: 'synthetic-matrix-project',
+    ownerId: 'synthetic-matrix-owner',
+    confirmedBriefContext: RECOVERY_BRIEF,
+    documentRevision,
+    workspaceRevision,
+    checklistApproved: true,
+  })
+  const checklistApproval = initial.documentReviewState.checklistApproval!
+  const comprehensiveChecks = createAcceptedComprehensiveReview().checks
+  const comprehensiveApproval = resourceRevision
+    ? {
+        scope: 'complete' as const,
+        revision: resourceRevision,
+        checks: comprehensiveChecks,
+        checkEvidenceDigests: {},
+        evidencePath: '.beegame/workflow/evidence/comprehensive.json',
+        approvedAt: RECOVERY_ACCEPTED_AT,
+      }
+    : undefined
+  const task = matrixAtomicTask()
+  const resourcePreparation = resourceRevision
+    ? {
+        path: '.beegame/workflow/evidence/resource-gate.json',
+        kind: 'resource_preparation' as const,
+        revision: resourceRevision,
+        status: 'passed' as const,
+        observedAt: RECOVERY_ACCEPTED_AT,
+      }
+    : undefined
+  const common: DeliveryRun = {
+    ...initial,
+    revision: {
+      document: documentRevision,
+      workspace: workspaceRevision,
+      ...(resourceRevision ? { resource: resourceRevision } : {}),
     },
-    request: { ...input.request, dispatchId },
-    startedAt: RECOVERY_ACCEPTED_AT,
-    finishedAt: RECOVERY_ACCEPTED_AT,
+    documentReviewState: {
+      ...initial.documentReviewState,
+      checklistApproval,
+      ...(comprehensiveApproval ? { comprehensiveApproval } : {}),
+    },
+    evidence: resourcePreparation ? { resourcePreparation } : {},
+    resourceProductionState: {
+      currentTask: 'RESOURCE_GATE',
+      ...(inventoryRevision
+        ? {
+            inventoryReceipt: {
+              revision: inventoryRevision,
+              bindings: needsVerifiedInventory
+                ? [
+                    {
+                      requirementId: 'matrix-requirement',
+                      resourceIds: ['matrix-resource'],
+                    },
+                  ]
+                : [],
+              catalogObserved: true,
+              acceptedAt: RECOVERY_ACCEPTED_AT,
+            },
+          }
+        : {}),
+      ...(contentDigest
+        ? {
+            contentReceipt: {
+              contentDigest,
+              acceptedAt: RECOVERY_ACCEPTED_AT,
+            },
+          }
+        : {}),
+    },
+  }
+
+  if (input.workerType === 'document-author')
+    return {
+      ...common,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: { completedPaths: [] },
+      documentReviewState: {
+        repairPasses: common.documentReviewState.repairPasses,
+      },
+      evidence: {},
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    }
+  if (input.workerType === 'document-reviewer')
+    return {
+      ...common,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      documentReviewState: {
+        repairPasses: common.documentReviewState.repairPasses,
+      },
+      evidence: {},
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    }
+  if (input.workerType === 'resource-planner')
+    return {
+      ...common,
+      phase: 'RESOURCE_PREPARATION',
+      documentStep: undefined,
+      evidence: {},
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    }
+  if (input.workerType === 'resource-curator')
+    return {
+      ...common,
+      phase: 'RESOURCE_PREPARATION',
+      documentStep: undefined,
+      evidence: {},
+      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
+    }
+  if (input.workerType === 'resource-content-author')
+    return {
+      ...common,
+      phase: 'RESOURCE_PREPARATION',
+      documentStep: undefined,
+      evidence: {},
+      resourceProductionState: {
+        ...common.resourceProductionState,
+        currentTask: 'RESOURCE_CONTENT',
+        contentReceipt: undefined,
+      },
+    }
+  if (input.workerType === 'atomic-task-planner')
+    return { ...common, phase: 'ATOMIC_TASK_PLANNING', tasks: [] }
+  if (input.workerType === 'implementation-worker')
+    return { ...common, phase: 'IMPLEMENTATION', tasks: [task] }
+  const completedTask: AtomicTask = {
+    ...task,
+    status: 'completed',
+    completedRevision: workspaceRevision,
+    evidenceRefs: ['.beegame/workflow/evidence/matrix-task.json'],
+  }
+  if (input.workerType === 'implementation-auditor')
+    return {
+      ...common,
+      phase: 'IMPLEMENTATION_AUDIT',
+      tasks: [completedTask],
+      revision: { ...common.revision, implementation: workspaceRevision },
+    }
+  if (input.workerType === 'acceptance-validator')
+    return {
+      ...common,
+      phase: 'ACCEPTANCE',
+      tasks: [completedTask],
+      revision: { ...common.revision, implementation: workspaceRevision },
+      evidence: {
+        ...common.evidence,
+        implementationAudit: {
+          path: '.beegame/workflow/evidence/implementation-audit.json',
+          kind: 'implementation_audit',
+          revision: workspaceRevision,
+          status: 'passed',
+          observedAt: RECOVERY_ACCEPTED_AT,
+        },
+      },
+    }
+  if (input.workerType === 'change-impact-analyzer')
+    return {
+      ...common,
+      phase: 'DELIVERY',
+      changeRequest: 'Synthetic change request.',
+    }
+  return {
+    ...common,
+    phase: 'DELIVERY',
+    changeRequest: 'Synthetic question.',
+    changeRoute: 'question',
   }
 }
 
@@ -694,23 +1260,12 @@ describe('delivery workflow recovery', () => {
     for (const checkpoint of EXACT_RESUME_WORKER_CHECKPOINTS) {
       test(`${workerType} keeps semantic dispatch count stable at ${checkpoint}`, async () => {
         workspace = await mkdtemp(join(tmpdir(), 'beegame-worker-matrix-'))
-        const initial = createTestDeliveryRun({
-          runId: `matrix-run-${workerType}`,
-          projectId: 'synthetic-matrix-project',
-          ownerId: 'synthetic-matrix-owner',
-          confirmedBriefContext: RECOVERY_BRIEF,
-          checklistApproved: true,
-        })
-        const run: DeliveryRun = {
-          ...initial,
-          phase: WORKER_CHECKPOINT_PHASES[workerType],
-        }
-        const store = createRunStore(workspace, run.ownerId)
-        const request = workerCheckpointRequest({
-          run,
+        const run = await createWorkerRecoveryRun({
           workspacePath: workspace,
           workerType,
         })
+        const store = createRunStore(workspace, run.ownerId)
+        await store.save(run)
         const started: WorkerDispatchRequest[] = []
         const workerPort = {
           async start(startedRequest: WorkerDispatchRequest) {
@@ -726,52 +1281,67 @@ describe('delivery workflow recovery', () => {
             throw new Error('not used')
           },
         }
-
-        if (checkpoint === 'unit-accepted') {
-          const acceptedRun: DeliveryRun = {
-            ...run,
-            phase: 'DELIVERY',
-            status: 'completed',
-            completedAt: RECOVERY_ACCEPTED_AT,
-            updatedAt: RECOVERY_ACCEPTED_AT,
-            activeDispatch: undefined,
-          }
-          await store.save(acceptedRun)
+        const resumeFromDisk = async (sessionOpen: boolean) => {
+          const restartedStore = createRunStore(workspace, run.ownerId)
           const controller = createDeliveryWorkflowController({
             workspacePath: workspace,
             ownerId: run.ownerId,
             workerPort,
           })
-          await controller.resume(acceptedRun)
-          expect(started).toHaveLength(0)
-          return
-        }
-
-        if (
-          checkpoint === 'terminal-accepted' ||
-          checkpoint === 'canonical-receipt'
-        ) {
-          const acceptedDispatch = acceptedCheckpointDispatch({
-            request,
-            checkpoint,
+          const resumed = await resumeRun({
+            store: restartedStore,
+            runId: run.runId,
+            workspacePath: workspace,
+            sessionIsOpen: async () => sessionOpen,
           })
-          await store.save({ ...run, activeDispatch: acceptedDispatch })
-          const dispatcher = createDeliveryDispatcher({ store, workerPort })
-          const resumed = await dispatcher.dispatch(request)
-          expect(resumed.dispatchId).toBe(acceptedDispatch.dispatchId)
-          expect(started).toHaveLength(0)
+          await controller.resume(resumed)
+          return restartedStore
+        }
+
+        if (checkpoint === 'before-dispatch') {
+          await resumeFromDisk(false)
+          expect(started.map(request => request.workerType)).toEqual([
+            workerType,
+          ])
           return
         }
 
-        await store.save(run)
-        const dispatcher = createDeliveryDispatcher({ store, workerPort })
-        const first = await dispatcher.dispatch(request)
-        expect(started).toHaveLength(1)
-        if (checkpoint === 'before-dispatch') return
+        const firstController = createDeliveryWorkflowController({
+          workspacePath: workspace,
+          ownerId: run.ownerId,
+          workerPort,
+        })
+        await firstController.resume(run)
+        const active = (await store.load())?.activeDispatch
+        expect(active?.request?.workerType).toBe(workerType)
+        const originalRequest = active!.request!
 
-        const duplicate = await dispatcher.dispatch(request)
-        expect(duplicate.dispatchId).toBe(first.dispatchId)
-        expect(started).toHaveLength(1)
+        if (checkpoint === 'open') {
+          await resumeFromDisk(true)
+        } else {
+          const terminal = await matrixTerminal({
+            workspacePath: workspace,
+            request: originalRequest,
+          })
+          const terminalOnlyDispatcher = createDeliveryDispatcher({
+            store,
+            workerPort,
+          })
+          await terminalOnlyDispatcher.completeDispatch(
+            active!.dispatchId,
+            terminal,
+          )
+          await resumeFromDisk(false)
+          if (checkpoint === 'unit-accepted') await resumeFromDisk(false)
+        }
+
+        expect(
+          started.filter(
+            request =>
+              matrixWorkerUnitKey(request) ===
+              matrixWorkerUnitKey(originalRequest),
+          ),
+        ).toHaveLength(1)
       })
     }
   }

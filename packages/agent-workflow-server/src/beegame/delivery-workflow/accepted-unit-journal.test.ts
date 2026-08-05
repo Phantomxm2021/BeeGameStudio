@@ -587,4 +587,45 @@ describe('accepted workflow unit journal', () => {
       'pendingEvent',
     )
   })
+
+  test('rejects an invalid tasks.planned receipt before appending it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'task-graph-write-'))
+    const base = run()
+    const store = createRunStore(workspace, base.ownerId)
+
+    await expect(
+      store.appendEvent({
+        runId: base.runId,
+        type: 'tasks.planned',
+        phase: 'IMPLEMENTATION',
+        status: 'running',
+        revision: base.revision,
+        taskGraph: 'invalid-task-graph',
+      }),
+    ).rejects.toThrow('tasks.planned')
+    await expect(store.readEvents()).resolves.toEqual([])
+  })
+
+  test('rejects an invalid tasks.planned receipt while reading the journal', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'task-graph-read-'))
+    const base = run()
+    const store = createRunStore(workspace, base.ownerId)
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.events,
+      `${JSON.stringify({
+        eventId: 'invalid-task-graph-event',
+        runId: base.runId,
+        type: 'tasks.planned',
+        phase: 'IMPLEMENTATION',
+        status: 'running',
+        revision: base.revision,
+        createdAt: '2026-08-05T00:00:00.000Z',
+        taskGraph: [],
+      })}\n`,
+      'utf8',
+    )
+
+    await expect(store.readEvents()).rejects.toThrow('tasks.planned')
+  })
 })

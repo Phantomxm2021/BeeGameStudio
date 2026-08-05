@@ -8,7 +8,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises'
-import { parseDeliveryRun } from './schema'
+import { parseDeliveryRun, parseWorkflowEvent } from './schema'
 import {
   SnapshotMigrationError,
   migrateWorkflowSnapshot,
@@ -333,7 +333,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       return content
         .split('\n')
         .filter(Boolean)
-        .map(line => JSON.parse(line) as WorkflowEvent)
+        .map(line => parseWorkflowEvent(JSON.parse(line)))
     } catch (error) {
       throw new WorkflowStoreError(
         `workflow event journal is invalid at ${filePaths.events}: ${error instanceof Error ? error.message : String(error)}`,
@@ -346,11 +346,11 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
   ): Promise<WorkflowEvent> {
-    const record = {
+    const record = parseWorkflowEvent({
       ...event,
       eventId: event.eventId ?? randomUUID(),
       createdAt: event.createdAt ?? now(),
-    } as WorkflowEvent
+    })
     const existing = await readEventsUnlocked()
     if (existing.some(candidate => candidate.eventId === record.eventId))
       return existing.find(candidate => candidate.eventId === record.eventId)!

@@ -25,6 +25,12 @@ export class SnapshotMigrationError extends Error {
 
 type SnapshotRecord = Record<string, unknown>
 
+export type WorkflowSnapshotMigration = {
+  from: number
+  to: number
+  migrate(snapshot: SnapshotRecord): SnapshotRecord
+}
+
 const currentCheckIds = new Set<string>(DOCUMENT_REVIEW_CHECK_IDS)
 const currentCheckOwnerById = new Map(
   Object.entries(DOCUMENT_REVIEW_OWNER_BY_CHECK_ID),
@@ -182,6 +188,17 @@ function migrateVersion12To13(snapshot: SnapshotRecord): SnapshotRecord {
   return migrated
 }
 
+export const SUPPORTED_WORKFLOW_SNAPSHOT_VERSIONS = [
+  11,
+  12,
+  DELIVERY_RUN_SCHEMA_VERSION,
+] as const
+
+export const WORKFLOW_SNAPSHOT_MIGRATIONS = [
+  { from: 11, to: 12, migrate: migrateVersion11To12 },
+  { from: 12, to: 13, migrate: migrateVersion12To13 },
+] as const satisfies readonly WorkflowSnapshotMigration[]
+
 export function migrateWorkflowSnapshot(
   value: unknown,
 ): SnapshotMigrationResult {
@@ -206,7 +223,11 @@ export function migrateWorkflowSnapshot(
       )
     }
   }
-  if (value.schemaVersion !== 11 && value.schemaVersion !== 12)
+  if (
+    !SUPPORTED_WORKFLOW_SNAPSHOT_VERSIONS.some(
+      version => version === value.schemaVersion,
+    )
+  )
     throw new SnapshotMigrationError(
       'unsupported_version',
       `workflow snapshot schema version ${value.schemaVersion} is unsupported`,
@@ -214,8 +235,17 @@ export function migrateWorkflowSnapshot(
 
   const migratedFrom = value.schemaVersion
   let migrated = structuredClone(value)
-  if (migrated.schemaVersion === 11) migrated = migrateVersion11To12(migrated)
-  if (migrated.schemaVersion === 12) migrated = migrateVersion12To13(migrated)
+  while (migrated.schemaVersion !== DELIVERY_RUN_SCHEMA_VERSION) {
+    const migration = WORKFLOW_SNAPSHOT_MIGRATIONS.find(
+      candidate => candidate.from === migrated.schemaVersion,
+    )
+    if (!migration)
+      throw new SnapshotMigrationError(
+        'unsupported_version',
+        `workflow snapshot migration chain is incomplete at version ${migrated.schemaVersion}`,
+      )
+    migrated = migration.migrate(migrated)
+  }
   try {
     return {
       value: parseDeliveryRun(migrated),

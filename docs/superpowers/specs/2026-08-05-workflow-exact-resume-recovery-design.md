@@ -228,9 +228,10 @@ After reconstruction, only the current-schema run, accepted-unit journal and can
 ## 12. Task 6 measured verification and guarantees
 
 The persisted protocol remains version 13. Its registered SHA-256 fingerprint is
-`be8121aaa71ccc50e7e7ff2dda166f1d0c92a494a7faf87b8968ff61cdf4499a`.
+`2dd56a8ef8057464d6f5f79ecb01439f89b529f0ed7550ed63954d4c496106ac`.
 The guard computes this value from canonicalized Zod JSON Schema projections of
-the strict `DeliveryRun` topology and accepted-unit journal event topology. It
+the strict `DeliveryRun` topology, accepted-unit journal event topology and
+versioned `tasks.planned.taskGraph` receipt topology. It
 does not read TypeScript source text and does not use regular expressions. A
 topology or persisted-enum change at version 13 now fails with a direct
 instruction to increment `DELIVERY_RUN_SCHEMA_VERSION` and add a snapshot
@@ -239,11 +240,15 @@ its fingerprint and migration.
 
 The automated worker checkpoint matrix covers all 11 persisted worker types at
 five interruption points: before dispatch, while open, terminal accepted,
-canonical receipt persisted and unit accepted. These are 55 real
-RunStore/dispatcher/controller cases plus one coverage-shape assertion. Before
-dispatch starts exactly one semantic dispatch, an open duplicate retains one,
-and terminal-, receipt- and unit-accepted checkpoints start zero accepted-unit
-redispatches. The wider recovery suite also covers obsolete and same-version
+canonical receipt persisted and unit accepted. These are 55 real on-disk
+restart cases plus one coverage-shape assertion. Every case reconstructs fresh
+RunStore/controller/dispatcher instances and enters through `resumeRun`.
+Before dispatch starts exactly one semantic dispatch, an open duplicate retains
+one, and terminal-, receipt- and unit-accepted checkpoints never increase the
+accepted semantic unit's dispatch count. The matrix also proved and corrected
+the Delivery question terminal: after `question.answered`, the run returns to
+completed state and clears its one-shot change route, so restart cannot dispatch
+the same question again. The wider recovery suite also covers obsolete and same-version
 invalid snapshots, malformed/truncated JSON with complete and incomplete
 journal proof, stale worker telemetry and ownership, queued duplicate Continue,
 terminal drain during the stop barrier, CAS races and reconstruction restart
@@ -257,8 +262,8 @@ units alone advance mutable task status and evidence. This lets a complete
 journal reconstruct a truncated `run.json` without a fallback path or second
 ledger, while contradictory topology fails closed.
 
-On 2026-08-06 the complete server command measured 562 passing tests across 67
-files, 0 failures and 1580 assertions. The required frontend command measured
+On 2026-08-06 the complete server command measured 565 passing tests across 67
+files, 0 failures and 1595 assertions. The required frontend command measured
 116 passing tests across 2 files and 0 failures. Server and repository
 TypeScript checks both exited 0; Biome checked 46 required files with no fixes
 remaining; `git diff --check` exited 0. The anti-pollution scan found only this

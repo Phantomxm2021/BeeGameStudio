@@ -19,6 +19,7 @@ import type {
   EvidenceRef,
   FoundationDraftState,
   Revision,
+  TasksPlannedEvent,
   TaskVerification,
   WorkflowEvent,
   WorkflowUnitAcceptedEvent,
@@ -566,6 +567,20 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   })
   .catchall(z.unknown()) as z.ZodType<WorkflowEvent>
 
+export const tasksPlannedEventSchema: z.ZodType<TasksPlannedEvent> = z
+  .object({
+    eventId: z.string().min(1),
+    runId: z.string().min(1),
+    type: z.literal('tasks.planned'),
+    phase: z.literal('IMPLEMENTATION'),
+    status: z.literal('running'),
+    revision: revisionSchema,
+    activeTaskId: z.string().min(1).optional(),
+    taskGraph: z.array(atomicTaskSchema).min(1),
+    createdAt: z.string().datetime(),
+  })
+  .strict()
+
 const acceptedWorkflowUnitBase = {
   eventSchemaVersion: z.literal(1),
   unitId: z.string().min(1),
@@ -713,18 +728,38 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
     })
     .catchall(z.unknown()) as z.ZodType<WorkflowUnitAcceptedEvent>
 
+export function parseWorkflowEvent(value: unknown): WorkflowEvent {
+  const event = workflowEventSchema.parse(value)
+  if (event.type === 'workflow.unit.accepted')
+    return workflowUnitAcceptedEventSchema.parse(value)
+  if (event.type === 'tasks.planned') {
+    const parsed = tasksPlannedEventSchema.safeParse(value)
+    if (!parsed.success)
+      throw new Error(`invalid tasks.planned workflow event: ${parsed.error}`)
+    return parsed.data
+  }
+  return event
+}
+
 const pendingWorkflowEventsSchema = z
   .array(workflowEventSchema)
   .min(1)
   .superRefine((events, context) => {
     for (const [index, event] of events.entries()) {
-      if (event.type !== 'workflow.unit.accepted') continue
-      const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
+      if (
+        event.type !== 'workflow.unit.accepted' &&
+        event.type !== 'tasks.planned'
+      )
+        continue
+      const parsed =
+        event.type === 'workflow.unit.accepted'
+          ? workflowUnitAcceptedEventSchema.safeParse(event)
+          : tasksPlannedEventSchema.safeParse(event)
       if (!parsed.success)
         context.addIssue({
           code: 'custom',
           path: [index],
-          message: 'workflow unit accepted event is invalid',
+          message: `${event.type} event is invalid`,
         })
     }
   })

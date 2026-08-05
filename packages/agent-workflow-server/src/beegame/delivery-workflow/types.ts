@@ -491,6 +491,14 @@ export type WorkflowUnitAcceptedEvent = WorkflowEvent & {
   unit: AcceptedWorkflowUnit
 }
 
+export type TasksPlannedEvent = WorkflowEvent & {
+  type: 'tasks.planned'
+  phase: 'IMPLEMENTATION'
+  status: 'running'
+  activeTaskId?: string
+  taskGraph: AtomicTask[]
+}
+
 export type DeliveryRun = {
   schemaVersion: typeof DELIVERY_RUN_SCHEMA_VERSION
   runId: string
