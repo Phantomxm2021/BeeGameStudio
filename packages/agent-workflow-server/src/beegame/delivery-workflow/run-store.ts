@@ -17,7 +17,9 @@ import { assertDeliveryRunInvariants } from './transition'
 import type {
   DeliveryRun,
   DispatchRecord,
+  AcceptedWorkflowUnit,
   WorkflowEvent,
+  WorkflowUnitAcceptedEvent,
   WorkflowUsage,
 } from './types'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
@@ -332,17 +334,16 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     let shouldRewriteCanonicalSnapshot =
       options.migrate &&
       (migrated || JSON.stringify(value) !== JSON.stringify(run))
-    if (run.pendingEvent) {
-      if (!options.migrate) return run
+    if (run.pendingEvents?.length) {
       // Journal replay failures are operational failures, not malformed
       // snapshots. Keep the marker so the next load can retry safely.
-      await appendEventUnlocked(run.pendingEvent)
-      const { pendingEvent: _pendingEvent, ...withoutPendingEvent } = run
+      for (const event of run.pendingEvents) await appendEventUnlocked(event)
+      const { pendingEvents: _pendingEvents, ...withoutPendingEvents } = run
       await durableWrite(
         filePaths.snapshot,
-        `${JSON.stringify(withoutPendingEvent, null, 2)}\n`,
+        `${JSON.stringify(withoutPendingEvents, null, 2)}\n`,
       )
-      run = withoutPendingEvent
+      run = withoutPendingEvents
       shouldRewriteCanonicalSnapshot = false
     }
     if (shouldRewriteCanonicalSnapshot)
@@ -360,7 +361,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
   async function saveUnlocked(
     run: DeliveryRun,
     touchUpdatedAt = true,
-    preservePendingEvent = true,
+    preservePendingEvents = true,
     allowDispatchCompletion = false,
   ): Promise<DeliveryRun> {
     if (run.ownerId !== ownerId)
@@ -406,13 +407,13 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         const usage = mergeUsage(existing.usage, parsed.usage)
         if (usage) parsed = parseDeliveryRun({ ...parsed, usage })
         if (
-          preservePendingEvent &&
-          existing.pendingEvent &&
-          !parsed.pendingEvent
+          preservePendingEvents &&
+          existing.pendingEvents &&
+          !parsed.pendingEvents
         ) {
           parsed = parseDeliveryRun({
             ...parsed,
-            pendingEvent: existing.pendingEvent,
+            pendingEvents: existing.pendingEvents,
           })
         }
       }
@@ -440,8 +441,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     run: DeliveryRun,
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
+    acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
-    const pendingEvent = {
+    const ordinaryEvent = {
       ...event,
       runId: run.runId,
       phase: run.phase,
@@ -450,16 +452,34 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       eventId: event.eventId ?? randomUUID(),
       createdAt: event.createdAt ?? now(),
     } as WorkflowEvent
+    const pendingEvents: WorkflowEvent[] = [
+      ordinaryEvent,
+      ...acceptedUnits.map(unit =>
+        ({
+          eventId: randomUUID(),
+          runId: run.runId,
+          type: 'workflow.unit.accepted',
+          phase: unit.phase,
+          status: run.status,
+          revision: run.revision,
+          createdAt: unit.acceptedAt,
+          projectId: run.projectId,
+          ownerId: run.ownerId,
+          unit,
+        }) satisfies WorkflowUnitAcceptedEvent,
+      ),
+    ]
     // The pending marker is written together with the new authoritative
     // snapshot, so there is no unjournaled state window.
     const saved = await saveUnlocked(
-      { ...run, pendingEvent },
+      { ...run, pendingEvents },
       true,
       false,
       true,
     )
-    await appendEventUnlocked(pendingEvent)
-    const { pendingEvent: _pendingEvent, ...committed } = saved
+    for (const pendingEvent of pendingEvents)
+      await appendEventUnlocked(pendingEvent)
+    const { pendingEvents: _pendingEvents, ...committed } = saved
     await saveUnlocked(committed, false, false, true)
     return committed
   }
@@ -468,20 +488,24 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     run: DeliveryRun,
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
+    acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
     // Recover a previous marker before replacing the snapshot. This keeps a
     // failed append retryable and prevents a later commit from overwriting
     // an event that was waiting for journal recovery.
     await loadUnlocked()
-    return persistCommitUnlocked(run, event)
+    return persistCommitUnlocked(run, event, acceptedUnits)
   }
 
   async function commit(
     run: DeliveryRun,
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
+    acceptedUnits?: AcceptedWorkflowUnit[],
   ): Promise<DeliveryRun> {
-    return enqueueMutation(filePaths.snapshot, () => commitUnlocked(run, event))
+    return enqueueMutation(filePaths.snapshot, () =>
+      commitUnlocked(run, event, acceptedUnits),
+    )
   }
 
   async function readEvents(afterEventId?: string): Promise<WorkflowEvent[]> {

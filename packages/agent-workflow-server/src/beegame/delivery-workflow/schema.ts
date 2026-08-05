@@ -7,6 +7,7 @@ import {
 } from './document-repair-graph'
 import type {
   AtomicTask,
+  AcceptedWorkflowUnit,
   DocumentReviewApproval,
   DocumentReviewCheck,
   DocumentReviewCycle,
@@ -20,6 +21,7 @@ import type {
   Revision,
   TaskVerification,
   WorkflowEvent,
+  WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
 import {
@@ -557,6 +559,168 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   })
   .catchall(z.unknown()) as z.ZodType<WorkflowEvent>
 
+const acceptedWorkflowUnitBase = {
+  eventSchemaVersion: z.literal(1),
+  unitId: z.string().min(1),
+  phase: z.enum(DELIVERY_PHASES),
+  predecessorUnitIds: z.array(z.string().min(1)),
+  inputRevision: z.string().min(1),
+  dependencyDigests: z.record(z.string(), z.string().min(1)),
+  receiptRef: z.string().min(1).optional(),
+  acceptedAt: z.string().datetime(),
+}
+
+const receiptPayloadSchema = z
+  .object({ receiptRef: z.string().min(1) })
+  .strict()
+
+export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
+  z.discriminatedUnion('kind', [
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('document'),
+        payload: z
+          .object({ path: z.string().min(1), revision: z.string().min(1) })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('review-check'),
+        payload: z
+          .object({
+            check: persistedDocumentReviewCheckSchema,
+            findings: z.array(persistedDocumentReviewFindingSchema),
+            dependencyDigests: checkEvidenceDigestsSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('checklist'),
+        payload: z
+          .object({
+            revision: z.string().min(1),
+            evidencePath: z.string().min(1),
+            checkIds: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-inventory'),
+        payload: z
+          .object({
+            bindings: z.array(
+              z
+                .object({
+                  requirementId: z.string().min(1),
+                  resourceIds: z.array(z.string().min(1)).min(1),
+                })
+                .strict(),
+            ),
+            catalogObserved: z.boolean(),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-content'),
+        payload: z.object({}).strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('resource-gate'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('atomic-plan'),
+        payload: z
+          .object({ taskIds: z.array(z.string().min(1)).min(1) })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('implementation-task'),
+        payload: z
+          .object({
+            taskId: z.string().min(1),
+            evidenceRefs: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('implementation-audit'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
+        kind: z.literal('acceptance'),
+        payload: receiptPayloadSchema,
+      })
+      .strict(),
+  ])
+
+export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEvent> =
+  z.object({
+    eventId: z.string().min(1),
+    runId: z.string().min(1),
+    type: z.literal('workflow.unit.accepted'),
+    phase: z.enum(DELIVERY_PHASES),
+    documentStep: z
+      .enum([
+        'FOUNDATION_DRAFTING',
+        'FOUNDATION_REVIEW',
+        'CHECKLIST_DRAFTING',
+        'CHECKLIST_REVIEW',
+        'COMPREHENSIVE_REVIEW',
+      ])
+      .optional(),
+    status: z.enum(DELIVERY_RUN_STATUSES),
+    revision: revisionSchema,
+    createdAt: z.string().datetime(),
+    projectId: z.string().min(1),
+    ownerId: z.string().min(1),
+    unit: acceptedWorkflowUnitSchema,
+  })
+    .catchall(z.unknown()) as z.ZodType<WorkflowUnitAcceptedEvent>
+
+const pendingWorkflowEventsSchema = z
+  .array(workflowEventSchema)
+  .min(1)
+  .superRefine((events, context) => {
+    for (const [index, event] of events.entries()) {
+      if (event.type !== 'workflow.unit.accepted') continue
+      const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
+      if (!parsed.success)
+        context.addIssue({
+          code: 'custom',
+          path: [index],
+          message: 'workflow unit accepted event is invalid',
+        })
+    }
+  })
+
 export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .object({
     schemaVersion: z.literal(DELIVERY_RUN_SCHEMA_VERSION),
@@ -602,7 +766,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     currentMessage: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
     lastProgressAt: z.string().datetime().optional(),
-    pendingEvent: workflowEventSchema.optional(),
+    pendingEvents: pendingWorkflowEventsSchema.optional(),
     lastAnswer: z.string().min(1).optional(),
     blockedReason: z.string().min(1).optional(),
     createdAt: z.string().datetime(),

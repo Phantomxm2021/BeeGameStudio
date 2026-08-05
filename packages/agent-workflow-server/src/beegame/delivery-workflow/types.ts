@@ -438,6 +438,29 @@ export type WorkflowUsage = {
   total_tokens: number
 }
 
+export type AcceptedWorkflowUnit = {
+  eventSchemaVersion: 1
+  unitId: string
+  kind:
+    | 'document'
+    | 'review-check'
+    | 'checklist'
+    | 'resource-inventory'
+    | 'resource-content'
+    | 'resource-gate'
+    | 'atomic-plan'
+    | 'implementation-task'
+    | 'implementation-audit'
+    | 'acceptance'
+  phase: DeliveryPhase
+  predecessorUnitIds: string[]
+  inputRevision: string
+  dependencyDigests: Record<string, string>
+  receiptRef?: string
+  acceptedAt: string
+  payload: unknown
+}
+
 /**
  * A journal record that is also safe to keep temporarily in the run snapshot.
  * The snapshot marker makes a commit recoverable if the process exits after
@@ -453,6 +476,13 @@ export type WorkflowEvent = {
   revision: Revision
   createdAt: string
   [key: string]: unknown
+}
+
+export type WorkflowUnitAcceptedEvent = WorkflowEvent & {
+  type: 'workflow.unit.accepted'
+  projectId: string
+  ownerId: string
+  unit: AcceptedWorkflowUnit
 }
 
 export type DeliveryRun = {
@@ -493,8 +523,8 @@ export type DeliveryRun = {
   thinking?: 'working' | 'waiting' | 'idle'
   /** Last worker activity observed by the durable progress channel. */
   lastProgressAt?: string
-  /** Internal write-ahead marker; removed once the matching journal entry exists. */
-  pendingEvent?: WorkflowEvent
+  /** Internal write-ahead marker; removed once every matching journal entry exists. */
+  pendingEvents?: WorkflowEvent[]
   lastAnswer?: string
   blockedReason?: string
   createdAt: string

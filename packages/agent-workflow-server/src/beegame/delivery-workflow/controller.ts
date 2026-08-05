@@ -39,6 +39,7 @@ import {
   computeWorkspaceRevision,
 } from './revision'
 import { createRunStore, type RunStore } from './run-store'
+import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { transitionDeliveryRun } from './transition'
 import {
   enterImplementationAudit,
@@ -98,6 +99,10 @@ export function createDeliveryWorkflowController(input: {
     eventType: string,
     details: Record<string, unknown> = {},
   ): Promise<DeliveryRun> {
+    const previous = await store.load()
+    const acceptedUnits = previous
+      ? deriveAcceptedWorkflowUnits(previous, run)
+      : []
     const committed = await store.commit(run, {
       runId: run.runId,
       type: eventType,
@@ -106,7 +111,7 @@ export function createDeliveryWorkflowController(input: {
       revision: run.revision,
       activeTaskId: run.activeTaskId,
       ...details,
-    })
+    }, acceptedUnits)
     scheduleOrphanedHandoffRecovery(committed)
     return committed
   }
