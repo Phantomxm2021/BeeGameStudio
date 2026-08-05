@@ -716,6 +716,31 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
 
+  test('only replaces an obsolete snapshot after explicit migration', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-migrate-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-migrate',
+      projectId: 'project-migrate',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    const obsoleteSnapshot = JSON.stringify({ ...initial, schemaVersion: 11 })
+    await writeFile(store.paths.snapshot, obsoleteSnapshot, 'utf8')
+
+    await expect(store.load()).rejects.toMatchObject({ code: 'obsolete' })
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
+
+    await expect(store.load({ migrate: true })).resolves.toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      runId: initial.runId,
+    })
+    expect(JSON.parse(await readFile(store.paths.snapshot, 'utf8'))).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      runId: initial.runId,
+    })
+  })
+
   test('does not allow an older server to load a newer snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-newer-'))
     const store = createRunStore(workspace, 'owner-1')

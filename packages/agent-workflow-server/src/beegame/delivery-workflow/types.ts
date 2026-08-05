@@ -347,7 +347,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 11 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 12 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

@@ -9,6 +9,10 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { parseDeliveryRun } from './schema'
+import {
+  SnapshotMigrationError,
+  migrateWorkflowSnapshot,
+} from './snapshot-migrations'
 import { assertDeliveryRunInvariants } from './transition'
 import type {
   DeliveryRun,
@@ -255,7 +259,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return record
   }
 
-  async function loadUnlocked(): Promise<DeliveryRun | null> {
+  async function loadUnlocked(options: { migrate?: boolean } = {}): Promise<
+    DeliveryRun | null
+  > {
     let snapshotText: string
     try {
       snapshotText = await readFile(filePaths.snapshot, 'utf8')
@@ -273,6 +279,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       )
     }
     let run: DeliveryRun
+    let migrated = false
     const snapshotVersion =
       value && typeof value === 'object' && !Array.isArray(value)
         ? (value as Record<string, unknown>).schemaVersion
@@ -281,11 +288,28 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       typeof snapshotVersion === 'number' &&
       Number.isInteger(snapshotVersion) &&
       snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
-    )
-      throw new WorkflowStoreError(
-        `unsupported workflow snapshot schema version ${snapshotVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
-        'obsolete',
-      )
+    ) {
+      if (!options.migrate)
+        throw new WorkflowStoreError(
+          `unsupported workflow snapshot schema version ${snapshotVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+          'obsolete',
+        )
+      try {
+        const result = migrateWorkflowSnapshot(value)
+        value = result.value
+        migrated = result.migratedFrom !== undefined
+      } catch (error) {
+        const detail =
+          error instanceof Error ? error.message : 'workflow snapshot migration failed'
+        throw new WorkflowStoreError(
+          `workflow snapshot migration failed at ${filePaths.snapshot}: ${detail}`,
+          error instanceof SnapshotMigrationError &&
+            error.code === 'unsupported_version'
+            ? 'obsolete'
+            : 'invalid',
+        )
+      }
+    }
     if (
       typeof snapshotVersion === 'number' &&
       Number.isInteger(snapshotVersion) &&
@@ -306,8 +330,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     if (run.ownerId !== ownerId)
       throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
     let shouldRewriteCanonicalSnapshot =
-      JSON.stringify(value) !== JSON.stringify(run)
+      options.migrate &&
+      (migrated || JSON.stringify(value) !== JSON.stringify(run))
     if (run.pendingEvent) {
+      if (!options.migrate) return run
       // Journal replay failures are operational failures, not malformed
       // snapshots. Keep the marker so the next load can retry safely.
       await appendEventUnlocked(run.pendingEvent)
@@ -327,8 +353,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return run
   }
 
-  async function load(): Promise<DeliveryRun | null> {
-    return enqueueMutation(filePaths.snapshot, loadUnlocked)
+  async function load(options?: { migrate?: boolean }): Promise<DeliveryRun | null> {
+    return enqueueMutation(filePaths.snapshot, () => loadUnlocked(options))
   }
 
   async function saveUnlocked(
@@ -446,7 +472,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     // Recover a previous marker before replacing the snapshot. This keeps a
     // failed append retryable and prevents a later commit from overwriting
     // an event that was waiting for journal recovery.
-    await loadUnlocked()
+    await loadUnlocked({ migrate: true })
     return persistCommitUnlocked(run, event)
   }
 
@@ -574,7 +600,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     dispatchId: string,
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
-      const run = await loadUnlocked()
+      const run = await loadUnlocked({ migrate: true })
       if (!run || run.runId !== runId) return run
       if (
         run.status !== 'running' ||
@@ -607,7 +633,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     },
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
-      const run = await loadUnlocked()
+      const run = await loadUnlocked({ migrate: true })
       if (!run || run.runId !== runId) return run
       if (
         progress.dispatchId &&
