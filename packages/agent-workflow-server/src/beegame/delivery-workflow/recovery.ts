@@ -42,30 +42,6 @@ async function restoreCanonicalDocumentCommit(
   }
 }
 
-function withResourcePreparationAttempt(run: DeliveryRun): DeliveryRun {
-  if (
-    run.phase !== 'RESOURCE_PREPARATION' ||
-    !run.blockedReason ||
-    (run.status !== 'needs_action' &&
-      run.status !== 'failed' &&
-      run.status !== 'blocked')
-  )
-    return run
-  const activeCycle = run.documentReviewState.activeCycle
-  if (
-    activeCycle?.acceptedSemanticResult &&
-    activeCycle.activeTarget === 'resource'
-  )
-    return run
-  return {
-    ...run,
-    resourcePreparationAttempt: Math.max(
-      1,
-      run.resourcePreparationAttempt ?? 0,
-    ),
-  }
-}
-
 function reviewRetryIsLocked(run: DeliveryRun): boolean {
   const cycle = run.documentReviewState.activeCycle
   return Boolean(
@@ -88,7 +64,7 @@ async function unlockReviewForChangedRevision(input: {
     input.run.confirmedBriefDigest,
   )
   const currentRevision =
-    cycle.scope === 'foundation'
+    cycle.scope !== 'complete'
       ? documentRevision
       : await computeResourceRevision(input.workspacePath, documentRevision)
   if (currentRevision === cycle.sourceRevision) return undefined
@@ -104,7 +80,7 @@ async function unlockReviewForChangedRevision(input: {
     },
     tasks: [],
     evidence:
-      cycle.scope === 'foundation'
+      cycle.scope !== 'complete'
         ? {}
         : {
             resourcePreparation: input.run.evidence.resourcePreparation,
@@ -112,8 +88,17 @@ async function unlockReviewForChangedRevision(input: {
     documentReviewState: {
       ...input.run.documentReviewState,
       ...(cycle.scope === 'foundation'
-        ? { foundationApproval: undefined, comprehensiveApproval: undefined }
-        : { comprehensiveApproval: undefined }),
+        ? {
+            foundationApproval: undefined,
+            checklistApproval: undefined,
+            comprehensiveApproval: undefined,
+          }
+        : cycle.scope === 'checklist'
+          ? {
+              checklistApproval: undefined,
+              comprehensiveApproval: undefined,
+            }
+          : { comprehensiveApproval: undefined }),
       activeCycle: undefined,
     },
     updatedAt: new Date().toISOString(),
@@ -182,7 +167,7 @@ export async function resumeRun(input: {
       (retryable
         ? transitionDeliveryRun(
             {
-              ...withResourcePreparationAttempt(acquired.run),
+              ...acquired.run,
               activeDispatch: acquired.run.activeDispatch?.terminalResult
                 ? acquired.run.activeDispatch
                 : undefined,
@@ -247,7 +232,7 @@ export async function retryRun(input: {
       changedReview ??
       transitionDeliveryRun(
         {
-          ...withResourcePreparationAttempt(acquired.run),
+          ...acquired.run,
           activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },

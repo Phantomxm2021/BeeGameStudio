@@ -209,24 +209,6 @@ describe('WorkflowCard', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
   });
 
-  it('presents obsolete workflow replacement as an explicit restart action', async () => {
-    const onAction = vi.fn().mockResolvedValue(undefined);
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'workflow-state-error',
-          status: 'blocked',
-          block: { message: '当前项目使用旧版工作流协议。' },
-          nextAction: 'restart',
-        }}
-        onAction={onAction}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
-    await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart'));
-  });
-
   it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {
     const writeText = vi.fn().mockRejectedValue(new Error('Clipboard permission denied'));
     Object.defineProperty(navigator, 'clipboard', {

@@ -15,7 +15,7 @@ const facets = {
 }
 
 describe('Resource selection service client', () => {
-  test('browses the generic catalog without requirement binding', async () => {
+  test('lists compact Packs through the Pack catalog endpoint', async () => {
     const requests: Array<{ url: string; body: unknown }> = []
     const client = createResourceSelectionClient({
       baseUrl: 'https://resource.invalid/',
@@ -26,24 +26,38 @@ describe('Resource selection service client', () => {
           body: JSON.parse(String(init?.body)),
         })
         return Response.json({
-          items: [],
-          total: 0,
+          items: [catalogPack()],
+          total: 1,
           facets,
-          catalogRevision: 'a'.repeat(64),
-          normalizedFilters: {},
         })
       },
     })
     await expect(
-      client.browseCatalog({ filters: { dimensions: ['3D'] }, limit: 12 }),
-    ).resolves.toEqual(
-      expect.objectContaining({ total: 0, catalogRevision: 'a'.repeat(64) }),
-    )
+      client.listPacks({ filters: { dimensions: ['3D'] }, limit: 8 }),
+    ).resolves.toEqual(expect.objectContaining({ total: 1 }))
     expect(requests).toEqual([
       {
-        url: 'https://resource.invalid/api/resource-catalog/elements',
-        body: { filters: { dimensions: ['3D'] }, limit: 12 },
+        url: 'https://resource.invalid/api/resource-catalog/packs',
+        body: { filters: { dimensions: ['3D'] }, limit: 8 },
       },
+    ])
+  })
+
+  test('inspects only the selected Pack elements', async () => {
+    const requests: string[] = []
+    const client = createResourceSelectionClient({
+      baseUrl: 'https://resource.invalid',
+      serviceToken: 'token',
+      fetchImpl: async input => {
+        requests.push(String(input))
+        return Response.json({ items: [catalogElement()], total: 1, facets })
+      },
+    })
+    await expect(client.inspectPack('pack/a', { limit: 4 })).resolves.toEqual(
+      expect.objectContaining({ total: 1 }),
+    )
+    expect(requests).toEqual([
+      'https://resource.invalid/api/resource-catalog/packs/pack%2Fa/elements',
     ])
   })
 
@@ -90,14 +104,51 @@ describe('Resource selection service client', () => {
     ])
   })
 
-  test('rejects an invalid catalog snapshot instead of inventing empty metadata', async () => {
+  test('rejects an invalid Pack response instead of inventing metadata', async () => {
     const client = createResourceSelectionClient({
       baseUrl: 'https://resource.invalid',
       serviceToken: 'token',
       fetchImpl: async () => Response.json({ items: [], total: 0 }),
     })
-    await expect(client.browseCatalog({})).rejects.toThrow(
-      'Resource catalog snapshot is invalid',
+    await expect(client.listPacks({})).rejects.toThrow(
+      'Resource catalog response is invalid',
     )
   })
 })
+
+function catalogPack() {
+  return {
+    packId: 'pack-a',
+    packVersion: '1.0.0',
+    packName: 'Pack',
+    dimension: '3D',
+    primaryCategory: 'environment',
+    styles: [],
+    gameTypes: [],
+    tags: [],
+    usageTags: [],
+    assetKinds: [],
+    capabilities: [],
+    formats: ['glb'],
+    readyElementCount: 1,
+  }
+}
+
+function catalogElement() {
+  return {
+    packId: 'pack-a',
+    packVersion: '1.0.0',
+    packName: 'Pack',
+    packStyles: [],
+    packGameTypes: [],
+    elementId: 'element-a',
+    elementName: 'Element',
+    elementPath: 'model.glb',
+    category: 'environment',
+    usageTags: [],
+    dimension: '3D',
+    capabilities: [],
+    relations: [],
+    dependencyCount: 0,
+  }
+}

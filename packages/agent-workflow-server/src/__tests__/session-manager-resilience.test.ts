@@ -17,10 +17,10 @@ import type {
   BeeGameUsageBillingRecordResult as RecordUsageResult,
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import { getObservedNativeResourceLibraryEvidence } from '../beegame/native-resource-library-evidence'
 import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -77,7 +77,7 @@ describe('BeeGame session runtime resilience', () => {
   test('treats canonical resource mutations as durable progress', () => {
     for (const [toolName, input] of [
       ['Write', {}],
-      ['AssetManifest', { action: 'register_authored_resources' }],
+      ['AssetManifest', { action: 'author_provisional_resources' }],
       ['ResourceLibrary', { action: 'import_resources' }],
     ] as const) {
       expect(
@@ -101,7 +101,7 @@ describe('BeeGame session runtime resilience', () => {
         payload: {
           type: 'tool_event',
           toolName: 'ResourceLibrary',
-          input: { action: 'browse_catalog' },
+          input: { action: 'list_packs' },
         },
         createdAt: new Date(),
       }),
@@ -215,71 +215,6 @@ describe('BeeGame session runtime resilience', () => {
     ).toBe(false)
   })
 
-  test('records native Resource Library provenance from workflow workers', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-evidence-'))
-    const workspacePath = join(root, 'workspace')
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async input => {
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'tool_use',
-                  id: 'resource-tool-1',
-                  name: 'ResourceLibrary',
-                  input: {
-                    action: 'browse_catalog',
-                    filters: { dimensions: ['3D'] },
-                  },
-                },
-              ],
-            },
-          })
-          input.onMessage({
-            type: 'user',
-            message: {
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: 'resource-tool-1',
-                  content: JSON.stringify({ result: 'inspected' }),
-                },
-              ],
-            },
-          })
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'resource-preparer',
-    })
-
-    await manager.send(session.id, 'prepare resources')
-    await waitForIdle(manager, session.id)
-
-    expect(
-      getObservedNativeResourceLibraryEvidence({
-        dataRoot: root,
-        sessionId: session.id,
-        workspacePath,
-      }),
-    ).toMatchObject({
-      state: 'current',
-      actions: ['browse_catalog'],
-      failedActions: [],
-    })
-    manager.dispose()
-  })
-
   test('publishes structural resource activity without claiming durable progress', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-progress-'))
     const workspacePath = join(root, 'workspace')
@@ -289,6 +224,7 @@ describe('BeeGame session runtime resilience', () => {
       projectId: 'project-1',
       ownerId: 'user-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     const startedAt = new Date().toISOString()
     await store.save({
@@ -297,7 +233,7 @@ describe('BeeGame session runtime resilience', () => {
       lastProgressAt: startedAt,
       activeDispatch: {
         dispatchId: 'dispatch-1',
-        workerType: 'resource-preparer',
+        workerType: 'resource-curator',
         phase: 'RESOURCE_PREPARATION',
         revision: initial.revision.document,
         status: 'running',
@@ -316,7 +252,7 @@ describe('BeeGame session runtime resilience', () => {
                   id: 'resource-catalog-1',
                   name: 'ResourceLibrary',
                   input: {
-                    action: 'browse_catalog',
+                    action: 'list_packs',
                     filters: { dimensions: ['3D'] },
                   },
                 },
@@ -346,7 +282,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'resource-preparer',
+      workflowWorkerType: 'resource-curator',
     })
 
     await manager.send(session.id, 'prepare resources')
@@ -414,7 +350,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'resource-preparer',
+      workflowWorkerType: 'resource-curator',
       workflowAllowedPaths: ['assets/'],
     })
 
@@ -453,25 +389,21 @@ describe('BeeGame session runtime resilience', () => {
   test('hard-enforces the sole resource-production mutation boundaries', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-repair-permission-'))
     const workspacePath = join(root, 'workspace')
-    await mkdir(join(workspacePath, 'assets'), { recursive: true })
-    await writeFile(
-      join(workspacePath, 'assets/asset-manifest.json'),
-      JSON.stringify({
-        version: 7,
-        project_target: {
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
+    await writeBeeGameAssetManifest(workspacePath, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [
+        {
+          id: 'model',
         },
-        requirements: [
-          {
-            id: 'model',
-          },
-        ],
-        resources: [],
-      }),
-    )
+      ],
+      resources: [],
+    })
     const decisions: Record<string, DashboardPermissionDecision | undefined> =
       {}
     const runner: BeeGameSessionRunner = {
@@ -602,7 +534,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'resource-preparer',
+      workflowWorkerType: 'resource-curator',
       workflowAllowedPaths: [
         'assets/asset-manifest.json',
         'assets/runtime/',
@@ -700,7 +632,7 @@ describe('BeeGame session runtime resilience', () => {
       userId: 'user-1',
       workflowWorker: true,
       workflowRunId: 'run-1',
-      workflowWorkerType: 'resource-preparer',
+      workflowWorkerType: 'resource-curator',
       workflowAllowedPaths: [
         'assets/asset-manifest.json',
         'assets/runtime/',
@@ -715,6 +647,66 @@ describe('BeeGame session runtime resilience', () => {
     expect(decision).toMatchObject({
       behavior: 'deny',
       message: expect.stringContaining('only through AssetManifest'),
+    })
+    manager.dispose()
+  })
+
+  test('protects already committed content files during artifact-derived continuation', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-content-continuation-'))
+    const workspacePath = join(root, 'workspace')
+    await writeBeeGameAssetManifest(workspacePath, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [],
+      resources: [],
+    })
+    let preserved: DashboardPermissionDecision | undefined
+    let missing: DashboardPermissionDecision | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          preserved = await startInput.requestPermission?.({
+            toolUseID: 'rewrite-committed-content',
+            toolName: 'Write',
+            message: 'Rewrite committed content',
+            input: { file_path: 'assets/content/entities.json' },
+          })
+          missing = await startInput.requestPermission?.({
+            toolUseID: 'write-missing-content',
+            toolName: 'Write',
+            message: 'Write missing content',
+            input: { file_path: 'assets/content/waves.json' },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowWorkerType: 'resource-content-author',
+      workflowAllowedPaths: ['assets/content/'],
+      workflowProtectedPaths: ['assets/content/entities.json'],
+    })
+
+    await manager.send(session.id, 'continue content production')
+    await waitForIdle(manager, session.id)
+
+    expect(preserved).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('already committed successfully'),
+    })
+    expect(missing).toEqual({
+      behavior: 'allow',
+      scope: 'once',
     })
     manager.dispose()
   })
@@ -982,85 +974,6 @@ describe('BeeGame session runtime resilience', () => {
         workspacePath,
       ),
     ).toEqual([])
-    manager.dispose()
-  })
-
-  test('denies metadata refresh until the canonical inventory is valid', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-resource-refresh-order-'))
-    const workspacePath = join(root, 'workspace')
-    await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
-    await writeFile(join(workspacePath, 'assets/runtime/model.fbx'), 'fbx')
-    await writeFile(
-      join(workspacePath, 'assets/asset-manifest.json'),
-      JSON.stringify({
-        version: 7,
-        project_target: {
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [
-          {
-            id: 'model',
-          },
-        ],
-        resources: [
-          {
-            id: 'model',
-            source: {
-              type: 'resource-library',
-              pack_id: 'pack-1',
-              pack_version: '1.0.0',
-              element_id: 'model',
-              element_path: 'model.fbx',
-            },
-            provisional: false,
-            status: 'verified',
-            root_path: 'assets/runtime/model.fbx',
-            file_paths: ['assets/runtime/model.fbx'],
-            selected_at: new Date().toISOString(),
-            selection_reason: ['Approved inventory'],
-          },
-        ],
-      }),
-    )
-    let decision: DashboardPermissionDecision | undefined
-    const runner: BeeGameSessionRunner = {
-      start: async startInput => ({
-        submit: async () => {
-          decision = await startInput.requestPermission?.({
-            toolUseID: 'refresh-before-final-manifest',
-            toolName: 'ResourceLibrary',
-            message: 'Refresh metadata',
-            input: { action: 'refresh_resource_metadata' },
-          })
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowWorkerType: 'resource-preparer',
-      workflowAllowedPaths: [
-        'assets/asset-manifest.json',
-        'assets/runtime/',
-        'assets/content/',
-        'assets/generated/',
-      ],
-    })
-
-    await manager.send(session.id, 'repair resources')
-    await waitForIdle(manager, session.id)
-
-    expect(decision).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('Finalize and validate'),
-    })
     manager.dispose()
   })
 

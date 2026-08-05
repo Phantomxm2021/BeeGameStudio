@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   RESOURCE_CATEGORIES,
   RESOURCE_ASSET_KINDS,
@@ -12,7 +11,6 @@ import {
   browseResourceCatalogPacks,
   browseResourceCatalogPackSummaries,
   hasElementCatalogFilters,
-  queryResourceCatalogElements,
   ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
   resolveExactResourceElement,
@@ -82,7 +80,6 @@ export function createBeeGameResourceServerApp(
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
           '/api/resource-catalog/packs',
-          '/api/resource-catalog/elements',
             '/api/resource-library/resolve',
           ].includes(pathname)) ||
         (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
@@ -127,31 +124,6 @@ export function createBeeGameResourceServerApp(
         const packs = await options.repository.listPacks()
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
-      }
-      if (request.method === 'POST' && pathname === '/api/resource-catalog/elements') {
-        const catalogRequest = parseCatalogRequest(await request.json())
-        const packs = await options.repository.listPacks()
-        const elements = (
-          await Promise.all(
-            packs.map(pack => options.repository.listElements(pack.id)),
-          )
-        ).flat()
-        const catalogRevision = resourceCatalogRevision(packs, elements)
-        return corsResponse(
-          Response.json(
-            {
-              ...queryResourceCatalogElements(
-                packs,
-                elements,
-                catalogRequest,
-                catalogRevision,
-              ),
-              catalogRevision,
-              normalizedFilters: catalogRequest.filters ?? {},
-            },
-          ),
-          options.corsOrigin,
-        )
       }
       const packElementsMatch = pathname.match(/^\/api\/resource-catalog\/packs\/([^/]+)\/elements$/)
       if (request.method === 'POST' && packElementsMatch) {
@@ -458,83 +430,6 @@ export function createBeeGameResourceServerApp(
       }
     },
   }
-}
-
-function resourceCatalogRevision(
-  packs: readonly ResourcePack[],
-  elements: readonly import('@bee-game-studio/beegame-resource-core').ResourceElement[],
-): string {
-  const snapshot = {
-    packs: [...packs]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map(pack =>
-        canonicalCatalogValue({
-          id: pack.id,
-          name: pack.name,
-          styles: pack.styles,
-          gameTypes: pack.gameTypes,
-          dimension: pack.dimension,
-          primaryCategory: pack.primaryCategory,
-          categories: pack.categories,
-          license: pack.license,
-          version: pack.version,
-          status: pack.status,
-          description: pack.description,
-          tags: pack.tags,
-          source: pack.source,
-          author: pack.author,
-          compatibleEngines: pack.compatibleEngines,
-          elementDefaults: pack.elementDefaults,
-        }),
-      ),
-    elements: [...elements]
-      .sort(
-        (left, right) =>
-          left.packId.localeCompare(right.packId) ||
-          left.id.localeCompare(right.id),
-      )
-      .map(element =>
-        canonicalCatalogValue({
-          id: element.id,
-          packId: element.packId,
-          name: element.name,
-          path: element.path,
-          category: element.category,
-          kind: element.kind,
-          preview: element.preview,
-          specs: element.specs,
-          usageTags: element.usageTags,
-          usageTagsMode: element.usageTagsMode,
-          usageTagsSource: element.usageTagsSource,
-          assetKind: element.assetKind,
-          capabilities: element.capabilities,
-          contentProfile: element.contentProfile,
-          relations: element.relations,
-          dependencies: element.dependencies,
-          dependencyBindings: element.dependencyBindings,
-          status: element.status,
-          styleOverride: element.styleOverride,
-          dimensionOverride: element.dimensionOverride,
-        }),
-      ),
-  }
-  return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
-}
-
-function canonicalCatalogValue(value: unknown): unknown {
-  if (Array.isArray(value))
-    return value
-      .map(canonicalCatalogValue)
-      .sort((left, right) =>
-        JSON.stringify(left).localeCompare(JSON.stringify(right)),
-      )
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([, field]) => field !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, field]) => [key, canonicalCatalogValue(field)]),
-  )
 }
 
 function isSupportedCover(file: File): boolean {

@@ -9,39 +9,22 @@ import {
 } from './project-resource-application'
 
 describe('ProjectResourceApplication', () => {
-  test('caps catalog page size without adding semantic filters', async () => {
-    let observed: unknown
-    const application = new ProjectResourceApplication({
-      browseCatalog: async input => {
-        observed = input
-        return catalogPage()
-      },
-      resolveResources: async () => [],
-    })
-    await application.browseCatalog({ limit: 200 })
-    expect(observed).toEqual({ limit: 64 })
+  test('forwards Pack listing and selected Pack inspection without semantic inference', async () => {
+    const calls: unknown[] = []
+    const application = new ProjectResourceApplication(resourceClient(calls))
+    await application.listPacks({ limit: 8 })
+    await application.inspectPack('pack-a', { limit: 4 })
+    expect(calls).toEqual([
+      ['list', { limit: 8 }],
+      ['inspect', 'pack-a', { limit: 4 }],
+    ])
   })
 
-  test('acquires independently identified resources into the declared inventory root', async () => {
+  test('acquires exact identities into the declared inventory root', async () => {
     const workspace = await createWorkspace()
-    const client: ProjectResourceSelectionClient = {
-      browseCatalog: async () => catalogPage(),
-      resolveResources: async selections =>
-        selections.map(selection => ({
-          resourceId: selection.resourceId,
-        packId: selection.packId,
-          packVersion: selection.expectedPackVersion,
-        elementId: selection.elementId,
-          elementPath: 'model.glb',
-          sourceUrl: 'https://download.invalid/model',
-        selectionReason: selection.selectionReason,
-          assetKind: 'model',
-          dependencies: [],
-      })),
-    }
     try {
       const result = await new ProjectResourceApplication(
-        client,
+        resourceClient(),
         async () => new Response(new Uint8Array([1, 2, 3])),
       ).acquireResources(workspace, [
         {
@@ -52,14 +35,14 @@ describe('ProjectResourceApplication', () => {
           destinationPath: 'assets/runtime/library',
           selectionReason: ['Observed technical and semantic fit.'],
         },
-    ])
+      ])
       expect(result.resources).toEqual([
         expect.objectContaining({
           resourceId: 'material-a',
           status: 'verified',
           rootPath: 'assets/runtime/library/model.glb',
         }),
-    ])
+      ])
       expect(result.manifest.resources).toHaveLength(1)
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -69,13 +52,11 @@ describe('ProjectResourceApplication', () => {
   test('rejects duplicate project resource identities before service resolution', async () => {
     const workspace = await createWorkspace()
     let called = false
-    const application = new ProjectResourceApplication({
-      browseCatalog: async () => catalogPage(),
-      resolveResources: async () => {
-        called = true
-        return []
-      },
-  })
+    const client = resourceClient()
+    client.resolveResources = async () => {
+      called = true
+      return []
+    }
     const selection = {
       resourceId: 'same-id',
       packId: 'pack-a',
@@ -86,7 +67,10 @@ describe('ProjectResourceApplication', () => {
     }
     try {
       await expect(
-        application.acquireResources(workspace, [selection, selection]),
+        new ProjectResourceApplication(client).acquireResources(workspace, [
+          selection,
+          selection,
+        ]),
       ).rejects.toThrow('Resource ids must be unique')
       expect(called).toBe(false)
     } finally {
@@ -95,10 +79,49 @@ describe('ProjectResourceApplication', () => {
   })
 })
 
+function resourceClient(calls: unknown[] = []): ProjectResourceSelectionClient {
+  return {
+    listPacks: async input => {
+      calls.push(['list', input])
+      return { items: [], total: 0, facets: facets() }
+    },
+    inspectPack: async (packId, input) => {
+      calls.push(['inspect', packId, input])
+      return { items: [], total: 0, facets: facets() }
+    },
+    resolveResources: async selections =>
+      selections.map(selection => ({
+        resourceId: selection.resourceId,
+        packId: selection.packId,
+        packVersion: selection.expectedPackVersion,
+        elementId: selection.elementId,
+        elementPath: 'model.glb',
+        sourceUrl: 'https://download.invalid/model',
+        selectionReason: selection.selectionReason,
+        dependencies: [],
+      })),
+  }
+}
+
+function facets() {
+  return {
+    dimensions: [],
+    primaryCategories: [],
+    categories: [],
+    styles: [],
+    gameTypes: [],
+    packTags: [],
+    usageTags: [],
+    assetKinds: [],
+    capabilities: [],
+    formats: [],
+  }
+}
+
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-app-'))
   await writeBeeGameAssetManifest(workspace, {
-    version: 7,
+    version: 8,
     project_target: {
       asset_format_capabilities: ['glb'],
       resource_library_usage: 'optional',
@@ -106,31 +129,8 @@ async function createWorkspace(): Promise<string> {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [
-      { id: 'world.visual', required: true },
-    ],
+    requirements: [{ id: 'world.visual', required: true }],
     resources: [],
   })
   return workspace
-}
-
-function catalogPage() {
-  return {
-    items: [],
-    total: 0,
-    facets: {
-      dimensions: [],
-      primaryCategories: [],
-      categories: [],
-      styles: [],
-      gameTypes: [],
-      packTags: [],
-      usageTags: [],
-      assetKinds: [],
-      capabilities: [],
-      formats: [],
-    },
-    catalogRevision: 'a'.repeat(64),
-    normalizedFilters: {},
-  }
 }

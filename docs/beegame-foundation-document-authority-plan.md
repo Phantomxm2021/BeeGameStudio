@@ -26,7 +26,9 @@ Foundation 固定为以下八份文档：
 
 八份文档必须在同一个 Foundation Drafting pass 中按固定依赖顺序串行完成；一个 pass 是同一 durable workflow 阶段和同一 Foundation revision，不是一个模型上下文、一个 transport turn 或一个八文档 dispatch。每份文档是一个独立 durable task，只允许一个 active Document Author dispatch、一个 canonical 路径和一次 `CommitCanonicalDocument`。完成后服务端自动推进下一份，八份全部完成前不得启动 Initial Reviewer。每份文档均以 YAML front matter 声明稳定 `document_id`、`MAJOR.MINOR.PATCH` 版本和 ISO 8601 UTC `updated_at`；三项元数据由 Workflow 服务在唯一提交边界生成，模型只提交 Markdown 正文。任一文档缺失、为空、越权拥有事实或缺少核心设计输入，Foundation 不得通过。
 
-`docs/acceptance/gameplay-checklist.md` 不是 Foundation 文档。它只能在八份文档通过 Foundation Initial Review、必要修复和 Closure Review 后生成。`assets/asset-manifest.json`、资源文件及 JSON/YAML 可执行内容只能在 Checklist 完成后创建。
+`docs/acceptance/gameplay-checklist.md` 不是 Foundation 文档。它只能在八份文档通过 Foundation Initial Review、必要修复和 Closure Review 后生成；生成后必须在进入资源阶段前完成独立 Checklist Initial Review、必要修复与 Closure，并由服务端封存其批准 revision。`assets/asset-manifest.json`、`assets/manifest/**`、资源文件及 JSON/YAML 可执行内容只能在 Checklist 批准封存后创建。
+
+Checklist 一旦封存，Resource Production、Comprehensive Review、Implementation 与下游 Agent 只能读取，不能修改、提升版本或把它列为 finding subject。若下游发现冻结 Checklist 与批准 Foundation 不一致，这是资源前 Checklist Gate 的系统不变量失败，当前 run 必须停止在明确错误上；不得由资源阶段自动重开文档。只有显式重新开始上游规划 revision 才能产生新的 Checklist，旧资源证据随后按新 revision 重新建立。
 
 ## 3. 唯一事实归属
 
@@ -98,9 +100,10 @@ Confirmed Brief
   -> Foundation Initial Review（12 checks）
   -> Foundation Owner 批量修复
   -> Foundation Closure Review
-  -> Gameplay Checklist
-  -> Resource Production（Manifest + 资源文件 + JSON/YAML）
-  -> Comprehensive Initial Review（17 checks）
+  -> Gameplay Checklist Drafting
+  -> Checklist Initial Review / Repair / Closure（封存）
+  -> Resource Production（Manifest modules + 资源文件 + JSON/YAML）
+  -> Comprehensive Initial Review（16 checks；Checklist 只读且不重复审计）
   -> 按 owner 批量修复
   -> Comprehensive Closure Review
   -> Atomic Task Planning
@@ -118,7 +121,7 @@ Foundation 固定执行以下 12 项，其中空间设计检查为本次补齐�
 
 - `level_scene_design_integrity`
 
-Foundation 固定为 12 项；Comprehensive 仍为 Foundation 与 5 项下游检查的严格并集，固定为 17 项。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
+Foundation 固定为 12 项；Checklist 在资源前由 `checklist_traceability` 独立审计并封存；Comprehensive 为 Foundation 与 4 项资源/实现就绪检查的严格并集，固定为 16 项。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
 
 Reviewer 只允许一个 frozen-revision Review Cycle。12 项 Foundation check 保持固定顺序和独立结论，但按五个事务型 packet 派发：`brief_alignment + cross_document_consistency + gameplay_completeness`；`gameplay_strategy_viability + economy_progression_integrity`；`numeric_balance_feasibility + pacing_difficulty_coherence`；`level_scene_design_integrity + technical_feasibility + art_direction_coherence + ui_audio_consistency`；`acceptance_observability`。策略/经济包共享玩家选择、资源流和成长约束，数值/节奏包共享公式边界、压力/能力曲线与尖峰恢复推导；不得把十二项 assessment 合成一个原子提交。每个 packet 的原生工具必须向模型直接暴露完整 check、assessment、finding 与 reference JSON Schema，并在返回 `accepted` 前使用与持久化相同的唯一 submission contract 校验全部 check、固定 criteria、稳定 `referenceId`、逐 check artifact dependency、finding subject owner 与 Closure 边界；不得以空 item Schema 配合 Prompt 补偿字段合同。任一项非法则整个 packet 零落盘。packet 传输依赖并集只用于减少重复输入，不能扩大任一 check 的 evidence/subject 权限；每项 approval digest 覆盖该 check 的完整依赖而非仅覆盖主动引用。已接受 packet 不回滚。未接受 terminal 的 packet 边界与当前 durable cursor 不一致时必须丢弃并重新派发当前 packet，不得兼容解析或部分接收。不得创建并行 Reviewer、替代提交合同或整轮重审分支。
 

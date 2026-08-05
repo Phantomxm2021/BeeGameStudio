@@ -19,7 +19,6 @@ import {
   initializeBeeGameNativeQueryMode,
   installInheritedBeeGameTools,
   NativeResourceLibraryPermissionBroker,
-  ResourceCatalogTurnGate,
   NativeBackgroundTaskLedger,
   NativeSandboxNetworkPermissionBroker,
   parseNativeTerminalTaskNotification,
@@ -93,7 +92,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       requiresBeeGameWorkflowBoundaryCheck(
         {
           workflowWorker: true,
-          workflowWorkerType: 'resource-preparer',
+          workflowWorkerType: 'resource-curator',
         },
         'Bash',
       ),
@@ -144,7 +143,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(selectBeeGameWorkerTools(tools, 'document-reviewer')).toEqual([])
 
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
+      selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
     ).toEqual(['Read'])
@@ -167,7 +166,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(selectBeeGameWorkerTools(tools, 'unrelated-agent')).toEqual(tools)
   })
 
-  test('keeps scoped file tools for resource production', () => {
+  test('keeps the Curator read-only outside native resource tools', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -179,13 +178,13 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ]
 
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
+      selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+    ).toEqual(['Read'])
   })
 
-  test('gives resource production one scoped file lane without shell or nested agents', () => {
+  test('keeps Curator exploration read-only without shell or nested agents', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -197,10 +196,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ]
 
     expect(
-      selectBeeGameWorkerTools(tools, 'resource-preparer').map(
+      selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Write', 'Glob'])
+    ).toEqual(['Read', 'Glob'])
   })
 
   test('removes generic file tools from the canonical document lane', () => {
@@ -387,7 +386,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       },
     )
     const toolInput = {
-      action: 'browse_catalog',
+      action: 'list_packs',
       filters: { dimensions: ['3D'] },
     }
 
@@ -404,56 +403,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       }),
     )
     expect(requests).toEqual([])
-  })
-
-  test('allows one catalog read per model turn and leaves imports available', () => {
-    const gate = new ResourceCatalogTurnGate()
-    const turn = {}
-    expect(
-      gate.issue({
-        workerType: 'resource-preparer',
-        toolName: 'ResourceLibrary',
-        toolInput: {
-          action: 'browse_catalog',
-          filters: { dimensions: ['3D'] },
-        },
-        assistantMessage: turn,
-        toolUseContext: {},
-      }),
-    ).toBeUndefined()
-    expect(
-      gate.issue({
-        workerType: 'resource-preparer',
-        toolName: 'ResourceLibrary',
-        toolInput: {
-          action: 'browse_catalog',
-          filters: { dimensions: ['3D'] },
-        },
-        assistantMessage: turn,
-        toolUseContext: {},
-      }),
-    ).toContain('Only one ResourceLibrary catalog read')
-    expect(
-      gate.issue({
-        workerType: 'resource-preparer',
-        toolName: 'ResourceLibrary',
-        toolInput: { action: 'import_resources', selections: [] },
-        assistantMessage: turn,
-        toolUseContext: {},
-      }),
-    ).toBeUndefined()
-    expect(
-      gate.issue({
-        workerType: 'resource-preparer',
-        toolName: 'ResourceLibrary',
-        toolInput: {
-          action: 'browse_catalog',
-          filters: { dimensions: ['3D'] },
-        },
-        assistantMessage: {},
-        toolUseContext: {},
-      }),
-    ).toBeUndefined()
   })
 
   test('rejects an invented ResourceLibrary action with the supported contract', async () => {
@@ -477,7 +426,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       expect.objectContaining({
         behavior: 'deny',
         message:
-          'Unsupported ResourceLibrary action "match". Allowed actions: browse_catalog, import_resources, refresh_resource_metadata.',
+          'Unsupported ResourceLibrary action "match". Allowed actions: list_packs, inspect_pack, import_resources.',
       }),
     )
     expect(requests).toEqual([])
@@ -546,31 +495,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       )?.behavior,
     ).toBe('deny')
     expect(requests).toHaveLength(2)
-  })
-
-  test('routes refresh_resource_metadata through the ResourceLibrary mutation boundary', async () => {
-    const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeResourceLibraryPermissionBroker(
-      () => async request => {
-        requests.push(request)
-        return { behavior: 'deny' }
-      },
-    )
-    const toolInput = { action: 'refresh_resource_metadata' }
-
-    expect(
-      await broker.authorize({
-        toolName: 'ResourceLibrary',
-        toolInput,
-        toolUseID: 'refresh-resource',
-      }),
-    ).toEqual(expect.objectContaining({ behavior: 'deny' }))
-    expect(requests).toEqual([
-      expect.objectContaining({
-        toolName: 'ResourceLibrary',
-        input: toolInput,
-      }),
-    ])
   })
 
   test('never treats a session ResourceLibrary grant as approval for another deferred tool', async () => {

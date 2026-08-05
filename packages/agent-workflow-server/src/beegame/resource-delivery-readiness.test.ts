@@ -16,7 +16,7 @@ describe('resource-content readiness', () => {
     await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
     await writeFile(join(workspace, 'assets/runtime/player.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
     await writeBeeGameAssetManifest(workspace, {
-      version: 7,
+      version: 8,
       project_target: {
         asset_format_capabilities: ['svg', 'json', 'yaml'],
         resource_library_usage: 'optional',

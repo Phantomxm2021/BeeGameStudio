@@ -1,11 +1,12 @@
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { auditAssetContract } from '../asset-contract-audit'
 import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   DOCUMENT_REVIEW_CHECK_PACKETS,
+  RESOURCE_PRODUCTION_TASKS,
+  type ResourceProductionTask,
   type DocumentWorkflowStep,
   type DocumentReviewCheckId,
 } from './types'
@@ -57,6 +58,7 @@ export type AssetDisplayTaskInput = {
   workflowStatus?: string
   thinking?: string
   activeDispatch?: unknown
+  resourceProductionTask: ResourceProductionTask
   reviewTarget?: 'foundation' | 'checklist' | 'resource'
   reviewFindings?: Array<{
     id: string
@@ -111,13 +113,15 @@ export function projectDocumentDisplayTasks(
     input.workflowStatus === 'running' && input.thinking === 'working'
   const operation =
     input.documentStep === 'FOUNDATION_REVIEW' ||
-    input.documentStep === 'CHECKLIST_REVIEW'
+    input.documentStep === 'CHECKLIST_REVIEW' ||
+    input.documentStep === 'COMPREHENSIVE_REVIEW'
       ? 'review'
       : 'write'
   const documentPaths =
-    input.documentStep === 'CHECKLIST_DRAFTING'
+    input.documentStep === 'CHECKLIST_DRAFTING' ||
+    input.documentStep === 'CHECKLIST_REVIEW'
       ? [CANONICAL_PROJECT_DOCUMENTS[CANONICAL_PROJECT_DOCUMENTS.length - 1]]
-      : input.documentStep === 'CHECKLIST_REVIEW'
+      : input.documentStep === 'COMPREHENSIVE_REVIEW'
         ? canonicalReviewArtifacts
         : CANONICAL_FOUNDATION_DOCUMENTS
   const reviewedPaths = new Set(
@@ -277,16 +281,14 @@ export function projectDocumentDisplayTasks(
 }
 
 /**
- * Projects resource work from the canonical v7 manifest and content files.
+ * Projects resource work from the canonical modular manifest and content files.
  * only inventory authority: the UI does not infer work from chat text or keep
  * a second resource/task model.
  */
 export function projectAssetDisplayTasks(
   input: AssetDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  const audit = auditAssetContract(input.workspacePath)
   const dispatch = objectValue(input.activeDispatch)
-  const request = objectValue(dispatch?.request)
   const workerType = stringValue(dispatch?.workerType)
   const dispatchStatus = stringValue(dispatch?.status)
   const active =
@@ -294,93 +296,51 @@ export function projectAssetDisplayTasks(
     input.thinking === 'working' &&
     dispatchStatus === 'running'
 
-  const currentResourceFindings =
-    input.reviewTarget === 'resource'
-      ? (input.reviewFindings ?? []).filter(
-          finding => finding.owner === 'resource',
-        )
-      : []
-  if (currentResourceFindings.length)
-    return currentResourceFindings.map(finding => ({
-      id: finding.id,
-      title: finding.title,
-      status: active
-        ? 'running'
-        : workflowStopped(input.workflowStatus)
-          ? 'stopped'
-          : workflowFailed(input.workflowStatus)
-            ? 'failed'
-            : 'pending',
-      attempt: 0,
-      operation: 'produce',
-    }))
-
-  {
-    const planningStatus =
-      audit.present && audit.valid
-        ? 'completed'
-        : workerType === 'resource-preparer'
-          ? dispatchTaskStatus(dispatchStatus, active, input.workflowStatus)
-          : 'pending'
-    const inventoryStatus =
-      workerType === 'resource-preparer' && audit.present && audit.valid
-        ? dispatchTaskStatus(dispatchStatus, active, input.workflowStatus)
-        : audit.resources.length > 0 &&
-            audit.resources.every(resource => resource.status === 'verified')
-          ? 'completed'
-          : 'pending'
-    const tasks: DocumentDisplayTask[] = [
-      {
-        id: 'resource-plan',
-        title: '资源需求与生产计划',
-        status: planningStatus,
-        attempt: 0,
-        operation: 'produce',
-      },
-      {
-        id: 'resource-inventory',
-        title: '完整资源库存',
-        status: inventoryStatus,
-        attempt: 0,
-        operation: 'produce',
-      },
-      {
-        id: 'content-descriptions',
-        title: 'JSON / YAML 内容描述',
-        status: audit.content.valid
-          ? 'completed'
-          : active
-            ? 'running'
-            : 'pending',
-        attempt: 0,
-        operation: 'produce',
-      },
-    ]
-    return [
-      ...tasks,
-      ...audit.resources.map(resource => ({
-        id: resource.id,
-        title: resource.id,
-        status:
-          resource.status === 'verified'
-            ? ('completed' as const)
-            : resource.status === 'failed'
-              ? ('failed' as const)
-              : active
-                ? ('running' as const)
-                : ('pending' as const),
-        attempt: 0,
-        operation: 'produce' as const,
-      })),
-      ...audit.content.files.map(file => ({
-        id: file.id,
-        title: file.id,
-        status: 'completed' as const,
-        attempt: 0,
-        operation: 'produce' as const,
-      })),
-    ]
+  const currentIndex = RESOURCE_PRODUCTION_TASKS.indexOf(
+    input.resourceProductionTask,
+  )
+  const workerByTask: Record<ResourceProductionTask, string | undefined> = {
+    RESOURCE_PLAN: 'resource-planner',
+    RESOURCE_INVENTORY: 'resource-curator',
+    RESOURCE_CONTENT: 'resource-content-author',
+    RESOURCE_GATE: undefined,
   }
+  const titleByTask: Record<ResourceProductionTask, string> = {
+    RESOURCE_PLAN: '资源需求与生产计划',
+    RESOURCE_INVENTORY: '完整资源库存',
+    RESOURCE_CONTENT: 'JSON / YAML 内容描述',
+    RESOURCE_GATE: '资源与内容门禁',
+  }
+  return RESOURCE_PRODUCTION_TASKS.map((task, index) => {
+    const current = index === currentIndex
+    const dispatchOwnsTask = workerByTask[task] === workerType
+    return {
+      id: task,
+      title: titleByTask[task],
+      status:
+        index < currentIndex
+          ? ('completed' as const)
+          : !current
+            ? ('pending' as const)
+            : workflowStopped(input.workflowStatus)
+              ? ('stopped' as const)
+              : workflowFailed(input.workflowStatus)
+                ? ('failed' as const)
+                : task === 'RESOURCE_GATE'
+                  ? input.workflowStatus === 'running'
+                    ? ('running' as const)
+                    : ('pending' as const)
+                  : dispatchOwnsTask
+                    ? dispatchTaskStatus(
+                        dispatchStatus,
+                        active,
+                        input.workflowStatus,
+                      )
+                    : ('pending' as const),
+      attempt: 0,
+      operation: 'produce' as const,
+    }
+  })
 }
 
 function dispatchTaskStatus(

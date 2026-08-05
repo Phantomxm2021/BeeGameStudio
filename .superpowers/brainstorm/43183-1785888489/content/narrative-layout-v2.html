@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bee — 清晰版叙事</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e9e9e7; color: #111; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; }
+    .shell { width: min(1280px, calc(100% - 32px)); margin: 28px auto; }
+    .top { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 20px; }
+    .eyebrow { color: #777; font-size: 11px; font-weight: 700; letter-spacing: .15em; }
+    h1 { margin: 9px 0 0; font-size: clamp(32px, 5vw, 58px); line-height: 1; letter-spacing: -.055em; font-weight: 650; }
+    .top p { max-width: 460px; margin: 0; color: #696969; font-size: 14px; line-height: 1.6; }
+    .browser { overflow: hidden; border-radius: 24px; background: #fafafa; box-shadow: 0 30px 80px rgba(0,0,0,.14); }
+    .chrome { height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 15px; border-bottom: 1px solid #e8e8e8; background: #f6f6f6; }
+    .chrome i { width: 8px; height: 8px; border-radius: 50%; background: #d8d8d8; }
+    .page { height: min(720px, calc(100vh - 190px)); overflow-y: auto; scroll-snap-type: y proximity; }
+    section { position: relative; min-height: 630px; scroll-snap-align: start; overflow: hidden; }
+    nav { position: absolute; inset: 0 0 auto; z-index: 8; height: 68px; padding: 0 5.2%; display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 650; }
+    .logo { display: flex; align-items: center; gap: 8px; }.bee { width: 16px; height: 16px; border-radius: 50%; background: #efb619; box-shadow: inset -4px -2px rgba(0,0,0,.12); }
+    .hero { min-height: 700px; display: flex; align-items: center; justify-content: center; text-align: center; background: #faf9f6; }
+    .hero-copy { position: relative; z-index: 4; margin-top: -45px; }
+    .hero h2 { margin: 0; font-size: clamp(48px, 6.8vw, 96px); line-height: .94; letter-spacing: -.07em; font-weight: 650; }
+    .hero h2 span { color: #c98b00; }
+    .hero p { width: min(650px, 84%); margin: 26px auto 0; color: #666; font-size: 17px; line-height: 1.65; }
+    .hero .tiny { margin-top: 14px; color: #a0a0a0; font-size: 12px; }
+    .seed { position: absolute; left: 50%; bottom: -245px; width: 430px; height: 430px; transform: translateX(-50%); border-radius: 50%; background: #efb619; box-shadow: 0 25px 100px rgba(218,156,0,.27); }
+    .journey { min-height: 660px; display: grid; place-items: center; color: #fff; background: #070707; }
+    .journey .copy { position: relative; z-index: 3; width: 88%; text-align: center; }
+    .kicker { margin: 0 0 24px; color: #efb619; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    .journey h2, .meaning h2, .invite h2 { margin: 0 auto; max-width: 920px; font-size: clamp(40px, 5.8vw, 80px); line-height: .98; letter-spacing: -.062em; font-weight: 620; }
+    .journey p { max-width: 620px; margin: 25px auto 0; color: rgba(255,255,255,.62); font-size: 17px; line-height: 1.6; }
+    .steps { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 42px; color: rgba(255,255,255,.82); font-size: 12px; }
+    .steps b { padding: 12px 17px; border: 1px solid rgba(255,255,255,.18); border-radius: 99px; font-weight: 500; }.steps i { width: 24px; border-top: 1px solid rgba(239,182,25,.6); }
+    .meaning { min-height: 760px; display: grid; place-items: center; padding: 90px 5%; text-align: center; background: #efe5d4; }
+    .meaning h2 { max-width: 850px; }
+    .meaning > div > p { max-width: 600px; margin: 24px auto 0; color: #71695f; font-size: 17px; line-height: 1.6; }
+    .stories { width: min(980px, 100%); margin-top: 52px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .story { min-height: 210px; padding: 26px; display: flex; flex-direction: column; justify-content: space-between; text-align: left; border-radius: 20px; background: rgba(255,255,255,.58); }
+    .story .num { color: #a89c8b; font-size: 11px; font-weight: 700; }.story b { display: block; max-width: 230px; font-size: 19px; line-height: 1.3; letter-spacing: -.028em; }.story span { display: block; margin-top: 10px; color: #776e62; font-size: 13px; line-height: 1.5; }
+    .invite { min-height: 660px; display: grid; place-items: center; padding: 80px 5%; text-align: center; background: #faf9f6; }
+    .invite h2 { max-width: 750px; }.invite .sub { max-width: 520px; margin: 22px auto 0; color: #707070; font-size: 16px; line-height: 1.6; }
+    .actions { margin-top: 34px; display: flex; justify-content: center; gap: 10px; }.input { width: 280px; padding: 15px 18px; text-align: left; color: #949494; border: 1px solid #dededb; border-radius: 99px; background: #fff; font-size: 13px; }.button { padding: 15px 22px; border-radius: 99px; color: white; background: #171717; font-size: 13px; font-weight: 650; }.community { display: inline-block; margin-top: 20px; color: #333; font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
+    .note { margin: 18px 0 0; color: #747474; font-size: 12px; text-align: center; }
+    @media (max-width: 720px) { .top { display: block; }.top p { margin-top: 14px; }.stories { grid-template-columns: 1fr; }.steps { flex-wrap: wrap; }.actions { flex-direction: column; align-items: center; }.input { width: min(320px, 100%); }.page { height: 72vh; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="top"><div><span class="eyebrow">DESIGN SECTION 1 · REVISED</span><h1>先让人明白。再让人向往。</h1></div><p>请在下方页面内滚动。每一幕都回答一个具体问题：这是什么、怎么开始、为什么重要、现在做什么。</p></div>
+    <div class="browser"><div class="chrome"><i></i><i></i><i></i></div><div class="page">
+      <section class="hero"><nav><span class="logo"><i class="bee"></i> Bee Game Studio</span><span>中文⌄</span></nav><div class="hero-copy"><h2>把你的想法，<br>变成一款<span>真正能玩的游戏。</span></h2><p>Bee Game Studio 帮助每一个有想法的人，把脑海中的角色、故事和世界，变成可以游玩、可以分享的游戏。</p><div class="tiny">产品即将上线 · 优先体验申请已开放</div></div><div class="seed"></div></section>
+      <section class="journey"><div class="copy"><p class="kicker">从想法开始</p><h2>你负责想象。<br>让游戏在你面前成形。</h2><p>从一句话、一个角色，或一段想和朋友分享的冒险开始。你不必先成为游戏开发者。</p><div class="steps"><b>一个想法</b><i></i><b>一个可以走进的世界</b><i></i><b>一段能分享的游戏</b></div></div></section>
+      <section class="meaning"><div><p class="kicker">为想创造的人</p><h2>少一点“我不会”。<br>多一点“我们来试试”。</h2><p>Bee 不是要你学习另一套复杂的语言。它想让更多好点子，有机会被真正玩到。</p><div class="stories"><div class="story"><span class="num">01</span><div><b>做一场只属于朋友的冒险</b><span>把你们总在谈论的点子，变成今晚真的能玩的游戏。</span></div></div><div class="story"><span class="num">02</span><div><b>把睡前故事变成孩子能探索的世界</b><span>让熟悉的角色，从纸上走到眼前。</span></div></div><div class="story"><span class="num">03</span><div><b>让那个放了很久的梦想，第一次可以被体验</b><span>不是再写一份设定，而是邀请别人走进去。</span></div></div></div></div></section>
+      <section class="invite"><div><p class="kicker">COMING SOON</p><h2>你的第一个世界，<br>可以从今天开始。</h2><p class="sub">留下邮箱，成为首批体验 Bee Game Studio 的创作者。我们会在准备好时邀请你。</p><div class="actions"><span class="input">你的邮箱</span><span class="button">申请优先体验</span></div><a class="community">加入创作者社群 →</a></div></section>
+    </div></div>
+    <p class="note">滚动阅读全文后，回到终端告诉我：清晰度与情绪是否平衡。</p>
+  </main>
+</body>
+</html>

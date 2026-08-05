@@ -656,7 +656,7 @@
     },
     "assets": {
       "title": "資源合約",
-      "empty": "還沒有資源合約。下一次建構時，BeeGame 會要求 agent 生成 assets/asset-manifest.json。",
+      "empty": "還沒有資源合約。資源生產階段會在下一次建構時建立。",
       "loading": "正在讀取資源合約...",
       "upload": "上傳替換",
       "uploading": "上傳中...",

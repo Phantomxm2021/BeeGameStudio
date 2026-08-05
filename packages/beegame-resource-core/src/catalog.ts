@@ -57,55 +57,6 @@ export function browseResourceCatalogPackSummaries(
   return page(filtered, catalogRequest, collectSummaryFacets(summaries), item => item.packId)
 }
 
-/**
- * Query reusable logical roots across every published Pack. Every returned
- * element satisfies the complete filter conjunction itself; Pack aggregates
- * never manufacture a candidate from unrelated elements.
- */
-export function queryResourceCatalogElements(
-  packs: readonly ResourcePack[],
-  elements: readonly ResourceElement[],
-  request: ResourceCatalogRequest,
-  catalogRevision?: string,
-): ResourceCatalogPage<ResourceCatalogElement> {
-  const catalogRequest = resolveCatalogRequest(
-    request,
-    catalogRevision ? `elements:${catalogRevision}` : 'elements',
-  )
-  const published = packs.filter(pack => pack.status === 'published')
-  const packById = new Map(published.map(pack => [pack.id, pack]))
-  const readyIds = readyDependencyIds(elements)
-  const available = elements.filter(element => {
-    const pack = packById.get(element.packId)
-    return Boolean(
-      pack &&
-        element.status === 'ready' &&
-        hasCompleteDependencyClosure(element, readyIds),
-    )
-  })
-  const eligible = available
-    .filter(element =>
-      elementMatches(element, packById.get(element.packId)!, catalogRequest.filters),
-    )
-    .sort((left, right) => {
-      const leftPack = packById.get(left.packId)!
-      const rightPack = packById.get(right.packId)!
-      return (
-        compareText(leftPack.name, rightPack.name) ||
-        compareText(left.path, right.path) ||
-        compareText(left.id, right.id)
-      )
-    })
-  return page(
-    eligible.map(element =>
-      summarizeElement(packById.get(element.packId)!, element),
-    ),
-    catalogRequest,
-    collectFacets(published, available),
-    item => `${item.packId}/${item.elementId}`,
-  )
-}
-
 export function hasElementCatalogFilters(
   filters?: ResourceCatalogFilter,
 ): boolean {

@@ -86,7 +86,7 @@ describe('system delivery contract projection', () => {
     expect(buildSystemDeliveryContract()).toEqual({
       canonicalAssetManifest: {
         path: 'assets/asset-manifest.json',
-        version: 7,
+        version: 8,
       },
       roots: {
         runtimeAssets: 'assets/runtime',

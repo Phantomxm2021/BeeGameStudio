@@ -5,7 +5,7 @@
 本文是 Resource Production 的唯一实施权威，字段合同由
 [BeeGame 资源与内容描述合同](./beegame-resource-content-contract.md) 补充。其他文档只能引用，不能另建资源阶段、资源状态机、恢复协议或兼容合同。
 
-本次改造不是在当前 `resource-preparer` 外增加调度层，而是物理替换当前实现。最终系统只允许：
+本方案物理替换此前的单体资源处理逻辑，不在其外围增加调度层。最终系统只允许：
 
 ```text
 已批准的 Foundation 文档与 Gameplay Checklist
@@ -25,13 +25,25 @@
 
 项目只维护三类资源事实：
 
-1. `assets/asset-manifest.json`：需求、目标能力和项目实际拥有的资源文件；
+1. `assets/asset-manifest.json` 及其唯一引用的 `assets/manifest/**` 模块：需求、目标能力和项目实际拥有的资源文件；
 2. `assets/content/**/*.json`：资源映射、实体、UI、音频、事件、波次和数值；
 3. `assets/content/**/*.yaml`：世界、场景、层级、transform 和实例摆放。
 
 Workflow snapshot 只保存当前 phase、当前 task、dispatch 和 gate receipt。receipt 只证明某个 canonical revision 是否完成，不复制 requirement、resource、content 或场景数据。重启后服务必须重新读取上述项目事实并确定下一任务，不能根据聊天消息、Worker prose、历史失败或次数计数推断进度。
 
-禁止新增 selection ledger、slot、Composition、候选队列、no-match 表、repair feedback 队列、shadow state 或迁移后的旧 Manifest 副本。
+禁止新增第二选择账本、机械职责槽位、中间组装领域对象、候选队列、未匹配表、修复反馈队列、影子状态、聚合 Manifest 副本或旧 Manifest reader。模块集合是一个逻辑 Manifest，每项事实只存在于一个模块；服务端可以在内存中投影聚合视图，但不得把该投影再次持久化。
+
+### 2.1 Manifest v8 模块集合
+
+`assets/asset-manifest.json` 是紧凑根索引，只保存 `version`、`project_target` 与模块路径。requirements 与每个 resource record 分别保存在内容寻址模块中，根索引列出当前有效记录路径。资源记录不得同时出现在根索引、requirements 或其他 resource 文件中。
+
+```text
+assets/asset-manifest.json
+assets/manifest/requirements/<content-digest>.json
+assets/manifest/resources/<identity-digest>-<content-digest>.json
+```
+
+根索引、requirements 与 resource records 合称唯一 canonical Manifest v8。服务先写不可变模块，再最后原子替换根索引；新增或替换资源不会改写其他 resource record。提交后删除不再被根索引引用的模块；中断遗留的未注册模块由 Gate 报告。不存在旧单文件兼容读取、自动迁移或双写。
 
 ## 3. 类人团队模式的系统化表达
 
@@ -67,14 +79,14 @@ Agent 保留判断 Pack 风格、候选适用性、复用方式、placeholder �
 
 ### 5.1 Catalog 合同
 
-现有扁平 `browse_catalog` 必须被以下单一路径替换：
+Catalog 只允许以下 Pack-first 单一路径：
 
 1. `list_packs`：返回紧凑 Pack 摘要、稳定 `pack_id`、版本、客观分类、维度、格式能力和元素计数；
 2. `inspect_pack`：只返回已选 Pack 的元素摘要、准确 `element_id`、依赖与技术事实；
 3. `import_resources`：只导入本 dispatch 已观察到的准确 Pack version 与 element；
 4. 导入服务负责依赖闭包、下载、hash、路径校验和 Manifest 登记。
 
-`list_packs` 与 `inspect_pack` 使用 schema 枚举和 cursor，不使用名称关键词、正则或项目类型硬编码。结果只返回选择所需的客观字段，不重复完整文档、历史查询、长描述或无关元素元数据。旧 `browse_catalog` action 必须删除，不保留别名或兼容 handler。
+`list_packs` 与 `inspect_pack` 使用 schema 枚举和 cursor，不使用名称关键词、正则或项目类型硬编码。结果只返回选择所需的客观字段，不重复完整文档、历史查询、长描述或无关元素元数据。不得保留扁平全库查询、别名或兼容 handler。
 
 ### 5.2 库内资源与 placeholder
 
@@ -95,12 +107,14 @@ JSON 与 YAML 的归属严格遵循内容合同：
 
 - JSON：资源映射、实体、UI、音频 cue、事件、波次、数值与机器稳定配置；
 - YAML：世界、场景、层级、transform 与实例摆放；
-- 不使用 Composition、Prefab 或特定引擎对象作为共享领域模型；
+- 不使用中间组装对象、Prefab 或特定引擎对象作为共享领域模型；
 - 内容只能引用 Manifest 中已登记的 resource ID；
 - 所有文件边界、content ID、owner 和交叉引用先一次规划，再并行写入互不冲突的文件；
 - 具体写入失败只重做失败文件，不重新读取全量 Catalog，也不重建资源库存。
 
-若编排时证明库存遗漏了必要原料，Content Author 只能提交结构化缺口，不能创建、下载或登记资源。服务使当前库存 checkpoint 失效并从唯一 `RESOURCE_INVENTORY` task 继续；Curator 必须导入资源或创建 placeholder，随后再恢复 Content task。缺口不写项目文件、不形成队列，也不产生第二条资源处理路径。
+若编排时证明库存遗漏了必要原料，Content Author 只能提交结构化缺口，不能创建、下载或登记资源。服务必须用当前 Manifest、库存 binding 与文件审计独立证明对应 requirement 确实没有 verified resource 后，才使当前库存 checkpoint 失效并从唯一 `RESOURCE_INVENTORY` task 继续；仅有“资源尚未被 Content 引用”、写权限冲突或 Worker 自述时必须拒绝回退。Curator 必须导入资源或创建 placeholder，随后再恢复 Content task。缺口不写项目文件、不形成队列，也不产生第二条资源处理路径。
+
+Content task 的保护路径必须从当前确定性问题和 accepted resource finding 的精确 subject 派生。局部文件错误只解锁受影响文件；无法归属到单一路径的跨文件引用错误必须解锁当前 canonical content 集合，由同一个 Content Author 在一次受控修订中恢复一致性。不得一边要求修复跨文件错误，一边把全部候选 owner 文件列入 `protectedPaths`。
 
 ## 7. Task 4：确定性资源门禁
 
@@ -114,7 +128,7 @@ Gate 不使用 LLM，不修改文件，只对当前 canonical revision 执行：
 - 所有 content resource 引用存在且 verified；
 - 资源无孤立、内容事实 owner 不重复、三个根目录不重叠；
 - `preferred`/`required` 策略对应真实 Catalog observation 与导入事实；
-- 不存在 Composition、slot、源码内 placeholder 或第二资源库存。
+- 不存在中间组装对象、机械职责槽位、源码内 placeholder 或第二资源库存。
 
 失败项必须指向 canonical path/ID 和确定性不变量。资源 phase 保持 `needs_action`，继续时由 artifact resolver 派生唯一未完成 task；不生成 feedback 文档、不复制错误列表、不重放已经通过的任务。
 
@@ -129,7 +143,7 @@ Resource Production 不设置业务 token 上限、wall-clock 上限、工具调
 - plan 已提交：绝不重新规划；
 - 已登记资源：绝不重复下载；
 - content 文件已原子提交：绝不重复生成；
-- gate passed：直接进入 Comprehensive Review。
+- gate passed：直接进入只允许 resource finding 的 Comprehensive Review；Foundation 与 Checklist 均为冻结输入。
 
 Token 与时间仍按真实 usage 全量累计并展示，但只作为可观测指标，不能改变资源业务状态。Provider 自身拒绝或网络错误按真实 transport failure 暴露；系统不能把 token 计量伪装成 idle timeout，也不能因存在任意文件变更就自动启动一个全上下文 Worker。
 
@@ -148,17 +162,15 @@ Workflow Card 的资源阶段显示固定四项：
 
 ## 10. 必须物理删除的当前实现
 
-切换时必须同时删除以下生产逻辑及其正向测试，不允许留作 fallback：
+切换时必须同时删除以下生产逻辑及其正向测试，不允许保留替代入口：
 
-- 通吃计划、Catalog、导入、placeholder 和内容写入的 `resource-preparer`；
-- `resourcePlanOnly` 与永远无法由真实入口满足的 `resourcePlanCheckpointCompleted`；
-- `DEFAULT_RESOURCE_MAX_TOKENS`、`resourceMaxTokens`、`onResourceBudgetYield` 和 `dispatch.resource_budget_yielded`；
-- `MAX_AUTOMATIC_RESOURCE_EXECUTION_ATTEMPTS` 与 `resourcePreparationAttempt` 驱动的续跑；
-- Resource Worker 的 `maxToolCalls`、`repeatedReadResultLimit` 和相应 needs-action 文案；
-- 把 token limit 记为 idle timeout 的事件映射；
-- 旧 `browse_catalog` 大结果 action、等价 action 别名和兼容 parser；
+- 通吃计划、Catalog、导入、placeholder 和内容写入的单体 Worker；
+- 无真实入口可以完成的旧计划检查点与派生状态；
+- 以 token、时间、工具调用次数或自动执行次数终止资源任务的业务门禁；
+- 把计量事件伪装成空闲超时的事件映射；
+- 扁平全库大结果 action、等价 action 别名和旧 parser；
 - 以历史失败、聊天文案或“发生过 durable progress”为依据的自动重派；
-- Resource Production 中的 feedback/shadow/repair queue、旧 schema reader、snapshot converter 和双轨 UI 投影。
+- Resource Production 中并列的修复队列、旧 snapshot 读取转换和第二套 UI 状态投影。
 
 非法旧快照可以在拒绝测试中以内联对象出现，但生产常量、生产类型和用户可见文案不得继续声明旧协议。
 
@@ -179,13 +191,13 @@ Workflow Card 的资源阶段显示固定四项：
 
 - 新建 `resource-planner`、`resource-curator`、`resource-content-author`；
 - 为每种 Worker 建立独立 prompt、tool allowlist、allowed paths 和 terminal；
-- 移除 `resource-preparer` 的类型、prompt、工具装配和 session 特判。
+- 移除单体资源 Worker 的类型、prompt、工具装配和 session 特判。
 
 完成判据：Planner 无 Catalog，Curator 无内容 Write，Content Author 无 Catalog，三者均无玩法代码写权限。
 
 ### C. 替换 Resource Library 工具合同
 
-- 用 `list_packs`、`inspect_pack`、`import_resources` 替换 `browse_catalog`；
+- Catalog 只提供 `list_packs`、`inspect_pack`、`import_resources`；
 - 收窄 wire payload，只保留客观选择事实；
 - 导入和 Manifest 登记保持一个事务边界；
 - 删除旧 action、旧 evidence 解析和旧测试。
@@ -198,6 +210,9 @@ Workflow Card 的资源阶段显示固定四项：
 - 每个 canonical commit 后结束当前 dispatch；
 - 删除 token/time/tool/attempt 控制和 budget-yield 自动重派；
 - Gate 通过后唯一转入 Comprehensive Review。
+- Checklist 在进入 Resource Production 前已经完成独立 Review/Closure 并封存；Comprehensive 不再拥有 checklist mutation 或 remediation target。
+- inventory checkpoint 只绑定 Manifest plan、resource records 与本地文件，不绑定无关 Checklist/文档的全量摘要。
+- Content 的 `needs_inventory` 由服务端验证真实缺料；不能用它逃离内容写入或权限错误。
 
 完成判据：任意服务重启点都不会重做已完成 task，也不会产生并发 Resource Worker。
 
@@ -205,13 +220,13 @@ Workflow Card 的资源阶段显示固定四项：
 
 - Workflow Card 投影四个 task 的真实状态；
 - 删除旧资源状态文案、旧错误和旧前端推断；
-- 对生产源码执行旧符号、feedback、fallback、compat、shadow 和 Composition 残留扫描。
+- 对生产源码执行旧符号、feedback、fallback、compat、shadow 和中间组装状态残留扫描。
 
 完成判据：生产包中不存在第 10 节列出的符号或行为。
 
 ## 12. 可行性、风险与控制
 
-该方案可直接建立在现有 Resource repository 的 Pack summary、`getPack`、`listElements`、`getElement` 和依赖解析能力上；两级 Catalog 是收窄现有事实的 Agent 合同，不需要新数据库、第二资源服务或语义搜索器。Manifest v7 与 Content v1 的事实模型继续使用，主要改动集中在 Workflow task/terminal、工具权限和 Catalog wire contract。
+该方案可直接建立在现有 Resource repository 的 Pack summary、`getPack`、`listElements`、`getElement` 和依赖解析能力上；两级 Catalog 是收窄现有事实的 Agent 合同，不需要新数据库、第二资源服务或语义搜索器。Manifest 只接受模块化 v8，Content 继续使用 v1；不保留旧 reader、迁移器或双写。主要改动集中在 Manifest 持久化、Workflow task/terminal、工具权限和 Catalog wire contract。
 
 主要风险只有：
 
@@ -236,7 +251,7 @@ Workflow Card 的资源阶段显示固定四项：
 - Gate 失败后只派生唯一未完成 task；
 - Resource phase 不存在 token、时间、工具次数和自动 attempt 终止；
 - 前后端 task、phase index、计时和错误投影一致；
-- 生产源码无旧协议、双轨、feedback、fallback、compat、shadow、slot 或 Composition 残留。
+- 生产源码无旧协议、双轨、feedback、fallback、compat、shadow、机械职责槽位或中间组装状态残留。
 
 端到端验证按一个项目一次串行执行，至少覆盖：
 

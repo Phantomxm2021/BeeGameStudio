@@ -43,6 +43,114 @@ function reviewerContract(
 }
 
 describe('delivery worker session credentials', () => {
+  test('accepts only the planner resource-plan terminal contract', async () => {
+    const workspacePath = await createResourceWorkspace()
+    try {
+      await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
+      const terminal = await runResourceTerminal({
+        workspacePath,
+        workerType: 'resource-planner',
+        toolName: 'AssetManifest',
+        toolInput: { action: 'submit_resource_plan' },
+      })
+
+      expect(terminal).toEqual({
+        revision: 'revision-resource-terminal',
+        workerType: 'resource-planner',
+        status: 'completed',
+        writtenPaths: ['assets/asset-manifest.json'],
+        taskMetrics: {
+          catalogPayloadBytes: 0,
+          catalogCallTypes: [],
+          canonicalMutationCount: 1,
+        },
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts only the curator inventory receipt terminal contract', async () => {
+    const workspacePath = await createResourceWorkspace()
+    try {
+      await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
+      await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+      await writeFile(join(workspacePath, 'assets/runtime/world.dat'), 'world')
+      await registerBeeGameAuthoredResources(workspacePath, [
+        {
+          id: 'world-resource',
+          root_path: 'assets/runtime/world.dat',
+          file_paths: ['assets/runtime/world.dat'],
+          provisional: true,
+          reason: 'Independent resource terminal fixture.',
+          selection_reason: ['Exercises the curator receipt boundary.'],
+          asset_kind: 'data',
+        },
+      ])
+      const terminal = await runResourceTerminal({
+        workspacePath,
+        workerType: 'resource-curator',
+        catalogObserved: true,
+        toolName: 'AssetManifest',
+        toolInput: {
+          action: 'complete_resource_inventory',
+          bindings: [
+            {
+              requirement_id: 'world.visual',
+              resource_ids: ['world-resource'],
+            },
+          ],
+        },
+      })
+
+      expect(terminal).toMatchObject({
+        revision: 'revision-resource-terminal',
+        workerType: 'resource-curator',
+        status: 'completed',
+        catalogObserved: true,
+        resourceIds: ['world-resource'],
+        bindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+        taskMetrics: {
+          catalogPayloadBytes: expect.any(Number),
+          catalogCallTypes: ['list_packs'],
+          canonicalMutationCount: 0,
+        },
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts a content inventory request only for exact manifest requirement IDs', async () => {
+    const workspacePath = await createResourceWorkspace()
+    try {
+      await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
+      const terminal = await runResourceTerminal({
+        workspacePath,
+        workerType: 'resource-content-author',
+        toolName: 'SubmitResourceContentResult',
+        toolInput: {
+          status: 'needs_inventory',
+          missingRequirementIds: ['world.visual'],
+        },
+      })
+
+      expect(terminal).toMatchObject({
+        revision: 'revision-resource-terminal',
+        workerType: 'resource-content-author',
+        status: 'needs_inventory',
+        missingRequirementIds: ['world.visual'],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('starts one read-only repair-planning worker boundary', async () => {
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
@@ -200,54 +308,6 @@ describe('delivery worker session credentials', () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
-  })
-
-  test('reopens an existing catalog only for semantic review remediation', async () => {
-    const starts: Array<Record<string, unknown>> = []
-    const sessions = {
-      start(input: Record<string, unknown>) {
-        starts.push(input)
-        return { id: `session-${starts.length}` }
-      },
-      updateAuthToken() {},
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions,
-      userId: 'user-1',
-    })
-    const base = {
-      runId: 'run-1',
-      ownerId: 'user-1',
-      projectId: 'project-1',
-      workspacePath: '/tmp/project-1',
-      workerType: 'resource-preparer' as const,
-      phase: 'RESOURCE_PREPARATION' as const,
-      revision: 'revision-1',
-      allowedPaths: ['assets/'],
-    }
-    await port.start({
-      ...base,
-      dispatchId: 'dispatch-contract-repair',
-      contract: {},
-    })
-    await port.start({
-      ...base,
-      dispatchId: 'dispatch-semantic-review',
-      contract: {
-        remediation: {
-          kind: 'document_review',
-          cycleId: 'cycle-1',
-          sourceRevision: 'resource-1',
-          findings: [{ findingId: 'resource-finding' }],
-        },
-      },
-    })
-    expect(
-      starts[0]?.workflowAllowResourceCatalogWithExistingInventory,
-    ).toBeUndefined()
-    expect(starts[1]?.workflowAllowResourceCatalogWithExistingInventory).toBe(
-      true,
-    )
   })
 
   test('assigns the atomic planner one structured submission lane', async () => {
@@ -967,228 +1027,6 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('derives the resource terminal from durable workspace facts instead of assistant prose', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'beegame-resource-terminal-'),
-    )
-    try {
-      await mkdir(join(workspacePath, 'assets/runtime/root'), {
-        recursive: true,
-      })
-      await writeFile(
-        join(workspacePath, 'assets/runtime/root/root.glb'),
-        new Uint8Array([1, 2, 3]),
-      )
-      await writeFile(
-        join(workspacePath, 'assets/asset-manifest.json'),
-        JSON.stringify({
-          version: 7,
-          project_target: {
-            asset_format_capabilities: ['glb'],
-            runtime_asset_root: 'assets/runtime',
-            content_root: 'assets/content',
-            generated_asset_root: 'assets/generated',
-          },
-          requirements: [
-            {
-              id: 'root-model',
-              required: true,
-            },
-          ],
-          resources: [
-            {
-              id: 'root',
-              source: {
-                type: 'resource-library',
-                pack_id: 'pack-1',
-                pack_version: '1.0.0',
-                element_id: 'root',
-                element_path: 'models/root.glb',
-              },
-              status: 'verified',
-              root_path: 'assets/runtime/root/root.glb',
-              file_paths: ['assets/runtime/root/root.glb'],
-              provisional: false,
-              selected_at: new Date().toISOString(),
-              selection_reason: ['Approved asset plan'],
-            },
-          ],
-        }),
-      )
-      await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
-      await writeFile(
-        join(workspacePath, 'assets/content/resources.json'),
-        JSON.stringify({
-          schema: 'beegame-content-v1',
-          id: 'resources',
-          kind: 'resource-registry',
-          fulfills: ['root-model'],
-          resources: ['root'],
-          data: {},
-        }),
-      )
-      const starts: Array<Record<string, unknown>> = []
-      const sessions = {
-        start(input: Record<string, unknown>) {
-          starts.push(input)
-          return { id: 'session-resource' }
-        },
-        events() {
-          return [
-            {
-              id: 'event-1',
-              type: 'tool.started',
-              text: '',
-              createdAt: new Date(),
-              payload: {
-                toolUseID: 'denied-write',
-                toolName: 'Write',
-                input: { file_path: join(workspacePath, 'src/forbidden.ts') },
-              },
-            },
-            {
-              id: 'event-2',
-              type: 'tool.started',
-              text: '',
-              createdAt: new Date(),
-              payload: {
-                toolUseID: 'completed-write',
-                toolName: 'Write',
-                input: {
-                  file_path: join(
-                    workspacePath,
-                    'assets/content/resource-note.json',
-                  ),
-                },
-              },
-            },
-            {
-              id: 'event-3',
-              type: 'tool.completed',
-              text: '',
-              createdAt: new Date(),
-              payload: {
-                toolUseID: 'completed-write',
-                toolName: 'Write',
-              },
-            },
-            {
-              id: 'event-4',
-              type: 'result',
-              text: 'Resources are ready.',
-              createdAt: new Date(),
-              payload: { result: 'This is prose, not terminal JSON.' },
-            },
-          ]
-        },
-      } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-      })
-      const request: WorkerDispatchRequest = {
-        dispatchId: 'dispatch-resource',
-        runId: 'run-1',
-        ownerId: 'user-1',
-        projectId: 'project-1',
-        workspacePath,
-        workerType: 'resource-preparer',
-        phase: 'RESOURCE_PREPARATION',
-        revision: 'revision-1',
-        allowedPaths: [
-          'assets/asset-manifest.json',
-          'assets/runtime/',
-          'assets/content/',
-          'assets/generated/',
-        ],
-        contract: {},
-      }
-
-      await port.start(request)
-      const terminal = await port.waitForTerminal?.('dispatch-resource')
-
-      expect(starts[0]).toMatchObject({
-        workflowWorker: true,
-        workflowWorkerType: 'resource-preparer',
-      })
-      expect(terminal).toMatchObject({
-        workerType: 'resource-preparer',
-        revision: 'revision-1',
-        status: 'completed',
-        resourceIds: ['root'],
-      })
-      expect(
-        (terminal as { writtenPaths: string[] }).writtenPaths,
-      ).not.toContain('src/forbidden.ts')
-      expect((terminal as { writtenPaths: string[] }).writtenPaths).toContain(
-        'assets/content/resource-note.json',
-      )
-      const evidencePath = (terminal as { evidencePath: string }).evidencePath
-      const evidence = JSON.parse(
-        await readFile(join(workspacePath, evidencePath), 'utf8'),
-      )
-      expect(evidence).toMatchObject({
-        status: 'completed',
-        manifestPresent: true,
-        manifestValid: true,
-      })
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('stops a resource worker that repeats the same read without a durable mutation', async () => {
-    const repeatedOutput = JSON.stringify({ items: [{ id: 'catalog-item' }] })
-    const events = Array.from({ length: 4 }, (_, index) => ({
-      id: `event-${index}`,
-      type: 'tool.completed' as const,
-      text: '',
-      createdAt: new Date(),
-      payload: {
-        toolUseID: `read-${index}`,
-        toolName: 'ResourceLibrary',
-        input: { action: 'browse_catalog', page: 1, page_size: 25 },
-        output: repeatedOutput,
-      },
-    }))
-    const sessions = {
-      start() {
-        return { id: 'session-resource-loop' }
-      },
-      events() {
-        return events
-      },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions,
-      userId: 'user-1',
-      resourceLimits: { repeatedReadResultLimit: 4 },
-    })
-
-    await port.start({
-      dispatchId: 'dispatch-resource-loop',
-      runId: 'run-1',
-      ownerId: 'user-1',
-      projectId: 'project-1',
-      workspacePath: '/tmp/project-1',
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: 'revision-1',
-      contract: reviewerContract(),
-    })
-
-    try {
-      await port.waitForTerminal?.('dispatch-resource-loop')
-      throw new Error('expected resource convergence guard to stop the worker')
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).name).toBe('WorkerNeedsActionError')
-      expect((error as Error).message).toContain(
-        'repeated the same read result 4 times',
-      )
-    }
-  })
-
   test('reports an in-flight Resource Library import as unsafe to interrupt', async () => {
     const events: Array<{
       id: string
@@ -1232,7 +1070,7 @@ describe('delivery worker session credentials', () => {
       ownerId: 'user-1',
       projectId: 'project-1',
       workspacePath: '/tmp/project-1',
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision-1',
       contract: {},
@@ -1360,9 +1198,6 @@ describe('delivery worker session credentials', () => {
     const port = createBeeGameDeliveryWorkerPort({
       sessions,
       userId: 'user-1',
-      resourceLimits: {
-        repeatedReadResultLimit: 4,
-      },
     })
 
     await port.start({
@@ -1371,7 +1206,7 @@ describe('delivery worker session credentials', () => {
       ownerId: 'user-1',
       projectId: 'project-1',
       workspacePath: '/tmp/project-1',
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision-1',
       contract: {},
@@ -1382,3 +1217,90 @@ describe('delivery worker session credentials', () => {
     ).rejects.toThrow('model turn ended after rejected calls')
   })
 })
+
+async function createResourceWorkspace(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'beegame-resource-terminal-'))
+}
+
+function resourcePlanManifest() {
+  return {
+    version: 8 as const,
+    project_target: {
+      asset_format_capabilities: ['dat', 'json'],
+      resource_library_usage: 'optional' as const,
+      runtime_asset_root: 'assets/runtime',
+      content_root: 'assets/content',
+      generated_asset_root: 'assets/generated',
+    },
+    requirements: [{ id: 'world.visual', required: true }],
+    resources: [],
+  }
+}
+
+async function runResourceTerminal(input: {
+  workspacePath: string
+  workerType:
+    | 'resource-planner'
+    | 'resource-curator'
+    | 'resource-content-author'
+  toolName: 'AssetManifest' | 'SubmitResourceContentResult'
+  toolInput: Record<string, unknown>
+  catalogObserved?: boolean
+}) {
+  const events = [
+    ...(input.catalogObserved
+      ? [
+          {
+            id: 'resource-catalog-tool',
+            type: 'tool.completed' as const,
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolUseID: 'resource-catalog-tool',
+              toolName: 'ResourceLibrary',
+              input: { action: 'list_packs' },
+              output: JSON.stringify({ items: [] }),
+            },
+          },
+        ]
+      : []),
+    {
+      id: 'resource-terminal-tool',
+      type: 'tool.completed' as const,
+      text: '',
+      createdAt: new Date(),
+      payload: {
+        toolUseID: 'resource-terminal-tool',
+        toolName: input.toolName,
+        input: input.toolInput,
+      },
+    },
+    {
+      id: 'resource-terminal-result',
+      type: 'result' as const,
+      text: 'completed',
+      createdAt: new Date(),
+    },
+  ]
+  const sessions = {
+    start() {
+      return { id: `session-${input.workerType}` }
+    },
+    events() {
+      return events
+    },
+  } as unknown as BeeGameSessionManager
+  const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+  await port.start({
+    dispatchId: `dispatch-${input.workerType}`,
+    runId: 'run-resource-terminal',
+    ownerId: 'user-1',
+    projectId: 'project-resource-terminal',
+    workspacePath: input.workspacePath,
+    workerType: input.workerType,
+    phase: 'RESOURCE_PREPARATION',
+    revision: 'revision-resource-terminal',
+    contract: {},
+  })
+  return port.waitForTerminal!(`dispatch-${input.workerType}`)
+}

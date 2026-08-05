@@ -9,6 +9,7 @@ import {
   createTestDeliveryRun,
 } from './delivery-workflow-test-helpers'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 
 describe('delivery workflow resource entry', () => {
   let workspace = ''
@@ -19,21 +20,17 @@ describe('delivery workflow resource entry', () => {
 
   test('restores a missing comprehensive-review prerequisite through the sole resource transition', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-entry-'))
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(
-      join(workspace, 'assets/asset-manifest.json'),
-      `${JSON.stringify({
-        version: 7,
-        project_target: {
-          asset_format_capabilities: ['png'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [{ id: 'visual.player', required: true }],
-        resources: [],
-      })}\n`,
-    )
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['png'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [{ id: 'visual.player', required: true }],
+      resources: [],
+    })
 
     let dispatched: WorkerDispatchRequest | undefined
     const controller = createDeliveryWorkflowController({
@@ -69,7 +66,9 @@ describe('delivery workflow resource entry', () => {
       checkId: 'resource_content_consistency' as const,
       severity: 'blocking' as const,
       owner: 'resource' as const,
-      evidence: [{ path: 'assets/asset-manifest.json', anchor: '/requirements/0' }],
+      evidence: [
+        { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
+      ],
       subjects: [
         {
           path: 'assets/asset-manifest.json',
@@ -85,7 +84,7 @@ describe('delivery workflow resource entry', () => {
     const run = {
       ...initial,
       phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'CHECKLIST_REVIEW' as const,
+      documentStep: 'COMPREHENSIVE_REVIEW' as const,
       revision: {
         ...initial.revision,
         document: documentRevision,
@@ -96,6 +95,28 @@ describe('delivery workflow resource entry', () => {
       evidence: {},
       documentReviewState: {
         ...initial.documentReviewState,
+        checklistApproval: {
+          scope: 'checklist' as const,
+          revision: documentRevision,
+          checks: [
+            {
+              id: 'checklist_traceability' as const,
+              status: 'pass' as const,
+              conclusion: 'Checklist is approved.',
+              evidence: [
+                {
+                  path: 'docs/acceptance/gameplay-checklist.md',
+                  anchor: 'Acceptance',
+                },
+              ],
+              findingIds: [],
+              assessments: [],
+            },
+          ],
+          checkEvidenceDigests: {},
+          evidencePath: '.beegame/workflow/evidence/checklist.json',
+          approvedAt: new Date().toISOString(),
+        },
         repairPasses: {
           ...initial.documentReviewState.repairPasses,
           resource: 1,
@@ -172,13 +193,16 @@ describe('delivery workflow resource entry', () => {
       runId: 'run-resource-retry',
       projectId: 'project-resource-retry',
       ownerId: 'owner-resource-retry',
+      checklistApproved: true,
     })
     const retryFinding = {
       findingId: 'resource-retry-finding',
       checkId: 'resource_content_consistency' as const,
       severity: 'blocking' as const,
       owner: 'resource' as const,
-      evidence: [{ path: 'assets/asset-manifest.json', anchor: '/requirements/0' }],
+      evidence: [
+        { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
+      ],
       subjects: [
         {
           path: 'assets/asset-manifest.json',
@@ -195,7 +219,6 @@ describe('delivery workflow resource entry', () => {
       ...initial,
       phase: 'RESOURCE_PREPARATION' as const,
       documentStep: undefined,
-      resourcePreparationAttempt: 2,
       documentReviewState: {
         ...initial.documentReviewState,
         repairPasses: {
@@ -228,7 +251,7 @@ describe('delivery workflow resource entry', () => {
       ownerId: run.ownerId,
       projectId: run.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: run.revision.document,
       contract: {
@@ -240,14 +263,12 @@ describe('delivery workflow resource entry', () => {
       },
     })
 
-    expect((await controller.store.load())?.resourcePreparationAttempt).toBe(2)
-
     const baseRequest = {
       runId: run.runId,
       ownerId: run.ownerId,
       projectId: run.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer' as const,
+      workerType: 'resource-curator' as const,
       phase: 'RESOURCE_PREPARATION' as const,
       revision: run.revision.document,
     }
@@ -326,7 +347,7 @@ describe('delivery workflow resource entry', () => {
         ownerId: run.ownerId,
         projectId: run.projectId,
         workspacePath: workspace,
-        workerType: 'resource-preparer',
+        workerType: 'resource-curator',
         phase: 'RESOURCE_PREPARATION',
         revision: run.revision.document,
         contract: {
@@ -345,7 +366,7 @@ describe('delivery workflow resource entry', () => {
         ownerId: run.ownerId,
         projectId: run.projectId,
         workspacePath: workspace,
-        workerType: 'resource-preparer',
+        workerType: 'resource-curator',
         phase: 'RESOURCE_PREPARATION',
         revision: run.revision.document,
         contract: {

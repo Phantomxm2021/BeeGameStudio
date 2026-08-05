@@ -36,6 +36,9 @@ export type BeeGameContentHeader = {
 export type BeeGameContentAudit = {
   valid: boolean
   files: BeeGameContentHeader[]
+  validPaths: string[]
+  invalidPaths: string[]
+  hasGlobalIssues: boolean
   coveredRequirementIds: string[]
   referencedResourceIds: string[]
   issues: string[]
@@ -51,16 +54,26 @@ export function auditBeeGameContent(
     return {
       valid: false,
       files: [],
+      validPaths: [],
+      invalidPaths: [],
+      hasGlobalIssues: true,
       coveredRequirementIds: [],
       referencedResourceIds: [],
       issues: ['project_target is required before content preparation.'],
     }
   const workspace = resolve(workspacePath)
   const contentRoot = projectPath(workspace, target.content_root)
-  if (!contentRoot || !existsSync(contentRoot) || !statSync(contentRoot).isDirectory())
+  if (
+    !contentRoot ||
+    !existsSync(contentRoot) ||
+    !statSync(contentRoot).isDirectory()
+  )
     return {
       valid: false,
       files: [],
+      validPaths: [],
+      invalidPaths: [],
+      hasGlobalIssues: true,
       coveredRequirementIds: [],
       referencedResourceIds: [],
       issues: [`Content root does not exist: ${target.content_root}.`],
@@ -79,8 +92,11 @@ export function auditBeeGameContent(
       .map(item => item.id),
   )
   const files: BeeGameContentHeader[] = []
+  const validPaths: string[] = []
+  const invalidPaths: string[] = []
   const ids = new Set<string>()
   for (const absolute of listContentFiles(contentRoot)) {
+    const issueStart = issues.length
     const path = relative(workspace, absolute).split(sep).join('/')
     const extension = extname(absolute).toLowerCase()
     let value: unknown
@@ -94,7 +110,9 @@ export function auditBeeGameContent(
         value = document.toJS({ maxAliasCount: 0 })
       }
     } catch (error) {
-      issues.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
+      issues.push(
+        `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      )
       continue
     }
     if (!isRecord(value)) {
@@ -102,9 +120,13 @@ export function auditBeeGameContent(
       continue
     }
     const unknown = Object.keys(value).filter(
-      key => !['schema', 'id', 'kind', 'fulfills', 'resources', 'data'].includes(key),
+      key =>
+        !['schema', 'id', 'kind', 'fulfills', 'resources', 'data'].includes(
+          key,
+        ),
     )
-    if (unknown.length) issues.push(`${path}: unknown fields: ${unknown.join(', ')}.`)
+    if (unknown.length)
+      issues.push(`${path}: unknown fields: ${unknown.join(', ')}.`)
     const schema = text(value.schema)
     const id = text(value.id)
     const kind = text(value.kind)
@@ -124,10 +146,20 @@ export function auditBeeGameContent(
       issues.push(
         `${path}: YAML kind must be one of ${BEEGAME_YAML_CONTENT_KINDS.join(', ')}.`,
       )
-    if (!Array.isArray(value.fulfills) || fulfills.length !== value.fulfills.length)
-      issues.push(`${path}: fulfills must be an array of unique non-empty strings.`)
-    if (!Array.isArray(value.resources) || resources.length !== value.resources.length)
-      issues.push(`${path}: resources must be an array of unique non-empty strings.`)
+    if (
+      !Array.isArray(value.fulfills) ||
+      fulfills.length !== value.fulfills.length
+    )
+      issues.push(
+        `${path}: fulfills must be an array of unique non-empty strings.`,
+      )
+    if (
+      !Array.isArray(value.resources) ||
+      resources.length !== value.resources.length
+    )
+      issues.push(
+        `${path}: resources must be an array of unique non-empty strings.`,
+      )
     if (!('data' in value)) issues.push(`${path}: data is required.`)
     for (const requirementId of fulfills)
       if (!requirementIds.has(requirementId))
@@ -138,22 +170,35 @@ export function auditBeeGameContent(
       else if (!verifiedResourceIds.has(resourceId))
         issues.push(`${path}: resource is not verified: ${resourceId}.`)
     }
-    if (id && kind)
-      files.push({ path, id, kind, fulfills, resources })
+    if (id && kind) files.push({ path, id, kind, fulfills, resources })
+    if (issues.length === issueStart) validPaths.push(path)
+    else invalidPaths.push(path)
   }
-  if (!files.length) issues.push('Content root has no JSON or YAML content files.')
+  let hasGlobalIssues = false
+  if (!files.length) {
+    issues.push('Content root has no JSON or YAML content files.')
+    hasGlobalIssues = true
+  }
 
   const covered = new Set(files.flatMap(file => file.fulfills))
   const referenced = new Set(files.flatMap(file => file.resources))
   for (const id of requiredRequirementIds)
-    if (!covered.has(id)) issues.push(`Required requirement is not covered: ${id}.`)
+    if (!covered.has(id)) {
+      issues.push(`Required requirement is not covered: ${id}.`)
+      hasGlobalIssues = true
+    }
   for (const resource of manifest.resources)
-    if (!referenced.has(resource.id))
+    if (!referenced.has(resource.id)) {
       issues.push(`Resource is not referenced by content: ${resource.id}.`)
+      hasGlobalIssues = true
+    }
 
   return {
     valid: issues.length === 0,
     files,
+    validPaths,
+    invalidPaths,
+    hasGlobalIssues,
     coveredRequirementIds: [...covered],
     referencedResourceIds: [...referenced],
     issues,
@@ -165,7 +210,10 @@ function listContentFiles(root: string): string[] {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = resolve(root, entry.name)
     if (entry.isDirectory()) result.push(...listContentFiles(path))
-    else if (entry.isFile() && ['.json', '.yaml', '.yml'].includes(extname(entry.name).toLowerCase()))
+    else if (
+      entry.isFile() &&
+      ['.json', '.yaml', '.yml'].includes(extname(entry.name).toLowerCase())
+    )
       result.push(path)
   }
   return result.sort()
@@ -175,7 +223,11 @@ function projectPath(workspace: string, path: string): string | undefined {
   if (!path || isAbsolute(path)) return undefined
   const absolute = resolve(workspace, path)
   const fromWorkspace = relative(workspace, absolute)
-  if (fromWorkspace === '..' || fromWorkspace.startsWith(`..${sep}`) || isAbsolute(fromWorkspace))
+  if (
+    fromWorkspace === '..' ||
+    fromWorkspace.startsWith(`..${sep}`) ||
+    isAbsolute(fromWorkspace)
+  )
     return undefined
   return absolute
 }

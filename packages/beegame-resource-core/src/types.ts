@@ -128,46 +128,6 @@ export type ResourceRelationRequirement = {
   role?: string
 }
 
-/** Single machine-readable vocabulary used by manifest authors and auditors. */
-export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
-  version: 7,
-  rootFields: ['version', 'project_target', 'requirements', 'resources'],
-  projectTargetFields: [
-    'platform',
-    'runtime',
-    'asset_format_capabilities',
-    'resource_library_usage',
-    'runtime_asset_root',
-    'content_root',
-    'generated_asset_root',
-  ],
-  projectTargetFieldShapes: {
-    asset_format_capabilities: 'string[]',
-    resource_library_usage: 'optional | preferred | required',
-  },
-  requirementFields: ['id', 'name', 'purpose', 'required'],
-  resourceFields: ['id', 'source', 'status', 'root_path',
-    'file_paths',
-    'local_file_hashes',
-    'provisional',
-    'selected_at', 'selection_reason', 'asset_kind', 'capabilities', 'content_profile', 'technical_facts', 'dependencies',
-    'error',
-  ],
-  resourceSourceFields: ['type', 'pack_id', 'pack_version', 'element_id', 'element_path',
-    'created_at',
-    'reason',
-    'filename',
-  ],
-  resourceLibraryUsage: RESOURCE_LIBRARY_USAGE,
-  dimensions: RESOURCE_DIMENSIONS,
-  categories: RESOURCE_CATEGORIES,
-  usageTags: RESOURCE_USAGE_TAGS,
-  assetKinds: RESOURCE_ASSET_KINDS,
-  capabilities: RESOURCE_CAPABILITIES,
-  embeddedComponentKinds: RESOURCE_EMBEDDED_COMPONENT_KINDS,
-  relationKinds: RESOURCE_RELATION_KINDS,
-} as const
-
 export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
   '2d-art',
   '3d-assets',

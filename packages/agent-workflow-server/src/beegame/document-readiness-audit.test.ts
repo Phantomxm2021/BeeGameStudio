@@ -7,6 +7,7 @@ import {
   MAX_ACCEPTANCE_CHECKLIST_TASKS,
   REQUIRED_PROJECT_DOCUMENTS,
 } from './document-readiness-audit'
+import { writeBeeGameAssetManifest } from './asset-contracts'
 
 async function writeMinimalContent(workspace: string): Promise<void> {
   await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
@@ -84,7 +85,9 @@ describe('document readiness audit', () => {
   })
 
   test('rejects a mechanically expanded checklist before resource preparation', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-checklist-size-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-document-checklist-size-'),
+    )
     for (const path of REQUIRED_PROJECT_DOCUMENTS) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
       await writeFile(
@@ -125,24 +128,20 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeMinimalContent(workspace)
-    await writeFile(
-      join(workspace, 'assets', 'asset-manifest.json'),
-      JSON.stringify({
-        version: 7,
-        project_target: {
-          platform: 'selected-target',
-          runtime: 'project-native',
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [],
-        resources: [],
-      }),
-    )
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        platform: 'selected-target',
+        runtime: 'project-native',
+        asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [],
+      resources: [],
+    })
 
     expect(auditDocumentReadiness(workspace)).toEqual({
       valid: true,
@@ -175,10 +174,7 @@ describe('document readiness audit', () => {
     const audit = auditDocumentReadiness(workspace)
     expect(audit.valid).toBe(false)
     expect(audit.issues).toContain(
-      'assets/asset-manifest.json: requirements must be an array.',
-    )
-    expect(audit.issues).toContain(
-      'assets/asset-manifest.json: resources must be an array.',
+      'assets/asset-manifest.json: manifest index modules must be an object.',
     )
   })
 
@@ -193,24 +189,20 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeMinimalContent(workspace)
-    await writeFile(
-      join(workspace, 'assets', 'asset-manifest.json'),
-      JSON.stringify({
-        version: 7,
-        project_target: {
-          platform: 'selected-target',
-          runtime: 'project-native',
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [],
-        resources: [],
-      }),
-    )
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        platform: 'selected-target',
+        runtime: 'project-native',
+        asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [],
+      resources: [],
+    })
 
     expect(auditDocumentReadiness(workspace).issues).toEqual([
       'docs/acceptance/gameplay-checklist.md: Checklist task 1 has no stable identifier.',
@@ -230,22 +222,18 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeMinimalContent(workspace)
-    await writeFile(
-      join(workspace, 'assets', 'asset-manifest.json'),
-      JSON.stringify({
-        version: 7,
-        project_target: {
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [],
-        resources: [],
-      }),
-    )
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['glb'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [],
+      resources: [],
+    })
 
     expect(auditDocumentReadiness(workspace)).toEqual({
       valid: true,

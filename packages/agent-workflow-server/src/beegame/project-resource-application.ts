@@ -1,18 +1,21 @@
 import {
   addBeeGameLibraryResourceToWorkspace,
   readBeeGameAssetManifest,
-  refreshBeeGameLibraryResourceMetadataInWorkspace,
   type BeeGameAssetManifest,
-  type BeeGameProjectResource,
 } from './asset-contracts'
 import type {
-  ResourceCatalogBrowsePage,
+  ResourceCatalogElementPage,
   ResourceCatalogInput,
+  ResourceCatalogPackPage,
   ResourceResolvedSelection,
 } from './resource-selection-client'
 
 export type ProjectResourceSelectionClient = {
-  browseCatalog(input: ResourceCatalogInput): Promise<ResourceCatalogBrowsePage>
+  listPacks(input: ResourceCatalogInput): Promise<ResourceCatalogPackPage>
+  inspectPack(
+    packId: string,
+    input: ResourceCatalogInput,
+  ): Promise<ResourceCatalogElementPage>
   resolveResources(
     selections: Array<{
       resourceId: string
@@ -46,14 +49,6 @@ export type ProjectResourceAcquisitionResult = {
   resources: ProjectResourceAcquisition[]
 }
 
-export type ProjectResourceMetadataRefreshResult = {
-  manifest: BeeGameAssetManifest
-  refreshedResourceIds: string[]
-  unresolvedResourceIds: string[]
-}
-
-const MAX_AGENT_CATALOG_PAGE_ITEMS = 64
-
 /**
  * Project-side boundary for browsing and acquiring Resource Library material.
  * It deliberately knows nothing about project-specific game responsibilities.
@@ -65,14 +60,12 @@ export class ProjectResourceApplication {
     private readonly fetchImpl: ProjectResourceFetch = fetch,
   ) {}
 
-  browseCatalog(input: ResourceCatalogInput) {
-    return this.client.browseCatalog({
-      ...input,
-      limit: Math.min(
-        Math.max(Math.trunc(input.limit ?? MAX_AGENT_CATALOG_PAGE_ITEMS), 1),
-        MAX_AGENT_CATALOG_PAGE_ITEMS,
-      ),
-    })
+  listPacks(input: ResourceCatalogInput) {
+    return this.client.listPacks(input)
+  }
+
+  inspectPack(packId: string, input: ResourceCatalogInput) {
+    return this.client.inspectPack(packId, input)
   }
 
   async acquireResources(
@@ -173,90 +166,6 @@ export class ProjectResourceApplication {
     return {
       manifest: await readBeeGameAssetManifest(workspacePath),
       resources,
-    }
-  }
-
-  async refreshLibraryMetadata(
-    workspacePath: string,
-  ): Promise<ProjectResourceMetadataRefreshResult> {
-    const manifest = await readBeeGameAssetManifest(workspacePath)
-    const libraryResources = manifest.resources.filter(
-      resource => resource.source.type === 'resource-library',
-    )
-    const resolved: ResourceResolvedSelection[] = []
-    const unresolvedResourceIds: string[] = []
-    for (let start = 0; start < libraryResources.length; start += 64) {
-      const result = await this.resolveRefreshBatch(
-        libraryResources.slice(start, start + 64),
-      )
-      resolved.push(...result.resolved)
-      unresolvedResourceIds.push(...result.unresolvedResourceIds)
-    }
-    const refreshed = await refreshBeeGameLibraryResourceMetadataInWorkspace(
-      workspacePath,
-      resolved.map(selection => ({
-        resource_id: selection.resourceId,
-        pack_id: selection.packId,
-        pack_version: selection.packVersion,
-        element_id: selection.elementId,
-        ...(selection.assetKind ? { asset_kind: selection.assetKind } : {}),
-        ...(selection.capabilities
-          ? { capabilities: selection.capabilities }
-          : {}),
-        ...(selection.contentProfile
-          ? { content_profile: selection.contentProfile }
-          : {}),
-        ...(selection.technicalFacts
-          ? { technical_facts: selection.technicalFacts }
-          : {}),
-      })),
-    )
-    return { ...refreshed, unresolvedResourceIds }
-  }
-
-  private async resolveRefreshBatch(
-    resources: BeeGameProjectResource[],
-  ): Promise<{
-    resolved: ResourceResolvedSelection[]
-    unresolvedResourceIds: string[]
-  }> {
-    if (!resources.length) return { resolved: [], unresolvedResourceIds: [] }
-    try {
-      const result = await this.client.resolveResources(
-        resources.map(resource => {
-          if (resource.source.type !== 'resource-library')
-            throw new Error(`Resource is not library-backed: ${resource.id}`)
-          return {
-            resourceId: resource.id,
-            packId: resource.source.pack_id,
-            expectedPackVersion: resource.source.pack_version,
-            elementId: resource.source.element_id,
-            selectionReason: resource.selection_reason,
-          }
-        }),
-      )
-      const returned = new Set(result.map(item => item.resourceId))
-      return {
-        resolved: result,
-        unresolvedResourceIds: resources
-          .filter(resource => !returned.has(resource.id))
-          .map(resource => resource.id),
-      }
-    } catch {
-      if (resources.length === 1)
-        return { resolved: [], unresolvedResourceIds: [resources[0]!.id] }
-      const midpoint = Math.ceil(resources.length / 2)
-      const [left, right] = await Promise.all([
-        this.resolveRefreshBatch(resources.slice(0, midpoint)),
-        this.resolveRefreshBatch(resources.slice(midpoint)),
-      ])
-      return {
-        resolved: [...left.resolved, ...right.resolved],
-        unresolvedResourceIds: [
-          ...left.unresolvedResourceIds,
-          ...right.unresolvedResourceIds,
-        ],
-      }
     }
   }
 }

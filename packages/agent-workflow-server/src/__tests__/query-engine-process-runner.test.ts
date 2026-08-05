@@ -42,22 +42,18 @@ describe('process-isolated QueryEngine runner', () => {
       env: {},
       approvedOutboundTargets: {},
       workflowWorker: true,
-      workflowWorkerType: 'resource-preparer',
-      workflowResourceRegistrationBarrierPaths: [
-        'assets/provisional/audio.json',
-      ],
-      workflowAllowResourceCatalogWithExistingInventory: true,
+      workflowWorkerType: 'resource-curator',
+      workflowAllowedPaths: ['assets/content/'],
+      workflowProtectedPaths: ['assets/content/entities.json'],
     })
 
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
       sessionId: 'resource-worker',
       deliveryEvidenceDataRoot: '/tmp/evidence',
       workflowWorker: true,
-      workflowWorkerType: 'resource-preparer',
-      workflowResourceRegistrationBarrierPaths: [
-        'assets/provisional/audio.json',
-      ],
-      workflowAllowResourceCatalogWithExistingInventory: true,
+      workflowWorkerType: 'resource-curator',
+      workflowAllowedPaths: ['assets/content/'],
+      workflowProtectedPaths: ['assets/content/entities.json'],
     })
   })
 
@@ -75,7 +71,7 @@ describe('process-isolated QueryEngine runner', () => {
         requiredCheckIds: ['implementation_readiness'],
         currentCheckIds: ['implementation_readiness'],
         artifacts: [
-          { path: 'assets/asset-manifest.json', content: '{"version":7}\n' },
+          { path: 'assets/asset-manifest.json', content: '{"version":8}\n' },
         ],
         activeTarget: 'resource',
         priorFindings: [

@@ -1,14 +1,12 @@
 import {
   RESOURCE_ASSET_KINDS,
   RESOURCE_CAPABILITIES,
+  RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
   RESOURCE_PACK_PRIMARY_CATEGORIES,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { z } from 'zod/v4'
-import { CANONICAL_ASSET_MANIFEST } from './delivery-workflow/types'
 import {
   ProjectResourceApplication,
   type ProjectResourceSelectionClient,
@@ -24,9 +22,8 @@ const MAX_FILTER_VALUES_PER_FIELD = 32
 const MAX_TECHNICAL_FACTS_PER_ITEM = 24
 const MAX_TECHNICAL_FACT_STRING_CHARS = 240
 
-const catalogFiltersSchema = z
+const packFiltersSchema = z
   .object({
-    pack_ids: z.array(z.string().trim().min(1)).min(1).optional(),
     dimensions: z.array(z.enum(RESOURCE_DIMENSIONS)).min(1).optional(),
     primary_categories: z
       .array(z.enum(RESOURCE_PACK_PRIMARY_CATEGORIES))
@@ -35,6 +32,13 @@ const catalogFiltersSchema = z
     styles: z.array(z.string().trim().min(1)).min(1).optional(),
     game_types: z.array(z.string().trim().min(1)).min(1).optional(),
     pack_tags: z.array(z.string().trim().min(1)).min(1).optional(),
+  })
+  .strict()
+  .optional()
+
+const elementFiltersSchema = z
+  .object({
+    categories: z.array(z.enum(RESOURCE_CATEGORIES)).min(1).optional(),
     usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)).min(1).optional(),
     asset_kinds: z.array(z.enum(RESOURCE_ASSET_KINDS)).min(1).optional(),
     capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)).min(1).optional(),
@@ -54,8 +58,15 @@ const resourceSelectionSchema = z.object({
 
 const resourceLibraryInputSchema = z.discriminatedUnion('action', [
   z.object({
-    action: z.literal('browse_catalog'),
-    filters: catalogFiltersSchema,
+    action: z.literal('list_packs'),
+    filters: packFiltersSchema,
+    cursor: z.string().trim().min(1).optional(),
+    limit: z.number().int().min(1).max(MAX_CATALOG_PAGE_ITEMS).optional(),
+  }),
+  z.object({
+    action: z.literal('inspect_pack'),
+    pack_id: z.string().trim().min(1),
+    filters: elementFiltersSchema,
     cursor: z.string().trim().min(1).optional(),
     limit: z.number().int().min(1).max(MAX_CATALOG_PAGE_ITEMS).optional(),
   }),
@@ -63,7 +74,6 @@ const resourceLibraryInputSchema = z.discriminatedUnion('action', [
     action: z.literal('import_resources'),
     selections: z.array(resourceSelectionSchema).min(1).max(64),
   }),
-  z.object({ action: z.literal('refresh_resource_metadata') }),
 ])
 
 type ResourceLibraryInput = z.infer<typeof resourceLibraryInputSchema>
@@ -81,8 +91,6 @@ type ProjectResourceFetch = (
 export function createNativeResourceLibraryTool(options: {
   buildTool: BuildTool
   workspacePath: string
-  registrationBarrierPaths?: string[]
-  allowCatalogWithExistingInventory?: boolean
   client: ProjectResourceSelectionClient
   fetchImpl?: ProjectResourceFetch
 }): unknown {
@@ -92,9 +100,6 @@ export function createNativeResourceLibraryTool(options: {
   )
   const observed = new Map<string, string>()
   let callInFlight = false
-  const existingInventoryAtSessionStart = hasRegisteredInventory(
-    options.workspacePath,
-  )
 
   return options.buildTool({
     name: 'ResourceLibrary',
@@ -103,36 +108,22 @@ export function createNativeResourceLibraryTool(options: {
     inputSchema: resourceLibraryInputSchema,
     isConcurrencySafe: () => false,
     isReadOnly: (input: ResourceLibraryInput) =>
-      input.action === 'browse_catalog',
+      input.action === 'list_packs' || input.action === 'inspect_pack',
     async description() {
-      return 'Browse the Resource Library with structured filters, import exact observed elements into the project, and refresh objective metadata for existing library resources.'
+      return 'List compact Resource Pack summaries, inspect elements in a selected Pack, and import exact observed elements.'
     },
     async prompt() {
       return [
         'ResourceLibrary is an engine-neutral catalog and acquisition capability. You decide which project resources are useful; the service does not infer project roles or artistic suitability.',
-        ...(options.registrationBarrierPaths?.length
-          ? [
-              'This dispatch has durable unregistered files from the prior Resource Production dispatch. Repair and register every path in contract.existingUnregisteredResourcePaths through AssetManifest before any ResourceLibrary action; the service enforces this ordering.',
-            ]
-          : []),
-        'Begin broadly, inspect returned filter_values and selection summaries, then refine with those exact snake_case values or continue by passing next_cursor as cursor without filters. Do not repeat equivalent filters. A zero-result query is information about that query, not approval to end resource production.',
-        'Catalog reads are bounded discovery, not the deliverable. After a bounded set of distinct probes has not found suitable material, create standalone provisional resource files and continue with the project content definitions.',
-        'Catalog entries expose authored metadata, preview descriptors, dependency counts, semantic relations, content profiles and objective technical facts. Never treat names or paths alone as proof of suitability.',
+        'Start with list_packs using exact authored metadata. Use inspect_pack only after selecting a Pack, then inspect its elements and objective technical facts. Never treat names or paths alone as proof of suitability.',
         'import_resources copies only exact elements already observed in this tool session, pins their published Pack versions, downloads their declared dependency closure, verifies local files and records them under manifest.resources. One resource may be referenced by any number of JSON or YAML content files.',
         'If the library cannot provide appropriate material, author a real provisional resource as a normal project file and register it through AssetManifest. Do not embed placeholders in gameplay code. Provisional resources must remain independently replaceable.',
         'Resource acquisition does not fulfill requirements by itself. After the material inventory is complete, define how resources are used in engine-neutral JSON or YAML content files, then let the target implementation consume those content IDs and resource IDs.',
       ].join(' ')
     },
     async checkPermissions(input: ResourceLibraryInput) {
-      if (input.action === 'browse_catalog')
+      if (input.action === 'list_packs' || input.action === 'inspect_pack')
         return { behavior: 'allow', updatedInput: input }
-      if (input.action === 'refresh_resource_metadata')
-        return {
-          behavior: 'ask',
-          message:
-            'Allow objective metadata for existing Resource Library resources to be refreshed from their pinned Pack versions?',
-          updatedInput: input,
-        }
       return {
         behavior: 'ask',
         message: `Allow ${input.selections.length} selected Resource Library resource(s) to be downloaded into this project?`,
@@ -140,35 +131,17 @@ export function createNativeResourceLibraryTool(options: {
       }
     },
     async call(input: ResourceLibraryInput) {
-      if (
-        (await existingInventoryAtSessionStart) &&
-        !options.allowCatalogWithExistingInventory
-      )
-        throw new Error(
-          'The canonical resource inventory already existed when this recovery dispatch started. Finish the deterministic inventory and content correction; ResourceLibrary reopens only for an exact semantic review finding that requires renewed selection.',
-        )
-      const pendingRegistrationPaths = await unresolvedRegistrationBarrierPaths({
-        workspacePath: options.workspacePath,
-        barrierPaths: options.registrationBarrierPaths ?? [],
-      })
-      if (pendingRegistrationPaths.length)
-        throw new Error(
-          `ResourceLibrary is unavailable until every durable file from the prior resource dispatch is registered through AssetManifest: ${pendingRegistrationPaths.join(', ')}`,
-        )
       if (callInFlight)
         throw new Error(
           'ResourceLibrary accepts one operation at a time. Wait for the current result before continuing.',
         )
       callInFlight = true
       try {
-        if (input.action === 'browse_catalog') {
-          const page = await application.browseCatalog({
+        if (input.action === 'list_packs') {
+          const page = await application.listPacks({
             ...(input.filters
               ? {
                   filters: {
-                    ...(input.filters.pack_ids
-                      ? { packIds: input.filters.pack_ids }
-                      : {}),
                     ...(input.filters.dimensions
                       ? { dimensions: input.filters.dimensions }
                       : {}),
@@ -185,6 +158,22 @@ export function createNativeResourceLibraryTool(options: {
                       : {}),
                     ...(input.filters.pack_tags
                       ? { packTags: input.filters.pack_tags }
+                      : {}),
+                  },
+                }
+              : {}),
+            ...(input.cursor ? { cursor: input.cursor } : {}),
+            limit: input.limit ?? DEFAULT_CATALOG_PAGE_ITEMS,
+          })
+          return { data: compactPackPage(page) }
+        }
+        if (input.action === 'inspect_pack') {
+          const page = await application.inspectPack(input.pack_id, {
+            ...(input.filters
+              ? {
+                  filters: {
+                    ...(input.filters.categories
+                      ? { categories: input.filters.categories }
                       : {}),
                     ...(input.filters.usage_tags
                       ? { usageTags: input.filters.usage_tags }
@@ -209,7 +198,7 @@ export function createNativeResourceLibraryTool(options: {
               observedKey(item.packId, item.elementId),
               item.packVersion,
             )
-          return { data: compactCatalogPage(page) }
+          return { data: compactElementPage(page) }
         }
         if (input.action === 'import_resources') {
           for (const selection of input.selections) {
@@ -238,20 +227,6 @@ export function createNativeResourceLibraryTool(options: {
           )
           return { data: summarizeAcquisition(result) }
         }
-        if (input.action === 'refresh_resource_metadata') {
-          const refreshed = await application.refreshLibraryMetadata(
-            options.workspacePath,
-          )
-          return {
-            data: {
-              result: refreshed.unresolvedResourceIds.length
-                ? 'partially_refreshed'
-                : 'refreshed',
-              refreshed_count: refreshed.refreshedResourceIds.length,
-              unresolved_resource_ids: refreshed.unresolvedResourceIds,
-            },
-          }
-        }
         const unsupported: never = input
         throw new Error(
           `Unsupported ResourceLibrary input: ${JSON.stringify(unsupported)}`,
@@ -275,73 +250,34 @@ export function createNativeResourceLibraryTool(options: {
   })
 }
 
-async function hasRegisteredInventory(workspacePath: string): Promise<boolean> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(join(workspacePath, CANONICAL_ASSET_MANIFEST), 'utf8'),
-    ) as unknown
-    return Boolean(
-      parsed &&
-        typeof parsed === 'object' &&
-        !Array.isArray(parsed) &&
-        Array.isArray((parsed as Record<string, unknown>).resources) &&
-        ((parsed as Record<string, unknown>).resources as unknown[]).length > 0,
-    )
-  } catch {
-    return false
-  }
-}
-
-async function unresolvedRegistrationBarrierPaths(input: {
-  workspacePath: string
-  barrierPaths: string[]
-}): Promise<string[]> {
-  if (input.barrierPaths.length === 0) return []
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(
-      await readFile(
-        join(input.workspacePath, CANONICAL_ASSET_MANIFEST),
-        'utf8',
-      ),
-    )
-  } catch {
-    return [...new Set(input.barrierPaths)]
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-    return [...new Set(input.barrierPaths)]
-  const resources = (parsed as Record<string, unknown>).resources
-  if (!Array.isArray(resources)) return [...new Set(input.barrierPaths)]
-  const registeredPaths = new Set(
-    resources.flatMap(resource => {
-      if (!resource || typeof resource !== 'object' || Array.isArray(resource))
-        return []
-      const record = resource as Record<string, unknown>
-      return [
-        ...(typeof record.root_path === 'string' ? [record.root_path] : []),
-        ...(Array.isArray(record.file_paths)
-          ? record.file_paths.filter(
-              (value): value is string => typeof value === 'string',
-            )
-          : []),
-      ].map(normalizeProjectPath)
-    }),
-  )
-  return [...new Set(input.barrierPaths)].filter(
-    path => !registeredPaths.has(normalizeProjectPath(path)),
-  )
-}
-
-function normalizeProjectPath(value: string): string {
-  return value.trim().split('\\').join('/').replace(/^\.\//, '')
-}
-
 function observedKey(packId: string, elementId: string): string {
   return JSON.stringify([packId, elementId])
 }
 
-function compactCatalogPage(
-  page: Awaited<ReturnType<ProjectResourceApplication['browseCatalog']>>,
+function compactPackPage(
+  page: Awaited<ReturnType<ProjectResourceApplication['listPacks']>>,
+) {
+  return {
+    packs: page.items.map(pack => ({
+      pack_id: pack.packId,
+      pack_version: pack.packVersion,
+      name: pack.packName,
+      dimension: pack.dimension,
+      primary_category: pack.primaryCategory,
+      styles: pack.styles,
+      game_types: pack.gameTypes,
+      tags: pack.tags,
+      capabilities: pack.capabilities,
+      formats: pack.formats,
+      element_count: pack.readyElementCount,
+    })),
+    total: page.total,
+    ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
+  }
+}
+
+function compactElementPage(
+  page: Awaited<ReturnType<ProjectResourceApplication['inspectPack']>>,
 ) {
   const filterValues = {
     dimensions: page.facets.dimensions,
@@ -396,13 +332,14 @@ function compactCatalogPage(
     ...(truncatedFilterValueFields.length
       ? { truncated_filter_value_fields: truncatedFilterValueFields }
       : {}),
-    catalog_revision: page.catalogRevision,
   }
 }
 
 function compactContentProfile(
   profile: NonNullable<
-    Awaited<ReturnType<ProjectResourceApplication['browseCatalog']>>['items'][number]['contentProfile']
+    Awaited<
+      ReturnType<ProjectResourceApplication['inspectPack']>
+    >['items'][number]['contentProfile']
   >,
 ) {
   const componentCounts = new Map<string, number>()

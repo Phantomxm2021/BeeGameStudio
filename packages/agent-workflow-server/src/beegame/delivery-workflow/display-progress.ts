@@ -21,6 +21,7 @@ export const DELIVERY_PROGRESS_SUBSTAGES = [
   'REPAIRING',
   'CLOSURE_REVIEW',
   'CHECKLIST_DRAFTING',
+  'CHECKLIST_REVIEW',
 ] as const
 
 export type DeliveryProgressSubstage =
@@ -46,7 +47,7 @@ export function projectDeliveryProgress(workflow: Record<string, unknown>):
   const repairPasses = record(reviewState?.repairPasses)
   const comprehensiveConvergence =
     (workflow.phase === 'DOCUMENT_REVIEW' &&
-      workflow.documentStep === 'CHECKLIST_REVIEW') ||
+      workflow.documentStep === 'COMPREHENSIVE_REVIEW') ||
     cycle?.originScope === 'complete'
   const documentConvergence =
     !comprehensiveConvergence &&
@@ -55,6 +56,7 @@ export function projectDeliveryProgress(workflow: Record<string, unknown>):
       cycle.activeTarget === 'foundation') ||
       (workflow.phase === 'DOCUMENT_REVIEW' &&
         (workflow.documentStep === 'CHECKLIST_DRAFTING' ||
+          workflow.documentStep === 'CHECKLIST_REVIEW' ||
           cycle?.mode === 'closure')))
   const progressStage = comprehensiveConvergence
     ? 'COMPREHENSIVE_CONVERGENCE'
@@ -81,9 +83,11 @@ export function projectDeliveryProgress(workflow: Record<string, unknown>):
         : 'INITIAL_REVIEW'
     : workflow.documentStep === 'CHECKLIST_DRAFTING'
       ? 'CHECKLIST_DRAFTING'
-      : workflow.documentStep === 'FOUNDATION_DRAFTING'
-        ? 'INITIAL_DRAFTING'
-        : undefined
+      : workflow.documentStep === 'CHECKLIST_REVIEW'
+        ? 'CHECKLIST_REVIEW'
+        : workflow.documentStep === 'FOUNDATION_DRAFTING'
+          ? 'INITIAL_DRAFTING'
+          : undefined
   const passValue = activeTarget ? Number(repairPasses?.[activeTarget]) : 0
   const convergencePass =
     substage &&

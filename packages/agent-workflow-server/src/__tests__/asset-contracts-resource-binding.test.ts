@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { parseCanonicalBeeGameAssetManifest } from '../beegame/asset-contracts'
 
-describe('BeeGame canonical v7 resource contract', () => {
+describe('BeeGame canonical modular resource contract', () => {
   const manifest = {
-    version: 7,
+    version: 8,
     project_target: {
       asset_format_capabilities: ['png', 'json', 'yaml'],
       resource_library_usage: 'preferred',
@@ -17,17 +17,17 @@ describe('BeeGame canonical v7 resource contract', () => {
 
   it('accepts the single resource-content manifest', () => {
     expect(parseCanonicalBeeGameAssetManifest(manifest)).toMatchObject({
-      version: 7,
+      version: 8,
       requirements: [{ id: 'visual.player', required: true }],
       resources: [],
     })
   })
 
-  it('rejects composition and legacy requirement state', () => {
+  it('rejects retired and unknown manifest state', () => {
     expect(() => parseCanonicalBeeGameAssetManifest({
       ...manifest,
       requirements: [{ id: 'visual.player', required: true, status: 'ready' }],
-      compositions: [],
+      retired_records: [],
     })).toThrow(/unknown fields|unknown field/i)
   })
 

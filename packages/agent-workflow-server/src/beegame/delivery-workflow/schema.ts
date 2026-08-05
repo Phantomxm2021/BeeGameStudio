@@ -25,9 +25,12 @@ import type {
 } from './types'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
+  DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  RESOURCE_PRODUCTION_TASKS,
 } from './types'
 
 export const DELIVERY_PHASES = [
@@ -68,7 +71,9 @@ export const DISPATCH_STATUSES = [
 export const WORKER_TYPES = [
   'document-author',
   'document-reviewer',
-  'resource-preparer',
+  'resource-planner',
+  'resource-curator',
+  'resource-content-author',
   'atomic-task-planner',
   'implementation-worker',
   'implementation-auditor',
@@ -106,6 +111,7 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
     taskId: z.string().min(1).optional(),
     revision: z.string().min(1),
     allowedPaths: z.array(z.string().min(1)).optional(),
+    protectedPaths: z.array(z.string().min(1)).optional(),
     contract: z.record(z.string(), z.unknown()),
   })
   .strict()
@@ -136,6 +142,28 @@ const workflowUsageSchema = z
     cache_creation_tokens: z.number().nonnegative(),
     completion_tokens: z.number().nonnegative(),
     total_tokens: z.number().nonnegative(),
+  })
+  .strict()
+
+const resourceProductionStateSchema = z
+  .object({
+    currentTask: z.enum(RESOURCE_PRODUCTION_TASKS),
+    inventoryReceipt: z
+      .object({
+        revision: z.string().min(1),
+        bindings: z.array(
+          z
+            .object({
+              requirementId: z.string().min(1),
+              resourceIds: z.array(z.string().min(1)).min(1),
+            })
+            .strict(),
+        ),
+        catalogObserved: z.boolean(),
+        acceptedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -172,23 +200,7 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   })
   .strict()
 
-const resourceEvidenceSchema = z.union([
-  z.object({ state: z.literal('missing') }).strict(),
-  z
-    .object({
-      state: z.enum(['stale', 'current']),
-      actions: z.array(z.string().min(1)),
-      failedActions: z.array(z.string().min(1)),
-      successfulResourceCount: z.number().int().nonnegative(),
-      failedResourceCount: z.number().int().nonnegative(),
-      observedAt: z.string().datetime(),
-    })
-    .strict(),
-])
-
-const documentReviewCheckIdSchema = z.enum(
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
-)
+const documentReviewCheckIdSchema = z.enum(DOCUMENT_REVIEW_CHECK_IDS)
 
 export const persistedDocumentReviewCheckSchema: z.ZodType<DocumentReviewCheck> =
   documentReviewCheckSchema
@@ -237,7 +249,7 @@ const checkEvidenceDigestsSchema = z.record(
 
 const documentReviewApprovalSchema: z.ZodType<DocumentReviewApproval> = z
   .object({
-    scope: z.enum(['foundation', 'complete']),
+    scope: z.enum(['foundation', 'checklist', 'complete']),
     revision: z.string().min(1),
     checks: z.array(persistedDocumentReviewCheckSchema).min(1),
     checkEvidenceDigests: checkEvidenceDigestsSchema,
@@ -249,7 +261,9 @@ const documentReviewApprovalSchema: z.ZodType<DocumentReviewApproval> = z
     const expected =
       approval.scope === 'foundation'
         ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-        : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
+        : approval.scope === 'checklist'
+          ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
+          : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
     const ids = approval.checks.map(check => check.id)
     if (
       ids.length !== expected.length ||
@@ -269,8 +283,8 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
   .object({
     cycleId: z.string().min(1),
     parentCycleId: z.string().min(1).optional(),
-    originScope: z.enum(['foundation', 'complete']),
-    scope: z.enum(['foundation', 'complete']),
+    originScope: z.enum(['foundation', 'checklist', 'complete']),
+    scope: z.enum(['foundation', 'checklist', 'complete']),
     mode: z.enum(['initial', 'closure']),
     sourceRevision: z.string().min(1),
     requiredCheckIds: z.array(documentReviewCheckIdSchema).min(1),
@@ -310,7 +324,9 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
     const canonicalCheckIds =
       cycle.scope === 'foundation'
         ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-        : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
+        : cycle.scope === 'checklist'
+          ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
+          : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
     const canonicalRequiredSubset = canonicalCheckIds.filter(id =>
       cycle.requiredCheckIds.includes(id),
     )
@@ -466,6 +482,7 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
 const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
   .object({
     foundationApproval: documentReviewApprovalSchema.optional(),
+    checklistApproval: documentReviewApprovalSchema.optional(),
     comprehensiveApproval: documentReviewApprovalSchema.optional(),
     activeCycle: documentReviewCycleSchema.optional(),
     repairPasses: z
@@ -477,6 +494,20 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
       .strict(),
   })
   .strict()
+  .superRefine((state, context) => {
+    const approvals = [
+      ['foundationApproval', state.foundationApproval, 'foundation'],
+      ['checklistApproval', state.checklistApproval, 'checklist'],
+      ['comprehensiveApproval', state.comprehensiveApproval, 'complete'],
+    ] as const
+    for (const [path, approval, scope] of approvals)
+      if (approval && approval.scope !== scope)
+        context.addIssue({
+          code: 'custom',
+          path: [path, 'scope'],
+          message: `${path} must use ${scope} scope`,
+        })
+  })
 
 const checklistRemediationSchema: z.ZodType<ChecklistRemediation> = z
   .object({
@@ -519,6 +550,7 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
         'CHECKLIST_REVIEW',
+        'COMPREHENSIVE_REVIEW',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -550,6 +582,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
         'CHECKLIST_REVIEW',
+        'COMPREHENSIVE_REVIEW',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -568,10 +601,9 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .strict(),
     documentReviewState: documentReviewStateSchema,
     foundationDraftState: foundationDraftStateSchema,
+    resourceProductionState: resourceProductionStateSchema,
     checklistRemediation: checklistRemediationSchema.optional(),
-    resourcePreparationAttempt: z.number().int().nonnegative().optional(),
     usage: workflowUsageSchema.optional(),
-    resourceEvidence: resourceEvidenceSchema.optional(),
     currentMessage: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
     lastProgressAt: z.string().datetime().optional(),
@@ -604,6 +636,27 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         path: ['foundationDraftState', 'completedPaths'],
         message:
           'foundation review and downstream phases require all durable authoring checkpoints',
+      })
+
+    const requiresFrozenChecklistApproval =
+      run.phase === 'RESOURCE_PREPARATION' ||
+      run.phase === 'ATOMIC_TASK_PLANNING' ||
+      run.phase === 'IMPLEMENTATION' ||
+      run.phase === 'IMPLEMENTATION_AUDIT' ||
+      run.phase === 'ACCEPTANCE' ||
+      run.phase === 'DELIVERY' ||
+      (run.phase === 'DOCUMENT_REVIEW' &&
+        run.documentStep === 'COMPREHENSIVE_REVIEW')
+    const checklistApproval = run.documentReviewState.checklistApproval
+    if (
+      requiresFrozenChecklistApproval &&
+      (!checklistApproval || checklistApproval.revision !== run.revision.document)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['documentReviewState', 'checklistApproval'],
+        message:
+          'resource and downstream phases require the frozen current checklist approval',
       })
   })
 

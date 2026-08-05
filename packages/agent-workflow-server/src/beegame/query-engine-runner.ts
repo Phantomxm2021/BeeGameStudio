@@ -30,6 +30,7 @@ import {
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
 import { createNativeAtomicTaskPlanTool } from './native-atomic-task-plan-tool'
 import { createNativeAssetManifestTool } from './native-asset-manifest-tool'
+import { CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS } from './configured-provisional-resource-adapters'
 import { createNativeImplementationResultTool } from './native-implementation-result-tool'
 import { createNativeValidationResultTool } from './native-validation-result-tool'
 import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
@@ -160,7 +161,9 @@ const WORKFLOW_EXTERNAL_WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
 const SINGLE_LANE_WORKFLOW_WORKERS = new Set([
   'document-author',
   'document-reviewer',
-  'resource-preparer',
+  'resource-planner',
+  'resource-curator',
+  'resource-content-author',
   'implementation-worker',
   'implementation-auditor',
   'acceptance-validator',
@@ -178,42 +181,8 @@ const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
   'SubmitDocumentReviewPacket',
   'SubmitChangeImpactResult',
   'SubmitQuestionAnswerResult',
+  'SubmitResourceContentResult',
 ])
-
-const RESOURCE_CATALOG_READ_ACTIONS = new Set(['browse_catalog'])
-
-export class ResourceCatalogTurnGate {
-  private readonly turnsWithCatalogRead = new WeakSet<object>()
-
-  issue(input: {
-    workerType?: string
-    toolName: string
-    toolInput: Record<string, unknown>
-    assistantMessage: unknown
-    toolUseContext: unknown
-  }): string | undefined {
-    if (
-      input.workerType !== 'resource-preparer' ||
-      input.toolName !== 'ResourceLibrary' ||
-      !RESOURCE_CATALOG_READ_ACTIONS.has(String(input.toolInput.action ?? ''))
-    )
-      return undefined
-    const turn =
-      input.assistantMessage && typeof input.assistantMessage === 'object'
-        ? input.assistantMessage
-        : input.toolUseContext && typeof input.toolUseContext === 'object'
-          ? input.toolUseContext
-          : undefined
-    if (!turn) {
-      return 'ResourceLibrary catalog reads require an identifiable model turn.'
-    }
-    if (this.turnsWithCatalogRead.has(turn)) {
-      return 'Only one ResourceLibrary catalog read is allowed per model turn. Use the completed result before choosing the next read or import.'
-    }
-    this.turnsWithCatalogRead.add(turn)
-    return undefined
-  }
-}
 
 const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
   'Agent',
@@ -430,9 +399,7 @@ export class NativeResourceLibraryPermissionBroker {
       action: normalized.validAction,
       input: normalized.input,
     }
-    const mutationAction =
-      delegated.action === 'import_resources' ||
-      delegated.action === 'refresh_resource_metadata'
+    const mutationAction = delegated.action === 'import_resources'
     if (!mutationAction) {
       return Promise.resolve({
         behavior: 'allow',
@@ -480,10 +447,7 @@ export class NativeResourceLibraryPermissionBroker {
     const request = requestPermission({
       toolUseID: input.toolUseID,
       toolName: 'ResourceLibrary',
-      message:
-        delegated.action === 'refresh_resource_metadata'
-          ? 'Allow objective metadata for existing Resource Library resources to be refreshed from their pinned Pack versions?'
-          : `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} selected Resource Library resource(s) to be downloaded into this project?`,
+      message: `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} selected Resource Library resource(s) to be downloaded into this project?`,
       input: delegated.input,
     })
       .then(decision => {
@@ -735,10 +699,13 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.workflowDocumentAuthorMode,
     )
     const assetManifestTool =
-      this.input.workflowWorkerType === 'resource-preparer'
+      this.input.workflowWorkerType === 'resource-planner' ||
+      this.input.workflowWorkerType === 'resource-curator'
         ? createNativeAssetManifestTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workspacePath: this.input.cwd,
+            provisionalResourceAdapters:
+              CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS,
             resourceLibraryUsage:
               confirmedResourceLibraryUsage(this.confirmedBriefContext) ??
               (() => {
@@ -746,20 +713,22 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
                   'Resource preparation requires a confirmed Resource Library policy.',
                 )
               })(),
-            allowResourceRemediationMutations:
-              this.input.workflowAllowResourceRemediationMutations === true,
+            allowedActions:
+              this.input.workflowWorkerType === 'resource-planner'
+                ? ['submit_resource_plan']
+                : [
+                    'author_provisional_resources',
+                    'prune_unbound_resources',
+                    'complete_resource_inventory',
+                  ],
           })
         : undefined
     const resourceTool =
       this.input.resourceSelectionConfig &&
-      this.input.workflowWorkerType === 'resource-preparer'
+      this.input.workflowWorkerType === 'resource-curator'
         ? createNativeResourceLibraryTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workspacePath: this.input.cwd,
-            registrationBarrierPaths:
-              this.input.workflowResourceRegistrationBarrierPaths,
-            allowCatalogWithExistingInventory:
-              this.input.workflowAllowResourceCatalogWithExistingInventory,
             client: createResourceSelectionClient({
               ...this.input.resourceSelectionConfig,
               fetchImpl: PLATFORM_SERVICE_FETCH,
@@ -792,7 +761,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         this.input.workflowDocumentAuthorMode === 'repair-planning') ||
       this.input.workflowWorkerType === 'document-reviewer' ||
       this.input.workflowWorkerType === 'change-impact-analyzer' ||
-      this.input.workflowWorkerType === 'question-answerer'
+      this.input.workflowWorkerType === 'question-answerer' ||
+      this.input.workflowWorkerType === 'resource-content-author'
         ? createNativeWorkflowResultTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workerType: this.input.workflowWorkerType,
@@ -860,7 +830,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           this.input.requestPermission ??
           this.currentSubmitInput?.requestPermission,
       )
-    const resourceCatalogTurnGate = new ResourceCatalogTurnGate()
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -870,24 +839,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
       const toolName = getToolName(tool)
-      const catalogTurnIssue = resourceCatalogTurnGate.issue({
-        workerType: this.input.workflowWorkerType,
-        toolName,
-        toolInput,
-        assistantMessage,
-        toolUseContext,
-      })
-      if (catalogTurnIssue) {
-        return {
-          behavior: 'deny',
-          message: catalogTurnIssue,
-          decisionReason: {
-            type: 'other',
-            reason: 'resource_catalog_turn_limit',
-          },
-          toolUseID,
-        }
-      }
       const requestPermission =
         this.input.requestPermission ??
         this.currentSubmitInput?.requestPermission
@@ -1511,12 +1462,25 @@ export function selectBeeGameWorkerTools(
   if (workflowWorkerType === 'document-author') {
     return []
   }
-  if (workflowWorkerType === 'resource-preparer') {
+  if (workflowWorkerType === 'resource-planner') {
+    const resourceToolNames = new Set(['Read'])
+    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
+  }
+  if (workflowWorkerType === 'resource-curator') {
     const resourceToolNames = new Set([
       'Glob',
       'Grep',
       'LS',
-      'NotebookEdit',
+      'NotebookRead',
+      'Read',
+    ])
+    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
+  }
+  if (workflowWorkerType === 'resource-content-author') {
+    const resourceToolNames = new Set([
+      'Glob',
+      'Grep',
+      'LS',
       'NotebookRead',
       'Read',
       'Write',

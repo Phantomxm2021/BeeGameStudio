@@ -3,7 +3,7 @@ import { atomicTaskSchema } from './schema'
 import { documentReviewCheckSchema } from './document-review-check-schema'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type DocumentReviewCheckId,
   type DocumentReviewCriterionId,
@@ -14,7 +14,7 @@ const base = z.object({ revision: z.string().min(1) }).strict()
 
 const documentReviewFindingShape = {
   findingId: z.string().trim().min(1),
-  checkId: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
+  checkId: z.enum(DOCUMENT_REVIEW_CHECK_IDS),
   severity: z.literal('blocking'),
   owner: z.enum(['foundation', 'checklist', 'resource']),
   evidence: z
@@ -112,7 +112,7 @@ const documentReviewSubmissionFindingShape = {
 
 function documentReviewCheckSubmissionFindingSchema(
   mode: 'initial' | 'closure',
-  _scope: 'foundation' | 'complete',
+  _scope: 'foundation' | 'checklist' | 'complete',
 ) {
   const subjects = z
     .array(
@@ -175,7 +175,7 @@ const documentReviewCheckSubmissionShape = {
 }
 
 function documentReviewCheckSubmissionSchemaForCheck(
-  atomicCheckId: (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number],
+  atomicCheckId: DocumentReviewCheckId,
 ) {
   return z
     .object(documentReviewCheckSubmissionShape)
@@ -316,7 +316,7 @@ function visibleDocumentReviewCheckSubmissionSchema<
 
 export function documentReviewPacketSubmissionSchemaForContract(contract: {
   mode: 'initial' | 'closure'
-  scope: 'foundation' | 'complete'
+  scope: 'foundation' | 'checklist' | 'complete'
   currentCheckIds: DocumentReviewCheckId[]
 }) {
   const findingSchema = documentReviewCheckSubmissionFindingSchema(
@@ -409,16 +409,67 @@ export const documentReviewerTerminalSchema = base
       })
   })
 
-export const resourcePreparerTerminalSchema = base
-  .extend({
-    workerType: z.literal('resource-preparer'),
-    status: z.enum(['completed', 'failed', 'blocked']),
-    writtenPaths: z.array(z.string().min(1)),
-    resourceIds: z.array(z.string().min(1)),
-    contentIds: z.array(z.string().min(1)),
-    evidencePath: z.string().min(1),
+const resourceTaskMetricsSchema = z
+  .object({
+    catalogPayloadBytes: z.number().int().nonnegative(),
+    catalogCallTypes: z.array(z.string().min(1)),
+    canonicalMutationCount: z.number().int().nonnegative(),
   })
   .strict()
+
+export const resourcePlannerTerminalSchema = base
+  .extend({
+    workerType: z.literal('resource-planner'),
+    status: z.literal('completed'),
+    writtenPaths: z.array(z.string().min(1)),
+    taskMetrics: resourceTaskMetricsSchema,
+  })
+  .strict()
+
+export const resourceCuratorTerminalSchema = base
+  .extend({
+    workerType: z.literal('resource-curator'),
+    status: z.literal('completed'),
+    catalogObserved: z.boolean(),
+    resourceIds: z.array(z.string().min(1)),
+    bindings: z.array(
+      z
+        .object({
+          requirementId: z.string().min(1),
+          resourceIds: z.array(z.string().min(1)).min(1),
+        })
+        .strict(),
+    ),
+    writtenPaths: z.array(z.string().min(1)),
+    taskMetrics: resourceTaskMetricsSchema,
+  })
+  .strict()
+
+export const resourceContentAuthorTerminalSchema = base
+  .extend({
+    workerType: z.literal('resource-content-author'),
+    status: z.enum(['completed', 'needs_inventory']),
+    contentIds: z.array(z.string().min(1)),
+    writtenPaths: z.array(z.string().min(1)),
+    missingRequirementIds: z.array(z.string().min(1)),
+    taskMetrics: resourceTaskMetricsSchema,
+  })
+  .strict()
+
+export const resourceContentSubmissionSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('completed'),
+      missingRequirementIds: z.array(z.never()).max(0),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('needs_inventory'),
+      missingRequirementIds: z.array(z.string().trim().min(1)).min(1),
+    })
+    .strict(),
+])
 
 export const atomicTaskPlannerTerminalSchema = base
   .extend({
@@ -549,7 +600,9 @@ export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
   documentReviewerTerminalSchema,
-  resourcePreparerTerminalSchema,
+  resourcePlannerTerminalSchema,
+  resourceCuratorTerminalSchema,
+  resourceContentAuthorTerminalSchema,
   atomicTaskPlannerTerminalSchema,
   implementationWorkerTerminalSchema,
   implementationAuditorTerminalSchema,

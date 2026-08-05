@@ -9,10 +9,7 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
-import {
-  createRunStore,
-  readObsoleteWorkflowRestartSeed,
-} from '../beegame/delivery-workflow/run-store'
+import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
@@ -267,6 +264,28 @@ describe('delivery workflow recovery', () => {
       blockedReason: 'review repair is exhausted',
       documentReviewState: {
         ...initial.documentReviewState,
+        checklistApproval: {
+          scope: 'checklist',
+          revision: initial.revision.document,
+          checks: [
+            {
+              id: 'checklist_traceability',
+              status: 'pass',
+              conclusion: 'Checklist is approved.',
+              evidence: [
+                {
+                  path: 'docs/acceptance/gameplay-checklist.md',
+                  anchor: 'Acceptance',
+                },
+              ],
+              findingIds: [],
+              assessments: [],
+            },
+          ],
+          checkEvidenceDigests: {},
+          evidencePath: '.beegame/workflow/evidence/checklist.json',
+          approvedAt: new Date().toISOString(),
+        },
         repairPasses: {
           ...initial.documentReviewState.repairPasses,
           foundation: 2,
@@ -344,12 +363,34 @@ describe('delivery workflow recovery', () => {
     await store.save({
       ...initial,
       phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_REVIEW',
+      documentStep: 'COMPREHENSIVE_REVIEW',
       status: 'needs_action',
       blockedReason:
         'document review cycle has already accepted its unique semantic result',
       documentReviewState: {
         ...initial.documentReviewState,
+        checklistApproval: {
+          scope: 'checklist',
+          revision: initial.revision.document,
+          checks: [
+            {
+              id: 'checklist_traceability',
+              status: 'pass',
+              conclusion: 'Checklist is approved.',
+              evidence: [
+                {
+                  path: 'docs/acceptance/gameplay-checklist.md',
+                  anchor: 'Acceptance',
+                },
+              ],
+              findingIds: [],
+              assessments: [],
+            },
+          ],
+          checkEvidenceDigests: {},
+          evidencePath: '.beegame/workflow/evidence/checklist.json',
+          approvedAt: new Date().toISOString(),
+        },
         repairPasses: {
           ...initial.documentReviewState.repairPasses,
           resource: 1,
@@ -541,7 +582,7 @@ describe('delivery workflow recovery', () => {
           attempt: 1,
           issues: ['resource contract failed'],
           preserveImportIds: [],
-          preserveCompositionIds: [],
+          retiredCheckpointIds: [],
         },
       }),
       'utf8',
@@ -579,56 +620,7 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
 
-  test('extracts only digest-bound authority when explicitly restarting an obsolete snapshot', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-restart-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-obsolete',
-      projectId: 'project-obsolete',
-      ownerId: 'owner-1',
-      confirmedBriefContext: 'Build the confirmed game.',
-    })
-    await mkdir(store.paths.directory, { recursive: true })
-    await writeFile(
-      store.paths.snapshot,
-      JSON.stringify({
-        ...initial,
-        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
-        activeDispatch: {
-          untrustedRetiredState: true,
-        },
-      }),
-      'utf8',
-    )
-
-    await expect(
-      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
-    ).resolves.toEqual({
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
-      runId: initial.runId,
-      projectId: initial.projectId,
-      ownerId: initial.ownerId,
-      confirmedBriefDigest: initial.confirmedBriefDigest,
-      confirmedBriefContext: initial.confirmedBriefContext,
-    })
-  })
-
-  test('does not treat a current snapshot as restartable obsolete state', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-current-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-current',
-      projectId: 'project-current',
-      ownerId: 'owner-1',
-    })
-    await store.save(initial)
-
-    await expect(
-      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
-    ).rejects.toMatchObject({ code: 'conflict' })
-  })
-
-  test('does not allow an older server to replace a newer snapshot', async () => {
+  test('does not allow an older server to load a newer snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-newer-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -647,9 +639,6 @@ describe('delivery workflow recovery', () => {
     )
 
     await expect(store.load()).rejects.toMatchObject({ code: 'invalid' })
-    await expect(
-      readObsoleteWorkflowRestartSeed(workspace, 'owner-1'),
-    ).rejects.toMatchObject({ code: 'conflict' })
   })
 
   test('does not overwrite a genuinely invalid workflow snapshot', async () => {
@@ -716,6 +705,7 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     const task = {
       id: 'task-1',
@@ -786,6 +776,7 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     const task = {
       id: 'task-1',
@@ -845,6 +836,7 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     const failed = {
       ...initial,
@@ -862,7 +854,7 @@ describe('delivery workflow recovery', () => {
       },
       activeDispatch: {
         dispatchId: 'dispatch-1',
-        workerType: 'resource-preparer' as const,
+        workerType: 'resource-curator' as const,
         phase: 'RESOURCE_PREPARATION' as const,
         revision: initial.revision.document,
         status: 'failed' as const,
@@ -878,32 +870,7 @@ describe('delivery workflow recovery', () => {
 
     const retried = await retryRun({ store, runId: failed.runId })
 
-    expect(retried).toMatchObject({
-      status: 'running',
-      resourcePreparationAttempt: 1,
-    })
-  })
-
-  test('preserves Resource Production retry accounting across a startup failure', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-retry-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'needs_action',
-      blockedReason: 'resource worker produced no durable mutation',
-      resourcePreparationAttempt: 7,
-    })
-
-    const retried = await retryRun({ store, runId: initial.runId })
-
-    expect(retried.resourcePreparationAttempt).toBe(7)
+    expect(retried).toMatchObject({ status: 'running' })
   })
 
   test('starts retry idle timing from the new dispatch instead of stale run progress', async () => {
@@ -914,6 +881,7 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     await store.save({
       ...initial,
@@ -922,7 +890,6 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      progressPollIntervalMs: 10,
       workerPort: {
         async start(request) {
           return {
@@ -944,7 +911,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -956,50 +923,6 @@ describe('delivery workflow recovery', () => {
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
   })
 
-  test('preserves Resource Production execution accounting without a retry contract', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-remediation-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      resourcePreparationAttempt: 2,
-    })
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: 'session-1',
-            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
-      contract: {},
-    })
-
-    expect((await store.load())?.resourcePreparationAttempt).toBe(2)
-  })
-
   test('starts a fresh retry dispatch even while an explicitly stopped transport is still closing', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-stale-key-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -1008,6 +931,7 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     await store.save({
       ...initial,
@@ -1017,7 +941,6 @@ describe('delivery workflow recovery', () => {
     let closeCalls = 0
     const dispatcher = createDeliveryDispatcher({
       store,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           const dispatchId = request.dispatchId ?? 'missing-dispatch-id'
@@ -1040,7 +963,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
@@ -1098,12 +1021,11 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      resourceMaxTokens: 0,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           return {
@@ -1124,7 +1046,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -1149,7 +1071,6 @@ describe('delivery workflow recovery', () => {
     await store.save({ ...initial, phase: 'DOCUMENT_DRAFTING' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           return {
@@ -1191,12 +1112,11 @@ describe('delivery workflow recovery', () => {
       projectId: 'project-1',
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
     })
     await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
     const dispatcher = createDeliveryDispatcher({
       store,
-      resourceMaxTokens: 0,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           return {
@@ -1217,7 +1137,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -1227,73 +1147,6 @@ describe('delivery workflow recovery', () => {
     expect(await store.load()).toMatchObject({
       status: 'running',
       activeDispatch: { status: 'running' },
-    })
-  })
-
-  test('stops a resource dispatch after its own cumulative token delta', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-token-limit-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    const baselineUsage = {
-      input_tokens: 40,
-      cache_read_tokens: 30,
-      cache_creation_tokens: 20,
-      completion_tokens: 10,
-      total_tokens: 100,
-    }
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      usage: baselineUsage,
-    })
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      resourceMaxTokens: 50,
-      progressPollIntervalMs: 5,
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: 'session-1',
-            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    const dispatch = await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
-      contract: {},
-    })
-    expect(dispatch.startingUsage).toEqual(baselineUsage)
-    await store.updateUsage(initial.runId, {
-      ...baselineUsage,
-      cache_read_tokens: 80,
-      total_tokens: 150,
-    })
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await store.load())?.status === 'needs_action') break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'resource worker exceeded its 50 token limit',
     })
   })
 
@@ -1313,8 +1166,6 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      resourceMaxTokens: 0,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           return {
@@ -1368,8 +1219,6 @@ describe('delivery workflow recovery', () => {
     })
     const dispatcher = createDeliveryDispatcher({
       store,
-      resourceMaxTokens: 0,
-      progressPollIntervalMs: 5,
       workerPort: {
         async start(request) {
           return {
@@ -1405,143 +1254,6 @@ describe('delivery workflow recovery', () => {
       activeDispatch: { status: 'running' },
     })
     expect((await store.load())?.blockedReason).toBeUndefined()
-  })
-
-  test('yields a resource dispatch with durable progress so the controller can continue it', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-token-yield-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
-    const yielded: string[] = []
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      resourceMaxTokens: 50,
-      progressPollIntervalMs: 5,
-      onResourceBudgetYield: async (_record, reason) => {
-        yielded.push(reason)
-      },
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: 'session-1',
-            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
-      contract: {},
-    })
-    await new Promise(resolve => setTimeout(resolve, 2))
-    await store.updateProgress(initial.runId, { durable: true })
-    await store.updateUsage(initial.runId, {
-      input_tokens: 50,
-      cache_read_tokens: 0,
-      cache_creation_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 50,
-    })
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (yielded.length) break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-
-    expect(yielded).toEqual(['resource worker exceeded its 50 token limit'])
-    expect(await store.load()).toMatchObject({
-      status: 'running',
-      activeDispatch: { status: 'interrupted' },
-    })
-  })
-
-  test('forces a fresh resource dispatch after the initial plan checkpoint', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-plan-yield-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-plan',
-      projectId: 'project-plan',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-plan',
-    })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
-    const yielded: string[] = []
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      resourceMaxTokens: 0,
-      progressPollIntervalMs: 5,
-      onResourceBudgetYield: async (_record, reason) => {
-        yielded.push(reason)
-      },
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: 'session-plan',
-            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'resource-preparer',
-      phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
-      contract: { resourcePlanOnly: true },
-    })
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(
-      join(workspace, 'assets/asset-manifest.json'),
-      `${JSON.stringify({
-        version: 7,
-        project_target: {
-          asset_format_capabilities: ['svg'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [{ id: 'world.structure', required: true }],
-        resources: [],
-      })}\n`,
-    )
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (yielded.length) break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-
-    expect(yielded).toEqual(['resource plan checkpoint completed'])
-    expect(await store.load()).toMatchObject({
-      status: 'running',
-      activeDispatch: {
-        status: 'interrupted',
-        failureReason: 'resource plan checkpoint completed',
-      },
-    })
   })
 
   test('uses worker and document lane identity in dispatch idempotency keys', async () => {

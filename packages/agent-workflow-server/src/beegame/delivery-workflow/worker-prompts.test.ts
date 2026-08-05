@@ -10,7 +10,7 @@ describe('resource-content worker prompts', () => {
       ownerId: 'owner',
       projectId: 'project',
       workspacePath: '/workspace',
-      workerType: 'resource-preparer',
+      workerType: 'resource-content-author',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision',
       contract: {},
@@ -18,7 +18,7 @@ describe('resource-content worker prompts', () => {
     const prompt = buildWorkerPrompt(request)
     expect(prompt).toContain('JSON')
     expect(prompt).toContain('YAML')
-    expect(prompt).toContain('schema-valid JSON/YAML content files')
+    expect(prompt).toContain('complete engine-neutral JSON/YAML content')
     expect(prompt).toContain('events, waves and numeric configuration as JSON')
     expect(prompt).toContain(
       'world, scene, hierarchy and instance placement as YAML',
@@ -26,11 +26,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('event-definitions, wave-definitions')
     expect(prompt).toContain('fulfills contains only exact requirement IDs')
     expect(prompt).toContain('reference every Manifest resource ID')
-    expect(prompt).toContain('shell and nested agents are not available')
-    expect(prompt).toContain('AssetManifest author_provisional_resources')
-    expect(prompt).toContain('Use scoped Write only for JSON/YAML content')
-    expect(prompt).toContain('Never retry or invent Bash')
-    expect(prompt).toContain('never hand-author runtime files')
+    expect(prompt).toContain('Do not browse the Catalog')
+    expect(prompt).toContain('SubmitResourceContentResult exactly once')
   })
 
   test('requires authors and reviewers to keep one resource loading path', () => {
@@ -254,13 +251,13 @@ describe('resource-content worker prompts', () => {
     )
   })
 
-  test('keeps resource remediation on the single replacement and pruning lane', () => {
+  test('keeps resource remediation inside the same Curator task', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
       projectId: 'project',
       workspacePath: '/workspace',
-      workerType: 'resource-preparer',
+      workerType: 'resource-curator',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision',
       contract: {
@@ -270,9 +267,9 @@ describe('resource-content worker prompts', () => {
         },
       },
     })
-    expect(prompt).toContain('same replacement commit')
-    expect(prompt).toContain('prune_unbound_resources')
-    expect(prompt).toContain('resource ID is not a requirement ID')
+    expect(prompt).toContain('ResourceLibrary list_packs')
+    expect(prompt).toContain('complete_resource_inventory exactly once')
+    expect(prompt).toContain('resource-finding')
   })
 
   test('assigns one initial foundation document while retaining fact ownership', () => {
@@ -405,20 +402,19 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('Never write an oversized draft')
   })
 
-  test('gives resource production the complete approved fact-owner set', () => {
+  test('gives Content Author the complete approved fact-owner set', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
       projectId: 'project',
       workspacePath: '/workspace',
-      workerType: 'resource-preparer',
+      workerType: 'resource-content-author',
       phase: 'RESOURCE_PREPARATION',
       revision: 'revision',
       contract: {},
     })
-    expect(prompt).toContain('complete eight-document approved Foundation set')
-    expect(prompt).toContain('Respect its fact owners')
-    expect(prompt).toContain('Do not read unapproved or parallel documents')
+    expect(prompt).toContain('contract.authorityPaths')
+    expect(prompt).toContain('Do not browse the Catalog')
     expect(prompt).toContain('Plan the complete JSON/YAML file set')
     expect(prompt).toContain('one parallel tool batch')
     expect(prompt).toContain('only for a specific failed write')

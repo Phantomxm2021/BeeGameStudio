@@ -41,7 +41,6 @@ import type {
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
-import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
 import type { CanonicalDocumentCommitContract } from './native-canonical-document-tool'
@@ -61,9 +60,10 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
-import { auditAssetContract } from './asset-contract-audit'
-import { BEEGAME_RESOURCE_ROOTS } from './asset-contracts'
-import { auditResourceInventoryPolicy } from './delivery-workflow/resource-stage'
+import {
+  BEEGAME_RESOURCE_ROOTS,
+  readBeeGameAssetManifestSync,
+} from './asset-contracts'
 import { parseBeeGameProgrammaticAudioText } from './programmatic-audio-resource'
 
 export type BeeGameImageAttachment = {
@@ -261,14 +261,11 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorker?: boolean
   workflowWorkerType?: string
   workflowAllowedPaths?: string[]
+  workflowProtectedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairGroupCount?: number
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
-  /** Durable resource files that must enter the canonical manifest before another catalog operation. */
-  workflowResourceRegistrationBarrierPaths?: string[]
-  workflowAllowResourceCatalogWithExistingInventory?: boolean
-  workflowAllowResourceRemediationMutations?: boolean
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -356,12 +353,10 @@ type SessionRecord = {
   workflowWorkerType?: string
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
+  workflowProtectedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairGroupCount?: number
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
-  workflowResourceRegistrationBarrierPaths?: string[]
-  workflowAllowResourceCatalogWithExistingInventory?: boolean
-  workflowAllowResourceRemediationMutations?: boolean
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -442,7 +437,7 @@ function resourceWorkerActivityMessage(
   event: BeeGameEvent,
 ): string | undefined {
   if (
-    record.workflowWorkerType !== 'resource-preparer' ||
+    record.workflowWorkerType !== 'resource-curator' ||
     event.type !== 'tool.started' ||
     event.payload?.toolName !== 'ResourceLibrary'
   )
@@ -453,25 +448,33 @@ function resourceWorkerActivityMessage(
   const action = String((input as Record<string, unknown>).action ?? '')
   const traditional = record.language === 'zh-TW'
   const chinese = record.language === 'zh' || traditional
-  if (action === 'browse_catalog')
+  if (action === 'list_packs')
     return chinese
       ? traditional
         ? '正在瀏覽資源庫…'
         : '正在浏览资源库…'
       : 'Browsing the Resource Library…'
+  if (action === 'inspect_pack')
+    return chinese
+      ? traditional
+        ? '正在檢查資源包…'
+        : '正在检查资源包…'
+      : 'Inspecting a Resource Pack…'
   if (action === 'import_resources')
     return chinese
       ? traditional
         ? '正在匯入已選資源…'
         : '正在导入已选资源…'
       : 'Importing selected resources…'
-  if (action === 'refresh_resource_metadata')
-    return chinese
-      ? traditional
-        ? '正在校驗資源清單…'
-        : '正在校验资源清单…'
-      : 'Validating the resource manifest…'
   return undefined
+}
+
+function isResourceProductionWorker(workerType?: string): boolean {
+  return (
+    workerType === 'resource-planner' ||
+    workerType === 'resource-curator' ||
+    workerType === 'resource-content-author'
+  )
 }
 
 export type StartBeeGameSessionInput = {
@@ -492,12 +495,10 @@ export type StartBeeGameSessionInput = {
   workflowWorkerType?: string
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
+  workflowProtectedPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairGroupCount?: number
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
-  workflowResourceRegistrationBarrierPaths?: string[]
-  workflowAllowResourceCatalogWithExistingInventory?: boolean
-  workflowAllowResourceRemediationMutations?: boolean
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -630,6 +631,9 @@ export class BeeGameSessionManager {
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
+      ...(input.workflowProtectedPaths
+        ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
+        : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
         : {}),
@@ -644,19 +648,6 @@ export class BeeGameSessionManager {
             workflowCanonicalDocumentCommitContract:
               input.workflowCanonicalDocumentCommitContract,
           }
-        : {}),
-      ...(input.workflowResourceRegistrationBarrierPaths
-        ? {
-            workflowResourceRegistrationBarrierPaths: [
-              ...input.workflowResourceRegistrationBarrierPaths,
-            ],
-          }
-        : {}),
-      ...(input.workflowAllowResourceCatalogWithExistingInventory
-        ? { workflowAllowResourceCatalogWithExistingInventory: true }
-        : {}),
-      ...(input.workflowAllowResourceRemediationMutations
-        ? { workflowAllowResourceRemediationMutations: true }
         : {}),
       runtime,
       userId: input.userId,
@@ -1301,7 +1292,7 @@ export class BeeGameSessionManager {
             ...(this.resourceSelectionConfig &&
             env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
             (!record.workflowWorker ||
-              record.workflowWorkerType === 'resource-preparer')
+              record.workflowWorkerType === 'resource-curator')
               ? { resourceSelectionConfig: this.resourceSelectionConfig }
               : {}),
             ...(record.language ? { language: record.language } : {}),
@@ -1317,6 +1308,9 @@ export class BeeGameSessionManager {
               : {}),
             ...(record.workflowAllowedPaths
               ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
+              : {}),
+            ...(record.workflowProtectedPaths
+              ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
               : {}),
             ...(record.workflowDocumentAuthorMode
               ? {
@@ -1334,19 +1328,6 @@ export class BeeGameSessionManager {
                   workflowCanonicalDocumentCommitContract:
                     record.workflowCanonicalDocumentCommitContract,
                 }
-              : {}),
-            ...(record.workflowResourceRegistrationBarrierPaths
-              ? {
-                  workflowResourceRegistrationBarrierPaths: [
-                    ...record.workflowResourceRegistrationBarrierPaths,
-                  ],
-                }
-              : {}),
-            ...(record.workflowAllowResourceCatalogWithExistingInventory
-              ? { workflowAllowResourceCatalogWithExistingInventory: true }
-              : {}),
-            ...(record.workflowAllowResourceRemediationMutations
-              ? { workflowAllowResourceRemediationMutations: true }
               : {}),
             requestPermission: request =>
               this.requestPermission(record, request),
@@ -1833,44 +1814,6 @@ export class BeeGameSessionManager {
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
     }
-    if (isWorkflowResourceRefreshPermission(record, request)) {
-      const contract = auditAssetContract(record.session.cwd)
-      const refreshIssues = [
-        ...(!contract.present
-          ? ['assets/asset-manifest.json is missing.']
-          : contract.issues),
-        ...(await auditResourceInventoryPolicy(record.session.cwd)),
-      ]
-      if (refreshIssues.length) {
-        const message = `Finalize and validate the canonical resource manifest before refreshing metadata: ${refreshIssues.join(' ')}`
-        this.append(
-          record,
-          'permission.resolved',
-          `${request.toolName}: deny`,
-          {
-            type: 'permission.resolved',
-            toolUseID: request.toolUseID,
-            toolName: request.toolName,
-            decision: 'deny',
-            autoDenied: true,
-            reason: message,
-            input: request.input,
-          },
-        )
-        return Promise.resolve({ behavior: 'deny', message })
-      }
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        scope: 'once',
-        autoApproved: true,
-        reason: 'workflow_resource_preparer_validated_refresh',
-        input: request.input,
-      })
-      return Promise.resolve({ behavior: 'allow', scope: 'once' })
-    }
     if (isWorkflowResourceImportPermission(record, request)) {
       this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
         type: 'permission.resolved',
@@ -1955,12 +1898,13 @@ export class BeeGameSessionManager {
         record,
         event,
       )
-      const progressMessage =
-        record.workflowWorkerType === 'resource-preparer'
-          ? (resourceActivityMessage ?? '')
-          : event.type === 'assistant.message'
-            ? sanitizeWorkflowDisplayMessage(event.text)
-            : ''
+      const progressMessage = isResourceProductionWorker(
+        record.workflowWorkerType,
+      )
+        ? (resourceActivityMessage ?? '')
+        : event.type === 'assistant.message'
+          ? sanitizeWorkflowDisplayMessage(event.text)
+          : ''
       // Initial authoring already has one durable taskId. Keep that authority
       // stable while the worker reads upstream documents instead of projecting
       // transient Read events as a different active task.
@@ -1976,12 +1920,13 @@ export class BeeGameSessionManager {
       const clearCurrentItem =
         Boolean(currentItemId) &&
         (event.type === 'tool.completed' || event.type === 'tool.failed')
-      const durableProgress =
-        record.workflowWorkerType === 'resource-preparer'
-          ? isResourceWorkerDurableProgress(event)
-          : record.workflowWorkerType === 'document-author'
-            ? isDocumentAuthorDurableProgress(event)
-            : true
+      const durableProgress = isResourceProductionWorker(
+        record.workflowWorkerType,
+      )
+        ? isResourceWorkerDurableProgress(event)
+        : record.workflowWorkerType === 'document-author'
+          ? isDocumentAuthorDurableProgress(event)
+          : true
       const thinkingEnded =
         event.type === 'assistant.thinking' && event.payload?.status === 'ended'
       const thinking = thinkingEnded
@@ -1998,7 +1943,8 @@ export class BeeGameSessionManager {
         progressMessage ||
         thinking ||
         clearCurrentItem ||
-        (record.workflowWorkerType === 'resource-preparer' && durableProgress)
+        (isResourceProductionWorker(record.workflowWorkerType) &&
+          durableProgress)
       ) {
         void createRunStore(record.session.cwd, record.userId)
           .updateProgress(record.workflowRunId, {
@@ -2017,30 +1963,6 @@ export class BeeGameSessionManager {
           })
           .catch(() => undefined)
       }
-    }
-    try {
-      // Resource preparation runs in a workflow worker. Recording only visible
-      // chat sessions loses the native import provenance at the exact boundary
-      // that owns it and makes restart recovery report a false `missing` state.
-      observeNativeResourceLibraryToolEvent({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        eventType: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })
-    } catch (error) {
-      // Resource provenance is passive evidence for catalog acquisition.
-      // It must never alter or interrupt BeeGame Studio's native tool lifecycle.
-      console.warn(
-        '[BeeGame] Failed to persist native resource query evidence',
-        {
-          sessionId: record.session.id,
-          cause: error instanceof Error ? error.name : 'unknown_error',
-        },
-      )
     }
     record.nextEventId += 1
     record.session.updatedAt = new Date()
@@ -2139,10 +2061,7 @@ export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
   if (toolName === 'AssetManifest') return true
   if (toolName !== 'ResourceLibrary') return false
   const input = getDashboardPayloadRecord(event.payload, 'input')
-  return (
-    input?.action === 'import_resources' ||
-    input?.action === 'refresh_resource_metadata'
-  )
+  return input?.action === 'import_resources'
 }
 
 export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
@@ -3728,7 +3647,7 @@ function getBeeGamePermissionPolicyDecision(
   }
   if (
     record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-preparer' &&
+    isResourceProductionWorker(record.workflowWorkerType) &&
     (request.toolName === 'Read' || isFileMutationTool(request.toolName))
   ) {
     const runtimeMutationPath = isFileMutationTool(request.toolName)
@@ -3747,7 +3666,7 @@ function getBeeGamePermissionPolicyDecision(
       return {
         behavior: 'auto_deny',
         message:
-          'Resource production mutates runtime assets only through ResourceLibrary or AssetManifest author_provisional_resources/author_encoded_resources so file creation and inventory registration remain one operation.',
+          'Resource production mutates runtime assets only through ResourceLibrary import_resources or AssetManifest author_provisional_resources so file creation and inventory registration remain one operation.',
       }
     }
     const binaryPath = extractPermissionPaths(request.input).find(path => {
@@ -3772,15 +3691,29 @@ function getBeeGamePermissionPolicyDecision(
       return {
         behavior: 'auto_deny',
         message:
-          'Resource production cannot read or write binary media through generic file tools. Use AssetManifest author_encoded_resources to decode and register base64 binary files, or use ResourceLibrary to import existing media.',
+          'Resource production cannot read or write binary media through generic file tools. Use AssetManifest author_provisional_resources for target-adapter output, or ResourceLibrary import_resources for existing media.',
       }
     }
   }
   if (record.workflowWorker && isFileMutationTool(request.toolName)) {
     const paths = extractPermissionPaths(request.input)
     const allowedPaths = record.workflowAllowedPaths ?? []
+    const protectedPaths = record.workflowProtectedPaths ?? []
     if (
-      record.workflowWorkerType === 'resource-preparer' &&
+      paths.some(path =>
+        protectedPaths.some(protectedPath =>
+          isPathInsideWorkflowScope(record.session.cwd, [protectedPath], path),
+        ),
+      )
+    ) {
+      return {
+        behavior: 'auto_deny',
+        message:
+          'This canonical content file was already committed successfully; continue with only missing or invalid content artifacts.',
+      }
+    }
+    if (
+      isResourceProductionWorker(record.workflowWorkerType) &&
       paths.some(path => isCanonicalAssetManifestPath(record.session.cwd, path))
     ) {
       return {
@@ -3788,7 +3721,7 @@ function getBeeGamePermissionPolicyDecision(
         message: 'The resource manifest is mutated only through AssetManifest.',
       }
     }
-    if (record.workflowWorkerType === 'resource-preparer') {
+    if (isResourceProductionWorker(record.workflowWorkerType)) {
       const resourceContractViolation =
         canonicalProgrammaticAudioMutationViolation(record.session.cwd, request)
       if (resourceContractViolation) {
@@ -3886,9 +3819,7 @@ function resourceMutationFormatViolation(
   if (paths.length === 0) return undefined
   let manifest: unknown
   try {
-    manifest = JSON.parse(
-      readFileSync(join(workspacePath, CANONICAL_ASSET_MANIFEST), 'utf8'),
-    )
+    manifest = readBeeGameAssetManifestSync(workspacePath)
   } catch {
     return 'Resource files cannot be authored until the canonical asset manifest establishes the target format capabilities.'
   }
@@ -3972,9 +3903,7 @@ function canonicalProgrammaticAudioMutationViolation(
           'beegame-programmatic-audio-v1'
       )
         return 'Canonical programmatic audio resources must be rewritten atomically with Write so the complete executable schema can be validated before mutation.'
-    } catch {
-      continue
-    }
+    } catch {}
   }
   return undefined
 }
@@ -4007,23 +3936,11 @@ function isWorkflowResourceImportPermission(
 ): boolean {
   return (
     record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-preparer' &&
+    record.workflowWorkerType === 'resource-curator' &&
     request.toolName === 'ResourceLibrary' &&
     request.input.action === 'import_resources' &&
     Array.isArray(request.input.selections) &&
     request.input.selections.length > 0
-  )
-}
-
-function isWorkflowResourceRefreshPermission(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): boolean {
-  return (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-preparer' &&
-    request.toolName === 'ResourceLibrary' &&
-    request.input.action === 'refresh_resource_metadata'
   )
 }
 

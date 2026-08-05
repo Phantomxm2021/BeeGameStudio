@@ -10,7 +10,7 @@ import {
   createTestDeliveryRun,
 } from './delivery-workflow-test-helpers'
 
-describe('v7 resource-content workflow', () => {
+describe('canonical resource-content workflow', () => {
   it('moves directly from resource preparation to comprehensive review', () => {
     const run = {
       ...createTestDeliveryRun({
@@ -19,6 +19,7 @@ describe('v7 resource-content workflow', () => {
         ownerId: 'owner-resource-content',
         documentRevision: 'docs',
         workspaceRevision: 'workspace',
+        checklistApproved: true,
       }),
       phase: 'RESOURCE_PREPARATION' as const,
       documentStep: undefined,
@@ -36,9 +37,8 @@ describe('v7 resource-content workflow', () => {
     })
     expect(next).toMatchObject({
       phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_REVIEW',
+      documentStep: 'COMPREHENSIVE_REVIEW',
     })
-    expect(next.evidence).not.toHaveProperty('compositionAssembly')
   })
 
   it('does not reconcile ready files across an accepted resource finding batch', async () => {
@@ -48,6 +48,7 @@ describe('v7 resource-content workflow', () => {
       ownerId: 'owner-resource-review-remediation',
       documentRevision: 'docs',
       workspaceRevision: 'workspace',
+      checklistApproved: true,
     })
     const run = {
       ...initial,
@@ -63,14 +64,16 @@ describe('v7 resource-content workflow', () => {
           sourceRevision: 'resources',
           requiredCheckIds: ['resource_content_consistency' as const],
           completedCheckIds: ['resource_content_consistency' as const],
-          checks: [{
-            id: 'resource_content_consistency' as const,
-            status: 'block' as const,
-            conclusion: 'Resource remediation is required.',
-            evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-            findingIds: ['resource-review-finding'],
-            assessments: [],
-          }],
+          checks: [
+            {
+              id: 'resource_content_consistency' as const,
+              status: 'block' as const,
+              conclusion: 'Resource remediation is required.',
+              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+              findingIds: ['resource-review-finding'],
+              assessments: [],
+            },
+          ],
           checkEvidenceDigests: {},
           findings: [
             {
@@ -125,14 +128,16 @@ describe('v7 resource-content workflow', () => {
       sourceRevision: 'resources',
       requiredCheckIds: ['resource_content_consistency' as const],
       completedCheckIds: ['resource_content_consistency' as const],
-      checks: [{
-        id: 'resource_content_consistency' as const,
-        status: 'block' as const,
-        conclusion: 'Resource remediation is required.',
-        evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-        findingIds: ['resource-format-gap'],
-        assessments: [],
-      }],
+      checks: [
+        {
+          id: 'resource_content_consistency' as const,
+          status: 'block' as const,
+          conclusion: 'Resource remediation is required.',
+          evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+          findingIds: ['resource-format-gap'],
+          assessments: [],
+        },
+      ],
       checkEvidenceDigests: {},
       findings: [
         {
@@ -165,7 +170,7 @@ describe('v7 resource-content workflow', () => {
       {
         ...initial,
         phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_REVIEW',
+        documentStep: 'COMPREHENSIVE_REVIEW',
         revision: {
           ...initial.revision,
           resource: 'resources',
@@ -173,6 +178,28 @@ describe('v7 resource-content workflow', () => {
         },
         documentReviewState: {
           ...initial.documentReviewState,
+          checklistApproval: {
+            scope: 'checklist',
+            revision: initial.revision.document,
+            checks: [
+              {
+                id: 'checklist_traceability',
+                status: 'pass',
+                conclusion: 'Checklist is approved.',
+                evidence: [
+                  {
+                    path: 'docs/acceptance/gameplay-checklist.md',
+                    anchor: 'Acceptance',
+                  },
+                ],
+                findingIds: [],
+                assessments: [],
+              },
+            ],
+            checkEvidenceDigests: {},
+            evidencePath: '.beegame/workflow/evidence/checklist.json',
+            approvedAt: new Date().toISOString(),
+          },
           activeCycle,
         },
       },
@@ -192,31 +219,8 @@ describe('v7 resource-content workflow', () => {
         },
       },
     })
-    expect(invalidated.resourcePreparationAttempt).toBeUndefined()
     expect(invalidated.revision.resource).toBeUndefined()
     expect(invalidated.revision.implementation).toBeUndefined()
-  })
-
-  it('rejects Resource Production retry state outside the resource phase', () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-invalid-resource-retry',
-      projectId: 'project-invalid-resource-retry',
-      ownerId: 'owner-invalid-resource-retry',
-    })
-
-    expect(() =>
-      transitionDeliveryRun(
-        {
-          ...initial,
-          phase: 'DOCUMENT_REVIEW',
-          documentStep: 'CHECKLIST_REVIEW',
-          resourcePreparationAttempt: 1,
-        },
-        { type: 'resource_preparation_required' },
-      ),
-    ).toThrow(
-      'resource preparation retry state is valid only in Resource Production',
-    )
   })
 
   it('rejects downstream planning while accepted resource findings still await closure', () => {
@@ -224,6 +228,7 @@ describe('v7 resource-content workflow', () => {
       runId: 'run-unclosed-resource-review',
       projectId: 'project-unclosed-resource-review',
       ownerId: 'owner-unclosed-resource-review',
+      checklistApproved: true,
     })
 
     expect(() =>
@@ -277,6 +282,7 @@ describe('v7 resource-content workflow', () => {
       runId: 'run-empty-resource-authority',
       projectId: 'project-empty-resource-authority',
       ownerId: 'owner-empty-resource-authority',
+      checklistApproved: true,
     })
 
     expect(() =>

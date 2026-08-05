@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bee — 页面叙事结构</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e9e9e7; color: #111; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; }
+    .shell { width: min(1280px, calc(100% - 32px)); margin: 28px auto; }
+    .top { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin: 0 0 20px; }
+    .eyebrow { color: #777; font-size: 11px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 9px 0 0; font-size: clamp(32px, 5vw, 58px); line-height: 1; letter-spacing: -.055em; font-weight: 650; }
+    .top p { max-width: 470px; margin: 0; color: #696969; font-size: 14px; line-height: 1.6; }
+    .browser { overflow: hidden; border-radius: 24px; background: #fafafa; box-shadow: 0 30px 80px rgba(0,0,0,.14); }
+    .chrome { height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 15px; border-bottom: 1px solid #e8e8e8; background: #f6f6f6; }
+    .chrome i { width: 8px; height: 8px; border-radius: 50%; background: #d8d8d8; }
+    .page { height: min(720px, calc(100vh - 190px)); overflow-y: auto; scroll-snap-type: y proximity; }
+    section { position: relative; min-height: 600px; scroll-snap-align: start; overflow: hidden; }
+    nav { position: absolute; inset: 0 0 auto; z-index: 8; height: 68px; padding: 0 5.2%; display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 650; }
+    .logo { display: flex; align-items: center; gap: 8px; }
+    .bee { width: 16px; height: 16px; border-radius: 50%; background: #efb619; box-shadow: inset -4px -2px rgba(0,0,0,.12); }
+    .hero { min-height: 700px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: #faf9f6; }
+    .hero-copy { position: relative; z-index: 4; margin-top: -40px; }
+    .hero h2 { margin: 0; font-size: clamp(52px, 7vw, 104px); line-height: .92; letter-spacing: -.072em; font-weight: 650; }
+    .hero h2 span { color: #c98b00; }
+    .hero p { width: min(520px, 82%); margin: 24px auto 0; color: #737373; font-size: 17px; line-height: 1.6; }
+    .seed { position: absolute; left: 50%; bottom: -205px; width: 430px; height: 430px; transform: translateX(-50%); border-radius: 50%; background: #efb619; box-shadow: 0 25px 100px rgba(218,156,0,.27); }
+    .seed::before { content: ""; position: absolute; inset: 76px 120px 122px 90px; border-radius: 48% 52% 44% 56%; background: #fff3bc; transform: rotate(-14deg); }
+    .seed::after { content: ""; position: absolute; left: 145px; top: 205px; width: 145px; height: 18px; border-radius: 99px; background: #161616; box-shadow: 0 58px #161616; transform: rotate(-6deg); }
+    .awakens { min-height: 660px; display: grid; place-items: center; color: #fff; background: #050505; }
+    .awakens .copy { position: relative; z-index: 3; width: 90%; text-align: center; }
+    .awakens h2, .human h2, .invite h2 { margin: 0 auto; max-width: 900px; font-size: clamp(42px, 6vw, 84px); line-height: .98; letter-spacing: -.065em; font-weight: 620; }
+    .awakens p { max-width: 530px; margin: 25px auto 0; color: rgba(255,255,255,.58); font-size: 17px; line-height: 1.55; }
+    .rings { position: absolute; left: 50%; top: 50%; width: 300px; height: 300px; transform: translate(-50%,-50%); border: 1px solid rgba(239,182,25,.35); border-radius: 50%; box-shadow: 0 0 80px rgba(239,182,25,.13); }
+    .rings::before, .rings::after { content: ""; position: absolute; border: 1px solid rgba(255,255,255,.1); border-radius: 50%; }
+    .rings::before { inset: -120px; }.rings::after { inset: -250px; }
+    .human { min-height: 700px; display: grid; place-items: center; padding: 80px 5%; text-align: center; background: #f0e8da; }
+    .human h2 { max-width: 850px; font-family: ui-serif, Georgia, serif; font-weight: 500; }
+    .moments { width: min(930px, 100%); margin-top: 52px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .moment { min-height: 180px; padding: 24px; display: flex; flex-direction: column; justify-content: end; text-align: left; border-radius: 18px; background: rgba(255,255,255,.55); }
+    .moment b { font-size: 18px; letter-spacing: -.025em; }.moment span { margin-top: 8px; color: #786f62; font-size: 13px; line-height: 1.45; }
+    .invite { min-height: 660px; display: grid; place-items: center; padding: 80px 5%; text-align: center; background: #faf9f6; }
+    .invite .small { margin: 0 0 22px; color: #9b6a00; font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    .actions { margin-top: 36px; display: flex; justify-content: center; gap: 12px; }
+    .input { width: 280px; padding: 15px 18px; text-align: left; color: #949494; border: 1px solid #dededb; border-radius: 99px; background: #fff; font-size: 13px; }
+    .button { padding: 15px 22px; border-radius: 99px; color: white; background: #171717; font-size: 13px; font-weight: 650; }
+    .community { display: inline-block; margin-top: 20px; color: #333; font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
+    .sequence { margin: 18px 0 0; color: #747474; font-size: 12px; text-align: center; }
+    @media (max-width: 720px) { .top { display: block; }.top p { margin-top: 14px; }.moments { grid-template-columns: 1fr; }.actions { flex-direction: column; align-items: center; }.input { width: min(320px, 100%); }.page { height: 72vh; }.hero h2 { font-size: 58px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="top"><div><span class="eyebrow">Design Section 1 · Narrative</span><h1>一页，讲完一次创造。</h1></div><p>请在下方页面内滚动。四幕不是功能模块，而是一条情绪曲线：愿望、苏醒、改变、邀请。</p></div>
+    <div class="browser">
+      <div class="chrome"><i></i><i></i><i></i></div>
+      <div class="page">
+        <section class="hero"><nav><span class="logo"><i class="bee"></i> Bee Game Studio</span><span>中文⌄</span></nav><div class="hero-copy"><h2>你的想象，<br><span>终于可以玩了。</span></h2><p>让那个一直住在你脑海里的世界，第一次回应你。</p></div><div class="seed"></div></section>
+        <section class="awakens"><div class="rings"></div><div class="copy"><h2>一个念头。<br>然后，整个世界醒来。</h2><p>你说出想去的地方、想遇见的人、想感受的冒险。剩下的，让创造自然发生。</p></div></section>
+        <section class="human"><div><h2>第一次，你不是在适应工具。<br>工具在理解你。</h2><div class="moments"><div class="moment"><b>今晚的一个念头</b><span>不再沉睡在备忘录里。</span></div><div class="moment"><b>和朋友分享的笑声</b><span>不只是一句“如果有这样一款游戏”。</span></div><div class="moment"><b>属于你的世界</b><span>终于有人可以走进去。</span></div></div></div></section>
+        <section class="invite"><div><p class="small">Coming soon</p><h2>第一批世界，<br>等你来创造。</h2><div class="actions"><span class="input">你的邮箱</span><span class="button">申请优先体验</span></div><a class="community">加入创作者社群 →</a></div></section>
+      </div>
+    </div>
+    <p class="sequence">01 愿望　→　02 苏醒　→　03 改变　→　04 邀请</p>
+  </main>
+</body>
+</html>

@@ -180,7 +180,7 @@
     },
     "assets": {
       "title": "Asset Contracts",
-      "empty": "No asset contract yet. BeeGame will ask the agent to create assets/asset-manifest.json on the next build.",
+      "empty": "No asset contract yet. Resource Production will create it on the next build.",
       "loading": "Loading asset contracts...",
       "upload": "Upload replacement",
       "uploading": "Uploading...",

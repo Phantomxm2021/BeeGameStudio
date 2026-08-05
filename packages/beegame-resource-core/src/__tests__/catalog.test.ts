@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   browseResourceCatalogPacks,
   browseResourcePackElements,
-  queryResourceCatalogElements,
 } from '../catalog'
 import type { ResourceElement, ResourcePack } from '../types'
 
@@ -55,36 +54,6 @@ describe('resource catalog browsing', () => {
     })
 
     expect(page.items).toEqual([])
-  })
-
-  test('queries exact candidates across Packs and binds cursors to filters', () => {
-    const page = queryResourceCatalogElements(packs, elements, {
-      filters: { assetKinds: ['model'], formats: ['glb'] },
-      limit: 1,
-    }, 'revision-1')
-
-    expect(page.total).toBe(2)
-    expect(page.items).toEqual([
-      expect.objectContaining({ packId: 'world-kit', elementId: 'ground' }),
-    ])
-    expect(page.nextCursor).toStartWith('v3:')
-    expect(queryResourceCatalogElements(packs, elements, {
-      cursor: page.nextCursor,
-    }, 'revision-1').items).toEqual([
-      expect.objectContaining({ packId: 'world-kit', elementId: 'wall' }),
-    ])
-    expect(() =>
-      queryResourceCatalogElements(packs, elements, {
-        filters: { assetKinds: ['vfx'] },
-        cursor: page.nextCursor,
-      }, 'revision-1'),
-    ).toThrow('does not belong to these filters')
-    expect(() =>
-      queryResourceCatalogElements(packs, elements, {
-        filters: { assetKinds: ['model'], formats: ['glb'] },
-        cursor: page.nextCursor,
-      }, 'revision-2'),
-    ).toThrow('does not belong to this catalog')
   })
 
   test('keeps element exploration inside the Pack deliberately selected by the Agent', () => {

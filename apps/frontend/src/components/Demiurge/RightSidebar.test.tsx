@@ -17,9 +17,9 @@ vi.mock('../../services/api', () => ({
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
         downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
-        getProjectAssets: vi.fn().mockResolvedValue({ version: 7, requirements: [], resources: [] }),
+        getProjectAssets: vi.fn().mockResolvedValue({ version: 8, requirements: [], resources: [] }),
         uploadProjectAsset: vi.fn().mockResolvedValue({
-            manifest: { version: 7, requirements: [], resources: [] },
+            manifest: { version: 8, requirements: [], resources: [] },
       resource: { id: 'user-resource' },
       path: 'assets/resources/user-resource/file.bin',
       message: 'Resource added',
@@ -430,7 +430,7 @@ describe('RightSidebar tabs', () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
         vi.mocked(api.getProjectAssets).mockResolvedValue({
-            version: 7,
+            version: 8,
             project_target: { platform: 'web', runtime: 'react',
         asset_format_capabilities: ['audio/mpeg'],
         runtime_asset_root: 'client/public/assets',
@@ -451,7 +451,7 @@ describe('RightSidebar tabs', () => {
         });
         vi.mocked(api.uploadProjectAsset).mockResolvedValue({
             manifest: {
-                version: 7,
+                version: 8,
                 project_target: { platform: 'web', runtime: 'react',
           asset_format_capabilities: ['audio/mpeg'],
           runtime_asset_root: 'client/public/assets',
@@ -515,7 +515,7 @@ describe('RightSidebar tabs', () => {
 
     it('shows an empty asset contract message when a restored project has no manifest', async () => {
         const user = userEvent.setup();
-        vi.mocked(api.getProjectAssets).mockResolvedValue({ version: 7, requirements: [],
+        vi.mocked(api.getProjectAssets).mockResolvedValue({ version: 8, requirements: [],
       resources: [],
     });
 
@@ -589,7 +589,7 @@ describe('RightSidebar tabs', () => {
         vi.useFakeTimers();
         vi.mocked(api.getProjectAssets)
             .mockResolvedValueOnce({
-                version: 7,
+                version: 8,
                 project_target: {
           asset_format_capabilities: ['audio/ogg'],
           runtime_asset_root: 'public/game-assets',
@@ -657,7 +657,7 @@ describe('RightSidebar tabs', () => {
         vi.mocked(api.getProjectAssets).mockImplementation(async (projectId: string) => {
             if (projectId === 'proj_1') {
                 return {
-                    version: 7,
+                    version: 8,
                     requirements: [{
                         id: 'bgm_game',
                         name: 'Game BGM',
@@ -667,7 +667,7 @@ describe('RightSidebar tabs', () => {
                     resources: [],
                 };
             }
-            return { version: 7, requirements: [], resources: [] };
+            return { version: 8, requirements: [], resources: [] };
         });
         const baseProps = {
             lang: 'zh' as const,

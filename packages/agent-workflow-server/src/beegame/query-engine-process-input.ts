@@ -29,6 +29,9 @@ export function serializeQueryEngineStartInput(
     ...(input.workflowAllowedPaths
       ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
       : {}),
+    ...(input.workflowProtectedPaths
+      ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
+      : {}),
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
@@ -46,19 +49,6 @@ export function serializeQueryEngineStartInput(
       : {}),
     ...(input.workflowDocumentReviewContract
       ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
-      : {}),
-    ...(input.workflowResourceRegistrationBarrierPaths
-      ? {
-          workflowResourceRegistrationBarrierPaths: [
-            ...input.workflowResourceRegistrationBarrierPaths,
-          ],
-        }
-      : {}),
-    ...(input.workflowAllowResourceCatalogWithExistingInventory
-      ? { workflowAllowResourceCatalogWithExistingInventory: true }
-      : {}),
-    ...(input.workflowAllowResourceRemediationMutations
-      ? { workflowAllowResourceRemediationMutations: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
@@ -99,6 +89,9 @@ export function deserializeQueryEngineStartInput(
     ...(input.workflowAllowedPaths
       ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
       : {}),
+    ...(input.workflowProtectedPaths
+      ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
+      : {}),
     ...(input.workflowDocumentAuthorMode
       ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
       : {}),
@@ -116,19 +109,6 @@ export function deserializeQueryEngineStartInput(
       : {}),
     ...(input.workflowDocumentReviewContract
       ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
-      : {}),
-    ...(input.workflowResourceRegistrationBarrierPaths
-      ? {
-          workflowResourceRegistrationBarrierPaths: [
-            ...input.workflowResourceRegistrationBarrierPaths,
-          ],
-        }
-      : {}),
-    ...(input.workflowAllowResourceCatalogWithExistingInventory
-      ? { workflowAllowResourceCatalogWithExistingInventory: true }
-      : {}),
-    ...(input.workflowAllowResourceRemediationMutations
-      ? { workflowAllowResourceRemediationMutations: true }
       : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [

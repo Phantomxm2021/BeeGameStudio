@@ -24,8 +24,7 @@ import {
 } from './document-stage'
 import { assertReviewAuthority } from './document-review-input'
 import {
-  auditResourcesForPreparation,
-  completeResourcePreparation,
+  completeResourceTask,
   reconcileCurrentResourcePreparation,
   startResourcePreparation,
 } from './resource-stage'
@@ -65,16 +64,12 @@ import {
   parseWorkerTerminalResult,
   type WorkerTerminalResult,
 } from './worker-contracts'
-import type { NativeResourceLibraryEvidenceState } from '../native-resource-library-evidence'
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
   ownerId: string
   workerPort: DeliveryWorkerPort
   handoffRecoveryGraceMs?: number
-  getResourceLibraryEvidence?: (
-    runId: string,
-  ) => NativeResourceLibraryEvidenceState
 }) {
   const store = createRunStore(input.workspacePath, input.ownerId)
   let dispatcher: ReturnType<typeof createDeliveryDispatcher>
@@ -96,19 +91,6 @@ export function createDeliveryWorkflowController(input: {
     workerPort: input.workerPort,
     onTerminal: async (record, result, request) =>
       handleTerminal(record, result, request),
-    onResourceBudgetYield: async record =>
-      serialize(async () => {
-        const current = await store.load()
-        if (
-          !current ||
-          current.status !== 'running' ||
-          current.phase !== 'RESOURCE_PREPARATION' ||
-          current.activeDispatch?.dispatchId !== record.dispatchId ||
-          current.activeDispatch.status !== 'interrupted'
-        )
-          return
-        await resumeUnlocked(current)
-      }),
   })
 
   async function persist(
@@ -160,17 +142,10 @@ export function createDeliveryWorkflowController(input: {
       resourceReadiness: ResourceDeliveryReadiness
     }
   > {
-    const observed = input.getResourceLibraryEvidence?.(run.runId)
-    const resourceEvidence =
-      run.resourceEvidence?.state === 'current'
-        ? run.resourceEvidence
-        : observed?.state === 'missing' && run.resourceEvidence
-          ? run.resourceEvidence
-          : observed
     return plannerContractFacts(
       input.workspacePath,
       run.confirmedBriefContext,
-      resourceEvidence,
+      run.resourceProductionState.inventoryReceipt?.catalogObserved ?? false,
     )
   }
 
@@ -270,6 +245,10 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? { completedPaths: [] }
             : next.foundationDraftState,
+        resourceProductionState:
+          result.classification === 'documents_required'
+            ? { currentTask: 'RESOURCE_PLAN' }
+            : next.resourceProductionState,
         checklistRemediation:
           result.classification === 'documents_required'
             ? undefined
@@ -321,11 +300,6 @@ export function createDeliveryWorkflowController(input: {
         terminal: result,
         documentSet,
       })
-      const observedResourceEvidence = input.getResourceLibraryEvidence?.(
-        next.runId,
-      )
-      if (observedResourceEvidence)
-        next = { ...next, resourceEvidence: observedResourceEvidence }
       if (
         next.blockedReason &&
         next.status === 'running' &&
@@ -352,9 +326,11 @@ export function createDeliveryWorkflowController(input: {
       const reviewScope =
         request?.contract.reviewScope === 'foundation'
           ? 'foundation'
-          : 'complete'
+          : request?.contract.reviewScope === 'checklist'
+            ? 'checklist'
+            : 'complete'
       const currentReviewRevision =
-        reviewScope === 'foundation'
+        reviewScope !== 'complete'
           ? await computeDocumentRevision(
               input.workspacePath,
               next.confirmedBriefDigest,
@@ -374,7 +350,9 @@ export function createDeliveryWorkflowController(input: {
         next,
         reviewScope === 'foundation'
           ? 'document.foundation.review.reconciled'
-          : 'document.review.reconciled',
+          : reviewScope === 'checklist'
+            ? 'document.checklist.review.reconciled'
+            : 'document.review.reconciled',
       )
       // The persisted phase/documentStep is the durable handoff marker. Use
       // the same resume path for every next-stage transition so a process
@@ -383,7 +361,11 @@ export function createDeliveryWorkflowController(input: {
       await resumeUnlocked(next)
       return
     }
-    if (result.workerType === 'resource-preparer') {
+    if (
+      result.workerType === 'resource-planner' ||
+      result.workerType === 'resource-curator' ||
+      result.workerType === 'resource-content-author'
+    ) {
       if (await documentRevisionChanged(next)) {
         await restartDocumentStage(
           next,
@@ -391,28 +373,10 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const observedResourceEvidence = input.getResourceLibraryEvidence?.(
-        next.runId,
-      )
-      const resourceEvidence =
-        next.resourceEvidence?.state === 'current'
-          ? next.resourceEvidence
-          : observedResourceEvidence
-      const resourceAudit = auditResourcesForPreparation({
-        workspacePath: input.workspacePath,
-        confirmedBriefContext: next.confirmedBriefContext,
-        ...(resourceEvidence ? { resourceEvidence } : {}),
-      })
-      next = await completeResourcePreparation({
+      next = await completeResourceTask({
         run: next,
         workspacePath: input.workspacePath,
         terminal: result,
-        audit: resourceAudit,
-        baselineResourceRevision:
-          typeof request?.contract.resourceBaselineRevision === 'string'
-            ? request.contract.resourceBaselineRevision
-            : undefined,
-        ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       if (
         next.status === 'running' &&
@@ -843,12 +807,8 @@ export function createDeliveryWorkflowController(input: {
       type: 'resource_preparation_required',
       reason,
     })
-    await persist(invalidated, 'resource.revision.invalidated')
-    await startResourcePreparation({
-      run: invalidated,
-      workspacePath: input.workspacePath,
-      dispatcher,
-    })
+    const saved = await persist(invalidated, 'resource.revision.invalidated')
+    await resumeUnlocked(saved)
   }
 
   async function restartDocumentStage(
@@ -883,6 +843,7 @@ export function createDeliveryWorkflowController(input: {
         repairPasses: { foundation: 0, checklist: 0, resource: 0 },
       },
       foundationDraftState: { completedPaths: [] },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
       checklistRemediation: undefined,
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -974,18 +935,35 @@ export function createDeliveryWorkflowController(input: {
           dispatcher,
         })
       } else {
-        if (run.documentStep !== 'FOUNDATION_REVIEW') {
-          const resourceEvidence = run.evidence.resourcePreparation
+        if (
+          run.documentStep === 'COMPREHENSIVE_REVIEW' &&
+          (run.documentReviewState.checklistApproval?.scope !== 'checklist' ||
+            run.documentReviewState.checklistApproval.revision !==
+              run.revision.document)
+        ) {
+          await persist(
+            {
+              ...run,
+              status: 'needs_action',
+              blockedReason:
+                'comprehensive review requires the frozen current checklist approval',
+            },
+            'document.checklist.approval.missing',
+          )
+          return
+        }
+        if (run.documentStep === 'COMPREHENSIVE_REVIEW') {
+          const resourceGateReceipt = run.evidence.resourcePreparation
           if (
             !run.revision.resource ||
-            resourceEvidence?.status !== 'passed' ||
-            resourceEvidence.revision !== run.revision.resource
+            resourceGateReceipt?.status !== 'passed' ||
+            resourceGateReceipt.revision !== run.revision.resource
           ) {
             const restored = await persist(
               transitionDeliveryRun(run, {
                 type: 'resource_preparation_required',
                 reason:
-                  'resource preparation evidence is missing before comprehensive review',
+                  'resource preparation receipt is missing before comprehensive review',
               }),
               'document.review.prerequisite.restored',
             )
@@ -1013,7 +991,11 @@ export function createDeliveryWorkflowController(input: {
           return
         }
         const reviewScope =
-          run.documentStep === 'FOUNDATION_REVIEW' ? 'foundation' : 'complete'
+          run.documentStep === 'FOUNDATION_REVIEW'
+            ? 'foundation'
+            : run.documentStep === 'CHECKLIST_REVIEW'
+              ? 'checklist'
+              : 'complete'
         const reviewRevision =
           reviewScope === 'complete'
             ? await computeResourceRevision(
@@ -1073,21 +1055,29 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const observedResourceEvidence = input.getResourceLibraryEvidence?.(
-        run.runId,
-      )
-      const resourceEvidence =
-        run.resourceEvidence?.state === 'current'
-          ? run.resourceEvidence
-          : observedResourceEvidence
       const reconciledResources = await reconcileCurrentResourcePreparation({
         run,
         workspacePath: input.workspacePath,
-        ...(resourceEvidence ? { resourceEvidence } : {}),
       })
       if (reconciledResources) {
+        let reconciled = reconciledResources
+        if (
+          reconciled.phase === 'DOCUMENT_REVIEW' &&
+          reconciled.documentReviewState.activeCycle?.acceptedSemanticResult &&
+          reconciled.documentReviewState.activeCycle.activeTarget === 'resource'
+        ) {
+          if (!reconciled.revision.resource)
+            throw new Error(
+              'resource review closure requires the completed resource revision',
+            )
+          reconciled = await beginResourceDocumentReviewClosure({
+            run: reconciled,
+            workspacePath: input.workspacePath,
+            currentRevision: reconciled.revision.resource,
+          })
+        }
         const saved = await persist(
-          reconciledResources,
+          reconciled,
           'resource.preparation.reconciled',
         )
         await resumeUnlocked(saved)
@@ -1120,7 +1110,7 @@ export function createDeliveryWorkflowController(input: {
           {
             ...run,
             phase: 'DOCUMENT_REVIEW',
-            documentStep: 'CHECKLIST_REVIEW',
+            documentStep: 'COMPREHENSIVE_REVIEW',
             activeDispatch: undefined,
             status: 'running',
             blockedReason: undefined,
@@ -1328,7 +1318,7 @@ function isCanonicalDocumentPath(path: string): boolean {
 async function plannerContractFacts(
   workspacePath: string,
   confirmedBriefContext?: string,
-  resourceEvidence?: NativeResourceLibraryEvidenceState,
+  catalogObserved = false,
 ): Promise<
   AtomicTaskContractFacts & {
     resourceIds: string[]
@@ -1340,7 +1330,7 @@ async function plannerContractFacts(
   const resourceReadiness = auditResourceDeliveryReadiness({
     workspacePath,
     confirmedPolicy: confirmedResourceLibraryUsage(confirmedBriefContext),
-    ...(resourceEvidence ? { resourceEvidence } : {}),
+    catalogObserved,
   })
   return {
     checklistIds: readAcceptanceChecklistIds(workspacePath),

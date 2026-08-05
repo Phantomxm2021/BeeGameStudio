@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   BeeGameAssetManifestError,
-  parseCanonicalBeeGameAssetManifest,
+  readBeeGameAssetManifestModulePathsSync,
+  readBeeGameAssetManifestSync,
   type BeeGameAssetManifest,
 } from './asset-contracts'
-import { auditBeeGameContent, type BeeGameContentAudit } from './content-contracts'
+import {
+  auditBeeGameContent,
+  type BeeGameContentAudit,
+} from './content-contracts'
 
 export type AssetRequirementAudit = {
   id: string
@@ -40,29 +44,46 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const emptyContent: BeeGameContentAudit = {
     valid: false,
     files: [],
+    validPaths: [],
+    invalidPaths: [],
+    hasGlobalIssues: false,
     coveredRequirementIds: [],
     referencedResourceIds: [],
     issues: [],
   }
-  const empty = {
+  const empty: Omit<AssetContractAudit, 'present' | 'valid'> = {
     manifestPath,
     requirements: [],
     resources: [],
     content: emptyContent,
     issues: [],
   }
-  if (!existsSync(manifestPath)) return { present: false, valid: true, ...empty }
+  if (!existsSync(manifestPath))
+    return { present: false, valid: true, ...empty }
 
   let manifest: BeeGameAssetManifest
   try {
-    manifest = parseCanonicalBeeGameAssetManifest(
-      JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown,
-    )
+    manifest = readBeeGameAssetManifestSync(workspace)
   } catch (error) {
-    const issues = error instanceof BeeGameAssetManifestError
-      ? error.issues
-      : [error instanceof Error ? error.message : String(error)]
+    const issues =
+      error instanceof BeeGameAssetManifestError
+        ? error.issues
+        : [error instanceof Error ? error.message : String(error)]
     return { present: true, valid: false, ...empty, issues }
+  }
+
+  const registeredModulePaths = new Set(
+    readBeeGameAssetManifestModulePathsSync(workspace),
+  )
+  for (const moduleKind of ['requirements', 'resources'] as const) {
+    const moduleRoot = resolve(workspace, 'assets', 'manifest', moduleKind)
+    if (!existsSync(moduleRoot)) continue
+    for (const entry of readdirSync(moduleRoot, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const path = `assets/manifest/${moduleKind}/${entry.name}`
+      if (!registeredModulePaths.has(path))
+        empty.issues.push(`Unregistered manifest module: ${path}`)
+    }
   }
 
   const resources = manifest.resources.map(resource => {
@@ -83,7 +104,9 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
         else if (!stats.size) issues.push(`File is empty: ${filePath}`)
         const expected = resource.local_file_hashes?.[filePath]
         if (expected && stats.isFile()) {
-          const actual = createHash('sha256').update(readFileSync(absolute)).digest('hex')
+          const actual = createHash('sha256')
+            .update(readFileSync(absolute))
+            .digest('hex')
           if (actual !== expected)
             issues.push(`File hash does not match manifest: ${filePath}`)
         }
@@ -112,7 +135,10 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     issues: [] as string[],
   }))
   const issues = [
-    ...resources.flatMap(resource => resource.issues.map(issue => `${resource.id}: ${issue}`)),
+    ...empty.issues,
+    ...resources.flatMap(resource =>
+      resource.issues.map(issue => `${resource.id}: ${issue}`),
+    ),
     ...content.issues,
   ]
   return {
@@ -130,7 +156,11 @@ function projectFile(workspace: string, filePath: string): string | undefined {
   if (!filePath || isAbsolute(filePath)) return undefined
   const absolute = resolve(workspace, filePath)
   const fromWorkspace = relative(workspace, absolute)
-  if (fromWorkspace === '..' || fromWorkspace.startsWith(`..${sep}`) || isAbsolute(fromWorkspace))
+  if (
+    fromWorkspace === '..' ||
+    fromWorkspace.startsWith(`..${sep}`) ||
+    isAbsolute(fromWorkspace)
+  )
     return undefined
   return absolute
 }

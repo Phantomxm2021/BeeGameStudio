@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { readBeeGameAssetManifest } from '../asset-contracts'
 import { parseDispatchRecord } from './schema'
 import {
   parseWorkerTerminalResult,
@@ -32,8 +31,6 @@ export type DispatchCredits = {
   ) => Promise<void>
 }
 
-const DEFAULT_PROGRESS_POLL_INTERVAL_MS = 5 * 1000
-const DEFAULT_RESOURCE_MAX_TOKENS = 750_000
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
 export class DispatchError extends Error {
@@ -153,6 +150,36 @@ function reviewerPerformance(input: {
   }
 }
 
+function resourceTaskPerformance(input: {
+  dispatch: DispatchRecord
+  request: WorkerDispatchRequest | undefined
+  result: WorkerTerminalResult
+  currentUsage: WorkflowUsage | undefined
+  finishedAt: string
+}): Record<string, unknown> | undefined {
+  if (
+    !input.request ||
+    ![
+      'resource-planner',
+      'resource-curator',
+      'resource-content-author',
+    ].includes(input.request.workerType) ||
+    !('taskMetrics' in input.result)
+  )
+    return undefined
+  const startedAt = Date.parse(input.dispatch.startedAt)
+  const finishedAt = Date.parse(input.finishedAt)
+  return {
+    task: input.request.taskId,
+    durationMs:
+      Number.isFinite(startedAt) && Number.isFinite(finishedAt)
+        ? Math.max(0, finishedAt - startedAt)
+        : 0,
+    usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
+    ...input.result.taskMetrics,
+  }
+}
+
 function terminalEvidencePath(
   result: WorkerTerminalResult,
 ): string | undefined {
@@ -168,14 +195,24 @@ function workerRequiresEvidence(
   // reconciler only after the frozen check/finding contract is accepted.
   // Requiring the file here would reject every valid reviewer terminal before
   // that reconciler gets the opportunity to validate and persist it.
-  return workerType !== 'document-author' && workerType !== 'document-reviewer'
+  return (
+    workerType !== 'document-author' &&
+    workerType !== 'document-reviewer' &&
+    workerType !== 'resource-planner' &&
+    workerType !== 'resource-curator' &&
+    workerType !== 'resource-content-author'
+  )
 }
 
 function assertSingleResourceWorkAuthority(
   request: WorkerDispatchRequest,
   run: DeliveryRun,
 ): void {
-  if (request.workerType !== 'resource-preparer') return
+  if (
+    request.workerType !== 'resource-curator' &&
+    request.workerType !== 'resource-content-author'
+  )
+    return
   if ('preparationRetry' in request.contract) {
     throw new DispatchError(
       'blocked',
@@ -222,17 +259,10 @@ export function createDeliveryDispatcher(options: {
   store: RunStore
   workerPort: DeliveryWorkerPort
   credits?: DispatchCredits
-  progressPollIntervalMs?: number
-  resourceMaxTokens?: number
   onTerminal?: (
     record: DispatchRecord,
     result: WorkerTerminalResult,
     request?: WorkerDispatchRequest,
-  ) => Promise<void>
-  /** Continue a resource stage in a fresh bounded worker after durable progress. */
-  onResourceBudgetYield?: (
-    record: DispatchRecord,
-    reason: string,
   ) => Promise<void>
 }) {
   const byKey = new Map<string, DispatchRecord>()
@@ -240,10 +270,6 @@ export function createDeliveryDispatcher(options: {
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
   let dispatchTail: Promise<void> = Promise.resolve()
-  const progressPollIntervalMs =
-    options.progressPollIntervalMs ?? DEFAULT_PROGRESS_POLL_INTERVAL_MS
-  const resourceMaxTokens =
-    options.resourceMaxTokens ?? DEFAULT_RESOURCE_MAX_TOKENS
 
   function forgetDispatch(dispatchId: string): void {
     for (const [key, record] of byKey.entries()) {
@@ -418,7 +444,6 @@ export function createDeliveryDispatcher(options: {
               : thisFail(error),
           )
       }
-      void monitorIdleProgress(record.dispatchId).catch(() => undefined)
       await options.workerPort.submit(dispatchId, buildWorkerPrompt(request))
     } catch (error) {
       const current = await options.store.load()
@@ -457,94 +482,6 @@ export function createDeliveryDispatcher(options: {
       void markDispatchNeedsAction(record.dispatchId, reason).catch(
         () => undefined,
       )
-    }
-  }
-
-  async function monitorIdleProgress(dispatchId: string): Promise<void> {
-    while (true) {
-      await new Promise(resolve => setTimeout(resolve, progressPollIntervalMs))
-      const run = await options.store.load()
-      if (
-        !run?.activeDispatch ||
-        run.activeDispatch.dispatchId !== dispatchId ||
-        run.activeDispatch.status !== 'running' ||
-        run.status !== 'running'
-      )
-        return
-      const isResourceWorker =
-        run.activeDispatch.workerType === 'resource-preparer'
-      const resourceMutationInFlight =
-        isResourceWorker &&
-        (await options.workerPort
-          .hasInFlightMutation?.(dispatchId)
-          .catch(() => false))
-      const activeRequest =
-        requests.get(dispatchId) ?? run.activeDispatch.request
-      if (
-        isResourceWorker &&
-        !resourceMutationInFlight &&
-        activeRequest &&
-        (await resourcePlanCheckpointCompleted(activeRequest))
-      ) {
-        await yieldResourceDispatch(
-          dispatchId,
-          'resource plan checkpoint completed',
-          'dispatch.resource_plan_checkpoint_yielded',
-        )
-        return
-      }
-      if (
-        isResourceWorker &&
-        !resourceMutationInFlight &&
-        resourceMaxTokens > 0
-      ) {
-        const consumed = Math.max(
-          0,
-          (run.usage?.total_tokens ?? 0) -
-            (run.activeDispatch.startingUsage?.total_tokens ?? 0),
-        )
-        if (consumed >= resourceMaxTokens) {
-          const reason = `resource worker exceeded its ${resourceMaxTokens} token limit`
-          if (hasDurableProgressSinceDispatch(run))
-            await yieldResourceDispatch(dispatchId, reason)
-          else await markDispatchNeedsAction(dispatchId, reason)
-          return
-        }
-      }
-    }
-  }
-
-  function hasDurableProgressSinceDispatch(run: {
-    lastProgressAt?: string
-    activeDispatch?: DispatchRecord
-  }): boolean {
-    if (!run.activeDispatch || !run.lastProgressAt) return false
-    const startedAt = Date.parse(run.activeDispatch.startedAt)
-    const lastProgressAt = Date.parse(run.lastProgressAt)
-    return (
-      Number.isFinite(startedAt) &&
-      Number.isFinite(lastProgressAt) &&
-      lastProgressAt > startedAt
-    )
-  }
-
-  async function resourcePlanCheckpointCompleted(
-    request: WorkerDispatchRequest,
-  ): Promise<boolean> {
-    if (
-      request.workerType !== 'resource-preparer' ||
-      request.contract.resourcePlanOnly !== true
-    )
-      return false
-    try {
-      const manifest = await readBeeGameAssetManifest(request.workspacePath)
-      return (
-        Boolean(manifest.project_target) &&
-        manifest.requirements.length > 0 &&
-        manifest.resources.length === 0
-      )
-    } catch {
-      return false
     }
   }
 
@@ -675,6 +612,13 @@ export function createDeliveryDispatcher(options: {
       currentUsage: run.usage,
       finishedAt,
     })
+    const resourcePerformance = resourceTaskPerformance({
+      dispatch: run.activeDispatch,
+      request,
+      result,
+      currentUsage: run.usage,
+      finishedAt,
+    })
     await options.store.commit(updated, {
       runId: run.runId,
       type: `dispatch.${status}`,
@@ -684,6 +628,9 @@ export function createDeliveryDispatcher(options: {
       dispatchId,
       workerType: result.workerType,
       ...(performance ? { reviewerPerformance: performance } : {}),
+      ...(resourcePerformance
+        ? { resourceTaskPerformance: resourcePerformance }
+        : {}),
     })
     const key = request
       ? idempotencyKey(
@@ -876,7 +823,7 @@ export function createDeliveryDispatcher(options: {
       },
       {
         runId: run.runId,
-        type: 'dispatch.idle_timeout',
+        type: 'dispatch.needs_action',
         phase: run.phase,
         status: 'needs_action',
         revision: run.revision,
@@ -885,44 +832,6 @@ export function createDeliveryDispatcher(options: {
       },
     )
     releaseDispatch(dispatchId, { stopReason: reason })
-    return saved.activeDispatch ?? interrupted
-  }
-
-  async function yieldResourceDispatch(
-    dispatchId: string,
-    reason: string,
-    eventType = 'dispatch.resource_budget_yielded',
-  ): Promise<DispatchRecord> {
-    const run = await options.store.load()
-    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
-      throw new DispatchError('not_found', 'dispatch is not active')
-    if (run.activeDispatch.status !== 'running') return run.activeDispatch
-    const interrupted = parseDispatchRecord({
-      ...run.activeDispatch,
-      status: 'interrupted',
-      finishedAt: now(),
-      failureReason: reason,
-    })
-    const saved = await options.store.commit(
-      {
-        ...run,
-        status: 'running',
-        blockedReason: undefined,
-        activeDispatch: interrupted,
-        thinking: 'idle',
-      },
-      {
-        runId: run.runId,
-        type: eventType,
-        phase: run.phase,
-        status: 'running',
-        revision: run.revision,
-        dispatchId,
-        reason,
-      },
-    )
-    releaseDispatch(dispatchId, { stopReason: reason })
-    await options.onResourceBudgetYield?.(interrupted, reason)
     return saved.activeDispatch ?? interrupted
   }
 

@@ -4,7 +4,7 @@
 
 BeeGame 按人类游戏开发者的常规方式处理资源：先获得真实资源文件，再用少量 JSON/YAML 描述这些资源如何被游戏使用，最后由目标运行时加载或构建。
 
-系统不把“组装过程”提升为持久化领域对象，不创建 `cmp-*` 身份，也不存在一个 requirement 对应一个 Composition 的中间层。
+系统不把“组装过程”提升为持久化领域对象，也不存在一个 requirement 对应一个中间组装记录的机械映射层。
 
 唯一流程是：
 
@@ -19,13 +19,13 @@ BeeGame 按人类游戏开发者的常规方式处理资源：先获得真实资
 
 ## 2. 权威文件
 
-### 2.1 `assets/asset-manifest.json`
+### 2.1 Canonical Asset Manifest v8
 
-Asset Manifest 只记录项目实际拥有的资源，不描述场景布局、事件流程或玩法行为。
+Asset Manifest 只记录项目实际拥有的资源，不描述场景布局、事件流程或玩法行为。它是一个模块化文件集合，不是一个无限增长的 JSON：
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "project_target": {
     "runtime_asset_root": "assets/runtime",
     "content_root": "assets/content",
@@ -33,20 +33,26 @@ Asset Manifest 只记录项目实际拥有的资源，不描述场景布局、�
     "resource_library_usage": "required",
     "asset_format_capabilities": ["png", "svg", "glb", "wav", "json", "yaml"]
   },
-  "requirements": [],
-  "resources": []
+  "modules": {
+    "requirements": "assets/manifest/requirements/<content-digest>.json",
+    "resources": [
+      "assets/manifest/resources/<identity-digest>-<content-digest>.json"
+    ]
+  }
 }
 ```
 
+requirements 模块保存唯一 requirements 数组；每个 resources 模块保存恰好一个 resource record。模块文件名由身份摘要与内容摘要确定，根索引中的 resources 路径按 resource ID 稳定排序。模块先落盘、根索引最后原子替换，因此中断不会让已提交索引指向半份新内容；提交后清理未被索引引用的模块。服务端读取时可返回一个内存聚合对象供 Gate、Reviewer、API 和实现消费，但不得把聚合对象持久化为第二份 Manifest。
+
 Manifest 不包含：
 
-- `compositions`；
+- 中间组装记录；
 - `imports`、slots、selection receipt、no-match 或 fallback；
 - 场景位置、旋转、缩放或事件逻辑；
 - 构建步骤、目标引擎对象或运行时验收状态；
 - Agent 自述式验证文字。
 
-这三个根目录和 `resource_library_usage` 都由 Workflow 根据系统合同与确认简报写入，Agent 不能提交、改写或降级它们。
+这三个根目录、模块路径和 `resource_library_usage` 都由 Workflow 根据系统合同与确认简报写入，Agent 不能提交、改写或降级它们。系统只读取当前模块合同，不双写 resources，也不维护旧副本。
 
 ### 2.2 `assets/content/**/*.json`
 
@@ -126,7 +132,7 @@ data:
 - 标记 `provisional: true` 时仍然可被目标工具加载或构建；
 - 与正式资源使用相同的语义 ID 和内容描述接口。
 
-程序资源可以存在，但必须是独立文件，并由目标资源构建器产生普通媒体或引擎可加载产物。构建器不是 Composition Worker，也不创建持久化 `cmp-*` 记录。
+程序资源可以存在，但必须是独立文件，并由目标资源构建器产生普通媒体或引擎可加载产物。构建器不创建持久化中间组装记录。
 
 ## 5. 替换规则
 
@@ -162,7 +168,7 @@ data:
 - 是 Asset Manifest 的唯一写入边界；
 - 确定性解析 JSON/YAML 公共头；
 - 验证 requirement 覆盖、资源引用、路径和格式；
-- 不创建中间 Composition 状态机。
+- 不创建中间组装状态机。
 
 ### Implementation Agent
 
@@ -187,7 +193,7 @@ data:
 6. 内容文件 ID 唯一，资源 ID 唯一，requirement ID 唯一；
 7. provisional 与正式资源采用相同引用方式；
 8. 不存在源码内嵌的可替换媒体；
-9. 不存在 `cmp-*`、Composition Manifest、第二资源库存或兼容 reader；
+9. 不存在中间组装清单、第二资源库存或兼容 reader；
 10. Resource Library 为 required 时，至少存在一项真实、完整 provenance 的导入资源。
 
 门禁只验证结构事实。美术适配、场景合理性和事件一致性由 Reviewer 审计，真实加载与行为由 Runtime Acceptance 验证。
@@ -206,14 +212,12 @@ data:
 
 ## 9. 明确删除
 
-- Manifest `compositions`；
-- `COMPOSITION_ASSEMBLY` phase；
-- `composition-assembler` worker；
-- `composition-stage.ts`；
-- `cmp-*` 任务和前端展示；
-- composition output、member、status、evidence 与 replacement graph；
-- Implementation 的 composition ID/output binding；
-- 描述性 `composition.json`；
+- Manifest 中间组装记录；
+- 中间组装 phase、worker 和 stage；
+- 中间组装任务和前端展示；
+- 中间组装 output、member、status、evidence 与 replacement graph；
+- Implementation 的中间组装 ID/output binding；
+- 描述性中间组装文件；
 - 固定 WOFF2、TSX、Prefab 或特定引擎输出的共享层规则；
 - 旧版 reader、migration、feedback、shadow、fallback 与双轨测试。
 

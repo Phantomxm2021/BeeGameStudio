@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bee — 三语排版系统</title>
+  <style>
+    * { box-sizing:border-box; }
+    body { margin:0; background:#eeeeec; color:#111; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Hiragino Sans",sans-serif; }
+    main { width:min(1420px,calc(100% - 32px)); margin:32px auto 56px; }
+    .eyebrow { color:#777; font-size:11px; font-weight:700; letter-spacing:.15em; }.intro { display:flex; align-items:end; justify-content:space-between; gap:32px; margin-bottom:24px; }.intro h1 { margin:9px 0 0; font-size:clamp(34px,5vw,62px); line-height:1; letter-spacing:-.055em; font-weight:650; }.intro p { max-width:490px; margin:0; color:#6c6c6c; font-size:14px; line-height:1.6; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; }.sample { overflow:hidden; border-radius:24px; background:#faf9f6; box-shadow:0 16px 50px rgba(0,0,0,.07); }.bar { display:flex; align-items:center; justify-content:space-between; height:54px; padding:0 20px; border-bottom:1px solid #ecebe7; font-size:11px; font-weight:650; }.brand { display:flex; align-items:center; gap:7px; }.bee { width:14px; height:14px; border-radius:50%; background:#efb619; box-shadow:inset -3px -2px rgba(0,0,0,.11); }.select { min-width:108px; padding:9px 12px; display:flex; justify-content:space-between; gap:14px; border:1px solid #d8d8d5; border-radius:9px; background:#fff; }
+    .hero { position:relative; min-height:480px; padding:78px 30px 28px; overflow:hidden; text-align:center; }.hero h2 { position:relative; z-index:2; margin:0 auto; font-weight:650; }.hero h2 em { color:#c98b00; font-style:normal; }.hero p { position:relative; z-index:2; margin:24px auto 0; max-width:350px; color:#6a6a68; font-size:14px; }.orb { position:absolute; left:50%; bottom:-175px; width:300px; height:300px; transform:translateX(-50%); border-radius:50%; background:#efb619; box-shadow:0 25px 65px rgba(218,156,0,.25); }
+    .zh h2 { max-width:370px; font-family:"PingFang SC",-apple-system,sans-serif; font-size:52px; line-height:1.04; letter-spacing:-.055em; }.zh p { line-height:1.72; }.en h2 { max-width:390px; font-family:"SF Pro Display",-apple-system,sans-serif; font-size:58px; line-height:.94; letter-spacing:-.058em; }.en p { line-height:1.58; }.ja h2 { max-width:390px; font-family:"Hiragino Sans","Yu Gothic",sans-serif; font-size:47px; line-height:1.12; letter-spacing:-.045em; line-break:strict; word-break:normal; }.ja p { line-height:1.82; line-break:strict; }
+    .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-top:15px; }.rule { padding:20px 22px; border-radius:18px; background:#fff; }.rule b { font-size:13px; }.rule p { margin:8px 0 0; color:#777; font-size:12px; line-height:1.55; }
+    .mobile-title { margin:46px 0 18px; display:flex; justify-content:space-between; align-items:end; }.mobile-title h2 { margin:0; font-size:30px; letter-spacing:-.04em; }.mobile-title p { margin:0; color:#777; font-size:13px; }.phones { display:flex; justify-content:center; gap:28px; }.phone { width:230px; height:430px; padding:9px; border-radius:34px; background:#111; box-shadow:0 20px 50px rgba(0,0,0,.16); }.screen { position:relative; height:100%; overflow:hidden; border-radius:26px; background:#faf9f6; text-align:center; }.phone .bar { height:48px; padding:0 13px; border:0; }.phone .brand span { display:none; }.phone .select { min-width:86px; padding:7px 9px; }.phone h3 { position:relative; z-index:2; margin:74px auto 0; font-weight:650; }.phone p { position:relative; z-index:2; width:82%; margin:18px auto 0; color:#70706e; font-size:11px; }.phone .orb { bottom:-140px; width:250px; height:250px; }.phone.zh h3 { font-size:34px; line-height:1.08; letter-spacing:-.055em; }.phone.zh p { line-height:1.65; }.phone.en h3 { font-size:38px; line-height:.97; letter-spacing:-.057em; }.phone.en p { line-height:1.52; }.phone.ja h3 { font-size:30px; line-height:1.18; letter-spacing:-.04em; }.phone.ja p { line-height:1.72; }
+    .note { margin-top:18px; color:#777; font-size:12px; text-align:center; }
+    @media(max-width:900px){.intro{display:block}.intro p{margin-top:12px}.grid,.rules{grid-template-columns:1fr}.phones{overflow-x:auto;justify-content:flex-start;padding-bottom:18px}.sample{max-width:540px;margin:auto}}
+  </style>
+</head>
+<body><main>
+  <div class="intro"><div><span class="eyebrow">DESIGN SECTION 2 · TYPOGRAPHY</span><h1>同一个品牌。三种自然的声音。</h1></div><p>三种语言共享视觉性格，但不共享僵硬的排版数值。标题按语言单独断行；中文紧凑，英文更有张力，日文增加呼吸并遵守禁则换行。</p></div>
+  <section class="grid">
+    <article class="sample zh"><div class="bar"><span class="brand"><i class="bee"></i>Bee Game Studio</span><span class="select">简体中文 <i>⌄</i></span></div><div class="hero"><h2>想一个游戏。<br><em>然后，玩到它。</em></h2><p>Bee Game Studio 让每一个有想法的人，都有机会把脑海里的游戏带到生活里。</p><div class="orb"></div></div></article>
+    <article class="sample en"><div class="bar"><span class="brand"><i class="bee"></i>Bee Game Studio</span><span class="select">English <i>⌄</i></span></div><div class="hero"><h2>Imagine a game.<br><em>Then play it.</em></h2><p>Bee Game Studio gives everyone with an idea the chance to bring the game in their mind into real life.</p><div class="orb"></div></div></article>
+    <article class="sample ja"><div class="bar"><span class="brand"><i class="bee"></i>Bee Game Studio</span><span class="select">日本語 <i>⌄</i></span></div><div class="hero"><h2>ゲームを思い描く。<br><em>そして、遊んでみる。</em></h2><p>Bee Game Studioは、アイデアを持つすべての人に、頭の中のゲームを現実へと連れ出す機会を届けます。</p><div class="orb"></div></div></article>
+  </section>
+  <section class="rules"><div class="rule"><b>中文 · 紧凑而清晰</b><p>适度负字距，标题行距约 1.04；避免一行塞入过多汉字。</p></div><div class="rule"><b>English · 宽阔而有节奏</b><p>更大的标题尺寸与更紧的行高，用语义断行保持发布会式力度。</p></div><div class="rule"><b>日本語 · 克制且有呼吸</b><p>略小字号、更宽行距，使用严格日文换行规则，避免标点悬挂。</p></div></section>
+  <div class="mobile-title"><h2>移动端不是缩小版。</h2><p>375px 宽度下重新设定断行与间距</p></div>
+  <section class="phones">
+    <div class="phone zh"><div class="screen"><div class="bar"><span class="brand"><i class="bee"></i><span>Bee</span></span><span class="select">中文 <i>⌄</i></span></div><h3>想一个游戏。<br>然后，玩到它。</h3><p>让每一个有想法的人，都有机会把脑海里的游戏带到生活里。</p><div class="orb"></div></div></div>
+    <div class="phone en"><div class="screen"><div class="bar"><span class="brand"><i class="bee"></i><span>Bee</span></span><span class="select">EN <i>⌄</i></span></div><h3>Imagine<br>a game.<br>Then play it.</h3><p>Bring the game in your mind into real life.</p><div class="orb"></div></div></div>
+    <div class="phone ja"><div class="screen"><div class="bar"><span class="brand"><i class="bee"></i><span>Bee</span></span><span class="select">日本語 <i>⌄</i></span></div><h3>ゲームを<br>思い描く。<br>そして、遊ぶ。</h3><p>頭の中のゲームを、現実の世界へ。</p><div class="orb"></div></div></div>
+  </section>
+  <p class="note">语言切换会持久化用户选择，并同步更新 html lang，便于屏幕阅读器与搜索引擎正确理解。</p>
+</main></body>
+</html>

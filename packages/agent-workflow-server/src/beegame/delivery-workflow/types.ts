@@ -73,6 +73,7 @@ export type DocumentWorkflowStep =
   | 'FOUNDATION_REVIEW'
   | 'CHECKLIST_DRAFTING'
   | 'CHECKLIST_REVIEW'
+  | 'COMPREHENSIVE_REVIEW'
 
 /**
  * `blocked` is reserved for a durable validation gate result.  Operational
@@ -98,7 +99,9 @@ export type AtomicTaskStatus =
 export type DispatchWorkerType =
   | 'document-author'
   | 'document-reviewer'
-  | 'resource-preparer'
+  | 'resource-planner'
+  | 'resource-curator'
+  | 'resource-content-author'
   | 'atomic-task-planner'
   | 'implementation-worker'
   | 'implementation-auditor'
@@ -150,16 +153,20 @@ export const FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS = [
 ] as const satisfies readonly (readonly FoundationDocumentReviewCheckId[])[]
 
 export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
-  'checklist_traceability',
   'resource_semantic_fitness',
   'content_structure_fitness',
   'resource_content_consistency',
   'implementation_readiness',
 ] as const
 
+export const CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS = [
+  'checklist_traceability',
+] as const
+
 export const DOCUMENT_REVIEW_CHECK_PACKETS: readonly (readonly DocumentReviewCheckId[])[] =
   [
     ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
+    CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
     ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS.map(id => [id]),
   ]
 
@@ -168,13 +175,24 @@ export const COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS = [
   ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
 ] as const
 
-export type DocumentReviewScope = 'foundation' | 'complete'
+export const DOCUMENT_REVIEW_CHECK_IDS = [
+  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  ...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
+  ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
+] as const
+
+export type DocumentReviewScope = 'foundation' | 'checklist' | 'complete'
 export type DocumentReviewMode = 'initial' | 'closure'
 export type FoundationDocumentReviewCheckId =
   (typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS)[number]
 export type ComprehensiveDocumentReviewCheckId =
   (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number]
-export type DocumentReviewCheckId = ComprehensiveDocumentReviewCheckId
+export type ChecklistDocumentReviewCheckId =
+  (typeof CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS)[number]
+export type DocumentReviewCheckId =
+  | FoundationDocumentReviewCheckId
+  | ChecklistDocumentReviewCheckId
+  | ComprehensiveDocumentReviewCheckId
 
 export const DOCUMENT_REVIEW_OWNER_BY_CHECK_ID = Object.fromEntries([
   ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(
@@ -311,6 +329,7 @@ export type DocumentReviewCycle = {
 
 export type DocumentReviewState = {
   foundationApproval?: DocumentReviewApproval
+  checklistApproval?: DocumentReviewApproval
   comprehensiveApproval?: DocumentReviewApproval
   activeCycle?: DocumentReviewCycle
   repairPasses: {
@@ -320,7 +339,33 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 8 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 11 as const
+
+export const RESOURCE_PRODUCTION_TASKS = [
+  'RESOURCE_PLAN',
+  'RESOURCE_INVENTORY',
+  'RESOURCE_CONTENT',
+  'RESOURCE_GATE',
+] as const
+
+export type ResourceProductionTask = (typeof RESOURCE_PRODUCTION_TASKS)[number]
+
+export type ResourceInventoryBinding = {
+  requirementId: string
+  resourceIds: string[]
+}
+
+export type ResourceInventoryReceipt = {
+  revision: string
+  bindings: ResourceInventoryBinding[]
+  catalogObserved: boolean
+  acceptedAt: string
+}
+
+export type ResourceProductionState = {
+  currentTask: ResourceProductionTask
+  inventoryReceipt?: ResourceInventoryReceipt
+}
 
 export type ChecklistRemediation = {
   sourceRevision: string
@@ -391,17 +436,6 @@ export type WorkflowUsage = {
   total_tokens: number
 }
 
-export type ResourceEvidenceSnapshot =
-  | { state: 'missing' }
-  | {
-      state: 'stale' | 'current'
-      actions: string[]
-      failedActions: string[]
-      successfulResourceCount: number
-      failedResourceCount: number
-      observedAt: string
-    }
-
 /**
  * A journal record that is also safe to keep temporarily in the run snapshot.
  * The snapshot marker makes a commit recoverable if the process exits after
@@ -452,13 +486,11 @@ export type DeliveryRun = {
   documentReviewState: DocumentReviewState
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
+  /** Sole task/checkpoint state for Resource Production. */
+  resourceProductionState: ResourceProductionState
   /** Deterministic checklist-structure issues carried across bounded author retries. */
   checklistRemediation?: ChecklistRemediation
-  /** Durable execution count for the current Resource Production phase. */
-  resourcePreparationAttempt?: number
   usage?: WorkflowUsage
-  /** Latest deterministic native Resource Library provenance observed for this run. */
-  resourceEvidence?: ResourceEvidenceSnapshot
   /** Latest durable progress text for the workflow card. */
   currentMessage?: string
   thinking?: 'working' | 'waiting' | 'idle'
@@ -486,6 +518,7 @@ export type WorkerDispatchRequest = {
   taskId?: string
   revision: string
   allowedPaths?: string[]
+  protectedPaths?: string[]
   contract: Record<string, unknown>
 }
 

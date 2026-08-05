@@ -44,89 +44,6 @@ export class WorkflowStoreError extends Error {
   }
 }
 
-type ObsoleteWorkflowRestartSeed = {
-  schemaVersion: number
-  runId: string
-  projectId: string
-  ownerId: string
-  confirmedBriefDigest: string
-  confirmedBriefContext: string
-}
-
-function requiredSnapshotString(
-  value: Record<string, unknown>,
-  key: keyof ObsoleteWorkflowRestartSeed,
-): string {
-  const candidate = value[key]
-  if (typeof candidate !== 'string' || !candidate.trim())
-    throw new WorkflowStoreError(
-      `obsolete workflow snapshot is missing ${key}`,
-      'invalid',
-    )
-  return candidate
-}
-
-export async function readObsoleteWorkflowRestartSeed(
-  workspacePath: string,
-  ownerId: string,
-): Promise<ObsoleteWorkflowRestartSeed> {
-  const snapshotPath = paths(workspacePath).snapshot
-  let snapshotText: string
-  try {
-    snapshotText = await readFile(snapshotPath, 'utf8')
-  } catch (error) {
-    throw storageReadError(snapshotPath, error)
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(snapshotText) as unknown
-  } catch (error) {
-    throw new WorkflowStoreError(
-      `workflow snapshot JSON is invalid at ${snapshotPath}: ${error instanceof Error ? error.message : String(error)}`,
-      'invalid',
-    )
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new WorkflowStoreError('workflow snapshot root is invalid', 'invalid')
-  const record = value as Record<string, unknown>
-  const schemaVersion = record.schemaVersion
-  if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion))
-    throw new WorkflowStoreError(
-      'workflow snapshot schema version is invalid',
-      'invalid',
-    )
-  if (schemaVersion >= DELIVERY_RUN_SCHEMA_VERSION)
-    throw new WorkflowStoreError(
-      'current or newer workflow snapshots cannot be restarted as obsolete state',
-      'conflict',
-    )
-  const seed = {
-    schemaVersion: schemaVersion as number,
-    runId: requiredSnapshotString(record, 'runId'),
-    projectId: requiredSnapshotString(record, 'projectId'),
-    ownerId: requiredSnapshotString(record, 'ownerId'),
-    confirmedBriefDigest: requiredSnapshotString(
-      record,
-      'confirmedBriefDigest',
-    ),
-    confirmedBriefContext: requiredSnapshotString(
-      record,
-      'confirmedBriefContext',
-    ),
-  }
-  if (seed.ownerId !== ownerId)
-    throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
-  const digest = createHash('sha256')
-    .update(seed.confirmedBriefContext)
-    .digest('hex')
-  if (digest !== seed.confirmedBriefDigest)
-    throw new WorkflowStoreError(
-      'obsolete workflow confirmed brief digest is invalid',
-      'invalid',
-    )
-  return seed
-}
-
 function now(): string {
   return new Date().toISOString()
 }
@@ -294,6 +211,7 @@ export function createInitialDeliveryRun(input: {
       repairPasses: { foundation: 0, checklist: 0, resource: 0 },
     },
     foundationDraftState: { completedPaths: [] },
+    resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     createdAt: timestamp,
     updatedAt: timestamp,
   }
@@ -542,29 +460,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return enqueueMutation(filePaths.snapshot, () => commitUnlocked(run, event))
   }
 
-  async function replaceObsolete(
-    run: DeliveryRun,
-    expectedObsoleteRunId: string,
-    event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
-      Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
-  ): Promise<DeliveryRun> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      const seed = await readObsoleteWorkflowRestartSeed(workspacePath, ownerId)
-      if (
-        seed.runId !== expectedObsoleteRunId ||
-        seed.projectId !== run.projectId ||
-        seed.ownerId !== run.ownerId ||
-        seed.confirmedBriefDigest !== run.confirmedBriefDigest ||
-        seed.confirmedBriefContext !== run.confirmedBriefContext
-      )
-        throw new WorkflowStoreError(
-          'obsolete workflow changed before restart',
-          'conflict',
-        )
-      return persistCommitUnlocked(run, event)
-    })
-  }
-
   async function readEvents(afterEventId?: string): Promise<WorkflowEvent[]> {
     const records = await readEventsUnlocked()
     if (!afterEventId) return records
@@ -791,7 +686,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     load,
     save,
     commit,
-    replaceObsolete,
     appendEvent,
     readEvents,
     lock,

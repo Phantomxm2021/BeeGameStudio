@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { parse as parseYaml } from 'yaml'
 import { resolveWorkspaceRelativePath } from './revision'
 import { auditAssetContract } from '../asset-contract-audit'
+import { readBeeGameAssetManifest } from '../asset-contracts'
 import {
   buildSystemDeliveryContract,
   SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
@@ -11,6 +12,7 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DOCUMENT_REVIEW_OWNER_BY_CHECK_ID,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
@@ -246,7 +248,9 @@ export function requiredDocumentReviewCheckIds(
 ): DocumentReviewCheckId[] {
   return scope === 'foundation'
     ? [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS]
-    : [...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS]
+    : scope === 'checklist'
+      ? [...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS]
+      : [...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS]
 }
 
 function reviewResourceProjection(value: unknown): unknown {
@@ -269,9 +273,10 @@ function reviewResourceProjection(value: unknown): unknown {
   )
 }
 
-function manifestProjection(content: string): string {
-  const parsed = JSON.parse(content) as Record<string, unknown>
-  const manifestDigest = sha256(content)
+function manifestProjection(
+  parsed: Awaited<ReturnType<typeof readBeeGameAssetManifest>>,
+): string {
+  const manifestDigest = sha256(JSON.stringify(parsed))
   return `${JSON.stringify({
     manifestRevision: manifestDigest,
     manifestDigest,
@@ -293,7 +298,9 @@ export async function readDocumentReviewArtifacts(
   const paths =
     scope === 'foundation'
       ? CANONICAL_FOUNDATION_DOCUMENTS
-      : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
+      : scope === 'checklist'
+        ? CANONICAL_PROJECT_DOCUMENTS
+        : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
   const artifacts = await Promise.all(
     paths.map(async path => {
       const absolutePath = resolveWorkspaceRelativePath(workspacePath, path)
@@ -301,12 +308,15 @@ export async function readDocumentReviewArtifacts(
         throw new Error(
           `canonical review artifact is outside the workspace: ${path}`,
         )
-      const content = await readFile(absolutePath, 'utf8')
+      const content =
+        path === CANONICAL_ASSET_MANIFEST
+          ? ''
+          : await readFile(absolutePath, 'utf8')
       return {
         path,
         content:
           path === CANONICAL_ASSET_MANIFEST
-            ? manifestProjection(content)
+            ? manifestProjection(await readBeeGameAssetManifest(workspacePath))
             : content,
       }
     }),

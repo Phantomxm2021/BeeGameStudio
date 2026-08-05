@@ -199,7 +199,7 @@ export interface BeeGameProjectResourcePayload {
 
 export interface BeeGameAssetManifestPayload {
   contract_state?: 'missing' | 'ready'
-  version: 7
+  version: 8
   project_target?: {
     platform?: string
     runtime?: string
@@ -454,8 +454,6 @@ export const api = {
     beeGameAdapter.resumeWorkflow(projectId),
 
   retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
-
-  restartWorkflow: (projectId: string) => beeGameAdapter.restartWorkflow(projectId),
 
   requestProjectAction: (data: {
     project_id: string

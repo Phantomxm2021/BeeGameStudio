@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bee Game Studio — 视觉方向</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f4f2; color: #111; }
+    main { width: min(1440px, 100%); margin: 0 auto; padding: 56px 32px 80px; }
+    header { max-width: 760px; margin-bottom: 34px; }
+    .eyebrow { margin: 0 0 12px; color: #777; font-size: 12px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.055em; font-weight: 650; }
+    .intro { margin: 20px 0 0; color: #666; font-size: 17px; line-height: 1.55; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card { overflow: hidden; border: 2px solid transparent; border-radius: 28px; background: #fff; cursor: pointer; transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 18px 45px rgba(0,0,0,.08); }
+    .card.selected { border-color: #efb619; box-shadow: 0 0 0 4px rgba(239,182,25,.18); }
+    .stage { position: relative; min-height: 520px; padding: 24px; overflow: hidden; }
+    .meta { padding: 22px 24px 26px; border-top: 1px solid rgba(0,0,0,.08); }
+    .meta-line { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .meta h2 { margin: 0; font-size: 19px; letter-spacing: -.025em; }
+    .tag { color: #9b6a00; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .meta p { margin: 9px 0 0; color: #6b6b6b; font-size: 14px; line-height: 1.5; }
+    .a { background: #faf9f6; display: flex; flex-direction: column; justify-content: space-between; text-align: center; }
+    .mini-nav { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 650; }
+    .logo { display: inline-flex; align-items: center; gap: 7px; }
+    .dot { width: 13px; height: 13px; border-radius: 50%; background: #f4b915; box-shadow: inset -3px -2px 0 rgba(0,0,0,.1); }
+    .a-copy { position: relative; z-index: 2; margin-top: 60px; }
+    .a h3, .b h3, .c h3 { margin: 0; font-size: clamp(34px, 4vw, 52px); line-height: .96; letter-spacing: -.065em; font-weight: 640; }
+    .a h3 span { color: #c98c00; }
+    .a-copy p { margin: 18px auto 0; width: 80%; color: #747474; font-size: 13px; line-height: 1.5; }
+    .world { position: relative; width: 190px; height: 190px; margin: 30px auto -72px; border-radius: 50%; background: #f2b714; box-shadow: 0 38px 80px rgba(204,147,0,.32); }
+    .world::before { content: ""; position: absolute; inset: 32px 52px 56px 38px; background: #fff5ca; border-radius: 50% 45% 55% 42%; transform: rotate(-18deg); }
+    .world::after { content: ""; position: absolute; width: 64px; height: 10px; left: 62px; top: 92px; background: #191919; border-radius: 99px; box-shadow: 0 28px 0 #191919; transform: rotate(-8deg); }
+    .b { color: white; background: #090909; display: flex; flex-direction: column; justify-content: space-between; }
+    .b .mini-nav { color: rgba(255,255,255,.86); }
+    .b-copy { position: relative; z-index: 3; padding-top: 80px; }
+    .b h3 { font-size: clamp(38px, 4.3vw, 58px); }
+    .b-copy p { width: 78%; color: rgba(255,255,255,.55); font-size: 13px; line-height: 1.5; }
+    .portal { position: absolute; right: -80px; bottom: -20px; width: 350px; height: 350px; border-radius: 50%; border: 1px solid rgba(255,210,80,.5); box-shadow: inset 0 0 80px rgba(244,185,21,.08), 0 0 90px rgba(244,185,21,.12); }
+    .portal::before, .portal::after { content: ""; position: absolute; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); }
+    .portal::before { inset: 46px; }
+    .portal::after { inset: 92px; background: #e5a90a; box-shadow: 0 0 70px rgba(244,185,21,.48); }
+    .spark { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #ffd768; box-shadow: 60px -80px #ffd768, -70px 35px #ffd768, 22px 78px #fff; }
+    .s1 { right: 110px; bottom: 250px; }.s2 { right: 275px; bottom: 70px; transform: scale(.6); }
+    .c { color: #15120d; background: #e8dcc6; }
+    .c .mini-nav { position: relative; z-index: 4; }
+    .c-copy { position: relative; z-index: 4; padding-top: 58px; }
+    .c h3 { font-family: ui-serif, Georgia, serif; font-weight: 500; letter-spacing: -.055em; }
+    .c-copy p { width: 76%; font-size: 13px; line-height: 1.55; color: #655b4d; }
+    .paper { position: absolute; width: 215px; height: 280px; right: -18px; bottom: -15px; padding: 24px; transform: rotate(7deg); background: #fffef9; box-shadow: 0 20px 50px rgba(58,43,20,.17); }
+    .scribble { width: 125px; height: 95px; margin: 30px auto 0; border: 2px solid #2d2923; border-radius: 50% 45% 48% 43%; transform: rotate(-12deg); }
+    .scribble::before { content: ""; display: block; width: 50px; height: 50px; margin: 18px auto; border-radius: 8px 22px 8px 20px; background: #efb619; transform: rotate(24deg); }
+    .lines { margin-top: 30px; height: 34px; border-top: 1px solid #d5d0c6; border-bottom: 1px solid #d5d0c6; }
+    .bee-path { position: absolute; left: 55px; bottom: 72px; width: 160px; height: 105px; border-top: 2px dashed rgba(48,40,29,.36); border-radius: 50%; transform: rotate(-20deg); }
+    .bee-path::after { content: ""; position: absolute; right: -2px; top: -5px; width: 12px; height: 9px; border-radius: 50%; background: #191919; border: 4px solid #efb619; }
+    .hint { margin-top: 22px; color: #777; font-size: 13px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .stage { min-height: 430px; } main { padding: 32px 16px 60px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Bee Game Studio · Visual Direction</p>
+      <h1>哪一种，更像你想带到世界上的 Bee？</h1>
+      <p class="intro">三种方向都不谈参数，而是讲“一个念头终于成为可玩的世界”。点击卡片选择；推荐 A，它最克制，也最有发布会式的聚焦感。</p>
+    </header>
+    <section class="grid">
+      <article class="card" data-choice="a" onclick="toggleSelect(this)">
+        <div class="stage a">
+          <nav class="mini-nav"><span class="logo"><i class="dot"></i> Bee</span><span>中文⌄</span></nav>
+          <div class="a-copy">
+            <h3>你的想象，<br><span>终于可以玩了。</span></h3>
+            <p>不是学会更多工具。只是让那个一直住在你脑海里的世界，第一次回应你。</p>
+          </div>
+          <div class="world"></div>
+        </div>
+        <div class="meta"><div class="meta-line"><h2>A · 一颗世界</h2><span class="tag">推荐</span></div><p>明亮、纯净、标志性。用一个不断生长的“世界种子”贯穿全页。</p></div>
+      </article>
+      <article class="card" data-choice="b" onclick="toggleSelect(this)">
+        <div class="stage b">
+          <nav class="mini-nav"><span class="logo"><i class="dot"></i> Bee</span><span>中文⌄</span></nav>
+          <div class="b-copy"><h3>有些世界，<br>只差你开始。</h3><p>深色电影感，让访客像站在尚未开启的世界入口前。更神秘，也更具游戏气质。</p></div>
+          <div class="portal"></div><i class="spark s1"></i><i class="spark s2"></i>
+        </div>
+        <div class="meta"><div class="meta-line"><h2>B · 世界入口</h2><span class="tag">沉浸</span></div><p>深邃、戏剧化、期待感强。适合强化“即将到来”的悬念。</p></div>
+      </article>
+      <article class="card" data-choice="c" onclick="toggleSelect(this)">
+        <div class="stage c">
+          <nav class="mini-nav"><span class="logo"><i class="dot"></i> Bee</span><span>中文⌄</span></nav>
+          <div class="c-copy"><h3>从随手一画，<br>到一起游玩。</h3><p>更有人味、更像创作者的桌面。讲述念头从纸上站起来的过程。</p></div>
+          <div class="bee-path"></div><div class="paper"><div class="scribble"></div><div class="lines"></div></div>
+        </div>
+        <div class="meta"><div class="meta-line"><h2>C · 创作者手记</h2><span class="tag">温度</span></div><p>温暖、触感、亲近。更强调普通人也能开始的轻松感。</p></div>
+      </article>
+    </section>
+    <p class="hint">点击你偏好的卡片，然后回到终端告诉我选择与想调整的地方。</p>
+  </main>
+</body>
+</html>

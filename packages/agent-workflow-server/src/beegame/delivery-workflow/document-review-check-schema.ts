@@ -1,14 +1,15 @@
 import { z } from 'zod/v4'
 import {
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type DocumentReviewCheck,
   type DocumentReviewCriterionId,
   type GameDesignDocumentReviewCheckId,
 } from './types'
 
-const criterionIds = Object.values(GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA)
-  .flat() as DocumentReviewCriterionId[]
+const criterionIds = Object.values(
+  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
+).flat() as DocumentReviewCriterionId[]
 
 const evidenceSchema = z
   .object({
@@ -29,7 +30,7 @@ const assessmentSchema = z
 
 export const documentReviewCheckSchema: z.ZodType<DocumentReviewCheck> = z
   .object({
-    id: z.enum(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS),
+    id: z.enum(DOCUMENT_REVIEW_CHECK_IDS),
     status: z.enum(['pass', 'block']),
     conclusion: z.string().trim().min(1),
     evidence: z.array(evidenceSchema).min(1),
@@ -38,9 +39,10 @@ export const documentReviewCheckSchema: z.ZodType<DocumentReviewCheck> = z
   })
   .strict()
   .superRefine((check, context) => {
-    const criteria = GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
-      check.id as GameDesignDocumentReviewCheckId
-    ]
+    const criteria =
+      GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA[
+        check.id as GameDesignDocumentReviewCheckId
+      ]
     if (!criteria) {
       if (check.assessments.length > 0)
         context.addIssue({

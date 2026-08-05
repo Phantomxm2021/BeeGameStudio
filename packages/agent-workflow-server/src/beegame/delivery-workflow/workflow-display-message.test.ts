@@ -12,7 +12,7 @@ describe('sanitizeWorkflowDisplayMessage', () => {
     expect(
       sanitizeWorkflowDisplayMessage(
         JSON.stringify({
-          workerType: 'resource-preparer',
+          workerType: 'resource-curator',
           status: 'completed',
           revision: 'resource-revision',
         }),

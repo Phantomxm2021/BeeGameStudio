@@ -48,7 +48,7 @@ export interface WorkflowCardTask {
   failureReason?: string
 }
 
-export type WorkflowCardAction = 'resume' | 'retry' | 'restart'
+export type WorkflowCardAction = 'resume' | 'retry'
 
 export interface WorkflowCardPayload {
   runId: string

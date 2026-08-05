@@ -140,15 +140,6 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
     )
   }
   if (
-    run.resourcePreparationAttempt !== undefined &&
-    run.phase !== 'RESOURCE_PREPARATION'
-  ) {
-    throw new WorkflowTransitionError(
-      'invariant_violation',
-      'resource preparation retry state is valid only in Resource Production',
-    )
-  }
-  if (
     run.activeTaskId &&
     !run.tasks.some(task => task.id === run.activeTaskId)
   ) {
@@ -218,6 +209,17 @@ function enterResourcePreparation(
     repairPasses?: DeliveryRun['documentReviewState']['repairPasses']
   } = {},
 ): DeliveryRun {
+  if (
+    run.documentReviewState.checklistApproval?.scope !== 'checklist' ||
+    run.documentReviewState.checklistApproval.revision !==
+      run.revision.document ||
+    run.documentReviewState.checklistApproval.checks.some(
+      check => check.status !== 'pass',
+    )
+  )
+    throw new Error(
+      'resource preparation requires the frozen checklist approval',
+    )
   const activeCycle = run.documentReviewState.activeCycle
   const preserveReviewCycle = Boolean(
     activeCycle?.acceptedSemanticResult &&
@@ -238,7 +240,12 @@ function enterResourcePreparation(
     },
     tasks: [],
     evidence: {},
-    resourcePreparationAttempt: undefined,
+    resourceProductionState: preserveReviewCycle
+      ? {
+          ...run.resourceProductionState,
+          currentTask: 'RESOURCE_PLAN',
+        }
+      : { currentTask: 'RESOURCE_PLAN' },
     documentReviewState: {
       ...run.documentReviewState,
       comprehensiveApproval: undefined,
@@ -277,10 +284,13 @@ export function transitionDeliveryRun(
         ...withEvidence(run, 'resourcePreparation', event.evidence),
         revision: { ...run.revision, resource: event.resourceRevision },
         phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_REVIEW',
+        documentStep: 'COMPREHENSIVE_REVIEW',
         status: 'running',
         blockedReason: undefined,
-        resourcePreparationAttempt: undefined,
+        resourceProductionState: {
+          ...run.resourceProductionState,
+          currentTask: 'RESOURCE_GATE',
+        },
       }
       break
     case 'resource_preparation_needs_action':

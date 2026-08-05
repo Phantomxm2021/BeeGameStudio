@@ -279,9 +279,7 @@ const normalizeWorkflowDisplay = (
     activeSince:
       trimString(source.activeSince ?? source.active_since) || undefined,
     nextAction:
-      nextActionValue === 'resume' ||
-      nextActionValue === 'retry' ||
-      nextActionValue === 'restart'
+      nextActionValue === 'resume' || nextActionValue === 'retry'
         ? nextActionValue
         : undefined,
     block:

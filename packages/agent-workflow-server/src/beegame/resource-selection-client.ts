@@ -1,6 +1,6 @@
 import type {
   ResourceCatalogElement,
-  ResourceCatalogFilter,
+  ResourceCatalogPack,
   ResourceCatalogPage,
   ResourceCatalogRequest,
 } from '@bee-game-studio/beegame-resource-core'
@@ -41,15 +41,11 @@ export type ResourceSelectionResult = {
   relations?: ResourceSelectionElementRelation[]
   dependencies?: ResourceSelectionDependencyResult[]
 }
-export type ResourceCatalogFilterInput = ResourceCatalogFilter
 export type ResourceCatalogInput = ResourceCatalogRequest
 export type ResourceCatalogElementResult = ResourceCatalogElement
 export type ResourceCatalogElementPage =
   ResourceCatalogPage<ResourceCatalogElement>
-export type ResourceCatalogBrowsePage = ResourceCatalogElementPage & {
-  catalogRevision: string
-  normalizedFilters: ResourceCatalogFilterInput
-}
+export type ResourceCatalogPackPage = ResourceCatalogPage<ResourceCatalogPack>
 export type ResourceSelectionInput = {
   resourceId: string
   packId: string
@@ -83,31 +79,33 @@ export function createResourceSelectionClient(options: {
     ? Math.max(0, Math.trunc(options.transportRetryDelayMs!))
     : 100
   return {
-    async browseCatalog(
+    async listPacks(
       input: ResourceCatalogInput,
-    ): Promise<ResourceCatalogBrowsePage> {
+    ): Promise<ResourceCatalogPackPage> {
+      const response = await servicePost('/api/resource-catalog/packs', input)
+      const body = await response.json().catch(() => undefined)
+      if (!response.ok)
+        throw new Error(
+          errorMessage(body) ||
+            `Resource Pack catalog browse failed (${response.status})`,
+        )
+      return parseCatalogPage(body, parseCatalogPack)
+    },
+    async inspectPack(
+      packId: string,
+      input: ResourceCatalogInput,
+    ): Promise<ResourceCatalogElementPage> {
       const response = await servicePost(
-        '/api/resource-catalog/elements',
+        `/api/resource-catalog/packs/${encodeURIComponent(packId)}/elements`,
         input,
       )
       const body = await response.json().catch(() => undefined)
       if (!response.ok)
         throw new Error(
           errorMessage(body) ||
-            `Resource catalog browse failed (${response.status})`,
+            `Resource Pack inspection failed (${response.status})`,
         )
-      if (
-        !isRecord(body) ||
-        typeof body.catalogRevision !== 'string' ||
-        body.catalogRevision.trim().length !== 64 ||
-        !isRecord(body.normalizedFilters)
-      )
-        throw new Error('Resource catalog snapshot is invalid')
-      return {
-        ...parseCatalogPage(body, parseCatalogElement),
-        catalogRevision: body.catalogRevision,
-        normalizedFilters: body.normalizedFilters as ResourceCatalogFilterInput,
-      }
+      return parseCatalogPage(body, parseCatalogElement)
     },
     async resolveResources(
       selections: ResourceSelectionInput[],
@@ -162,6 +160,35 @@ export function createResourceSelectionClient(options: {
       'x-beegame-resource-service-token': options.serviceToken,
     }
   }
+}
+
+function parseCatalogPack(value: unknown): ResourceCatalogPack {
+  if (!isRecord(value)) throw new Error('Resource catalog Pack is invalid')
+  for (const key of [
+    'packId',
+    'packVersion',
+    'packName',
+    'dimension',
+    'primaryCategory',
+  ] as const) {
+    if (typeof value[key] !== 'string' || !value[key].trim())
+      throw new Error('Resource catalog Pack is invalid')
+  }
+  for (const key of [
+    'styles',
+    'gameTypes',
+    'tags',
+    'usageTags',
+    'assetKinds',
+    'capabilities',
+    'formats',
+  ] as const) {
+    if (!Array.isArray(value[key]))
+      throw new Error('Resource catalog Pack is invalid')
+  }
+  if (typeof value.readyElementCount !== 'number')
+    throw new Error('Resource catalog Pack is invalid')
+  return value as unknown as ResourceCatalogPack
 }
 
 function parseCatalogPage<T>(
@@ -345,7 +372,7 @@ function primitiveRecord(
   if (!isPrimitiveRecord(value)) return undefined
   const entries = Object.entries(value).filter(
     (entry): entry is [string, string | number | boolean] => {
-    const item = entry[1]
+      const item = entry[1]
       return (
         typeof item === 'string' ||
         typeof item === 'boolean' ||

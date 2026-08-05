@@ -901,7 +901,7 @@
     },
     "assets": {
       "title": "资源合同",
-      "empty": "还没有资源合同。下一次构建时，BeeGame 会要求 agent 生成 assets/asset-manifest.json。",
+      "empty": "还没有资源合同。资源生产阶段会在下一次构建时创建。",
       "loading": "正在读取资源合同...",
       "upload": "添加资源",
       "uploading": "上传中...",

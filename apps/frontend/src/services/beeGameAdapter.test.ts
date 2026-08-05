@@ -3234,7 +3234,7 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/projects/project_runtime/assets' && !init?.method) {
         return jsonResponse({
-          version: 7,
+          version: 8,
           requirements: [{ id: 'title_logo', name: 'Title logo', required: true }],
           resources: [],
           });
@@ -3245,7 +3245,7 @@ describe('beeGameAdapter prompt rules', () => {
           path: 'public/assets/title-logo.png',
             resource: { id: 'title_logo' },
           manifest: {
-            version: 7,
+            version: 8,
             requirements: [{ id: 'title_logo', required: true }],
             resources: [],
           },
@@ -3277,6 +3277,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(deployments).toEqual([]);
     expect(deployment.url).toBe('/deployments/deploy_project/');
     expect(rollback.url).toBe('/deployments/deploy_rollback/');
+    expect(assets.version).toBe(8);
     expect(assets.requirements[0]?.id).toBe('title_logo');
     expect(upload.path).toBe('public/assets/title-logo.png');
   });

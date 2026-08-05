@@ -14,7 +14,8 @@ Document Reviewer 在实现前发现跨文档、资源与内容描述之间的�
   -> 按 repair graph 依赖串行修订 owner 文档
   -> Foundation Closure Review
   -> Gameplay Checklist
-  -> Resource Production（Manifest + 资源文件 + JSON/YAML 内容描述）
+  -> Checklist Initial Review / Repair / Closure（批准后封存）
+  -> Resource Production（Manifest modules + 资源文件 + JSON/YAML 内容描述）
   -> Comprehensive Initial Review
   -> 按 owner 批量修订
   -> Comprehensive Closure Review
@@ -22,7 +23,7 @@ Document Reviewer 在实现前发现跨文档、资源与内容描述之间的�
   -> Implementation
 ```
 
-Foundation Review 不得要求尚未创建的 Checklist、Manifest、资源或运行证据。Comprehensive Review 可以审计当前 Manifest 与 `assets/content/**/*.json|yaml` 的语义适配，但不能要求尚未实现的代码、构建或运行证据。
+Foundation Review 不得要求尚未创建的 Checklist、Manifest、资源或运行证据。Checklist Review 只审计已生成 Checklist 对已批准 Foundation 的追踪、可观察性与内部结构，不能要求尚未创建的资源或实现。Comprehensive Review 可以审计当前模块化 Manifest 与 `assets/content/**/*.json|yaml` 的语义适配，但不能要求尚未实现的代码、构建或运行证据，也不能重新审计或修改已经封存的 Checklist。
 
 ## 3. 固定审计集合
 
@@ -41,9 +42,14 @@ Foundation Review 不得要求尚未创建的 Checklist、Manifest、资源或�
 - `ui_audio_consistency`
 - `acceptance_observability`
 
-### 3.2 Comprehensive additions
+### 3.2 Checklist 独立检查
 
 - `checklist_traceability`
+
+该 check 在 Resource Preparation 前形成独立 Cycle。其 finding owner 固定为 `checklist`，只允许在该 Cycle 内修复 Checklist；Closure 通过后保存 Checklist approval revision 并永久退出本 run 的 mutation matrix。
+
+### 3.3 Comprehensive additions
+
 - `resource_semantic_fitness`
 - `content_structure_fitness`
 - `resource_content_consistency`
@@ -55,7 +61,7 @@ Comprehensive 的固定集合不是替换 Foundation，而是严格并集：
 COMPREHENSIVE_CHECKS = FOUNDATION_CHECKS + COMPREHENSIVE_ADDITIONS
 ```
 
-因此 Foundation 批准集合固定为 12 项，Comprehensive 最终批准集合固定为 17 项。Comprehensive 的 17 项 ledger 可以由“当前仍新鲜的 12 项 Foundation approval 前缀 + 本轮新执行的 5 项 additions”构成；复用是同一证据合同下的增量批准，不是删减 check。不得重命名、替换、拆分或按案例新增顶层 check；新发现的审计规则必须归入已有 check 的职责。
+因此 Foundation 批准集合固定为 12 项，Checklist approval 固定为 1 项，Comprehensive 最终批准集合固定为 16 项。Comprehensive 的 16 项 ledger 可以由“当前仍新鲜的 12 项 Foundation approval 前缀 + 本轮新执行的 4 项 resource additions”构成；冻结 Checklist 的 approval 是进入 Resource Preparation 的前置证据，不复制进 Comprehensive ledger。不得重命名、替换、拆分或按案例新增顶层 check；新发现的审计规则必须归入已有 check 的职责。
 
 ### 3.3 Check 职责边界
 
@@ -121,7 +127,7 @@ Reviewer 只接收服务端生成的当前 revision 投影。传输顺序必须�
 - 当前唯一 active packet、其有序 checks 及固定 criteria；
 - 五项结构化设计 check 的固定 criterion 与结构化推导结果；
 - prior findings、当前 repair batch 和 server diff；
-- Comprehensive 阶段的 canonical v7 Manifest；
+- Comprehensive 阶段的 canonical modular v8 Manifest；
 - 从内容文件安全解析出的 `schema`、`id`、`kind`、`fulfills`、`resources` 与文件路径；
 - 从同一批 frozen artifacts 确定性派生的稳定 `referenceId` 索引：wire view 用一次性 artifact dictionary 保存路径，各 reference 只携带 artifact ID 与 exact anchor；服务端仍维护 `referenceId -> canonical path + exact anchor` 唯一映射。Reviewer 的 evidence 与 subject 只提交 `referenceId`，不得手抄路径或标题；
 - 当前 Catalog provenance 和确定性资源门禁结果。
@@ -147,7 +153,7 @@ Reviewer 不提交整轮 verdict。最后一个 required check 被接受后，�
 System Delivery Contract 由服务端当前常量结构化生成，是只读 request view，不写入项目、不由 Agent 修改，也不允许项目文档重新定义。至少包含：
 
 - 唯一 Manifest：`assets/asset-manifest.json`；
-- Manifest 版本：canonical v7；
+- Manifest 版本：canonical modular v8；
 - runtime asset root：`assets/runtime`；
 - content root：`assets/content`；
 - generated adapter root：`assets/generated`；
@@ -200,7 +206,7 @@ Requirement 来自批准文档，不是 Catalog query 或 slot。Reviewer 判断
 - 同一事实不得双写；
 - 一个内容文件可以覆盖多个 requirement；
 - 不要求每个 requirement 生成一个文件；
-- 不接受 `cmp-*`、assembly status、member binding 或第二资源身份。
+- 不接受中间组装身份、assembly status、member binding 或第二资源身份。
 
 ### 6.4 引擎中立
 
@@ -219,7 +225,7 @@ Reviewer 审计可观察需求、资源引用与内容结构，不得要求 Pref
 5. 完整 repair plan 被原子接受后，服务端按 graph 拓扑序派生串行 document repair cursor；每个 Foundation Owner task 只通过一次 `CommitCanonicalDocument` 提交一份 canonical 文档并形成 durable receipt/checkpoint。完整 batch、finding ledger、repair plan 和 Closure 均只有一个，不得把 owner task 建成第二队列或并行 lane。
 6. Closure Review 的 required checks 由服务端从当前 target 的固定候选矩阵、accepted finding 所属 check、server diff 的 changed paths 与 check artifact dependency 确定性求交派生；候选 check 的固定 finding owner 必须等于当前 remediation target，禁止派发一个能够发现问题却被 owner 合同禁止提交 finding 的检查。至少包含每个待关闭 finding 的原 check，并只加入读取了已修改 artifact 的同 owner 候选 check。不得固定重跑整个 Foundation/Comprehensive 矩阵，不得由 Agent 自选影响范围，也不得依赖关键词、正则或自然语言相似度。Closure 复核 prior findings、服务端选中的受影响 checks 及其精确 artifact dependency；在这些 checks 内发现 Initial Review 遗漏但当前仍真实存在的缺陷时，必须提交新的稳定 finding ID，即使其 subject 位于未修改 artifact。只有能够证明由 server diff 直接引入的缺陷才声明 `regressionPaths`，且路径必须来自 changed paths。
 7. Closure packet 对单一 finding ledger 执行替换语义：`cycle.findings` 保留该 Cycle 已接受的完整 finding 身份历史，不删除已关闭条目；当前 open 集合只由最新 `cycle.checks[].findingIds` 确定性派生，不增加 status 字段、墓碑列表或第二 ledger。某个 prior finding 未再次提交表示其原 check 的最新结论不再引用该 ID，因此已关闭；再次提交同一 ID 表示同一问题仍未关闭，并且必须保持原 `checkId`、owner 与 `requiredOutcome` 完全不变，只更新当前证据、subjects、observation 和 blocking impact；不同问题必须使用在完整 ledger 中从未出现的新 ID。原生 terminal 与最终持久化必须调用同一校验函数，不得先接受再以“ID already accepted”拒绝。已经关闭的 ID 不得在后续 packet 中代表另一个问题。完整 identity ledger 只供服务端校验；Reviewer request 只投影与当前 packet artifact dependency 相交的 open findings。
-8. 上游变更确定性失效受影响的下游 approval；Foundation 修订后重新生成 Checklist，Checklist 修订后重新进入唯一 Resource Production，随后由新的 Comprehensive Cycle 验证当前资源与实现就绪性。不得用跨 owner Closure check 强行复用基于旧上游 artifact 的结果，也不重新开放无关全文审计。
+8. 上游变更确定性失效受影响的下游 approval。Foundation 修订发生在资源前时重新生成并审计 Checklist；Checklist 只允许在资源前自己的 Cycle 内修订。进入 Resource Production 后 Foundation 与 Checklist 均冻结，Comprehensive 只能产生 resource finding。库存 checkpoint 只因 Manifest plan、resource record 或本地资源文件变化而失效；Checklist 的无关摘要变化不得触发库存重跑。不得用跨 owner Closure check 强行复用基于旧上游 artifact 的结果，也不重新开放无关全文审计。
 9. 自动修订不设置次数上限；每轮只处理当前 accepted finding，并持续闭环到 Closure 通过、出现明确基础设施错误或用户停止。
 
 wire view 可以把 artifact 正文渲染为清晰分隔块、把 Confirmed Brief 保持为结构化值并省略模型无需回传的重复字段，但不得发明压缩语义或第二解析协议。性能验收必须按 packet 记录 check IDs、dispatch duration、input tokens、cache-read tokens、completion tokens、artifact count、artifact bytes、reference count、prior finding count 与 rejected submission count；这些度量只进入既有 Workflow event/usage 观测，不进入审计事实或 finding ledger。本方案不授权并行 active packet 或多 Reviewer。
@@ -244,7 +250,7 @@ Workflow Card 的阶段、task 与 icon 必须来自 durable review 状态：
 - failed / needs_action：错误 icon 与真实错误 popover，计时停止；
 - retry / continue 恢复同一 durable dispatch，不重置累计运行时长。
 
-Card 标题旁的主进度显示服务端确定性派生的 delivery progress stage，而不是持久化 worker 类型或 task 完成数。可见阶段固定为 11 项：`Brief -> Foundation Drafting -> Foundation Initial Review -> Foundation Document Convergence -> Resource Preparation -> Comprehensive Convergence -> Atomic Task Planning -> Implementation -> Implementation Audit -> Acceptance -> Delivery`。Foundation repair、Foundation Closure 与首次 Checklist drafting 属于第 4 阶段；资源生产属于第 5 阶段；资源之后的 Comprehensive Initial Review 及其 foundation、checklist、resource remediation/Closure 全部属于第 6 阶段。它们可以复用既有 durable `DOCUMENT_DRAFTING`、`DOCUMENT_REVIEW`、`RESOURCE_PREPARATION` 执行路由，但界面不得因 worker 路由复用而阶段倒退。该投影只由 durable phase、document step、Cycle `originScope` 与 active target 派生，不落盘、不成为第二状态。task 完成数仅在 task 列表区域显示为 `任务 completed / total`。前端不得复制阶段顺序或用当前 task 数伪装阶段进度。
+Card 标题旁的主进度显示服务端确定性派生的 delivery progress stage，而不是持久化 worker 类型或 task 完成数。可见阶段固定为 11 项：`Brief -> Foundation Drafting -> Foundation Initial Review -> Foundation Document Convergence -> Resource Preparation -> Comprehensive Convergence -> Atomic Task Planning -> Implementation -> Implementation Audit -> Acceptance -> Delivery`。Foundation repair、Foundation Closure、Checklist drafting 及其独立 Initial Review/Repair/Closure 属于第 4 阶段；资源生产属于第 5 阶段；资源之后的 Comprehensive Initial Review 及其 resource remediation/Closure 属于第 6 阶段。它们可以复用既有 durable `DOCUMENT_DRAFTING`、`DOCUMENT_REVIEW`、`RESOURCE_PREPARATION` 执行路由，但界面不得因 worker 路由复用而阶段倒退。该投影只由 durable phase、document step、Cycle `originScope` 与 active target 派生，不落盘、不成为第二状态。task 完成数仅在 task 列表区域显示为 `任务 completed / total`。前端不得复制阶段顺序或用当前 task 数伪装阶段进度。
 
 第 4、6 阶段必须同时投影唯一的收敛子阶段，不允许只显示底层 Worker 路由。子阶段固定为 `INITIAL_REVIEW -> REPAIR_PLANNING -> REPAIRING -> CLOSURE_REVIEW -> CHECKLIST_DRAFTING` 的适用子集；`repairPasses[activeTarget]` 是唯一轮次来源。Card 必须显示类似“第 2 轮 · Closure Review”的业务位置。每个子阶段的 task 分母只描述当前子阶段，切换子阶段时必须同时改变标题与任务语义，不能把不同分母伪装成同一条累计进度。`DOCUMENT_DRAFTING`、`DOCUMENT_REVIEW` 以及 Worker 类型只能出现在执行详情中，不能决定业务标题。
 
@@ -256,9 +262,9 @@ Cycle 的 `acceptedSemanticResult` 只表示当前 required check packet 集合�
 
 ## 9. 删除清单
 
-- Composition Review 和 Composition Assembly 前置条件；
-- Manifest `compositions` 投影；
-- `cmp-*` subject、finding 和 task；
+- 中间组装审计与装配前置条件；
+- Manifest 中间组装投影；
+- 中间组装 subject、finding 和 task；
 - open-ended re-review loop；
 - keyword/regex owner routing；
 - reviewer prose parser；
@@ -277,7 +283,7 @@ Cycle 的 `acceptedSemanticResult` 只表示当前 required check packet 集合�
 3. placeholder 不会因库内无匹配而停止项目；
 4. invalid check submission 不会变成业务 finding，也不会抹除已接受 check；
 5. 修订次数不构成停止条件；重启和继续保留同一 Cycle、finding ledger、累计时间与修订计数；
-6. 没有 Composition phase、`cmp-*`、双轨或替代 reader；
+6. 没有中间组装 phase、身份、双轨或替代 reader；
 7. 系统 Chrome 能打开交付项目并按 Checklist 完成真实玩家路径。
 8. 至少使用结构不同的全新项目证明 Reviewer 能阻止无意义选择、支配策略、经济死锁/套利、数值无解、难度断层、空间不支持和场景状态缺口，而不是只发现格式或跨文档冲突。
 9. 任一时刻只有一个 active packet；重启后从第一个未完成 packet 恢复；12 项全部进入同一 ledger 前不产生 verdict、不进入修订。

@@ -468,7 +468,9 @@ function artifactDigestChanges(
 function expectedReviewPaths(scope: DocumentReviewScope): string[] {
   return scope === 'foundation'
     ? [...CANONICAL_FOUNDATION_DOCUMENTS]
-    : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
+    : scope === 'checklist'
+      ? [...CANONICAL_PROJECT_DOCUMENTS]
+      : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
 }
 
 function normalizedReviewFindings(
@@ -826,7 +828,11 @@ async function beginDocumentReviewClosure(input: {
   if (!previous || !previous.acceptedSemanticResult || !target)
     throw new Error('document repair has no accepted finding batch')
   const scope: DocumentReviewScope =
-    target === 'foundation' ? 'foundation' : 'complete'
+    target === 'foundation'
+      ? 'foundation'
+      : target === 'checklist'
+        ? 'checklist'
+        : 'complete'
   const artifacts = await readDocumentReviewArtifacts(
     input.workspacePath,
     scope,
@@ -897,7 +903,11 @@ async function beginDocumentReviewClosure(input: {
     ...input.run,
     phase: 'DOCUMENT_REVIEW',
     documentStep:
-      target === 'foundation' ? 'FOUNDATION_REVIEW' : 'CHECKLIST_REVIEW',
+      target === 'foundation'
+        ? 'FOUNDATION_REVIEW'
+        : target === 'checklist'
+          ? 'CHECKLIST_REVIEW'
+          : 'COMPREHENSIVE_REVIEW',
     documentReviewState: {
       ...input.run.documentReviewState,
       activeCycle,
@@ -1250,14 +1260,10 @@ export async function completeDocumentDraft(input: {
   if (issues.length) return updated
 
   if (remediationFindings.length) {
-    const currentReviewRevision =
-      target === 'foundation'
-        ? documentRevision
-        : await computeResourceRevision(input.workspacePath, documentRevision)
+    const currentReviewRevision = documentRevision
     if (target === 'checklist')
       updated = {
         ...updated,
-        revision: { ...updated.revision, resource: currentReviewRevision },
         checklistRemediation: undefined,
       }
     return beginDocumentReviewClosure({
@@ -1268,10 +1274,16 @@ export async function completeDocumentDraft(input: {
   }
 
   return documentSet === 'checklist'
-    ? transitionDeliveryRun(
-        { ...updated, checklistRemediation: undefined },
-        { type: 'resource_preparation_required' },
-      )
+    ? {
+        ...updated,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_REVIEW',
+        checklistRemediation: undefined,
+        documentReviewState: {
+          ...updated.documentReviewState,
+          activeCycle: undefined,
+        },
+      }
     : {
         ...updated,
         phase: 'DOCUMENT_REVIEW',
@@ -1575,11 +1587,11 @@ export async function reconcileDocumentReview(input: {
     throw new Error('canonical artifacts changed during document review')
   const readiness = input.audit
     ? input.audit(input.workspacePath, {
-        includeChecklist: scope === 'complete',
+        includeChecklist: scope !== 'foundation',
         includeAssetManifest: scope === 'complete',
       })
     : await defaultAudit(input.workspacePath, {
-        includeChecklist: scope === 'complete',
+        includeChecklist: scope !== 'foundation',
         includeAssetManifest: scope === 'complete',
       })
   if (!readiness.valid)
@@ -1602,7 +1614,7 @@ export async function reconcileDocumentReview(input: {
   )
     throw new Error('document review does not cover the frozen artifact set')
   const expectedChecklistIds =
-    scope === 'complete'
+    scope !== 'foundation'
       ? await readAcceptanceChecklistIds(input.workspacePath)
       : []
   if (!exactStringSet(input.terminal.checklistIds, expectedChecklistIds))
@@ -1729,30 +1741,44 @@ export async function reconcileDocumentReview(input: {
       evidencePath: input.terminal.evidencePath,
       approvedAt: new Date().toISOString(),
     }
-    return scope === 'foundation'
-      ? {
+    if (scope === 'foundation')
+      return {
+        ...base,
+        status: 'running',
+        documentStep: 'CHECKLIST_DRAFTING',
+        blockedReason: undefined,
+        documentReviewState: {
+          ...base.documentReviewState,
+          foundationApproval: approval,
+          activeCycle: undefined,
+        },
+      }
+    if (scope === 'checklist')
+      return transitionDeliveryRun(
+        {
           ...base,
           status: 'running',
-          documentStep: 'CHECKLIST_DRAFTING',
           blockedReason: undefined,
           documentReviewState: {
             ...base.documentReviewState,
-            foundationApproval: approval,
+            checklistApproval: approval,
             activeCycle: undefined,
           },
-        }
-      : {
-          ...base,
-          phase: 'ATOMIC_TASK_PLANNING',
-          documentStep: undefined,
-          status: 'running',
-          blockedReason: undefined,
-          documentReviewState: {
-            ...base.documentReviewState,
-            comprehensiveApproval: approval,
-            activeCycle: undefined,
-          },
-        }
+        },
+        { type: 'resource_preparation_required' },
+      )
+    return {
+      ...base,
+      phase: 'ATOMIC_TASK_PLANNING',
+      documentStep: undefined,
+      status: 'running',
+      blockedReason: undefined,
+      documentReviewState: {
+        ...base.documentReviewState,
+        comprehensiveApproval: approval,
+        activeCycle: undefined,
+      },
+    }
   }
 
   const target = cycle.activeTarget!
@@ -1846,11 +1872,6 @@ export async function reconcileDocumentReview(input: {
     )
   }
 
-  if (cycle.originScope === 'complete' && target === 'checklist')
-    return transitionDeliveryRun(base, {
-      type: 'resource_preparation_required',
-    })
-
   const approvalScope = cycle.originScope
   const approvalArtifacts = await readDocumentReviewArtifacts(
     input.workspacePath,
@@ -1877,28 +1898,42 @@ export async function reconcileDocumentReview(input: {
     evidencePath: input.terminal.evidencePath,
     approvedAt: new Date().toISOString(),
   }
-  return approvalScope === 'foundation'
-    ? {
+  if (approvalScope === 'foundation')
+    return {
+      ...base,
+      status: 'running',
+      documentStep: 'CHECKLIST_DRAFTING',
+      blockedReason: undefined,
+      documentReviewState: {
+        ...base.documentReviewState,
+        foundationApproval: approval,
+        activeCycle: undefined,
+      },
+    }
+  if (approvalScope === 'checklist')
+    return transitionDeliveryRun(
+      {
         ...base,
         status: 'running',
-        documentStep: 'CHECKLIST_DRAFTING',
         blockedReason: undefined,
         documentReviewState: {
           ...base.documentReviewState,
-          foundationApproval: approval,
+          checklistApproval: approval,
           activeCycle: undefined,
         },
-      }
-    : {
-        ...base,
-        phase: 'ATOMIC_TASK_PLANNING',
-        documentStep: undefined,
-        status: 'running',
-        blockedReason: undefined,
-        documentReviewState: {
-          ...base.documentReviewState,
-          comprehensiveApproval: approval,
-          activeCycle: undefined,
-        },
-      }
+      },
+      { type: 'resource_preparation_required' },
+    )
+  return {
+    ...base,
+    phase: 'ATOMIC_TASK_PLANNING',
+    documentStep: undefined,
+    status: 'running',
+    blockedReason: undefined,
+    documentReviewState: {
+      ...base.documentReviewState,
+      comprehensiveApproval: approval,
+      activeCycle: undefined,
+    },
+  }
 }

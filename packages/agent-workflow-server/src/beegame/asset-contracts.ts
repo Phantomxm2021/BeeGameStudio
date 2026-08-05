@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import {
   basename,
@@ -27,13 +27,27 @@ export const BEEGAME_RESOURCE_STATUSES = [
   'failed',
 ] as const
 const AUDIO_ASSET_KINDS = new Set([
-  'audio-clip', 'audio-cue', 'audio-bank', 'music', 'ambience', 'voice',
+  'audio-clip',
+  'audio-cue',
+  'audio-bank',
+  'music',
+  'ambience',
+  'voice',
 ])
 const PLAYABLE_AUDIO_ASSET_KINDS = new Set([
-  'audio-clip', 'music', 'ambience', 'voice',
+  'audio-clip',
+  'music',
+  'ambience',
+  'voice',
 ])
 const AUDIO_FILE_EXTENSIONS = new Set([
-  '.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav',
+  '.aac',
+  '.flac',
+  '.m4a',
+  '.mp3',
+  '.ogg',
+  '.opus',
+  '.wav',
 ])
 
 export type BeeGameResourceStatus = (typeof BEEGAME_RESOURCE_STATUSES)[number]
@@ -103,10 +117,19 @@ export type BeeGameProjectResource = {
 }
 
 export type BeeGameAssetManifest = {
-  version: 7
+  version: 8
   project_target?: BeeGameAssetProjectTarget
   requirements: BeeGameAssetRequirement[]
   resources: BeeGameProjectResource[]
+}
+
+type BeeGameAssetManifestIndex = {
+  version: 8
+  project_target?: BeeGameAssetProjectTarget
+  modules: {
+    requirements: string
+    resources: string[]
+  }
 }
 
 export const BEEGAME_RESOURCE_ROOTS = {
@@ -150,17 +173,6 @@ export type BeeGameResolvedLibraryResourceInput = {
   }>
 }
 
-export type BeeGameLibraryResourceMetadataUpdate = {
-  resource_id: string
-  pack_id: string
-  pack_version: string
-  element_id: string
-  asset_kind?: string
-  capabilities?: string[]
-  content_profile?: Record<string, unknown>
-  technical_facts?: Record<string, string | number | boolean>
-}
-
 export type BeeGameAuthoredResourceInput = {
   id: string
   root_path: string
@@ -175,7 +187,9 @@ export type BeeGameAuthoredResourceInput = {
   replace_existing_provisional?: boolean
 }
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
-export const CURRENT_ASSET_MANIFEST_VERSION = 7
+const ASSET_REQUIREMENTS_MODULE_ROOT = 'assets/manifest/requirements'
+const ASSET_RESOURCE_MODULE_ROOT = 'assets/manifest/resources'
+export const CURRENT_ASSET_MANIFEST_VERSION = 8
 
 export class BeeGameAssetManifestError extends Error {
   readonly code = 'invalid_asset_manifest'
@@ -195,28 +209,88 @@ export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
     content_root: BEEGAME_RESOURCE_ROOTS.content,
     generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
   },
-  requirements: [
-    {
-      id: '<stable-semantic-requirement-id>',
-      required: true,
-    },
-  ],
-  resources: [],
+  modules: {
+    requirements:
+      'assets/manifest/requirements/<content-addressed-record>.json',
+    resources: [
+      'assets/manifest/resources/<identity-and-content-addressed-record>.json',
+    ],
+  },
 } as const
 
 export async function readBeeGameAssetManifest(
   workspacePath: string,
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
+  return readBeeGameAssetManifestSync(root)
+}
+
+export function readBeeGameAssetManifestSync(
+  workspacePath: string,
+): BeeGameAssetManifest {
+  const root = normalizeWorkspacePath(workspacePath)
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
   if (!existsSync(manifestPath)) return emptyManifest()
-  let parsed: unknown
+  let indexValue: unknown
   try {
-    parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    indexValue = JSON.parse(readFileSync(manifestPath, 'utf8'))
   } catch {
     throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
   }
-  return parseCanonicalBeeGameAssetManifest(parsed)
+  const index = parseManifestIndex(indexValue)
+  let requirementsValue: unknown
+  const resources: unknown[] = []
+  try {
+    requirementsValue = JSON.parse(
+      readFileSync(
+        resolveInsideWorkspace(root, index.modules.requirements),
+        'utf8',
+      ),
+    )
+    for (const path of index.modules.resources)
+      resources.push(
+        JSON.parse(readFileSync(resolveInsideWorkspace(root, path), 'utf8')),
+      )
+  } catch {
+    throw new BeeGameAssetManifestError([
+      'every registered manifest module must exist and contain valid JSON.',
+    ])
+  }
+  if (!isRecord(requirementsValue))
+    throw new BeeGameAssetManifestError([
+      'requirements module root must be an object.',
+    ])
+  const requirementModuleIssues: string[] = []
+  rejectUnknownKeys(
+    requirementsValue,
+    ['requirements'],
+    'requirements module',
+    requirementModuleIssues,
+  )
+  if (requirementModuleIssues.length)
+    throw new BeeGameAssetManifestError(requirementModuleIssues)
+  return parseCanonicalBeeGameAssetManifest({
+    version: index.version,
+    ...(index.project_target ? { project_target: index.project_target } : {}),
+    requirements: requirementsValue.requirements,
+    resources,
+  })
+}
+
+export function readBeeGameAssetManifestModulePathsSync(
+  workspacePath: string,
+): string[] {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  if (!existsSync(manifestPath)) return []
+  const index = parseManifestIndex(
+    JSON.parse(readFileSync(manifestPath, 'utf8')),
+  )
+  return [
+    ASSET_MANIFEST_PATH,
+    index.modules.requirements,
+    ...index.modules.resources,
+  ]
 }
 
 export function parseCanonicalBeeGameAssetManifest(
@@ -225,6 +299,63 @@ export function parseCanonicalBeeGameAssetManifest(
   const issues = validateManifest(value)
   if (issues.length) throw new BeeGameAssetManifestError(issues)
   return structuredClone(value as BeeGameAssetManifest)
+}
+
+function parseManifestIndex(value: unknown): BeeGameAssetManifestIndex {
+  const issues: string[] = []
+  if (!isRecord(value))
+    throw new BeeGameAssetManifestError([
+      'manifest index root must be an object.',
+    ])
+  rejectUnknownKeys(
+    value,
+    ['version', 'project_target', 'modules'],
+    'manifest index',
+    issues,
+  )
+  if (value.version !== CURRENT_ASSET_MANIFEST_VERSION)
+    issues.push(`version must be ${CURRENT_ASSET_MANIFEST_VERSION}.`)
+  validateTarget(value.project_target, issues)
+  if (!isRecord(value.modules)) {
+    issues.push('manifest index modules must be an object.')
+  } else {
+    rejectUnknownKeys(
+      value.modules,
+      ['requirements', 'resources'],
+      'manifest index modules',
+      issues,
+    )
+    if (
+      typeof value.modules.requirements !== 'string' ||
+      dirname(value.modules.requirements) !== ASSET_REQUIREMENTS_MODULE_ROOT ||
+      extname(value.modules.requirements) !== '.json'
+    )
+      issues.push(
+        `manifest index requirements module must be a JSON file directly under ${ASSET_REQUIREMENTS_MODULE_ROOT}.`,
+      )
+    if (
+      !Array.isArray(value.modules.resources) ||
+      !value.modules.resources.every(
+        path => typeof path === 'string' && path.trim().length > 0,
+      )
+    )
+      issues.push('manifest index resources must be an array of module paths.')
+    else {
+      const paths = value.modules.resources
+      if (new Set(paths).size !== paths.length)
+        issues.push('manifest index resource module paths must be unique.')
+      for (const path of paths)
+        if (
+          dirname(path) !== ASSET_RESOURCE_MODULE_ROOT ||
+          extname(path) !== '.json'
+        )
+          issues.push(
+            `manifest resource module must be a JSON file directly under ${ASSET_RESOURCE_MODULE_ROOT}: ${path}.`,
+          )
+    }
+  }
+  if (issues.length) throw new BeeGameAssetManifestError(issues)
+  return structuredClone(value as BeeGameAssetManifestIndex)
 }
 
 export function toCanonicalBeeGameAssetManifest(
@@ -279,17 +410,13 @@ export async function uploadBeeGameAsset(
     selection_reason: ['User provided this project resource.'],
   }
   const updated = replaceResource(manifest, resource)
-  const rollback = await commitResourceWrites([
-    { targetPath, bytes },
-    {
-      targetPath: resolveInsideWorkspace(root, ASSET_MANIFEST_PATH),
-      bytes: encodeManifest(updated),
-    },
-  ])
+  const rollback = await commitResourceWrites([{ targetPath, bytes }])
   try {
+    await writeManifestAtomically(root, updated)
     await options.persist?.(updated)
   } catch (error) {
     await rollback()
+    await writeManifestAtomically(root, manifest)
     throw error
   }
   return {
@@ -406,17 +533,19 @@ export async function addBeeGameLibraryResourceToWorkspace(
       : {}),
   }
   const updated = replaceResource(manifest, resource)
-  await commitResourceWrites([
+  const rollback = await commitResourceWrites([
     { targetPath, bytes: rootBytes },
     ...dependencies.map(dependency => ({
       targetPath: dependency.targetPath,
       bytes: dependency.bytes,
     })),
-    {
-      targetPath: resolveInsideWorkspace(root, ASSET_MANIFEST_PATH),
-      bytes: encodeManifest(updated),
-    },
   ])
+  try {
+    await writeManifestAtomically(root, updated)
+  } catch (error) {
+    await rollback()
+    throw error
+  }
   return { manifest: updated, resource }
 }
 
@@ -446,7 +575,10 @@ export async function registerBeeGameAuthoredResources(
   if (!target)
     throw new Error('Additional authored resource formats are invalid.')
   let updated = additionalFormatCapabilities.length
-    ? parseCanonicalBeeGameAssetManifest({ ...manifest, project_target: target })
+    ? parseCanonicalBeeGameAssetManifest({
+        ...manifest,
+        project_target: target,
+      })
     : manifest
   const now = new Date().toISOString()
   const obsoletePaths = new Set<string>()
@@ -462,9 +594,9 @@ export async function registerBeeGameAuthoredResources(
       )
     const changesPaths = Boolean(
       existing &&
-      (existing.root_path !== rootPath ||
-        existing.file_paths.length !== filePaths.length ||
-        existing.file_paths.some(path => !filePaths.includes(path))),
+        (existing.root_path !== rootPath ||
+          existing.file_paths.length !== filePaths.length ||
+          existing.file_paths.some(path => !filePaths.includes(path))),
     )
     if (changesPaths && !input.replace_existing_provisional)
       throw new Error(
@@ -472,7 +604,9 @@ export async function registerBeeGameAuthoredResources(
       )
     if (
       changesPaths &&
-      (!existing?.provisional || !input.provisional || existing.source.type !== 'agent-authored')
+      (!existing?.provisional ||
+        !input.provisional ||
+        existing.source.type !== 'agent-authored')
     )
       throw new Error(
         `Only an agent-authored provisional resource can be replaced in place: ${id}`,
@@ -549,7 +683,9 @@ export async function registerBeeGameAuthoredResources(
     updated = replaceResource(updated, resource)
   }
   await writeManifestAtomically(root, updated)
-  const retainedPaths = new Set(updated.resources.flatMap(resource => resource.file_paths))
+  const retainedPaths = new Set(
+    updated.resources.flatMap(resource => resource.file_paths),
+  )
   await Promise.all(
     [...obsoletePaths]
       .filter(path => !retainedPaths.has(path))
@@ -576,7 +712,9 @@ export async function removeBeeGameUnboundResources(
   const existingIds = new Set(manifest.resources.map(item => item.id))
   const missingIds = ids.filter(id => !existingIds.has(id))
   if (missingIds.length)
-    throw new Error(`Resource identities do not exist: ${missingIds.join(', ')}.`)
+    throw new Error(
+      `Resource identities do not exist: ${missingIds.join(', ')}.`,
+    )
   const referencedIds = new Set(
     auditBeeGameContent(root, manifest).referencedResourceIds,
   )
@@ -585,10 +723,14 @@ export async function removeBeeGameUnboundResources(
     throw new Error(
       `Remove resource references from JSON/YAML before pruning inventory: ${stillReferenced.join(', ')}.`,
     )
-  const removed = manifest.resources.filter(resource => ids.includes(resource.id))
+  const removed = manifest.resources.filter(resource =>
+    ids.includes(resource.id),
+  )
   const updated = parseCanonicalBeeGameAssetManifest({
     ...manifest,
-    resources: manifest.resources.filter(resource => !ids.includes(resource.id)),
+    resources: manifest.resources.filter(
+      resource => !ids.includes(resource.id),
+    ),
   })
   const retainedPaths = new Set(
     updated.resources.flatMap(resource => resource.file_paths),
@@ -632,48 +774,6 @@ export async function removeBeeGameUnboundResources(
     throw error
   }
   return updated
-}
-
-export async function refreshBeeGameLibraryResourceMetadataInWorkspace(
-  workspacePath: string,
-  updates: readonly BeeGameLibraryResourceMetadataUpdate[],
-): Promise<{ manifest: BeeGameAssetManifest; refreshedResourceIds: string[] }> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  const byId = new Map(updates.map(update => [update.resource_id, update]))
-  const refreshedResourceIds: string[] = []
-  const resources = await Promise.all(
-    manifest.resources.map(async resource => {
-      const hashes = await hashExistingResourceFiles(root, resource)
-      const update = byId.get(resource.id)
-      if (!update || resource.source.type !== 'resource-library')
-        return { ...resource, ...(hashes ? { local_file_hashes: hashes } : {}) }
-      if (
-        resource.source.pack_id !== update.pack_id ||
-        resource.source.pack_version !== update.pack_version ||
-        resource.source.element_id !== update.element_id
-      )
-        return { ...resource, ...(hashes ? { local_file_hashes: hashes } : {}) }
-      refreshedResourceIds.push(resource.id)
-      return {
-        ...resource,
-        ...(hashes ? { local_file_hashes: hashes } : {}),
-        ...(update.asset_kind ? { asset_kind: update.asset_kind } : {}),
-        ...(update.capabilities
-          ? { capabilities: uniqueStrings(update.capabilities) }
-          : {}),
-        ...(update.content_profile
-          ? { content_profile: structuredClone(update.content_profile) }
-          : {}),
-        ...(update.technical_facts
-          ? { technical_facts: { ...update.technical_facts } }
-          : {}),
-      }
-    }),
-  )
-  const updated = { ...manifest, resources }
-  await writeManifestAtomically(root, updated)
-  return { manifest: updated, refreshedResourceIds }
 }
 
 function validateManifest(value: unknown): string[] {
@@ -1013,15 +1113,13 @@ function replaceResource(
   manifest: BeeGameAssetManifest,
   resource: BeeGameProjectResource,
 ): BeeGameAssetManifest {
-  return parseCanonicalBeeGameAssetManifest(
-    {
-      ...manifest,
-      resources: [
-        ...manifest.resources.filter(item => item.id !== resource.id),
-        resource,
-      ],
-    },
-  )
+  return parseCanonicalBeeGameAssetManifest({
+    ...manifest,
+    resources: [
+      ...manifest.resources.filter(item => item.id !== resource.id),
+      resource,
+    ],
+  })
 }
 
 function emptyManifest(): BeeGameAssetManifest {
@@ -1135,45 +1233,95 @@ async function resourceFilesMatchHashes(
   return true
 }
 
-async function hashExistingResourceFiles(
-  root: string,
-  resource: BeeGameProjectResource,
-): Promise<Record<string, string> | undefined> {
-  const entries: Array<[string, string]> = []
-  for (const path of resource.file_paths) {
-    try {
-      entries.push([
-        path,
-        sha256(
-          new Uint8Array(await readFile(resolveInsideWorkspace(root, path))),
-        ),
-      ])
-    } catch {
-      return undefined
-    }
-  }
-  return entries.length ? Object.fromEntries(entries) : undefined
-}
-
 async function writeManifestAtomically(
   root: string,
   manifest: BeeGameAssetManifest,
 ): Promise<void> {
   const validated = parseCanonicalBeeGameAssetManifest(manifest)
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
-  const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`
-  await mkdir(dirname(manifestPath), { recursive: true })
+  const requirementsBytes = encodeJson({
+    requirements: validated.requirements,
+  })
+  const requirementsModulePath = `${ASSET_REQUIREMENTS_MODULE_ROOT}/${sha256(
+    requirementsBytes,
+  ).slice(0, 24)}.json`
+  const requirementsPath = resolveInsideWorkspace(root, requirementsModulePath)
+  const resourceModules = validated.resources
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+    .map(resource => ({
+      path: `${ASSET_RESOURCE_MODULE_ROOT}/${createHash('sha256')
+        .update(resource.id)
+        .digest('hex')
+        .slice(0, 12)}-${sha256(encodeJson(resource)).slice(0, 12)}.json`,
+      resource,
+    }))
+  const index: BeeGameAssetManifestIndex = {
+    version: CURRENT_ASSET_MANIFEST_VERSION,
+    ...(validated.project_target
+      ? { project_target: validated.project_target }
+      : {}),
+    modules: {
+      requirements: requirementsModulePath,
+      resources: resourceModules.map(module => module.path),
+    },
+  }
+  const resourceModuleDirectory = resolveInsideWorkspace(
+    root,
+    ASSET_RESOURCE_MODULE_ROOT,
+  )
+  const previousResourceModules = existsSync(resourceModuleDirectory)
+    ? readdirSync(resourceModuleDirectory, { withFileTypes: true })
+        .filter(entry => entry.isFile())
+        .map(entry => `${ASSET_RESOURCE_MODULE_ROOT}/${entry.name}`)
+    : []
+  const requirementsModuleDirectory = resolveInsideWorkspace(
+    root,
+    ASSET_REQUIREMENTS_MODULE_ROOT,
+  )
+  const previousRequirementModules = existsSync(requirementsModuleDirectory)
+    ? readdirSync(requirementsModuleDirectory, { withFileTypes: true })
+        .filter(entry => entry.isFile())
+        .map(entry => `${ASSET_REQUIREMENTS_MODULE_ROOT}/${entry.name}`)
+    : []
+  const writes = [
+    {
+      targetPath: requirementsPath,
+      bytes: requirementsBytes,
+    },
+    ...resourceModules.map(module => ({
+      targetPath: resolveInsideWorkspace(root, module.path),
+      bytes: encodeJson(module.resource),
+    })),
+    { targetPath: manifestPath, bytes: encodeJson(index) },
+  ]
+  const temporaryPaths: string[] = []
   try {
-    await writeFile(temporaryPath, encodeManifest(validated))
-    await rename(temporaryPath, manifestPath)
+    for (const write of writes) {
+      await mkdir(dirname(write.targetPath), { recursive: true })
+      const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
+      temporaryPaths.push(temporaryPath)
+      await writeFile(temporaryPath, write.bytes)
+    }
+    for (let index = 0; index < writes.length; index += 1)
+      await rename(temporaryPaths[index]!, writes[index]!.targetPath)
+    const currentPaths = new Set(resourceModules.map(module => module.path))
+    currentPaths.add(requirementsModulePath)
+    await Promise.all(
+      [...previousRequirementModules, ...previousResourceModules]
+        .filter(path => !currentPaths.has(path))
+        .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
+    )
   } finally {
-    await rm(temporaryPath, { force: true }).catch(() => undefined)
+    await Promise.all(
+      temporaryPaths.map(path =>
+        rm(path, { force: true }).catch(() => undefined),
+      ),
+    )
   }
 }
 
-function encodeManifest(manifest: BeeGameAssetManifest): Uint8Array {
-  const validated = parseCanonicalBeeGameAssetManifest(manifest)
-  return new TextEncoder().encode(`${JSON.stringify(validated, null, 2)}\n`)
+function encodeJson(value: unknown): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`)
 }
 
 async function commitResourceWrites(

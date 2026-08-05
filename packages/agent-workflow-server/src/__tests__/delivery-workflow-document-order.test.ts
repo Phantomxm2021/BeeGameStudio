@@ -23,10 +23,12 @@ import {
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
+import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
@@ -215,7 +217,7 @@ describe('single-track document review workflow', () => {
       ),
     ).toBe(false)
   })
-  test('uses the exact document-authoritative 12 plus 5 review matrix', () => {
+  test('uses 12 Foundation checks, one checklist check and 4 resource checks', () => {
     expect(CANONICAL_FOUNDATION_DOCUMENTS).toEqual([
       'docs/GDD.md',
       'docs/LEVEL_SCENE_DESIGN.md',
@@ -245,7 +247,6 @@ describe('single-track document review workflow', () => {
       'acceptance_observability',
     ])
     expect(COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS).toEqual([
-      'checklist_traceability',
       'resource_semantic_fitness',
       'content_structure_fitness',
       'resource_content_consistency',
@@ -254,6 +255,9 @@ describe('single-track document review workflow', () => {
     expect(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS).toEqual([
       ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
       ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
+    ])
+    expect(CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS).toEqual([
+      'checklist_traceability',
     ])
     expect(FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS).toEqual([
       [
@@ -410,6 +414,56 @@ describe('single-track document review workflow', () => {
         documentStep: 'FOUNDATION_REVIEW',
       }),
     ).toThrow('require all durable authoring checkpoints')
+  })
+
+  test('rejects resource and downstream state without the frozen current checklist approval', () => {
+    const run = createTestDeliveryRun({
+      projectId: 'project-unapproved-resource-entry',
+      ownerId: 'owner-1',
+    })
+    expect(() =>
+      parseDeliveryRun({
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    ).toThrow('require the frozen current checklist approval')
+
+    const checklistChecks = passingChecks('checklist')
+    expect(() =>
+      parseDeliveryRun({
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+        documentReviewState: {
+          ...run.documentReviewState,
+          checklistApproval: {
+            scope: 'checklist',
+            revision: 'stale-document-revision',
+            checks: checklistChecks,
+            checkEvidenceDigests: {},
+            evidencePath: 'docs/reviews/checklist.json',
+            approvedAt: '2026-08-05T00:00:00.000Z',
+          },
+        },
+      }),
+    ).toThrow('require the frozen current checklist approval')
+
+    expect(() =>
+      parseDeliveryRun({
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+        documentReviewState: {
+          ...run.documentReviewState,
+          checklistApproval: {
+            scope: 'checklist',
+            revision: run.revision.document,
+            checks: checklistChecks,
+            checkEvidenceDigests: {},
+            evidencePath: 'docs/reviews/checklist.json',
+            approvedAt: '2026-08-05T00:00:00.000Z',
+          },
+        },
+      }),
+    ).not.toThrow()
   })
 
   test('freezes one authority-bound Initial Review cycle and dispatch contract', async () => {
@@ -777,7 +831,7 @@ describe('single-track document review workflow', () => {
     run = {
       ...run,
       phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_REVIEW',
+      documentStep: 'COMPREHENSIVE_REVIEW',
       revision: { ...run.revision, resource: resourceRevision },
     }
     run = await createInitialDocumentReviewCycle({
@@ -837,7 +891,7 @@ describe('single-track document review workflow', () => {
     run = {
       ...run,
       phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_REVIEW',
+      documentStep: 'COMPREHENSIVE_REVIEW',
       revision: {
         ...run.revision,
         document: documentRevision,
@@ -1280,7 +1334,10 @@ describe('single-track document review workflow', () => {
         resolvedFindingIds: [],
         repairPlan: {
           decisions: [
-            { decision: 'Correct the shared threshold at its Balance authority.' },
+            {
+              decision:
+                'Correct the shared threshold at its Balance authority.',
+            },
             { decision: 'Correct the UI authority.' },
           ],
         },
@@ -1574,7 +1631,7 @@ describe('single-track document review workflow', () => {
     expect(authorRequest?.contract.systemDeliveryContract).toMatchObject({
       canonicalAssetManifest: {
         path: 'assets/asset-manifest.json',
-        version: 7,
+        version: 8,
       },
       roots: {
         runtimeAssets: 'assets/runtime',
@@ -1600,7 +1657,9 @@ describe('single-track document review workflow', () => {
         writtenPaths: [],
         resolvedFindingIds: [],
         repairPlan: {
-          decisions: [{ decision: 'Correct the cited GDD authority conflict.' }],
+          decisions: [
+            { decision: 'Correct the cited GDD authority conflict.' },
+          ],
         },
       },
       documentSet: 'foundation',
@@ -1788,26 +1847,25 @@ describe('single-track document review workflow', () => {
     ).not.toContain(CANONICAL_ASSET_MANIFEST)
   })
 
-  test('closes checklist findings before handing the same ledger to the resource owner', async () => {
+  test('reviews and closes the checklist before freezing it for resource production', async () => {
     const workspacePath = await createWorkspace()
-    let run = await reviewRun(workspacePath, 'complete')
+    let run = await reviewRun(workspacePath, 'checklist')
     run = await createInitialDocumentReviewCycle({
       run,
       workspacePath,
-      scope: 'complete',
-      revision: run.revision.resource!,
+      scope: 'checklist',
+      revision: run.revision.document,
     })
     run = await reconcileDocumentReview({
       run,
       workspacePath,
       terminal: await reviewTerminal({
         workspacePath,
-        scope: 'complete',
-        revision: run.revision.resource!,
+        scope: 'checklist',
+        revision: run.revision.document,
         verdict: 'NEEDS_REVISION',
-        checks: checksWithBlocks('complete', {
+        checks: checksWithBlocks('checklist', {
           checklist_traceability: ['checklist-gap'],
-          resource_semantic_fitness: ['resource-gap'],
         }),
         findings: [
           reviewFinding({
@@ -1816,17 +1874,10 @@ describe('single-track document review workflow', () => {
             owner: 'checklist',
             path: 'docs/acceptance/gameplay-checklist.md',
           }),
-          reviewFinding({
-            findingId: 'resource-gap',
-            checkId: 'resource_semantic_fitness',
-            owner: 'resource',
-            path: CANONICAL_ASSET_MANIFEST,
-            requirementId: 'REQ-1',
-          }),
         ],
       }),
-      currentDocumentRevision: run.revision.resource,
-      scope: 'complete',
+      currentDocumentRevision: run.revision.document,
+      scope: 'checklist',
       audit: () => ({ valid: true, issues: [] }),
     })
     expect(run.documentStep).toBe('CHECKLIST_DRAFTING')
@@ -1847,9 +1898,6 @@ describe('single-track document review workflow', () => {
         },
       },
     })
-    const checklistFinding = run.documentReviewState.activeCycle!.findings.find(
-      finding => finding.owner === 'checklist',
-    )!
     await writeFile(
       join(workspacePath, 'docs/acceptance/gameplay-checklist.md'),
       `${documentContent('Acceptance', '1.0.1', '2026-08-02T00:00:00.000Z')}- [ ] PATH-001 source: docs/GDD.md implement: Execute and observe the canonical behavior expected: the complete behavior is visible evidence: runtime\n`,
@@ -1867,98 +1915,40 @@ describe('single-track document review workflow', () => {
       audit: () => ({ valid: true, issues: [] }),
     })
     expect(run.documentReviewState.repairPasses.checklist).toBe(1)
-    const checklistClosureIds = new Set(['checklist_traceability'])
     const afterChecklist = await reconcileDocumentReview({
       run,
       workspacePath,
       terminal: await reviewTerminal({
         workspacePath,
-        scope: 'complete',
+        scope: 'checklist',
         revision: run.documentReviewState.activeCycle!.sourceRevision,
         verdict: 'READY',
-        checks: passingChecks('complete').filter(check =>
-          checklistClosureIds.has(check.id),
-        ),
+        checks: passingChecks('checklist'),
         findings: [],
       }),
       currentDocumentRevision:
         run.documentReviewState.activeCycle!.sourceRevision,
-      scope: 'complete',
+      scope: 'checklist',
       audit: () => ({ valid: true, issues: [] }),
     })
 
     expect(afterChecklist.phase).toBe('RESOURCE_PREPARATION')
-    expect(afterChecklist.documentReviewState.activeCycle).toMatchObject({
-      activeTarget: 'resource',
-      acceptedSemanticResult: true,
+    expect(afterChecklist.documentReviewState.activeCycle).toBeUndefined()
+    expect(afterChecklist.documentReviewState.checklistApproval).toMatchObject({
+      scope: 'checklist',
+      revision: run.documentReviewState.activeCycle!.sourceRevision,
     })
-    expect(
-      afterChecklist.documentReviewState.activeCycle?.findings,
-    ).toHaveLength(1)
-    expect(
-      afterChecklist.documentReviewState.activeCycle?.findings[0]?.findingId,
-    ).toBe('resource-gap')
-    expect(afterChecklist.documentReviewState.activeCycle?.activeTarget).toBe(
-      'resource',
-    )
     expect(afterChecklist.documentReviewState.repairPasses).toEqual({
       foundation: 0,
       checklist: 1,
-      resource: 1,
-    })
-
-    let resourceRequest: WorkerDispatchRequest | undefined
-    await startResourcePreparation({
-      run: afterChecklist,
-      workspacePath,
-      dispatcher: {
-        async dispatch(request) {
-          resourceRequest = request
-          return request
-        },
-      },
-    })
-    expect(resourceRequest?.contract.remediation).toMatchObject({
-      kind: 'document_review',
-      cycleId: afterChecklist.documentReviewState.activeCycle?.cycleId,
-      findings: [{ findingId: 'resource-gap' }],
-    })
-    expect(resourceRequest?.contract).not.toHaveProperty('reviewRemediation')
-
-    const manifestPath = join(workspacePath, CANONICAL_ASSET_MANIFEST)
-    await writeFile(
-      manifestPath,
-      `${(await readFile(manifestPath, 'utf8')).trim()}\n\n`,
-    )
-    const resourceRevision = await computeResourceRevision(
-      workspacePath,
-      afterChecklist.revision.document,
-    )
-    const resourceClosure = await beginResourceDocumentReviewClosure({
-      run: {
-        ...afterChecklist,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_REVIEW',
-        revision: {
-          ...afterChecklist.revision,
-          resource: resourceRevision,
-        },
-      },
-      workspacePath,
-      currentRevision: resourceRevision,
-    })
-
-    expect(resourceClosure.documentReviewState.activeCycle).toMatchObject({
-      mode: 'closure',
-      activeTarget: 'resource',
-      acceptedSemanticResult: false,
-      changedPaths: [CANONICAL_ASSET_MANIFEST],
+      resource: 0,
     })
   })
 
   test('continues resource remediation without a repair-pass cutoff', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'complete')
+    run = withChecklistApproval(run)
     run = await createInitialDocumentReviewCycle({
       run: {
         ...run,
@@ -2336,27 +2326,36 @@ async function createWorkspace(): Promise<string> {
     join(workspacePath, 'docs/acceptance/gameplay-checklist.md'),
     `${documentContent('Acceptance', '1.0.0', '2026-08-01T00:00:00.000Z')}- [ ] PATH-001 source: docs/GDD.md implement: Execute the observable behavior expected: the behavior is visible evidence: runtime\n`,
   )
-  await mkdir(join(workspacePath, 'assets'), { recursive: true })
-  await writeFile(
-    join(workspacePath, CANONICAL_ASSET_MANIFEST),
-    `${JSON.stringify(
+  await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+  await writeFile(join(workspacePath, 'assets/runtime/resource.glb'), 'asset')
+  await writeBeeGameAssetManifest(workspacePath, {
+    version: 8,
+    project_target: {
+      platform: 'selected-target',
+      runtime: 'project-native',
+      asset_format_capabilities: ['glb'],
+      runtime_asset_root: 'assets/runtime',
+      content_root: 'assets/content',
+      generated_asset_root: 'assets/generated',
+    },
+    requirements: [{ id: 'REQ-1', required: true }],
+    resources: [
       {
-        version: 7,
-        project_target: {
-          platform: 'selected-target',
-          runtime: 'project-native',
-          asset_format_capabilities: ['glb'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
+        id: 'RES-1',
+        source: {
+          type: 'agent-authored',
+          created_at: '2026-08-01T00:00:00.000Z',
+          reason: 'Test resource.',
         },
-        requirements: [{ id: 'REQ-1', required: true }],
-        resources: [{ id: 'RES-1', status: 'verified' }],
+        root_path: 'assets/runtime/resource.glb',
+        file_paths: ['assets/runtime/resource.glb'],
+        provisional: true,
+        status: 'verified',
+        selected_at: '2026-08-01T00:00:00.000Z',
+        selection_reason: ['Test review resource.'],
       },
-      null,
-      2,
-    )}\n`,
-  )
+    ],
+  })
   return workspacePath
 }
 
@@ -2389,7 +2388,11 @@ async function reviewRun(
     ...initial,
     phase: 'DOCUMENT_REVIEW',
     documentStep:
-      scope === 'foundation' ? 'FOUNDATION_REVIEW' : 'CHECKLIST_REVIEW',
+      scope === 'foundation'
+        ? 'FOUNDATION_REVIEW'
+        : scope === 'checklist'
+          ? 'CHECKLIST_REVIEW'
+          : 'COMPREHENSIVE_REVIEW',
     revision: {
       ...initial.revision,
       document: documentRevision,
@@ -2402,7 +2405,9 @@ function passingChecks(scope: DocumentReviewScope): DocumentReviewCheck[] {
   const ids =
     scope === 'foundation'
       ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-      : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
+      : scope === 'checklist'
+        ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
+        : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
   return ids.map(id => ({
     id,
     status: 'pass',
@@ -2524,11 +2529,30 @@ async function reviewTerminal(input: {
     reviewedDocumentPaths:
       input.scope === 'foundation'
         ? [...CANONICAL_FOUNDATION_DOCUMENTS]
-        : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST],
+        : input.scope === 'checklist'
+          ? [...CANONICAL_PROJECT_DOCUMENTS]
+          : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST],
     checklistIds: input.scope === 'foundation' ? [] : ['PATH-001'],
     findings: input.findings,
     evidencePath,
     rejectedSubmissionCount: 0,
+  }
+}
+
+function withChecklistApproval(run: DeliveryRun): DeliveryRun {
+  return {
+    ...run,
+    documentReviewState: {
+      ...run.documentReviewState,
+      checklistApproval: {
+        scope: 'checklist',
+        revision: run.revision.document,
+        checks: passingChecks('checklist'),
+        checkEvidenceDigests: {},
+        evidencePath: '.beegame/workflow/evidence/checklist-approved.json',
+        approvedAt: '2026-08-02T00:00:00.000Z',
+      },
+    },
   }
 }
 

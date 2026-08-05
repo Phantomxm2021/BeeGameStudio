@@ -61,7 +61,7 @@ describe('delivery display progress', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_REVIEW',
+        documentStep: 'COMPREHENSIVE_REVIEW',
         documentReviewState: { activeCycle: completeCycle },
       }),
     ).toEqual({

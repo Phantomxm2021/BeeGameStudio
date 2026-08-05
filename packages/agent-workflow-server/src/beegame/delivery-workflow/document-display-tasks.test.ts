@@ -57,7 +57,7 @@ describe('resource-content display tasks', () => {
       await writeFile(
         join(workspace, 'assets/asset-manifest.json'),
         JSON.stringify({
-          version: 7,
+          version: 8,
           project_target: {
             asset_format_capabilities: ['json'],
             runtime_asset_root: 'assets/runtime',
@@ -73,8 +73,15 @@ describe('resource-content display tasks', () => {
         phase: 'RESOURCE_PREPARATION',
         workflowStatus: 'running',
         thinking: 'working',
+        resourceProductionTask: 'RESOURCE_CONTENT',
       })
-      expect(tasks.map(task => task.id)).toContain('content-descriptions')
+      expect(tasks.map(task => task.id)).toEqual([
+        'RESOURCE_PLAN',
+        'RESOURCE_INVENTORY',
+        'RESOURCE_CONTENT',
+        'RESOURCE_GATE',
+      ])
+      expect(tasks[2]?.status).toBe('pending')
       expect(tasks.every(task => task.operation === 'produce')).toBe(true)
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -89,20 +96,24 @@ describe('resource-content display tasks', () => {
         phase: 'RESOURCE_PREPARATION',
         workflowStatus: 'running',
         thinking: 'working',
-        activeDispatch: { workerType: 'resource-preparer', status: 'running' },
+        activeDispatch: { workerType: 'resource-curator', status: 'running' },
+        resourceProductionTask: 'RESOURCE_INVENTORY',
         reviewTarget: 'resource',
         reviewFindings: [
           { id: 'F-001', title: 'foundation repair', owner: 'foundation' },
           { id: 'F-002', title: 'resource repair', owner: 'resource' },
         ],
       })
-      expect(tasks).toEqual([
+      expect(tasks).toHaveLength(4)
+      expect(tasks[0]?.status).toBe('completed')
+      expect(tasks[1]).toEqual(
         expect.objectContaining({
-          id: 'F-002',
+          id: 'RESOURCE_INVENTORY',
           status: 'running',
           operation: 'produce',
         }),
-      ])
+      )
+      expect(tasks[2]?.status).toBe('pending')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

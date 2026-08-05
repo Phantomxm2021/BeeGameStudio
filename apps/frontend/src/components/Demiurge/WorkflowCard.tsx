@@ -40,7 +40,7 @@ const stageLabel: Record<string, string> = {
   FOUNDATION_DRAFTING: '基础文档编写',
   FOUNDATION_REVIEW: '基础文档审计',
   CHECKLIST_DRAFTING: 'Gameplay Checklist 编写',
-  CHECKLIST_REVIEW: '八产物综合审计',
+  COMPREHENSIVE_REVIEW: '八产物综合审计',
   BRIEF_CONFIRMED: '需求确认',
   DOCUMENT_DRAFTING: '基础文档编写',
   DOCUMENT_REVIEW: '文档审计',
@@ -55,7 +55,9 @@ const stageLabel: Record<string, string> = {
 const workerLabel: Record<string, string> = {
   'document-author': 'Document Author',
   'document-reviewer': 'Document Reviewer',
-  'resource-preparer': 'Resource Producer',
+  'resource-planner': 'Resource Planner',
+  'resource-curator': 'Resource Curator',
+  'resource-content-author': 'Resource Content Author',
   'atomic-task-planner': 'Task Planner',
   'implementation-worker': 'Implementation Worker',
   'implementation-auditor': 'Implementation Auditor',
@@ -613,9 +615,7 @@ export function WorkflowCard({
                     ? '处理中…'
                     : workflow.nextAction === 'resume'
                       ? '继续'
-                      : workflow.nextAction === 'restart'
-                        ? '重新开始'
-                        : '重试'}
+                      : '重试'}
                 </button>
               ) : null}
             </div>

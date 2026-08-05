@@ -3,6 +3,7 @@ import {
   documentRepairPlanSubmissionSchemaForGroupCount,
   documentReviewPacketSubmissionSchemaForContract,
   questionAnswerSubmissionSchema,
+  resourceContentSubmissionSchema,
 } from './delivery-workflow/worker-contracts'
 import {
   parseAndValidateDocumentReviewPacketSubmission,
@@ -16,6 +17,7 @@ type WorkflowResultWorker =
   | 'document-reviewer'
   | 'change-impact-analyzer'
   | 'question-answerer'
+  | 'resource-content-author'
 
 const definitions = {
   'document-reviewer': {
@@ -42,6 +44,15 @@ const definitions = {
     prompt:
       'Call exactly once with the answer. The workflow service owns canonical evidence.',
     message: '提交问题回答',
+  },
+  'resource-content-author': {
+    name: 'SubmitResourceContentResult',
+    schema: resourceContentSubmissionSchema,
+    description:
+      'Submit completion of the canonical JSON/YAML content set or exact missing resource requirements.',
+    prompt:
+      'Call exactly once. completed requires the complete canonical JSON/YAML set and an empty missingRequirementIds array. needs_inventory requires exact current Manifest requirement IDs and does not authorize resource mutation.',
+    message: '提交资源内容结果',
   },
 } as const
 

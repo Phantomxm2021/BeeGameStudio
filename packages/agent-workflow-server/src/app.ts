@@ -162,7 +162,6 @@ import {
 } from './beegame/intake-job-store'
 import {
   createRunStore,
-  readObsoleteWorkflowRestartSeed,
   WorkflowStoreError,
 } from './beegame/delivery-workflow/run-store'
 import {
@@ -179,6 +178,7 @@ import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delive
 import type {
   DeliveryRun,
   DispatchRecord,
+  ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
 import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
@@ -189,10 +189,6 @@ import {
   projectReviewFindingDisplayItems,
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
-import {
-  getObservedNativeResourceLibraryEvidence,
-  type NativeResourceLibraryEvidenceState,
-} from './beegame/native-resource-library-evidence'
 
 type JsonObject = Record<string, unknown>
 
@@ -547,7 +543,6 @@ export function createAgentWorkflowApp(
     {
       controller: ReturnType<typeof createDeliveryWorkflowController>
       authContext: { credential?: BeeGameSessionCredential }
-      resourceEvidenceSessionIds: Set<string>
     }
   >()
   const deliveryStartQueues = new Map<string, Promise<void>>()
@@ -559,7 +554,6 @@ export function createAgentWorkflowApp(
     briefContext?: string
     modelConfigId?: string
     language?: BeeGameSessionLanguage
-    resourceEvidenceSessionId?: string
   }) => {
     const workspaceKey = resolve(input.workspacePath)
     const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}`
@@ -567,16 +561,11 @@ export function createAgentWorkflowApp(
     const existing = deliveryControllers.get(key)
     if (existing) {
       if (requestCredential) existing.authContext.credential = requestCredential
-      if (input.resourceEvidenceSessionId)
-        existing.resourceEvidenceSessionIds.add(input.resourceEvidenceSessionId)
       return existing.controller
     }
     const deliveryAuthContext: { credential?: BeeGameSessionCredential } = {
       ...(requestCredential ? { credential: requestCredential } : {}),
     }
-    const resourceEvidenceSessionIds = new Set<string>()
-    if (input.resourceEvidenceSessionId)
-      resourceEvidenceSessionIds.add(input.resourceEvidenceSessionId)
     const workerPort = createBeeGameDeliveryWorkerPort({
       sessions: beeGameSessions,
       userId: input.user.id,
@@ -608,56 +597,10 @@ export function createAgentWorkflowApp(
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
-      getResourceLibraryEvidence: (runId: string) => {
-        const sessionIds = [
-          ...resourceEvidenceSessionIds,
-          ...beeGameSessions.workflowWorkerSessionIds(runId, workspaceKey),
-        ]
-        const states = sessionIds
-          .filter((sessionId, index, all) => all.indexOf(sessionId) === index)
-          .map(sessionId =>
-            getObservedNativeResourceLibraryEvidence({
-              dataRoot: dashboardDataRoot,
-              sessionId,
-              workspacePath: workspaceKey,
-            }),
-          )
-        const observed = states.filter(
-          (
-            state,
-          ): state is Exclude<
-            NativeResourceLibraryEvidenceState,
-            { state: 'missing' }
-          > => state.state !== 'missing',
-        )
-        const current = observed.filter(state => state.state === 'current')
-        const selected = current.length
-          ? current
-          : observed.filter(state => state.state === 'stale')
-        if (!selected.length) return { state: 'missing' }
-        const actions = [...new Set(selected.flatMap(state => state.actions))]
-        const latest = selected
-          .slice()
-          .sort((left, right) =>
-            left.observedAt.localeCompare(right.observedAt),
-          )
-          .at(-1)!
-        return {
-          state: current.length ? 'current' : 'stale',
-          actions,
-          failedActions: latest.failedActions,
-          successfulResourceCount: Math.max(
-            ...selected.map(state => state.successfulResourceCount),
-          ),
-          failedResourceCount: latest.failedResourceCount,
-          observedAt: latest.observedAt,
-        } satisfies NativeResourceLibraryEvidenceState
-      },
     })
     deliveryControllers.set(key, {
       controller,
       authContext: deliveryAuthContext,
-      resourceEvidenceSessionIds,
     })
     return controller
   }
@@ -724,7 +667,6 @@ export function createAgentWorkflowApp(
     briefContext: string
     modelConfigId?: string
     language?: BeeGameSessionLanguage
-    resourceEvidenceSessionId?: string
   }) => {
     const key = `${input.user.id}:${resolve(input.workspacePath)}`
     const previous = deliveryStartQueues.get(key) ?? Promise.resolve()
@@ -753,7 +695,6 @@ export function createAgentWorkflowApp(
     briefContext: string
     modelConfigId?: string
     language?: BeeGameSessionLanguage
-    resourceEvidenceSessionId?: string
   }): Promise<{ runId: string; phase: string; status: string }> => {
     const store = createRunStore(input.workspacePath, input.user.id)
     const existing = await store.load()
@@ -1898,7 +1839,6 @@ export function createAgentWorkflowApp(
         briefContext: extractConfirmedBriefContext(confirmedBriefPrompt),
         ...(modelConfigId ? { modelConfigId } : {}),
         ...(language ? { language } : {}),
-        resourceEvidenceSessionId: session.id,
       })
 
       return c.json(
@@ -2496,69 +2436,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/projects/:id/workflow/restart', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project?.root_path)
-        return c.json({ error: 'Project not found' }, 404)
-      const seed = await readObsoleteWorkflowRestartSeed(
-        project.root_path,
-        user.id,
-      )
-      if (seed.projectId !== project.id)
-        return c.json({ error: 'workflow project identity mismatch' }, 409)
-      await beeGameSessions.disposeWorkflowWorkers(
-        seed.runId,
-        project.root_path,
-      )
-      const store = createRunStore(project.root_path, user.id)
-      const initial = createInitialDeliveryRun({
-        projectId: seed.projectId,
-        ownerId: seed.ownerId,
-        confirmedBriefDigest: seed.confirmedBriefDigest,
-        confirmedBriefContext: seed.confirmedBriefContext,
-        documentRevision: 'uncomputed',
-        workspaceRevision: 'uncomputed',
-      })
-      const savedInitial = await store.replaceObsolete(initial, seed.runId, {
-        runId: initial.runId,
-        type: 'run.created',
-        phase: initial.phase,
-        status: initial.status,
-        revision: initial.revision,
-      })
-      const drafting = transitionDeliveryRun(savedInitial, {
-        type: 'documents_ready',
-      })
-      const savedDrafting = await store.commit(drafting, {
-        runId: drafting.runId,
-        type: 'phase.entered',
-        phase: drafting.phase,
-        status: drafting.status,
-        revision: drafting.revision,
-      })
-      const controller = getDeliveryController({
-        request: c.req.raw,
-        user,
-        projectId: seed.projectId,
-        workspacePath: project.root_path,
-        briefContext: seed.confirmedBriefContext,
-      })
-      scheduleDeliveryResume({ controller, store, run: savedDrafting })
-      return c.json(savedDrafting, 202)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 409)
-    }
-  })
-
   app.post('/api/projects/:id/workflow/stop', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.cancel')
@@ -3052,7 +2929,7 @@ export function createAgentWorkflowApp(
         if (!project.root_path)
           return c.json({
             contract_state: 'missing',
-            version: 7,
+            version: 8,
             requirements: [],
             resources: [],
           })
@@ -4979,7 +4856,7 @@ async function getBeeGameProjectRuntimeState(input: {
   const assetManifest = await readBeeGameAssetManifest(
     sessionRef.workspacePath,
   ).catch(() => ({
-    version: 7 as const,
+    version: 8 as const,
     requirements: [],
     resources: [],
     project_target: undefined,
@@ -5431,7 +5308,7 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
     workflowStateError: true,
     workflowStateObsolete: obsolete,
     blockedReason: obsolete
-      ? `当前项目使用旧版工作流协议，无法继续运行。请点击重新开始以创建当前版本的全新工作流。诊断编号：${traceId}`
+      ? `当前项目的工作流协议已失效，无法继续运行。请创建全新项目以启动当前工作流。诊断编号：${traceId}`
       : `当前项目的工作流状态无效，无法安全继续。诊断编号：${traceId}`,
     // Detailed schema diagnostics stay in the server log. The user-facing
     // workflow card must never render internal JSON validation output.
@@ -5489,9 +5366,8 @@ function workflowMessageKey(workflow: JsonObject): string {
 
 function workflowNextAction(
   workflow: JsonObject,
-): 'resume' | 'retry' | 'restart' | undefined {
-  if (workflow.workflowStateError === true)
-    return workflow.workflowStateObsolete === true ? 'restart' : undefined
+): 'resume' | 'retry' | undefined {
+  if (workflow.workflowStateError === true) return undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
   const acceptedReviewIsBounded =
@@ -5646,6 +5522,7 @@ function workflowViewForDisplay(
             workflowStatus: workflowStatus(workflow),
             thinking: workflowThinkingStatus(workflow),
             activeDispatch: workflow.activeDispatch,
+            resourceProductionTask: resourceProductionTaskForDisplay(workflow),
             ...(isObject(workflow.documentReviewState) &&
             isObject(workflow.documentReviewState.activeCycle)
               ? {
@@ -5762,6 +5639,23 @@ function workflowViewForDisplay(
       ? { failureReason: workflowBlockedReason(workflow) }
       : {}),
     ...(nextAction ? { nextAction } : {}),
+  }
+}
+
+function resourceProductionTaskForDisplay(
+  workflow: JsonObject,
+): ResourceProductionTask {
+  const value = isObject(workflow.resourceProductionState)
+    ? workflow.resourceProductionState.currentTask
+    : undefined
+  switch (value) {
+    case 'RESOURCE_PLAN':
+    case 'RESOURCE_INVENTORY':
+    case 'RESOURCE_CONTENT':
+    case 'RESOURCE_GATE':
+      return value
+    default:
+      throw new Error('resource workflow is missing its canonical task cursor')
   }
 }
 
@@ -6367,7 +6261,6 @@ function registerBeeGameSessionRoutes(
       briefContext: string
       modelConfigId?: string
       language?: BeeGameSessionLanguage
-      resourceEvidenceSessionId?: string
     }) => Promise<{ runId: string; phase: string; status: string }>
     resumeDeliveryWorkflow?: (input: {
       request: Request
@@ -6377,7 +6270,6 @@ function registerBeeGameSessionRoutes(
       run: import('./beegame/delivery-workflow/types').DeliveryRun
       modelConfigId?: string
       language?: BeeGameSessionLanguage
-      resourceEvidenceSessionId?: string
     }) => Promise<unknown>
     requestDeliveryChange?: (input: {
       request: Request
@@ -7034,7 +6926,6 @@ function registerBeeGameSessionRoutes(
           ? { modelConfigId: session.modelConfigId }
           : {}),
         ...(language ? { language } : {}),
-        resourceEvidenceSessionId: session.id,
       })
       return c.json({
         session,
@@ -7080,7 +6971,6 @@ function registerBeeGameSessionRoutes(
                     ? { modelConfigId: session.modelConfigId }
                     : {}),
                   ...(language ? { language } : {}),
-                  resourceEvidenceSessionId: session.id,
                 }),
               )
             }
