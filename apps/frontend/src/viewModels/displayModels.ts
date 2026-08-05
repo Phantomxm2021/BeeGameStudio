@@ -9,6 +9,7 @@ import type {
   WorkflowCardPayload,
   WorkflowCardStatus,
   WorkflowCardTask,
+  WorkflowRecoveryUnitKind,
 } from '../types/message'
 
 export type ChatDisplayMessage = Pick<
@@ -106,6 +107,19 @@ const WORKFLOW_STATUS: Record<string, WorkflowCardStatus> = {
   stale: 'stale',
 }
 
+const WORKFLOW_RECOVERY_UNIT_KINDS: readonly WorkflowRecoveryUnitKind[] = [
+  'document',
+  'review-check',
+  'checklist',
+  'resource-inventory',
+  'resource-content',
+  'resource-gate',
+  'atomic-plan',
+  'implementation-task',
+  'implementation-audit',
+  'acceptance',
+]
+
 const normalizeWorkflowMessage = (value: unknown): string | undefined => {
   const message = trimString(value)
   if (!message) return undefined
@@ -199,6 +213,9 @@ const normalizeWorkflowDisplay = (
   )
   const nextActionValue = trimString(source.nextAction ?? source.next_action)
   const recoverable = source.recoverable === true
+  const recoveryUnitKind = trimString(
+    source.lastProvenUnitKind ?? source.last_proven_unit_kind,
+  )
 
   return {
     runId,
@@ -291,6 +308,14 @@ const normalizeWorkflowDisplay = (
     lastProvenUnitId:
       recoverable && trimString(source.lastProvenUnitId ?? source.last_proven_unit_id)
         ? trimString(source.lastProvenUnitId ?? source.last_proven_unit_id)
+        : undefined,
+    lastProvenUnitKind:
+      recoverable && WORKFLOW_RECOVERY_UNIT_KINDS.includes(recoveryUnitKind as WorkflowRecoveryUnitKind)
+        ? recoveryUnitKind as WorkflowRecoveryUnitKind
+        : undefined,
+    lastProvenItemId:
+      recoverable && trimString(source.lastProvenItemId ?? source.last_proven_item_id)
+        ? trimString(source.lastProvenItemId ?? source.last_proven_item_id)
         : undefined,
     block:
       blockMessage || failureReason

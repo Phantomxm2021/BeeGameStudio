@@ -23,7 +23,12 @@ import { PauseIcon } from '../ui/pause';
 import { ScanTextIcon } from '../ui/scan-text';
 import { XIcon } from '../ui/x';
 import { useToastContext } from '../../contexts/ToastContext';
-import type { WorkflowCardAction, WorkflowCardPayload, WorkflowCardTask } from '../../types/message';
+import type {
+  WorkflowCardAction,
+  WorkflowCardPayload,
+  WorkflowCardTask,
+  WorkflowRecoveryUnitKind,
+} from '../../types/message';
 
 const statusLabel: Record<WorkflowCardPayload['status'], string> = {
   draft: '准备中',
@@ -101,16 +106,31 @@ const displayTaskTitle = (task: WorkflowCardTask): string => {
   return title;
 };
 
-const displayRecoveryUnitTitle = (unitId?: string): string | undefined => {
-  if (!unitId) return undefined;
-  const reviewUnitPrefix = 'review:';
-  const documentUnitPrefix = 'document:';
-  const displayId = unitId.startsWith(reviewUnitPrefix)
-    ? unitId.slice(reviewUnitPrefix.length)
-    : unitId.startsWith(documentUnitPrefix)
-      ? unitId.slice(documentUnitPrefix.length)
-      : unitId;
-  return documentTitle[displayId];
+const displayRecoveryUnitTitle = (
+  kind?: WorkflowRecoveryUnitKind,
+  itemId?: string,
+): string | undefined => {
+  switch (kind) {
+    case 'document':
+    case 'review-check':
+      return itemId ? documentTitle[itemId] : undefined;
+    case 'checklist':
+      return 'Gameplay Checklist';
+    case 'resource-inventory':
+      return '资源清单';
+    case 'resource-content':
+      return '资源内容';
+    case 'resource-gate':
+      return '资源准入审计';
+    case 'atomic-plan':
+      return '原子任务规划';
+    case 'implementation-task':
+      return '实现任务';
+    case 'implementation-audit':
+      return '实现审计';
+    case 'acceptance':
+      return '运行验收';
+  }
 };
 
 const formatDuration = (milliseconds: number): string => {
@@ -356,7 +376,9 @@ export function WorkflowCard({
   const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(workflow.status) && Boolean(workflow.block);
   const tasks = workflow.tasks ?? [];
   const recoveryPhaseTitle = isRecoverable ? stageLabel[workflow.lastProvenPhase || ''] : undefined;
-  const recoveryUnitTitle = isRecoverable ? displayRecoveryUnitTitle(workflow.lastProvenUnitId) : undefined;
+  const recoveryUnitTitle = isRecoverable
+    ? displayRecoveryUnitTitle(workflow.lastProvenUnitKind, workflow.lastProvenItemId)
+    : undefined;
   const recoveryMessage = '已验证的工作流检查点可继续恢复。';
   const failureMessage = isRecoverable
     ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。'

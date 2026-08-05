@@ -219,6 +219,8 @@ describe('WorkflowCard', () => {
           recoverable: true,
           lastProvenPhase: 'DOCUMENT_REVIEW',
           lastProvenUnitId: 'review:resource_semantic_fitness',
+          lastProvenUnitKind: 'review-check',
+          lastProvenItemId: 'resource_semantic_fitness',
           thinking: '{"issues":[{"code":"invalid_type"}]}',
           block: { message: 'ZodError: internal diagnostic payload' },
           nextAction: 'resume',
@@ -254,6 +256,37 @@ describe('WorkflowCard', () => {
 
     expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
     expect(screen.queryByText('retired:unknown-unit')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['document', 'docs/GDD.md', '游戏设计文档 GDD'],
+    ['review-check', 'resource_semantic_fitness', '资源语义适配'],
+    ['checklist', undefined, 'Gameplay Checklist'],
+    ['resource-inventory', undefined, '资源清单'],
+    ['resource-content', undefined, '资源内容'],
+    ['resource-gate', undefined, '资源准入审计'],
+    ['atomic-plan', undefined, '原子任务规划'],
+    ['implementation-task', undefined, '实现任务'],
+    ['implementation-audit', undefined, '实现审计'],
+    ['acceptance', undefined, '运行验收'],
+  ] as const)('renders the safe title for a %s canonical recovery unit', (kind, itemId, title) => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: `run_recovery_${kind}`,
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'IMPLEMENTATION',
+          lastProvenUnitId: 'internal-unit-id-must-not-render',
+          lastProvenUnitKind: kind,
+          lastProvenItemId: itemId,
+          nextAction: 'resume',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(new RegExp(title))).toBeInTheDocument();
+    expect(screen.queryByText('internal-unit-id-must-not-render')).not.toBeInTheDocument();
   });
 
   it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {

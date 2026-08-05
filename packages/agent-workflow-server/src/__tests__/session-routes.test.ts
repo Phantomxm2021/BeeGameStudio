@@ -845,6 +845,50 @@ describe('delivery workflow session continuation', () => {
         store.paths.snapshot,
         `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
       )
+      await store.appendEvent({
+        runId: journalRun.runId,
+        type: 'workflow.unit.accepted',
+        phase: 'DOCUMENT_DRAFTING',
+        status: journalRun.status,
+        revision: journalRun.revision,
+        createdAt: journalRun.updatedAt,
+        projectId,
+        ownerId,
+        unit: {
+          eventSchemaVersion: 1,
+          unitId: `document:${recoverablePath}`,
+          kind: 'document',
+          phase: 'DOCUMENT_DRAFTING',
+          predecessorUnitIds: [],
+          inputRevision: journalRun.revision.document,
+          dependencyDigests: {},
+          acceptedAt: journalRun.updatedAt,
+          payload: {
+            path: recoverablePath,
+            revision: journalRun.revision.document,
+          },
+        },
+      })
+      const snapshotBeforeRecoveryRead = await readFile(store.paths.snapshot, 'utf8')
+      const eventsBeforeRecoveryRead = await readFile(store.paths.events, 'utf8')
+      const startsBeforeRecoveryRead = workflowWorkerStarts
+      const recoveryRead = await app.request(`/api/projects/${projectId}/workflow`)
+      const recoveryPayload = (await recoveryRead.json()) as {
+        workflow?: Record<string, unknown>
+      }
+      expect(recoveryRead.status).toBe(200)
+      expect(recoveryPayload.workflow).toMatchObject({
+        recoverable: true,
+        lastProvenPhase: 'DOCUMENT_DRAFTING',
+        lastProvenUnitId: `document:${recoverablePath}`,
+        lastProvenUnitKind: 'document',
+        lastProvenItemId: recoverablePath,
+        nextAction: 'resume',
+      })
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshotBeforeRecoveryRead)
+      expect(await readFile(store.paths.events, 'utf8')).toBe(eventsBeforeRecoveryRead)
+      expect(workflowWorkerStarts).toBe(startsBeforeRecoveryRead)
+      await writeFile(store.paths.events, eventsBeforeRecoverable)
       const startsBeforeInvalidRecovery = workflowWorkerStarts
       const recoveredInvalid = await app.request(
         `/api/projects/${projectId}/workflow/resume`,

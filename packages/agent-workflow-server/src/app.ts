@@ -190,6 +190,7 @@ import {
   projectReviewFindingDisplayItems,
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
+import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
 type JsonObject = Record<string, unknown>
 
@@ -5372,6 +5373,18 @@ const workflowStateErrorTraceByDetail = new Map<string, string>()
 type LastProvenWorkflowSummary = {
   lastProvenPhase: string
   lastProvenUnitId: string
+  lastProvenUnitKind:
+    | 'document'
+    | 'review-check'
+    | 'checklist'
+    | 'resource-inventory'
+    | 'resource-content'
+    | 'resource-gate'
+    | 'atomic-plan'
+    | 'implementation-task'
+    | 'implementation-audit'
+    | 'acceptance'
+  lastProvenItemId?: string
 }
 
 function lastProvenWorkflowSummary(
@@ -5379,17 +5392,21 @@ function lastProvenWorkflowSummary(
 ): LastProvenWorkflowSummary | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type !== 'workflow.unit.accepted' || !isObject(event.unit))
-      continue
-    const phase = event.unit.phase
-    const unitId = event.unit.unitId
-    if (
-      typeof phase === 'string' &&
-      phase === event.phase &&
-      typeof unitId === 'string' &&
-      unitId.trim()
-    )
-      return { lastProvenPhase: phase, lastProvenUnitId: unitId }
+    const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
+    if (!parsed.success || parsed.data.unit.phase !== parsed.data.phase) continue
+    const { unit } = parsed.data
+    const itemId =
+      unit.kind === 'document'
+        ? (unit.payload as { path: string }).path
+        : unit.kind === 'review-check'
+          ? (unit.payload as { check: { id: string } }).check.id
+          : undefined
+    return {
+      lastProvenPhase: unit.phase,
+      lastProvenUnitId: unit.unitId,
+      lastProvenUnitKind: unit.kind,
+      ...(itemId ? { lastProvenItemId: itemId } : {}),
+    }
   }
   return undefined
 }
@@ -5743,6 +5760,12 @@ function workflowViewForDisplay(
       : {}),
     ...(typeof workflow.lastProvenUnitId === 'string'
       ? { lastProvenUnitId: workflow.lastProvenUnitId }
+      : {}),
+    ...(typeof workflow.lastProvenUnitKind === 'string'
+      ? { lastProvenUnitKind: workflow.lastProvenUnitKind }
+      : {}),
+    ...(typeof workflow.lastProvenItemId === 'string'
+      ? { lastProvenItemId: workflow.lastProvenItemId }
       : {}),
     ...(typeof workflow.createdAt === 'string'
       ? { createdAt: workflow.createdAt }
