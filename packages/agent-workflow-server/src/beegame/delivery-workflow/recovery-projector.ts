@@ -3,13 +3,16 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 import {
+  artifactsForDocumentReviewCheck,
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
 } from './document-review-input'
 import {
+  computeDocumentRevision,
   computeResourceContentDigest,
   computeResourceInventoryRevision,
   computeResourceRevision,
+  computeWorkspaceRevision,
   resolveWorkspaceRelativePath,
 } from './revision'
 import {
@@ -65,6 +68,12 @@ type RecoveryErrorCode =
 type ProvenUnit = {
   unit: AcceptedWorkflowUnit
   source: 'journal' | 'snapshot'
+}
+
+type RecoveryJournalMetadata = {
+  runId?: string
+  createdAt?: string
+  usage?: WorkflowUsage
 }
 
 function recoveryError(code: RecoveryErrorCode, message: string): never {
@@ -313,6 +322,80 @@ function parseAcceptedEvents(input: {
   return accepted
 }
 
+function workflowUsage(
+  value: unknown,
+  source: 'snapshot' | 'journal',
+): WorkflowUsage | undefined {
+  const usage = record(value)
+  if (!usage) return undefined
+  const keys = [
+    'input_tokens',
+    'cache_read_tokens',
+    'cache_creation_tokens',
+    'completion_tokens',
+    'total_tokens',
+  ] as const
+  if (
+    keys.some(
+      key =>
+        typeof usage[key] !== 'number' ||
+        !Number.isFinite(usage[key]) ||
+        (usage[key] as number) < 0,
+    )
+  )
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      `${source} cumulative usage is outside the current schema`,
+    )
+  return Object.fromEntries(keys.map(key => [key, usage[key]])) as WorkflowUsage
+}
+
+function recoveryJournalMetadata(input: {
+  events: WorkflowEvent[]
+  expectedRunId?: string
+}): RecoveryJournalMetadata {
+  let runId = input.expectedRunId
+  let createdAt: string | undefined
+  let usage: WorkflowUsage | undefined
+  for (const event of input.events) {
+    if (event.type !== 'run.created' && event.type !== 'usage.updated') continue
+    const eventRunId = stringValue(event.runId)
+    const eventTimestamp = stringValue(event.createdAt)
+    if (
+      !eventRunId ||
+      !eventTimestamp ||
+      !Number.isFinite(Date.parse(eventTimestamp))
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        `${event.type} journal proof is outside the current schema`,
+      )
+    if (runId && eventRunId !== runId)
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        `${event.type} journal proof contradicts the current run identity`,
+      )
+    runId = eventRunId
+    if (event.type === 'run.created') {
+      if (createdAt)
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'accepted-unit ledger contains duplicate run.created proofs',
+        )
+      createdAt = eventTimestamp
+      continue
+    }
+    const currentUsage = workflowUsage(event.usage, 'journal')
+    if (!currentUsage)
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'usage.updated journal proof has no cumulative usage',
+      )
+    usage = currentUsage
+  }
+  return { runId, createdAt, usage }
+}
+
 function rawSnapshotRecord(
   inspection: WorkflowSnapshotInspection,
 ): Record<string, unknown> | undefined {
@@ -463,7 +546,6 @@ function historicalReviewFacts(input: {
 
   for (const id of completedIds) {
     const unitId = reviewUnitId(id as DocumentReviewCheckId)
-    if (input.proofs.has(unitId)) continue
     const check = checks.get(id)
     if (!check)
       recoveryError(
@@ -561,16 +643,28 @@ async function historicalDocumentFacts(input: {
         await readFile(join(resolve(input.workspacePath), path)),
       )
     } catch {
-      continue
-    }
-    const matches = receipts
-      .filter(
-        receipt =>
-          receipt.targetPath === path && receipt.finalDigest === currentDigest,
+      recoveryError(
+        'recovery_artifact_digest_mismatch',
+        `snapshot-completed document ${path} is unavailable`,
       )
+    }
+    const receiptsForPath = receipts.filter(
+      receipt => receipt.targetPath === path,
+    )
+    if (receiptsForPath.length === 0)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        `snapshot-completed document ${path} has no canonical receipt`,
+      )
+    const matches = receiptsForPath
+      .filter(receipt => receipt.finalDigest === currentDigest)
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
     const receipt = matches.at(-1)
-    if (!receipt) continue
+    if (!receipt)
+      recoveryError(
+        'recovery_artifact_digest_mismatch',
+        `snapshot-completed document ${path} contradicts its canonical receipt`,
+      )
     addSnapshotProof(input.proofs, {
       eventSchemaVersion: 1,
       unitId,
@@ -688,21 +782,57 @@ function historicalChecklistFact(input: {
   })
 }
 
-function snapshotRevision(
+function reconcileSourceRevision(input: {
+  label: 'document' | 'workspace'
+  snapshot?: string
+  journal?: string
+  current: string
+}): string {
+  if (input.snapshot && input.journal && input.snapshot !== input.journal)
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      `snapshot and journal contradict the ${input.label} revision`,
+    )
+  const durable = input.snapshot ?? input.journal
+  if (!durable)
+    recoveryError(
+      'recovery_checkpoint_missing',
+      `recovery cannot prove the current ${input.label} revision`,
+    )
+  if (durable !== input.current)
+    recoveryError(
+      'recovery_artifact_digest_mismatch',
+      `current ${input.label} revision contradicts durable recovery sources`,
+    )
+  return input.current
+}
+
+async function snapshotRevision(
   snapshot: Record<string, unknown> | undefined,
   accepted: WorkflowUnitAcceptedEvent[],
-): Revision {
+  workspacePath: string,
+  confirmedBriefDigest: string,
+): Promise<Revision> {
   const raw = record(snapshot?.revision)
   const rawDocument = stringValue(raw?.document)
   const rawWorkspace = stringValue(raw?.workspace)
   const latest = accepted.at(-1)?.revision
-  const document = rawDocument ?? latest?.document
-  const workspace = rawWorkspace ?? latest?.workspace
-  if (!document || !workspace)
-    recoveryError(
-      'recovery_checkpoint_missing',
-      'recovery cannot prove the current document and workspace revisions',
-    )
+  const [currentDocument, currentWorkspace] = await Promise.all([
+    computeDocumentRevision(workspacePath, confirmedBriefDigest),
+    computeWorkspaceRevision(workspacePath),
+  ])
+  const document = reconcileSourceRevision({
+    label: 'document',
+    snapshot: rawDocument,
+    journal: latest?.document,
+    current: currentDocument,
+  })
+  const workspace = reconcileSourceRevision({
+    label: 'workspace',
+    snapshot: rawWorkspace,
+    journal: latest?.workspace,
+    current: currentWorkspace,
+  })
   return {
     document,
     ...((stringValue(raw?.resource) ?? latest?.resource)
@@ -766,6 +896,67 @@ function snapshotTasks(
       'snapshot atomic task graph contradicts the accepted plan',
     )
   return tasks
+}
+
+function assertSnapshotCompletedClaims(input: {
+  snapshot: Record<string, unknown> | undefined
+  proofs: Map<string, ProvenUnit>
+  tasks: AtomicTask[]
+}): void {
+  for (const task of input.tasks) {
+    if (task.status !== 'completed') continue
+    const unitId = `implementation:${task.id}`
+    const proof = input.proofs.get(unitId)?.unit
+    if (!proof)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        `snapshot-completed task ${task.id} has no accepted terminal`,
+      )
+    const payload = acceptedUnitPayload(proof)
+    const evidenceRefs = stringArray(payload.evidenceRefs)
+    if (
+      task.completedRevision !== proof.inputRevision ||
+      !evidenceRefs ||
+      !sameStrings(task.evidenceRefs, evidenceRefs)
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        `snapshot and journal contradict completed task ${task.id}`,
+      )
+  }
+
+  const evidence = record(input.snapshot?.evidence)
+  for (const claim of [
+    {
+      value: record(evidence?.implementationAudit),
+      unitId: IMPLEMENTATION_AUDIT_UNIT_ID,
+      label: 'Implementation Audit',
+    },
+    {
+      value: record(evidence?.acceptance),
+      unitId: ACCEPTANCE_UNIT_ID,
+      label: 'Acceptance',
+    },
+  ]) {
+    if (claim.value?.status !== 'passed') continue
+    const proof = input.proofs.get(claim.unitId)?.unit
+    if (!proof)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        `snapshot-passed ${claim.label} has no accepted terminal`,
+      )
+    const payload = acceptedUnitPayload(proof)
+    if (
+      claim.value.path !== proof.receiptRef ||
+      claim.value.path !== payload.receiptRef ||
+      claim.value.revision !== proof.inputRevision ||
+      claim.value.observedAt !== proof.acceptedAt
+    )
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        `snapshot and journal contradict ${claim.label}`,
+      )
+  }
 }
 
 function completeUnitGraph(input: { taskIds?: string[] }): string[] {
@@ -878,22 +1069,33 @@ async function validateAcceptedArtifacts(input: {
   confirmedBriefDigest: string
   documentRevision: string
 }): Promise<void> {
-  const artifactDigests = new Map<
+  const artifactsByScope = new Map<
     DocumentReviewScope,
-    Promise<Record<string, string>>
+    ReturnType<typeof readDocumentReviewArtifacts>
   >()
-  const digestsForScope = (scope: DocumentReviewScope) => {
-    let pending = artifactDigests.get(scope)
+  const artifactsForScope = (scope: DocumentReviewScope) => {
+    let pending = artifactsByScope.get(scope)
     if (!pending) {
       pending = readDocumentReviewArtifacts(input.workspacePath, scope, {
         confirmedBriefContext: input.confirmedBriefContext,
         confirmedBriefDigest: input.confirmedBriefDigest,
-      }).then(documentReviewArtifactDigests)
-      artifactDigests.set(scope, pending)
+      })
+      artifactsByScope.set(scope, pending)
     }
     return pending
   }
+  const finalAcceptedDocument = input.units
+    .filter(unit => unit.kind === 'document')
+    .at(-1)
   for (const unit of input.units) {
+    if (
+      unit === finalAcceptedDocument &&
+      unit.inputRevision !== input.documentRevision
+    )
+      recoveryError(
+        'recovery_artifact_digest_mismatch',
+        'final accepted document proof contradicts the current document revision',
+      )
     if (unit.kind === 'review-check') {
       if (Object.keys(unit.dependencyDigests).length === 0)
         recoveryError(
@@ -903,18 +1105,19 @@ async function validateAcceptedArtifacts(input: {
       const check = reviewCheckFromUnit(unit)
       let current: Record<string, string>
       try {
-        current = await digestsForScope(reviewScope(check.id))
+        current = documentReviewArtifactDigests(
+          artifactsForDocumentReviewCheck(
+            await artifactsForScope(reviewScope(check.id)),
+            check.id,
+          ),
+        )
       } catch {
         recoveryError(
           'recovery_artifact_digest_mismatch',
           `current artifacts for ${unit.unitId} cannot be verified`,
         )
       }
-      if (
-        Object.entries(unit.dependencyDigests).some(
-          ([path, expected]) => current[path] !== expected,
-        )
-      )
+      if (stableValue(unit.dependencyDigests) !== stableValue(current))
         recoveryError(
           'recovery_artifact_digest_mismatch',
           `accepted dependencies changed after ${unit.unitId}`,
@@ -954,6 +1157,26 @@ async function validateAcceptedArtifacts(input: {
         recoveryError(
           'recovery_artifact_digest_mismatch',
           'canonical resource revision changed after Resource Gate acceptance',
+        )
+      continue
+    }
+    if (unit.kind === 'checklist') {
+      const reviewProof = input.units.find(
+        candidate =>
+          candidate.unitId === reviewUnitId('checklist_traceability'),
+      )
+      if (!reviewProof)
+        recoveryError(
+          'recovery_checkpoint_missing',
+          'accepted Checklist has no accepted review dependency',
+        )
+      if (
+        stableValue(unit.dependencyDigests) !==
+        stableValue(reviewProof.dependencyDigests)
+      )
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'accepted Checklist contradicts its review dependency proof',
         )
       continue
     }
@@ -1028,28 +1251,7 @@ function rawActiveUnitId(
 function usageFromSnapshot(
   snapshot: Record<string, unknown> | undefined,
 ): WorkflowUsage | undefined {
-  const usage = record(snapshot?.usage)
-  if (!usage) return undefined
-  const keys = [
-    'input_tokens',
-    'cache_read_tokens',
-    'cache_creation_tokens',
-    'completion_tokens',
-    'total_tokens',
-  ] as const
-  if (
-    keys.some(
-      key =>
-        typeof usage[key] !== 'number' ||
-        !Number.isFinite(usage[key]) ||
-        (usage[key] as number) < 0,
-    )
-  )
-    recoveryError(
-      'recovery_checkpoint_conflict',
-      'snapshot cumulative usage is outside the current schema',
-    )
-  return Object.fromEntries(keys.map(key => [key, usage[key]])) as WorkflowUsage
+  return workflowUsage(snapshot?.usage, 'snapshot')
 }
 
 function timestampFromSnapshot(
@@ -1099,6 +1301,7 @@ function approvalFromReviewUnits(input: {
 function buildProjectionRun(input: {
   snapshot?: Record<string, unknown>
   acceptedEvents: WorkflowUnitAcceptedEvent[]
+  journalMetadata: RecoveryJournalMetadata
   proofs: Map<string, ProvenUnit>
   replayedUnitIds: string[]
   activeUnitId?: string
@@ -1109,7 +1312,9 @@ function buildProjectionRun(input: {
   confirmedBriefContext: string
 }): DeliveryRun {
   const runId =
-    stringValue(input.snapshot?.runId) ?? input.acceptedEvents[0]?.runId
+    stringValue(input.snapshot?.runId) ??
+    input.acceptedEvents[0]?.runId ??
+    input.journalMetadata.runId
   if (!runId)
     recoveryError(
       'recovery_checkpoint_missing',
@@ -1176,11 +1381,21 @@ function buildProjectionRun(input: {
   const gate = replayed.has(RESOURCE_GATE_UNIT_ID)
     ? input.proofs.get(RESOURCE_GATE_UNIT_ID)?.unit
     : undefined
+  const audit = replayed.has(IMPLEMENTATION_AUDIT_UNIT_ID)
+    ? input.proofs.get(IMPLEMENTATION_AUDIT_UNIT_ID)?.unit
+    : undefined
+  const acceptance = replayed.has(ACCEPTANCE_UNIT_ID)
+    ? input.proofs.get(ACCEPTANCE_UNIT_ID)?.unit
+    : undefined
   const inventoryPayload = inventory
     ? acceptedUnitPayload(inventory)
     : undefined
   const contentPayload = content ? acceptedUnitPayload(content) : undefined
   const gatePayload = gate ? acceptedUnitPayload(gate) : undefined
+  const auditPayload = audit ? acceptedUnitPayload(audit) : undefined
+  const acceptancePayload = acceptance
+    ? acceptedUnitPayload(acceptance)
+    : undefined
 
   let phase: DeliveryRun['phase'] = 'DELIVERY'
   let documentStep: DeliveryRun['documentStep']
@@ -1310,9 +1525,8 @@ function buildProjectionRun(input: {
         ? rawRepairPasses.resource
         : 0,
   }
-  const createdAt =
-    timestampFromSnapshot(input.snapshot, 'createdAt') ??
-    input.acceptedEvents[0]?.createdAt
+  const snapshotCreatedAt = timestampFromSnapshot(input.snapshot, 'createdAt')
+  const createdAt = input.journalMetadata.createdAt
   const updatedAt =
     timestampFromSnapshot(input.snapshot, 'updatedAt') ??
     input.acceptedEvents.at(-1)?.createdAt
@@ -1320,6 +1534,23 @@ function buildProjectionRun(input: {
     recoveryError(
       'recovery_checkpoint_missing',
       'recovery cannot prove the original run timestamps',
+    )
+  if (snapshotCreatedAt && snapshotCreatedAt !== createdAt)
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      'snapshot and journal contradict the original run start',
+    )
+  const snapshotUsage = usageFromSnapshot(input.snapshot)
+  const usage = input.journalMetadata.usage
+  if (!usage)
+    recoveryError(
+      'recovery_checkpoint_missing',
+      'recovery cannot prove cumulative workflow usage',
+    )
+  if (snapshotUsage && stableValue(snapshotUsage) !== stableValue(usage))
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      'snapshot and journal contradict cumulative workflow usage',
     )
 
   const projectedTasks = input.tasks.map(task => {
@@ -1369,6 +1600,40 @@ function buildProjectionRun(input: {
             },
           }
         : {}),
+      ...(audit
+        ? {
+            implementationAudit: {
+              path:
+                audit.receiptRef ??
+                stringValue(auditPayload?.receiptRef) ??
+                recoveryError(
+                  'recovery_checkpoint_missing',
+                  'Implementation Audit checkpoint has no canonical receipt',
+                ),
+              kind: 'implementation_audit' as const,
+              revision: audit.inputRevision,
+              status: 'passed' as const,
+              observedAt: audit.acceptedAt,
+            },
+          }
+        : {}),
+      ...(acceptance
+        ? {
+            acceptance: {
+              path:
+                acceptance.receiptRef ??
+                stringValue(acceptancePayload?.receiptRef) ??
+                recoveryError(
+                  'recovery_checkpoint_missing',
+                  'Acceptance checkpoint has no canonical receipt',
+                ),
+              kind: 'acceptance' as const,
+              revision: acceptance.inputRevision,
+              status: 'passed' as const,
+              observedAt: acceptance.acceptedAt,
+            },
+          }
+        : {}),
     },
     documentReviewState: {
       repairPasses,
@@ -1397,9 +1662,7 @@ function buildProjectionRun(input: {
           }
         : {}),
     },
-    ...(usageFromSnapshot(input.snapshot)
-      ? { usage: usageFromSnapshot(input.snapshot) }
-      : {}),
+    usage,
     thinking: activeUnitId ? 'idle' : undefined,
     lastProgressAt:
       timestampFromSnapshot(input.snapshot, 'lastProgressAt') ?? updatedAt,
@@ -1472,12 +1735,21 @@ export async function projectExactResumeRun(input: {
     projectId: input.projectId,
     snapshotRunId,
   })
+  const journalMetadata = recoveryJournalMetadata({
+    events: input.events,
+    expectedRunId: snapshotRunId ?? acceptedEvents[0]?.runId,
+  })
   if (!snapshot && acceptedEvents.length === 0)
     recoveryError(
       'recovery_checkpoint_missing',
       'malformed snapshot has no accepted-unit journal',
     )
-  const revision = snapshotRevision(snapshot, acceptedEvents)
+  const revision = await snapshotRevision(
+    snapshot,
+    acceptedEvents,
+    input.workspacePath,
+    sha256(input.confirmedBriefContext),
+  )
   const proofs = new Map<string, ProvenUnit>(
     acceptedEvents.map(event => [
       event.unit.unitId,
@@ -1497,6 +1769,7 @@ export async function projectExactResumeRun(input: {
   }
   const taskIds = planTaskIds(proofs)
   const tasks = snapshotTasks(snapshot, taskIds)
+  assertSnapshotCompletedClaims({ snapshot, proofs, tasks })
   const graph = completeUnitGraph({ taskIds })
   const replayedUnitIds = assertCurrentUnitGraph({
     proofs,
@@ -1530,6 +1803,7 @@ export async function projectExactResumeRun(input: {
   const run = buildProjectionRun({
     snapshot,
     acceptedEvents,
+    journalMetadata,
     proofs,
     replayedUnitIds,
     activeUnitId,

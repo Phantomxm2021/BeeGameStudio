@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
-import { parseDeliveryRun } from './schema'
+import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
@@ -61,6 +61,26 @@ function reviewRun(completedCheckIds: string[]): DeliveryRun {
 }
 
 describe('accepted workflow unit journal', () => {
+  test('builds the one strict nested dependency payload for accepted review units', () => {
+    const before = reviewRun([])
+    const after = reviewRun(['brief_alignment'])
+
+    const [accepted] = deriveAcceptedWorkflowUnits(before, after)
+    const parsed = acceptedWorkflowUnitSchema.safeParse(accepted)
+
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    expect(parsed.data.payload).toEqual({
+      check: after.documentReviewState.activeCycle?.checks[0],
+      findings: [],
+      dependencyDigests: {
+        brief_alignment:
+          after.documentReviewState.activeCycle?.checkEvidenceDigests
+            .brief_alignment,
+      },
+    })
+  })
+
   test('derives every newly accepted semantic unit from a reconciled run transition', () => {
     const beforeDocument = {
       ...run(),

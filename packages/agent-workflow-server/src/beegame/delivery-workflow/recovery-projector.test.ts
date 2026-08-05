@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
@@ -8,15 +15,18 @@ import {
   createTestDeliveryRun,
 } from '../../__tests__/delivery-workflow-test-helpers'
 import { commitCanonicalDocument } from '../native-canonical-document-tool'
+import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import {
   artifactsForDocumentReviewCheck,
   documentReviewArtifactDigests,
   readDocumentReviewArtifacts,
 } from './document-review-input'
 import {
+  computeDocumentRevision,
   computeResourceContentDigest,
   computeResourceInventoryRevision,
   computeResourceRevision,
+  computeWorkspaceRevision,
 } from './revision'
 import { projectExactResumeRun } from './recovery-projector'
 import { createRunStore, WorkflowStoreError } from './run-store'
@@ -27,7 +37,6 @@ import {
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  type AcceptedWorkflowUnit,
   type DeliveryRun,
   type DocumentReviewCheck,
   type WorkflowEvent,
@@ -38,8 +47,6 @@ const OWNER_ID = 'owner-recovery'
 const PROJECT_ID = 'project-recovery'
 const RUN_ID = 'run-recovery'
 const BRIEF = 'Confirmed synthetic delivery authority.'
-const DOCUMENT_REVISION = 'document-revision'
-const WORKSPACE_REVISION = 'workspace-revision'
 const ACCEPTED_AT = '2026-08-05T00:00:00.000Z'
 const RETIRED_PENDING_CHECK_ID = 'retired-pending-check'
 const CHECKLIST_UNIT_ID = 'checklist:docs/acceptance/gameplay-checklist.md'
@@ -50,58 +57,14 @@ function digest(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-function acceptedEvent(
-  unit: AcceptedWorkflowUnit,
-  index: number,
-  revision: DeliveryRun['revision'],
-): WorkflowUnitAcceptedEvent {
-  return {
-    eventId: `accepted-event-${index}`,
-    runId: RUN_ID,
-    type: 'workflow.unit.accepted',
-    phase: unit.phase,
-    status: 'running',
-    revision,
-    createdAt: unit.acceptedAt,
-    projectId: PROJECT_ID,
-    ownerId: OWNER_ID,
-    unit,
-  }
-}
-
-function unit(
-  value: Omit<AcceptedWorkflowUnit, 'eventSchemaVersion' | 'acceptedAt'>,
-): AcceptedWorkflowUnit {
-  return {
-    eventSchemaVersion: 1,
-    acceptedAt: ACCEPTED_AT,
-    ...value,
-  }
-}
-
-function reviewUnit(input: {
-  check: DocumentReviewCheck
-  predecessorUnitIds: string[]
-  inputRevision: string
-  dependencyDigests?: Record<string, string>
-}): AcceptedWorkflowUnit {
-  const dependencyDigests = input.dependencyDigests ?? {}
-  return unit({
-    unitId: `review:${input.check.id}`,
-    kind: 'review-check',
-    phase: 'DOCUMENT_REVIEW',
-    predecessorUnitIds: input.predecessorUnitIds,
-    inputRevision: input.inputRevision,
-    dependencyDigests,
-    payload: {
-      check: input.check,
-      findings: [],
-      dependencyDigests: { [input.check.id]: dependencyDigests },
-    },
-  })
-}
-
-async function createProjectionFixture() {
+async function createProjectionFixture(
+  acceptedThrough:
+    | 'resource-gate'
+    | 'plan'
+    | 'implementation'
+    | 'audit'
+    | 'acceptance' = 'resource-gate',
+) {
   const workspacePath = await mkdtemp(join(tmpdir(), 'workflow-projector-'))
   for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
     await commitCanonicalDocument({
@@ -123,17 +86,22 @@ async function createProjectionFixture() {
     'utf8',
   )
 
+  const documentRevision = await computeDocumentRevision(
+    workspacePath,
+    digest(BRIEF),
+  )
+  const workspaceRevision = await computeWorkspaceRevision(workspacePath)
   const contentDigest = await computeResourceContentDigest(workspacePath)
   const inventoryRevision =
     await computeResourceInventoryRevision(workspacePath)
   const resourceRevision = await computeResourceRevision(
     workspacePath,
-    DOCUMENT_REVISION,
+    documentRevision,
   )
   const revision = {
-    document: DOCUMENT_REVISION,
+    document: documentRevision,
     resource: resourceRevision,
-    workspace: WORKSPACE_REVISION,
+    workspace: workspaceRevision,
   }
   const allReviewChecks = createAcceptedComprehensiveReview().checks
   const foundationChecks = allReviewChecks.slice(
@@ -162,6 +130,11 @@ async function createProjectionFixture() {
     'checklist',
     authority,
   )
+  const comprehensiveArtifacts = await readDocumentReviewArtifacts(
+    workspacePath,
+    'complete',
+    authority,
+  )
   const dependencyDigestsByCheckId = Object.fromEntries([
     ...foundationChecks.map(check => [
       check.id,
@@ -176,94 +149,358 @@ async function createProjectionFixture() {
       ),
     ],
   ])
+  const comprehensiveDependencyDigestsByCheckId = Object.fromEntries(
+    allReviewChecks.map(check => [
+      check.id,
+      documentReviewArtifactDigests(
+        artifactsForDocumentReviewCheck(comprehensiveArtifacts, check.id),
+      ),
+    ]),
+  )
 
-  const acceptedUnits: AcceptedWorkflowUnit[] = []
-  for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries())
-    acceptedUnits.push(
-      unit({
-        unitId: `document:${path}`,
-        kind: 'document',
-        phase: 'DOCUMENT_DRAFTING',
-        predecessorUnitIds:
-          index === 0
-            ? []
-            : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[index - 1]}`],
-        inputRevision: DOCUMENT_REVISION,
-        dependencyDigests: {},
-        payload: { path, revision: DOCUMENT_REVISION },
-      }),
-    )
-  for (const [index, check] of foundationChecks.entries())
-    acceptedUnits.push(
-      reviewUnit({
-        check,
-        predecessorUnitIds:
-          index === 0
-            ? []
-            : [`review:${FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[index - 1]}`],
-        inputRevision: DOCUMENT_REVISION,
-        dependencyDigests: dependencyDigestsByCheckId[check.id],
-      }),
-    )
-  acceptedUnits.push(
-    reviewUnit({
-      check: checklistCheck,
-      predecessorUnitIds: [],
-      inputRevision: DOCUMENT_REVISION,
-      dependencyDigests: dependencyDigestsByCheckId.checklist_traceability,
+  const journalBase = {
+    ...createTestDeliveryRun({
+      runId: RUN_ID,
+      projectId: PROJECT_ID,
+      ownerId: OWNER_ID,
+      confirmedBriefContext: BRIEF,
+      foundationDraftComplete: false,
     }),
-    unit({
-      unitId: CHECKLIST_UNIT_ID,
-      kind: 'checklist',
-      phase: 'DOCUMENT_REVIEW',
-      predecessorUnitIds: ['review:checklist_traceability'],
-      inputRevision: DOCUMENT_REVISION,
-      dependencyDigests: {},
-      receiptRef: '.beegame/workflow/evidence/checklist.json',
-      payload: {
-        revision: DOCUMENT_REVISION,
-        evidencePath: '.beegame/workflow/evidence/checklist.json',
-        checkIds: ['checklist_traceability'],
+    revision,
+    createdAt: '2026-08-04T00:00:00.000Z',
+    lastProgressAt: ACCEPTED_AT,
+    updatedAt: ACCEPTED_AT,
+  }
+  const beforeDocuments = {
+    ...journalBase,
+    phase: 'DOCUMENT_DRAFTING' as const,
+    documentStep: 'FOUNDATION_DRAFTING' as const,
+  }
+  const afterDocuments = {
+    ...beforeDocuments,
+    foundationDraftState: {
+      completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+    },
+  }
+  const beforeFoundationReview = {
+    ...afterDocuments,
+    phase: 'DOCUMENT_REVIEW' as const,
+    documentStep: 'FOUNDATION_REVIEW' as const,
+    documentReviewState: {
+      ...afterDocuments.documentReviewState,
+      activeCycle: {
+        cycleId: 'foundation-cycle',
+        originScope: 'foundation' as const,
+        scope: 'foundation' as const,
+        mode: 'initial' as const,
+        sourceRevision: documentRevision,
+        requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        completedCheckIds: [],
+        checks: [],
+        checkEvidenceDigests: {},
+        findings: [],
+        acceptedSemanticResult: false,
+        changedPaths: [],
+        sourceArtifactDigests: {},
       },
-    }),
-    unit({
-      unitId: 'resource:inventory',
-      kind: 'resource-inventory',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: [CHECKLIST_UNIT_ID],
-      inputRevision: inventoryRevision,
-      dependencyDigests: {},
-      payload: {
+    },
+  }
+  const afterFoundationReview = {
+    ...beforeFoundationReview,
+    documentReviewState: {
+      ...beforeFoundationReview.documentReviewState,
+      activeCycle: {
+        ...beforeFoundationReview.documentReviewState.activeCycle,
+        completedCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        checks: foundationChecks,
+        checkEvidenceDigests: Object.fromEntries(
+          foundationChecks.map(check => [
+            check.id,
+            dependencyDigestsByCheckId[check.id],
+          ]),
+        ),
+        acceptedSemanticResult: true,
+      },
+    },
+  }
+  const checklistApproval = {
+    scope: 'checklist' as const,
+    revision: documentRevision,
+    checks: [checklistCheck],
+    checkEvidenceDigests: {
+      checklist_traceability: dependencyDigestsByCheckId.checklist_traceability,
+    },
+    evidencePath: '.beegame/workflow/evidence/checklist.json',
+    approvedAt: ACCEPTED_AT,
+  }
+  const afterChecklist = {
+    ...afterFoundationReview,
+    documentStep: 'CHECKLIST_REVIEW' as const,
+    documentReviewState: {
+      ...afterFoundationReview.documentReviewState,
+      checklistApproval,
+      activeCycle: {
+        cycleId: 'checklist-cycle',
+        originScope: 'checklist' as const,
+        scope: 'checklist' as const,
+        mode: 'initial' as const,
+        sourceRevision: documentRevision,
+        requiredCheckIds: ['checklist_traceability' as const],
+        completedCheckIds: ['checklist_traceability' as const],
+        checks: [checklistCheck],
+        checkEvidenceDigests: checklistApproval.checkEvidenceDigests,
+        findings: [],
+        acceptedSemanticResult: true,
+        changedPaths: [],
+        sourceArtifactDigests: {},
+      },
+    },
+  }
+  const afterInventory = {
+    ...afterChecklist,
+    phase: 'RESOURCE_PREPARATION' as const,
+    resourceProductionState: {
+      currentTask: 'RESOURCE_CONTENT' as const,
+      inventoryReceipt: {
+        revision: inventoryRevision,
         bindings: [
           { requirementId: 'requirement-id', resourceIds: ['resource-id'] },
         ],
         catalogObserved: true,
+        acceptedAt: ACCEPTED_AT,
       },
-    }),
-    unit({
-      unitId: 'resource:content',
-      kind: 'resource-content',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: ['resource:inventory'],
-      inputRevision: contentDigest,
-      dependencyDigests: { content: contentDigest },
-      payload: { contentDigest },
-    }),
-    unit({
-      unitId: 'resource:gate',
-      kind: 'resource-gate',
-      phase: 'DOCUMENT_REVIEW',
-      predecessorUnitIds: ['resource:content'],
-      inputRevision: resourceRevision,
-      dependencyDigests: {},
-      receiptRef: '.beegame/workflow/evidence/resource-gate.json',
-      payload: {
-        receiptRef: '.beegame/workflow/evidence/resource-gate.json',
+    },
+  }
+  const afterContent = {
+    ...afterInventory,
+    resourceProductionState: {
+      ...afterInventory.resourceProductionState,
+      currentTask: 'RESOURCE_GATE' as const,
+      contentReceipt: { contentDigest, acceptedAt: ACCEPTED_AT },
+    },
+  }
+  const afterGate = {
+    ...afterContent,
+    phase: 'DOCUMENT_REVIEW' as const,
+    documentStep: 'COMPREHENSIVE_REVIEW' as const,
+    evidence: {
+      resourcePreparation: {
+        path: '.beegame/workflow/evidence/resource-gate.json',
+        kind: 'resource_preparation' as const,
+        revision: resourceRevision,
+        status: 'passed' as const,
+        observedAt: ACCEPTED_AT,
       },
-    }),
+    },
+  }
+  const beforeComprehensive = {
+    ...afterGate,
+    documentReviewState: {
+      ...afterGate.documentReviewState,
+      activeCycle: {
+        cycleId: 'comprehensive-cycle',
+        originScope: 'complete' as const,
+        scope: 'complete' as const,
+        mode: 'initial' as const,
+        sourceRevision: resourceRevision,
+        requiredCheckIds: [...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS],
+        completedCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        checks: foundationChecks,
+        checkEvidenceDigests: Object.fromEntries(
+          foundationChecks.map(check => [
+            check.id,
+            dependencyDigestsByCheckId[check.id],
+          ]),
+        ),
+        findings: [],
+        acceptedSemanticResult: false,
+        changedPaths: [],
+        sourceArtifactDigests: {},
+      },
+    },
+  }
+  const afterComprehensive = {
+    ...beforeComprehensive,
+    documentReviewState: {
+      ...beforeComprehensive.documentReviewState,
+      activeCycle: {
+        ...beforeComprehensive.documentReviewState.activeCycle,
+        completedCheckIds: [...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS],
+        checks: allReviewChecks,
+        checkEvidenceDigests: Object.fromEntries(
+          allReviewChecks.map(check => [
+            check.id,
+            FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.includes(check.id as never)
+              ? dependencyDigestsByCheckId[check.id]
+              : comprehensiveDependencyDigestsByCheckId[check.id],
+          ]),
+        ),
+        acceptedSemanticResult: true,
+      },
+    },
+  }
+  const task = {
+    id: 'task-id',
+    title: 'Synthetic task',
+    checklistIds: ['check-id'],
+    resourceIds: ['resource-id'],
+    contentIds: ['content-id'],
+    dependsOn: [],
+    allowedPaths: ['src/'],
+    expectedArtifacts: ['src/artifact.ts'],
+    verification: [
+      {
+        kind: 'test' as const,
+        commandOrAction: 'synthetic verification',
+        expectedResult: 'pass',
+      },
+    ],
+    status: 'pending' as const,
+    attempt: 0,
+    evidenceRefs: [],
+  }
+  const planned = {
+    ...afterComprehensive,
+    phase: 'IMPLEMENTATION' as const,
+    tasks: [task],
+  }
+  const implemented = {
+    ...planned,
+    revision: { ...revision, implementation: workspaceRevision },
+    tasks: [
+      {
+        ...task,
+        status: 'completed' as const,
+        completedRevision: workspaceRevision,
+        evidenceRefs: ['.beegame/workflow/evidence/task.json'],
+      },
+    ],
+  }
+  const audited = {
+    ...implemented,
+    phase: 'ACCEPTANCE' as const,
+    evidence: {
+      ...implemented.evidence,
+      implementationAudit: {
+        path: '.beegame/workflow/evidence/audit.json',
+        kind: 'implementation_audit' as const,
+        revision: workspaceRevision,
+        status: 'passed' as const,
+        observedAt: ACCEPTED_AT,
+      },
+    },
+  }
+  const accepted = {
+    ...audited,
+    phase: 'DELIVERY' as const,
+    evidence: {
+      ...audited.evidence,
+      acceptance: {
+        path: '.beegame/workflow/evidence/acceptance.json',
+        kind: 'acceptance' as const,
+        revision: workspaceRevision,
+        status: 'passed' as const,
+        observedAt: ACCEPTED_AT,
+      },
+    },
+  }
+  const acceptedUnits = [
+    ...deriveAcceptedWorkflowUnits(beforeDocuments, afterDocuments),
+    ...deriveAcceptedWorkflowUnits(
+      beforeFoundationReview as DeliveryRun,
+      afterFoundationReview as DeliveryRun,
+    ),
+    ...deriveAcceptedWorkflowUnits(
+      afterFoundationReview as DeliveryRun,
+      afterChecklist as DeliveryRun,
+    ),
+    ...deriveAcceptedWorkflowUnits(
+      afterChecklist as DeliveryRun,
+      afterInventory as DeliveryRun,
+    ),
+    ...deriveAcceptedWorkflowUnits(
+      afterInventory as DeliveryRun,
+      afterContent as DeliveryRun,
+    ),
+    ...deriveAcceptedWorkflowUnits(
+      afterContent as DeliveryRun,
+      afterGate as DeliveryRun,
+    ),
+  ]
+  const acceptedRank = [
+    'resource-gate',
+    'plan',
+    'implementation',
+    'audit',
+    'acceptance',
+  ].indexOf(acceptedThrough)
+  if (acceptedRank >= 1)
+    acceptedUnits.push(
+      ...deriveAcceptedWorkflowUnits(
+        beforeComprehensive as DeliveryRun,
+        afterComprehensive as DeliveryRun,
+      ),
+      ...deriveAcceptedWorkflowUnits(
+        afterComprehensive as DeliveryRun,
+        planned as DeliveryRun,
+      ),
+    )
+  if (acceptedRank >= 2)
+    acceptedUnits.push(
+      ...deriveAcceptedWorkflowUnits(
+        planned as DeliveryRun,
+        implemented as DeliveryRun,
+      ),
+    )
+  if (acceptedRank >= 3)
+    acceptedUnits.push(
+      ...deriveAcceptedWorkflowUnits(
+        implemented as DeliveryRun,
+        audited as DeliveryRun,
+      ),
+    )
+  if (acceptedRank >= 4)
+    acceptedUnits.push(
+      ...deriveAcceptedWorkflowUnits(
+        audited as DeliveryRun,
+        accepted as DeliveryRun,
+      ),
+    )
+  const usage = {
+    input_tokens: 101,
+    cache_read_tokens: 20,
+    cache_creation_tokens: 10,
+    completion_tokens: 30,
+    total_tokens: 161,
+  }
+  const store = createRunStore(workspacePath, OWNER_ID)
+  await store.commit(journalBase, {
+    runId: RUN_ID,
+    type: 'run.created',
+    phase: journalBase.phase,
+    status: journalBase.status,
+    revision,
+    projectId: PROJECT_ID,
+    ownerId: OWNER_ID,
+    createdAt: journalBase.createdAt,
+  })
+  await store.commit(
+    { ...journalBase, usage },
+    {
+      runId: RUN_ID,
+      type: 'usage.updated',
+      phase: journalBase.phase,
+      status: journalBase.status,
+      revision,
+      usage,
+      createdAt: ACCEPTED_AT,
+    },
+    acceptedUnits,
   )
-  const events = acceptedUnits.map((acceptedUnit, index) =>
-    acceptedEvent(acceptedUnit, index, revision),
+  const journalEvents = await store.readEvents()
+  const events = journalEvents.filter(
+    (event): event is WorkflowUnitAcceptedEvent =>
+      event.type === 'workflow.unit.accepted',
   )
 
   const base = createTestDeliveryRun({
@@ -303,8 +540,7 @@ async function createProjectionFixture() {
     documentReviewState: {
       ...base.documentReviewState,
       checklistApproval: {
-        ...base.documentReviewState.checklistApproval!,
-        revision: DOCUMENT_REVISION,
+        ...checklistApproval,
       },
       activeCycle: {
         cycleId: 'active-comprehensive-cycle',
@@ -355,13 +591,7 @@ async function createProjectionFixture() {
         },
       },
     },
-    usage: {
-      input_tokens: 101,
-      cache_read_tokens: 20,
-      cache_creation_tokens: 10,
-      completion_tokens: 30,
-      total_tokens: 161,
-    },
+    usage,
     createdAt: '2026-08-04T00:00:00.000Z',
     updatedAt: '2026-08-05T00:00:00.000Z',
   }
@@ -376,10 +606,15 @@ async function createProjectionFixture() {
     snapshotPath,
     sourceContent,
     events: events as WorkflowEvent[],
+    journalEvents,
     snapshot,
     contentDigest,
     inventoryRevision,
     resourceRevision,
+    task,
+    implementedTask: implemented.tasks[0],
+    implementationAudit: audited.evidence.implementationAudit,
+    acceptance: accepted.evidence.acceptance,
   }
 }
 
@@ -393,7 +628,7 @@ async function inspect(fixture: ProjectionFixture) {
 function projectInput(
   fixture: ProjectionFixture,
   inspection: Awaited<ReturnType<typeof inspect>>,
-  events: WorkflowEvent[] = fixture.events,
+  events: WorkflowEvent[] = fixture.journalEvents,
 ) {
   return {
     inspection,
@@ -472,8 +707,9 @@ describe('workflow exact-resume recovery projector', () => {
   test('uses matching canonical document receipts to recover historical completed paths', async () => {
     const fixture = await createProjectionFixture()
     const inspection = await inspect(fixture)
-    const events = fixture.events.filter(
+    const events = fixture.journalEvents.filter(
       event =>
+        event.type !== 'workflow.unit.accepted' ||
         !(event as WorkflowUnitAcceptedEvent).unit.unitId.startsWith(
           'document:',
         ),
@@ -489,6 +725,246 @@ describe('workflow exact-resume recovery projector', () => {
     expect(projection.activeUnitId).toBe('review:resource_semantic_fitness')
   })
 
+  test('fails closed when a snapshot-completed document has no canonical receipt', async () => {
+    const fixture = await createProjectionFixture()
+    const completedPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const receiptDirectory = join(
+      fixture.workspacePath,
+      '.beegame',
+      'workflow',
+      'document-commits',
+    )
+    for (const name of await readdir(receiptDirectory)) {
+      const receiptPath = join(receiptDirectory, name)
+      const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
+        targetPath?: string
+      }
+      if (receipt.targetPath === completedPath) await unlink(receiptPath)
+    }
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: undefined,
+      activeDispatch: undefined,
+      foundationDraftState: { completedPaths: [completedPath] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const ordinaryEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, ordinaryEvents)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a snapshot-completed document whose canonical receipt digest conflicts', async () => {
+    const fixture = await createProjectionFixture()
+    const completedPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const receiptDirectory = join(
+      fixture.workspacePath,
+      '.beegame',
+      'workflow',
+      'document-commits',
+    )
+    for (const name of await readdir(receiptDirectory)) {
+      const receiptPath = join(receiptDirectory, name)
+      const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
+        targetPath?: string
+        finalDigest?: string
+      }
+      if (receipt.targetPath !== completedPath) continue
+      await writeFile(
+        receiptPath,
+        `${JSON.stringify({
+          ...receipt,
+          finalDigest: digest('different synthetic document'),
+        })}\n`,
+      )
+    }
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: undefined,
+      activeDispatch: undefined,
+      foundationDraftState: { completedPaths: [completedPath] },
+      documentReviewState: {
+        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      },
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
+      evidence: {},
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const ordinaryEvents = fixture.journalEvents.filter(
+      event => event.type !== 'workflow.unit.accepted',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, ordinaryEvents)),
+      'recovery_artifact_digest_mismatch',
+    )
+  })
+
+  test('rejects a snapshot-completed implementation task without its accepted event', async () => {
+    const fixture = await createProjectionFixture('plan')
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'IMPLEMENTATION' as const,
+      documentStep: undefined,
+      activeDispatch: undefined,
+      activeTaskId: undefined,
+      revision: {
+        ...fixture.snapshot.revision,
+        implementation: fixture.snapshot.revision.workspace,
+      },
+      tasks: [fixture.implementedTask],
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a snapshot-passed implementation audit without its accepted event', async () => {
+    const fixture = await createProjectionFixture('implementation')
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'IMPLEMENTATION_AUDIT' as const,
+      documentStep: undefined,
+      activeDispatch: undefined,
+      activeTaskId: undefined,
+      revision: {
+        ...fixture.snapshot.revision,
+        implementation: fixture.snapshot.revision.workspace,
+      },
+      tasks: [fixture.implementedTask],
+      evidence: {
+        ...fixture.snapshot.evidence,
+        implementationAudit: fixture.implementationAudit,
+      },
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects snapshot-passed acceptance without its accepted event', async () => {
+    const fixture = await createProjectionFixture('audit')
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DELIVERY' as const,
+      documentStep: undefined,
+      activeDispatch: undefined,
+      activeTaskId: undefined,
+      revision: {
+        ...fixture.snapshot.revision,
+        implementation: fixture.snapshot.revision.workspace,
+      },
+      tasks: [fixture.implementedTask],
+      evidence: {
+        ...fixture.snapshot.evidence,
+        implementationAudit: fixture.implementationAudit,
+        acceptance: fixture.acceptance,
+      },
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('projects accepted implementation task audit and acceptance without redispatch', async () => {
+    const fixture = await createProjectionFixture('acceptance')
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'DELIVERY' as const,
+      documentStep: undefined,
+      activeDispatch: undefined,
+      activeTaskId: undefined,
+      revision: {
+        ...fixture.snapshot.revision,
+        implementation: fixture.snapshot.revision.workspace,
+      },
+      tasks: [fixture.implementedTask],
+      evidence: {
+        ...fixture.snapshot.evidence,
+        implementationAudit: fixture.implementationAudit,
+        acceptance: fixture.acceptance,
+      },
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    const projection = await projectExactResumeRun(
+      projectInput(fixture, inspection),
+    )
+
+    expect(projection.activeUnitId).toBeUndefined()
+    expect(projection.run.tasks[0]?.status).toBe('completed')
+    expect(projection.run.evidence.implementationAudit).toEqual(
+      fixture.implementationAudit,
+    )
+    expect(projection.run.evidence.acceptance).toEqual(fixture.acceptance)
+  })
+
   test('reports a missing checkpoint when historical resource content has no v13 digest receipt', async () => {
     const fixture = await createProjectionFixture()
     const sourceSnapshot = structuredClone(fixture.snapshot)
@@ -500,8 +976,9 @@ describe('workflow exact-resume recovery projector', () => {
       `${JSON.stringify(snapshot, null, 2)}\n`,
     )
     const inspection = await inspect(fixture)
-    const events = fixture.events.filter(
+    const events = fixture.journalEvents.filter(
       event =>
+        event.type !== 'workflow.unit.accepted' ||
         (event as WorkflowUnitAcceptedEvent).unit.unitId !== 'resource:content',
     )
 
@@ -530,6 +1007,25 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
+  test('rejects conflicting snapshot and journal review terminals', async () => {
+    const fixture = await createProjectionFixture()
+    const snapshot = structuredClone(fixture.snapshot)
+    snapshot.documentReviewState.activeCycle.checks[0] = {
+      ...snapshot.documentReviewState.activeCycle.checks[0],
+      conclusion: 'Contradictory synthetic terminal.',
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
   test('rejects accepted dependency digests that no longer match artifacts', async () => {
     const fixture = await createProjectionFixture()
     const inspection = await inspect(fixture)
@@ -544,10 +1040,91 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
-  test('rejects a review checkpoint that carries no dependency proof', async () => {
+  test('rejects a raw workspace revision that contradicts journal and current artifacts', async () => {
+    const fixture = await createProjectionFixture()
+    const snapshot = structuredClone(fixture.snapshot)
+    snapshot.revision.workspace = 'contradictory-workspace-revision'
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
+  test('rejects a journal workspace revision that contradicts snapshot and current artifacts', async () => {
     const fixture = await createProjectionFixture()
     const inspection = await inspect(fixture)
-    const events = fixture.events.map(event => {
+    const events = fixture.journalEvents.map(event =>
+      event.type === 'workflow.unit.accepted'
+        ? {
+            ...event,
+            revision: {
+              ...event.revision,
+              workspace: 'contradictory-journal-workspace-revision',
+            },
+          }
+        : event,
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
+  test('rejects a current workspace revision that no longer matches durable sources', async () => {
+    const fixture = await createProjectionFixture()
+    const inspection = await inspect(fixture)
+    await mkdir(join(fixture.workspacePath, 'src'), { recursive: true })
+    await writeFile(
+      join(fixture.workspacePath, 'src', 'artifact.ts'),
+      'export const syntheticValue = 1\n',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_artifact_digest_mismatch',
+    )
+  })
+
+  test('rejects a placeholder document revision in an accepted document proof', async () => {
+    const fixture = await createProjectionFixture()
+    const inspection = await inspect(fixture)
+    const finalDocumentUnitId = `document:${CANONICAL_FOUNDATION_DOCUMENTS.at(-1)}`
+    const events = fixture.journalEvents.map(event => {
+      if (event.type !== 'workflow.unit.accepted') return event
+      const accepted = event as WorkflowUnitAcceptedEvent
+      if (accepted.unit.unitId !== finalDocumentUnitId) return event
+      return {
+        ...accepted,
+        unit: {
+          ...accepted.unit,
+          inputRevision: 'placeholder-document-revision',
+          payload: {
+            ...(accepted.unit.payload as Record<string, unknown>),
+            revision: 'placeholder-document-revision',
+          },
+        },
+      } as WorkflowEvent
+    })
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_artifact_digest_mismatch',
+    )
+  })
+
+  test('rejects a review checkpoint that carries no dependency proof', async () => {
+    const fixture = await createProjectionFixture()
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.map(event => {
+      if (event.type !== 'workflow.unit.accepted') return event
       const accepted = event as WorkflowUnitAcceptedEvent
       if (accepted.unit.unitId !== 'review:brief_alignment') return event
       return {
@@ -569,6 +1146,36 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
+  test('rejects a review checkpoint with only a nonempty dependency subset', async () => {
+    const fixture = await createProjectionFixture()
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.map(event => {
+      if (event.type !== 'workflow.unit.accepted') return event
+      const accepted = event as WorkflowUnitAcceptedEvent
+      if (accepted.unit.unitId !== 'review:brief_alignment') return event
+      const entries = Object.entries(accepted.unit.dependencyDigests)
+      expect(entries.length).toBeGreaterThan(1)
+      const dependencyDigests = Object.fromEntries(entries.slice(1))
+      return {
+        ...accepted,
+        unit: {
+          ...accepted.unit,
+          dependencyDigests,
+          payload: {
+            ...(accepted.unit.payload as Record<string, unknown>),
+            dependencyDigests: { brief_alignment: dependencyDigests },
+          },
+        },
+      } as WorkflowEvent
+    })
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_artifact_digest_mismatch',
+    )
+  })
+
   test('projects malformed JSON when the accepted journal is complete', async () => {
     const fixture = await createProjectionFixture()
     await writeFile(fixture.snapshotPath, '{"schemaVersion":')
@@ -582,14 +1189,67 @@ describe('workflow exact-resume recovery projector', () => {
     expect(inspection.error?.code).toBe('invalid')
     expect(projection.activeUnitId).toBe('review:resource_semantic_fitness')
     expect(projection.run.activeDispatch).toBeUndefined()
+    expect(projection.run.createdAt).toBe(fixture.snapshot.createdAt)
+    expect(projection.run.usage).toEqual(fixture.snapshot.usage)
+  })
+
+  test('rejects raw start and usage that contradict the event journal', async () => {
+    const fixture = await createProjectionFixture()
+    const snapshot = {
+      ...fixture.snapshot,
+      createdAt: '2026-08-03T00:00:00.000Z',
+      usage: {
+        ...fixture.snapshot.usage,
+        input_tokens: fixture.snapshot.usage.input_tokens + 1,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
+  test('rejects malformed JSON without a run-created journal proof', async () => {
+    const fixture = await createProjectionFixture()
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.filter(
+      event => event.type !== 'run.created',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects malformed JSON without a cumulative usage journal proof', async () => {
+    const fixture = await createProjectionFixture()
+    await writeFile(fixture.snapshotPath, '{"schemaVersion":')
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.filter(
+      event => event.type !== 'usage.updated',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_missing',
+    )
   })
 
   test('rejects malformed JSON when a later accepted event exposes a journal gap', async () => {
     const fixture = await createProjectionFixture()
     await writeFile(fixture.snapshotPath, '{"schemaVersion":')
     const inspection = await inspect(fixture)
-    const events = fixture.events.filter(
+    const events = fixture.journalEvents.filter(
       event =>
+        event.type !== 'workflow.unit.accepted' ||
         (event as WorkflowUnitAcceptedEvent).unit.unitId !== 'resource:content',
     )
 
@@ -609,7 +1269,10 @@ describe('workflow exact-resume recovery projector', () => {
 
     await expectRecoveryError(
       projectExactResumeRun(
-        projectInput(fixture, inspection, [...fixture.events, duplicate]),
+        projectInput(fixture, inspection, [
+          ...fixture.journalEvents,
+          duplicate,
+        ]),
       ),
       'recovery_checkpoint_conflict',
     )

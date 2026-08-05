@@ -105,7 +105,7 @@ function acceptedReviewUnits(
         payload: {
           check,
           findings: findingsByCheckId.get(id) ?? [],
-          dependencyDigests,
+          dependencyDigests: { [id]: dependencyDigests },
         },
       })
     })
