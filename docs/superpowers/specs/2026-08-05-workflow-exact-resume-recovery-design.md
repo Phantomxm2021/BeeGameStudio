@@ -6,7 +6,7 @@
 
 ## 1. Goal
 
-Any managed project must continue from its exact durable interruption point even when the materialized Workflow snapshot is obsolete, fails the current schema, or was left behind by a breaking Workflow release.
+Any managed project on the current persisted protocol must continue from its exact durable interruption point even when the materialized Workflow snapshot fails the current schema.
 
 Recovery reconstructs orchestration state. It never reconstructs project output and never repeats an accepted phase, task, review check, document commit, resource operation, implementation task, audit, or acceptance operation.
 
@@ -19,7 +19,7 @@ Recovery reconstructs orchestration state. It never reconstructs project output 
 5. Only the single active unit without an accepted terminal may be re-dispatched after its stale worker session is stopped.
 6. Units that have not started remain pending under the current protocol.
 7. Project documents, Checklist, Manifest modules, imported/authored resources, JSON/YAML content and implementation files are never deleted, rewritten or reacquired merely because orchestration state is unreadable.
-8. Recovery produces exactly one current-schema run. No old runtime, fallback Workflow, compatibility execution branch, second ledger or feedback loop may remain active.
+8. Recovery produces exactly one current-schema run. No alternate runtime, fallback Workflow, compatibility execution branch, second ledger or feedback loop may remain active.
 9. If the system cannot prove whether a unit was accepted, it must report `recovery_checkpoint_missing`; it must not silently rerun the unit or pretend it completed.
 10. Every breaking persisted-state change increments `DELIVERY_RUN_SCHEMA_VERSION` in the same commit.
 11. The ordered graph identifies what may follow an accepted prefix, but it does not prove that the following unit started. Recovery may enter Document Drafting only when durable snapshot or dispatch identity proves that the exact unfinished unit is a current canonical document unit.
@@ -30,8 +30,6 @@ Recovery reconstructs orchestration state. It never reconstructs project output 
 
 `resume`, `retry`, startup reconciliation and controller progress all begin with strict `RunStore.load()`. A snapshot that cannot pass the current Zod schema fails before worker-session reconciliation, receipt recovery, phase transition or artifact inspection can run.
 
-The current 15-check change also altered a persisted enum without increasing schema version 11. Existing version-11 snapshots containing the removed sixteenth check were therefore classified as malformed current state instead of an older state requiring deterministic transformation.
-
 The error view is read-only and exposes no recovery operation. Consequently valid project outputs exist, but the controller cannot reach them.
 
 ## 4. Chosen architecture
@@ -39,22 +37,13 @@ The error view is read-only and exposes no recovery operation. Consequently vali
 The system uses one public continuation operation with two internal stages:
 
 1. **Current snapshot load:** parse and resume a valid current run normally.
-2. **Exact-resume reconstruction:** when normal load reports obsolete or invalid state, reconstruct one current run from durable semantic checkpoints, then invoke the same current controller resume path.
+2. **Exact-resume reconstruction:** when normal load reports an invalid version-13 state, reconstruct one current run from durable semantic checkpoints, then invoke the same current controller resume path.
 
-There is no old Workflow execution. Reconstruction is a one-way data operation that ends before current Workflow execution begins.
+Earlier and newer schema versions fail closed. Reconstruction is a one-way data operation that ends before current Workflow execution begins.
 
-### 4.1 Versioned one-way snapshot migration
+### 4.1 Strict current snapshot protocol
 
-Every persisted breaking change defines a deterministic `N -> N+1` transformation. Migration operates on raw data, is keyed only by explicit `schemaVersion`, and must:
-
-- preserve accepted unit identities, results, revisions, evidence and usage;
-- preserve the exact active unit when it remains a current semantic unit;
-- map or remove only protocol-owned pending topology that changed;
-- reject ambiguous transformations rather than guessing;
-- validate the transformed value with the current full schema;
-- atomically replace `run.json` only after complete validation.
-
-Migration code is not a runtime compatibility path. The controller, schemas, prompts and transition logic support only the current protocol. No old identifier may remain after the atomic replacement.
+The controller, schemas, prompts, transition logic and recovery projector support exactly `DELIVERY_RUN_SCHEMA_VERSION`. A breaking persisted change increments that version and starts a clean development protocol. The runtime does not transform prior versions. Read routes preserve unsupported bytes and return diagnostics; mutation routes fail closed.
 
 ### 4.2 Canonical accepted-unit events
 
@@ -88,7 +77,7 @@ It performs this fixed sequence:
 4. Inspect the now-stable source again and reconcile any active canonical document or Resource Content receipt committed before its terminal reached `run.json`.
 5. Replay accepted-unit events in durable order.
 6. Verify every replayed unit against the current unit schema, predecessor relation, receipt and dependency digest.
-7. Inspect the invalid raw snapshot only for current-recognized semantic facts not yet journaled by historical versions. Accept such facts only when their current schema and all referenced digests validate; ignore unknown pending topology.
+7. Inspect the invalid raw snapshot only to validate current-protocol identity, contradictions and the exact unfinished unit. It never supplies accepted-unit proof.
 8. Derive the longest contiguous accepted unit prefix and require durable identity for the exact unfinished active unit. The first graph node after the prefix is a consistency check, not fallback authority.
 9. Build one current-schema `DeliveryRun` with the original project identity, confirmed brief, start time and cumulative usage.
 10. Ask `RunStore` to compare the expected source digest and write the reconstructed run plus `workflow.run.reconstructed` in the same storage mutation critical section.
@@ -96,28 +85,16 @@ It performs this fixed sequence:
 
 The projector contains no LLM, keyword matching, regular expressions, project-specific names or platform-specific rules.
 
-### 4.4 Historical snapshots without complete accepted-unit events
+### 4.4 Invalid current snapshots
 
-Existing snapshots predate the complete accepted-unit journal. The projector may extract only current-recognized semantic facts from their raw JSON structure. It must never accept the old snapshot as a run.
-
-A historical fact is reusable only when:
-
-- its unit/check/task identity exists in the current protocol;
-- its terminal or receipt passes the current result schema;
-- its stored dependency digests exactly equal current artifact digests;
-- its predecessor units are also proven accepted;
-- no duplicate or contradictory accepted result exists.
-
-Unknown fields and removed pending units are discarded. A removed unit that was previously accepted requires an explicit version migration decision; it cannot be silently treated as current work.
-
-This historical extraction is part of the same projector and produces only current facts. It does not create a second parser used by normal execution.
+An invalid version-13 snapshot is recoverable only when `events.jsonl` proves the accepted prefix and durable current-protocol identity proves the exact unfinished unit. Snapshot completion arrays, task status, approvals or evidence never become accepted proof. They are checked only for contradictions with journal facts. Missing journal proof fails with `recovery_checkpoint_missing`.
 
 ## 5. Continue, retry and restart semantics
 
 The UI exposes the existing user concepts, but all use one server-owned continuation boundary:
 
-- **Continue:** valid run resumes normally; invalid/obsolete run reconstructs and resumes the exact unit.
-- **Retry:** valid actionable run retries only its current unit; invalid/obsolete state first reconstructs, then retries only the reconstructed active unit.
+- **Continue:** valid run resumes normally; invalid version-13 state reconstructs and resumes the exact unit.
+- **Retry:** valid actionable run retries only its current unit; invalid version-13 state first reconstructs, then retries only the reconstructed active unit.
 - **Restart current Workflow:** stops the stale worker and reconstructs the same project from durable accepted facts. It does not create a project, return to the idea, or clear outputs.
 
 Read-only GET routes never mutate state. They return `recoverable: true`, the diagnostic ID and the last provable phase/unit summary. The mutation occurs only after the user presses Continue/Retry/Restart.
@@ -178,8 +155,8 @@ Internal validation JSON stays in server diagnostics. The Workflow card shows th
 ### 10.1 Version and schema enforcement
 
 - A persisted enum/shape change without a schema-version increment fails a repository test.
-- Each registered migration transforms fixtures into the exact current schema.
-- No production controller or prompt references an old identifier after migration.
+- Earlier and newer schema versions fail closed without rewriting snapshot bytes.
+- No production migration module or alternate protocol parser exists.
 
 ### 10.2 Exact-resume matrix
 
@@ -195,19 +172,19 @@ Every test asserts that accepted unit dispatch counts remain unchanged and only 
 
 ### 10.3 Invalid snapshot matrix
 
-Cover obsolete version, current-version schema rejection, unknown fields, removed pending unit, truncated JSON, stale active dispatch, duplicate Continue requests and server restart during reconstruction.
+Cover earlier/newer version rejection, current-version schema rejection, unknown fields, truncated JSON, stale active dispatch, duplicate Continue requests and server restart during reconstruction.
 
 Use the real controller and dispatcher for dispatch-count assertions. Cover the final compare/write race with two real `RunStore` instances, restart after reconstruction, and a terminal accepted during the stop barrier. Do not manufacture `activeDispatch` in a resume callback.
 
 ### 10.4 Read and HTTP boundaries
 
-- Project resume, project retry and session Continue each cover valid current state, recoverable invalid/obsolete state and hard failures.
+- Project resume, project retry and session Continue each cover valid current state, recoverable invalid-current state and hard failures.
 - Repeated or queued Continue requests produce one durable resume and one active-unit dispatch.
 - Project Workflow, Workflow events and runtime-state GETs preserve `run.json`, `events.jsonl` and dispatch counts byte-for-byte, including snapshots with pending markers and orphaned-looking dispatches.
 
 ### 10.5 Current regression fixture
 
-Use a synthetic version-11 16-check fixture with the same semantic state shape as the diagnosed project. Assert reconstruction yields 15 current checks, 12 completed Foundation checks, `resource_semantic_fitness` as the sole active unit, preserved Resource Gate evidence and zero dispatches for every earlier phase.
+Use only synthetic version-13 fixtures. Assert reconstruction preserves every journal-accepted check, resumes the sole exact unfinished unit and dispatches zero earlier phases.
 
 Do not use or modify a real user project as a test fixture.
 
@@ -215,13 +192,12 @@ Do not use or modify a real user project as a test fixture.
 
 Implementation must remove:
 
-- the generic instruction to create a new project for every obsolete snapshot;
 - any resume/retry path that can only operate after strict full-run parsing;
 - schema-changing code that does not register a version increment;
 - alternate restart logic that clears documents, resources or accepted state;
 - any invalid-state branch that selects Document Drafting without exact durable active-unit proof;
 - polling/read logic that flushes markers, reconciles terminals or starts work;
-- compatibility execution, fallback Workflow, duplicate state ledger and feedback-driven recovery.
+- snapshot migration code, compatibility execution, fallback Workflow, duplicate state ledger and feedback-driven recovery.
 
 After reconstruction, only the current-schema run, accepted-unit journal and canonical receipts participate in execution.
 
@@ -234,9 +210,8 @@ the strict `DeliveryRun` topology, accepted-unit journal event topology and
 versioned `tasks.planned.taskGraph` receipt topology. It
 does not read TypeScript source text and does not use regular expressions. A
 topology or persisted-enum change at version 13 now fails with a direct
-instruction to increment `DELIVERY_RUN_SCHEMA_VERSION` and add a snapshot
-migration; an unregistered new version fails with an instruction to register
-its fingerprint and migration.
+instruction to increment `DELIVERY_RUN_SCHEMA_VERSION`; an unregistered new
+version fails with an instruction to register its fingerprint.
 
 The automated worker checkpoint matrix covers all 11 persisted worker types at
 their real durable interruption points. Every worker covers before dispatch,
@@ -251,8 +226,8 @@ one, and terminal-, receipt- and unit-accepted checkpoints never increase the
 accepted semantic unit's dispatch count. The matrix also proved and corrected
 the Delivery question terminal: after `question.answered`, the run returns to
 completed state and clears its one-shot change route, so restart cannot dispatch
-the same question again. The wider recovery suite also covers obsolete and same-version
-invalid snapshots, malformed/truncated JSON with complete and incomplete
+the same question again. The wider recovery suite also covers unsupported-version
+rejection and same-version invalid snapshots, malformed/truncated JSON with complete and incomplete
 journal proof, stale worker telemetry and ownership, queued duplicate Continue,
 terminal drain during the stop barrier, CAS races and reconstruction restart
 with fresh RunStore/controller/dispatcher instances.
@@ -265,12 +240,9 @@ units alone advance mutable task status and evidence. This lets a complete
 journal reconstruct a truncated `run.json` without a fallback path or second
 ledger, while contradictory topology fails closed.
 
-On 2026-08-06 the complete server command measured 556 passing tests across 67
-files, 0 failures and 1581 assertions. The required frontend command measured
-116 passing tests across 2 files and 0 failures. Server and repository
-TypeScript checks both exited 0; Biome checked 46 required files with no fixes
-remaining; `git diff --check` exited 0. The anti-pollution scan found only this
-spec's rejected old-behavior history and a frontend test asserting separation
-from legacy phase telemetry; it found no production execution path. Automated
-verification did not perform the Chrome acceptance check or port cleanup, which
-remain assigned to the main agent.
+On 2026-08-06 the complete server command measured 584 passing tests across 66
+files, 0 failures and 1640 assertions. The complete frontend command measured
+643 passing tests across 58 files and 0 failures. Server and repository
+TypeScript checks both exited 0; `git diff --check` exited 0. The anti-pollution
+scan found no production snapshot migration or alternate execution path.
+Chrome acceptance and port cleanup remain final integration gates.

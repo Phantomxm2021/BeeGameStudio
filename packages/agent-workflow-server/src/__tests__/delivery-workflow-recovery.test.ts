@@ -1080,7 +1080,8 @@ async function createStaleReviewerRecoveryFixture() {
 
   const snapshot = {
     ...journalRun,
-    schemaVersion: 11,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    invalidRecoveryMarker: true,
     phase: 'DOCUMENT_REVIEW' as const,
     documentStep: 'COMPREHENSIVE_REVIEW' as const,
     evidence: {
@@ -1267,7 +1268,8 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
   }
   const rawSnapshot: Record<string, unknown> = {
     ...journalRun,
-    schemaVersion: 12,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    invalidRecoveryMarker: true,
     phase: 'DOCUMENT_DRAFTING',
     documentStep: 'FOUNDATION_DRAFTING',
     currentItemId: firstPath,
@@ -1610,7 +1612,7 @@ describe('delivery workflow recovery', () => {
     ).toHaveLength(0)
   })
 
-  test('reconciles an obsolete snapshots active Resource Content receipt before projection', async () => {
+  test('reconciles an invalid current snapshots active Resource Content receipt before projection', async () => {
     const fixture = await createStaleReviewerRecoveryFixture()
     workspace = fixture.workspacePath
     const dispatchId = 'committed-resource-content-dispatch'
@@ -1684,7 +1686,8 @@ describe('delivery workflow recovery', () => {
       `${JSON.stringify(
         {
           ...fixture.snapshot,
-          schemaVersion: 12,
+          schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+          invalidRecoveryMarker: true,
           phase: 'RESOURCE_PREPARATION',
           documentStep: undefined,
           currentItemId: undefined,
@@ -4074,7 +4077,7 @@ describe('delivery workflow recovery', () => {
           const duringStop = JSON.parse(
             await readFile(fixture.store.paths.snapshot, 'utf8'),
           ) as { schemaVersion: number }
-          expect(duringStop.schemaVersion).toBe(11)
+          expect(duringStop.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
         },
         resumeCurrentRun: run => controller.resume(run),
       })
@@ -4185,7 +4188,8 @@ describe('delivery workflow recovery', () => {
       `${JSON.stringify(
         {
           ...fixture.journalRun,
-          schemaVersion: 12,
+          schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+          invalidRecoveryMarker: true,
           phase: 'DOCUMENT_DRAFTING',
           documentStep: 'FOUNDATION_DRAFTING',
           status: 'running',

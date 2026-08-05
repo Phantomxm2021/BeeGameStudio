@@ -29,10 +29,6 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
-import {
-  migrateWorkflowSnapshot,
-  SnapshotMigrationError,
-} from './snapshot-migrations'
 import { reconcileCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 import {
   createResourceContentTerminalFromReceipt,
@@ -467,13 +463,13 @@ function assertRecoveryAuthority(input: {
   if (
     typeof schemaVersion === 'number' &&
     Number.isInteger(schemaVersion) &&
-    schemaVersion > DELIVERY_RUN_SCHEMA_VERSION
+    schemaVersion !== DELIVERY_RUN_SCHEMA_VERSION
   )
     throw (
       input.inspection.error ??
       new WorkflowStoreError(
-        `workflow snapshot schema version ${schemaVersion} is newer than current version ${DELIVERY_RUN_SCHEMA_VERSION}`,
-        'invalid',
+        `workflow snapshot schema version ${schemaVersion} is not the current version ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        schemaVersion < DELIVERY_RUN_SCHEMA_VERSION ? 'obsolete' : 'invalid',
       )
     )
   const ownerId =
@@ -502,39 +498,6 @@ function assertRecoveryAuthority(input: {
       'workflow confirmed brief authority conflicts with recovery input',
       'recovery_checkpoint_conflict',
     )
-}
-
-function migrationInspection(
-  inspection: WorkflowSnapshotInspection,
-): WorkflowSnapshotInspection {
-  if (inspection.error?.code !== 'obsolete') return inspection
-  try {
-    const migrated = migrateWorkflowSnapshot(inspection.parsedValue)
-    return {
-      ...inspection,
-      parsedValue: migrated.value,
-      currentRun: migrated.value as DeliveryRun,
-      error: undefined,
-    }
-  } catch (error) {
-    if (
-      error instanceof SnapshotMigrationError &&
-      error.code === 'ambiguous_completed_unit'
-    )
-      throw new WorkflowStoreError(
-        error.message,
-        'recovery_checkpoint_conflict',
-      )
-    throw new WorkflowStoreError(
-      error instanceof Error
-        ? error.message
-        : 'workflow snapshot migration failed',
-      error instanceof SnapshotMigrationError &&
-        error.code === 'unsupported_version'
-        ? 'obsolete'
-        : 'invalid',
-    )
-  }
 }
 
 async function withWorkspaceRecoveryLock<T>(
@@ -609,7 +572,7 @@ export async function recoverAndResumeRun(input: {
       }
       try {
         await input.stopWorkspaceWorkers(
-          'recovering obsolete or invalid delivery workflow',
+          'recovering invalid current delivery workflow',
         )
       } catch (error) {
         throw new WorkflowRecoveryTransactionError(
@@ -648,7 +611,6 @@ export async function recoverAndResumeRun(input: {
               lockedSource.currentRun.activeDispatch?.status !== 'running',
           }
         }
-        const migratedSource = migrationInspection(lockedSource)
         const events = await input.store.readEvents()
         const assertMutationAuthority = async () => {
           const current = await input.store.inspectWorkflowSnapshot()
@@ -658,7 +620,7 @@ export async function recoverAndResumeRun(input: {
             )
         }
         const reconciled = await reconcileActiveCanonicalReceipt({
-          inspection: migratedSource,
+          inspection: lockedSource,
           events,
           workspacePath,
           ownerId: input.ownerId,

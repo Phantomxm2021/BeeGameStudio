@@ -536,7 +536,7 @@ async function recoverPreparedResourceContentCommit(input: {
       await input.assertMutationAuthority()
     } catch (error) {
       await rename(input.contentRoot, input.receipt.stagingRoot)
-      if (hadExistingRoot)
+      if (existsSync(input.receipt.backupRoot))
         await rename(input.receipt.backupRoot, input.contentRoot)
       throw error
     }

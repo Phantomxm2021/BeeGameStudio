@@ -29,6 +29,7 @@ import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
+  DELIVERY_RUN_SCHEMA_VERSION,
 } from '../beegame/delivery-workflow/types'
 import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
 
@@ -777,7 +778,8 @@ describe('delivery workflow session continuation', () => {
         `${JSON.stringify(
           {
             ...journalRun,
-            schemaVersion: 12,
+            schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+            invalidRecoveryMarker: true,
             phase: 'DOCUMENT_DRAFTING',
             documentStep: 'FOUNDATION_DRAFTING',
             status: 'running',
@@ -848,7 +850,8 @@ describe('delivery workflow session continuation', () => {
       }
       const recoverableSnapshot = {
         ...journalRun,
-        schemaVersion: 12,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+        invalidRecoveryMarker: true,
         phase: 'DOCUMENT_DRAFTING' as const,
         documentStep: 'FOUNDATION_DRAFTING' as const,
         status: 'running' as const,

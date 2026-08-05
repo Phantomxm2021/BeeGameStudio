@@ -4,7 +4,7 @@
 
 **Goal:** Recover every managed BeeGame Workflow from its exact durable interruption unit without rerunning accepted work.
 
-**Architecture:** The persisted protocol is version 13. Apply one-way raw snapshot migrations before current-schema execution, including the 11→12 review-topology transformation followed by the 12→13 marker transformation, and journal accepted semantic units so one current run can be reconstructed even when `run.json` is invalid. The recovery projector creates the sole current `DeliveryRun`; the existing controller then resumes only the one unaccepted active unit.
+**Architecture:** The persisted protocol is version 13 only. Journal accepted semantic units so one current run can be reconstructed when a version-13 `run.json` is invalid. Earlier or newer schema versions fail closed and never enter current execution. The recovery projector creates the sole current `DeliveryRun`; the existing controller then resumes only the one unaccepted active unit.
 
 **Tech Stack:** TypeScript, Bun, Zod, append-only JSONL Workflow journal, React, Vitest.
 
@@ -15,7 +15,7 @@
 - Recovery must not rewrite or reacquire documents, Checklist, Manifest modules, resources, JSON/YAML content or implementation files.
 - Recovery produces one current run; no old runtime, fallback Workflow, second execution ledger or feedback loop may remain.
 - Missing proof returns `recovery_checkpoint_missing`; it never causes silent replay.
-- The graph successor is not active-unit proof. Invalid/obsolete state may enter Document Drafting only when durable current-unit or dispatch identity proves that exact unfinished canonical document unit.
+- The graph successor is not active-unit proof. Invalid current state may enter Document Drafting only when durable current-unit or dispatch identity proves that exact unfinished canonical document unit.
 - GET/read routes never flush pending markers, reconcile workers, persist progress or dispatch work.
 - Concurrent and queued Continue requests persist one resume decision and return the same current run without a second controller call.
 - Every breaking persisted-state change increments `DELIVERY_RUN_SCHEMA_VERSION` in the same commit.
@@ -24,80 +24,19 @@
 
 ---
 
-### Task 1: Version 13 and deterministic legacy migration chain
+### Task 1: Version 13 as the only executable snapshot protocol
 
 **Files:**
-- Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.ts`
-- Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts`
 - Modify: `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts`
 
-**Interfaces:**
-- Produces: `migrateWorkflowSnapshot(value: unknown): SnapshotMigrationResult`.
-- Produces: `SnapshotMigrationError` codes `unsupported_version`, `ambiguous_completed_unit`, `invalid_migrated_snapshot`.
-- Consumes: current `DOCUMENT_REVIEW_CHECK_IDS`; calls `parseDeliveryRun` only after raw transformation.
-
-- [ ] **Step 1: Write failing migration tests**
-
-Use a synthetic version-11 complete Review fixture with 16 required IDs, 12 completed current Foundation IDs, passed Resource Gate evidence and `resource_semantic_fitness` active. Assert:
-
-```ts
-const result = migrateWorkflowSnapshot(version11Snapshot)
-expect(result.migratedFrom).toBe(11)
-expect(result.value).toMatchObject({ schemaVersion: 13 })
-expect(activeCycle(result.value).requiredCheckIds).toEqual([
-  ...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
-])
-expect(activeCycle(result.value).completedCheckIds).toEqual([
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-])
-expect(activeDispatch(result.value).request.contract.currentCheckIds).toEqual([
-  'resource_semantic_fitness',
-])
-expect(resourceEvidence(result.value).status).toBe('passed')
-```
-
-Add a negative fixture where the unknown ID is completed; expect `ambiguous_completed_unit` and unchanged snapshot bytes.
-
-- [ ] **Step 2: Run tests and verify red state**
-
-```bash
-/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.test.ts
-```
-
-Expected: FAIL because the migration module is missing.
-
-- [ ] **Step 3: Implement the migration**
-
-```ts
-export type SnapshotMigrationResult = {
-  value: unknown
-  migratedFrom?: number
-}
-
-export function migrateWorkflowSnapshot(
-  value: unknown,
-): SnapshotMigrationResult
-```
-
-Set `DELIVERY_RUN_SCHEMA_VERSION = 13`. In 11→12, filter protocol-owned required-ID arrays through the current ID set; then always apply the deterministic 12→13 conversion before validation. The 12→13 conversion atomically converts a singular `pendingEvent` into `pendingEvents`, removes the singular field, and never permits both fields in the current runtime. Reject unknown completed/current checks, terminal checks, accepted approval checks or finding owners. Preserve current-recognized approvals, evidence, revisions, tasks, usage, timestamps and active semantic unit. Do not name the retired ID in production code. Validate the fully migrated object with `parseDeliveryRun` before returning.
-
-- [ ] **Step 4: Add explicit mutable loading**
-
-```ts
-load(options?: { migrate?: boolean }): Promise<DeliveryRun | null>
-```
-
-Default `migrate` to false. Read routes stay mutation-free. `migrate: true` atomically replaces an older snapshot only after migration and full validation. Current-version invalid snapshots remain for Task 3.
-
-- [ ] **Step 5: Verify and commit**
-
-```bash
-/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts
-git add packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.ts packages/agent-workflow-server/src/beegame/delivery-workflow/snapshot-migrations.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts
-git commit -m "feat: migrate workflow snapshots without replay"
-```
+- [x] Keep `DELIVERY_RUN_SCHEMA_VERSION = 13` and accept only that exact version in current execution and exact-resume reconstruction.
+- [x] Reject earlier versions as `obsolete` and newer versions as `invalid`; neither may be transformed or resumed.
+- [x] Keep version-13 schema-invalid snapshots available for journal-based exact reconstruction without rewriting them on reads.
+- [x] Remove snapshot migration modules, migration tests and mutable migration loading.
+- [x] Require every accepted unit to come from `events.jsonl`; raw version-13 snapshot fields may only validate identity, conflicts and the exact unfinished unit.
 
 ### Task 2: Journal accepted units atomically
 
@@ -157,7 +96,7 @@ Give each kind a strict Zod payload. Review payload owns one check, its findings
 
 - [ ] **Step 4: Replace the singular pending marker**
 
-The current version is 13. Convert version-12 `pendingEvent` snapshots through the sole 12→13 migration into `pendingEvents?: WorkflowEvent[]`; current runtime parsing never supports both fields. One state commit writes its ordinary event plus one `workflow.unit.accepted` event per new unit into the snapshot marker, appends every event idempotently, then removes the marker. Loading flushes the complete marker first.
+The current version is 13 and owns only `pendingEvents?: WorkflowEvent[]`. One state commit writes its ordinary event plus one `workflow.unit.accepted` event per new unit into the snapshot marker, appends every event idempotently, then removes the marker. Loading flushes the complete marker first. No singular or earlier-version marker is accepted.
 
 - [ ] **Step 5: Emit acceptance only after reconciliation**
 
@@ -295,13 +234,13 @@ Add a `RunStore` expected-digest replacement API whose compare and write share t
 
 - [x] **Step 4: Enforce exact proof, continuation and read boundaries**
 
-Valid runs use existing resume/retry. Obsolete or invalid runs call `recoverAndResumeRun` from project resume, project retry and session continue. Serialize the entire continuation decision per owned workspace; if durable current state already owns an active dispatch, return it without writing another resume event or invoking the controller. Ownership, newer-version, missing authority and missing exact active-unit proof remain hard failures. No recovery route enters Document Drafting unless the durable interruption unit itself is a current canonical document unit.
+Valid runs use existing resume/retry. Invalid version-13 runs call `recoverAndResumeRun` from project resume, project retry and session continue. Serialize the entire continuation decision per owned workspace; if durable current state already owns an active dispatch, return it without writing another resume event or invoking the controller. Earlier/newer versions, ownership, missing authority and missing exact active-unit proof remain hard failures. No recovery route enters Document Drafting unless the durable interruption unit itself is a current canonical document unit.
 
 Make `readBeeGameWorkflowSnapshot` use only snapshot inspection plus event reads. Project Workflow, Workflow events and runtime-state GETs must not call `load`, `reconcile`, `ensureProgress` or any dispatch path. Test byte-identical snapshot/event files and unchanged dispatch counts.
 
 - [x] **Step 5: Verify and commit**
 
-With the real controller/dispatcher, assert the synthetic 16-check run produces one new `resource_semantic_fitness` dispatch and zero earlier-unit dispatches. Add project resume, project retry and session Continue HTTP tests for valid, recoverable invalid/obsolete and hard-fail inputs. Remove the old test that recovered an unproven snapshot to Document Drafting; replace it with hard-fail and exact-drafting-proof cases.
+With the real controller/dispatcher, assert a synthetic current-protocol run dispatches only its exact unfinished check and zero earlier units. Add project resume, project retry and session Continue HTTP tests for valid, recoverable invalid-current and hard-fail version inputs. Remove any test that recovers an unproven snapshot to Document Drafting; retain hard-fail and exact-drafting-proof cases.
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
@@ -357,11 +296,11 @@ git commit -m "feat: expose exact workflow recovery action"
 
 - [ ] **Step 1: Add a structural version guard**
 
-Compute a deterministic fingerprint from persisted enum values and strict schema topology. Store its expected value beside version 13. A fingerprint change without version/migration change fails with a direct instruction to increment `DELIVERY_RUN_SCHEMA_VERSION`. Do not inspect source text with regex.
+Compute a deterministic fingerprint from persisted enum values and strict schema topology. Store its expected value beside version 13. A fingerprint change without a version change fails with a direct instruction to increment `DELIVERY_RUN_SCHEMA_VERSION`. Do not inspect source text with regex.
 
 - [ ] **Step 2: Complete the exact-resume matrix**
 
-For every worker type, test interruption before dispatch, while open, after terminal acceptance and after unit acceptance. For `document-author` and `resource-content-author`, which alone own an independently persisted canonical commit receipt, additionally test the receipt-only crash window before terminal acceptance. Do not invent a receipt contract for other workers. Also test obsolete version, same-version invalid state, truncated JSON with complete journal, stale worker, duplicate Continue and restart during reconstruction. Every accepted unit dispatch count must remain unchanged.
+For every worker type, test interruption before dispatch, while open, after terminal acceptance and after unit acceptance. For `document-author` and `resource-content-author`, which alone own an independently persisted canonical commit receipt, additionally test the receipt-only crash window before terminal acceptance. Do not invent a receipt contract for other workers. Also test earlier-version rejection, same-version invalid state, truncated JSON with complete journal, stale worker, duplicate Continue and restart during reconstruction. Every accepted unit dispatch count must remain unchanged.
 
 - [ ] **Step 3: Run complete verification**
 
@@ -377,10 +316,10 @@ git diff --check
 - [ ] **Step 4: Run anti-pollution scan**
 
 ```bash
-rg -n 'create a new project|重新创建项目|fallback workflow|legacy workflow|shadow workflow' packages/agent-workflow-server/src apps/frontend/src docs/superpowers/specs/2026-08-05-workflow-exact-resume-recovery-design.md
+rg -n 'snapshot-migrations|migrateWorkflowSnapshot|pendingEvent:' packages/agent-workflow-server/src apps/frontend/src
 ```
 
-Expected: no execution-path matches. Diagnostic history may describe rejected behavior without enabling it.
+Expected: no matches.
 
 - [ ] **Step 5: Chrome self-test and service cleanup**
 

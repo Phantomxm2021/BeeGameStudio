@@ -345,6 +345,52 @@ describe('native canonical resource content commit', () => {
     })
   })
 
+  test('restores a crash-window backup when recovery loses authority after publication', async () => {
+    let authorityChecks = 0
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+    const contentRoot = join(workspace, 'assets/content')
+    const receiptPath = join(
+      workspace,
+      '.beegame/workflow/resource-content-commits/dispatch-content-test.json',
+    )
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await rename(contentRoot, receipt.stagingRoot)
+    await mkdir(receipt.backupRoot, { recursive: true })
+    await writeFile(join(receipt.backupRoot, 'previous.txt'), 'previous')
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, status: 'prepared' }, null, 2)}\n`,
+    )
+
+    await expect(
+      reconcileResourceContentCommitReceipt({
+        workspacePath: workspace,
+        dispatchId: 'dispatch-content-test',
+        assertMutationAuthority() {
+          authorityChecks += 1
+          if (authorityChecks === 3)
+            throw new Error('resource content dispatch authority expired')
+        },
+      }),
+    ).rejects.toThrow('resource content dispatch authority expired')
+
+    expect(await readFile(join(contentRoot, 'previous.txt'), 'utf8')).toBe(
+      'previous',
+    )
+    expect(
+      JSON.parse(
+        await readFile(
+          join(receipt.stagingRoot, 'resource-registry.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ id: 'registry' })
+    expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+      status: 'prepared',
+    })
+  })
+
   test('rolls back without discarding prepared authority when staging is unavailable', async () => {
     const workspace = await createWorkspace()
     await commitRegistryOnly(workspace)

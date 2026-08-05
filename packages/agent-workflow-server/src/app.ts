@@ -5435,11 +5435,8 @@ function createWorkflowStateErrorView(
       detail,
     })
   }
-  const obsolete =
-    error instanceof WorkflowStoreError && error.code === 'obsolete'
   const recoverable =
-    error instanceof WorkflowStoreError &&
-    (error.code === 'invalid' || error.code === 'obsolete')
+    error instanceof WorkflowStoreError && error.code === 'invalid'
   const now = new Date().toISOString()
   return {
     runId: 'workflow-state-error',
@@ -5448,7 +5445,6 @@ function createWorkflowStateErrorView(
     tasks: [],
     evidence: {},
     workflowStateError: true,
-    workflowStateObsolete: obsolete,
     ...(recoverable ? { recoverable: true } : {}),
     ...(recoverable && lastProven ? lastProven : {}),
     blockedReason: recoverable
