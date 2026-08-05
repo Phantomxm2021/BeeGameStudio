@@ -1513,6 +1513,56 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
+  test('rejects an accepted atomic plan when its task graph journal event is missing', async () => {
+    const fixture = await createProjectionFixture('plan')
+    const snapshot = {
+      ...fixture.snapshot,
+      phase: 'IMPLEMENTATION' as const,
+      documentStep: undefined,
+      activeTaskId: fixture.task.id,
+      activeDispatch: undefined,
+      tasks: [fixture.task],
+      documentReviewState: {
+        repairPasses: fixture.snapshot.documentReviewState.repairPasses,
+        checklistApproval:
+          fixture.snapshot.documentReviewState.checklistApproval,
+        activeCycle: fixture.completedComprehensiveCycle,
+      },
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+    const events = fixture.journalEvents.filter(
+      event => event.type !== 'tasks.planned',
+    )
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a snapshot task graph that conflicts with the journal task graph', async () => {
+    const fixture = await createProjectionFixture('plan')
+    const snapshot = structuredClone(fixture.snapshot)
+    snapshot.tasks[0] = {
+      ...snapshot.tasks[0],
+      title: 'Conflicting snapshot task title',
+    }
+    await writeFile(
+      fixture.snapshotPath,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_conflict',
+    )
+  })
+
   test('reports a missing checkpoint when historical resource content has no v13 digest receipt', async () => {
     const fixture = await createProjectionFixture()
     const sourceSnapshot = structuredClone(fixture.snapshot)

@@ -3653,6 +3653,9 @@ describe('delivery workflow recovery', () => {
     const successor = { ...first, leaseId: 'successor-lease' }
     await writeFile(store.paths.lock, `${JSON.stringify(successor)}\n`)
 
+    await expect(store.lock('run-1', async () => false)).rejects.toMatchObject({
+      code: 'locked',
+    })
     await expect(store.unlock(first)).rejects.toMatchObject({
       code: 'ownership',
     })
@@ -3660,6 +3663,32 @@ describe('delivery workflow recovery', () => {
       successor,
     )
     await expect(store.unlock(successor)).resolves.toBeUndefined()
+  })
+
+  test('reclaims a recovery lease only after its owner process is dead', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-dead-lease-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+    })
+    await store.save(initial)
+    await writeFile(
+      store.paths.lock,
+      `${JSON.stringify({
+        ownerId: initial.ownerId,
+        runId: initial.runId,
+        leaseId: 'dead-process-lease',
+        processId: 2_147_483_647,
+        acquiredAt: initial.createdAt,
+        heartbeatAt: initial.createdAt,
+      })}\n`,
+    )
+
+    const lease = await store.lock(initial.runId, async () => false)
+    expect(lease.processId).toBe(process.pid)
+    await store.unlock(lease)
   })
 
   test('reloads the winner after acquiring the mutation lease', async () => {

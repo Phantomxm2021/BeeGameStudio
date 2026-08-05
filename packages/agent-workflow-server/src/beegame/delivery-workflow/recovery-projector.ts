@@ -892,21 +892,17 @@ function snapshotTasks(input: {
     runId: input.runId,
     taskIds,
   })
-  if (!snapshotGraph && !journalGraph)
+  if (!journalGraph)
     recoveryError(
       'recovery_checkpoint_missing',
-      'accepted atomic plan has no recoverable current task graph',
+      'accepted atomic plan has no tasks.planned journal receipt',
     )
-  if (
-    snapshotGraph &&
-    journalGraph &&
-    !sameTaskPlan(snapshotGraph, journalGraph)
-  )
+  if (snapshotGraph && !sameTaskPlan(snapshotGraph, journalGraph))
     recoveryError(
       'recovery_checkpoint_conflict',
       'snapshot atomic task graph contradicts its journal receipt',
     )
-  const tasks = snapshotGraph ?? journalGraph!
+  const tasks = journalGraph
   if (
     !sameStrings(
       tasks.map(task => task.id),
