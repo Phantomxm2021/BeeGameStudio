@@ -198,6 +198,7 @@ const normalizeWorkflowDisplay = (
       source.blocked_reason,
   )
   const nextActionValue = trimString(source.nextAction ?? source.next_action)
+  const recoverable = source.recoverable === true
 
   return {
     runId,
@@ -281,6 +282,15 @@ const normalizeWorkflowDisplay = (
     nextAction:
       nextActionValue === 'resume' || nextActionValue === 'retry'
         ? nextActionValue
+        : undefined,
+    recoverable,
+    lastProvenPhase:
+      recoverable && trimString(source.lastProvenPhase ?? source.last_proven_phase)
+        ? trimString(source.lastProvenPhase ?? source.last_proven_phase)
+        : undefined,
+    lastProvenUnitId:
+      recoverable && trimString(source.lastProvenUnitId ?? source.last_proven_unit_id)
+        ? trimString(source.lastProvenUnitId ?? source.last_proven_unit_id)
         : undefined,
     block:
       blockMessage || failureReason

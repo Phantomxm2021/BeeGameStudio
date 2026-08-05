@@ -5060,6 +5060,7 @@ async function readBeeGameWorkflowSnapshot(
       return createWorkflowStateErrorView(
         inspection.error ??
           new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
+        lastProvenWorkflowSummary(await store.readEvents()),
       )
     const { pendingEvents: _pendingEvents, ...run } = inspection.currentRun
     const timing = workflowElapsedTiming(
@@ -5368,7 +5369,35 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
 const WORKFLOW_STATE_ERROR_TRACE_LIMIT = 100
 const workflowStateErrorTraceByDetail = new Map<string, string>()
 
-function createWorkflowStateErrorView(error: unknown): JsonObject {
+type LastProvenWorkflowSummary = {
+  lastProvenPhase: string
+  lastProvenUnitId: string
+}
+
+function lastProvenWorkflowSummary(
+  events: WorkflowEvent[],
+): LastProvenWorkflowSummary | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'workflow.unit.accepted' || !isObject(event.unit))
+      continue
+    const phase = event.unit.phase
+    const unitId = event.unit.unitId
+    if (
+      typeof phase === 'string' &&
+      phase === event.phase &&
+      typeof unitId === 'string' &&
+      unitId.trim()
+    )
+      return { lastProvenPhase: phase, lastProvenUnitId: unitId }
+  }
+  return undefined
+}
+
+function createWorkflowStateErrorView(
+  error: unknown,
+  lastProven?: LastProvenWorkflowSummary,
+): JsonObject {
   const detail = error instanceof Error ? error.message : String(error)
   let traceId = workflowStateErrorTraceByDetail.get(detail)
   if (!traceId) {
@@ -5390,6 +5419,9 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
   }
   const obsolete =
     error instanceof WorkflowStoreError && error.code === 'obsolete'
+  const recoverable =
+    error instanceof WorkflowStoreError &&
+    (error.code === 'invalid' || error.code === 'obsolete')
   const now = new Date().toISOString()
   return {
     runId: 'workflow-state-error',
@@ -5399,8 +5431,10 @@ function createWorkflowStateErrorView(error: unknown): JsonObject {
     evidence: {},
     workflowStateError: true,
     workflowStateObsolete: obsolete,
-    blockedReason: obsolete
-      ? `当前项目的工作流协议已失效，无法继续运行。请创建全新项目以启动当前工作流。诊断编号：${traceId}`
+    ...(recoverable ? { recoverable: true } : {}),
+    ...(recoverable && lastProven ? lastProven : {}),
+    blockedReason: recoverable
+      ? `工作流需要恢复。请点击继续以从已验证的检查点恢复。诊断编号：${traceId}`
       : `当前项目的工作流状态无效，无法安全继续。诊断编号：${traceId}`,
     // Detailed schema diagnostics stay in the server log. The user-facing
     // workflow card must never render internal JSON validation output.
@@ -5459,7 +5493,8 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
-  if (workflow.workflowStateError === true) return undefined
+  if (workflow.workflowStateError === true)
+    return workflow.recoverable === true ? 'resume' : undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
   const acceptedReviewIsBounded =
@@ -5701,6 +5736,13 @@ function workflowViewForDisplay(
       : {}),
     ...(typeof workflow.workflowStateError === 'boolean'
       ? { workflowStateError: workflow.workflowStateError }
+      : {}),
+    ...(workflow.recoverable === true ? { recoverable: true } : {}),
+    ...(typeof workflow.lastProvenPhase === 'string'
+      ? { lastProvenPhase: workflow.lastProvenPhase }
+      : {}),
+    ...(typeof workflow.lastProvenUnitId === 'string'
+      ? { lastProvenUnitId: workflow.lastProvenUnitId }
       : {}),
     ...(typeof workflow.createdAt === 'string'
       ? { createdAt: workflow.createdAt }

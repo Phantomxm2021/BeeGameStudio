@@ -101,6 +101,18 @@ const displayTaskTitle = (task: WorkflowCardTask): string => {
   return title;
 };
 
+const displayRecoveryUnitTitle = (unitId?: string): string | undefined => {
+  if (!unitId) return undefined;
+  const reviewUnitPrefix = 'review:';
+  const documentUnitPrefix = 'document:';
+  const displayId = unitId.startsWith(reviewUnitPrefix)
+    ? unitId.slice(reviewUnitPrefix.length)
+    : unitId.startsWith(documentUnitPrefix)
+      ? unitId.slice(documentUnitPrefix.length)
+      : unitId;
+  return documentTitle[displayId];
+};
+
 const formatDuration = (milliseconds: number): string => {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -338,11 +350,20 @@ export function WorkflowCard({
   const [now, setNow] = useState(() => Date.now());
   const [actionState, setActionState] = useState<'idle' | 'pending'>('idle');
   const [actionError, setActionError] = useState('');
+  const isRecoverable = workflow.recoverable === true;
   const isActive = ['draft', 'running', 'verifying'].includes(workflow.status);
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(workflow.status);
   const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(workflow.status) && Boolean(workflow.block);
   const tasks = workflow.tasks ?? [];
-  const message = workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
+  const recoveryPhaseTitle = isRecoverable ? stageLabel[workflow.lastProvenPhase || ''] : undefined;
+  const recoveryUnitTitle = isRecoverable ? displayRecoveryUnitTitle(workflow.lastProvenUnitId) : undefined;
+  const recoveryMessage = '已验证的工作流检查点可继续恢复。';
+  const failureMessage = isRecoverable
+    ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。'
+    : workflow.block?.message;
+  const message = isRecoverable
+    ? recoveryMessage
+    : workflow.thinking || (isBlocked ? workflow.block?.message : undefined) || '正在准备当前阶段…';
   const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(
     message || '',
   );
@@ -377,8 +398,9 @@ export function WorkflowCard({
               : workflow.substage === 'CHECKLIST_DRAFTING'
                 ? '编写验收清单'
                 : undefined;
-  const stageTitle =
-    workflow.substage && [4, 6].includes(Number(workflow.phaseIndex))
+  const stageTitle = isRecoverable
+    ? '工作流需要恢复'
+    : workflow.substage && [4, 6].includes(Number(workflow.phaseIndex))
       ? convergenceTitle
       : substageTitle ||
         stageLabel[workflow.documentStep || ''] ||
@@ -435,7 +457,7 @@ export function WorkflowCard({
   };
 
   const handleCopyFailure = async () => {
-    const message = workflow.block?.message;
+    const message = failureMessage;
     if (!message) return;
     const copied = await copyText(message);
     if (copied) showSuccess('错误信息已复制');
@@ -462,6 +484,11 @@ export function WorkflowCard({
                   ) : null}
                 </div>
                 {convergencePosition ? <p className="mt-1 text-xs text-zinc-400">{convergencePosition}</p> : null}
+                {isRecoverable && (recoveryPhaseTitle || recoveryUnitTitle) ? (
+                  <p className="mt-1 text-xs text-zinc-400">
+                    {[recoveryPhaseTitle, recoveryUnitTitle].filter(Boolean).join(' · ')}
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-zinc-400">{statusLabel[workflow.status]}</span>
@@ -480,7 +507,7 @@ export function WorkflowCard({
                       role="tooltip"
                       className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-rose-400/20 bg-zinc-950/95 p-3 text-xs leading-5 text-rose-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                     >
-                      <p>{workflow.block.message}</p>
+                      <p>{failureMessage}</p>
                       {workflow.block.nextAction ? (
                         <p className="mt-1 text-rose-200/70">下一步：{workflow.block.nextAction}</p>
                       ) : null}

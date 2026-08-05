@@ -209,6 +209,53 @@ describe('WorkflowCard', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
   });
 
+  it('shows a recoverable workflow at its proven unit and continues once without internal diagnostics', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_recovery',
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'DOCUMENT_REVIEW',
+          lastProvenUnitId: 'review:resource_semantic_fitness',
+          thinking: '{"issues":[{"code":"invalid_type"}]}',
+          block: { message: 'ZodError: internal diagnostic payload' },
+          nextAction: 'resume',
+        }}
+        onAction={onAction}
+      />,
+    );
+
+    expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
+    expect(screen.getByText(/资源语义适配/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    expect(screen.queryByText(/invalid_type|ZodError|internal diagnostic payload/)).not.toBeInTheDocument();
+    expect(screen.queryByText('review:resource_semantic_fitness')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(onAction).toHaveBeenCalledTimes(1));
+    expect(onAction).toHaveBeenCalledWith('resume');
+  });
+
+  it('does not render an unknown recovery unit ID', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_unknown_recovery_unit',
+          status: 'blocked',
+          recoverable: true,
+          lastProvenPhase: 'DOCUMENT_REVIEW',
+          lastProvenUnitId: 'retired:unknown-unit',
+          nextAction: 'resume',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
+    expect(screen.queryByText('retired:unknown-unit')).not.toBeInTheDocument();
+  });
+
   it('falls back to a DOM copy operation when the Clipboard API rejects', async () => {
     const writeText = vi.fn().mockRejectedValue(new Error('Clipboard permission denied'));
     Object.defineProperty(navigator, 'clipboard', {
