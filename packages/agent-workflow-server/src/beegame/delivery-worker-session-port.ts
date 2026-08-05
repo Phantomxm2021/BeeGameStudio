@@ -50,7 +50,7 @@ import {
 } from './native-canonical-document-tool'
 import {
   createResourceContentTerminalFromReceipt,
-  reconcileResourceContentCommitReceipt,
+  readResourceContentCommitReceipt,
   resourceContentCommitContractSchema,
 } from './native-resource-content-tool'
 
@@ -872,16 +872,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
         )
         const request = requests.get(dispatchId)
         if (request?.workerType === 'resource-content-author') {
-          const receipt = await reconcileResourceContentCommitReceipt({
-            workspacePath: request.workspacePath,
-            dispatchId: request.dispatchId ?? dispatchId,
-          })
-          if (receipt)
+          const receipt = readResourceContentCommitReceipt(
+            request.workspacePath,
+            request.dispatchId ?? dispatchId,
+          )
+          if (receipt?.status === 'committed')
             return createResourceContentTerminalFromReceipt({
               workspacePath: request.workspacePath,
               revision: request.revision,
               receipt,
             })
+          if (receipt?.status === 'prepared') {
+            await new Promise(resolve => setTimeout(resolve, 250))
+            continue
+          }
         }
         // The accepted structured submission is the workflow terminal event.
         // Waiting for the SDK turn/result envelope after that point creates a

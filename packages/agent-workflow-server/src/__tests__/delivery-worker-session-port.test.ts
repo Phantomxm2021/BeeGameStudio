@@ -185,7 +185,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('recovers completed resource content from its durable receipt without a tool event', async () => {
+  test('waits through a prepared resource receipt and accepts only its committed proof', async () => {
     const workspacePath = await createResourceWorkspace()
     try {
       await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
@@ -249,6 +249,16 @@ describe('delivery worker session credentials', () => {
           },
         ],
       })
+      const receiptPath = join(
+        workspacePath,
+        '.beegame/workflow/resource-content-commits',
+        `${contract.dispatchId}.json`,
+      )
+      const committedReceipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+      await writeFile(
+        receiptPath,
+        `${JSON.stringify({ ...committedReceipt, status: 'prepared' }, null, 2)}\n`,
+      )
 
       const sessions = {
         start() {
@@ -284,8 +294,21 @@ describe('delivery worker session credentials', () => {
         },
       })
 
-      await expect(port.waitForTerminal!(contract.dispatchId)).resolves.toEqual(
-        {
+      const terminalResult = port.waitForTerminal!(contract.dispatchId).then(
+        value => ({ value }),
+        error => ({ error }),
+      )
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+        status: 'prepared',
+      })
+      await writeFile(
+        receiptPath,
+        `${JSON.stringify(committedReceipt, null, 2)}\n`,
+      )
+
+      await expect(terminalResult).resolves.toEqual({
+        value: {
           revision: 'revision-content-receipt',
           workerType: 'resource-content-author',
           status: 'completed',
@@ -298,7 +321,7 @@ describe('delivery worker session credentials', () => {
             canonicalMutationCount: 1,
           },
         },
-      )
+      })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
