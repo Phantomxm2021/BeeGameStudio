@@ -491,7 +491,7 @@ describe('native document review result tool', () => {
 })
 
 describe('native document repair plan result tool', () => {
-  test('requires the service-owned group count', () => {
+  test('requires the service-owned repair plan contract', () => {
     expect(() =>
       createNativeWorkflowResultTool({
         workerType: 'document-author',
@@ -500,7 +500,7 @@ describe('native document repair plan result tool', () => {
           return value
         },
       }),
-    ).toThrow('document repair plan group count is missing')
+    ).toThrow('document repair plan contract is missing')
   })
 
   test('rejects incomplete plans before accepting the same tool call', async () => {
@@ -508,7 +508,18 @@ describe('native document repair plan result tool', () => {
     createNativeWorkflowResultTool({
       workerType: 'document-author',
       documentAuthorMode: 'repair-planning',
-      documentRepairGroupCount: 2,
+      documentRepairPlanContract: {
+        groups: [
+          {
+            subjectPaths: ['docs/GDD.md'],
+            candidatePaths: ['docs/GDD.md', 'docs/UI_UX_SPEC.md'],
+          },
+          {
+            subjectPaths: ['docs/BALANCE_DESIGN.md'],
+            candidatePaths: ['docs/BALANCE_DESIGN.md'],
+          },
+        ],
+      },
       buildTool(value) {
         definition = value
         return value
@@ -516,13 +527,39 @@ describe('native document repair plan result tool', () => {
     })
     const call = definition!.call as (value: unknown) => Promise<unknown>
     await expect(
-      call({ decisions: [{ decision: 'Repair the first group.' }] }),
+      call({
+        decisions: [
+          {
+            groupDecision: 'Repair the first group.',
+            pathDecisions: [
+              { path: 'docs/GDD.md', decision: 'Repair the GDD.' },
+            ],
+          },
+        ],
+      }),
     ).rejects.toThrow('requires exactly 2 decisions')
     await expect(
       call({
         decisions: [
-          { decision: 'Repair the first group.' },
-          { decision: 'Repair the dependent group.' },
+          {
+            groupDecision: 'Repair the first group.',
+            pathDecisions: [
+              { path: 'docs/GDD.md', decision: 'Repair the GDD.' },
+              {
+                path: 'docs/UI_UX_SPEC.md',
+                decision: 'Update the downstream UI reference.',
+              },
+            ],
+          },
+          {
+            groupDecision: 'Repair the dependent group.',
+            pathDecisions: [
+              {
+                path: 'docs/BALANCE_DESIGN.md',
+                decision: 'Repair Balance.',
+              },
+            ],
+          },
         ],
       }),
     ).resolves.toEqual({

@@ -43,7 +43,9 @@ import type {
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
+import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
 import type { CanonicalDocumentCommitContract } from './native-canonical-document-tool'
+import type { ResourceContentCommitContract } from './native-resource-content-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -262,9 +264,11 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorkerType?: string
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
+  workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairGroupCount?: number
+  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
+  workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
@@ -355,9 +359,11 @@ type SessionRecord = {
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
+  workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairGroupCount?: number
+  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
+  workflowResourceContentCommitContract?: ResourceContentCommitContract
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -497,9 +503,11 @@ export type StartBeeGameSessionInput = {
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
+  workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairGroupCount?: number
+  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
   workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
+  workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -635,19 +643,28 @@ export class BeeGameSessionManager {
       ...(input.workflowProtectedPaths
         ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
         : {}),
+      ...(input.workflowReadOnlyPaths
+        ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
+        : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
         : {}),
-      ...(input.workflowDocumentRepairGroupCount
+      ...(input.workflowDocumentRepairPlanContract
         ? {
-            workflowDocumentRepairGroupCount:
-              input.workflowDocumentRepairGroupCount,
+            workflowDocumentRepairPlanContract:
+              input.workflowDocumentRepairPlanContract,
           }
         : {}),
       ...(input.workflowCanonicalDocumentCommitContract
         ? {
             workflowCanonicalDocumentCommitContract:
               input.workflowCanonicalDocumentCommitContract,
+          }
+        : {}),
+      ...(input.workflowResourceContentCommitContract
+        ? {
+            workflowResourceContentCommitContract:
+              input.workflowResourceContentCommitContract,
           }
         : {}),
       runtime,
@@ -742,43 +759,13 @@ export class BeeGameSessionManager {
     )
   }
 
-  workflowWorkerSessionIds(
-    workflowRunId: string,
-    workspacePath: string,
-  ): string[] {
-    const root = resolve(workspacePath)
-    const active = [...this.sessions.values()]
-      .filter(
-        record =>
-          record.workflowWorker === true &&
-          record.workflowRunId === workflowRunId &&
-          resolve(record.session.cwd) === root,
-      )
-      .map(record => record.session.id)
-    return [
-      ...new Set([
-        ...active,
-        ...readWorkflowWorkerSessionIdsFromLogIndex(root, workflowRunId),
-      ]),
-    ]
-  }
-
-  /**
-   * Quiesce worker transports owned by this process before replacing an
-   * obsolete durable run. Project log indexes are historical provenance and
-   * must never be interpreted as live session state.
-   */
-  async disposeWorkflowWorkers(
-    workflowRunId: string,
-    workspacePath: string,
-  ): Promise<number> {
-    const root = resolve(workspacePath)
+  /** Dispose the one transport owned by a durable dispatch identity. */
+  async disposeWorkflowDispatch(workflowDispatchId: string): Promise<number> {
     const sessionIds = [...this.sessions.values()]
       .filter(
         record =>
           record.workflowWorker === true &&
-          record.workflowRunId === workflowRunId &&
-          resolve(record.session.cwd) === root,
+          record.workflowDispatchId === workflowDispatchId,
       )
       .map(record => record.session.id)
     for (const sessionId of sessionIds)
@@ -975,6 +962,36 @@ export class BeeGameSessionManager {
     return [...record.streamingToolUses.values()].some(
       name => name === toolName,
     )
+  }
+
+  /**
+   * End a workflow turn once its sole structured result has been accepted.
+   * The session and native runner stay alive so a Reviewer Cycle can reuse its
+   * stable context; only the now-authority-free continuation is interrupted.
+   */
+  finishWorkflowTurnAfterAcceptedTool(
+    sessionId: string,
+    toolName: string,
+  ): boolean {
+    const record = this.sessions.get(sessionId)
+    if (
+      !record?.workflowWorker ||
+      record.session.status !== 'running' ||
+      record.session.turnStatus !== 'running' ||
+      !record.currentTurnId
+    )
+      return false
+    const accepted = record.events.some(
+      event =>
+        event.turnId === record.currentTurnId &&
+        event.type === 'tool.completed' &&
+        event.payload?.toolName === toolName,
+    )
+    if (!accepted) return false
+    this.closeOpenThinkingLifecycle(record, 'structured_terminal_accepted')
+    record.abortController?.abort()
+    record.runner?.stop()
+    return true
   }
 
   transcript(sessionId: string): Array<{
@@ -1201,13 +1218,19 @@ export class BeeGameSessionManager {
 
   dispose(): void {
     for (const record of this.sessions.values()) {
-      record.abortController?.abort()
-      disposeRunner(record.runner)
-      record.runner = null
-      this.resolveAllPendingPermissions(record, {
-        behavior: 'deny',
-        message: 'BeeGame server stopped before permission was resolved',
-      })
+      // Mark the session stopped before the transport can flush any more
+      // messages. Aborting a runner while leaving the record "running" lets
+      // late SDK events cross a hot-reload boundary and mutate durable state.
+      if (record.session.status === 'running') this.stop(record.session.id)
+      else {
+        record.abortController?.abort()
+        disposeRunner(record.runner)
+        record.runner = null
+        this.resolveAllPendingPermissions(record, {
+          behavior: 'deny',
+          message: 'BeeGame server stopped before permission was resolved',
+        })
+      }
       if (record.workflowWorker) {
         void this.flushWorkflowUsage(record.session.id).catch(error => {
           console.error('[BeeGame] Failed to flush workflow token usage', {
@@ -1332,21 +1355,30 @@ export class BeeGameSessionManager {
             ...(record.workflowProtectedPaths
               ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
               : {}),
+            ...(record.workflowReadOnlyPaths
+              ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
+              : {}),
             ...(record.workflowDocumentAuthorMode
               ? {
                   workflowDocumentAuthorMode: record.workflowDocumentAuthorMode,
                 }
               : {}),
-            ...(record.workflowDocumentRepairGroupCount
+            ...(record.workflowDocumentRepairPlanContract
               ? {
-                  workflowDocumentRepairGroupCount:
-                    record.workflowDocumentRepairGroupCount,
+                  workflowDocumentRepairPlanContract:
+                    record.workflowDocumentRepairPlanContract,
                 }
               : {}),
             ...(record.workflowCanonicalDocumentCommitContract
               ? {
                   workflowCanonicalDocumentCommitContract:
                     record.workflowCanonicalDocumentCommitContract,
+                }
+              : {}),
+            ...(record.workflowResourceContentCommitContract
+              ? {
+                  workflowResourceContentCommitContract:
+                    record.workflowResourceContentCommitContract,
                 }
               : {}),
             requestPermission: request =>
@@ -1392,7 +1424,22 @@ export class BeeGameSessionManager {
           }
         }
       } finally {
-        if (signal.aborted && record.runner === runner) {
+        const acceptedReviewerTerminal =
+          record.workflowWorkerType === 'document-reviewer' &&
+          Boolean(
+            record.currentTurnId &&
+              record.events.some(
+                event =>
+                  event.turnId === record.currentTurnId &&
+                  event.type === 'tool.completed' &&
+                  event.payload?.toolName === 'SubmitDocumentReviewPacket',
+              ),
+          )
+        if (
+          signal.aborted &&
+          record.runner === runner &&
+          !acceptedReviewerTerminal
+        ) {
           disposeRunner(record.runner)
           record.runner = null
         }
@@ -1938,11 +1985,6 @@ export class BeeGameSessionManager {
         record.workflowWorkerType === 'document-author'
           ? undefined
           : workflowDocumentFromToolEvent(record, event)
-      const reviewedDocumentPath =
-        record.workflowWorkerType === 'document-reviewer' &&
-        event.type === 'tool.completed'
-          ? currentItemId
-          : undefined
       const clearCurrentItem =
         Boolean(currentItemId) &&
         (event.type === 'tool.completed' || event.type === 'tool.failed')
@@ -1984,7 +2026,6 @@ export class BeeGameSessionManager {
               : {}),
             ...(currentItemId ? { currentItemId } : {}),
             ...(clearCurrentItem ? { currentItemId: null } : {}),
-            ...(reviewedDocumentPath ? { reviewedDocumentPath } : {}),
             durable: durableProgress,
           })
           .catch(() => undefined)
@@ -2015,6 +2056,9 @@ export class BeeGameSessionManager {
         completion_tokens: delta.completion_tokens,
         total_tokens: delta.total_tokens,
       }
+      const workflowDispatchId = record.workflowDispatchId
+      if (!workflowDispatchId)
+        throw new Error('workflow usage event is missing its dispatch identity')
       const previousWrite = record.workflowUsageWriteTail
       const nextWrite = previousWrite
         .catch(() => undefined)
@@ -2022,7 +2066,11 @@ export class BeeGameSessionManager {
           const persisted = await createRunStore(
             record.session.cwd,
             record.userId,
-          ).addWorkflowUsage(record.workflowRunId as string, usageDelta)
+          ).addWorkflowUsage(
+            record.workflowRunId as string,
+            usageDelta,
+            workflowDispatchId,
+          )
           if (!persisted) {
             throw new Error(
               'workflow run disappeared before usage was persisted',
@@ -2035,7 +2083,7 @@ export class BeeGameSessionManager {
           error instanceof Error ? error : new Error(String(error))
         console.error('[BeeGame] Failed to persist workflow token usage', {
           runId: record.workflowRunId,
-          dispatchId: record.workflowDispatchId,
+          dispatchId: workflowDispatchId,
           cause: record.workflowUsageWriteError.message,
         })
       })
@@ -2085,6 +2133,7 @@ export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
   const toolName = getDashboardPayloadString(event.payload, 'toolName')
   if (isFileMutationTool(toolName)) return true
   if (toolName === 'AssetManifest') return true
+  if (toolName === 'CommitResourceContent') return true
   if (toolName !== 'ResourceLibrary') return false
   const input = getDashboardPayloadRecord(event.payload, 'input')
   return input?.action === 'import_resources'
@@ -3601,6 +3650,27 @@ function getBeeGamePermissionPolicyDecision(
   code?: 'resource_target_format_unsupported' | 'resource_contract_invalid'
 } {
   if (
+    request.toolName === 'CommitResourceContentAuthority' &&
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-content-author'
+  ) {
+    const dispatchId = request.input.dispatchId
+    const active =
+      typeof dispatchId === 'string' &&
+      dispatchId === record.workflowDispatchId &&
+      dispatchId === record.workflowResourceContentCommitContract?.dispatchId &&
+      record.session.status === 'running'
+    return active
+      ? {
+          behavior: 'auto_allow',
+          message: 'workflow_resource_content_active_dispatch',
+        }
+      : {
+          behavior: 'auto_deny',
+          message: 'Resource Content dispatch is no longer active.',
+        }
+  }
+  if (
     record.workflowWorker === true &&
     ['WebSearch', 'WebFetch'].includes(request.toolName)
   ) {
@@ -3676,6 +3746,38 @@ function getBeeGamePermissionPolicyDecision(
     isResourceProductionWorker(record.workflowWorkerType) &&
     (request.toolName === 'Read' || isFileMutationTool(request.toolName))
   ) {
+    if (
+      record.workflowWorkerType === 'resource-content-author' &&
+      isFileMutationTool(request.toolName)
+    )
+      return {
+        behavior: 'auto_deny',
+        message:
+          'Resource Content Author mutates canonical content only through CommitResourceContent.',
+      }
+    if (
+      record.workflowWorkerType === 'resource-content-author' &&
+      request.toolName === 'Read'
+    ) {
+      const paths = extractPermissionPaths(request.input)
+      const readOnlyPaths = record.workflowReadOnlyPaths ?? []
+      if (
+        paths.length === 0 ||
+        paths.some(
+          path =>
+            !isPathInsideWorkflowScope(record.session.cwd, readOnlyPaths, path),
+        )
+      )
+        return {
+          behavior: 'auto_deny',
+          message:
+            'Resource Content Author may read only its frozen fact-owner documents and protected canonical content files.',
+        }
+      return {
+        behavior: 'auto_allow',
+        message: 'workflow_resource_content_read_scope',
+      }
+    }
     const runtimeMutationPath = isFileMutationTool(request.toolName)
       ? extractPermissionPaths(request.input).find(path => {
           const absolute = isAbsolute(path)
@@ -4717,19 +4819,6 @@ function readProjectLogIndex(
     updatedAt: new Date().toISOString(),
     sessions: {},
   }
-}
-
-/** Recover workflow worker provenance after a server restart. */
-export function readWorkflowWorkerSessionIdsFromLogIndex(
-  workspacePath: string,
-  workflowRunId: string,
-): string[] {
-  const root = resolve(workspacePath)
-  const index = readProjectLogIndex(
-    resolve(root, '.beegame', 'workflow', 'logs', workflowRunId, 'index.json'),
-    root,
-  )
-  return Object.keys(index.sessions)
 }
 
 function getProjectLogsDir(workspacePath: string): string {

@@ -178,7 +178,6 @@ export function createInitialDeliveryRun(input: {
   ownerId: string
   confirmedBriefDigest: string
   confirmedBriefContext: string
-  parentRunId?: string
   documentRevision?: string
   workspaceRevision?: string
 }): DeliveryRun {
@@ -195,7 +194,6 @@ export function createInitialDeliveryRun(input: {
     runId: input.runId ?? randomUUID(),
     projectId: input.projectId,
     ownerId: input.ownerId,
-    ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
     confirmedBriefDigest: input.confirmedBriefDigest,
     confirmedBriefContext: input.confirmedBriefContext,
     phase: 'BRIEF_CONFIRMED',
@@ -570,34 +568,20 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     })
   }
 
-  async function updateUsage(
-    runId: string,
-    usage: WorkflowUsage,
-  ): Promise<DeliveryRun | null> {
-    return enqueueMutation(filePaths.snapshot, async () => {
-      const run = await loadUnlocked()
-      if (!run || run.runId !== runId) return run
-      return commitUnlocked(
-        { ...run, usage },
-        {
-          runId: run.runId,
-          type: 'usage.updated',
-          phase: run.phase,
-          status: run.status,
-          revision: run.revision,
-          usage,
-        },
-      )
-    })
-  }
-
   async function addWorkflowUsage(
     runId: string,
     delta: WorkflowUsage,
+    dispatchId: string,
   ): Promise<DeliveryRun | null> {
     return enqueueMutation(filePaths.snapshot, async () => {
       const run = await loadUnlocked()
       if (!run || run.runId !== runId) return run
+      if (
+        run.status !== 'running' ||
+        run.activeDispatch?.status !== 'running' ||
+        run.activeDispatch.dispatchId !== dispatchId
+      )
+        return null
       const next = { ...run, usage: addUsage(run.usage, delta) }
       return commitUnlocked(next, {
         runId: next.runId,
@@ -618,7 +602,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       workerType?: string
       dispatchId?: string
       currentItemId?: string | null
-      reviewedDocumentPath?: string
       /** False for UI activity that did not change durable workflow facts. */
       durable?: boolean
     },
@@ -639,14 +622,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const message = progress.message
         ? sanitizeWorkflowDisplayMessage(progress.message)
         : ''
-      const reviewedDocumentPaths = progress.reviewedDocumentPath
-        ? [
-            ...new Set([
-              ...(run.reviewedDocumentPaths ?? []),
-              progress.reviewedDocumentPath,
-            ]),
-          ]
-        : run.reviewedDocumentPaths
       const next = {
         ...run,
         ...(progress.durable === false ? {} : { lastProgressAt: now() }),
@@ -657,7 +632,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : progress.currentItemId
             ? { currentItemId: progress.currentItemId }
             : {}),
-        ...(reviewedDocumentPaths ? { reviewedDocumentPaths } : {}),
       }
       return commitUnlocked(next, {
         runId: next.runId,
@@ -692,7 +666,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     heartbeat,
     unlock,
     reconcile,
-    updateUsage,
     addWorkflowUsage,
     updateProgress,
   }

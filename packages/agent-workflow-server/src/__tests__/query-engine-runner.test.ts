@@ -184,6 +184,25 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual(['Read'])
   })
 
+  test('removes generic mutation and exploration from Resource Content Author', () => {
+    const tools = [
+      { name: 'Read' },
+      { name: 'Write' },
+      { name: 'Edit' },
+      { name: 'MultiEdit' },
+      { name: 'Glob' },
+      { name: 'Grep' },
+      { name: 'Bash' },
+      { name: 'Task' },
+    ]
+
+    expect(
+      selectBeeGameWorkerTools(tools, 'resource-content-author').map(
+        tool => (tool as { name: string }).name,
+      ),
+    ).toEqual(['Read'])
+  })
+
   test('keeps Curator exploration read-only without shell or nested agents', () => {
     const tools = [
       { name: 'Read' },

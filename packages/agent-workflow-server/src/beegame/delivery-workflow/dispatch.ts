@@ -47,11 +47,19 @@ function idempotencyKey(
   request: WorkerDispatchRequest,
   attempt: number,
 ): string {
+  const reviewerPacketIdentity =
+    request.workerType === 'document-reviewer'
+      ? JSON.stringify({
+          cycleId: request.contract.cycleId,
+          mode: request.contract.reviewMode,
+          checkIds: request.contract.currentCheckIds,
+        })
+      : undefined
   const lane =
     request.workerType === 'document-author'
       ? `document:${String(request.contract.documentSet ?? 'foundation')}`
       : request.workerType === 'document-reviewer'
-        ? `review:${String(request.contract.reviewScope ?? 'complete')}`
+        ? `review:${String(request.contract.reviewScope ?? 'complete')}:${reviewerPacketIdentity}`
         : request.workerType
   return `${request.runId}:${request.phase}:${request.workerType}:${lane}:${request.taskId ?? request.phase}:${request.revision}:${attempt}`
 }
@@ -213,12 +221,6 @@ function assertSingleResourceWorkAuthority(
     request.workerType !== 'resource-content-author'
   )
     return
-  if ('preparationRetry' in request.contract) {
-    throw new DispatchError(
-      'blocked',
-      'resource preparation retry contracts are retired',
-    )
-  }
   const remediation = request.contract.remediation
   const cycle = run.documentReviewState.activeCycle
   const hasAcceptedResourceAuthority = Boolean(
@@ -408,9 +410,6 @@ export function createDeliveryDispatcher(options: {
             request.workerType === 'document-author' && request.taskId
               ? request.taskId
               : undefined,
-          ...(request.workerType === 'document-reviewer'
-            ? { reviewedDocumentPaths: [] }
-            : {}),
           thinking: 'working',
         },
         {
@@ -431,6 +430,23 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker returned a dispatch id that does not match the durable dispatch',
         )
+      const current = await options.store.load()
+      if (
+        !current ||
+        current.runId !== run.runId ||
+        current.status !== 'running' ||
+        current.activeDispatch?.status !== 'running' ||
+        current.activeDispatch.dispatchId !== record.dispatchId
+      ) {
+        releaseDispatch(record.dispatchId, {
+          stopReason: 'delivery dispatch lost durable authority before submit',
+        })
+        if (current?.activeDispatch) return current.activeDispatch
+        throw new DispatchError(
+          'blocked',
+          'delivery dispatch lost durable authority before submit',
+        )
+      }
       // Supervision starts as soon as the durable dispatch owns a transport.
       // submit() spans the complete model turn, so attaching these observers
       // after awaiting it would leave thinking/tool execution unsupervised.
@@ -701,7 +717,10 @@ export function createDeliveryDispatcher(options: {
     return { record: completed, result }
   }
 
-  async function replayTerminal(record: DispatchRecord): Promise<void> {
+  async function replayTerminal(
+    record: DispatchRecord,
+    onTerminal = options.onTerminal,
+  ): Promise<void> {
     if (
       !['completed', 'failed', 'blocked'].includes(record.status) ||
       !record.terminalResult
@@ -722,7 +741,7 @@ export function createDeliveryDispatcher(options: {
         : 1
       const key = request ? idempotencyKey(request, attempt) : record.dispatchId
       await options.credits?.settle?.(key, result)
-      await options.onTerminal?.(record, result, record.request)
+      await onTerminal?.(record, result, record.request)
     } catch (error) {
       const reason =
         error instanceof Error

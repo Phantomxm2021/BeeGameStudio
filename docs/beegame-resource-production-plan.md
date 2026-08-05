@@ -101,7 +101,7 @@ Catalog 只允许以下 Pack-first 单一路径：
 
 ## 6. Task 3：JSON/YAML 内容描述
 
-`resource-content-author` 只读取当前 Manifest、必要 Foundation 文档和 Gameplay Checklist；只写 `assets/content/**/*.json|yaml`。它不能调用 Resource Library、不能提交资源计划，也不能修改玩法代码。
+`resource-content-author` 不再读取 Manifest 模块或 Gameplay Checklist。Workflow 将当前 schema、合法 JSON/YAML kind、required requirement ID、verified resource ID、库存 binding、保护路径和内容基线 revision 冻结进 dispatch；Agent 只读取拥有可执行事实的 GDD、关卡/场景、数值、技术、UI/UX 与音频文档。它不能调用 Resource Library、不能提交资源计划，也不能修改玩法代码。
 
 JSON 与 YAML 的归属严格遵循内容合同：
 
@@ -109,12 +109,15 @@ JSON 与 YAML 的归属严格遵循内容合同：
 - YAML：世界、场景、层级、transform 与实例摆放；
 - 不使用中间组装对象、Prefab 或特定引擎对象作为共享领域模型；
 - 内容只能引用 Manifest 中已登记的 resource ID；
-- 所有文件边界、content ID、owner 和交叉引用先一次规划，再并行写入互不冲突的文件；
-- 具体写入失败只重做失败文件，不重新读取全量 Catalog，也不重建资源库存。
+- `resource-registry.data.bindings` 是唯一 requirement-to-resource 映射，必须与冻结库存 receipt 完全一致；
+- 所有文件边界、content ID、owner 和交叉引用先一次规划，再通过唯一 `CommitResourceContent` 提交完整 project-required 集合；
+- 服务在内存中合并保护文件与候选文件，使用和 Gate 相同的 canonical validator 完整验证后，才由服务序列化并发布整个 content root；Agent 没有通用 Write/Edit/MultiEdit。
 
 若编排时证明库存遗漏了必要原料，Content Author 只能提交结构化缺口，不能创建、下载或登记资源。服务必须用当前 Manifest、库存 binding 与文件审计独立证明对应 requirement 确实没有 verified resource 后，才使当前库存 checkpoint 失效并从唯一 `RESOURCE_INVENTORY` task 继续；仅有“资源尚未被 Content 引用”、写权限冲突或 Worker 自述时必须拒绝回退。Curator 必须导入资源或创建 placeholder，随后再恢复 Content task。缺口不写项目文件、不形成队列，也不产生第二条资源处理路径。
 
 Content task 的保护路径必须从当前确定性问题和 accepted resource finding 的精确 subject 派生。局部文件错误只解锁受影响文件；无法归属到单一路径的跨文件引用错误必须解锁当前 canonical content 集合，由同一个 Content Author 在一次受控修订中恢复一致性。不得一边要求修复跨文件错误，一边把全部候选 owner 文件列入 `protectedPaths`。
+
+每次 commit 绑定唯一 dispatch ID、inventory revision 与 content baseline revision。工具在准备暂存目录前和发布前都复核 active dispatch；prepared/committed receipt 记录 baseline、最终目录 digest、暂存路径、备份路径与写入路径。进程中断时只能按同一 receipt 完成或恢复这次目录发布，不能要求 LLM 重新生成已验证内容，也不能接受旧 dispatch 的迟到写入。
 
 ## 7. Task 4：确定性资源门禁
 
@@ -123,7 +126,7 @@ Gate 不使用 LLM，不修改文件，只对当前 canonical revision 执行：
 - Manifest schema、唯一 ID、根目录、相对路径和格式能力；
 - Library provenance、依赖闭包、本地文件、非空内容与 hash；
 - provisional 文件独立存在并可由目标 adapter 加载或构建；
-- JSON/YAML 安全解析、无重复 key、content ID 唯一；
+- JSON/YAML 安全解析、无重复 key、content ID 唯一，并调用与 commit 完全相同的 canonical validator；
 - required requirement 被内容公共头覆盖；
 - 所有 content resource 引用存在且 verified；
 - 资源无孤立、内容事实 owner 不重复、三个根目录不重叠；

@@ -93,8 +93,8 @@ describe('process-isolated QueryEngine runner', () => {
       workflowDocumentReviewContract: {
         scope: 'complete',
         mode: 'closure',
-        requiredCheckIds: ['implementation_readiness'],
-        currentCheckIds: ['implementation_readiness'],
+        requiredCheckIds: ['resource_semantic_fitness'],
+        currentCheckIds: ['resource_semantic_fitness'],
         artifacts: [
           { path: 'assets/asset-manifest.json', content: '{"version":8}\n' },
         ],
@@ -102,7 +102,7 @@ describe('process-isolated QueryEngine runner', () => {
         priorFindings: [
           {
             findingId: 'finding-1',
-            checkId: 'implementation_readiness',
+            checkId: 'resource_semantic_fitness',
             owner: 'resource',
             open: true,
             requiredOutcome: 'The resource contract is implementation ready.',
@@ -118,8 +118,8 @@ describe('process-isolated QueryEngine runner', () => {
       workflowDocumentReviewContract: {
         scope: 'complete',
         mode: 'closure',
-        requiredCheckIds: ['implementation_readiness'],
-        currentCheckIds: ['implementation_readiness'],
+        requiredCheckIds: ['resource_semantic_fitness'],
+        currentCheckIds: ['resource_semantic_fitness'],
         activeTarget: 'resource',
       },
     })
@@ -163,6 +163,41 @@ describe('process-isolated QueryEngine runner', () => {
     })
   })
 
+  test('preserves the frozen Resource Content contract across process serialization', () => {
+    const serialized = serializeQueryEngineStartInput({
+      sessionId: 'resource-content-author',
+      cwd: '/tmp/project',
+      env: {},
+      approvedOutboundTargets: {},
+      workflowWorker: true,
+      workflowWorkerType: 'resource-content-author',
+      workflowReadOnlyPaths: ['docs/GDD.md'],
+      workflowResourceContentCommitContract: {
+        dispatchId: 'dispatch-content',
+        inventoryRevision: 'inventory-revision',
+        baselineResourceRevision: 'baseline-resource-revision',
+        requiredRequirementIds: ['req-world'],
+        verifiedResourceIds: ['res-world'],
+        inventoryBindings: [
+          { requirementId: 'req-world', resourceIds: ['res-world'] },
+        ],
+        protectedPaths: [],
+      },
+    })
+
+    expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
+      workflowWorkerType: 'resource-content-author',
+      workflowReadOnlyPaths: ['docs/GDD.md'],
+      workflowResourceContentCommitContract: {
+        dispatchId: 'dispatch-content',
+        inventoryRevision: 'inventory-revision',
+        baselineResourceRevision: 'baseline-resource-revision',
+        requiredRequirementIds: ['req-world'],
+        verifiedResourceIds: ['res-world'],
+      },
+    })
+  })
+
   test('preserves the repair graph cardinality across process serialization', () => {
     const serialized = serializeQueryEngineStartInput({
       sessionId: 'document-repair-planner',
@@ -173,12 +208,26 @@ describe('process-isolated QueryEngine runner', () => {
       workflowWorkerType: 'document-author',
       workflowAllowedPaths: [],
       workflowDocumentAuthorMode: 'repair-planning',
-      workflowDocumentRepairGroupCount: 3,
+      workflowDocumentRepairPlanContract: {
+        groups: [
+          {
+            subjectPaths: ['docs/GDD.md'],
+            candidatePaths: ['docs/GDD.md'],
+          },
+        ],
+      },
     })
 
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
       workflowDocumentAuthorMode: 'repair-planning',
-      workflowDocumentRepairGroupCount: 3,
+      workflowDocumentRepairPlanContract: {
+        groups: [
+          {
+            subjectPaths: ['docs/GDD.md'],
+            candidatePaths: ['docs/GDD.md'],
+          },
+        ],
+      },
     })
   })
 

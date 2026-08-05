@@ -8,6 +8,7 @@ import {
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
+import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import {
@@ -19,6 +20,15 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
+import {
+  registerBeeGameAuthoredResources,
+  writeBeeGameAssetManifest,
+} from '../beegame/asset-contracts'
+import {
+  computeResourceInventoryRevision,
+  computeResourceRevision,
+} from '../beegame/delivery-workflow/revision'
 
 describe('delivery workflow recovery', () => {
   let workspace = ''
@@ -95,6 +105,162 @@ describe('delivery workflow recovery', () => {
     })
   })
 
+  test('recovers and consumes a committed resource content dispatch without redispatching the author', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-receipt-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-resource-receipt',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
+    })
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['dat', 'json'],
+        resource_library_usage: 'optional',
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [{ id: 'world.visual', required: true }],
+      resources: [],
+    })
+    await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+    await writeFile(join(workspace, 'assets/runtime/world.dat'), 'world')
+    await registerBeeGameAuthoredResources(workspace, [
+      {
+        id: 'world-resource',
+        root_path: 'assets/runtime/world.dat',
+        file_paths: ['assets/runtime/world.dat'],
+        provisional: true,
+        reason: 'Durable recovery fixture.',
+        selection_reason: ['Exercises retry reconciliation.'],
+        asset_kind: 'data',
+      },
+    ])
+    const commitContract = {
+      dispatchId: 'resource-content-dispatch',
+      inventoryRevision: await computeResourceInventoryRevision(workspace),
+      baselineResourceRevision: await computeResourceRevision(workspace, ''),
+      requiredRequirementIds: ['world.visual'],
+      verifiedResourceIds: ['world-resource'],
+      inventoryBindings: [
+        {
+          requirementId: 'world.visual',
+          resourceIds: ['world-resource'],
+        },
+      ],
+      protectedPaths: [],
+    }
+    const tool = createNativeResourceContentTool({
+      buildTool: definition => definition,
+      workspacePath: workspace,
+      contract: commitContract,
+      assertMutationAuthority: () => undefined,
+    }) as { call(input: unknown): Promise<unknown> }
+    await tool.call({
+      action: 'commit',
+      documents: [
+        {
+          path: 'assets/content/resource-registry.json',
+          schema: 'beegame-content-v1',
+          id: 'resource-registry',
+          kind: 'resource-registry',
+          fulfills: ['world.visual'],
+          resources: ['world-resource'],
+          data: {
+            bindings: [
+              {
+                requirementId: 'world.visual',
+                resourceIds: ['world-resource'],
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const request: WorkerDispatchRequest = {
+      dispatchId: commitContract.dispatchId,
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'resource-content-author',
+      phase: 'RESOURCE_PREPARATION',
+      revision: initial.revision.document,
+      contract: {
+        ...commitContract,
+        preservedPaths: [],
+      },
+    }
+    await store.save({
+      ...initial,
+      phase: 'RESOURCE_PREPARATION',
+      status: 'failed',
+      resourceProductionState: {
+        currentTask: 'RESOURCE_CONTENT',
+      },
+      activeDispatch: {
+        dispatchId: commitContract.dispatchId,
+        workerType: 'resource-content-author',
+        phase: 'RESOURCE_PREPARATION',
+        revision: request.revision,
+        status: 'failed',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        failureReason: 'transport result mapping failed',
+        request,
+      },
+      blockedReason: 'transport result mapping failed',
+    })
+
+    const retried = await retryRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(retried.status).toBe('running')
+    expect(retried.activeDispatch).toMatchObject({
+      dispatchId: commitContract.dispatchId,
+      status: 'completed',
+      terminalResult: {
+        workerType: 'resource-content-author',
+        status: 'completed',
+        contentIds: ['resource-registry'],
+        writtenPaths: ['assets/content/resource-registry.json'],
+      },
+    })
+
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(nextRequest) {
+          return {
+            sessionId: 'recovery-next-session',
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await controller.resume(retried)
+
+    const progressed = await store.load()
+    expect(progressed?.activeDispatch?.dispatchId).not.toBe(
+      commitContract.dispatchId,
+    )
+    expect(progressed?.activeDispatch?.failureReason).toBeUndefined()
+  }, 2_000)
+
   test('records NEEDS_REVISION as a completed reviewer execution', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-status-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -154,13 +320,17 @@ describe('delivery workflow recovery', () => {
         priorFindings: [{ findingId: 'prior-1' }],
       },
     })
-    await store.updateUsage(initial.runId, {
-      input_tokens: 20,
-      cache_read_tokens: 10,
-      cache_creation_tokens: 5,
-      completion_tokens: 4,
-      total_tokens: 39,
-    })
+    await store.addWorkflowUsage(
+      initial.runId,
+      {
+        input_tokens: 20,
+        cache_read_tokens: 10,
+        cache_creation_tokens: 5,
+        completion_tokens: 4,
+        total_tokens: 39,
+      },
+      dispatch.dispatchId,
+    )
     const completed = await dispatcher.completeDispatch(dispatch.dispatchId, {
       workerType: 'document-reviewer',
       revision: initial.revision.document,
@@ -191,7 +361,6 @@ describe('delivery workflow recovery', () => {
           assessments: [],
         },
       ],
-      reviewedDocumentPaths: [],
       checklistIds: [],
       findings: [
         {
@@ -478,46 +647,6 @@ describe('delivery workflow recovery', () => {
     ).toBe(false)
   })
 
-  test('persists reviewer artifact progress only for the active dispatch', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-progress-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      reviewedDocumentPaths: [],
-      activeDispatch: {
-        dispatchId: 'review-dispatch',
-        workerType: 'document-reviewer',
-        phase: 'DOCUMENT_REVIEW',
-        revision: initial.revision.document,
-        status: 'running',
-        startedAt: new Date().toISOString(),
-      },
-    })
-
-    await store.updateProgress('run-1', {
-      dispatchId: 'review-dispatch',
-      reviewedDocumentPath: 'docs/GDD.md',
-    })
-    await store.updateProgress('run-1', {
-      dispatchId: 'review-dispatch',
-      reviewedDocumentPath: 'docs/GDD.md',
-    })
-    await store.updateProgress('run-1', {
-      dispatchId: 'stale-dispatch',
-      reviewedDocumentPath: 'docs/TECHNICAL_DESIGN.md',
-    })
-
-    expect((await store.load())?.reviewedDocumentPaths).toEqual(['docs/GDD.md'])
-  })
-
   test('rejects late progress from a terminal dispatch', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-terminal-progress-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -560,39 +689,6 @@ describe('delivery workflow recovery', () => {
       lastProgressAt: terminalAt,
       activeDispatch: { status: 'interrupted' },
     })
-  })
-
-  test('rejects retired current-version fields without rewriting the snapshot', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-normalize-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await mkdir(store.paths.directory, { recursive: true })
-    await writeFile(
-      store.paths.snapshot,
-      JSON.stringify({
-        ...initial,
-        currentMessageKey: 'workflow.resourcePreparation',
-        resourceRemediation: {
-          sourceRevision: 'resource-1',
-          attempt: 1,
-          issues: ['resource contract failed'],
-          preserveImportIds: [],
-          retiredCheckpointIds: [],
-        },
-      }),
-      'utf8',
-    )
-
-    const retiredSnapshot = await readFile(store.paths.snapshot, 'utf8')
-    await expect(store.load()).rejects.toThrow(
-      'workflow snapshot schema is invalid',
-    )
-    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(retiredSnapshot)
   })
 
   test('rejects an obsolete snapshot version before nested schema validation', async () => {
@@ -990,6 +1086,118 @@ describe('delivery workflow recovery', () => {
     })
   })
 
+  test('does not submit a worker after its durable dispatch loses authority during start', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-start-fence-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
+    })
+    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    let submitCount = 0
+    const stopped: string[] = []
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          const current = await store.load()
+          await store.save({
+            ...current!,
+            status: 'stopped',
+            blockedReason: 'operator stopped workflow',
+            activeDispatch: {
+              ...current!.activeDispatch!,
+              status: 'interrupted',
+              finishedAt: new Date().toISOString(),
+            },
+          })
+          return {
+            sessionId: 'session-1',
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {
+          submitCount += 1
+        },
+        async stop(dispatchId) {
+          stopped.push(dispatchId)
+        },
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    const dispatch = await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'resource-curator',
+      phase: 'RESOURCE_PREPARATION',
+      revision: initial.revision.document,
+      contract: {},
+    })
+
+    expect(dispatch.status).toBe('interrupted')
+    expect(submitCount).toBe(0)
+    expect(stopped).toEqual([dispatch.dispatchId])
+  })
+
+  test('rejects usage from a stopped or superseded dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-fence-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    const startedAt = new Date().toISOString()
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      activeDispatch: {
+        dispatchId: 'dispatch-current',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt,
+      },
+    })
+    const delta = {
+      input_tokens: 10,
+      cache_read_tokens: 20,
+      cache_creation_tokens: 0,
+      completion_tokens: 5,
+      total_tokens: 35,
+    }
+
+    await store.addWorkflowUsage(initial.runId, delta, 'dispatch-stale')
+    expect((await store.load())?.usage?.total_tokens ?? 0).toBe(0)
+
+    await store.addWorkflowUsage(initial.runId, delta, 'dispatch-current')
+    expect((await store.load())?.usage?.total_tokens).toBe(35)
+
+    const running = await store.load()
+    await store.save({
+      ...running!,
+      status: 'stopped',
+      activeDispatch: {
+        ...running!.activeDispatch!,
+        status: 'interrupted',
+        finishedAt: new Date().toISOString(),
+      },
+    })
+    await store.addWorkflowUsage(initial.runId, delta, 'dispatch-current')
+    expect((await store.load())?.usage?.total_tokens).toBe(35)
+  })
+
   test('does not let display-only activity refresh durable progress', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-durable-progress-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -1041,7 +1249,7 @@ describe('delivery workflow recovery', () => {
       },
     })
 
-    await dispatcher.dispatch({
+    const dispatch = await dispatcher.dispatch({
       runId: initial.runId,
       ownerId: initial.ownerId,
       projectId: initial.projectId,
@@ -1233,7 +1441,7 @@ describe('delivery workflow recovery', () => {
         },
       },
     })
-    await dispatcher.dispatch({
+    const dispatch = await dispatcher.dispatch({
       runId: initial.runId,
       ownerId: initial.ownerId,
       projectId: initial.projectId,
@@ -1243,11 +1451,17 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: { reviewScope: 'foundation' },
     })
-    await store.updateUsage(initial.runId, {
-      ...baselineUsage,
-      cache_read_tokens: 80,
-      total_tokens: 150,
-    })
+    await store.addWorkflowUsage(
+      initial.runId,
+      {
+        input_tokens: 0,
+        cache_read_tokens: 50,
+        cache_creation_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 50,
+      },
+      dispatch.dispatchId,
+    )
     await new Promise(resolve => setTimeout(resolve, 40))
     expect(await store.load()).toMatchObject({
       status: 'running',
@@ -1287,7 +1501,12 @@ describe('delivery workflow recovery', () => {
       {
         ...shared,
         workerType: 'document-reviewer',
-        contract: { reviewScope: 'foundation' },
+        contract: {
+          cycleId: 'cycle-1',
+          reviewScope: 'foundation',
+          reviewMode: 'initial',
+          currentCheckIds: ['brief_alignment'],
+        },
       },
       1,
     )
@@ -1310,6 +1529,117 @@ describe('delivery workflow recovery', () => {
 
     expect(checklistAuthor).not.toBe(reviewer)
     expect(comprehensiveReviewer).not.toBe(reviewer)
+    expect(
+      dispatcher.idempotencyKey(
+        {
+          ...shared,
+          workerType: 'document-reviewer',
+          contract: {
+            cycleId: 'cycle-1',
+            reviewScope: 'foundation',
+            reviewMode: 'initial',
+            currentCheckIds: ['cross_document_consistency'],
+          },
+        },
+        1,
+      ),
+    ).not.toBe(reviewer)
+  })
+
+  test('hands the next reviewer packet through the dispatcher without stopping the cycle session', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-packet-handoff-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      documentRevision: 'revision-1',
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+    })
+    const started: WorkerDispatchRequest[] = []
+    const stopped: string[] = []
+    let dispatcher!: ReturnType<typeof createDeliveryDispatcher>
+    const commonContract = {
+      cycleId: 'cycle-1',
+      reviewScope: 'foundation',
+      reviewMode: 'initial',
+      requiredCheckIds: ['brief_alignment', 'cross_document_consistency'],
+    }
+    dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          return {
+            sessionId: 'cycle-session',
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop(_dispatchId, reason) {
+          stopped.push(reason)
+        },
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+      async onTerminal(_record, result) {
+        if (result.workerType !== 'document-reviewer') return
+        const current = await store.load()
+        await store.save({ ...current!, activeDispatch: undefined })
+        await dispatcher.dispatch({
+          runId: initial.runId,
+          ownerId: initial.ownerId,
+          projectId: initial.projectId,
+          workspacePath: workspace,
+          workerType: 'document-reviewer',
+          phase: 'DOCUMENT_REVIEW',
+          revision: initial.revision.document,
+          contract: {
+            ...commonContract,
+            currentCheckIds: ['cross_document_consistency'],
+          },
+        })
+      },
+    })
+    const first = await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: initial.revision.document,
+      contract: { ...commonContract, currentCheckIds: ['brief_alignment'] },
+    })
+    await dispatcher.completeDispatch(first.dispatchId, {
+      workerType: 'document-reviewer',
+      revision: initial.revision.document,
+      verdict: 'READY',
+      checks: [
+        {
+          id: 'brief_alignment',
+          status: 'pass',
+          conclusion: 'The brief is aligned.',
+          evidence: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
+          findingIds: [],
+          assessments: [],
+        },
+      ],
+      checklistIds: [],
+      findings: [],
+      evidencePath: '.beegame/workflow/evidence/packet-1.json',
+      rejectedSubmissionCount: 0,
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(started).toHaveLength(2)
+    expect(stopped).toEqual([])
   })
 
   test('starts a checklist author after a reviewer completes at the same phase and revision', async () => {
@@ -1396,7 +1726,6 @@ describe('delivery workflow recovery', () => {
           assessments: [],
         },
       ],
-      reviewedDocumentPaths: [],
       checklistIds: [],
       findings: [],
       evidencePath,

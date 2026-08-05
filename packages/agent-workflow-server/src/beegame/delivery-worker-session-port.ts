@@ -29,14 +29,14 @@ import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   documentAuthorTerminalSchema,
-  documentRepairPlanSubmissionSchemaForGroupCount,
+  documentRepairPlanSubmissionSchemaForContract,
   documentReviewerTerminalSchema,
   implementationAuditorTerminalSchema,
   questionAnswerTerminalSchema,
-  resourceContentAuthorTerminalSchema,
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
+import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
 import { readAcceptanceChecklistIds } from './document-readiness-audit'
 import type {
   BeeGameSessionManager,
@@ -48,6 +48,11 @@ import {
   reconcileCanonicalDocumentCommitReceipt,
   type CanonicalDocumentCommitContract,
 } from './native-canonical-document-tool'
+import {
+  createResourceContentTerminalFromReceipt,
+  reconcileResourceContentCommitReceipt,
+  resourceContentCommitContractSchema,
+} from './native-resource-content-tool'
 
 function reviewerSubmissionContract(
   request: WorkerDispatchRequest,
@@ -145,6 +150,56 @@ function reviewerSubmissionContract(
   }
 }
 
+function repairPlanSubmissionContract(
+  request: WorkerDispatchRequest,
+): DocumentRepairPlanSubmissionContract | undefined {
+  if (
+    request.workerType !== 'document-author' ||
+    request.contract.authoringMode !== 'repair-planning'
+  )
+    return undefined
+  const task = request.contract.repairPlanTask
+  const groups =
+    task && typeof task === 'object' && !Array.isArray(task)
+      ? (task as { groups?: unknown }).groups
+      : undefined
+  if (!Array.isArray(groups) || groups.length === 0)
+    throw new Error('document repair plan contract is invalid')
+  return {
+    groups: groups.map(group => {
+      if (!group || typeof group !== 'object' || Array.isArray(group))
+        throw new Error('document repair plan group contract is invalid')
+      const { subjectPaths, candidatePaths } = group as Record<string, unknown>
+      if (
+        !Array.isArray(subjectPaths) ||
+        subjectPaths.length === 0 ||
+        !Array.isArray(candidatePaths) ||
+        candidatePaths.length === 0 ||
+        new Set(subjectPaths).size !== subjectPaths.length ||
+        new Set(candidatePaths).size !== candidatePaths.length ||
+        subjectPaths.some(
+          path =>
+            typeof path !== 'string' ||
+            !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+        ) ||
+        candidatePaths.some(
+          path =>
+            typeof path !== 'string' ||
+            !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+        ) ||
+        subjectPaths.some(path => !candidatePaths.includes(path))
+      )
+        throw new Error('document repair plan path contract is invalid')
+      return {
+        subjectPaths:
+          subjectPaths as DocumentRepairPlanSubmissionContract['groups'][number]['subjectPaths'],
+        candidatePaths:
+          candidatePaths as DocumentRepairPlanSubmissionContract['groups'][number]['candidatePaths'],
+      }
+    }),
+  }
+}
+
 function taskTypeForWorker(
   workerType: WorkerDispatchRequest['workerType'],
   documentAuthorMode?: unknown,
@@ -186,10 +241,12 @@ export async function buildDocumentAuthorAuthorityBlock(
           Array.isArray(reference)
         )
           return true
-        const { path, anchor } = reference as Record<string, unknown>
+        const { path, anchor, content } = reference as Record<string, unknown>
         return (
           typeof path !== 'string' ||
           typeof anchor !== 'string' ||
+          typeof content !== 'string' ||
+          content.length === 0 ||
           (!CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never) &&
             path !== SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH)
         )
@@ -201,28 +258,11 @@ export async function buildDocumentAuthorAuthorityBlock(
     const references = authorityReferences as Array<{
       path: string
       anchor: string
+      content: string
     }>
-    const sections = await Promise.all(
-      references.map(async reference => {
-        const content =
-          reference.path === SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH
-            ? `${JSON.stringify(request.contract.systemDeliveryContract)}\n`
-            : await readFile(
-                resolve(request.workspacePath, reference.path),
-                'utf8',
-              )
-        return {
-          ...reference,
-          content: projectDocumentReviewReference(
-            content,
-            reference.path,
-            reference.anchor,
-          ),
-        }
-      }),
-    )
+    const sections = references
     return [
-      'The workflow service projected one coherent accepted finding group and its exact subject/evidence authority below. Act only as the Repair Lead: lock one internally consistent minimum decision for the complete group. Do not write project files, reopen review, or expand scope.',
+      'The workflow service projected the complete ordered accepted finding groups and their frozen subject/evidence plus bounded candidate authority below. Act only as the Repair Lead: lock one internally consistent minimum group decision and its necessary coordinated path decisions. Do not write project files, reopen review, or expand scope.',
       ...sections.map(
         section =>
           `--- BEGIN REPAIR AUTHORITY: ${section.path} ${section.anchor} ---\n${section.content}\n--- END REPAIR AUTHORITY: ${section.path} ${section.anchor} ---`,
@@ -370,8 +410,7 @@ async function buildCanonicalDocumentCommitContract(
   const revisionRequired =
     request.contract.authoringMode === 'remediation' ||
     typeof request.contract.changeRequest === 'string' ||
-    request.contract.remediation !== undefined ||
-    request.contract.checklistRemediation !== undefined
+    request.contract.remediation !== undefined
   if (revisionRequired && !metadataRecord)
     throw new Error('canonical document revision requires baseline metadata')
   const baselineVersion = metadataRecord?.version
@@ -447,6 +486,19 @@ export function createBeeGameDeliveryWorkerPort(input: {
           request.contract.reviewMode,
         ].join(':')
       : undefined
+  const isFinalReviewerPacket = (request: WorkerDispatchRequest) => {
+    if (request.workerType !== 'document-reviewer') return false
+    const requiredCheckIds = request.contract.requiredCheckIds
+    const currentCheckIds = request.contract.currentCheckIds
+    const finalCheckId = Array.isArray(requiredCheckIds)
+      ? requiredCheckIds.at(-1)
+      : undefined
+    return Boolean(
+      finalCheckId &&
+        Array.isArray(currentCheckIds) &&
+        currentCheckIds.includes(finalCheckId),
+    )
+  }
   const disposeReviewerSessions = async (
     workspacePath: string,
     keepKey?: string,
@@ -482,6 +534,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           const contract = reviewerSubmissionContract(request)
           if (!contract)
             throw new Error('document reviewer submission contract is missing')
+          await input.sessions.flushWorkflowUsage(pooled.sessionId)
           input.sessions.rebindWorkflowReviewer({
             sessionId: pooled.sessionId,
             dispatchId,
@@ -544,6 +597,22 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
         workflowProtectedPaths: request.protectedPaths ?? [],
+        ...(request.workerType === 'resource-content-author'
+          ? {
+              workflowReadOnlyPaths: [
+                ...(Array.isArray(request.contract.authorityPaths)
+                  ? request.contract.authorityPaths.filter(
+                      (path): path is string => typeof path === 'string',
+                    )
+                  : []),
+                ...(Array.isArray(request.contract.preservedPaths)
+                  ? request.contract.preservedPaths.filter(
+                      (path): path is string => typeof path === 'string',
+                    )
+                  : []),
+              ],
+            }
+          : {}),
         ...(request.workerType === 'document-author' &&
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'repair-planning' ||
@@ -553,17 +622,30 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(request.workerType === 'document-author' &&
         request.contract.authoringMode === 'repair-planning'
           ? {
-              workflowDocumentRepairGroupCount: (
-                request.contract.repairPlanTask as {
-                  groups: unknown[]
-                }
-              ).groups.length,
+              workflowDocumentRepairPlanContract:
+                repairPlanSubmissionContract(request),
             }
           : {}),
         ...(canonicalDocumentCommitContract
           ? {
               workflowCanonicalDocumentCommitContract:
                 canonicalDocumentCommitContract,
+            }
+          : {}),
+        ...(request.workerType === 'resource-content-author'
+          ? {
+              workflowResourceContentCommitContract:
+                resourceContentCommitContractSchema.parse({
+                  dispatchId,
+                  inventoryRevision: request.contract.inventoryRevision,
+                  baselineResourceRevision:
+                    request.contract.baselineResourceRevision,
+                  requiredRequirementIds:
+                    request.contract.requiredRequirementIds,
+                  verifiedResourceIds: request.contract.verifiedResourceIds,
+                  inventoryBindings: request.contract.inventoryBindings,
+                  protectedPaths: request.contract.preservedPaths ?? [],
+                }),
             }
           : {}),
       })
@@ -680,7 +762,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
     },
     async stop(dispatchId, reason) {
       const sessionId = sessions.get(dispatchId)
-      if (!sessionId) return
+      if (!sessionId) {
+        await input.sessions.disposeWorkflowDispatch?.(dispatchId)
+        return
+      }
       input.sessions.stop(sessionId)
       records.set(dispatchId, {
         ...(records.get(dispatchId) ?? {
@@ -697,17 +782,27 @@ export function createBeeGameDeliveryWorkerPort(input: {
     },
     async close(dispatchId) {
       const sessionId = sessions.get(dispatchId)
-      if (!sessionId) return
+      if (!sessionId) {
+        await input.sessions.disposeWorkflowDispatch?.(dispatchId)
+        return
+      }
       const reviewSessionKey = reviewerSessionKeysByDispatch.get(dispatchId)
+      const request = requests.get(dispatchId)
       try {
         const session = input.sessions.get(sessionId)
         const keepReviewerSession = Boolean(
           reviewSessionKey &&
             reviewerSessions.get(reviewSessionKey)?.sessionId === sessionId &&
-            session?.status === 'running',
+            session?.status === 'running' &&
+            request &&
+            !isFinalReviewerPacket(request),
         )
         if (!keepReviewerSession) {
-          if (session?.status === 'running') input.sessions.stop(sessionId)
+          if (
+            session?.status === 'running' &&
+            typeof input.sessions.stop === 'function'
+          )
+            input.sessions.stop(sessionId)
           await disposeWorkflowSession(sessionId)
           if (reviewSessionKey) reviewerSessions.delete(reviewSessionKey)
         }
@@ -775,12 +870,35 @@ export function createBeeGameDeliveryWorkerPort(input: {
           eventOffsets.get(dispatchId) ?? 0,
         )
         const request = requests.get(dispatchId)
+        if (request?.workerType === 'resource-content-author') {
+          const receipt = await reconcileResourceContentCommitReceipt({
+            workspacePath: request.workspacePath,
+            dispatchId: request.dispatchId ?? dispatchId,
+          })
+          if (receipt)
+            return createResourceContentTerminalFromReceipt({
+              workspacePath: request.workspacePath,
+              revision: request.revision,
+              receipt,
+            })
+        }
         // The accepted structured submission is the workflow terminal event.
         // Waiting for the SDK turn/result envelope after that point creates a
         // race where a valid submission can be overwritten by a wall-clock
         // timeout while the transport is still closing the model turn.
-        if (request && hasCompletedStructuredSubmission(request, events))
+        if (request && hasCompletedStructuredSubmission(request, events)) {
+          const toolName = structuredSubmissionToolName(request)
+          if (
+            toolName &&
+            typeof input.sessions.finishWorkflowTurnAfterAcceptedTool ===
+              'function'
+          )
+            input.sessions.finishWorkflowTurnAfterAcceptedTool(
+              sessionId,
+              toolName,
+            )
           return createDeterministicStructuredTerminal({ request, events })
+        }
         if (request && isCanonicalDocumentAuthor(request)) {
           const receipt = await reconcileCanonicalDocumentCommitReceipt({
             workspacePath: request.workspacePath,
@@ -807,14 +925,17 @@ export function createBeeGameDeliveryWorkerPort(input: {
             )
           if (
             request?.workerType === 'resource-planner' ||
-            request?.workerType === 'resource-curator' ||
-            request?.workerType === 'resource-content-author'
+            request?.workerType === 'resource-curator'
           ) {
             return createDeterministicResourceTaskTerminal({
               request,
               events,
             })
           }
+          if (request?.workerType === 'resource-content-author')
+            throw new Error(
+              'resource content author completed without an accepted durable receipt',
+            )
           if (request && isCanonicalDocumentAuthor(request)) {
             const commitFailure = [...events]
               .reverse()
@@ -883,7 +1004,7 @@ function structuredSubmissionToolName(
     case 'question-answerer':
       return 'SubmitQuestionAnswerResult'
     case 'resource-content-author':
-      return 'SubmitResourceContentResult'
+      return undefined
     case 'resource-planner':
     case 'resource-curator':
       return undefined
@@ -981,13 +1102,8 @@ function createDeterministicDocumentAuthorTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   if (input.request.contract.authoringMode === 'repair-planning') {
-    const groupCount = (
-      input.request.contract.repairPlanTask as
-        | { groups?: unknown[] }
-        | undefined
-    )?.groups?.length
-    if (!groupCount)
-      throw new Error('document repair plan group count is missing')
+    const contract = repairPlanSubmissionContract(input.request)
+    if (!contract) throw new Error('document repair plan contract is missing')
     const candidates = completedToolInputs(
       input.events,
       'SubmitDocumentRepairPlan',
@@ -996,7 +1112,7 @@ function createDeterministicDocumentAuthorTerminal(input: {
     for (const candidate of candidates) {
       try {
         const repairPlan =
-          documentRepairPlanSubmissionSchemaForGroupCount(groupCount).parse(
+          documentRepairPlanSubmissionSchemaForContract(contract).parse(
             candidate,
           )
         return documentAuthorTerminalSchema.parse({
@@ -1047,12 +1163,6 @@ async function createDeterministicDocumentReviewTerminal(input: {
           ? 'READY'
           : 'NEEDS_REVISION',
         checks: normalized.checks,
-        reviewedDocumentPaths:
-          scope === 'foundation'
-            ? CANONICAL_FOUNDATION_DOCUMENTS
-            : scope === 'checklist'
-              ? CANONICAL_PROJECT_DOCUMENTS
-              : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST],
         checklistIds:
           scope === 'foundation'
             ? []
@@ -1285,7 +1395,8 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
     if (
       WORKSPACE_MUTATION_TOOLS.has(toolName) ||
       RESOURCE_MUTATION_ACTIONS.has(resourceAction) ||
-      toolName === 'AssetManifest'
+      toolName === 'AssetManifest' ||
+      toolName === 'CommitResourceContent'
     )
       active.set(toolUseId, true)
   }
@@ -1388,48 +1499,7 @@ async function createDeterministicResourceTaskTerminal(input: {
       taskMetrics,
     })
   }
-  if (input.request.workerType !== 'resource-content-author')
-    throw new Error('resource task worker type is invalid')
-  const submission = completedToolInputs(
-    input.events,
-    'SubmitResourceContentResult',
-  )[0]
-  if (!submission)
-    throw new Error(
-      'resource content author completed without SubmitResourceContentResult',
-    )
-  const status = submission.status
-  const missingRequirementIds = Array.isArray(submission.missingRequirementIds)
-    ? submission.missingRequirementIds.filter(
-        (id): id is string => typeof id === 'string' && id.length > 0,
-      )
-    : []
-  if (status === 'completed' && !contract.content.valid)
-    throw new Error(
-      `resource content is invalid: ${contract.content.issues.join('; ')}`,
-    )
-  if (status !== 'completed' && status !== 'needs_inventory')
-    throw new Error('resource content submission status is invalid')
-  const requirementIds = new Set(
-    contract.requirements.map(requirement => requirement.id),
-  )
-  if (
-    status === 'needs_inventory' &&
-    (missingRequirementIds.length === 0 ||
-      missingRequirementIds.some(id => !requirementIds.has(id)))
-  )
-    throw new Error(
-      'resource content inventory request must contain exact current Manifest requirement IDs',
-    )
-  return resourceContentAuthorTerminalSchema.parse({
-    revision: input.request.revision,
-    workerType: 'resource-content-author' as const,
-    status,
-    contentIds,
-    writtenPaths,
-    missingRequirementIds,
-    taskMetrics,
-  })
+  throw new Error('resource task worker type is invalid')
 }
 
 function resourceTaskMetrics(

@@ -31,6 +31,7 @@ import {
   CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
+  DOCUMENT_REVIEW_CHECK_PACKETS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
@@ -44,6 +45,28 @@ import type { WorkerTerminalResult } from '../beegame/delivery-workflow/worker-c
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 const workspaces: string[] = []
+
+function minimumRepairPlan(
+  request: WorkerDispatchRequest,
+  groupDecisions: string[],
+) {
+  const groups = (
+    request.contract.repairPlanTask as {
+      groups: Array<{
+        subjectPaths: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number][]
+      }>
+    }
+  ).groups
+  return {
+    decisions: groups.map((group, index) => ({
+      groupDecision: groupDecisions[index] ?? `Repair group ${index + 1}.`,
+      pathDecisions: group.subjectPaths.map(path => ({
+        path,
+        decision: `Apply the group decision to ${path}.`,
+      })),
+    })),
+  }
+}
 
 async function reconcileDocumentReview(
   input: Parameters<typeof reconcileDocumentReviewCheck>[0],
@@ -121,7 +144,7 @@ describe('single-track document review workflow', () => {
     ])
     expect(groups).toHaveLength(3)
     expect(groups[0]).toMatchObject({
-      affectedPaths: ['docs/GDD.md'],
+      subjectPaths: ['docs/GDD.md'],
       dependsOn: [],
     })
     expect(groups[0]?.findings.map(finding => finding.findingId)).toEqual([
@@ -130,6 +153,37 @@ describe('single-track document review workflow', () => {
     ])
     expect(groups[1]?.dependsOn).toEqual(['repair-group-1'])
     expect(groups[2]?.dependsOn).toEqual(['repair-group-1'])
+  })
+
+  test('groups findings through their shared highest fact owner', () => {
+    const groups = deriveFoundationRepairGroups([
+      reviewFinding({
+        findingId: 'balance-conflict',
+        checkId: 'numeric_balance_feasibility',
+        owner: 'foundation',
+        path: 'docs/BALANCE_DESIGN.md',
+        evidence: [
+          { path: 'docs/GDD.md', anchor: 'Spec' },
+          { path: 'docs/BALANCE_DESIGN.md', anchor: 'Spec' },
+        ],
+      }),
+      reviewFinding({
+        findingId: 'ui-conflict',
+        checkId: 'ui_audio_consistency',
+        owner: 'foundation',
+        path: 'docs/UI_UX_SPEC.md',
+        evidence: [
+          { path: 'docs/GDD.md', anchor: 'Spec' },
+          { path: 'docs/UI_UX_SPEC.md', anchor: 'Spec' },
+        ],
+      }),
+    ])
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.findings.map(finding => finding.findingId)).toEqual([
+      'balance-conflict',
+      'ui-conflict',
+    ])
   })
   test('accepts a canonical graph prefix when owner order differs from finding discovery order', () => {
     const findings = [
@@ -156,8 +210,11 @@ describe('single-track document review workflow', () => {
           {
             groupId: derived[0]!.groupId,
             findingIds: derived[0]!.findings.map(finding => finding.findingId),
-            decision: 'Repair the canonical upstream owner first.',
-            affectedPaths: derived[0]!.affectedPaths,
+            groupDecision: 'Repair the canonical upstream owner first.',
+            pathDecisions: derived[0]!.subjectPaths.map(path => ({
+              path,
+              decision: 'Repair this owner.',
+            })),
             dependsOn: derived[0]!.dependsOn,
           },
         ],
@@ -168,8 +225,11 @@ describe('single-track document review workflow', () => {
     const canonicalPlanGroup = {
       groupId: firstGroup.groupId,
       findingIds: firstGroup.findings.map(finding => finding.findingId),
-      decision: 'Repair the canonical upstream owner first.',
-      affectedPaths: firstGroup.affectedPaths,
+      groupDecision: 'Repair the canonical upstream owner first.',
+      pathDecisions: firstGroup.subjectPaths.map(path => ({
+        path,
+        decision: 'Repair this owner.',
+      })),
       dependsOn: firstGroup.dependsOn,
     }
     expect(
@@ -191,9 +251,9 @@ describe('single-track document review workflow', () => {
         [
           {
             ...canonicalPlanGroup,
-            affectedPaths: [
-              ...canonicalPlanGroup.affectedPaths,
-              canonicalPlanGroup.affectedPaths[0]!,
+            pathDecisions: [
+              ...canonicalPlanGroup.pathDecisions,
+              canonicalPlanGroup.pathDecisions[0]!,
             ],
           },
         ],
@@ -208,8 +268,11 @@ describe('single-track document review workflow', () => {
           {
             groupId: secondGroup.groupId,
             findingIds: secondGroup.findings.map(finding => finding.findingId),
-            decision: 'Repair the dependent UI owner.',
-            affectedPaths: secondGroup.affectedPaths,
+            groupDecision: 'Repair the dependent UI owner.',
+            pathDecisions: secondGroup.subjectPaths.map(path => ({
+              path,
+              decision: 'Repair this owner.',
+            })),
             dependsOn: [...secondGroup.dependsOn, secondGroup.dependsOn[0]!],
           },
         ],
@@ -217,7 +280,7 @@ describe('single-track document review workflow', () => {
       ),
     ).toBe(false)
   })
-  test('uses 12 Foundation checks, one checklist check and 4 resource checks', () => {
+  test('uses 12 Foundation checks, one checklist check and 3 resource checks in 2 packets', () => {
     expect(CANONICAL_FOUNDATION_DOCUMENTS).toEqual([
       'docs/GDD.md',
       'docs/LEVEL_SCENE_DESIGN.md',
@@ -250,7 +313,6 @@ describe('single-track document review workflow', () => {
       'resource_semantic_fitness',
       'content_structure_fitness',
       'resource_content_consistency',
-      'implementation_readiness',
     ])
     expect(COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS).toEqual([
       ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
@@ -274,6 +336,10 @@ describe('single-track document review workflow', () => {
         'ui_audio_consistency',
       ],
       ['acceptance_observability'],
+    ])
+    expect(DOCUMENT_REVIEW_CHECK_PACKETS.slice(-2)).toEqual([
+      ['resource_semantic_fitness'],
+      ['content_structure_fitness', 'resource_content_consistency'],
     ])
     expect(GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS).toHaveLength(5)
     expect(
@@ -694,7 +760,7 @@ describe('single-track document review workflow', () => {
     ).rejects.toThrow()
   })
 
-  test('discards a terminal from a retired packet boundary and dispatches the current packet', async () => {
+  test('discards a terminal from a stale packet boundary and dispatches the current packet', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'foundation')
     const confirmedBriefContext = JSON.stringify({
@@ -743,7 +809,7 @@ describe('single-track document review workflow', () => {
     })
     const staleRequest = {
       ...currentRequest,
-      dispatchId: 'retired-packet-dispatch',
+      dispatchId: 'stale-packet-dispatch',
       contract: {
         ...currentRequest.contract,
         currentCheckIds: [
@@ -846,10 +912,62 @@ describe('single-track document review workflow', () => {
       completedCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
       acceptedSemanticResult: false,
     })
-    expect(
-      (await buildDocumentReviewDispatch({ run, workspacePath })).contract
-        .currentCheckIds,
-    ).toEqual([COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS[0]])
+    const resourceSemanticsDispatch = await buildDocumentReviewDispatch({
+      run,
+      workspacePath,
+    })
+    expect(resourceSemanticsDispatch.contract.currentCheckIds).toEqual([
+      'resource_semantic_fitness',
+    ])
+
+    run = await reconcileDocumentReviewCheck({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'complete',
+        revision: resourceRevision,
+        verdict: 'READY',
+        checks: passingChecks('complete').filter(
+          check => check.id === 'resource_semantic_fitness',
+        ),
+        findings: [],
+      }),
+      currentDocumentRevision: resourceRevision,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    const contentIntegrationDispatch = await buildDocumentReviewDispatch({
+      run,
+      workspacePath,
+    })
+    expect(contentIntegrationDispatch.contract.currentCheckIds).toEqual([
+      'content_structure_fitness',
+      'resource_content_consistency',
+    ])
+
+    await expect(
+      reconcileDocumentReviewCheck({
+        run,
+        workspacePath,
+        terminal: await reviewTerminal({
+          workspacePath,
+          scope: 'complete',
+          revision: resourceRevision,
+          verdict: 'READY',
+          checks: passingChecks('complete').filter(
+            check => check.id === 'content_structure_fitness',
+          ),
+          findings: [],
+        }),
+        currentDocumentRevision: resourceRevision,
+        scope: 'complete',
+        audit: () => ({ valid: true, issues: [] }),
+      }),
+    ).rejects.toThrow(
+      'document review must submit exactly the active check packet',
+    )
   })
 
   test('does not partially inherit a stale Foundation approval', async () => {
@@ -1111,9 +1229,17 @@ describe('single-track document review workflow', () => {
         },
       },
     })
+    expect(
+      approved.documentReviewState.comprehensiveApproval?.checks.map(
+        check => check.id,
+      ),
+    ).toEqual([...COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS])
+    expect(
+      approved.documentReviewState.comprehensiveApproval?.checks,
+    ).toHaveLength(15)
   })
 
-  test('projects atomically completed repair documents into an interrupted retry request', async () => {
+  test('rejects an unplanned document mutation before repair planning', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'foundation')
     run = await createInitialDocumentReviewCycle({
@@ -1151,20 +1277,17 @@ describe('single-track document review workflow', () => {
       documentContent('GDD', '1.0.1', '2026-08-02T00:00:00.000Z'),
     )
 
-    let retryRequest: WorkerDispatchRequest | undefined
-    await startDocumentStage({
-      run,
-      workspacePath,
-      dispatcher: {
-        async dispatch(request) {
-          retryRequest = request
-          return request
+    await expect(
+      startDocumentStage({
+        run,
+        workspacePath,
+        dispatcher: {
+          async dispatch(request) {
+            return request
+          },
         },
-      },
-    })
-
-    expect(retryRequest?.contract.authoringMode).toBe('repair-planning')
-    expect(retryRequest?.allowedPaths).toEqual([])
+      }),
+    ).rejects.toThrow('canonical artifacts changed during document review')
   })
 
   test('accepts the complete canonical repair plan atomically', async () => {
@@ -1226,12 +1349,10 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [
-            { decision: 'Correct the GDD authority.' },
-            { decision: 'Correct the Balance authority.' },
-          ],
-        },
+        repairPlan: minimumRepairPlan(planningRequest!, [
+          'Correct the GDD authority.',
+          'Correct the Balance authority.',
+        ]),
       },
       documentSet: 'foundation',
     })
@@ -1243,6 +1364,14 @@ describe('single-track document review workflow', () => {
 
   test('keeps cross-document evidence outside the exact repair subject scope', async () => {
     const workspacePath = await createWorkspace()
+    await writeFile(
+      join(workspacePath, 'docs/BALANCE_DESIGN.md'),
+      `${documentContent('Balance', '1.0.0', '2026-08-01T00:00:00.000Z')}\nThe shared authority is \`ECONOMY.THRESHOLD\`.\n`,
+    )
+    await writeFile(
+      join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+      `${documentContent('Technical', '1.0.0', '2026-08-01T00:00:00.000Z')}\nRuntime consumes \`ECONOMY.THRESHOLD\`.\n`,
+    )
     let run = await reviewRun(workspacePath, 'foundation')
     run = await createInitialDocumentReviewCycle({
       run,
@@ -1308,19 +1437,33 @@ describe('single-track document review workflow', () => {
         },
       },
     })
+    const submittedRepairPlan = minimumRepairPlan(planningRequest!, [
+      'Correct the shared threshold at its Balance authority.',
+      'Correct the UI authority.',
+    ])
     expect(planningRequest?.contract.repairPlanTask).toMatchObject({
       groups: expect.arrayContaining([
         expect.objectContaining({
           findings: [
             expect.objectContaining({ findingId: 'shared-threshold-conflict' }),
           ],
-          affectedPaths: ['docs/BALANCE_DESIGN.md'],
+          subjectPaths: ['docs/BALANCE_DESIGN.md'],
         }),
       ]),
       authorityReferences: expect.arrayContaining([
-        { path: 'docs/BALANCE_DESIGN.md', anchor: 'Spec' },
-        { path: 'docs/GDD.md', anchor: 'Spec' },
-        { path: 'docs/LEVEL_SCENE_DESIGN.md', anchor: 'Spec' },
+        expect.objectContaining({
+          path: 'docs/BALANCE_DESIGN.md',
+          anchor: '# Balance',
+        }),
+        expect.objectContaining({ path: 'docs/GDD.md', anchor: 'Spec' }),
+        expect.objectContaining({
+          path: 'docs/LEVEL_SCENE_DESIGN.md',
+          anchor: 'Spec',
+        }),
+        expect.objectContaining({
+          path: 'docs/TECHNICAL_DESIGN.md',
+          anchor: '# Technical',
+        }),
       ]),
     })
 
@@ -1332,15 +1475,7 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [
-            {
-              decision:
-                'Correct the shared threshold at its Balance authority.',
-            },
-            { decision: 'Correct the UI authority.' },
-          ],
-        },
+        repairPlan: submittedRepairPlan,
       },
       documentSet: 'foundation',
     })
@@ -1359,14 +1494,71 @@ describe('single-track document review workflow', () => {
       groups: expect.arrayContaining([
         expect.objectContaining({
           findingIds: ['shared-threshold-conflict'],
-          affectedPaths: ['docs/BALANCE_DESIGN.md'],
+          pathDecisions: [
+            expect.objectContaining({ path: 'docs/BALANCE_DESIGN.md' }),
+          ],
         }),
       ]),
       completedPaths: [],
     })
   })
 
-  test('derives affected paths from the accepted finding rather than model input', async () => {
+  test('rejects repair planning when canonical artifacts changed after review acceptance', async () => {
+    const workspacePath = await createWorkspace()
+    let run = await reviewRun(workspacePath, 'foundation')
+    run = await createInitialDocumentReviewCycle({
+      run,
+      workspacePath,
+      scope: 'foundation',
+      revision: run.revision.document,
+    })
+    run = await reconcileDocumentReview({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'foundation',
+        revision: run.revision.document,
+        verdict: 'NEEDS_REVISION',
+        checks: checksWithBlocks('foundation', {
+          numeric_balance_feasibility: ['balance-finding'],
+        }),
+        findings: [
+          reviewFinding({
+            findingId: 'balance-finding',
+            checkId: 'numeric_balance_feasibility',
+            owner: 'foundation',
+            path: 'docs/BALANCE_DESIGN.md',
+          }),
+        ],
+      }),
+      currentDocumentRevision: run.revision.document,
+      scope: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+    await writeFile(
+      join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+      documentContent(
+        'Externally changed technical design',
+        '1.0.0',
+        '2026-08-01T00:00:00.000Z',
+      ),
+    )
+
+    await expect(
+      startDocumentStage({
+        run,
+        workspacePath,
+        dispatcher: {
+          async dispatch(request) {
+            return request
+          },
+        },
+      }),
+    ).rejects.toThrow('canonical artifacts changed during document review')
+  })
+
+  test('derives the coordinated change set from accepted Repair Lead path decisions', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'foundation')
     run = await createInitialDocumentReviewCycle({
@@ -1417,6 +1609,14 @@ describe('single-track document review workflow', () => {
         },
       },
     })
+    const repairPlan = minimumRepairPlan(planningRequest!, [
+      'Correct the GDD authority and its UI consumer.',
+      'Correct the Balance authority.',
+    ])
+    repairPlan.decisions[0]!.pathDecisions.push({
+      path: 'docs/UI_UX_SPEC.md',
+      decision: 'Update the exact downstream UI reference.',
+    })
 
     const rejected = await completeDocumentDraft({
       run: withDispatch(run, planningRequest!),
@@ -1426,21 +1626,17 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [
-            { decision: 'Correct the GDD authority.' },
-            { decision: 'Correct the Balance authority.' },
-          ],
-        },
+        repairPlan,
       },
       documentSet: 'foundation',
     })
 
     expect(rejected.blockedReason).toBeUndefined()
     expect(
-      rejected.documentReviewState.activeCycle?.repairPlan?.groups[0]
-        ?.affectedPaths,
-    ).toEqual(['docs/GDD.md'])
+      rejected.documentReviewState.activeCycle?.repairPlan?.groups[0]?.pathDecisions.map(
+        pathDecision => pathDecision.path,
+      ),
+    ).toEqual(['docs/GDD.md', 'docs/UI_UX_SPEC.md'])
   })
 
   test('repairs multiple documents through one durable serial owner cursor', async () => {
@@ -1503,12 +1699,10 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [
-            { decision: 'Correct the GDD authority.' },
-            { decision: 'Correct the Balance authority.' },
-          ],
-        },
+        repairPlan: minimumRepairPlan(request!, [
+          'Correct the GDD authority.',
+          'Correct the Balance authority.',
+        ]),
       },
       documentSet: 'foundation',
     })
@@ -1656,11 +1850,9 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [
-            { decision: 'Correct the cited GDD authority conflict.' },
-          ],
-        },
+        repairPlan: minimumRepairPlan(authorRequest!, [
+          'Correct the cited GDD authority conflict.',
+        ]),
       },
       documentSet: 'foundation',
     })
@@ -1793,9 +1985,9 @@ describe('single-track document review workflow', () => {
         status: 'completed',
         writtenPaths: [],
         resolvedFindingIds: [],
-        repairPlan: {
-          decisions: [{ decision: 'Correct the cited foundation gap in GDD.' }],
-        },
+        repairPlan: minimumRepairPlan(authorRequest!, [
+          'Correct the cited foundation gap in GDD.',
+        ]),
       },
       documentSet: 'foundation',
     })
@@ -1945,6 +2137,39 @@ describe('single-track document review workflow', () => {
     })
   })
 
+  test('stops an invalid initial checklist instead of creating an author self-revision lane', async () => {
+    const workspacePath = await createWorkspace()
+    const base = await reviewRun(workspacePath, 'checklist')
+    const run: DeliveryRun = {
+      ...base,
+      documentStep: 'CHECKLIST_DRAFTING',
+      documentReviewState: {
+        ...base.documentReviewState,
+        activeCycle: undefined,
+      },
+    }
+
+    const stopped = await completeDocumentDraft({
+      run,
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: ['docs/acceptance/gameplay-checklist.md'],
+        resolvedFindingIds: [],
+      },
+      documentSet: 'checklist',
+      audit: (_workspace, options) =>
+        options?.includeChecklist
+          ? { valid: false, issues: ['checklist task is malformed'] }
+          : { valid: true, issues: [] },
+    })
+
+    expect(stopped.status).toBe('needs_action')
+    expect(stopped.blockedReason).toContain('checklist task is malformed')
+    expect(stopped.activeDispatch).toBeUndefined()
+  })
+
   test('continues resource remediation without a repair-pass cutoff', async () => {
     const workspacePath = await createWorkspace()
     let run = await reviewRun(workspacePath, 'complete')
@@ -1991,6 +2216,87 @@ describe('single-track document review workflow', () => {
     expect(routed.phase).toBe('RESOURCE_PREPARATION')
     expect(routed.documentReviewState.repairPasses.resource).toBe(3)
     expect(routed.blockedReason).toBeUndefined()
+  })
+
+  test('reviews a changed content artifact through the single content-integration Closure packet', async () => {
+    const workspacePath = await createWorkspace()
+    await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
+    const contentPath = join(workspacePath, 'assets/content/game-data.json')
+    await writeFile(
+      contentPath,
+      JSON.stringify({
+        schema: 'beegame-content-v1',
+        id: 'game-data',
+        kind: 'numeric-configuration',
+        fulfills: ['REQ-1'],
+        resources: ['RES-1'],
+        data: { value: 1 },
+      }),
+    )
+    let run = withChecklistApproval(await reviewRun(workspacePath, 'complete'))
+    run = await createInitialDocumentReviewCycle({
+      run,
+      workspacePath,
+      scope: 'complete',
+      revision: run.revision.resource!,
+    })
+    const routed = await reconcileDocumentReview({
+      run,
+      workspacePath,
+      terminal: await reviewTerminal({
+        workspacePath,
+        scope: 'complete',
+        revision: run.revision.resource!,
+        verdict: 'NEEDS_REVISION',
+        checks: checksWithBlocks('complete', {
+          content_structure_fitness: ['content-structure-gap'],
+        }),
+        findings: [
+          reviewFinding({
+            findingId: 'content-structure-gap',
+            checkId: 'content_structure_fitness',
+            owner: 'resource',
+            path: 'assets/content/game-data.json',
+            contentId: 'game-data',
+          }),
+        ],
+      }),
+      currentDocumentRevision: run.revision.resource,
+      scope: 'complete',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+    await writeFile(
+      contentPath,
+      JSON.stringify({
+        schema: 'beegame-content-v1',
+        id: 'game-data',
+        kind: 'numeric-configuration',
+        fulfills: ['REQ-1'],
+        resources: ['RES-1'],
+        data: { value: 2 },
+      }),
+    )
+    const currentRevision = await computeResourceRevision(
+      workspacePath,
+      routed.revision.document,
+    )
+    const closure = await beginResourceDocumentReviewClosure({
+      run: {
+        ...routed,
+        revision: { ...routed.revision, resource: currentRevision },
+      },
+      workspacePath,
+      currentRevision,
+    })
+
+    expect(closure.documentReviewState.activeCycle?.requiredCheckIds).toEqual([
+      'content_structure_fitness',
+      'resource_content_consistency',
+    ])
+    expect(
+      (await buildDocumentReviewDispatch({ run: closure, workspacePath }))
+        .contract.currentCheckIds,
+    ).toEqual(['content_structure_fitness', 'resource_content_consistency'])
   })
 
   test('accepts new findings in an affected Closure check and validates declared regressions', async () => {
@@ -2476,6 +2782,7 @@ function reviewFinding(input: {
   path: string
   anchor?: string
   requirementId?: string
+  contentId?: string
   regressionPaths?: string[]
   evidence?: Array<{ path: string; anchor: string }>
 }) {
@@ -2498,6 +2805,7 @@ function reviewFinding(input: {
         path: input.path,
         anchor: input.anchor ?? (input.path.endsWith('.md') ? 'Spec' : '$'),
         ...(input.requirementId ? { requirementId: input.requirementId } : {}),
+        ...(input.contentId ? { contentId: input.contentId } : {}),
       },
     ],
     observation: 'The current artifacts contain a blocking inconsistency.',
@@ -2526,12 +2834,6 @@ async function reviewTerminal(input: {
     revision: input.revision,
     verdict: input.verdict,
     checks: input.checks,
-    reviewedDocumentPaths:
-      input.scope === 'foundation'
-        ? [...CANONICAL_FOUNDATION_DOCUMENTS]
-        : input.scope === 'checklist'
-          ? [...CANONICAL_PROJECT_DOCUMENTS]
-          : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST],
     checklistIds: input.scope === 'foundation' ? [] : ['PATH-001'],
     findings: input.findings,
     evidencePath,

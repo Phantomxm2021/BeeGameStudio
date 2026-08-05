@@ -4,6 +4,10 @@ import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import type { DeliveryRun, DispatchRecord } from './types'
 import type { RunStore } from './run-store'
 import { reconcileCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+import {
+  createResourceContentTerminalFromReceipt,
+  reconcileResourceContentCommitReceipt,
+} from '../native-resource-content-tool'
 
 async function restoreCanonicalDocumentCommit(
   run: DeliveryRun,
@@ -36,6 +40,42 @@ async function restoreCanonicalDocumentCommit(
         writtenPaths: [receipt.targetPath],
         resolvedFindingIds: [],
       },
+    },
+    blockedReason: undefined,
+    updatedAt: finishedAt,
+  }
+}
+
+async function restoreResourceContentCommit(
+  run: DeliveryRun,
+  workspacePath?: string,
+): Promise<DeliveryRun> {
+  const dispatch = run.activeDispatch
+  if (
+    !workspacePath ||
+    !dispatch ||
+    dispatch.workerType !== 'resource-content-author' ||
+    dispatch.terminalResult
+  )
+    return run
+  const receipt = await reconcileResourceContentCommitReceipt({
+    workspacePath,
+    dispatchId: dispatch.dispatchId,
+  })
+  if (!receipt) return run
+  const finishedAt = new Date().toISOString()
+  return {
+    ...run,
+    activeDispatch: {
+      ...dispatch,
+      status: 'completed',
+      finishedAt,
+      failureReason: undefined,
+      terminalResult: createResourceContentTerminalFromReceipt({
+        workspacePath,
+        revision: dispatch.revision,
+        receipt,
+      }),
     },
     blockedReason: undefined,
     updatedAt: finishedAt,
@@ -144,6 +184,10 @@ export async function resumeRun(input: {
       acquired.run,
       input.workspacePath,
     )
+    acquired.run = await restoreResourceContentCommit(
+      acquired.run,
+      input.workspacePath,
+    )
     if (acquired.run.status === 'completed') return acquired.run
     const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
       acquired.run,
@@ -202,6 +246,10 @@ export async function retryRun(input: {
   const acquired = await acquireAndLoad(input)
   try {
     acquired.run = await restoreCanonicalDocumentCommit(
+      acquired.run,
+      input.workspacePath,
+    )
+    acquired.run = await restoreResourceContentCommit(
       acquired.run,
       input.workspacePath,
     )

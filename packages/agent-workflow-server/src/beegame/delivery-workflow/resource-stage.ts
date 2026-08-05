@@ -4,6 +4,11 @@ import {
   readBeeGameAssetManifest,
 } from '../asset-contracts'
 import {
+  BEEGAME_CONTENT_SCHEMA,
+  BEEGAME_JSON_CONTENT_KINDS,
+  BEEGAME_YAML_CONTENT_KINDS,
+} from '../content-contracts'
+import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
   type ResourceDeliveryReadiness,
@@ -118,7 +123,8 @@ export async function startResourcePreparation(input: {
         ...(remediation ? { remediation } : {}),
       },
     })
-  const contentAudit = auditAssetContract(input.workspacePath).content
+  const assetAudit = auditAssetContract(input.workspacePath)
+  const contentAudit = assetAudit.content
   const repairPaths = new Set(
     remediation?.findings.flatMap(finding =>
       finding.subjects.map(subject => subject.path.replaceAll('\\', '/')),
@@ -133,18 +139,31 @@ export async function startResourcePreparation(input: {
     workerType: 'resource-content-author',
     contract: {
       task: resolution.task,
-      manifestPath: 'assets/asset-manifest.json',
       contentRoot: BEEGAME_RESOURCE_ROOTS.content,
+      schema: BEEGAME_CONTENT_SCHEMA,
+      jsonKinds: BEEGAME_JSON_CONTENT_KINDS,
+      yamlKinds: BEEGAME_YAML_CONTENT_KINDS,
+      requiredRequirementIds: assetAudit.requirements
+        .filter(requirement => requirement.required)
+        .map(requirement => requirement.id),
+      verifiedResourceIds: assetAudit.resources
+        .filter(resource => resource.status === 'verified')
+        .map(resource => resource.id),
+      inventoryBindings:
+        input.run.resourceProductionState.inventoryReceipt?.bindings ?? [],
+      inventoryRevision:
+        input.run.resourceProductionState.inventoryReceipt?.revision,
+      baselineResourceRevision: await computeResourceRevision(
+        input.workspacePath,
+        '',
+      ),
       authorityPaths: [
         'docs/GDD.md',
         'docs/LEVEL_SCENE_DESIGN.md',
         'docs/BALANCE_DESIGN.md',
         'docs/TECHNICAL_DESIGN.md',
-        'docs/ART_DIRECTION.md',
         'docs/UI_UX_SPEC.md',
         'docs/AUDIO_DESIGN.md',
-        'docs/ASSET_PLAN.md',
-        'docs/acceptance/gameplay-checklist.md',
       ],
       preservedPaths,
       currentContentIssues: contentAudit.issues,

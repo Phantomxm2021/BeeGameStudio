@@ -7,7 +7,6 @@ import {
 } from './document-repair-graph'
 import type {
   AtomicTask,
-  ChecklistRemediation,
   DocumentReviewApproval,
   DocumentReviewCheck,
   DocumentReviewCycle,
@@ -304,9 +303,16 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
               .object({
                 groupId: z.string().trim().min(1),
                 findingIds: z.array(z.string().trim().min(1)).min(1),
-                decision: z.string().trim().min(1),
-                affectedPaths: z
-                  .array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS))
+                groupDecision: z.string().trim().min(1),
+                pathDecisions: z
+                  .array(
+                    z
+                      .object({
+                        path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+                        decision: z.string().trim().min(1),
+                      })
+                      .strict(),
+                  )
                   .min(1),
                 dependsOn: z.array(z.string().trim().min(1)),
               })
@@ -457,7 +463,7 @@ const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
         })
       const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
         cycle.repairPlan!.groups.some(group =>
-          group.affectedPaths.includes(path),
+          group.pathDecisions.some(pathDecision => pathDecision.path === path),
         ),
       )
       const completedPrefix = repairPaths.slice(
@@ -509,14 +515,6 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
         })
   })
 
-const checklistRemediationSchema: z.ZodType<ChecklistRemediation> = z
-  .object({
-    sourceRevision: z.string().min(1),
-    attempt: z.number().int().positive(),
-    issues: z.array(z.string().min(1)).min(1),
-  })
-  .strict()
-
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
@@ -565,7 +563,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     runId: z.string().min(1),
     projectId: z.string().min(1),
     ownerId: z.string().min(1),
-    parentRunId: z.string().min(1).optional(),
     confirmedBriefDigest: z.string().min(1),
     confirmedBriefContext: z.string().min(1),
     changeRequest: z.string().min(1).optional(),
@@ -589,7 +586,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     revision: revisionSchema,
     activeTaskId: z.string().min(1).optional(),
     currentItemId: z.string().min(1).optional(),
-    reviewedDocumentPaths: z.array(z.string().min(1)).optional(),
     tasks: z.array(atomicTaskSchema),
     activeDispatch: dispatchRecordSchema.optional(),
     evidence: z
@@ -602,7 +598,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     documentReviewState: documentReviewStateSchema,
     foundationDraftState: foundationDraftStateSchema,
     resourceProductionState: resourceProductionStateSchema,
-    checklistRemediation: checklistRemediationSchema.optional(),
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
@@ -650,7 +645,8 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     const checklistApproval = run.documentReviewState.checklistApproval
     if (
       requiresFrozenChecklistApproval &&
-      (!checklistApproval || checklistApproval.revision !== run.revision.document)
+      (!checklistApproval ||
+        checklistApproval.revision !== run.revision.document)
     )
       context.addIssue({
         code: 'custom',

@@ -5428,11 +5428,6 @@ function workflowViewForDisplay(
                   typeof path === 'string' ? [path] : [],
                 )
               : undefined,
-          reviewedDocumentPaths: Array.isArray(workflow.reviewedDocumentPaths)
-            ? workflow.reviewedDocumentPaths.flatMap(path =>
-                typeof path === 'string' ? [path] : [],
-              )
-            : undefined,
           documentStep:
             typeof workflow.documentStep === 'string'
               ? (workflow.documentStep as Parameters<
@@ -5490,12 +5485,15 @@ function workflowViewForDisplay(
                           workflow.documentReviewState.activeCycle.repairPlan.groups.flatMap(
                             group =>
                               isObject(group) &&
-                              Array.isArray(group.affectedPaths)
+                              Array.isArray(group.pathDecisions)
                                 ? [
                                     {
-                                      affectedPaths: group.affectedPaths.filter(
-                                        (path): path is string =>
-                                          typeof path === 'string',
+                                      paths: group.pathDecisions.flatMap(
+                                        pathDecision =>
+                                          isObject(pathDecision) &&
+                                          typeof pathDecision.path === 'string'
+                                            ? [pathDecision.path]
+                                            : [],
                                       ),
                                     },
                                   ]

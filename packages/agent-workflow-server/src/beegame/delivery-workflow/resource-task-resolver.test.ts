@@ -224,8 +224,20 @@ describe('resource production task resolver', () => {
     })
     expect(request).toMatchObject({
       workerType: 'resource-content-author',
-      contract: { preservedPaths: [] },
+      contract: {
+        schema: 'beegame-content-v1',
+        requiredRequirementIds: ['world.visual'],
+        verifiedResourceIds: ['world-resource'],
+        inventoryBindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+        preservedPaths: [],
+      },
     })
+    expect(request).not.toHaveProperty('contract.manifestPath')
     expect(request).not.toHaveProperty('protectedPaths')
   })
 })
@@ -285,7 +297,14 @@ async function writeContent(workspace: string): Promise<void> {
       kind: 'resource-registry',
       fulfills: ['world.visual'],
       resources: ['world-resource'],
-      data: { world: 'world-resource' },
+      data: {
+        bindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+      },
     })}\n`,
   )
 }

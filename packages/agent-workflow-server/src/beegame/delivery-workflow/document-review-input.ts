@@ -147,7 +147,6 @@ export const REVIEW_ARTIFACT_DEPENDENCIES_BY_CHECK: Record<
     ],
     includeContent: true,
   },
-  implementation_readiness: 'all',
 }
 
 export function documentReviewCheckDependsOnPath(

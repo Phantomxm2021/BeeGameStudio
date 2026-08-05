@@ -249,10 +249,6 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? { currentTask: 'RESOURCE_PLAN' }
             : next.resourceProductionState,
-        checklistRemediation:
-          result.classification === 'documents_required'
-            ? undefined
-            : next.checklistRemediation,
         blockedReason: undefined,
       }
       // A change is a new revision of the same delivery run. Creating a child
@@ -300,11 +296,7 @@ export function createDeliveryWorkflowController(input: {
         terminal: result,
         documentSet,
       })
-      if (
-        next.blockedReason &&
-        next.status === 'running' &&
-        !(documentSet === 'checklist' && next.checklistRemediation)
-      ) {
+      if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
           status: 'needs_action',
@@ -314,9 +306,7 @@ export function createDeliveryWorkflowController(input: {
       next = await persist(
         next,
         next.status === 'running'
-          ? documentSet === 'checklist' && next.checklistRemediation
-            ? 'document.checklist.remediation_requested'
-            : 'phase.entered'
+          ? 'phase.entered'
           : 'document.draft.incomplete',
       )
       await resumeUnlocked(next)
@@ -844,7 +834,6 @@ export function createDeliveryWorkflowController(input: {
       },
       foundationDraftState: { completedPaths: [] },
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
-      checklistRemediation: undefined,
     }
     await persist(invalidated, 'document.revision.invalidated')
     await startDocumentStage({
@@ -895,7 +884,13 @@ export function createDeliveryWorkflowController(input: {
         await resumeUnlocked(refreshed)
         return
       }
-      await dispatcher.replayTerminal(run.activeDispatch)
+      // resumeUnlocked already owns the controller serialization lane. Reuse
+      // the canonical terminal handler directly instead of queueing behind
+      // ourselves through handleTerminal.
+      await dispatcher.replayTerminal(
+        run.activeDispatch,
+        handleTerminalUnlocked,
+      )
       return
     }
     if (run.activeDispatch?.status === 'running') return

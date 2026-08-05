@@ -19,7 +19,7 @@ async function writeMinimalContent(workspace: string): Promise<void> {
       kind: 'resource-registry',
       fulfills: [],
       resources: [],
-      data: {},
+      data: { bindings: [] },
     }),
   )
 }

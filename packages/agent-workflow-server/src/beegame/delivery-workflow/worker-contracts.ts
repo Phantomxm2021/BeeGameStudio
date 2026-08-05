@@ -35,7 +35,7 @@ const documentReviewFindingShape = {
             .string()
             .min(1)
             .describe(
-              'Canonical artifact path whose current content violates authority and must change to satisfy requiredOutcome; contextual or already-correct evidence is not a subject.',
+              'Canonical artifact path whose current content contains the observed defect; contextual evidence and downstream consumers are not subjects.',
             ),
           anchor: z.string().trim().min(1),
           requirementId: z.string().min(1).optional(),
@@ -46,7 +46,7 @@ const documentReviewFindingShape = {
     )
     .min(1)
     .describe(
-      'Complete mutation scope for this finding. Every listed artifact must change, and every artifact required to change must be listed.',
+      'Exact defect locations in the frozen revision. Repair impact paths are selected later by the single Repair Lead contract.',
     ),
   observation: z.string().trim().min(1),
   blockingImpact: z.string().trim().min(1),
@@ -179,23 +179,72 @@ export { documentReviewCheckSchema } from './document-review-check-schema'
 export const documentRepairPlanSubmissionSchema = z
   .object({
     decisions: z
-      .array(z.object({ decision: z.string().trim().min(1) }).strict())
+      .array(
+        z
+          .object({
+            groupDecision: z.string().trim().min(1),
+            pathDecisions: z
+              .array(
+                z
+                  .object({
+                    path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+                    decision: z.string().trim().min(1),
+                  })
+                  .strict(),
+              )
+              .min(1),
+          })
+          .strict(),
+      )
       .min(1),
   })
   .strict()
 
-export function documentRepairPlanSubmissionSchemaForGroupCount(
-  groupCount: number,
+export type DocumentRepairPlanSubmissionContract = {
+  groups: Array<{
+    subjectPaths: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number][]
+    candidatePaths: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number][]
+  }>
+}
+
+export function documentRepairPlanSubmissionSchemaForContract(
+  contract: DocumentRepairPlanSubmissionContract,
 ) {
-  if (!Number.isSafeInteger(groupCount) || groupCount <= 0)
-    throw new Error('document repair plan group count is invalid')
+  if (!Array.isArray(contract.groups) || contract.groups.length === 0)
+    throw new Error('document repair plan contract is invalid')
   return documentRepairPlanSubmissionSchema.superRefine((value, context) => {
-    if (value.decisions.length !== groupCount)
+    if (value.decisions.length !== contract.groups.length) {
       context.addIssue({
         code: 'custom',
         path: ['decisions'],
-        message: `document repair plan requires exactly ${groupCount} decisions`,
+        message: `document repair plan requires exactly ${contract.groups.length} decisions`,
       })
+      return
+    }
+    value.decisions.forEach((decision, index) => {
+      const group = contract.groups[index]!
+      const paths = decision.pathDecisions.map(item => item.path)
+      if (new Set(paths).size !== paths.length)
+        context.addIssue({
+          code: 'custom',
+          path: ['decisions', index, 'pathDecisions'],
+          message: 'document repair path decisions must be unique',
+        })
+      if (group.subjectPaths.some(path => !paths.includes(path)))
+        context.addIssue({
+          code: 'custom',
+          path: ['decisions', index, 'pathDecisions'],
+          message:
+            'document repair path decisions must cover every subject path',
+        })
+      if (paths.some(path => !group.candidatePaths.includes(path)))
+        context.addIssue({
+          code: 'custom',
+          path: ['decisions', index, 'pathDecisions'],
+          message:
+            'document repair path decision is outside the impact candidates',
+        })
+    })
   })
 }
 
@@ -337,7 +386,6 @@ export const documentReviewerTerminalSchema = base
     workerType: z.literal('document-reviewer'),
     verdict: z.enum(['READY', 'NEEDS_REVISION', 'BLOCKED']),
     checks: z.array(documentReviewCheckSchema).min(1),
-    reviewedDocumentPaths: z.array(z.string().min(1)),
     checklistIds: z.array(z.string().min(1)),
     findings: z.array(documentReviewFindingSchema),
     evidencePath: z.string().min(1),
@@ -427,21 +475,6 @@ export const resourceContentAuthorTerminalSchema = base
     taskMetrics: resourceTaskMetricsSchema,
   })
   .strict()
-
-export const resourceContentSubmissionSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('completed'),
-      missingRequirementIds: z.array(z.never()).max(0),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('needs_inventory'),
-      missingRequirementIds: z.array(z.string().trim().min(1)).min(1),
-    })
-    .strict(),
-])
 
 export const atomicTaskPlannerTerminalSchema = base
   .extend({

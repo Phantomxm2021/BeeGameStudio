@@ -6,7 +6,11 @@ import { writeBeeGameAssetManifest } from './asset-contracts'
 import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
 const roots: string[] = []
-afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
+afterEach(async () =>
+  Promise.all(
+    roots.splice(0).map(root => rm(root, { recursive: true, force: true })),
+  ),
+)
 
 describe('resource-content readiness', () => {
   it('requires verified resources and JSON/YAML coverage', async () => {
@@ -14,7 +18,10 @@ describe('resource-content readiness', () => {
     roots.push(workspace)
     await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
     await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
-    await writeFile(join(workspace, 'assets/runtime/player.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    await writeFile(
+      join(workspace, 'assets/runtime/player.svg'),
+      '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    )
     await writeBeeGameAssetManifest(workspace, {
       version: 8,
       project_target: {
@@ -25,19 +32,43 @@ describe('resource-content readiness', () => {
         generated_asset_root: 'assets/generated',
       },
       requirements: [{ id: 'visual.player', required: true }],
-      resources: [{
-        id: 'player-art',
-        source: { type: 'agent-authored', created_at: new Date().toISOString(), reason: 'placeholder' },
-        root_path: 'assets/runtime/player.svg', file_paths: ['assets/runtime/player.svg'],
-        provisional: true, status: 'verified', selected_at: new Date().toISOString(),
-        selection_reason: ['No suitable library material was selected.'],
-      }],
+      resources: [
+        {
+          id: 'player-art',
+          source: {
+            type: 'agent-authored',
+            created_at: new Date().toISOString(),
+            reason: 'placeholder',
+          },
+          root_path: 'assets/runtime/player.svg',
+          file_paths: ['assets/runtime/player.svg'],
+          provisional: true,
+          status: 'verified',
+          selected_at: new Date().toISOString(),
+          selection_reason: ['No suitable library material was selected.'],
+        },
+      ],
     })
-    expect(auditResourceDeliveryReadiness({ workspacePath: workspace }).ready).toBe(false)
-    await writeFile(join(workspace, 'assets/content/entities.json'), JSON.stringify({
-      schema: 'beegame-content-v1', id: 'entities', kind: 'entity-definitions',
-      fulfills: ['visual.player'], resources: ['player-art'], data: {},
-    }))
-    expect(auditResourceDeliveryReadiness({ workspacePath: workspace })).toMatchObject({ ready: true, contentFileCount: 1 })
+    expect(
+      auditResourceDeliveryReadiness({ workspacePath: workspace }).ready,
+    ).toBe(false)
+    await writeFile(
+      join(workspace, 'assets/content/resource-registry.json'),
+      JSON.stringify({
+        schema: 'beegame-content-v1',
+        id: 'registry',
+        kind: 'resource-registry',
+        fulfills: ['visual.player'],
+        resources: ['player-art'],
+        data: {
+          bindings: [
+            { requirementId: 'visual.player', resourceIds: ['player-art'] },
+          ],
+        },
+      }),
+    )
+    expect(
+      auditResourceDeliveryReadiness({ workspacePath: workspace }),
+    ).toMatchObject({ ready: true, contentFileCount: 1 })
   })
 })

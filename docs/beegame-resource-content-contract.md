@@ -153,7 +153,7 @@ data:
 
 - Resource Planner 只提交 Manifest plan，不访问 Catalog 或内容文件；
 - Resource Curator 浏览 Pack、检查元素、下载真实资源，并为缺失内容创建独立 provisional 文件；
-- Resource Content Author 只编写或修订 `assets/content/**/*.json|yaml`；若编排时发现原料缺口，只提交结构化缺口，由唯一 Resource Curator 补齐；
+- Resource Content Author 只通过唯一 `CommitResourceContent` 提交完整 JSON/YAML 候选集；服务端验证、序列化并发布 `assets/content`，Agent 不持有通用文件写入能力；若编排时发现原料缺口，只提交精确 requirement ID，由唯一 Resource Curator 补齐；
 - 三者都不写玩法代码，也不建立第二份资源事实。
 
 每个任务提交 canonical artifact 后立即结束 dispatch。服务根据 Manifest 和内容文件派生下一个任务，不依靠 Worker prose、历史失败或固定次数续跑。
@@ -166,8 +166,10 @@ data:
 ### Workflow service
 
 - 是 Asset Manifest 的唯一写入边界；
-- 确定性解析 JSON/YAML 公共头；
-- 验证 requirement 覆盖、资源引用、路径和格式；
+- 从 canonical Manifest 与库存 receipt 派生冻结的 requirement、resource、binding 与 baseline revision 投影，不要求 Agent 重读 Manifest 模块；
+- 使用唯一 canonical validator 在 mutation 前和 Gate 中验证公共头、resource-registry bindings、requirement 覆盖、资源引用、路径和格式；
+- 以 dispatch-bound prepared/committed receipt 和整个 content root 暂存发布处理恢复，拒绝迟到或基线已变化的提交；
+- receipt 是 Resource Content 唯一持久终态权威；`tool.completed` 与模型 prose 只用于传输和展示，重启后不得以事件缺失否定已提交 receipt，也不得重新派发模型；
 - 不创建中间组装状态机。
 
 ### Implementation Agent

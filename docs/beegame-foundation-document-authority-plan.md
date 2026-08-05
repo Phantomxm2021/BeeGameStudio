@@ -121,9 +121,9 @@ Foundation 固定执行以下 12 项，其中空间设计检查为本次补齐�
 
 - `level_scene_design_integrity`
 
-Foundation 固定为 12 项；Checklist 在资源前由 `checklist_traceability` 独立审计并封存；Comprehensive 为 Foundation 与 4 项资源/实现就绪检查的严格并集，固定为 16 项。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
+Foundation 固定为 12 项；Checklist 在资源前由 `checklist_traceability` 独立审计并封存；Comprehensive 为 Foundation 与 3 项资源语义检查的严格并集，固定为 15 项，并以两个串行 packet 执行。实现准入由 Workflow 在全部审批与资源门禁满足后确定性派生，不新增 Reviewer check。`BALANCE_DESIGN.md` 不新增顶层 check，由现有四项游戏设计检查共同审计，避免第二套 Balance Reviewer。
 
-Reviewer 只允许一个 frozen-revision Review Cycle。12 项 Foundation check 保持固定顺序和独立结论，但按五个事务型 packet 派发：`brief_alignment + cross_document_consistency + gameplay_completeness`；`gameplay_strategy_viability + economy_progression_integrity`；`numeric_balance_feasibility + pacing_difficulty_coherence`；`level_scene_design_integrity + technical_feasibility + art_direction_coherence + ui_audio_consistency`；`acceptance_observability`。策略/经济包共享玩家选择、资源流和成长约束，数值/节奏包共享公式边界、压力/能力曲线与尖峰恢复推导；不得把十二项 assessment 合成一个原子提交。每个 packet 的原生工具必须向模型直接暴露完整 check、assessment、finding 与 reference JSON Schema，并在返回 `accepted` 前使用与持久化相同的唯一 submission contract 校验全部 check、固定 criteria、稳定 `referenceId`、逐 check artifact dependency、finding subject owner 与 Closure 边界；不得以空 item Schema 配合 Prompt 补偿字段合同。任一项非法则整个 packet 零落盘。packet 传输依赖并集只用于减少重复输入，不能扩大任一 check 的 evidence/subject 权限；每项 approval digest 覆盖该 check 的完整依赖而非仅覆盖主动引用。已接受 packet 不回滚。未接受 terminal 的 packet 边界与当前 durable cursor 不一致时必须丢弃并重新派发当前 packet，不得兼容解析或部分接收。不得创建并行 Reviewer、替代提交合同或整轮重审分支。
+Reviewer 只允许一个 frozen-revision Review Cycle。12 项 Foundation check 保持固定顺序和独立结论，但按五个事务型 packet 派发：`brief_alignment + cross_document_consistency + gameplay_completeness`；`gameplay_strategy_viability + economy_progression_integrity`；`numeric_balance_feasibility + pacing_difficulty_coherence`；`level_scene_design_integrity + technical_feasibility + art_direction_coherence + ui_audio_consistency`；`acceptance_observability`。策略/经济包共享玩家选择、资源流和成长约束，数值/节奏包共享公式边界、压力/能力曲线与尖峰恢复推导；不得把十二项 assessment 合成一个原子提交。每个 packet 的原生工具必须向模型直接暴露完整 check、assessment、finding 与 reference JSON Schema，并在返回 `accepted` 前使用与持久化相同的唯一 submission contract 校验全部 check、固定 criteria、稳定 `referenceId`、逐 check artifact dependency、finding subject owner 与 Closure 边界；不得以空 item Schema 配合 Prompt 补偿字段合同。任一项非法则整个 packet 零落盘。packet 传输依赖并集只用于减少重复输入，不能扩大任一 check 的 evidence/subject 权限；每项 approval digest 覆盖该 check 的完整依赖而非仅覆盖主动引用。结构化 terminal 一经 accepted，服务端立即结束当前 turn，不等待或记录后续解释 prose；Cycle session 仍由下一 packet 复用。已接受 packet 不回滚。未接受 terminal 的 packet 边界与当前 durable cursor 不一致时必须丢弃并重新派发当前 packet，不得兼容解析或部分接收。不得创建并行 Reviewer、替代提交合同或整轮重审分支。
 
 `level_scene_design_integrity` 必须提交三个固定 criterion：
 
@@ -158,15 +158,15 @@ Initial Author 与 remediation Author 的唯一 mutation 都是当前目标的�
 
 初稿采用紧凑的 decision contract，而不是说明书：只记录当前 owner 的稳定 ID、选择、约束、公式、必要边界和给下游的接口引用。不得复述 confirmed brief、上游正文、fact-owner 总表、通用系统合同、理由散文、示例、测试用例、伪代码、实现步骤或调参过程；这些内容若不是当前 owner 的独立权威事实，就不得写入当前文档。完整性由 Initial Reviewer 跨八份文档判断，不以单份文档篇幅替代审计。
 
-修复时只允许写 accepted finding 指向且 repair plan 分配给当前 task 的一份 Foundation 文档，并要求该文档 PATCH 版本提升。首次撰写、repair planning 和 finding owner 修复是互斥任务，不共享 prompt 或允许路径。
+修复时只允许写唯一 repair plan 的 `affectedPaths` 分配给当前 task 的一份 Foundation 文档，并要求该文档 PATCH 版本提升。finding subjects 只标识 frozen revision 中已经存在的缺陷；Repair Lead 锁定修法后，由同一 repair graph 从受控候选依赖中确定的同步消费者通过 `pathDecisions` 进入 affectedPaths。两者不得再被实现为同一个集合。首次撰写、repair planning 和 finding owner 修复是互斥任务，不共享 prompt 或允许路径。
 
 Foundation 修复 dispatch 只消费当前目标正文，以及服务端从唯一 repair plan 按该目标确定性投影的 locked decisions、finding ID、required outcome、subjects 和必要 authority references；不得把完整 repair batch、其他目标的决定或已由 Repair Lead 消化的重复 observation/blocking impact 交给每个 Author。每份权威章节读取至多一次。Author 不得在修复中重新审计未受影响文档、扩大 finding 或自行执行跨文档 Closure，required outcome 与回归的最终判定唯一属于随后一次 Closure Reviewer。
 
 Finding 是审计结论，不是可直接执行的修改方案。Foundation 修复保持一个 finding batch、一个 active review cycle 和一个最终 Closure，不得把该约束误写成一个模型上下文或一个多文档 dispatch。修复采用与人类团队一致的唯一串行交接：Repair Lead 先在同一 active cycle 内锁定修订决策，随后服务端按事实 owner 与依赖顺序逐份派发 Document Author durable task。
 
 1. 服务端先从 accepted finding ledger 确定性构造 repair graph：共享 canonical subject、共享最高事实 owner，或一个 finding 的 subject 是另一 finding evidence 所依赖的 owner 时建立关联；按 Foundation 固定 owner 依赖顺序求连通分量和分量间 DAG。不得使用关键词、正则、项目名或 LLM 摘要分组；
-2. 每个连通分量形成一个 coherent repair group。Repair Lead 的一个只读 dispatch 消费该组完整 findings、精确 subjects/evidence、blocking impact、required outcome 与必要 System Delivery Contract 片段，并只提交一份组内一致的最小修订决策；同一 finding 恰好属于一个 group。不得一个 finding 建一个机械 group，也不得把无关 findings 合成全量巨型计划；
-3. 服务端从 graph 确定性派生 group ID、finding IDs、`affectedPaths` 和 `dependsOn`，模型不得提交这些可派生身份字段。接受的 decision 写入原 active review cycle 的唯一 repair plan ledger；服务端必须保证 ledger 是 graph 拓扑序的稳定前缀，最终恰好覆盖完整 batch。规划依赖 group 时，服务端必须把每个直接依赖 group 已锁定的 `groupId`、finding IDs、affected paths 与 decision 作为只读约束投影给当前 Repair Lead；只提供 `dependsOn` ID 而不提供 decision 属于不完整交接，当前 group 不得重新打开或替换上游 decision。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
+2. 每个连通分量形成一个 coherent repair group。服务端从固定 Foundation owner 依赖矩阵派生该组有界 impact candidate paths，并只从 accepted Cycle 的 frozen projection 提供 finding 已引用的精确 section 与每份候选文档的完整 canonical root；当前 Markdown 不存在可验证 section identity 时不得重读实时文件，也不得把反引号文本、关键词、正则或自然语言相似度当成身份关系。Repair Lead 的一个只读 dispatch 消费该组完整 findings、精确 subjects/evidence、blocking impact、required outcome、impact candidates 与必要 System Delivery Contract 片段，并提交一份组内一致的最小 `groupDecision`，以及对实际必须同步修改的每条候选路径各一项 `pathDecision`；同一 finding 恰好属于一个 group。不得一个 finding 建一个机械 group，也不得把无关 findings 合成全量巨型计划；
+3. 服务端从 graph 确定性派生 group ID、finding IDs、impact candidate paths 和 `dependsOn`，模型不得提交这些身份。每个 subject path 必须被 path decisions 覆盖；额外 path 必须来自候选集；重复、空决定和候选集外路径使整份 plan 零落盘。服务端把 group decision 与 path decisions 写入原 active review cycle 的唯一 repair plan ledger；`affectedPaths` 只能从 path decisions 随用随派生，禁止持久化冗余路径副本。服务端必须保证 ledger 是 graph 拓扑序的稳定前缀，最终恰好覆盖完整 batch。规划依赖 group 时，服务端必须把每个直接依赖 group 已锁定的 `groupId`、finding IDs、affected paths、group decision 与 path decisions 作为只读约束投影给当前 Repair Lead；只提供 `dependsOn` ID 而不提供决定属于不完整交接，当前 group 不得重新打开或替换上游决定。该 ledger 只是 finding 的执行字段，不是项目文档、第二事实源、第二队列或第二 terminal；
 4. 服务端按 repair graph 的拓扑序派生唯一 document repair cursor。每个 dispatch 只修一份文档，只获得当前 canonical 正文、与该文档相关的 finding 和已锁定决策，并只允许一次 `CommitCanonicalDocument`；
 5. 每份成功提交立即以 commit receipt 形成 durable checkpoint、由服务端提升 PATCH 并释放模型上下文。重启只核对 receipt 并继续 cursor 中未完成的文档，不重新规划、不重写已完成文档；
 6. 全部目标文档完成后，服务端相对 frozen baseline 核对 changed paths、版本和 finding 覆盖，再启动唯一 Closure Reviewer；Closure Reviewer 仍按原 finding ID、required outcome 和 server diff 独立判定。同一 prior finding 仍未关闭时必须保持原 ID、check、owner 与 required outcome；已关闭时不再提交。受影响 check 中发现 Initial Review 遗漏的另一缺陷时使用在完整 Cycle ledger 中从未出现的新 ID，不得借用旧 ID，也不得因 subject 未变化而隐藏真实缺陷。Closure packet 通过唯一校验函数原子替换该 packet 对应的 open 引用；完整 finding 身份历史保留在同一 `cycle.findings`，open 集合只由最新 check ledger 的 `findingIds` 派生，不能在工具接受后再由持久化边界以旧 ID 已存在为由拒绝。
@@ -183,7 +183,7 @@ Foundation 的范围权威必须在 Author、Reviewer 和 Repair Lead 三处一�
 
 Workflow worker 的自动 transport 恢复以“是否已收到任何 SDK/model 消息”为唯一副作边界。首次启动若在该边界之前失败，服务端必须释放失败 runtime，并且只能以同一 request 重建 worker 一次；此判定不得依赖错误文案、证书库差异或供应商专用错误码。收到任何 SDK/model 消息后禁止自动重放，必须由 durable workflow recovery 处理。该规则不得禁用 TLS 验证或改走第二网络路径。
 
-Checklist Author 必须从八份已批准文档派生**最小充分的场景级验收集合**。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。同一 setup、action 与 observable outcome 下的波次、敌人、输入、资源、cue 或表格行变体必须在一个参数化验收项中核对，不得按每个变体或文档句子机械拆项；一项可以引用多个批准事实，但每个稳定 ID 仍只描述一个可独立判定的场景结果。Author 必须在首次写入前完成分组和计数；常规首个交付目标为 24–40 项，只有批准设计确实包含更多互相独立的可观察场景时才允许超过 40 项，绝对不得超过 64 项。超出上限属于确定性 Checklist 合同错误，必须在进入资源阶段前原地修订，不得把膨胀清单交给 Planner 或 Implementation；禁止先写超限草稿再依赖同一 dispatch 二次改写。
+Checklist Author 必须从八份已批准文档派生**最小充分的场景级验收集合**。Checklist 至少覆盖：核心玩家路径、关键数值边界、关卡/场景状态、UI/Audio 反馈、资源可见结果和失败/恢复路径。同一 setup、action 与 observable outcome 下的波次、敌人、输入、资源、cue 或表格行变体必须在一个参数化验收项中核对，不得按每个变体或文档句子机械拆项；一项可以引用多个批准事实，但每个稳定 ID 仍只描述一个可独立判定的场景结果。Author 必须在首次写入前完成分组和计数；常规首个交付目标为 24–40 项，只有批准设计确实包含更多互相独立的可观察场景时才允许超过 40 项，绝对不得超过 64 项。超出上限属于确定性 Checklist 合同错误：服务端必须拒绝本次提交并把运行置为可操作停止态，不得进入资源、Planner 或 Implementation。用户显式重试时创建新的 canonical Checklist Author dispatch；不得保存自我修订状态、复用未接受正文，或在同一 dispatch 内二次改写。
 
 Resource Production 的输入按唯一任务边界投影，不能把八份全文重复交给每个 Agent。Resource Planner 只获得已批准的 `ASSET_PLAN.md`、`ART_DIRECTION.md`、`TECHNICAL_DESIGN.md` 和确认简报；Foundation Review 必须保证 Asset Plan 已经覆盖其他 owner 批准的全部资源职责。Resource Curator 只获得资源职责、表现约束和目标格式能力；Resource Content Author 才获得八份已批准 Foundation 文档中与 JSON/YAML owner 对应的事实，其中 `LEVEL_SCENE_DESIGN.md` 提供 YAML 空间事实，`GDD.md`、`BALANCE_DESIGN.md`、`UI_UX_SPEC.md`、`AUDIO_DESIGN.md` 与 `TECHNICAL_DESIGN.md` 分别提供其 JSON/加载投影所需事实。任何 Agent 都不得复制数值进 Manifest、让 JSON/YAML 越权重定义设计或读取未批准/平行文档。首次内容写入前必须完成完整 JSON/YAML 集合规划，并将互相独立的文件写入合并到一个并行工具批次；只有具体写入失败才补写，不得逐文件重新携带完整上下文循环规划。
 
@@ -198,7 +198,7 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 1. 将 `CANONICAL_FOUNDATION_DOCUMENTS` 和 `CANONICAL_PROJECT_DOCUMENTS` 改为八文档集合；Checklist 保持最后生成。
 2. 新增唯一 durable Foundation draft cursor，按固定顺序每次只派发一份文档；删除八路径初稿 dispatch、`existingDocumentPaths` 续写投影及对模型压缩摘要的依赖。
 3. 更新 Foundation Author prompt/contract，分离互斥的首次撰写、Repair Lead planning 与单文档 finding 修复；初稿与 owner task 都只写当前文档，彻底删除全量 Workbench 指令与工具。
-4. 新增 `level_scene_design_integrity`、三个固定 criterion、固定 owner 和结构化 Schema；Foundation/Comprehensive 数量改为 12/17。
+4. 新增 `level_scene_design_integrity`、三个固定 criterion、固定 owner 和结构化 Schema；Foundation/Comprehensive 数量固定为 12/15。
 5. 更新 Reviewer prompt、Closure 受影响 check 计算和 evidence digest，纳入 Balance 与 Level/Scene。
 6. 更新 Checklist Author、三个 Resource Production task、Atomic Planner 与 Implementation 输入，使每个消费者只获得其 owner 所需的八文档批准事实投影。
 7. 更新 Workflow Card 文档名称、Reviewer task、数量、状态和 icon。
@@ -224,8 +224,8 @@ Atomic Planner 和 Implementation 必须接收八份文档、Checklist、Manifes
 ## 10. 验收标准
 
 1. Readiness 对七份或任一缺失文档确定性失败，对八份非空合法文档通过。
-2. 首次 Foundation Author 每个 dispatch 只允许写当前 cursor 指向的一份文档，完成后自动推进；Repair Author 只允许写 accepted finding subjects，Checklist Author 只允许写 Checklist。
-3. Foundation Reviewer 必须在同一 Cycle 通过五个串行事务 packet 接受 12 checks 和 15 structured criteria；Comprehensive 继承新鲜 Foundation 前缀后，对新增 checks 使用单项 packet。每次只提交当前完整 packet，12 项 check 仍分别持久化，最终 verdict 由服务端汇总。
+2. 首次 Foundation Author 每个 dispatch 只允许写当前 cursor 指向的一份文档，完成后自动推进；Repair Author 只允许写唯一 repair plan 分配给当前 task 的 `affectedPaths`，finding subjects 仅用于定位原始缺陷；Checklist Author 只允许写 Checklist。
+3. Foundation Reviewer 必须在同一 Cycle 通过五个串行事务 packet 接受 12 checks 和 15 structured criteria；Comprehensive 继承新鲜 Foundation 前缀后，对新增 3 项 checks 使用“资源适配 1 项 + 内容集成 2 项”的两个固定串行 packet。每次只提交当前完整 packet，各项 check 仍分别持久化，最终 verdict 由服务端汇总。
 4. Balance 缺少关键口径、公式或可行边界时产生 foundation finding；不得由 Agent 补造。
 5. Level/Scene 缺少空间支持、关卡曲线或场景状态闭环时产生 foundation finding。
 6. 修复后对应文档 PATCH 版本提升，Closure 只关闭已验证 finding 和直接 regression。

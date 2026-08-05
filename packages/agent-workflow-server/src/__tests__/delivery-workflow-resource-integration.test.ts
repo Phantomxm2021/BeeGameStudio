@@ -258,25 +258,6 @@ describe('canonical resource-content workflow', () => {
     )
   })
 
-  it('rejects the retired resource remediation state instead of dual-reading it', () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-retired-resource-state',
-      projectId: 'project-retired-resource-state',
-      ownerId: 'owner-retired-resource-state',
-    })
-
-    expect(() =>
-      parseDeliveryRun({
-        ...initial,
-        resourceRemediation: {
-          sourceRevision: initial.revision.document,
-          attempt: 1,
-          issues: ['retired state'],
-        },
-      }),
-    ).toThrow()
-  })
-
   it('rejects empty accepted resource authority instead of falling back to Resource Production retry', () => {
     const initial = createTestDeliveryRun({
       runId: 'run-empty-resource-authority',

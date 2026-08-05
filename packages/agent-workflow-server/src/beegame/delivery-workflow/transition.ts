@@ -273,7 +273,6 @@ export function transitionDeliveryRun(
         documentReviewState: {
           repairPasses: { foundation: 0, checklist: 0, resource: 0 },
         },
-        checklistRemediation: undefined,
         updatedAt: timestamp(),
       }
       break

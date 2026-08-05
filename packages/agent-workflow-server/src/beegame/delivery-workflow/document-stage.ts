@@ -6,10 +6,12 @@ import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
+  buildDocumentReviewReferenceIndex,
   artifactsForDocumentReviewCheck,
   checkEvidenceDigests,
   documentReviewCheckDependsOnPath,
   documentReviewArtifactDigests,
+  projectDocumentReviewReference,
   readDocumentReviewArtifacts,
   requiredDocumentReviewCheckIds,
   validateDocumentReviewSubmission,
@@ -30,6 +32,7 @@ import {
   assertRepairPlanMatchesGraph,
   deriveFoundationRepairGroups,
   INITIAL_FOUNDATION_UPSTREAM_PATHS,
+  repairGroupAffectedPaths,
 } from './document-repair-graph'
 import {
   buildSystemDeliveryContract,
@@ -83,6 +86,50 @@ type FrozenReviewProjection = {
 
 const FROZEN_REVIEW_PROJECTION_CACHE_LIMIT = 16
 const frozenReviewProjectionCache = new Map<string, FrozenReviewProjection>()
+
+type RepairAuthorityReference = {
+  path: string
+  anchor: string
+  content: string
+}
+
+function deriveRepairAuthorityReferences(input: {
+  artifacts: DocumentReviewArtifact[]
+  baseReferences: Array<{ path: string; anchor: string }>
+  candidatePaths: FoundationDocumentPath[]
+}): RepairAuthorityReference[] {
+  const artifactByPath = new Map(
+    input.artifacts.map(artifact => [artifact.path, artifact]),
+  )
+  const referenceIndex = buildDocumentReviewReferenceIndex(input.artifacts)
+  const selected = new Map<string, RepairAuthorityReference>()
+  const addReference = (path: string, anchor: string) => {
+    const artifact = artifactByPath.get(path)
+    if (!artifact)
+      throw new Error(`frozen repair authority artifact is missing: ${path}`)
+    const key = `${path}\n${anchor}`
+    if (selected.has(key)) return
+    selected.set(key, {
+      path,
+      anchor,
+      content: projectDocumentReviewReference(artifact.content, path, anchor),
+    })
+  }
+  for (const reference of input.baseReferences)
+    if (
+      !input.candidatePaths.includes(reference.path as FoundationDocumentPath)
+    )
+      addReference(reference.path, reference.anchor)
+  for (const path of input.candidatePaths) {
+    const root = referenceIndex.references.find(
+      reference => reference.path === path && reference.anchor.startsWith('# '),
+    )
+    if (!root)
+      throw new Error(`frozen repair candidate has no canonical root: ${path}`)
+    addReference(path, root.anchor)
+  }
+  return [...selected.values()]
+}
 
 function rememberFrozenReviewProjection(input: {
   workspacePath: string
@@ -200,7 +247,6 @@ const CLOSURE_CHECK_CANDIDATES: Record<
     'resource_semantic_fitness',
     'content_structure_fitness',
     'resource_content_consistency',
-    'implementation_readiness',
   ],
 }
 
@@ -413,14 +459,6 @@ function artifactDigestChanges(
         : []
     },
   )
-}
-
-function expectedReviewPaths(scope: DocumentReviewScope): string[] {
-  return scope === 'foundation'
-    ? [...CANONICAL_FOUNDATION_DOCUMENTS]
-    : scope === 'checklist'
-      ? [...CANONICAL_PROJECT_DOCUMENTS]
-      : [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST]
 }
 
 function normalizedReviewFindings(
@@ -896,12 +934,20 @@ export async function startDocumentStage(input: {
       ? findingsForTarget(cycle, 'foundation')
       : []
   const repairPlan = remediationFindings.length ? cycle?.repairPlan : undefined
+  const repairProjection =
+    remediationFindings.length && !repairPlan
+      ? await frozenReviewProjection({
+          workspacePath: input.workspacePath,
+          run: input.run,
+          cycle: cycle!,
+        })
+      : undefined
   const derivedRepairGroups = remediationFindings.length
     ? deriveFoundationRepairGroups(remediationFindings)
     : []
   if (repairPlan)
     assertRepairPlanMatchesGraph(repairPlan.groups, derivedRepairGroups)
-  const repairPlanAuthorityReferences = derivedRepairGroups.length
+  const repairFindingReferences = derivedRepairGroups.length
     ? derivedRepairGroups
         .flatMap(group => group.findings)
         .flatMap(finding => [...finding.subjects, ...finding.evidence])
@@ -919,12 +965,26 @@ export async function startDocumentStage(input: {
             ) === index,
         )
     : []
+  const repairPlanAuthorityReferences =
+    derivedRepairGroups.length && !repairPlan
+      ? deriveRepairAuthorityReferences({
+          artifacts: repairProjection!.artifacts,
+          baseReferences: repairFindingReferences,
+          candidatePaths: CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
+            derivedRepairGroups.some(group =>
+              group.candidatePaths.includes(path),
+            ),
+          ),
+        })
+      : []
   const repairPlanComplete =
     remediationFindings.length > 0 && Boolean(repairPlan)
   const repairPaths =
     repairPlanComplete && repairPlan
       ? CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-          repairPlan.groups.some(group => group.affectedPaths.includes(path)),
+          repairPlan.groups.some(group =>
+            repairGroupAffectedPaths(group).includes(path),
+          ),
         )
       : []
   const repairPath =
@@ -995,17 +1055,22 @@ export async function startDocumentStage(input: {
               repairTask: {
                 cycleId: cycle!.cycleId,
                 groups: repairPlan!.groups
-                  .filter(group => group.affectedPaths.includes(repairPath))
+                  .filter(group =>
+                    repairGroupAffectedPaths(group).includes(repairPath),
+                  )
                   .map(group => ({
                     groupId: group.groupId,
-                    decision: group.decision,
+                    groupDecision: group.groupDecision,
+                    pathDecision: group.pathDecisions.find(
+                      pathDecision => pathDecision.path === repairPath,
+                    )!.decision,
                     findingIds: group.findingIds,
                   })),
                 findings: remediationFindings
                   .filter(finding =>
                     repairPlan!.groups.some(
                       group =>
-                        group.affectedPaths.includes(repairPath) &&
+                        repairGroupAffectedPaths(group).includes(repairPath) &&
                         group.findingIds.includes(finding.findingId),
                     ),
                   )
@@ -1013,9 +1078,7 @@ export async function startDocumentStage(input: {
                     findingId: finding.findingId,
                     checkId: finding.checkId,
                     requiredOutcome: finding.requiredOutcome,
-                    subjects: finding.subjects.filter(
-                      subject => subject.path === repairPath,
-                    ),
+                    subjects: finding.subjects,
                   })),
               },
             }
@@ -1026,7 +1089,8 @@ export async function startDocumentStage(input: {
                 groups: derivedRepairGroups.map(group => ({
                   groupId: group.groupId,
                   findings: group.findings,
-                  affectedPaths: group.affectedPaths,
+                  subjectPaths: group.subjectPaths,
+                  candidatePaths: group.candidatePaths,
                   dependsOn: group.dependsOn,
                 })),
                 authorityReferences: repairPlanAuthorityReferences,
@@ -1054,10 +1118,9 @@ export async function startChecklistDraftStage(input: {
     cycle?.acceptedSemanticResult && cycle.activeTarget === 'checklist'
       ? findingsForTarget(cycle, 'checklist')
       : []
-  const previousChecklistMetadata =
-    remediationFindings.length || input.run.checklistRemediation
-      ? readDocumentMetadata(input.workspacePath, CHECKLIST_PATH)
-      : undefined
+  const previousChecklistMetadata = remediationFindings.length
+    ? readDocumentMetadata(input.workspacePath, CHECKLIST_PATH)
+    : undefined
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -1073,9 +1136,6 @@ export async function startChecklistDraftStage(input: {
       approvedDocumentRevision:
         input.run.documentReviewState.foundationApproval?.revision ??
         input.run.revision.document,
-      ...(input.run.checklistRemediation
-        ? { checklistRemediation: input.run.checklistRemediation }
-        : {}),
       ...(remediationFindings.length
         ? {
             remediation: {
@@ -1136,18 +1196,6 @@ export async function completeDocumentDraft(input: {
         includeChecklist: documentSet === 'checklist',
         includeAssetManifest: false,
       })
-  const foundationReadiness =
-    documentSet === 'checklist'
-      ? input.audit
-        ? input.audit(input.workspacePath, {
-            includeChecklist: false,
-            includeAssetManifest: false,
-          })
-        : await defaultAudit(input.workspacePath, {
-            includeChecklist: false,
-            includeAssetManifest: false,
-          })
-      : undefined
   const allowedPaths = new Set(
     documentSet === 'checklist'
       ? [CHECKLIST_PATH]
@@ -1172,15 +1220,6 @@ export async function completeDocumentDraft(input: {
     input.run.confirmedBriefDigest,
   )
   const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
-  const checklistCanBeRemediated =
-    documentSet === 'checklist' &&
-    !readiness.valid &&
-    foundationReadiness?.valid === true &&
-    outOfScope.length === 0 &&
-    remediationFindings.length === 0
-  const checklistAttempt = checklistCanBeRemediated
-    ? (input.run.checklistRemediation?.attempt ?? 0) + 1
-    : undefined
   const issues = [
     ...readiness.issues,
     ...(outOfScope.length
@@ -1205,31 +1244,14 @@ export async function completeDocumentDraft(input: {
       workspace: workspaceRevision,
     },
     activeDispatch: undefined,
-    status: input.run.status,
+    status: issues.length ? 'needs_action' : input.run.status,
     blockedReason: issues.length ? issues.join('; ') : undefined,
-    ...(documentSet === 'checklist'
-      ? {
-          checklistRemediation:
-            checklistAttempt !== undefined
-              ? {
-                  sourceRevision: documentRevision,
-                  attempt: checklistAttempt,
-                  issues: readiness.issues,
-                }
-              : undefined,
-        }
-      : {}),
     updatedAt: new Date().toISOString(),
   }
   if (issues.length) return updated
 
   if (remediationFindings.length) {
     const currentReviewRevision = documentRevision
-    if (target === 'checklist')
-      updated = {
-        ...updated,
-        checklistRemediation: undefined,
-      }
     return beginDocumentReviewClosure({
       run: updated,
       workspacePath: input.workspacePath,
@@ -1242,7 +1264,6 @@ export async function completeDocumentDraft(input: {
         ...updated,
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'CHECKLIST_REVIEW',
-        checklistRemediation: undefined,
         documentReviewState: {
           ...updated.documentReviewState,
           activeCycle: undefined,
@@ -1301,8 +1322,8 @@ function completeFoundationRepairPlanning(
                 groups: derivedGroups.map((group, index) => ({
                   groupId: group.groupId,
                   findingIds: group.findings.map(finding => finding.findingId),
-                  decision: submittedPlan.decisions[index]!.decision,
-                  affectedPaths: group.affectedPaths,
+                  groupDecision: submittedPlan.decisions[index]!.groupDecision,
+                  pathDecisions: submittedPlan.decisions[index]!.pathDecisions,
                   dependsOn: group.dependsOn,
                 })),
                 completedPaths: [],
@@ -1325,7 +1346,7 @@ async function completeFoundationRepairOwner(
 ): Promise<DeliveryRun> {
   const plan = cycle.repairPlan!
   const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-    plan.groups.some(group => group.affectedPaths.includes(path)),
+    plan.groups.some(group => repairGroupAffectedPaths(group).includes(path)),
   )
   const expectedPath = repairPaths.find(
     path => !plan.completedPaths.includes(path),
@@ -1570,13 +1591,6 @@ export async function reconcileDocumentReview(input: {
     throw new Error(
       'document review evidence is outside the workflow evidence directory',
     )
-  if (
-    !exactStringSet(
-      input.terminal.reviewedDocumentPaths,
-      expectedReviewPaths(scope),
-    )
-  )
-    throw new Error('document review does not cover the frozen artifact set')
   const expectedChecklistIds =
     scope !== 'foundation'
       ? await readAcceptanceChecklistIds(input.workspacePath)

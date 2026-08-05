@@ -91,7 +91,6 @@ const documentTitle: Record<string, string> = {
   resource_semantic_fitness: '资源语义适配',
   content_structure_fitness: '内容结构适配',
   resource_content_consistency: '资源与内容一致性',
-  implementation_readiness: '实现就绪性',
 };
 
 const displayTaskTitle = (task: WorkflowCardTask): string => {
@@ -611,11 +610,7 @@ export function WorkflowCard({
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
                 >
                   <RotateCcw className={`h-3.5 w-3.5 ${actionState === 'pending' ? 'animate-spin' : ''}`} />
-                  {actionState === 'pending'
-                    ? '处理中…'
-                    : workflow.nextAction === 'resume'
-                      ? '继续'
-                      : '重试'}
+                  {actionState === 'pending' ? '处理中…' : workflow.nextAction === 'resume' ? '继续' : '重试'}
                 </button>
               ) : null}
             </div>

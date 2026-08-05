@@ -18,6 +18,11 @@ import {
 } from '../beegame/delivery-workflow/types'
 import { buildDocumentReviewReferenceIndex } from '../beegame/delivery-workflow/document-review-input'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
+import {
+  computeResourceInventoryRevision,
+  computeResourceRevision,
+} from '../beegame/delivery-workflow/revision'
 
 function reviewerContract(
   atomicCheckId: DocumentReviewCheckId = 'cross_document_consistency',
@@ -132,13 +137,40 @@ describe('delivery worker session credentials', () => {
     const workspacePath = await createResourceWorkspace()
     try {
       await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
+      const contract = {
+        dispatchId: 'dispatch-resource-content-author',
+        inventoryRevision:
+          await computeResourceInventoryRevision(workspacePath),
+        baselineResourceRevision: await computeResourceRevision(
+          workspacePath,
+          '',
+        ),
+        requiredRequirementIds: ['world.visual'],
+        verifiedResourceIds: [],
+        inventoryBindings: [],
+        protectedPaths: [],
+      }
+      const tool = createNativeResourceContentTool({
+        buildTool: definition => definition,
+        workspacePath,
+        contract,
+        assertMutationAuthority: () => undefined,
+      }) as { call(input: unknown): Promise<unknown> }
+      await tool.call({
+        action: 'needs_inventory',
+        missingRequirementIds: ['world.visual'],
+      })
       const terminal = await runResourceTerminal({
         workspacePath,
         workerType: 'resource-content-author',
-        toolName: 'SubmitResourceContentResult',
+        toolName: 'CommitResourceContent',
         toolInput: {
-          status: 'needs_inventory',
+          action: 'needs_inventory',
           missingRequirementIds: ['world.visual'],
+        },
+        contract: {
+          ...contract,
+          preservedPaths: [],
         },
       })
 
@@ -148,6 +180,125 @@ describe('delivery worker session credentials', () => {
         status: 'needs_inventory',
         missingRequirementIds: ['world.visual'],
       })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('recovers completed resource content from its durable receipt without a tool event', async () => {
+    const workspacePath = await createResourceWorkspace()
+    try {
+      await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
+      await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+      await writeFile(join(workspacePath, 'assets/runtime/world.dat'), 'world')
+      await registerBeeGameAuthoredResources(workspacePath, [
+        {
+          id: 'world-resource',
+          root_path: 'assets/runtime/world.dat',
+          file_paths: ['assets/runtime/world.dat'],
+          provisional: true,
+          reason: 'Durable Resource Content receipt fixture.',
+          selection_reason: ['Exercises restart recovery.'],
+          asset_kind: 'data',
+        },
+      ])
+      const contract = {
+        dispatchId: 'dispatch-content-receipt',
+        inventoryRevision:
+          await computeResourceInventoryRevision(workspacePath),
+        baselineResourceRevision: await computeResourceRevision(
+          workspacePath,
+          '',
+        ),
+        requiredRequirementIds: ['world.visual'],
+        verifiedResourceIds: ['world-resource'],
+        inventoryBindings: [
+          {
+            requirementId: 'world.visual',
+            resourceIds: ['world-resource'],
+          },
+        ],
+        protectedPaths: [],
+      }
+      const tool = createNativeResourceContentTool({
+        buildTool: definition => definition,
+        workspacePath,
+        contract,
+        assertMutationAuthority: () => undefined,
+      }) as {
+        call(input: unknown): Promise<unknown>
+      }
+      await tool.call({
+        action: 'commit',
+        documents: [
+          {
+            path: 'assets/content/resource-registry.json',
+            schema: 'beegame-content-v1',
+            id: 'resource-registry',
+            kind: 'resource-registry',
+            fulfills: ['world.visual'],
+            resources: ['world-resource'],
+            data: {
+              bindings: [
+                {
+                  requirementId: 'world.visual',
+                  resourceIds: ['world-resource'],
+                },
+              ],
+            },
+          },
+        ],
+      })
+
+      const sessions = {
+        start() {
+          return { id: 'session-content-receipt' }
+        },
+        events() {
+          return [
+            {
+              id: 'content-result-without-tool-event',
+              type: 'result' as const,
+              text: 'completed',
+              createdAt: new Date(),
+            },
+          ]
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions,
+        userId: 'user-1',
+      })
+      await port.start({
+        dispatchId: contract.dispatchId,
+        runId: 'run-content-receipt',
+        ownerId: 'user-1',
+        projectId: 'project-content-receipt',
+        workspacePath,
+        workerType: 'resource-content-author',
+        phase: 'RESOURCE_PREPARATION',
+        revision: 'revision-content-receipt',
+        contract: {
+          ...contract,
+          preservedPaths: [],
+        },
+      })
+
+      await expect(port.waitForTerminal!(contract.dispatchId)).resolves.toEqual(
+        {
+          revision: 'revision-content-receipt',
+          workerType: 'resource-content-author',
+          status: 'completed',
+          contentIds: ['resource-registry'],
+          writtenPaths: ['assets/content/resource-registry.json'],
+          missingRequirementIds: [],
+          taskMetrics: {
+            catalogPayloadBytes: 0,
+            catalogCallTypes: [],
+            canonicalMutationCount: 1,
+          },
+        },
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -180,7 +331,13 @@ describe('delivery worker session credentials', () => {
           findings: [{ findingId: 'F1' }, { findingId: 'F2' }],
         },
         repairPlanTask: {
-          groups: [{ findingIds: ['F1', 'F2'] }],
+          groups: [
+            {
+              findingIds: ['F1', 'F2'],
+              subjectPaths: ['docs/GDD.md'],
+              candidatePaths: ['docs/GDD.md'],
+            },
+          ],
         },
       },
     })
@@ -188,7 +345,14 @@ describe('delivery worker session credentials', () => {
     expect(starts[0]).toMatchObject({
       workflowAllowedPaths: [],
       workflowDocumentAuthorMode: 'repair-planning',
-      workflowDocumentRepairGroupCount: 1,
+      workflowDocumentRepairPlanContract: {
+        groups: [
+          {
+            subjectPaths: ['docs/GDD.md'],
+            candidatePaths: ['docs/GDD.md'],
+          },
+        ],
+      },
     })
   })
 
@@ -267,6 +431,51 @@ describe('delivery worker session credentials', () => {
       expect(block).toContain('replacement baseline from an earlier run')
       expect(block).toContain('stale target content')
       expect(block).toContain('CommitCanonicalDocument')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('projects repair authority from the frozen dispatch contract instead of live files', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'repair-authority-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspacePath, 'docs/GDD.md'),
+        '# Rules\n\nmutated live content',
+      )
+      const block = await buildDocumentAuthorAuthorityBlock({
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: {
+          authoringMode: 'repair-planning',
+          systemDeliveryContract: {},
+          repairPlanTask: {
+            groups: [
+              {
+                subjectPaths: ['docs/GDD.md'],
+                candidatePaths: ['docs/GDD.md'],
+              },
+            ],
+            authorityReferences: [
+              {
+                path: 'docs/GDD.md',
+                anchor: '# Rules',
+                content: '# Rules\n\nfrozen reviewed content',
+              },
+            ],
+          },
+        },
+      })
+
+      expect(block).toContain('frozen reviewed content')
+      expect(block).not.toContain('mutated live content')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -721,6 +930,8 @@ describe('delivery worker session credentials', () => {
     let activeDispatchId = ''
     let startCount = 0
     let rebindCount = 0
+    const rebindLifecycle: string[] = []
+    const disposedSessionIds: string[] = []
     const sessions = {
       start(input: { workflowDispatchId: string }) {
         startCount += 1
@@ -731,10 +942,18 @@ describe('delivery worker session credentials', () => {
         return session
       },
       rebindWorkflowReviewer(input: { dispatchId: string }) {
+        rebindLifecycle.push('rebind')
         rebindCount += 1
         activeDispatchId = input.dispatchId
       },
+      async flushWorkflowUsage() {
+        rebindLifecycle.push('flush-usage')
+      },
       updateAuthToken() {},
+      stop() {},
+      async disposeWorkflowWorker(sessionId: string) {
+        disposedSessionIds.push(sessionId)
+      },
       async sendWithDisplay(_sessionId: string, prompt: string) {
         prompts.push(prompt)
         events.push({
@@ -767,7 +986,7 @@ describe('delivery worker session credentials', () => {
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
     const request = (
       dispatchId: string,
-      currentCheckId: 'cross_document_consistency' | 'technical_feasibility',
+      currentCheck: 'cross_document_consistency' | 'technical_feasibility',
       cycleId = 'cycle-review',
     ): WorkerDispatchRequest => ({
       dispatchId,
@@ -780,7 +999,7 @@ describe('delivery worker session credentials', () => {
       revision: 'frozen-revision-1',
       allowedPaths: [],
       contract: {
-        ...reviewerContract(currentCheckId, cycleId),
+        ...reviewerContract(currentCheck, cycleId),
         requiredCheckIds: [
           'cross_document_consistency',
           'technical_feasibility',
@@ -792,12 +1011,15 @@ describe('delivery worker session credentials', () => {
       await port.submit('review-packet-1', 'full frozen projection')
       await port.waitForTerminal?.('review-packet-1')
       await port.close?.('review-packet-1')
+      expect(disposedSessionIds).toEqual([])
 
       await port.start(request('review-packet-2', 'technical_feasibility'))
+      expect(rebindLifecycle).toEqual(['flush-usage', 'rebind'])
       await port.submit('review-packet-2', 'must be replaced')
       await port.waitForTerminal?.('review-packet-2')
 
       await port.close?.('review-packet-2')
+      expect(disposedSessionIds).toEqual(['review-session'])
       await port.start(
         request(
           'review-packet-new-cycle',
@@ -1367,8 +1589,9 @@ async function runResourceTerminal(input: {
     | 'resource-planner'
     | 'resource-curator'
     | 'resource-content-author'
-  toolName: 'AssetManifest' | 'SubmitResourceContentResult'
+  toolName: 'AssetManifest' | 'CommitResourceContent'
   toolInput: Record<string, unknown>
+  contract?: Record<string, unknown>
   catalogObserved?: boolean
 }) {
   const events = [
@@ -1424,7 +1647,7 @@ async function runResourceTerminal(input: {
     workerType: input.workerType,
     phase: 'RESOURCE_PREPARATION',
     revision: 'revision-resource-terminal',
-    contract: {},
+    contract: input.contract ?? {},
   })
   return port.waitForTerminal!(`dispatch-${input.workerType}`)
 }

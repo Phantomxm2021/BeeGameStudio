@@ -71,7 +71,6 @@ export type DocumentDisplayTaskInput = {
   workspacePath: string
   currentItemId?: string
   foundationDraftCompletedPaths?: string[]
-  reviewedDocumentPaths?: string[]
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
@@ -80,7 +79,7 @@ export type DocumentDisplayTaskInput = {
   reviewPacketSetComplete?: boolean
   reviewTarget?: 'foundation' | 'checklist' | 'resource'
   repairPlan?: {
-    groups: Array<{ affectedPaths: string[] }>
+    groups: Array<{ paths: string[] }>
     completedPaths: string[]
   }
   reviewFindings?: Array<{
@@ -124,13 +123,6 @@ export function projectDocumentDisplayTasks(
       : input.documentStep === 'COMPREHENSIVE_REVIEW'
         ? canonicalReviewArtifacts
         : CANONICAL_FOUNDATION_DOCUMENTS
-  const reviewedPaths = new Set(
-    input.reviewedDocumentPaths?.filter(path =>
-      canonicalReviewArtifacts.includes(
-        path as (typeof canonicalReviewArtifacts)[number],
-      ),
-    ) ?? [],
-  )
   const draftedPaths = new Set(
     input.foundationDraftCompletedPaths?.filter(path =>
       CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
@@ -192,9 +184,7 @@ export function projectDocumentDisplayTasks(
         ]
       const completed = new Set(input.repairPlan.completedPaths)
       const paths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-        input.repairPlan!.groups.some(group =>
-          group.affectedPaths.includes(path),
-        ),
+        input.repairPlan!.groups.some(group => group.paths.includes(path)),
       )
       return paths.map(path => ({
         id: path,
@@ -260,11 +250,9 @@ export function projectDocumentDisplayTasks(
         : isStopped
           ? 'stopped'
           : operation === 'review'
-            ? reviewedPaths.has(path)
-              ? 'completed'
-              : isFailed
-                ? 'failed'
-                : 'pending'
+            ? isFailed
+              ? 'failed'
+              : 'pending'
             : isFailed
               ? 'failed'
               : input.documentStep === 'FOUNDATION_DRAFTING'
