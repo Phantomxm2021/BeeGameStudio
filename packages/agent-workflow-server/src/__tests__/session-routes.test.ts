@@ -20,12 +20,16 @@ import {
 import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
 import {
   computeDocumentRevision,
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
+} from '../beegame/delivery-workflow/types'
 import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
@@ -801,7 +805,27 @@ describe('delivery workflow session continuation', () => {
       ])
       expect(workflowWorkerStarts).toBe(startsBeforeHardFail)
 
-      const recoverablePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+      const acceptedPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
+      const acceptedDispatchId = 'accepted-foundation-draft'
+      await commitCanonicalDocument({
+        workspacePath: workspace,
+        contract: {
+          dispatchId: acceptedDispatchId,
+          targetPath: acceptedPath,
+          documentId: CANONICAL_PROJECT_DOCUMENT_IDS[acceptedPath],
+          operation: 'create',
+          baselineDigest: null,
+        },
+        body: '# Accepted foundation authority',
+      })
+      const recoverableRevision = {
+        document: await computeDocumentRevision(
+          workspace,
+          journalRun.confirmedBriefDigest,
+        ),
+        workspace: await computeWorkspaceRevision(workspace),
+      }
+      const recoverablePath = CANONICAL_FOUNDATION_DOCUMENTS[1]
       const recoverableDispatchId = 'recoverable-foundation-draft'
       const recoverableRequest = {
         dispatchId: recoverableDispatchId,
@@ -812,14 +836,14 @@ describe('delivery workflow session continuation', () => {
         workerType: 'document-author' as const,
         phase: 'DOCUMENT_DRAFTING' as const,
         taskId: recoverablePath,
-        revision: journalRun.revision.document,
+        revision: recoverableRevision.document,
         allowedPaths: [recoverablePath],
         contract: {
           confirmedBriefDigest: journalRun.confirmedBriefDigest,
           documentSet: 'foundation',
           authoringMode: 'initial',
           foundationDocumentPath: recoverablePath,
-          upstreamDocumentPaths: [],
+          upstreamDocumentPaths: [acceptedPath],
         },
       }
       const recoverableSnapshot = {
@@ -834,13 +858,14 @@ describe('delivery workflow session continuation', () => {
           workerType: 'document-author' as const,
           phase: 'DOCUMENT_DRAFTING' as const,
           taskId: recoverablePath,
-          revision: journalRun.revision.document,
+          revision: recoverableRevision.document,
           status: 'running' as const,
           startedAt: journalRun.updatedAt,
           request: recoverableRequest,
         },
+        revision: recoverableRevision,
+        foundationDraftState: { completedPaths: [acceptedPath] },
       }
-      const eventsBeforeRecoverable = await readFile(store.paths.events, 'utf8')
       await writeFile(
         store.paths.snapshot,
         `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
@@ -850,29 +875,39 @@ describe('delivery workflow session continuation', () => {
         type: 'workflow.unit.accepted',
         phase: 'DOCUMENT_DRAFTING',
         status: journalRun.status,
-        revision: journalRun.revision,
+        revision: recoverableRevision,
         createdAt: journalRun.updatedAt,
         projectId,
         ownerId,
         unit: {
           eventSchemaVersion: 1,
-          unitId: `document:${recoverablePath}`,
+          unitId: `document:${acceptedPath}`,
           kind: 'document',
           phase: 'DOCUMENT_DRAFTING',
           predecessorUnitIds: [],
-          inputRevision: journalRun.revision.document,
+          inputRevision: recoverableRevision.document,
           dependencyDigests: {},
+          dispatchId: acceptedDispatchId,
+          receiptRef: `.beegame/workflow/document-commits/${acceptedDispatchId}.json`,
           acceptedAt: journalRun.updatedAt,
           payload: {
-            path: recoverablePath,
-            revision: journalRun.revision.document,
+            path: acceptedPath,
+            revision: recoverableRevision.document,
           },
         },
       })
-      const snapshotBeforeRecoveryRead = await readFile(store.paths.snapshot, 'utf8')
-      const eventsBeforeRecoveryRead = await readFile(store.paths.events, 'utf8')
+      const snapshotBeforeRecoveryRead = await readFile(
+        store.paths.snapshot,
+        'utf8',
+      )
+      const eventsBeforeRecoveryRead = await readFile(
+        store.paths.events,
+        'utf8',
+      )
       const startsBeforeRecoveryRead = workflowWorkerStarts
-      const recoveryRead = await app.request(`/api/projects/${projectId}/workflow`)
+      const recoveryRead = await app.request(
+        `/api/projects/${projectId}/workflow`,
+      )
       const recoveryPayload = (await recoveryRead.json()) as {
         workflow?: Record<string, unknown>
       }
@@ -880,21 +915,31 @@ describe('delivery workflow session continuation', () => {
       expect(recoveryPayload.workflow).toMatchObject({
         recoverable: true,
         lastProvenPhase: 'DOCUMENT_DRAFTING',
-        lastProvenUnitId: `document:${recoverablePath}`,
+        lastProvenUnitId: `document:${acceptedPath}`,
         lastProvenUnitKind: 'document',
-        lastProvenItemId: recoverablePath,
+        lastProvenItemId: acceptedPath,
         nextAction: 'resume',
       })
-      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshotBeforeRecoveryRead)
-      expect(await readFile(store.paths.events, 'utf8')).toBe(eventsBeforeRecoveryRead)
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(
+        snapshotBeforeRecoveryRead,
+      )
+      expect(await readFile(store.paths.events, 'utf8')).toBe(
+        eventsBeforeRecoveryRead,
+      )
       expect(workflowWorkerStarts).toBe(startsBeforeRecoveryRead)
-      await writeFile(store.paths.events, eventsBeforeRecoverable)
+      await writeFile(store.paths.events, eventsBeforeRecoveryRead)
       const startsBeforeInvalidRecovery = workflowWorkerStarts
       const recoveredInvalid = await app.request(
         `/api/projects/${projectId}/workflow/resume`,
         { method: 'POST' },
       )
-      expect(recoveredInvalid.status).toBe(200)
+      expect({
+        status: recoveredInvalid.status,
+        body: await recoveredInvalid.clone().json(),
+      }).toEqual({
+        status: 200,
+        body: expect.not.objectContaining({ error: expect.any(String) }),
+      })
       expect(workflowWorkerStarts).toBe(startsBeforeInvalidRecovery + 1)
       expect(
         (await store.readEvents()).filter(
@@ -902,7 +947,7 @@ describe('delivery workflow session continuation', () => {
         ),
       ).toHaveLength(1)
 
-      await writeFile(store.paths.events, eventsBeforeRecoverable)
+      await writeFile(store.paths.events, eventsBeforeRecoveryRead)
       await writeFile(
         store.paths.snapshot,
         `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
