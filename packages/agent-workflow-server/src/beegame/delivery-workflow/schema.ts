@@ -588,6 +588,7 @@ const acceptedWorkflowUnitBase = {
   predecessorUnitIds: z.array(z.string().min(1)),
   inputRevision: z.string().min(1),
   dependencyDigests: z.record(z.string(), z.string().min(1)),
+  dispatchId: z.string().min(1).optional(),
   receiptRef: z.string().min(1).optional(),
   acceptedAt: z.string().datetime(),
 }
@@ -602,6 +603,8 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
       .object({
         ...acceptedWorkflowUnitBase,
         kind: z.literal('document'),
+        dispatchId: z.string().min(1),
+        receiptRef: z.string().min(1),
         payload: z
           .object({ path: z.string().min(1), revision: z.string().min(1) })
           .strict(),
@@ -656,6 +659,8 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
       .object({
         ...acceptedWorkflowUnitBase,
         kind: z.literal('resource-content'),
+        dispatchId: z.string().min(1),
+        receiptRef: z.string().min(1),
         payload: z.object({ contentDigest: z.string().min(1) }).strict(),
       })
       .strict(),

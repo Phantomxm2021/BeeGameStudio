@@ -228,7 +228,7 @@ After reconstruction, only the current-schema run, accepted-unit journal and can
 ## 12. Task 6 measured verification and guarantees
 
 The persisted protocol remains version 13. Its registered SHA-256 fingerprint is
-`2dd56a8ef8057464d6f5f79ecb01439f89b529f0ed7550ed63954d4c496106ac`.
+`263640f06ada501afb0421806f29215b83e54b4fb239591b9dc1256e8e4b5067`.
 The guard computes this value from canonicalized Zod JSON Schema projections of
 the strict `DeliveryRun` topology, accepted-unit journal event topology and
 versioned `tasks.planned.taskGraph` receipt topology. It

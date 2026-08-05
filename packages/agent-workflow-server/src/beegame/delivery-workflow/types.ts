@@ -462,6 +462,8 @@ export type AcceptedWorkflowUnit = {
   predecessorUnitIds: string[]
   inputRevision: string
   dependencyDigests: Record<string, string>
+  /** Exact worker dispatch that produced a receipt-backed accepted unit. */
+  dispatchId?: string
   receiptRef?: string
   acceptedAt: string
   payload: unknown

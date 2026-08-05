@@ -13,7 +13,7 @@ import {
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 
 const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
-  13: '2dd56a8ef8057464d6f5f79ecb01439f89b529f0ed7550ed63954d4c496106ac',
+  13: '263640f06ada501afb0421806f29215b83e54b4fb239591b9dc1256e8e4b5067',
 }
 
 function canonicalize(value: unknown): unknown {

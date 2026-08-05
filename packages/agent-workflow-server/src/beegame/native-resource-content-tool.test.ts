@@ -12,7 +12,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import {
+  computeResourceContentRootDigest,
   createNativeResourceContentTool,
+  readResourceContentCommitReceipt,
   reconcileResourceContentCommitReceipt,
 } from './native-resource-content-tool'
 import {
@@ -123,6 +125,27 @@ async function commitRegistryOnly(workspacePath: string): Promise<void> {
 }
 
 describe('native canonical resource content commit', () => {
+  test('reads exact committed proof and current root digest without reconciling it', async () => {
+    const workspace = await createWorkspace()
+    await commitRegistryOnly(workspace)
+
+    const receipt = readResourceContentCommitReceipt(
+      workspace,
+      'dispatch-content-test',
+    )
+
+    expect(receipt).toMatchObject({
+      dispatchId: 'dispatch-content-test',
+      status: 'committed',
+      action: 'commit',
+    })
+    if (!receipt || receipt.action !== 'commit')
+      throw new Error('expected committed Resource Content proof')
+    expect(computeResourceContentRootDigest(workspace)).toBe(
+      receipt.finalRootDigest,
+    )
+  })
+
   test('maps an accepted runtime result into a tool result block', async () => {
     const workspace = await createWorkspace()
     const tool = await createTool(workspace)
@@ -346,7 +369,7 @@ describe('native canonical resource content commit', () => {
         workspacePath: workspace,
         dispatchId: 'dispatch-content-test',
       }),
-    ).rejects.toThrow('dispatch is invalid')
+    ).rejects.toThrow('identity is invalid')
   })
 
   test('rejects the complete invalid set before mutating content files', async () => {

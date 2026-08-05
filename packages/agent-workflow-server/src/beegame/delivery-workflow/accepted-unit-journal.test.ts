@@ -6,10 +6,13 @@ import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
+import { commitCanonicalDocument } from '../native-canonical-document-tool'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
+  type WorkerDispatchRequest,
 } from './types'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 
@@ -20,6 +23,39 @@ function run(): DeliveryRun {
     ownerId: 'accepted-unit-owner',
     foundationDraftComplete: false,
   })
+}
+
+function completedDocumentDispatch(
+  base: DeliveryRun,
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): NonNullable<DeliveryRun['activeDispatch']> {
+  const dispatchId = `dispatch-${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`
+  return {
+    dispatchId,
+    workerType: 'document-author',
+    phase: 'DOCUMENT_DRAFTING',
+    taskId: path,
+    revision: base.revision.document,
+    status: 'completed',
+    startedAt: '2026-08-05T00:00:00.000Z',
+    finishedAt: '2026-08-05T00:01:00.000Z',
+    request: {
+      dispatchId,
+      runId: base.runId,
+      ownerId: base.ownerId,
+      projectId: base.projectId,
+      workspacePath: '/synthetic/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: base.revision.document,
+      allowedPaths: [path],
+      contract: {
+        authoringMode: 'initial',
+        foundationDocumentPath: path,
+      },
+    },
+  }
 }
 
 function reviewRun(completedCheckIds: string[]): DeliveryRun {
@@ -66,6 +102,330 @@ function reviewRun(completedCheckIds: string[]): DeliveryRun {
 }
 
 describe('accepted workflow unit journal', () => {
+  test('does not re-emit Foundation approvals inherited by Comprehensive Review', () => {
+    const approvedFoundation = reviewRun([
+      ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+    ])
+    const foundationCycle = approvedFoundation.documentReviewState.activeCycle!
+    const before = {
+      ...approvedFoundation,
+      documentStep: 'COMPREHENSIVE_REVIEW' as const,
+      documentReviewState: {
+        ...approvedFoundation.documentReviewState,
+        foundationApproval: {
+          scope: 'foundation' as const,
+          revision: foundationCycle.sourceRevision,
+          checks: foundationCycle.checks,
+          checkEvidenceDigests: foundationCycle.checkEvidenceDigests,
+          evidencePath: '.beegame/workflow/evidence/foundation-review.json',
+          approvedAt: '2026-08-05T00:00:00.000Z',
+        },
+        activeCycle: undefined,
+      },
+    }
+    const resourceCheck = {
+      id: 'resource_semantic_fitness' as const,
+      status: 'pass' as const,
+      conclusion: 'Resources satisfy the accepted design.',
+      evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+      findingIds: [],
+      assessments: [],
+    }
+    const after = {
+      ...before,
+      documentReviewState: {
+        ...before.documentReviewState,
+        foundationApproval: undefined,
+        activeCycle: {
+          cycleId: 'comprehensive-cycle',
+          originScope: 'complete' as const,
+          scope: 'complete' as const,
+          mode: 'initial' as const,
+          sourceRevision: 'resource-revision',
+          requiredCheckIds: [
+            ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+            'resource_semantic_fitness' as const,
+          ],
+          completedCheckIds: [
+            ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+            'resource_semantic_fitness' as const,
+          ],
+          checks: [...foundationCycle.checks, resourceCheck],
+          checkEvidenceDigests: {
+            ...foundationCycle.checkEvidenceDigests,
+            resource_semantic_fitness: {
+              'assets/asset-manifest.json': 'resource-digest',
+            },
+          },
+          findings: [],
+          acceptedSemanticResult: false,
+          changedPaths: [],
+          sourceArtifactDigests: {
+            'assets/asset-manifest.json': 'resource-digest',
+          },
+        },
+      },
+    }
+
+    expect(
+      deriveAcceptedWorkflowUnits(before as DeliveryRun, after as DeliveryRun),
+    ).toEqual([
+      expect.objectContaining({ unitId: 'review:resource_semantic_fitness' }),
+    ])
+  })
+
+  test('subtracts durable prior approvals even when the next snapshot no longer carries them', () => {
+    const approvedFoundation = reviewRun([
+      ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+    ])
+    const foundationCycle = approvedFoundation.documentReviewState.activeCycle!
+    const before = {
+      ...approvedFoundation,
+      documentStep: 'COMPREHENSIVE_REVIEW' as const,
+      documentReviewState: {
+        ...approvedFoundation.documentReviewState,
+        foundationApproval: {
+          scope: 'foundation' as const,
+          revision: foundationCycle.sourceRevision,
+          checks: foundationCycle.checks,
+          checkEvidenceDigests: foundationCycle.checkEvidenceDigests,
+          evidencePath: '.beegame/workflow/evidence/foundation-review.json',
+          approvedAt: '2026-08-05T00:00:00.000Z',
+        },
+        activeCycle: undefined,
+      },
+    }
+    const resourceCheck = {
+      id: 'resource_semantic_fitness' as const,
+      status: 'pass' as const,
+      conclusion: 'Resources satisfy the accepted design.',
+      evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
+      findingIds: [],
+      assessments: [],
+    }
+    const after = {
+      ...before,
+      documentReviewState: {
+        ...before.documentReviewState,
+        foundationApproval: undefined,
+        activeCycle: {
+          cycleId: 'comprehensive-cycle',
+          originScope: 'complete' as const,
+          scope: 'complete' as const,
+          mode: 'initial' as const,
+          sourceRevision: 'resource-revision',
+          requiredCheckIds: [
+            ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+            'resource_semantic_fitness' as const,
+          ],
+          completedCheckIds: [
+            ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+            'resource_semantic_fitness' as const,
+          ],
+          checks: [...foundationCycle.checks, resourceCheck],
+          checkEvidenceDigests: {
+            ...foundationCycle.checkEvidenceDigests,
+            resource_semantic_fitness: {
+              'assets/asset-manifest.json': 'resource-digest',
+            },
+          },
+          findings: [],
+          acceptedSemanticResult: false,
+          changedPaths: [],
+          sourceArtifactDigests: {
+            'assets/asset-manifest.json': 'resource-digest',
+          },
+        },
+      },
+    }
+
+    expect(
+      deriveAcceptedWorkflowUnits(before as DeliveryRun, after as DeliveryRun),
+    ).toEqual([
+      expect.objectContaining({ unitId: 'review:resource_semantic_fitness' }),
+    ])
+  })
+
+  test('requires dispatch identity and a canonical receipt for dispatch-backed units', () => {
+    const base = run()
+    const common = {
+      eventSchemaVersion: 1 as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      predecessorUnitIds: [],
+      inputRevision: base.revision.document,
+      dependencyDigests: {},
+      acceptedAt: '2026-08-05T00:00:00.000Z',
+    }
+
+    expect(
+      acceptedWorkflowUnitSchema.safeParse({
+        ...common,
+        unitId: `document:${CANONICAL_FOUNDATION_DOCUMENTS[0]}`,
+        kind: 'document',
+        payload: {
+          path: CANONICAL_FOUNDATION_DOCUMENTS[0],
+          revision: base.revision.document,
+        },
+      }).success,
+    ).toBe(false)
+    expect(
+      acceptedWorkflowUnitSchema.safeParse({
+        ...common,
+        unitId: 'resource:content',
+        kind: 'resource-content',
+        phase: 'RESOURCE_PREPARATION',
+        predecessorUnitIds: ['resource:inventory'],
+        dependencyDigests: { content: 'content-digest' },
+        inputRevision: 'content-digest',
+        payload: { contentDigest: 'content-digest' },
+      }).success,
+    ).toBe(false)
+  })
+
+  test('fails closed when an accepted document has no matching predecessor dispatch', () => {
+    const before = {
+      ...run(),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+      foundationDraftState: { completedPaths: [] },
+    }
+    const after = {
+      ...before,
+      foundationDraftState: {
+        completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
+      },
+    }
+
+    expect(() => deriveAcceptedWorkflowUnits(before, after)).toThrow('dispatch')
+  })
+
+  test('journals the exact Resource Content dispatch and canonical receipt', () => {
+    const base = run()
+    const dispatchId = 'resource-content-dispatch'
+    const before = {
+      ...base,
+      phase: 'RESOURCE_PREPARATION' as const,
+      resourceProductionState: {
+        currentTask: 'RESOURCE_CONTENT' as const,
+      },
+      activeDispatch: {
+        dispatchId,
+        workerType: 'resource-content-author' as const,
+        phase: 'RESOURCE_PREPARATION' as const,
+        taskId: 'RESOURCE_CONTENT',
+        revision: base.revision.document,
+        status: 'completed' as const,
+        startedAt: '2026-08-05T00:00:00.000Z',
+        finishedAt: '2026-08-05T00:01:00.000Z',
+        request: {
+          dispatchId,
+          runId: base.runId,
+          ownerId: base.ownerId,
+          projectId: base.projectId,
+          workspacePath: '/synthetic/workspace',
+          workerType: 'resource-content-author' as const,
+          phase: 'RESOURCE_PREPARATION' as const,
+          taskId: 'RESOURCE_CONTENT',
+          revision: base.revision.document,
+          contract: { task: 'RESOURCE_CONTENT' },
+        },
+      },
+    }
+    const after = {
+      ...before,
+      activeDispatch: undefined,
+      resourceProductionState: {
+        currentTask: 'RESOURCE_GATE' as const,
+        contentReceipt: {
+          contentDigest: 'content-digest',
+          acceptedAt: '2026-08-05T00:01:00.000Z',
+        },
+      },
+    }
+
+    expect(deriveAcceptedWorkflowUnits(before, after)).toEqual([
+      expect.objectContaining({
+        unitId: 'resource:content',
+        dispatchId,
+        receiptRef: `.beegame/workflow/resource-content-commits/${dispatchId}.json`,
+      }),
+    ])
+  })
+
+  test('journals the exact document dispatch receipt across the real controller handoff', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-handoff-'))
+    const initial = {
+      ...run(),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+      foundationDraftState: { completedPaths: [] },
+    }
+    const store = createRunStore(workspace, initial.ownerId)
+    await store.save(initial)
+    const requests = new Map<string, WorkerDispatchRequest>()
+    let releaseSecondStart!: () => void
+    const secondStarted = new Promise<void>(resolve => {
+      releaseSecondStart = resolve
+    })
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(request) {
+          requests.set(request.dispatchId!, request)
+          if (requests.size === 2) releaseSecondStart()
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+        async waitForTerminal(dispatchId) {
+          const request = requests.get(dispatchId)!
+          if (requests.size > 1) return new Promise(() => undefined)
+          const path =
+            request.taskId as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
+          await commitCanonicalDocument({
+            workspacePath: workspace,
+            contract: {
+              dispatchId,
+              targetPath: path,
+              documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+              operation: 'create',
+              baselineDigest: null,
+            },
+            body: '# Synthetic accepted document',
+          })
+          return {
+            workerType: 'document-author' as const,
+            status: 'completed' as const,
+            writtenPaths: [path],
+            resolvedFindingIds: [],
+          }
+        },
+      },
+    })
+
+    await controller.start(initial)
+    await secondStarted
+
+    const accepted = (await store.readEvents()).find(
+      event => event.type === 'workflow.unit.accepted',
+    )
+    const firstRequest = [...requests.values()][0]!
+    expect(accepted?.unit).toMatchObject({
+      unitId: `document:${CANONICAL_FOUNDATION_DOCUMENTS[0]}`,
+      dispatchId: firstRequest.dispatchId,
+      receiptRef: `.beegame/workflow/document-commits/${firstRequest.dispatchId}.json`,
+    })
+  })
+
   test('builds the one strict nested dependency payload for accepted review units', () => {
     const before = reviewRun([])
     const after = reviewRun(['brief_alignment'])
@@ -87,12 +447,18 @@ describe('accepted workflow unit journal', () => {
   })
 
   test('derives every newly accepted semantic unit from a reconciled run transition', () => {
+    const documentBase = run()
     const beforeDocument = {
-      ...run(),
+      ...documentBase,
+      activeDispatch: completedDocumentDispatch(
+        documentBase,
+        CANONICAL_FOUNDATION_DOCUMENTS[0],
+      ),
       foundationDraftState: { completedPaths: [] },
     }
     const afterDocument = {
       ...beforeDocument,
+      activeDispatch: undefined,
       revision: { ...beforeDocument.revision, document: 'document-revision' },
       foundationDraftState: {
         completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
@@ -168,10 +534,36 @@ describe('accepted workflow unit journal', () => {
       }),
     ])
 
-    const afterContent = {
+    const beforeContent = {
       ...afterInventory,
+      activeDispatch: {
+        dispatchId: 'content-dispatch',
+        workerType: 'resource-content-author' as const,
+        phase: 'RESOURCE_PREPARATION' as const,
+        taskId: 'RESOURCE_CONTENT',
+        revision: afterInventory.revision.document,
+        status: 'completed' as const,
+        startedAt: '2026-08-05T00:00:00.000Z',
+        finishedAt: '2026-08-05T00:01:00.000Z',
+        request: {
+          dispatchId: 'content-dispatch',
+          runId: afterInventory.runId,
+          ownerId: afterInventory.ownerId,
+          projectId: afterInventory.projectId,
+          workspacePath: '/synthetic/workspace',
+          workerType: 'resource-content-author' as const,
+          phase: 'RESOURCE_PREPARATION' as const,
+          taskId: 'RESOURCE_CONTENT',
+          revision: afterInventory.revision.document,
+          contract: { task: 'RESOURCE_CONTENT' },
+        },
+      },
+    }
+    const afterContent = {
+      ...beforeContent,
+      activeDispatch: undefined,
       resourceProductionState: {
-        ...afterInventory.resourceProductionState,
+        ...beforeContent.resourceProductionState,
         currentTask: 'RESOURCE_GATE' as const,
         contentReceipt: {
           contentDigest: 'content-digest',
@@ -179,7 +571,7 @@ describe('accepted workflow unit journal', () => {
         },
       },
     }
-    expect(deriveAcceptedWorkflowUnits(afterInventory, afterContent)).toEqual([
+    expect(deriveAcceptedWorkflowUnits(beforeContent, afterContent)).toEqual([
       expect.objectContaining({
         unitId: 'resource:content',
         kind: 'resource-content',
@@ -303,9 +695,19 @@ describe('accepted workflow unit journal', () => {
   test('commits ordinary and accepted events once and flushes the complete marker', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-journal-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')
-    const before = run()
+    const base = run()
+    const before = {
+      ...base,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      activeDispatch: completedDocumentDispatch(
+        base,
+        CANONICAL_FOUNDATION_DOCUMENTS[0],
+      ),
+    }
     const next = {
       ...before,
+      activeDispatch: undefined,
       foundationDraftState: {
         completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
       },
@@ -450,6 +852,27 @@ describe('accepted workflow unit journal', () => {
       ...run(),
       phase: 'RESOURCE_PREPARATION' as const,
       resourceProductionState: { currentTask: 'RESOURCE_CONTENT' as const },
+      activeDispatch: {
+        dispatchId: 'content-digest-dispatch',
+        workerType: 'resource-content-author' as const,
+        phase: 'RESOURCE_PREPARATION' as const,
+        taskId: 'RESOURCE_CONTENT',
+        revision: 'uncomputed',
+        status: 'completed' as const,
+        startedAt: '2026-08-05T00:00:00.000Z',
+        request: {
+          dispatchId: 'content-digest-dispatch',
+          runId: 'accepted-unit-run',
+          ownerId: 'accepted-unit-owner',
+          projectId: 'accepted-unit-project',
+          workspacePath: '/synthetic/workspace',
+          workerType: 'resource-content-author' as const,
+          phase: 'RESOURCE_PREPARATION' as const,
+          taskId: 'RESOURCE_CONTENT',
+          revision: 'uncomputed',
+          contract: { task: 'RESOURCE_CONTENT' },
+        },
+      },
     }
     const after = {
       ...before,
@@ -508,9 +931,19 @@ describe('accepted workflow unit journal', () => {
   test('recovers a marker after the snapshot write and after a partial append', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'accepted-unit-crash-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')
-    const before = run()
+    const base = run()
+    const before = {
+      ...base,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      activeDispatch: completedDocumentDispatch(
+        base,
+        CANONICAL_FOUNDATION_DOCUMENTS[0],
+      ),
+    }
     const next = {
       ...before,
+      activeDispatch: undefined,
       foundationDraftState: {
         completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
       },

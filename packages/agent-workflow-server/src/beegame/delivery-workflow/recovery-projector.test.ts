@@ -14,7 +14,12 @@ import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
 } from '../../__tests__/delivery-workflow-test-helpers'
+import {
+  registerBeeGameAuthoredResources,
+  writeBeeGameAssetManifest,
+} from '../asset-contracts'
 import { commitCanonicalDocument } from '../native-canonical-document-tool'
+import { createNativeResourceContentTool } from '../native-resource-content-tool'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import {
   artifactsForDocumentReviewCheck,
@@ -81,6 +86,71 @@ async function createProjectionFixture(
           ? '# Synthetic authority'
           : '# Synthetic artifact',
     })
+  await writeBeeGameAssetManifest(workspacePath, {
+    version: 8,
+    project_target: {
+      asset_format_capabilities: ['dat', 'json'],
+      resource_library_usage: 'optional',
+      runtime_asset_root: 'assets/runtime',
+      content_root: 'assets/content',
+      generated_asset_root: 'assets/generated',
+    },
+    requirements: [{ id: 'requirement-id', required: true }],
+    resources: [],
+  })
+  await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
+  await writeFile(
+    join(workspacePath, 'assets/runtime/resource.dat'),
+    'synthetic resource',
+  )
+  await registerBeeGameAuthoredResources(workspacePath, [
+    {
+      id: 'resource-id',
+      root_path: 'assets/runtime/resource.dat',
+      file_paths: ['assets/runtime/resource.dat'],
+      provisional: true,
+      reason: 'Synthetic recovery evidence.',
+      selection_reason: ['Covers the synthetic requirement.'],
+      asset_kind: 'data',
+    },
+  ])
+  const resourceContentTool = createNativeResourceContentTool({
+    buildTool: definition => definition,
+    workspacePath,
+    contract: {
+      dispatchId: 'resource-content-dispatch',
+      inventoryRevision: await computeResourceInventoryRevision(workspacePath),
+      baselineResourceRevision: await computeResourceRevision(
+        workspacePath,
+        '',
+      ),
+      requiredRequirementIds: ['requirement-id'],
+      verifiedResourceIds: ['resource-id'],
+      inventoryBindings: [
+        { requirementId: 'requirement-id', resourceIds: ['resource-id'] },
+      ],
+      protectedPaths: [],
+    },
+    assertMutationAuthority: () => undefined,
+  }) as { call(value: unknown): Promise<unknown> }
+  await resourceContentTool.call({
+    action: 'commit',
+    documents: [
+      {
+        path: 'assets/content/resource.json',
+        schema: 'beegame-content-v1',
+        id: 'content-id',
+        kind: 'resource-registry',
+        fulfills: ['requirement-id'],
+        resources: ['resource-id'],
+        data: {
+          bindings: [
+            { requirementId: 'requirement-id', resourceIds: ['resource-id'] },
+          ],
+        },
+      },
+    ],
+  })
   const sourceContent = await readFile(
     join(workspacePath, 'docs', 'GDD.md'),
     'utf8',
@@ -176,11 +246,49 @@ async function createProjectionFixture(
     phase: 'DOCUMENT_DRAFTING' as const,
     documentStep: 'FOUNDATION_DRAFTING' as const,
   }
-  const afterDocuments = {
-    ...beforeDocuments,
-    foundationDraftState: {
-      completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
-    },
+  const acceptedDocumentUnits = []
+  let afterDocuments: DeliveryRun = beforeDocuments
+  for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
+    const beforeDocument: DeliveryRun = {
+      ...afterDocuments,
+      activeDispatch: {
+        dispatchId: `canonical-document-${index}`,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: path,
+        revision: documentRevision,
+        status: 'completed',
+        startedAt: ACCEPTED_AT,
+        finishedAt: ACCEPTED_AT,
+        request: {
+          dispatchId: `canonical-document-${index}`,
+          runId: RUN_ID,
+          ownerId: OWNER_ID,
+          projectId: PROJECT_ID,
+          workspacePath,
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          taskId: path,
+          revision: documentRevision,
+          allowedPaths: [path],
+          contract: {
+            authoringMode: 'initial',
+            foundationDocumentPath: path,
+          },
+        },
+      },
+    }
+    const afterDocument: DeliveryRun = {
+      ...beforeDocument,
+      activeDispatch: undefined,
+      foundationDraftState: {
+        completedPaths: CANONICAL_FOUNDATION_DOCUMENTS.slice(0, index + 1),
+      },
+    }
+    acceptedDocumentUnits.push(
+      ...deriveAcceptedWorkflowUnits(beforeDocument, afterDocument),
+    )
+    afterDocuments = afterDocument
   }
   const beforeFoundationReview = {
     ...afterDocuments,
@@ -271,10 +379,36 @@ async function createProjectionFixture(
       },
     },
   }
-  const afterContent = {
+  const beforeContent = {
     ...afterInventory,
+    activeDispatch: {
+      dispatchId: 'resource-content-dispatch',
+      workerType: 'resource-content-author' as const,
+      phase: 'RESOURCE_PREPARATION' as const,
+      taskId: 'RESOURCE_CONTENT',
+      revision: documentRevision,
+      status: 'completed' as const,
+      startedAt: ACCEPTED_AT,
+      finishedAt: ACCEPTED_AT,
+      request: {
+        dispatchId: 'resource-content-dispatch',
+        runId: RUN_ID,
+        ownerId: OWNER_ID,
+        projectId: PROJECT_ID,
+        workspacePath,
+        workerType: 'resource-content-author' as const,
+        phase: 'RESOURCE_PREPARATION' as const,
+        taskId: 'RESOURCE_CONTENT',
+        revision: documentRevision,
+        contract: { task: 'RESOURCE_CONTENT' },
+      },
+    },
+  }
+  const afterContent = {
+    ...beforeContent,
+    activeDispatch: undefined,
     resourceProductionState: {
-      ...afterInventory.resourceProductionState,
+      ...beforeContent.resourceProductionState,
       currentTask: 'RESOURCE_GATE' as const,
       contentReceipt: { contentDigest, acceptedAt: ACCEPTED_AT },
     },
@@ -405,7 +539,7 @@ async function createProjectionFixture(
     },
   }
   const acceptedUnits = [
-    ...deriveAcceptedWorkflowUnits(beforeDocuments, afterDocuments),
+    ...acceptedDocumentUnits,
     ...deriveAcceptedWorkflowUnits(
       beforeFoundationReview as DeliveryRun,
       afterFoundationReview as DeliveryRun,
@@ -419,7 +553,7 @@ async function createProjectionFixture(
       afterInventory as DeliveryRun,
     ),
     ...deriveAcceptedWorkflowUnits(
-      afterInventory as DeliveryRun,
+      beforeContent as DeliveryRun,
       afterContent as DeliveryRun,
     ),
     ...deriveAcceptedWorkflowUnits(
@@ -929,7 +1063,7 @@ describe('workflow exact-resume recovery projector', () => {
     )
   })
 
-  test('uses matching canonical document receipts to recover historical completed paths', async () => {
+  test('does not promote matching directory receipts into accepted journal facts', async () => {
     const fixture = await createProjectionFixture()
     const inspection = await inspect(fixture)
     const events = fixture.journalEvents.filter(
@@ -940,14 +1074,125 @@ describe('workflow exact-resume recovery projector', () => {
         ),
     )
 
-    const projection = await projectExactResumeRun(
-      projectInput(fixture, inspection, events),
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_missing',
     )
+  })
 
-    expect(projection.run.foundationDraftState.completedPaths).toEqual([
-      ...CANONICAL_FOUNDATION_DOCUMENTS,
-    ])
-    expect(projection.activeUnitId).toBe('review:resource_semantic_fitness')
+  test('rejects a stale unrelated document receipt when the exact journal receipt is missing', async () => {
+    const fixture = await createProjectionFixture()
+    const unitId = `document:${CANONICAL_FOUNDATION_DOCUMENTS[0]}`
+    const accepted = fixture.journalEvents.find(
+      event =>
+        event.type === 'workflow.unit.accepted' &&
+        (event as WorkflowUnitAcceptedEvent).unit.unitId === unitId,
+    ) as WorkflowUnitAcceptedEvent
+    const dispatchId = 'canonical-document-0'
+    expect(accepted.unit.unitId).toBe(unitId)
+    const receiptPath = join(
+      fixture.workspacePath,
+      '.beegame',
+      'workflow',
+      'document-commits',
+      `${dispatchId}.json`,
+    )
+    const exactReceipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await writeFile(
+      join(
+        fixture.workspacePath,
+        '.beegame',
+        'workflow',
+        'document-commits',
+        'stale-unrelated-dispatch.json',
+      ),
+      `${JSON.stringify({
+        ...exactReceipt,
+        dispatchId: 'stale-unrelated-dispatch',
+      })}\n`,
+    )
+    await unlink(receiptPath)
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a stale unrelated Resource Content receipt when the exact journal receipt is missing', async () => {
+    const fixture = await createProjectionFixture()
+    const dispatchId = 'resource-content-dispatch'
+    const events = fixture.journalEvents.map(event => {
+      if (
+        event.type !== 'workflow.unit.accepted' ||
+        (event as WorkflowUnitAcceptedEvent).unit.unitId !== 'resource:content'
+      )
+        return event
+      const accepted = event as WorkflowUnitAcceptedEvent
+      return {
+        ...accepted,
+        unit: {
+          ...accepted.unit,
+          dispatchId,
+          receiptRef: `.beegame/workflow/resource-content-commits/${dispatchId}.json`,
+        },
+      } as WorkflowEvent
+    })
+    const receiptDirectory = join(
+      fixture.workspacePath,
+      '.beegame',
+      'workflow',
+      'resource-content-commits',
+    )
+    await unlink(join(receiptDirectory, `${dispatchId}.json`))
+    await mkdir(receiptDirectory, { recursive: true })
+    await writeFile(
+      join(receiptDirectory, 'stale-resource-content-dispatch.json'),
+      `${JSON.stringify({
+        schema: 'beegame-resource-content-commit-v1',
+        dispatchId: 'stale-resource-content-dispatch',
+        status: 'committed',
+        baselineResourceRevision: 'baseline-resource-revision',
+        finalRootDigest: 'stale-root-digest',
+        stagingRoot: 'staging',
+        backupRoot: 'backup',
+        writtenPaths: [],
+      })}\n`,
+    )
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_missing',
+    )
+  })
+
+  test('rejects a Resource Content receipt identity outside the canonical dispatch alphabet', async () => {
+    const fixture = await createProjectionFixture()
+    const events = fixture.journalEvents.map(event => {
+      if (
+        event.type !== 'workflow.unit.accepted' ||
+        (event as WorkflowUnitAcceptedEvent).unit.unitId !== 'resource:content'
+      )
+        return event
+      const accepted = event as WorkflowUnitAcceptedEvent
+      return {
+        ...accepted,
+        unit: {
+          ...accepted.unit,
+          dispatchId: '../unowned-receipt',
+          receiptRef:
+            '.beegame/workflow/resource-content-commits/../unowned-receipt.json',
+        },
+      } as WorkflowEvent
+    })
+    const inspection = await inspect(fixture)
+
+    await expectRecoveryError(
+      projectExactResumeRun(projectInput(fixture, inspection, events)),
+      'recovery_checkpoint_conflict',
+    )
   })
 
   test('fails closed when a snapshot-completed document has no canonical receipt', async () => {
@@ -1018,30 +1263,10 @@ describe('workflow exact-resume recovery projector', () => {
         })}\n`,
       )
     }
-    const snapshot = {
-      ...fixture.snapshot,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      documentStep: 'FOUNDATION_DRAFTING' as const,
-      currentItemId: undefined,
-      activeDispatch: undefined,
-      foundationDraftState: { completedPaths: [completedPath] },
-      documentReviewState: {
-        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
-      },
-      resourceProductionState: { currentTask: 'RESOURCE_PLAN' as const },
-      evidence: {},
-    }
-    await writeFile(
-      fixture.snapshotPath,
-      `${JSON.stringify(snapshot, null, 2)}\n`,
-    )
     const inspection = await inspect(fixture)
-    const ordinaryEvents = fixture.journalEvents.filter(
-      event => event.type !== 'workflow.unit.accepted',
-    )
 
     await expectRecoveryError(
-      projectExactResumeRun(projectInput(fixture, inspection, ordinaryEvents)),
+      projectExactResumeRun(projectInput(fixture, inspection)),
       'recovery_artifact_digest_mismatch',
     )
   })

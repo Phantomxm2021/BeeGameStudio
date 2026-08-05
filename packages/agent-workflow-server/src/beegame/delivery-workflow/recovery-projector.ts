@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+import {
+  computeResourceContentRootDigest,
+  readResourceContentCommitReceipt,
+} from '../native-resource-content-tool'
 import {
   artifactsForDocumentReviewCheck,
   documentReviewArtifactDigests,
@@ -97,6 +101,16 @@ function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || value.some(item => !stringValue(item)))
     return undefined
   return value as string[]
+}
+
+function isCanonicalDispatchId(value: string | undefined): value is string {
+  if (!value) return false
+  const allowed = new Set(
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'.split(
+      '',
+    ),
+  )
+  return [...value].every(character => allowed.has(character))
 }
 
 function stableValue(value: unknown): string {
@@ -226,9 +240,14 @@ function reviewFindingsFromUnit(
 function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
   const payload = acceptedUnitPayload(unit)
   if (unit.kind === 'document') {
+    const expectedReceiptRef = unit.dispatchId
+      ? `.beegame/workflow/document-commits/${unit.dispatchId}.json`
+      : undefined
     if (
       documentUnitId(stringValue(payload.path) ?? '') !== unit.unitId ||
-      payload.revision !== unit.inputRevision
+      payload.revision !== unit.inputRevision ||
+      !isCanonicalDispatchId(unit.dispatchId) ||
+      unit.receiptRef !== expectedReceiptRef
     )
       recoveryError(
         'recovery_checkpoint_conflict',
@@ -260,9 +279,14 @@ function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
         'Checklist checkpoint has contradictory revision identity',
       )
   } else if (unit.kind === 'resource-content') {
+    const expectedReceiptRef = unit.dispatchId
+      ? `.beegame/workflow/resource-content-commits/${unit.dispatchId}.json`
+      : undefined
     if (
       payload.contentDigest !== unit.inputRevision ||
-      unit.dependencyDigests.content !== payload.contentDigest
+      unit.dependencyDigests.content !== payload.contentDigest ||
+      !isCanonicalDispatchId(unit.dispatchId) ||
+      unit.receiptRef !== expectedReceiptRef
     )
       recoveryError(
         'recovery_checkpoint_conflict',
@@ -441,6 +465,7 @@ function checkpointComparable(unit: AcceptedWorkflowUnit): unknown {
     kind: unit.kind,
     inputRevision: unit.inputRevision,
     dependencyDigests: unit.dependencyDigests,
+    dispatchId: unit.dispatchId,
     receiptRef: unit.receiptRef,
     payload: unit.payload,
   }
@@ -585,8 +610,6 @@ function historicalReviewFacts(input: {
 async function historicalDocumentFacts(input: {
   snapshot: Record<string, unknown>
   proofs: Map<string, ProvenUnit>
-  workspacePath: string
-  revision: Revision
 }): Promise<void> {
   const completedPaths = stringArray(
     record(input.snapshot.foundationDraftState)?.completedPaths,
@@ -601,84 +624,13 @@ async function historicalDocumentFacts(input: {
       'recovery_checkpoint_conflict',
       'snapshot completed documents are outside the current canonical prefix',
     )
-  const receiptDirectory = join(
-    resolve(input.workspacePath),
-    '.beegame',
-    'workflow',
-    'document-commits',
-  )
-  let receiptNames: string[] = []
-  try {
-    receiptNames = (await readdir(receiptDirectory, { withFileTypes: true }))
-      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-      .map(entry => entry.name)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'canonical document receipt directory cannot be inspected',
-      )
-  }
-  const receipts = []
-  for (const name of receiptNames) {
-    const dispatchId = name.slice(0, -'.json'.length)
-    try {
-      const receipt = await readCanonicalDocumentCommitReceipt(
-        input.workspacePath,
-        dispatchId,
-      )
-      if (receipt) receipts.push(receipt)
-    } catch {
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'canonical document receipt is outside the current schema',
-      )
-    }
-  }
-  for (const [index, path] of completedPaths.entries()) {
+  for (const path of completedPaths) {
     const unitId = documentUnitId(path)
     if (input.proofs.has(unitId)) continue
-    let currentDigest: string
-    try {
-      currentDigest = sha256(
-        await readFile(join(resolve(input.workspacePath), path)),
-      )
-    } catch {
-      recoveryError(
-        'recovery_artifact_digest_mismatch',
-        `snapshot-completed document ${path} is unavailable`,
-      )
-    }
-    const receiptsForPath = receipts.filter(
-      receipt => receipt.targetPath === path,
+    recoveryError(
+      'recovery_checkpoint_missing',
+      `snapshot-completed document ${path} has no dispatch-bound accepted journal event`,
     )
-    if (receiptsForPath.length === 0)
-      recoveryError(
-        'recovery_checkpoint_missing',
-        `snapshot-completed document ${path} has no canonical receipt`,
-      )
-    const matches = receiptsForPath
-      .filter(receipt => receipt.finalDigest === currentDigest)
-      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
-    const receipt = matches.at(-1)
-    if (!receipt)
-      recoveryError(
-        'recovery_artifact_digest_mismatch',
-        `snapshot-completed document ${path} contradicts its canonical receipt`,
-      )
-    addSnapshotProof(input.proofs, {
-      eventSchemaVersion: 1,
-      unitId,
-      kind: 'document',
-      phase: 'DOCUMENT_DRAFTING',
-      predecessorUnitIds:
-        index === 0 ? [] : [documentUnitId(completedPaths[index - 1]!)],
-      inputRevision: input.revision.document,
-      dependencyDigests: { [path]: receipt.finalDigest },
-      receiptRef: `.beegame/workflow/document-commits/${receipt.dispatchId}.json`,
-      acceptedAt: receipt.updatedAt,
-      payload: { path, revision: input.revision.document },
-    })
   }
 }
 
@@ -716,17 +668,10 @@ function historicalResourceFacts(input: {
         'snapshot and journal contradict the canonical Resource Content digest',
       )
   } else if (content) {
-    addSnapshotProof(input.proofs, {
-      eventSchemaVersion: 1,
-      unitId: RESOURCE_CONTENT_UNIT_ID,
-      kind: 'resource-content',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: [RESOURCE_INVENTORY_UNIT_ID],
-      inputRevision: content.contentDigest as string,
-      dependencyDigests: { content: content.contentDigest as string },
-      acceptedAt: content.acceptedAt as string,
-      payload: { contentDigest: content.contentDigest },
-    })
+    recoveryError(
+      'recovery_checkpoint_missing',
+      'snapshot Resource Content digest has no dispatch-bound accepted journal event',
+    )
   }
   const evidence = record(record(input.snapshot.evidence)?.resourcePreparation)
   if (evidence?.status === 'passed') {
@@ -1217,6 +1162,63 @@ async function validateAcceptedArtifacts(input: {
     .filter(unit => unit.kind === 'document')
     .at(-1)
   for (const unit of input.units) {
+    if (unit.kind === 'document') {
+      const payload = acceptedUnitPayload(unit)
+      const path = stringValue(payload.path)
+      const dispatchId = unit.dispatchId
+      const expectedReceiptRef = dispatchId
+        ? `.beegame/workflow/document-commits/${dispatchId}.json`
+        : undefined
+      if (!path || !dispatchId || unit.receiptRef !== expectedReceiptRef)
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          `accepted document checkpoint ${unit.unitId} has no exact dispatch receipt identity`,
+        )
+      let receipt: Awaited<
+        ReturnType<typeof readCanonicalDocumentCommitReceipt>
+      >
+      try {
+        receipt = await readCanonicalDocumentCommitReceipt(
+          input.workspacePath,
+          dispatchId,
+        )
+      } catch {
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          `accepted document receipt for ${unit.unitId} is outside the canonical schema`,
+        )
+      }
+      if (!receipt)
+        recoveryError(
+          'recovery_checkpoint_missing',
+          `accepted document checkpoint ${unit.unitId} has no exact canonical receipt`,
+        )
+      if (
+        receipt.dispatchId !== dispatchId ||
+        receipt.targetPath !== path ||
+        receipt.status !== 'committed'
+      )
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          `accepted document receipt contradicts ${unit.unitId}`,
+        )
+      let currentDigest: string
+      try {
+        currentDigest = sha256(
+          await readFile(join(resolve(input.workspacePath), path)),
+        )
+      } catch {
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          `accepted document artifact ${path} is unavailable`,
+        )
+      }
+      if (receipt.finalDigest !== currentDigest)
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          `accepted document receipt digest changed after ${unit.unitId}`,
+        )
+    }
     if (
       unit === finalAcceptedDocument &&
       unit.inputRevision !== input.documentRevision
@@ -1265,6 +1267,53 @@ async function validateAcceptedArtifacts(input: {
       continue
     }
     if (unit.kind === 'resource-content') {
+      const dispatchId = unit.dispatchId
+      const expectedReceiptRef = dispatchId
+        ? `.beegame/workflow/resource-content-commits/${dispatchId}.json`
+        : undefined
+      if (!dispatchId || unit.receiptRef !== expectedReceiptRef)
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'accepted Resource Content checkpoint has no exact dispatch receipt identity',
+        )
+      let receipt: ReturnType<typeof readResourceContentCommitReceipt>
+      try {
+        receipt = readResourceContentCommitReceipt(
+          input.workspacePath,
+          dispatchId,
+        )
+      } catch {
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'accepted Resource Content receipt is outside the canonical schema',
+        )
+      }
+      if (!receipt)
+        recoveryError(
+          'recovery_checkpoint_missing',
+          'accepted Resource Content checkpoint has no exact canonical receipt',
+        )
+      if (receipt.status !== 'committed' || receipt.action !== 'commit')
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'accepted Resource Content receipt contradicts its dispatch identity',
+        )
+      let currentRootDigest: string
+      try {
+        currentRootDigest = computeResourceContentRootDigest(
+          input.workspacePath,
+        )
+      } catch {
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          'canonical Resource Content root cannot be inspected',
+        )
+      }
+      if (receipt.finalRootDigest !== currentRootDigest)
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          'accepted Resource Content receipt does not match canonical content',
+        )
       const currentDigest = await computeResourceContentDigest(
         input.workspacePath,
       )
@@ -2006,8 +2055,6 @@ export async function projectExactResumeRun(input: {
     await historicalDocumentFacts({
       snapshot,
       proofs,
-      workspacePath: input.workspacePath,
-      revision,
     })
     historicalReviewFacts({ snapshot, proofs, revision })
     historicalChecklistFact({ snapshot, proofs })

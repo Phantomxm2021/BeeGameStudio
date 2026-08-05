@@ -4,7 +4,10 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { parseDocument, stringify } from 'yaml'
 import { z } from 'zod/v4'
-import { readBeeGameAssetManifest } from './asset-contracts'
+import {
+  readBeeGameAssetManifest,
+  readBeeGameAssetManifestSync,
+} from './asset-contracts'
 import {
   computeResourceInventoryRevision,
   computeResourceRevision,
@@ -377,6 +380,7 @@ async function replaceContentRoot(input: {
       schema: 'beegame-resource-content-commit-v1' as const,
       dispatchId: input.contract.dispatchId,
       status: 'prepared' as const,
+      action: 'commit' as const,
       baselineResourceRevision: input.contract.baselineResourceRevision,
       finalRootDigest,
       stagingRoot,
@@ -404,7 +408,7 @@ export type ResourceContentCommitReceipt = {
   schema: 'beegame-resource-content-commit-v1'
   dispatchId: string
   status: 'prepared' | 'committed'
-  action?: 'commit'
+  action: 'commit'
   baselineResourceRevision: string
   finalRootDigest: string
   stagingRoot: string
@@ -448,6 +452,7 @@ function readCommitReceipt(
     return value
   }
   if (
+    value.action !== 'commit' ||
     typeof value.baselineResourceRevision !== 'string' ||
     typeof value.finalRootDigest !== 'string' ||
     typeof value.stagingRoot !== 'string' ||
@@ -456,6 +461,31 @@ function readCommitReceipt(
   )
     throw new Error(`Invalid Resource Content commit receipt: ${path}.`)
   return value
+}
+
+/** Read one dispatch-bound receipt without changing its state or the workspace. */
+export function readResourceContentCommitReceipt(
+  workspacePath: string,
+  dispatchId: string,
+): ResourceContentTerminalReceipt | undefined {
+  const receipt = readCommitReceipt(
+    resourceContentReceiptPath(workspacePath, dispatchId),
+  )
+  if (receipt && receipt.dispatchId !== dispatchId)
+    throw new Error('Resource Content commit receipt identity is invalid.')
+  return receipt
+}
+
+/** Digest the currently published canonical content root without reconciling it. */
+export function computeResourceContentRootDigest(
+  workspacePath: string,
+): string {
+  const manifest = readBeeGameAssetManifestSync(workspacePath)
+  const contentRoot = resolve(
+    workspacePath,
+    manifest.project_target?.content_root ?? 'assets/content',
+  )
+  return digestDirectory(contentRoot)
 }
 
 async function recoverPreparedResourceContentCommit(input: {
@@ -529,7 +559,10 @@ export async function reconcileResourceContentCommitReceipt(input: {
     input.workspacePath,
     input.dispatchId,
   )
-  const receipt = readCommitReceipt(receiptPath)
+  const receipt = readResourceContentCommitReceipt(
+    input.workspacePath,
+    input.dispatchId,
+  )
   if (!receipt) return undefined
   if (receipt.dispatchId !== input.dispatchId)
     throw new Error('Resource Content commit receipt dispatch is invalid.')
