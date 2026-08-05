@@ -2371,6 +2371,40 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
 
+  test.each([
+    ['missing', undefined],
+    ['string', String(DELIVERY_RUN_SCHEMA_VERSION)],
+    ['non-integer', DELIVERY_RUN_SCHEMA_VERSION + 0.5],
+  ])('rejects a %s schema version before exact recovery', async (_label, schemaVersion) => {
+    const fixture = await createStaleReviewerRecoveryFixture()
+    workspace = fixture.workspacePath
+    const snapshot = JSON.parse(
+      await readFile(fixture.store.paths.snapshot, 'utf8'),
+    ) as Record<string, unknown>
+    if (schemaVersion === undefined) delete snapshot.schemaVersion
+    else snapshot.schemaVersion = schemaVersion
+    await writeFile(
+      fixture.store.paths.snapshot,
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    )
+
+    let resumed = false
+    await expect(
+      recoverAndResumeRun({
+        store: fixture.store,
+        workspacePath: fixture.workspacePath,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => undefined,
+        resumeCurrentRun: async () => {
+          resumed = true
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+    expect(resumed).toBe(false)
+  })
+
   test('stale worker usage does not migrate or rewrite a version-11 snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-usage-'))
     const store = createRunStore(workspace, 'owner-1')

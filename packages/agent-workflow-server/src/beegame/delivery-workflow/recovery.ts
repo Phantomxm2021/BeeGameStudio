@@ -460,16 +460,16 @@ function assertRecoveryAuthority(input: {
   if (input.inspection.error?.code === 'ownership') throw input.inspection.error
   const snapshot = snapshotRecord(input.inspection.parsedValue)
   const schemaVersion = snapshot?.schemaVersion
-  if (
-    typeof schemaVersion === 'number' &&
-    Number.isInteger(schemaVersion) &&
-    schemaVersion !== DELIVERY_RUN_SCHEMA_VERSION
-  )
+  if (schemaVersion !== DELIVERY_RUN_SCHEMA_VERSION)
     throw (
       input.inspection.error ??
       new WorkflowStoreError(
         `workflow snapshot schema version ${schemaVersion} is not the current version ${DELIVERY_RUN_SCHEMA_VERSION}`,
-        schemaVersion < DELIVERY_RUN_SCHEMA_VERSION ? 'obsolete' : 'invalid',
+        typeof schemaVersion === 'number' &&
+          Number.isInteger(schemaVersion) &&
+          schemaVersion < DELIVERY_RUN_SCHEMA_VERSION
+          ? 'obsolete'
+          : 'invalid',
       )
     )
   const ownerId =

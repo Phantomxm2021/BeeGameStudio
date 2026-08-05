@@ -240,8 +240,8 @@ units alone advance mutable task status and evidence. This lets a complete
 journal reconstruct a truncated `run.json` without a fallback path or second
 ledger, while contradictory topology fails closed.
 
-On 2026-08-06 the complete server command measured 584 passing tests across 66
-files, 0 failures and 1640 assertions. The complete frontend command measured
+On 2026-08-06 the complete server command measured 587 passing tests across 66
+files, 0 failures and 1646 assertions. The complete frontend command measured
 643 passing tests across 58 files and 0 failures. Server and repository
 TypeScript checks both exited 0; `git diff --check` exited 0. The anti-pollution
 scan found no production snapshot migration or alternate execution path.
