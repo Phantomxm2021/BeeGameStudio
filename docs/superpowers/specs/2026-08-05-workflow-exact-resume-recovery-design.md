@@ -266,7 +266,7 @@ journal reconstruct a truncated `run.json` without a fallback path or second
 ledger, while contradictory topology fails closed.
 
 On 2026-08-06 the complete server command measured 556 passing tests across 67
-files, 0 failures and 1579 assertions. The required frontend command measured
+files, 0 failures and 1581 assertions. The required frontend command measured
 116 passing tests across 2 files and 0 failures. Server and repository
 TypeScript checks both exited 0; Biome checked 46 required files with no fixes
 remaining; `git diff --check` exited 0. The anti-pollution scan found only this

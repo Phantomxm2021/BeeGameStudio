@@ -119,25 +119,31 @@ function matrixAtomicTask(): AtomicTask {
   }
 }
 
+function matrixContentDocument() {
+  return {
+    path: 'assets/content/matrix.json',
+    schema: 'beegame-content-v1' as const,
+    id: 'matrix-content',
+    kind: 'resource-registry' as const,
+    fulfills: ['matrix-requirement'],
+    resources: ['matrix-resource'],
+    data: {
+      bindings: [
+        {
+          requirementId: 'matrix-requirement',
+          resourceIds: ['matrix-resource'],
+        },
+      ],
+    },
+  }
+}
+
 async function writeMatrixContent(workspacePath: string): Promise<void> {
   await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
+  const { path: _path, ...document } = matrixContentDocument()
   await writeFile(
     join(workspacePath, 'assets/content/matrix.json'),
-    JSON.stringify({
-      schema: 'beegame-content-v1',
-      id: 'matrix-content',
-      kind: 'resource-registry',
-      fulfills: ['matrix-requirement'],
-      resources: ['matrix-resource'],
-      data: {
-        bindings: [
-          {
-            requirementId: 'matrix-requirement',
-            resourceIds: ['matrix-resource'],
-          },
-        ],
-      },
-    }),
+    JSON.stringify(document),
   )
 }
 
@@ -250,6 +256,7 @@ function matrixFrontmatterValue(
 async function matrixTerminal(input: {
   workspacePath: string
   request: WorkerDispatchRequest
+  persistCanonicalReceipt?: boolean
 }) {
   const { request, workspacePath } = input
   const evidencePath = await writeMatrixEvidence(
@@ -359,7 +366,35 @@ async function matrixTerminal(input: {
     }
   }
   if (request.workerType === 'resource-content-author') {
-    await writeMatrixContent(workspacePath)
+    if (input.persistCanonicalReceipt) {
+      const tool = createNativeResourceContentTool({
+        buildTool: definition => definition,
+        workspacePath,
+        contract: {
+          dispatchId: request.dispatchId!,
+          inventoryRevision: String(request.contract.inventoryRevision),
+          baselineResourceRevision: String(
+            request.contract.baselineResourceRevision,
+          ),
+          requiredRequirementIds: matrixStringArray(
+            request.contract.requiredRequirementIds,
+          ),
+          verifiedResourceIds: matrixStringArray(
+            request.contract.verifiedResourceIds,
+          ),
+          inventoryBindings: request.contract.inventoryBindings as Array<{
+            requirementId: string
+            resourceIds: string[]
+          }>,
+          protectedPaths: request.protectedPaths ?? [],
+        },
+        assertMutationAuthority: () => undefined,
+      }) as { call(value: unknown): Promise<unknown> }
+      await tool.call({
+        action: 'commit',
+        documents: [matrixContentDocument()],
+      })
+    } else await writeMatrixContent(workspacePath)
     return {
       workerType: request.workerType,
       revision: request.revision,
@@ -1346,6 +1381,7 @@ describe('delivery workflow recovery', () => {
           const terminal = await matrixTerminal({
             workspacePath: workspace,
             request: originalRequest,
+            persistCanonicalReceipt: checkpoint === 'canonical-receipt',
           })
           if (checkpoint !== 'canonical-receipt') {
             const terminalOnlyDispatcher = createDeliveryDispatcher({
@@ -1357,7 +1393,21 @@ describe('delivery workflow recovery', () => {
               terminal,
             )
           }
-          await resumeFromDisk(false)
+          const recoveredStore = await resumeFromDisk(false)
+          if (checkpoint === 'canonical-receipt') {
+            const acceptedUnitId =
+              workerType === 'document-author'
+                ? `document:${originalRequest.taskId}`
+                : 'resource:content'
+            expect(
+              (await recoveredStore.readEvents()).filter(
+                event =>
+                  event.type === 'workflow.unit.accepted' &&
+                  (event.unit as AcceptedWorkflowUnit).unitId ===
+                    acceptedUnitId,
+              ),
+            ).toHaveLength(1)
+          }
           if (checkpoint === 'unit-accepted') await resumeFromDisk(false)
         }
 
