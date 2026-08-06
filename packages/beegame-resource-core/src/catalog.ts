@@ -12,6 +12,9 @@ import type {
   ResourceElement,
   ResourcePack,
   ResourcePackPrimaryCategory,
+  ResourceRequirementCandidate,
+  ResourceRequirementMatchRequest,
+  ResourceRequirementMatchResult,
   ResourceUsageTag,
 } from './types'
 import { normalizeResourceTechnicalFacts } from './technical-facts'
@@ -98,6 +101,103 @@ export function browseResourcePackElements(
   const scopedPacks = [...new Map(available.map(element => [element.packId, packById.get(element.packId)!])).values()]
   const facets = collectFacets(scopedPacks, available)
   return page(eligible.map(element => summarizeElement(packById.get(element.packId)!, element)), catalogRequest, facets, item => item.elementId)
+}
+
+/**
+ * Match project requirements against explicit catalog metadata. Names and
+ * paths are returned for human/Agent inspection but never participate in the
+ * deterministic match or ordering.
+ */
+export function matchResourceRequirements(
+  packs: readonly ResourcePack[],
+  elements: readonly ResourceElement[],
+  request: ResourceRequirementMatchRequest,
+): ResourceRequirementMatchResult {
+  const publishedById = new Map(
+    packs
+      .filter(pack => pack.status === 'published')
+      .map(pack => [pack.id, pack] as const),
+  )
+  const readyIds = readyDependencyIds(elements)
+  const deliveryByFormat = new Map(
+    request.deliveryCapabilities.map(capability => [
+      normalizeFormat(capability.sourceFormat),
+      {
+        ...capability,
+        sourceFormat: normalizeFormat(capability.sourceFormat),
+        targetFormat: normalizeFormat(capability.targetFormat),
+      },
+    ]),
+  )
+  const limit = Math.min(
+    Math.max(Math.trunc(request.maxCandidatesPerRequirement ?? 8), 1),
+    32,
+  )
+
+  return {
+    groups: request.requirements.map(requirement => {
+      const candidates: ResourceRequirementCandidate[] = []
+      const unclassifiedElementIds: string[] = []
+      for (const element of elements) {
+        const pack = publishedById.get(element.packId)
+        if (
+          !pack ||
+          element.status !== 'ready' ||
+          !hasCompleteDependencyClosure(element, readyIds)
+        )
+          continue
+        const dimension = element.dimensionOverride ?? pack.dimension
+        const assetKind = element.assetKind
+        const styles = element.styleOverride
+          ? [element.styleOverride]
+          : normalizedPackStyles(pack)
+        if (
+          !requirement.profile.dimensions.includes(dimension) ||
+          !assetKind ||
+          !requirement.profile.assetKinds.includes(assetKind) ||
+          (requirement.profile.styles.length > 0 &&
+            !intersectsNormalized(requirement.profile.styles, styles)) ||
+          !requirement.profile.capabilities.every(capability =>
+            element.capabilities?.includes(capability),
+          )
+        )
+          continue
+        if (
+          requirement.profile.usageTags.length > 0 &&
+          !(element.usageTags?.length ?? 0)
+        ) {
+          unclassifiedElementIds.push(element.id)
+          continue
+        }
+        if (
+          requirement.profile.usageTags.length > 0 &&
+          !intersects(requirement.profile.usageTags, element.usageTags ?? [])
+        )
+          continue
+        const delivery = deliveryByFormat.get(fileExtension(element.path))
+        if (!delivery) continue
+        candidates.push({ ...summarizeElement(pack, element), delivery })
+      }
+      candidates.sort(
+        (left, right) =>
+          Number(left.delivery.disposition === 'convert') -
+            Number(right.delivery.disposition === 'convert') ||
+          compareText(left.packId, right.packId) ||
+          compareText(left.elementId, right.elementId),
+      )
+      unclassifiedElementIds.sort(compareText)
+      return {
+        requirementId: requirement.requirementId,
+        status: candidates.length
+          ? ('matched' as const)
+          : unclassifiedElementIds.length
+            ? ('unclassified' as const)
+            : ('no-match' as const),
+        candidates: candidates.slice(0, limit),
+        unclassifiedElementIds,
+      }
+    }),
+  }
 }
 
 function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], filters?: ResourceCatalogFilter): boolean {
@@ -229,6 +329,10 @@ function collectFacets(packs: readonly ResourcePack[], elements: readonly Resour
 
 function normalizedPackStyles(pack: ResourcePack): string[] {
   return unique(pack.styles.map(value => value.trim()).filter(Boolean))
+}
+
+function normalizeFormat(value: string): string {
+  return value.trim().toLowerCase().replace(/^\./, '')
 }
 
 export class ResourceCatalogCursorError extends Error {}

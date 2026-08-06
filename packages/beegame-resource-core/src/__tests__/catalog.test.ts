@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   browseResourceCatalogPacks,
   browseResourcePackElements,
+  matchResourceRequirements,
 } from '../catalog'
 import type { ResourceElement, ResourcePack } from '../types'
 
@@ -89,6 +90,158 @@ describe('resource catalog browsing', () => {
     })
 
     expect(page.items).toEqual([expect.objectContaining({ elementId: 'wall' })])
+  })
+})
+
+describe('bounded requirement matching', () => {
+  test('matches only structured semantic facts and accepts explicit source conversion', () => {
+    const fbx = element(
+      'tower-model',
+      'world-kit',
+      'models/source.fbx',
+      'models',
+      'model',
+      ['building', 'combat'],
+      ['contains-materials'],
+    )
+    const result = matchResourceRequirements(packs, [...elements, fbx], {
+      requirements: [
+        {
+          requirementId: 'requirement-a',
+          profile: {
+            dimensions: ['3D'],
+            assetKinds: ['model'],
+            usageTags: ['building'],
+            capabilities: ['contains-materials'],
+            styles: ['Stylized'],
+          },
+        },
+      ],
+      deliveryCapabilities: [
+        {
+          sourceFormat: 'fbx',
+          disposition: 'convert',
+          targetFormat: 'glb',
+          adapterId: 'model-fbx-to-glb',
+        },
+      ],
+      maxCandidatesPerRequirement: 4,
+    })
+
+    expect(result.groups).toEqual([
+      expect.objectContaining({
+        requirementId: 'requirement-a',
+        status: 'matched',
+        candidates: [
+          expect.objectContaining({
+            elementId: 'tower-model',
+            delivery: {
+              disposition: 'convert',
+              sourceFormat: 'fbx',
+              targetFormat: 'glb',
+              adapterId: 'model-fbx-to-glb',
+            },
+          }),
+        ],
+      }),
+    ])
+  })
+
+  test('returns direct OGG delivery and caps candidates deterministically', () => {
+    const audioPack: ResourcePack = {
+      id: 'audio-kit',
+      name: 'Audio Kit',
+      version: '1.0.0',
+      status: 'published',
+      styles: ['Stylized'],
+      gameTypes: ['Strategy'],
+      dimension: 'agnostic',
+      primaryCategory: 'audio',
+      categories: ['audio'],
+      license: 'internal',
+    }
+    const audio = ['z', 'a', 'm'].map(id =>
+      element(
+        id,
+        audioPack.id,
+        `audio/${id}.ogg`,
+        'audio',
+        'audio-clip',
+        ['sound-effect'],
+        [],
+      ),
+    )
+    const result = matchResourceRequirements([audioPack], audio, {
+      requirements: [
+        {
+          requirementId: 'audio-feedback',
+          profile: {
+            dimensions: ['agnostic'],
+            assetKinds: ['audio-clip'],
+            usageTags: ['sound-effect'],
+            capabilities: [],
+            styles: [],
+          },
+        },
+      ],
+      deliveryCapabilities: [
+        {
+          sourceFormat: 'ogg',
+          disposition: 'direct',
+          targetFormat: 'ogg',
+        },
+      ],
+      maxCandidatesPerRequirement: 2,
+    })
+
+    expect(result.groups[0]?.candidates.map(item => item.elementId)).toEqual([
+      'a',
+      'm',
+    ])
+    expect(result.groups[0]?.candidates[0]?.delivery.disposition).toBe(
+      'direct',
+    )
+  })
+
+  test('does not turn missing semantic metadata into a no-match decision', () => {
+    const unclassified = element(
+      'untagged-model',
+      'world-kit',
+      'models/untagged.glb',
+      'models',
+      'model',
+      [],
+      [],
+    )
+    const result = matchResourceRequirements(packs, [unclassified], {
+      requirements: [
+        {
+          requirementId: 'environment-model',
+          profile: {
+            dimensions: ['3D'],
+            assetKinds: ['model'],
+            usageTags: ['environment'],
+            capabilities: [],
+            styles: ['Stylized'],
+          },
+        },
+      ],
+      deliveryCapabilities: [
+        {
+          sourceFormat: 'glb',
+          disposition: 'direct',
+          targetFormat: 'glb',
+        },
+      ],
+    })
+
+    expect(result.groups[0]).toEqual(
+      expect.objectContaining({
+        status: 'unclassified',
+        candidates: [],
+        unclassifiedElementIds: ['untagged-model'],
+      }),
+    )
   })
 })
 

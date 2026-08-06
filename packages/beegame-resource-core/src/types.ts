@@ -275,6 +275,45 @@ export type ResourceResolvedElement = {
   dependencies?: readonly ResourceSelectionDependency[]
 }
 
+export type ResourceAcquisitionProfile = {
+  dimensions: readonly ResourceDimension[]
+  assetKinds: readonly ResourceAssetKind[]
+  usageTags: readonly ResourceUsageTag[]
+  capabilities: readonly ResourceCapability[]
+  styles: readonly string[]
+}
+
+export type ResourceDeliveryCapability = {
+  sourceFormat: string
+  disposition: 'direct' | 'convert'
+  targetFormat: string
+  adapterId?: string
+}
+
+export type ResourceRequirementMatchRequest = {
+  requirements: readonly {
+    requirementId: string
+    profile: ResourceAcquisitionProfile
+  }[]
+  deliveryCapabilities: readonly ResourceDeliveryCapability[]
+  maxCandidatesPerRequirement?: number
+}
+
+export type ResourceRequirementCandidate = ResourceCatalogElement & {
+  delivery: ResourceDeliveryCapability
+}
+
+export type ResourceRequirementMatchGroup = {
+  requirementId: string
+  status: 'matched' | 'no-match' | 'unclassified'
+  candidates: readonly ResourceRequirementCandidate[]
+  unclassifiedElementIds: readonly string[]
+}
+
+export type ResourceRequirementMatchResult = {
+  groups: readonly ResourceRequirementMatchGroup[]
+}
+
 /**
  * Exact, structured filters for browsing a large Resource Library. These are
  * deliberately not tied to project requirements or authored roles: an Agent
