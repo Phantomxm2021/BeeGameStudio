@@ -185,6 +185,21 @@ describe('workflow stage card history', () => {
         stageSnapshot: { ...snapshot, status: 'running' },
       }),
     ).toBe(false)
+    expect(
+      isFrozenWorkflowStageCardEvent({
+        ...event,
+        stageSnapshot: { ...snapshot, completedAt: undefined },
+      }),
+    ).toBe(false)
+    expect(
+      isFrozenWorkflowStageCardEvent({
+        ...event,
+        stageSnapshot: {
+          ...snapshot,
+          activeSince: '2026-08-06T00:00:01.000Z',
+        },
+      }),
+    ).toBe(false)
   })
 
   test('computes the latest stage boundary and active elapsed time safely', () => {

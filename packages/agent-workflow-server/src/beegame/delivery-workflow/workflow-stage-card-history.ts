@@ -264,7 +264,9 @@ export function isFrozenWorkflowStageCardEvent(
     return false
   return (
     isWorkflowStageCardSnapshot(event.stageSnapshot) &&
-    event.stageSnapshot.status === 'completed'
+    event.stageSnapshot.status === 'completed' &&
+    finiteDate(event.stageSnapshot.completedAt) &&
+    event.stageSnapshot.activeSince === undefined
   )
 }
 
