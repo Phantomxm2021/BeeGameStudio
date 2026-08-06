@@ -725,7 +725,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       eventId: event.eventId ?? randomUUID(),
       createdAt,
     }
-    const frozenEvents = events.filter(isFrozenWorkflowStageCardEvent)
+    const runEvents = events.filter(event => event.runId === run.runId)
+    const frozenEvents = runEvents.filter(isFrozenWorkflowStageCardEvent)
     const stageStartedAt = previous
       ? lastStageBoundaryAt(previous.createdAt, frozenEvents)
       : undefined
@@ -738,7 +739,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             stageStartedAt,
             stageEndedAt: createdAt,
             elapsedMs: activeElapsedWithinStage({
-              events,
+              events: runEvents,
               stageStartedAt,
               stageEndedAt: createdAt,
             }),

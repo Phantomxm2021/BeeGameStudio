@@ -196,7 +196,7 @@ export const useWorkflowCardDeck = (
         }
         if (distance < POINTER_LOCK_DISTANCE) return;
         if (Math.abs(dx) <= Math.abs(dy) * 1.1) {
-          pointer.cancelled = true;
+          clearPointer(pointer.pointerId);
           return;
         }
         pointer.locked = true;

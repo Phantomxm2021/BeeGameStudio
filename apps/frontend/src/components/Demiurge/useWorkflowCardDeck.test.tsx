@@ -94,6 +94,21 @@ describe('useWorkflowCardDeck', () => {
     expect(harness).toHaveAttribute('data-drag-offset', '0');
   });
 
+  it('clears a vertical-intent pointer so the next drag can start', () => {
+    const snapshots = [stage('one', 1), stage('two', 2), stage('three', 3)];
+    render(<DragHarness snapshots={snapshots} />);
+    const harness = screen.getByTestId('drag-harness');
+
+    fireEvent.pointerDown(harness, { pointerId: 1, clientX: 120, clientY: 40, button: 0 });
+    fireEvent.pointerMove(harness, { pointerId: 1, clientX: 130, clientY: 100 });
+
+    fireEvent.pointerDown(harness, { pointerId: 2, clientX: 120, clientY: 40, button: 0 });
+    fireEvent.pointerMove(harness, { pointerId: 2, clientX: 210, clientY: 42 });
+    fireEvent.pointerUp(harness, { pointerId: 2, clientX: 210, clientY: 42 });
+
+    expect(harness).toHaveAttribute('data-selected-index', '1');
+  });
+
   it('snaps back for sub-threshold drags and safely cancels pointer capture', () => {
     const snapshots = [stage('one', 1), stage('two', 2), stage('three', 3)];
     render(<DragHarness snapshots={snapshots} />);

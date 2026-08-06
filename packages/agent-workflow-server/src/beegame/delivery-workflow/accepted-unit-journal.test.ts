@@ -799,6 +799,72 @@ describe('accepted workflow unit journal', () => {
     ).toHaveLength(1)
   })
 
+  test('scopes frozen stage timing to the current run', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-run-scope-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...run(),
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2026-08-06T00:00:00.000Z',
+    }
+    await store.commit(initial, {
+      runId: initial.runId,
+      type: 'run.created',
+      phase: initial.phase,
+      status: initial.status,
+      revision: initial.revision,
+      eventId: 'run-created-scope',
+      createdAt: '2026-08-06T00:00:01.000Z',
+    })
+
+    await store.appendEvent({
+      runId: 'foreign-run',
+      type: 'phase.entered',
+      phase: 'BRIEF_CONFIRMED',
+      status: 'completed',
+      revision: initial.revision,
+      eventId: 'foreign-stage-boundary',
+      createdAt: '2026-08-06T00:00:04.000Z',
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        phaseIndex: 1,
+        phaseCount: 11,
+        status: 'completed',
+        currentPhase: 'BRIEF_CONFIRMED',
+        tasks: [],
+        completedTaskCount: 0,
+        totalTaskCount: 0,
+        createdAt: '2026-08-06T00:00:00.000Z',
+        updatedAt: '2026-08-06T00:00:04.000Z',
+        completedAt: '2026-08-06T00:00:04.000Z',
+        elapsedMs: 4000,
+      },
+    })
+
+    const transitioned = transitionDeliveryRun(initial, {
+      type: 'documents_ready',
+    })
+    await store.commit(transitioned, {
+      runId: transitioned.runId,
+      type: 'phase.entered',
+      phase: transitioned.phase,
+      status: transitioned.status,
+      revision: transitioned.revision,
+      eventId: 'documents-ready-scope',
+      createdAt: '2026-08-06T00:00:05.000Z',
+    })
+
+    const boundary = (await store.readEvents()).find(
+      event => event.eventId === 'documents-ready-scope',
+    )
+    expect(boundary).toMatchObject({
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        elapsedMs: 5000,
+      },
+    })
+  })
+
   test('does not attach a frozen stage card to an intra-stage commit', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'stage-card-intra-stage-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')
