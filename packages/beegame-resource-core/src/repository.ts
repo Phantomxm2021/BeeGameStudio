@@ -1,7 +1,7 @@
 import type { PackSummary, ResourceCatalogPack, ResourceCategory, ResourceElement, ResourceFolder, ResourcePack } from './types'
 import { validateResourceElement, validateResourcePack } from './validation'
 import { assertResourcePackPublishable } from './publish-readiness'
-import { resolveResourceElementMetadata } from './metadata-policy'
+import { resolveEffectiveResourceMetadata } from './metadata-policy'
 
 export type { ResourceElement, ResourceFolder, ResourcePack } from './types'
 
@@ -37,7 +37,7 @@ export function createInMemoryResourceRepository(input: {
   })
   const resolvedElement = (element: ResourceElement): ResourceElement => {
     const pack = packs.find(item => item.id === element.packId)
-    return pack ? resolveResourceElementMetadata(pack, folders.filter(folder => folder.packId === element.packId), element) : element
+    return pack ? resolveEffectiveResourceMetadata(pack, folders.filter(folder => folder.packId === element.packId), element) : element
   }
   return {
     async listPacks() {

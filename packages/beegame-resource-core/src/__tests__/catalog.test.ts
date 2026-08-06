@@ -132,8 +132,8 @@ describe('bounded requirement matching', () => {
       expect.objectContaining({
         requirementId: 'requirement-a',
         status: 'matched',
-        candidates: [
-          expect.objectContaining({
+        bundles: [expect.objectContaining({
+          candidates: [expect.objectContaining({
             elementId: 'tower-model',
             delivery: {
               disposition: 'convert',
@@ -141,8 +141,8 @@ describe('bounded requirement matching', () => {
               targetFormat: 'glb',
               adapterId: 'model-fbx-to-glb',
             },
-          }),
-        ],
+          })],
+        })],
       }),
     ])
   })
@@ -194,17 +194,36 @@ describe('bounded requirement matching', () => {
       maxCandidatesPerRequirement: 2,
     })
 
-    expect(result.groups[0]?.candidates.map(item => item.elementId)).toEqual([
-      'a',
-      'm',
-    ])
-    expect(result.groups[0]?.candidates[0]?.delivery.disposition).toBe(
+    expect(result.groups[0]?.bundles.map(bundle => bundle.candidates[0]?.elementId)).toEqual(['a'])
+    expect(result.groups[0]?.bundles[0]?.candidates[0]?.delivery.disposition).toBe(
       'direct',
     )
   })
 
-  test('does not turn missing semantic metadata into a no-match decision', () => {
-    const unclassified = element(
+  test('forms a bundle from multiple roots to cover separate obligations', () => {
+    const model = element('bundle-model', 'world-kit', 'models/bundle.glb', 'models', 'model', ['building'], [])
+    const texture = element('bundle-texture', 'world-kit', 'textures/bundle.png', 'textures', 'texture', ['building'], [])
+    const result = matchResourceRequirements([packs[0]!], [model, texture], {
+      requirements: [{
+        requirementId: 'bundle-requirement',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model', 'texture'], usageTags: ['building'], capabilities: [], styles: ['Stylized'],
+          coverage: [{ assetKinds: ['model'] }, { assetKinds: ['texture'] }],
+        },
+      }],
+      deliveryCapabilities: [
+        { sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb' },
+        { sourceFormat: 'png', disposition: 'direct', targetFormat: 'png' },
+      ],
+    })
+
+    expect(result.groups[0]?.status).toBe('matched')
+    expect(result.groups[0]?.bundles[0]?.candidates.map(item => item.elementId)).toEqual(['bundle-model', 'bundle-texture'])
+    expect(result.groups[0]?.bundles[0]?.coveredObligations).toEqual(['0', '1'])
+  })
+
+  test('excludes non-selection-ready material and returns the sole no-match outcome', () => {
+    const incomplete = element(
       'untagged-model',
       'world-kit',
       'models/untagged.glb',
@@ -213,7 +232,7 @@ describe('bounded requirement matching', () => {
       [],
       [],
     )
-    const result = matchResourceRequirements(packs, [unclassified], {
+    const result = matchResourceRequirements(packs, [incomplete], {
       requirements: [
         {
           requirementId: 'environment-model',
@@ -237,26 +256,25 @@ describe('bounded requirement matching', () => {
 
     expect(result.groups[0]).toEqual(
       expect.objectContaining({
-        status: 'unclassified',
-        candidates: [],
-        unclassifiedElementCount: 1,
+        status: 'no-match',
+        bundles: [],
       }),
     )
   })
 
-  test('keeps the wire result bounded when many eligible elements lack semantic metadata', () => {
-    const unclassified = Array.from({ length: 1_000 }, (_, index) =>
+  test('keeps the two-outcome wire result bounded when catalog administration has incomplete material', () => {
+    const incomplete = Array.from({ length: 1_000 }, (_, index) =>
       element(
-        `unclassified-${index}`,
+        `incomplete-${index}`,
         'world-kit',
-        `models/unclassified-${index}.glb`,
+        `models/incomplete-${index}.glb`,
         'models',
         'model',
         [],
         [],
       ),
     )
-    const result = matchResourceRequirements(packs, unclassified, {
+    const result = matchResourceRequirements(packs, incomplete, {
       requirements: [{
         requirementId: 'environment-model',
         profile: {
@@ -270,14 +288,13 @@ describe('bounded requirement matching', () => {
     })
 
     expect(result.groups[0]).toEqual(expect.objectContaining({
-      status: 'unclassified',
-      candidates: [],
-      unclassifiedElementCount: 1_000,
+      status: 'no-match',
+      bundles: [],
     }))
-    expect(JSON.stringify(result).length).toBeLessThan(256)
+    expect(JSON.stringify(result).length).toBeLessThan(2_048)
   })
 
-  test('keeps semantically incomplete eligible elements out of no-match', () => {
+  test('does not expose incomplete catalog metadata as a third workflow state', () => {
     const incomplete = {
       ...element(
         'incomplete', 'world-kit', 'models/incomplete.glb',
@@ -301,9 +318,40 @@ describe('bounded requirement matching', () => {
     })
 
     expect(result.groups[0]).toEqual(expect.objectContaining({
-      status: 'unclassified',
-      candidates: [],
-      unclassifiedElementCount: 1,
+      status: 'no-match',
+      bundles: [],
+    }))
+  })
+
+  test('keeps a valid root when an unrelated root no longer meets readiness', () => {
+    const valid = element(
+      'valid-environment', 'world-kit', 'models/valid.glb',
+      'models', 'model', ['environment'], [],
+    )
+    const invalidRoot = {
+      ...element(
+        'invalid-root', 'world-kit', 'models/invalid.glb',
+        'models', 'model', ['prop'], [],
+      ),
+      specs: {},
+    }
+    const result = matchResourceRequirements(packs, [valid, invalidRoot], {
+      requirements: [{
+        requirementId: 'environment-model',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model'],
+          usageTags: ['environment'], capabilities: [], styles: ['Stylized'],
+        },
+      }],
+      deliveryCapabilities: [{
+        sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb',
+      }],
+    })
+
+    expect(result.groups[0]).toEqual(expect.objectContaining({
+      requirementId: 'environment-model',
+      status: 'matched',
+      bundles: [expect.objectContaining({ candidates: [expect.objectContaining({ elementId: 'valid-environment' })] })],
     }))
   })
 })

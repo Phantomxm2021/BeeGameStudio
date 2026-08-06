@@ -1,6 +1,13 @@
-import type { ResourceElement, ResourceFolder, ResourcePack, ResourceUsageTag, ResourceUsageTagsSource } from './types'
+import type {
+  ResourceElement,
+  ResourceFolder,
+  ResourcePack,
+  ResourceSemanticSuggestion,
+  ResourceUsageTag,
+  ResourceUsageTagsSource,
+} from './types'
 
-export function resolveResourceElementMetadata(
+export function resolveEffectiveResourceMetadata(
   pack: ResourcePack,
   folders: readonly ResourceFolder[],
   element: ResourceElement,
@@ -16,6 +23,49 @@ export function resolveResourceElementMetadata(
   const packTags = pack.elementDefaults?.usageTags ?? []
   if (packTags.length) return withEffectiveUsageTags(element, packTags, 'pack')
   return withEffectiveUsageTags(element, [], 'none')
+}
+
+export function confirmSemanticSuggestion(
+  element: ResourceElement,
+  input: { usageTags: readonly ResourceUsageTag[]; styleOverride?: string },
+): ResourceElement {
+  return {
+    ...element,
+    usageTags: [...new Set(input.usageTags)],
+    usageTagsMode: 'override',
+    ...(input.styleOverride === undefined ? {} : { styleOverride: input.styleOverride }),
+    semanticSuggestion: undefined,
+  }
+}
+
+export function rejectSemanticSuggestion(element: ResourceElement): ResourceElement {
+  const { semanticSuggestion: _discarded, ...withoutSuggestion } = element
+  return withoutSuggestion
+}
+
+export function buildResourceSemanticSuggestion(
+  pack: ResourcePack,
+  folders: readonly ResourceFolder[],
+  element: ResourceElement,
+  generatedAt: string,
+  generatorRevision: string,
+): ResourceSemanticSuggestion | undefined {
+  const inherited = resolveEffectiveResourceMetadata(pack, folders, {
+    ...element,
+    usageTags: [],
+    usageTagsMode: 'inherit',
+  })
+  const usageTags = inherited.usageTags ?? []
+  if (!usageTags.length) return undefined
+  return {
+    usageTags: [...usageTags],
+    styles: element.styleOverride ? [element.styleOverride] : [...pack.styles],
+    relations: [],
+    evidence: [`confirmed ${inherited.usageTagsSource ?? 'inherited'} policy`],
+    confidence: 'high',
+    generatedAt,
+    generatorRevision,
+  }
 }
 
 function closestContainingFolder(folders: readonly ResourceFolder[], elementPath: string): ResourceFolder | undefined {

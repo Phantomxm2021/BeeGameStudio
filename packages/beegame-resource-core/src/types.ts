@@ -157,6 +157,16 @@ export type ResourceElementDefaults = {
 export type ResourceUsageTagsMode = 'inherit' | 'override' | 'manual-only'
 export type ResourceUsageTagsSource = 'element' | 'folder' | 'pack' | 'none'
 
+export type ResourceSemanticSuggestion = {
+  usageTags: readonly ResourceUsageTag[]
+  styles: readonly string[]
+  relations: readonly ResourceElementRelation[]
+  evidence: readonly string[]
+  confidence: 'high' | 'medium' | 'low'
+  generatedAt: string
+  generatorRevision: string
+}
+
 export type ResourceFolder = {
   id: string
   packId: string
@@ -220,6 +230,8 @@ export type ResourceElement = {
   usageTagsMode?: ResourceUsageTagsMode
   /** Read-only provenance of the effective usageTags returned by a repository. */
   usageTagsSource?: ResourceUsageTagsSource
+  /** Temporary curation input; it is never used by catalog reads or matching. */
+  semanticSuggestion?: ResourceSemanticSuggestion
   assetKind?: ResourceAssetKind
   capabilities?: readonly ResourceCapability[]
   /** Inspected contents of this logical asset root (for example one GLB). */
@@ -281,6 +293,7 @@ export type ResourceAcquisitionProfile = {
   usageTags: readonly ResourceUsageTag[]
   capabilities: readonly ResourceCapability[]
   styles: readonly string[]
+  coverage?: readonly ResourceCoverageObligation[]
 }
 
 export type ResourceDeliveryCapability = {
@@ -288,6 +301,14 @@ export type ResourceDeliveryCapability = {
   disposition: 'direct' | 'convert'
   targetFormat: string
   adapterId?: string
+}
+
+export type ResourceCoverageObligation = {
+  assetKinds?: readonly ResourceAssetKind[]
+  usageTags?: readonly ResourceUsageTag[]
+  capabilities?: readonly ResourceCapability[]
+  relationKinds?: readonly ResourceRelationKind[]
+  embeddedKinds?: readonly ResourceEmbeddedComponentKind[]
 }
 
 export type ResourceRequirementMatchRequest = {
@@ -303,11 +324,23 @@ export type ResourceRequirementCandidate = ResourceCatalogElement & {
   delivery: ResourceDeliveryCapability
 }
 
+export type ResourceRequirementCandidateBundle = {
+  bundleId: string
+  candidates: readonly ResourceRequirementCandidate[]
+  coveredObligations: readonly string[]
+  uncoveredObligations: readonly string[]
+}
+
+export type ResourceMatchDiagnostic = {
+  code: 'missing_semantics' | 'technical_not_ready' | 'dependency_not_ready' | 'delivery_unsupported' | 'coverage_gap'
+  count: number
+}
+
 export type ResourceRequirementMatchGroup = {
   requirementId: string
-  status: 'matched' | 'no-match' | 'unclassified'
-  candidates: readonly ResourceRequirementCandidate[]
-  unclassifiedElementCount: number
+  status: 'matched' | 'no-match'
+  bundles: readonly ResourceRequirementCandidateBundle[]
+  diagnostics: readonly ResourceMatchDiagnostic[]
 }
 
 export type ResourceRequirementMatchResult = {

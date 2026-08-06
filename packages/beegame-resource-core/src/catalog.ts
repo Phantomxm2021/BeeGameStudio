@@ -10,14 +10,18 @@ import type {
   ResourceCategory,
   ResourceDimension,
   ResourceElement,
+  ResourceCoverageObligation,
   ResourcePack,
   ResourcePackPrimaryCategory,
+  ResourceMatchDiagnostic,
   ResourceRequirementCandidate,
+  ResourceRequirementCandidateBundle,
   ResourceRequirementMatchRequest,
   ResourceRequirementMatchResult,
   ResourceUsageTag,
 } from './types'
 import { normalizeResourceTechnicalFacts } from './technical-facts'
+import { evaluateResourceElementSelectionReadiness } from './publish-readiness'
 
 /**
  * Browse published Packs without assigning project-specific game roles.
@@ -113,17 +117,7 @@ export function matchResourceRequirements(
   elements: readonly ResourceElement[],
   request: ResourceRequirementMatchRequest,
 ): ResourceRequirementMatchResult {
-  const publishedById = new Map(
-    packs
-      .filter(pack => pack.status === 'published')
-      .map(pack => [pack.id, pack] as const),
-  )
-  const readyIds = readyDependencyIds(elements)
-  const immutableIds = new Set(
-    elements
-      .filter(element => element.status === 'ready' && hasImmutableContentHash(element))
-      .map(element => element.id),
-  )
+  const publishedById = new Map(packs.filter(pack => pack.status === 'published').map(pack => [pack.id, pack] as const))
   const deliveryByFormat = new Map(
     request.deliveryCapabilities.map(capability => [
       normalizeFormat(capability.sourceFormat),
@@ -142,38 +136,42 @@ export function matchResourceRequirements(
   return {
     groups: request.requirements.map(requirement => {
       const candidates: ResourceRequirementCandidate[] = []
-      let unclassifiedElementCount = 0
+      const diagnosticCounts = new Map<ResourceMatchDiagnostic['code'], number>()
+      const recordDiagnostic = (code: ResourceMatchDiagnostic['code']) => {
+        diagnosticCounts.set(code, (diagnosticCounts.get(code) ?? 0) + 1)
+      }
       for (const element of elements) {
         const pack = publishedById.get(element.packId)
-        if (
-          !pack ||
-          element.status !== 'ready' ||
-          !hasCompleteDependencyClosure(element, readyIds)
-        )
+        if (!pack) continue
+        const readiness = evaluateResourceElementSelectionReadiness(pack, element, elements)
+        if (!readiness.selectionReady) {
+          const code = readiness.blocking.some(issue => issue.code === 'dependency_missing' || issue.code === 'dependency_not_ready')
+            ? 'dependency_not_ready'
+            : 'technical_not_ready'
+          recordDiagnostic(code)
           continue
+        }
         const dimension = element.dimensionOverride ?? pack.dimension
         const assetKind = element.assetKind
         const styles = element.styleOverride
           ? [element.styleOverride]
           : normalizedPackStyles(pack)
         const delivery = deliveryByFormat.get(fileExtension(element.path))
-        if (!delivery || !requirement.profile.dimensions.includes(dimension))
+        if (!delivery) {
+          recordDiagnostic('delivery_unsupported')
+          continue
+        }
+        if (!requirement.profile.dimensions.includes(dimension))
           continue
         if (
           !assetKind ||
-          !hasImmutableContentHash(element) ||
-          !hasCompleteDependencyClosure(element, immutableIds) ||
+          !requirement.profile.assetKinds.includes(assetKind) ||
           (requirement.profile.styles.length > 0 && styles.length === 0) ||
-          (requirement.profile.capabilities.length > 0 &&
-            element.capabilities === undefined) ||
-          (requirement.profile.usageTags.length > 0 &&
-            !(element.usageTags?.length ?? 0))
+          (requirement.profile.capabilities.length > 0 && element.capabilities === undefined)
         ) {
-          unclassifiedElementCount += 1
           continue
         }
         if (
-          !requirement.profile.assetKinds.includes(assetKind) ||
           (requirement.profile.styles.length > 0 &&
             !intersectsNormalized(requirement.profile.styles, styles)) ||
           !requirement.profile.capabilities.every(capability =>
@@ -195,18 +193,58 @@ export function matchResourceRequirements(
           compareText(left.packId, right.packId) ||
           compareText(left.elementId, right.elementId),
       )
+      const obligations = requirement.profile.coverage?.length
+        ? requirement.profile.coverage
+        : [{
+            assetKinds: requirement.profile.assetKinds,
+            usageTags: requirement.profile.usageTags,
+            capabilities: requirement.profile.capabilities,
+          }]
+      const bundles: ResourceRequirementCandidateBundle[] = []
+      const maxBundles = Math.min(limit, 8)
+      const buildBundle = (orderedCandidates: readonly ResourceRequirementCandidate[]): ResourceRequirementCandidateBundle | undefined => {
+        const selected: ResourceRequirementCandidate[] = []
+        const covered = new Set<number>()
+        for (const candidate of orderedCandidates) {
+          const gained = obligations.flatMap((obligation, index) =>
+            covered.has(index) || !candidateCoversObligation(candidate, obligation) ? [] : [index],
+          )
+          if (!gained.length) continue
+          selected.push(candidate)
+          gained.forEach(index => covered.add(index))
+          if (covered.size === obligations.length || selected.length >= limit) break
+        }
+        if (!selected.length) return undefined
+        return {
+          bundleId: `${requirement.requirementId}:${selected.map(candidate => candidate.elementId).join(',')}`,
+          candidates: selected,
+          coveredObligations: [...covered].sort((left, right) => left - right).map(String),
+          uncoveredObligations: obligations.map((_, index) => String(index)).filter(index => !covered.has(Number(index))),
+        }
+      }
+      const bundle = buildBundle(candidates)
+      if (bundle && bundle.uncoveredObligations.length === 0) bundles.push(bundle)
+      else if (candidates.length) recordDiagnostic('coverage_gap')
       return {
         requirementId: requirement.requirementId,
-        status: candidates.length
-          ? ('matched' as const)
-          : unclassifiedElementCount
-            ? ('unclassified' as const)
-            : ('no-match' as const),
-        candidates: candidates.slice(0, limit),
-        unclassifiedElementCount,
+        status: bundles.length ? ('matched' as const) : ('no-match' as const),
+        bundles: bundles.slice(0, maxBundles),
+        diagnostics: [...diagnosticCounts.entries()].map(([code, count]) => ({ code, count })),
       }
     }),
   }
+}
+
+function candidateCoversObligation(
+  candidate: ResourceRequirementCandidate,
+  obligation: ResourceCoverageObligation,
+): boolean {
+  if (obligation.assetKinds?.length && (!candidate.assetKind || !obligation.assetKinds.includes(candidate.assetKind))) return false
+  if (obligation.usageTags?.length && !intersects(obligation.usageTags, candidate.usageTags)) return false
+  if (obligation.capabilities?.length && !obligation.capabilities.every(capability => candidate.capabilities.includes(capability))) return false
+  if (obligation.relationKinds?.length && !obligation.relationKinds.every(kind => candidate.relations.some(relation => relation.kind === kind))) return false
+  if (obligation.embeddedKinds?.length && !obligation.embeddedKinds.every(kind => candidate.contentProfile?.components.some(component => component.kind === kind))) return false
+  return true
 }
 
 function hasImmutableContentHash(element: ResourceElement): boolean {

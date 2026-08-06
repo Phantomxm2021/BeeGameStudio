@@ -12,6 +12,69 @@ export type ResourcePublishReadiness = {
   canPublish: boolean
 }
 
+export type ResourceElementSelectionReadiness = {
+  selectionReady: boolean
+  blocking: readonly ResourcePublishIssue[]
+  warnings: readonly ResourcePublishIssue[]
+  dependencyIds: readonly string[]
+}
+
+export function evaluateResourceElementSelectionReadiness(
+  _pack: ResourcePack,
+  root: ResourceElement,
+  elements: readonly ResourceElement[],
+): ResourceElementSelectionReadiness {
+  const blocking: ResourcePublishIssue[] = []
+  const warnings: ResourcePublishIssue[] = []
+  const byId = new Map(elements.map(element => [element.id, element]))
+  const dependencyIds = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (element: ResourceElement): void => {
+    if (visited.has(element.id)) return
+    visited.add(element.id)
+    for (const dependencyId of [
+      ...element.dependencies,
+      ...(element.dependencyBindings ?? []).map(binding => binding.dependencyElementId),
+    ]) {
+      dependencyIds.add(dependencyId)
+      const dependency = byId.get(dependencyId)
+      if (!dependency) {
+        blocking.push({ code: 'dependency_missing', message: `Element ${element.name} references a missing dependency`, elementId: element.id })
+      } else if (dependency.status !== 'ready') {
+        blocking.push({ code: 'dependency_not_ready', message: `Element ${element.name} references a dependency that is not ready`, elementId: element.id })
+      } else {
+        visit(dependency)
+      }
+    }
+  }
+  visit(root)
+
+  if (root.status !== 'ready') blocking.push({ code: 'element_not_ready', message: `Element ${root.name} is not ready`, elementId: root.id })
+  if (!hasImmutableContentHash(root)) blocking.push({ code: 'content_hash_missing', message: `Element ${root.name} has no immutable content hash`, elementId: root.id })
+  if (!root.assetKind) blocking.push({ code: 'asset_kind_missing', message: `Element ${root.name} has no typed asset kind`, elementId: root.id })
+  if (!(root.usageTags?.length ?? 0)) blocking.push({ code: 'usage_tags_missing', message: `Element ${root.name} has no confirmed effective usage tags`, elementId: root.id })
+
+  const externalReferences = externalReferencePaths(root.specs.externalReferences, root.specs.unresolvedTextureReferences)
+  const boundReferences = new Set((root.dependencyBindings ?? []).map(binding => normalizeExternalReferencePath(binding.referencePath)).filter((value): value is string => Boolean(value)))
+  if (externalReferences.some(reference => !boundReferences.has(reference))) {
+    blocking.push({ code: 'external_dependency_unmapped', message: `Element ${root.name} has external file references without dependency mappings`, elementId: root.id })
+  }
+  for (const relation of root.relations ?? []) {
+    if (relation.required !== false && !byId.has(relation.targetElementId)) {
+      blocking.push({ code: 'semantic_relation_missing', message: `Element ${root.name} has a required relation to a missing element`, elementId: root.id })
+    }
+  }
+  if (root.kind === 'model' && (!root.contentProfile || root.contentProfile.inspection.status !== 'complete')) {
+    warnings.push({ code: 'content_profile_incomplete', message: `Element ${root.name} has not been fully inspected as a logical asset`, elementId: root.id })
+  }
+  return {
+    selectionReady: blocking.length === 0,
+    blocking,
+    warnings,
+    dependencyIds: [...dependencyIds].sort(),
+  }
+}
+
 /**
  * Evaluates only deterministic repository facts. It deliberately does not
  * guess an asset's meaning from a filename: an incompatible or unresolved
@@ -65,8 +128,11 @@ export function evaluateResourcePackPublishReadiness(
     if (element.status === 'ready' && !dependencyElementIds.has(element.id) && !element.usageTags?.length) {
       blocking.push({ code: 'usage_tags_missing', message: `Element ${element.name} has no declared usage tags`, elementId: element.id })
     }
+    if (element.status === 'ready' && !hasImmutableContentHash(element)) {
+      blocking.push({ code: 'content_hash_missing', message: `Element ${element.name} has no immutable content hash`, elementId: element.id })
+    }
     if (element.status === 'ready' && !element.assetKind) {
-      warnings.push({ code: 'asset_kind_missing', message: `Element ${element.name} has no typed asset kind`, elementId: element.id })
+      blocking.push({ code: 'asset_kind_missing', message: `Element ${element.name} has no typed asset kind`, elementId: element.id })
     }
     if (element.status === 'ready' && element.kind === 'model' && (!element.contentProfile || element.contentProfile.inspection.status !== 'complete')) {
       warnings.push({ code: 'content_profile_incomplete', message: `Element ${element.name} has not been fully inspected as a logical asset`, elementId: element.id })
@@ -122,6 +188,14 @@ export function evaluateResourcePackPublishReadiness(
   }
 
   return { blocking, warnings, canPublish: blocking.length === 0 }
+}
+
+function hasImmutableContentHash(element: ResourceElement): boolean {
+  const value = element.specs.contentHash
+  if (typeof value !== 'string' || value.length !== 64) return false
+  for (const character of value.toLocaleLowerCase())
+    if (!'0123456789abcdef'.includes(character)) return false
+  return true
 }
 
 function externalReferencePaths(...values: unknown[]): string[] {

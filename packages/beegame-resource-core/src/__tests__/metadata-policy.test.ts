@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveResourceElementMetadata } from '../metadata-policy'
+import { resolveEffectiveResourceMetadata } from '../metadata-policy'
 import type { ResourceElement, ResourceFolder, ResourcePack } from '../types'
 
 const pack: ResourcePack = {
@@ -19,20 +19,20 @@ const folders: ResourceFolder[] = [
 
 describe('resource metadata policy', () => {
   test('uses the closest explicit folder policy before Pack defaults', () => {
-    expect(resolveResourceElementMetadata(pack, folders, element)).toEqual(expect.objectContaining({ usageTags: ['character'], usageTagsSource: 'folder' }))
+    expect(resolveEffectiveResourceMetadata(pack, folders, element)).toEqual(expect.objectContaining({ usageTags: ['character'], usageTagsSource: 'folder' }))
   })
 
   test('keeps an explicit element override above inherited policy', () => {
-    expect(resolveResourceElementMetadata(pack, folders, { ...element, usageTags: ['weapon-equipment'], usageTagsMode: 'override' }))
+    expect(resolveEffectiveResourceMetadata(pack, folders, { ...element, usageTags: ['weapon-equipment'], usageTagsMode: 'override' }))
       .toEqual(expect.objectContaining({ usageTags: ['weapon-equipment'], usageTagsSource: 'element' }))
   })
 
   test('supports a deliberate manual-only element without inheriting', () => {
-    expect(resolveResourceElementMetadata(pack, folders, { ...element, usageTagsMode: 'manual-only' }))
+    expect(resolveEffectiveResourceMetadata(pack, folders, { ...element, usageTagsMode: 'manual-only' }))
       .toEqual(expect.objectContaining({ usageTags: [], usageTagsSource: 'none' }))
   })
 
   test('falls back to Pack defaults when no folder policy applies', () => {
-    expect(resolveResourceElementMetadata(pack, [], element)).toEqual(expect.objectContaining({ usageTags: ['prop'], usageTagsSource: 'pack' }))
+    expect(resolveEffectiveResourceMetadata(pack, [], element)).toEqual(expect.objectContaining({ usageTags: ['prop'], usageTagsSource: 'pack' }))
   })
 })

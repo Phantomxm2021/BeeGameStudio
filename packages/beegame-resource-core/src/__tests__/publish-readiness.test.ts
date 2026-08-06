@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { evaluateResourcePackPublishReadiness } from '../publish-readiness'
+import { evaluateResourceElementSelectionReadiness, evaluateResourcePackPublishReadiness } from '../publish-readiness'
 import type { ResourceElement, ResourcePack } from '../types'
 
 const pack: ResourcePack = {
@@ -9,10 +9,25 @@ const pack: ResourcePack = {
 }
 const ready: ResourceElement = {
   id: 'tree', packId: 'forest', name: 'Tree', path: 'models/tree.glb', category: 'models', kind: 'model',
-  assetKind: 'model', contentProfile: { packaging: 'self-contained', components: [{ id: 'mesh:0', kind: 'mesh' }], inspection: { status: 'complete', source: 'server' } }, specs: { size: 1024, mimeType: 'model/gltf-binary' }, usageTags: ['environment'], dependencies: [], status: 'ready',
+  assetKind: 'model', contentProfile: { packaging: 'self-contained', components: [{ id: 'mesh:0', kind: 'mesh' }], inspection: { status: 'complete', source: 'server' } }, specs: { size: 1024, mimeType: 'model/gltf-binary', contentHash: 'a'.repeat(64) }, usageTags: ['environment'], dependencies: [], status: 'ready',
 }
 
 describe('resource pack publish readiness', () => {
+  test('keeps a valid root selectable when an unrelated root is invalid', () => {
+    const valid = evaluateResourceElementSelectionReadiness(pack, ready, [ready, { ...ready, id: 'invalid', specs: {} }])
+    const invalid = evaluateResourceElementSelectionReadiness(pack, { ...ready, id: 'invalid', specs: {} }, [ready, { ...ready, id: 'invalid', specs: {} }])
+    expect(valid.selectionReady).toBe(true)
+    expect(invalid.selectionReady).toBe(false)
+  })
+
+  test('isolates a root whose required dependency is not ready', () => {
+    const root = { ...ready, dependencies: ['dependency'] }
+    const dependency = { ...ready, id: 'dependency', status: 'failed' as const, usageTags: [] }
+    const report = evaluateResourceElementSelectionReadiness(pack, root, [root, dependency])
+    expect(report.selectionReady).toBe(false)
+    expect(report.blocking.map(issue => issue.code)).toContain('dependency_not_ready')
+  })
+
   test('allows a ready Pack with recorded license and version', () => {
     expect(evaluateResourcePackPublishReadiness(pack, [ready])).toEqual({ blocking: [], warnings: [], canPublish: true })
   })
@@ -30,8 +45,8 @@ describe('resource pack publish readiness', () => {
     const report = evaluateResourcePackPublishReadiness(
       { ...pack, license: 'CC-BY-4.0' },
       [
-        { ...ready, id: 'binary', specs: { ...ready.specs, inspectionStatus: 'binary_fbx_requires_processor', previewStatus: 'failed', contentHash: 'same-content' } },
-        { ...ready, id: 'copy', name: 'Tree Copy', path: 'models/tree-copy.glb', specs: { ...ready.specs, contentHash: 'same-content', size: 513 * 1024 * 1024 } },
+        { ...ready, id: 'binary', specs: { ...ready.specs, inspectionStatus: 'binary_fbx_requires_processor', previewStatus: 'failed', contentHash: 'b'.repeat(64) } },
+        { ...ready, id: 'copy', name: 'Tree Copy', path: 'models/tree-copy.glb', specs: { ...ready.specs, contentHash: 'b'.repeat(64), size: 513 * 1024 * 1024 } },
       ],
     )
     expect(report.canPublish).toBe(true)
@@ -45,6 +60,24 @@ describe('resource pack publish readiness', () => {
     expect(report.canPublish).toBe(false)
     expect(report.blocking).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'usage_tags_missing', elementId: ready.id }),
+    ]))
+  })
+
+  test('blocks publication when a ready root lacks immutable identity or typed asset identity', () => {
+    const missingHash = evaluateResourcePackPublishReadiness(pack, [{
+      ...ready,
+      specs: { size: 1024, mimeType: 'model/gltf-binary' },
+    }])
+    expect(missingHash.blocking).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'content_hash_missing', elementId: ready.id }),
+    ]))
+
+    const missingKind = evaluateResourcePackPublishReadiness(pack, [{
+      ...ready,
+      assetKind: undefined,
+    }])
+    expect(missingKind.blocking).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'asset_kind_missing', elementId: ready.id }),
     ]))
   })
 
