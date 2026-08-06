@@ -3478,7 +3478,7 @@ describe('delivery workflow recovery', () => {
     expect(drained).toBe(true)
   })
 
-  test('hands the next reviewer packet through the dispatcher without stopping the cycle session', async () => {
+  test('closes the accepted reviewer packet before dispatching the next packet in the same cycle', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-packet-handoff-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3495,6 +3495,7 @@ describe('delivery workflow recovery', () => {
     })
     const started: WorkerDispatchRequest[] = []
     const stopped: string[] = []
+    const closed: string[] = []
     let dispatcher!: ReturnType<typeof createDeliveryDispatcher>
     const commonContract = {
       cycleId: 'cycle-1',
@@ -3508,7 +3509,7 @@ describe('delivery workflow recovery', () => {
         async start(request) {
           started.push(request)
           return {
-            sessionId: 'cycle-session',
+            sessionId: `packet-session-${started.length}`,
             dispatchId: request.dispatchId!,
           }
         },
@@ -3516,7 +3517,9 @@ describe('delivery workflow recovery', () => {
         async stop(_dispatchId, reason) {
           stopped.push(reason)
         },
-        async close() {},
+        async close(dispatchId) {
+          closed.push(dispatchId)
+        },
         async status() {
           throw new Error('not used')
         },
@@ -3572,6 +3575,7 @@ describe('delivery workflow recovery', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(started).toHaveLength(2)
     expect(stopped).toEqual([])
+    expect(closed).toEqual([first.dispatchId])
   })
 
   test('starts a checklist author after a reviewer completes at the same phase and revision', async () => {

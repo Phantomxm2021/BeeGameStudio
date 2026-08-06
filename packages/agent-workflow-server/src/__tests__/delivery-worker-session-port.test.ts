@@ -10,7 +10,10 @@ import {
   registerBeeGameAuthoredResources,
   writeBeeGameAssetManifest,
 } from '../beegame/asset-contracts'
-import type { BeeGameSessionManager } from '../beegame/session-manager'
+import type {
+  BeeGameSession,
+  BeeGameSessionManager,
+} from '../beegame/session-manager'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import {
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
@@ -978,7 +981,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('reuses one frozen-revision reviewer execution session across serial packets', async () => {
+  test('isolates every frozen-revision reviewer packet in its own session', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-review-session-reuse-'),
     )
@@ -989,44 +992,53 @@ describe('delivery worker session credentials', () => {
     ]).references.find(
       reference => reference.path === 'systemDeliveryContract',
     )!.referenceId
-    const session = {
-      id: 'review-session',
-      status: 'running' as const,
-      turnStatus: 'idle' as const,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-    const events: ReturnType<BeeGameSessionManager['events']> = []
+    const liveSessions = new Map<string, BeeGameSession>()
+    const eventsBySession = new Map<
+      string,
+      ReturnType<BeeGameSessionManager['events']>
+    >()
     const prompts: string[] = []
     let activeDispatchId = ''
     let startCount = 0
-    let rebindCount = 0
-    const rebindLifecycle: string[] = []
     const disposedSessionIds: string[] = []
     const sessions = {
       start(input: { workflowDispatchId: string }) {
         startCount += 1
         activeDispatchId = input.workflowDispatchId
+        const session = {
+          id: `session-${input.workflowDispatchId}`,
+          status: 'running' as const,
+          turnStatus: 'idle' as const,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        liveSessions.set(session.id, session as BeeGameSession)
+        eventsBySession.set(session.id, [])
         return session
       },
-      get() {
-        return session
-      },
-      rebindWorkflowReviewer(input: { dispatchId: string }) {
-        rebindLifecycle.push('rebind')
-        rebindCount += 1
-        activeDispatchId = input.dispatchId
-      },
-      async flushWorkflowUsage() {
-        rebindLifecycle.push('flush-usage')
+      get(sessionId: string) {
+        return liveSessions.get(sessionId)
       },
       updateAuthToken() {},
       stop() {},
       async disposeWorkflowWorker(sessionId: string) {
         disposedSessionIds.push(sessionId)
       },
-      async sendWithDisplay(_sessionId: string, prompt: string) {
+      async sendWithDisplay(sessionId: string, prompt: string) {
         prompts.push(prompt)
+        const events = eventsBySession.get(sessionId)!
+        if (activeDispatchId === 'review-packet-1')
+          events.push({
+            id: `rejected-${activeDispatchId}`,
+            type: 'tool.failed',
+            text: 'SubmitDocumentReviewPacket failed',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'SubmitDocumentReviewPacket',
+              input: { checks: [] },
+              output: 'document review packet must exactly cover currentCheckIds',
+            },
+          } as never)
         events.push({
           id: `tool-${activeDispatchId}`,
           type: 'tool.completed',
@@ -1047,8 +1059,8 @@ describe('delivery worker session credentials', () => {
           },
         } as never)
       },
-      events() {
-        return events
+      events(sessionId: string) {
+        return eventsBySession.get(sessionId) ?? []
       },
       hasInFlightToolSubmission() {
         return false
@@ -1082,15 +1094,17 @@ describe('delivery worker session credentials', () => {
       await port.submit('review-packet-1', 'full frozen projection')
       await port.waitForTerminal?.('review-packet-1')
       await port.close?.('review-packet-1')
-      expect(disposedSessionIds).toEqual([])
+      expect(disposedSessionIds).toEqual(['session-review-packet-1'])
 
       await port.start(request('review-packet-2', 'technical_feasibility'))
-      expect(rebindLifecycle).toEqual(['flush-usage', 'rebind'])
-      await port.submit('review-packet-2', 'must be replaced')
+      await port.submit('review-packet-2', 'second frozen projection')
       await port.waitForTerminal?.('review-packet-2')
 
       await port.close?.('review-packet-2')
-      expect(disposedSessionIds).toEqual(['review-session'])
+      expect(disposedSessionIds).toEqual([
+        'session-review-packet-1',
+        'session-review-packet-2',
+      ])
       await port.start(
         request(
           'review-packet-new-cycle',
@@ -1101,16 +1115,12 @@ describe('delivery worker session credentials', () => {
       await port.submit('review-packet-new-cycle', 'new frozen projection')
       await port.waitForTerminal?.('review-packet-new-cycle')
 
-      expect(startCount).toBe(2)
-      expect(rebindCount).toBe(1)
+      expect(startCount).toBe(3)
       expect(prompts).toHaveLength(3)
       expect(prompts[0]).toStartWith('full frozen projection')
-      expect(prompts[1]).toContain(
-        'Continue the same frozen-revision Reviewer execution session',
-      )
-      expect(prompts[1]).toContain('BEGIN REVIEW REFERENCE INDEX')
-      expect(prompts[1]).toContain('BEGIN REVIEW ARTIFACT')
+      expect(prompts[1]).toStartWith('second frozen projection')
       expect(prompts[2]).toStartWith('new frozen projection')
+      expect(eventsBySession.get('session-review-packet-2')).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

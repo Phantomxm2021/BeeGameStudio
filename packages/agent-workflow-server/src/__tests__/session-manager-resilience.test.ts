@@ -284,7 +284,7 @@ describe('BeeGame session runtime resilience', () => {
     ).toBe(false)
   })
 
-  test('ends accepted reviewer output without destroying the reusable execution session', async () => {
+  test('ends accepted reviewer output so the delivery port can dispose the packet session', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-review-terminal-stop-'))
     const workspacePath = join(root, 'workspace')
     let startCount = 0
@@ -296,7 +296,6 @@ describe('BeeGame session runtime resilience', () => {
         return {
           submit: async input => {
             submitCount += 1
-            if (submitCount > 1) return
             input.onMessage({
               type: 'assistant',
               message: {
@@ -372,10 +371,8 @@ describe('BeeGame session runtime resilience', () => {
       status: 'running',
       turnStatus: 'idle',
     })
-    await manager.send(session.id, 'next review packet')
-    await waitForIdle(manager, session.id)
     expect(startCount).toBe(1)
-    expect(submitCount).toBe(2)
+    expect(submitCount).toBe(1)
     expect(stopCount).toBeGreaterThanOrEqual(1)
   })
 
