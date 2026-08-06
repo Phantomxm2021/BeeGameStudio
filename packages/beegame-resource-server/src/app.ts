@@ -13,6 +13,7 @@ import {
   hasElementCatalogFilters,
   ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
+  matchResourceRequirements,
   resolveExactResourceElement,
   searchResourcePacks,
   type ResourceDimension,
@@ -20,6 +21,8 @@ import {
   type ResourceAssetKind,
   type ResourceCapability,
   type ResourceUsageTag,
+  type ResourceDeliveryCapability,
+  type ResourceRequirementMatchRequest,
   type ResourcePack,
   type ResourceFolder,
   type ResourceRepository,
@@ -80,6 +83,7 @@ export function createBeeGameResourceServerApp(
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
           '/api/resource-catalog/packs',
+          '/api/resource-catalog/matches',
             '/api/resource-library/resolve',
           ].includes(pathname)) ||
         (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
@@ -124,6 +128,18 @@ export function createBeeGameResourceServerApp(
         const packs = await options.repository.listPacks()
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
+      }
+      if (request.method === 'POST' && pathname === '/api/resource-catalog/matches') {
+        const matchRequest = parseResourceRequirementMatchRequest(await request.json())
+        const packs = await options.repository.listPacks()
+        const elements = (await Promise.all(
+          packs.filter(pack => pack.status === 'published').map(pack => options.repository.listElements(pack.id)),
+        )).flat()
+        const matched = matchResourceRequirements(packs, elements, matchRequest)
+        return corsResponse(Response.json({
+          catalogRevision: await catalogRevision(packs, elements),
+          ...matched,
+        }), options.corsOrigin)
       }
       const packElementsMatch = pathname.match(/^\/api\/resource-catalog\/packs\/([^/]+)\/elements$/)
       if (request.method === 'POST' && packElementsMatch) {
@@ -518,6 +534,83 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
     ...(typeof record.cursor === 'string' && record.cursor ? { cursor: record.cursor } : {}),
     ...(limit ? { limit } : {}),
   }
+}
+
+function parseResourceRequirementMatchRequest(value: unknown): ResourceRequirementMatchRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResourceRequestValidationError('Resource requirement match request must be an object')
+  }
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.requirements) || record.requirements.length === 0 || record.requirements.length > 128) {
+    throw new ResourceRequestValidationError('Resource requirement match request must contain from 1 to 128 requirements')
+  }
+  if (!Array.isArray(record.deliveryCapabilities) || record.deliveryCapabilities.length === 0 || record.deliveryCapabilities.length > 128) {
+    throw new ResourceRequestValidationError('Resource requirement match request must contain from 1 to 128 delivery capabilities')
+  }
+  const requirements = record.requirements.map((value, index) => {
+    const item = requiredRecord(value, `Resource requirement ${index + 1}`)
+    const profile = requiredRecord(item.profile, `Resource requirement ${index + 1} profile`)
+    return {
+      requirementId: requiredString(item.requirementId, `Resource requirement ${index + 1} requirementId`),
+      profile: {
+        dimensions: requiredEnumList(profile.dimensions, RESOURCE_DIMENSIONS, `Resource requirement ${index + 1} dimensions`) as ResourceDimension[],
+        assetKinds: requiredEnumList(profile.assetKinds, RESOURCE_ASSET_KINDS, `Resource requirement ${index + 1} assetKinds`) as ResourceAssetKind[],
+        usageTags: requiredEnumList(profile.usageTags, RESOURCE_USAGE_TAGS, `Resource requirement ${index + 1} usageTags`) as ResourceUsageTag[],
+        capabilities: requiredEnumList(profile.capabilities, RESOURCE_CAPABILITIES, `Resource requirement ${index + 1} capabilities`) as ResourceCapability[],
+        styles: requiredStringList(profile.styles, `Resource requirement ${index + 1} styles`),
+      },
+    }
+  })
+  const deliveryCapabilities = record.deliveryCapabilities.map((value, index): ResourceDeliveryCapability => {
+    const item = requiredRecord(value, `Resource delivery capability ${index + 1}`)
+    if (item.disposition !== 'direct' && item.disposition !== 'convert') {
+      throw new ResourceRequestValidationError(`Resource delivery capability ${index + 1} disposition is unsupported`)
+    }
+    return {
+      sourceFormat: normalizedRequiredFormat(item.sourceFormat, `Resource delivery capability ${index + 1} sourceFormat`),
+      disposition: item.disposition,
+      targetFormat: normalizedRequiredFormat(item.targetFormat, `Resource delivery capability ${index + 1} targetFormat`),
+      ...(item.adapterId === undefined ? {} : { adapterId: requiredString(item.adapterId, `Resource delivery capability ${index + 1} adapterId`) }),
+    }
+  })
+  const maxCandidatesPerRequirement = optionalBoundedInteger(record.maxCandidatesPerRequirement, 'maxCandidatesPerRequirement', 1, 32)
+  return { requirements, deliveryCapabilities, ...(maxCandidatesPerRequirement ? { maxCandidatesPerRequirement } : {}) }
+}
+
+function requiredRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResourceRequestValidationError(`${label} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function requiredEnumList(value: unknown, allowed: readonly string[], label: string): string[] {
+  const values = requiredStringList(value, label)
+  if (values.some(item => !allowed.includes(item))) {
+    throw new ResourceRequestValidationError(`${label} contain unsupported values`)
+  }
+  return values
+}
+
+function requiredStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) {
+    throw new ResourceRequestValidationError(`${label} must be an array of non-empty strings`)
+  }
+  return value.map(item => (item as string).trim())
+}
+
+function normalizedRequiredFormat(value: unknown, label: string): string {
+  const format = requiredString(value, label)
+  return (format.startsWith('.') ? format.slice(1) : format).toLocaleLowerCase()
+}
+
+async function catalogRevision(packs: readonly ResourcePack[], elements: readonly { id: string; packId: string; path: string; status: string }[]): Promise<string> {
+  const facts = JSON.stringify({
+    packs: packs.map(pack => [pack.id, pack.version, pack.status]).sort(),
+    elements: elements.map(element => [element.packId, element.id, element.path, element.status]).sort(),
+  })
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(facts))
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function parseResourceSelections(value: unknown): Array<{

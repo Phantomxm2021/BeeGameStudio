@@ -742,7 +742,14 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               ...this.input.resourceSelectionConfig,
               fetchImpl: PLATFORM_SERVICE_FETCH,
             }),
-            fetchImpl: PLATFORM_SERVICE_FETCH,
+            deliveryCapabilities: CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS.map(
+              adapter => ({
+                sourceFormat: adapter.format,
+                disposition: 'direct' as const,
+                targetFormat: adapter.format,
+                adapterId: `direct-${adapter.format}`,
+              }),
+            ),
           })
         : undefined
     const resourceContentTool =

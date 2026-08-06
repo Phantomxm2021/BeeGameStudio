@@ -15,6 +15,40 @@ const facets = {
 }
 
 describe('Resource selection service client', () => {
+  test('matches all requirements through one strict bounded endpoint', async () => {
+    const requests: Array<{ url: string; body: unknown }> = []
+    const client = createResourceSelectionClient({
+      baseUrl: 'https://resource.invalid',
+      serviceToken: 'token',
+      fetchImpl: async (input, init) => {
+        requests.push({ url: String(input), body: JSON.parse(String(init?.body)) })
+        return Response.json({
+          catalogRevision: 'revision-a',
+          groups: [{
+            requirementId: 'visual.tower', status: 'matched',
+            candidates: [{ ...catalogElement(), assetKind: 'model', delivery: {
+              sourceFormat: 'fbx', disposition: 'convert', targetFormat: 'glb', adapterId: 'converter',
+            } }],
+            unclassifiedElementIds: [],
+          }],
+        })
+      },
+    })
+    const request = {
+      requirements: [{ requirementId: 'visual.tower', profile: {
+        dimensions: ['3D'] as const, assetKinds: ['model'] as const,
+        usageTags: ['building'] as const, capabilities: [], styles: ['stylized'],
+      } }],
+      deliveryCapabilities: [{ sourceFormat: 'fbx', disposition: 'convert' as const, targetFormat: 'glb', adapterId: 'converter' }],
+      maxCandidatesPerRequirement: 8,
+    }
+
+    await expect(client.matchRequirements(request)).resolves.toEqual(
+      expect.objectContaining({ catalogRevision: 'revision-a' }),
+    )
+    expect(requests).toEqual([{ url: 'https://resource.invalid/api/resource-catalog/matches', body: request }])
+  })
+
   test('lists compact Packs through the Pack catalog endpoint', async () => {
     const requests: Array<{ url: string; body: unknown }> = []
     const client = createResourceSelectionClient({

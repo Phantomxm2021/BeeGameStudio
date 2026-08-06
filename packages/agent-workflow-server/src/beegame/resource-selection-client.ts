@@ -3,6 +3,8 @@ import type {
   ResourceCatalogPack,
   ResourceCatalogPage,
   ResourceCatalogRequest,
+  ResourceRequirementMatchRequest,
+  ResourceRequirementMatchResult,
 } from '@bee-game-studio/beegame-resource-core'
 import { serializeQueryEngineError } from './query-engine-worker-protocol'
 
@@ -59,6 +61,9 @@ export type ResourceResolvedSelection = ResourceSelectionResult & {
   destinationPath?: string
   selectionReason: string[]
 }
+export type ResourceRequirementMatchResponse = ResourceRequirementMatchResult & {
+  catalogRevision: string
+}
 
 export function createResourceSelectionClient(options: {
   baseUrl: string
@@ -79,6 +84,18 @@ export function createResourceSelectionClient(options: {
     ? Math.max(0, Math.trunc(options.transportRetryDelayMs!))
     : 100
   return {
+    async matchRequirements(
+      input: ResourceRequirementMatchRequest,
+    ): Promise<ResourceRequirementMatchResponse> {
+      const response = await servicePost('/api/resource-catalog/matches', input)
+      const body = await response.json().catch(() => undefined)
+      if (!response.ok)
+        throw new Error(
+          errorMessage(body) ||
+            `Resource requirement matching failed (${response.status})`,
+        )
+      return parseRequirementMatchResponse(body)
+    },
     async listPacks(
       input: ResourceCatalogInput,
     ): Promise<ResourceCatalogPackPage> {
@@ -159,6 +176,70 @@ export function createResourceSelectionClient(options: {
       ...(json ? { 'content-type': 'application/json' } : {}),
       'x-beegame-resource-service-token': options.serviceToken,
     }
+  }
+}
+
+function parseRequirementMatchResponse(
+  value: unknown,
+): ResourceRequirementMatchResponse {
+  if (
+    !isRecord(value) ||
+    typeof value.catalogRevision !== 'string' ||
+    !value.catalogRevision.trim() ||
+    !Array.isArray(value.groups)
+  ) {
+    throw new Error('Resource requirement match response is invalid')
+  }
+  return {
+    catalogRevision: value.catalogRevision,
+    groups: value.groups.map(group => {
+      if (
+        !isRecord(group) ||
+        typeof group.requirementId !== 'string' ||
+        !group.requirementId.trim() ||
+        !['matched', 'no-match', 'unclassified'].includes(
+          String(group.status),
+        ) ||
+        !Array.isArray(group.candidates) ||
+        !stringArray(group.unclassifiedElementIds)
+      ) {
+        throw new Error('Resource requirement match group is invalid')
+      }
+      return {
+        requirementId: group.requirementId,
+        status: group.status as 'matched' | 'no-match' | 'unclassified',
+        candidates: group.candidates.map(candidate => {
+          if (!isRecord(candidate) || !isRecord(candidate.delivery)) {
+            throw new Error('Resource requirement match candidate is invalid')
+          }
+          const delivery = candidate.delivery
+          if (
+            typeof delivery.sourceFormat !== 'string' ||
+            !delivery.sourceFormat.trim() ||
+            typeof delivery.targetFormat !== 'string' ||
+            !delivery.targetFormat.trim() ||
+            !['direct', 'convert'].includes(String(delivery.disposition)) ||
+            (delivery.adapterId !== undefined &&
+              (typeof delivery.adapterId !== 'string' ||
+                !delivery.adapterId.trim()))
+          ) {
+            throw new Error('Resource requirement match delivery is invalid')
+          }
+          return {
+            ...parseCatalogElement(candidate),
+            delivery: {
+              sourceFormat: delivery.sourceFormat,
+              disposition: delivery.disposition as 'direct' | 'convert',
+              targetFormat: delivery.targetFormat,
+              ...(typeof delivery.adapterId === 'string'
+                ? { adapterId: delivery.adapterId }
+                : {}),
+            },
+          }
+        }),
+        unclassifiedElementIds: group.unclassifiedElementIds,
+      }
+    }),
   }
 }
 

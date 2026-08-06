@@ -9,15 +9,12 @@ import {
 } from './project-resource-application'
 
 describe('ProjectResourceApplication', () => {
-  test('forwards Pack listing and selected Pack inspection without semantic inference', async () => {
+  test('forwards one structured requirement match without semantic inference', async () => {
     const calls: unknown[] = []
     const application = new ProjectResourceApplication(resourceClient(calls))
-    await application.listPacks({ limit: 8 })
-    await application.inspectPack('pack-a', { limit: 4 })
-    expect(calls).toEqual([
-      ['list', { limit: 8 }],
-      ['inspect', 'pack-a', { limit: 4 }],
-    ])
+    const input = { requirements: [], deliveryCapabilities: [] }
+    await application.matchRequirements(input)
+    expect(calls).toEqual([['match', input]])
   })
 
   test('acquires exact identities into the declared inventory root', async () => {
@@ -81,13 +78,9 @@ describe('ProjectResourceApplication', () => {
 
 function resourceClient(calls: unknown[] = []): ProjectResourceSelectionClient {
   return {
-    listPacks: async input => {
-      calls.push(['list', input])
-      return { items: [], total: 0, facets: facets() }
-    },
-    inspectPack: async (packId, input) => {
-      calls.push(['inspect', packId, input])
-      return { items: [], total: 0, facets: facets() }
+    matchRequirements: async input => {
+      calls.push(['match', input])
+      return { catalogRevision: 'revision-a', groups: [] }
     },
     resolveResources: async selections =>
       selections.map(selection => ({
@@ -103,21 +96,6 @@ function resourceClient(calls: unknown[] = []): ProjectResourceSelectionClient {
   }
 }
 
-function facets() {
-  return {
-    dimensions: [],
-    primaryCategories: [],
-    categories: [],
-    styles: [],
-    gameTypes: [],
-    packTags: [],
-    usageTags: [],
-    assetKinds: [],
-    capabilities: [],
-    formats: [],
-  }
-}
-
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-app-'))
   await writeBeeGameAssetManifest(workspace, {
@@ -129,7 +107,9 @@ async function createWorkspace(): Promise<string> {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'world.visual', required: true }],
+    requirements: [{ id: 'world.visual', required: true, acquisition_profile: {
+      dimensions: ['3D'], asset_kinds: ['model'], usage_tags: ['scene'], capabilities: [], styles: [],
+    } }],
     resources: [],
   })
   return workspace

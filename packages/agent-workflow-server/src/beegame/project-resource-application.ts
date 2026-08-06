@@ -4,18 +4,17 @@ import {
   type BeeGameAssetManifest,
 } from './asset-contracts'
 import type {
-  ResourceCatalogElementPage,
-  ResourceCatalogInput,
-  ResourceCatalogPackPage,
+  ResourceRequirementMatchRequest,
+} from '@bee-game-studio/beegame-resource-core'
+import type {
+  ResourceRequirementMatchResponse,
   ResourceResolvedSelection,
 } from './resource-selection-client'
 
 export type ProjectResourceSelectionClient = {
-  listPacks(input: ResourceCatalogInput): Promise<ResourceCatalogPackPage>
-  inspectPack(
-    packId: string,
-    input: ResourceCatalogInput,
-  ): Promise<ResourceCatalogElementPage>
+  matchRequirements(
+    input: ResourceRequirementMatchRequest,
+  ): Promise<ResourceRequirementMatchResponse>
   resolveResources(
     selections: Array<{
       resourceId: string
@@ -60,12 +59,8 @@ export class ProjectResourceApplication {
     private readonly fetchImpl: ProjectResourceFetch = fetch,
   ) {}
 
-  listPacks(input: ResourceCatalogInput) {
-    return this.client.listPacks(input)
-  }
-
-  inspectPack(packId: string, input: ResourceCatalogInput) {
-    return this.client.inspectPack(packId, input)
+  matchRequirements(input: ResourceRequirementMatchRequest) {
+    return this.client.matchRequirements(input)
   }
 
   async acquireResources(

@@ -15,6 +15,49 @@ const pack: ResourcePack = {
 }
 
 describe('agentic resource exploration routes', () => {
+  test('matches every structured requirement in one bounded catalog request', async () => {
+    const app = appFor({
+      packs: [pack],
+      elements: [
+        element('tower-a', 'models/tower-a.fbx', ['building']),
+        element('tower-b', 'models/tower-b.fbx', ['building']),
+      ],
+    })
+    const response = await post(app, '/api/resource-catalog/matches', {
+      requirements: [{
+        requirementId: 'visual.tower',
+        profile: {
+          dimensions: ['3D'],
+          assetKinds: ['model'],
+          usageTags: ['building'],
+          capabilities: [],
+          styles: ['Stylized'],
+        },
+      }],
+      deliveryCapabilities: [{
+        sourceFormat: 'fbx',
+        disposition: 'convert',
+        targetFormat: 'glb',
+        adapterId: 'model-converter',
+      }],
+      maxCandidatesPerRequirement: 1,
+    }, 'resource-service-token')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      catalogRevision: expect.any(String),
+      groups: [{
+        requirementId: 'visual.tower',
+        status: 'matched',
+        candidates: [expect.objectContaining({
+          elementId: 'tower-a',
+          delivery: expect.objectContaining({ disposition: 'convert', targetFormat: 'glb' }),
+        })],
+        unclassifiedElementIds: [],
+      }],
+    })
+  })
+
   test('returns an unsigned Pack catalog without authored requirement roles', async () => {
     const app = appFor({
       packs: [pack],
