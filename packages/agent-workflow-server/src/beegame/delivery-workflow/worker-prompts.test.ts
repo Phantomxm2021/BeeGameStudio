@@ -357,6 +357,23 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('resource-finding')
   })
 
+  test('separates resource source profiles from runtime output formats', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'resource-planner',
+      phase: 'RESOURCE_PREPARATION',
+      revision: 'revision',
+      contract: {},
+    })
+
+    expect(prompt).toContain('structured acquisition_profile')
+    expect(prompt).toContain('runtime-consumable output formats')
+    expect(prompt).toContain('Never use target output formats as source-format')
+  })
+
   test('assigns one initial foundation document while retaining fact ownership', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',

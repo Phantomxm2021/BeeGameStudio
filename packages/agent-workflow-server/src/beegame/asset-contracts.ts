@@ -12,7 +12,12 @@ import {
   sep,
 } from 'node:path'
 import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_DIMENSIONS,
   RESOURCE_LIBRARY_USAGE,
+  RESOURCE_USAGE_TAGS,
+  type ResourceAcquisitionProfile,
   type ResourceLibraryUsage,
 } from '@bee-game-studio/beegame-resource-core'
 import {
@@ -67,6 +72,13 @@ export type BeeGameAssetRequirement = {
   name?: string
   purpose?: string
   required?: boolean
+  acquisition_profile: {
+    dimensions: ResourceAcquisitionProfile['dimensions']
+    asset_kinds: ResourceAcquisitionProfile['assetKinds']
+    usage_tags: ResourceAcquisitionProfile['usageTags']
+    capabilities: ResourceAcquisitionProfile['capabilities']
+    styles: ResourceAcquisitionProfile['styles']
+  }
 }
 
 export type BeeGameResourceDependency = {
@@ -879,7 +891,12 @@ function validateRequirement(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(value, ['id', 'name', 'purpose', 'required'], path, issues)
+  rejectUnknownKeys(
+    value,
+    ['id', 'name', 'purpose', 'required', 'acquisition_profile'],
+    path,
+    issues,
+  )
   const id = trimmedString(value.id)
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
@@ -888,6 +905,79 @@ function validateRequirement(
     issues.push(`${path}.required must be a boolean.`)
   validateOptionalString(value.name, `${path}.name`, issues)
   validateOptionalString(value.purpose, `${path}.purpose`, issues)
+  validateAcquisitionProfile(
+    value.acquisition_profile,
+    `${path}.acquisition_profile`,
+    issues,
+  )
+}
+
+function validateAcquisitionProfile(
+  value: unknown,
+  path: string,
+  issues: string[],
+): void {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  rejectUnknownKeys(
+    value,
+    ['dimensions', 'asset_kinds', 'usage_tags', 'capabilities', 'styles'],
+    path,
+    issues,
+  )
+  validateEnumArray(
+    value.dimensions,
+    RESOURCE_DIMENSIONS,
+    `${path}.dimensions`,
+    issues,
+    true,
+  )
+  validateEnumArray(
+    value.asset_kinds,
+    RESOURCE_ASSET_KINDS,
+    `${path}.asset_kinds`,
+    issues,
+    true,
+  )
+  validateEnumArray(
+    value.usage_tags,
+    RESOURCE_USAGE_TAGS,
+    `${path}.usage_tags`,
+    issues,
+  )
+  validateEnumArray(
+    value.capabilities,
+    RESOURCE_CAPABILITIES,
+    `${path}.capabilities`,
+    issues,
+  )
+  if (!Array.isArray(value.styles) || !value.styles.every(isTrimmedString))
+    issues.push(`${path}.styles must be an array of trimmed non-empty strings.`)
+}
+
+function validateEnumArray(
+  value: unknown,
+  allowed: readonly string[],
+  path: string,
+  issues: string[],
+  requireOne = false,
+): void {
+  if (
+    !Array.isArray(value) ||
+    (requireOne && value.length === 0) ||
+    !value.every(item =>
+      typeof item === 'string' && allowed.includes(item),
+    )
+  )
+    issues.push(
+      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values.`,
+    )
+}
+
+function isTrimmedString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim()
 }
 function validateResource(
   value: unknown,

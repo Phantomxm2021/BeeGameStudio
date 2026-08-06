@@ -1,4 +1,10 @@
-import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
+import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_DIMENSIONS,
+  RESOURCE_USAGE_TAGS,
+  type ResourceLibraryUsage,
+} from '@bee-game-studio/beegame-resource-core'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -35,6 +41,15 @@ const requirementSchema = z
     name: z.string().trim().min(1).optional(),
     purpose: z.string().trim().min(1).optional(),
     required: z.boolean().optional(),
+    acquisition_profile: z
+      .object({
+        dimensions: z.array(z.enum(RESOURCE_DIMENSIONS)).min(1),
+        asset_kinds: z.array(z.enum(RESOURCE_ASSET_KINDS)).min(1),
+        usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)),
+        capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)),
+        styles: z.array(z.string().trim().min(1)),
+      })
+      .strict(),
   })
   .strict()
 
@@ -157,6 +172,7 @@ export function createNativeAssetManifestTool(options: {
       return [
         'AssetManifest is the only writer for assets/asset-manifest.json.',
         `submit_resource_plan commits canonical modular Manifest v8 through the service-owned writer. The confirmed Resource Library policy is system-owned and fixed to ${options.resourceLibraryUsage}. The system also owns assets/runtime, assets/content and assets/generated as the three project roots. Do not provide or reinterpret policy or root paths.`,
+        'asset_format_capabilities declares runtime-consumable output formats, not permitted Resource Library source extensions. Every requirement acquisition_profile is the sole structured source-discovery contract and must not be inferred from identifiers, names or filenames.',
         `Register downloaded material only through ResourceLibrary import_resources. Create missing placeholders only through author_provisional_resources using one of the target adapters declared below. Match destination extension and asset_kind to the selected adapter. Generic file tools never write runtime_asset_root. A placeholder is provisional but uses the same stable resource identity and content references as final media. Available adapters: ${provisionalAdapters.map(adapter => adapter.description).join('; ')}.`,
         `Every content file uses schema ${BEEGAME_CONTENT_SCHEMA} plus id, kind, fulfills, resources and data. JSON owns resource mappings, entities, UI, audio, events, waves and numeric configuration; its allowed kinds are ${BEEGAME_JSON_CONTENT_KINDS.join(', ')}. YAML owns only world, scene, hierarchy and instance placement; its allowed kinds are ${BEEGAME_YAML_CONTENT_KINDS.join(', ')}. Do not duplicate one fact in JSON and YAML.`,
         'The modular manifest accepts only the declared v8 project target, requirements and resource records. Keep substitutable media out of gameplay source and keep engine-specific structures in project content or target adapters.',

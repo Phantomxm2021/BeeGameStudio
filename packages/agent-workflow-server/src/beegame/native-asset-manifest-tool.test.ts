@@ -21,6 +21,14 @@ afterEach(async () =>
 )
 
 describe('native modular AssetManifest v8 boundary', () => {
+  const visualProfile = {
+    dimensions: ['2D'] as const,
+    asset_kinds: ['sprite'] as const,
+    usage_tags: ['character'] as const,
+    capabilities: [] as const,
+    styles: ['Stylized'],
+  }
+
   it('creates the canonical requirements and resources manifest', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-manifest-'))
     roots.push(workspace)
@@ -34,7 +42,13 @@ describe('native modular AssetManifest v8 boundary', () => {
       project_target: {
         asset_format_capabilities: ['png', 'json', 'yaml'],
       },
-      requirements: [{ id: 'visual.player', required: true }],
+      requirements: [
+        {
+          id: 'visual.player',
+          required: true,
+          acquisition_profile: visualProfile,
+        },
+      ],
     })
     const manifest = await readBeeGameAssetManifest(workspace)
     expect(manifest).toEqual(
@@ -66,12 +80,38 @@ describe('native modular AssetManifest v8 boundary', () => {
       JSON.parse(
         await readFile(join(workspace, index.modules.requirements), 'utf8'),
       ),
-    ).toEqual({ requirements: [{ id: 'visual.player', required: true }] })
+    ).toEqual({
+      requirements: [
+        {
+          id: 'visual.player',
+          required: true,
+          acquisition_profile: visualProfile,
+        },
+      ],
+    })
     const prompt = await tool.prompt()
     expect(prompt).toContain('canonical modular Manifest v8')
     expect(prompt).not.toContain(
       `version ${CURRENT_ASSET_MANIFEST_VERSION - 1}`,
     )
+  })
+
+  it('rejects a resource requirement without a structured acquisition profile', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-manifest-'))
+    roots.push(workspace)
+    const tool = createNativeAssetManifestTool({
+      buildTool: value => value,
+      workspacePath: workspace,
+      resourceLibraryUsage: 'preferred',
+    }) as Tool
+
+    await expect(
+      tool.call({
+        action: 'submit_resource_plan',
+        project_target: { asset_format_capabilities: ['png'] },
+        requirements: [{ id: 'visual.player', required: true }],
+      }),
+    ).rejects.toThrow('acquisition_profile')
   })
 
   it('does not expose confirmed policy as model-controlled input', async () => {
@@ -90,7 +130,9 @@ describe('native modular AssetManifest v8 boundary', () => {
           asset_format_capabilities: ['png'],
           resource_library_usage: 'preferred',
         },
-        requirements: [{ id: 'visual.player' }],
+        requirements: [
+          { id: 'visual.player', acquisition_profile: visualProfile },
+        ],
       }),
     ).rejects.toThrow()
   })
@@ -107,7 +149,10 @@ describe('native modular AssetManifest v8 boundary', () => {
     await tool.call({
       action: 'submit_resource_plan',
       project_target: { asset_format_capabilities: ['gltf', 'png', 'wav'] },
-      requirements: [{ id: 'visual.marker' }, { id: 'visual.palette' }],
+      requirements: [
+        { id: 'visual.marker', acquisition_profile: visualProfile },
+        { id: 'visual.palette', acquisition_profile: visualProfile },
+      ],
     })
 
     await tool.call({
@@ -239,7 +284,9 @@ describe('native modular AssetManifest v8 boundary', () => {
     await tool.call({
       action: 'submit_resource_plan',
       project_target: { asset_format_capabilities: ['png'] },
-      requirements: [{ id: 'visual.marker' }],
+      requirements: [
+        { id: 'visual.marker', acquisition_profile: visualProfile },
+      ],
     })
     await tool.call({
       action: 'author_provisional_resources',
@@ -284,7 +331,9 @@ describe('native modular AssetManifest v8 boundary', () => {
     await tool.call({
       action: 'submit_resource_plan',
       project_target: { asset_format_capabilities: ['png'] },
-      requirements: [{ id: 'visual.marker' }],
+      requirements: [
+        { id: 'visual.marker', acquisition_profile: visualProfile },
+      ],
     })
 
     await expect(
@@ -317,7 +366,9 @@ describe('native modular AssetManifest v8 boundary', () => {
     await tool.call({
       action: 'submit_resource_plan',
       project_target: { asset_format_capabilities: ['png', 'json'] },
-      requirements: [{ id: 'visual.marker' }],
+      requirements: [
+        { id: 'visual.marker', acquisition_profile: visualProfile },
+      ],
     })
     await tool.call({
       action: 'author_provisional_resources',
@@ -367,7 +418,9 @@ describe('native modular AssetManifest v8 boundary', () => {
     await tool.call({
       action: 'submit_resource_plan',
       project_target: { asset_format_capabilities: ['png'] },
-      requirements: [{ id: 'visual.marker' }],
+      requirements: [
+        { id: 'visual.marker', acquisition_profile: visualProfile },
+      ],
     })
     await tool.call({
       action: 'author_provisional_resources',
