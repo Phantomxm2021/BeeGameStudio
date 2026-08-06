@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ForwardRefExoticComponent, HTMLAttributes, RefAttributes } from 'react';
+import type { ForwardRefExoticComponent, HTMLAttributes, ReactNode, RefAttributes } from 'react';
 import {
   AlertCircle,
   CircleCheckBig,
@@ -369,6 +369,7 @@ export interface WorkflowStageCardProps {
   isLatest: boolean;
   nextAction?: WorkflowCardAction;
   recovery?: WorkflowStageCardRecovery;
+  headerControls?: ReactNode;
   onAction?: (action: WorkflowCardAction) => Promise<void> | void;
 }
 
@@ -378,6 +379,7 @@ export function WorkflowStageCard({
   isLatest,
   nextAction,
   recovery,
+  headerControls,
   onAction,
 }: WorkflowStageCardProps) {
   const { showSuccess, showError } = useToastContext();
@@ -504,7 +506,8 @@ export function WorkflowStageCard({
     <section
       data-testid={`beegame-workflow-card-${runId}`}
       data-stage-id={snapshot.stageId}
-      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-white/15 bg-white/[0.04] text-zinc-100 shadow-sm backdrop-blur-2xl"
+      data-opaque-surface="true"
+      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-white/15 bg-[#17181d] text-zinc-100 shadow-sm"
     >
       <div className="px-4 py-4">
         <div className="flex items-start gap-3">
@@ -528,6 +531,7 @@ export function WorkflowStageCard({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {headerControls}
                 <span className="text-xs text-zinc-400">{statusLabel[snapshot.status]}</span>
                 {hasFailureDetails && snapshot.block ? (
                   <div className="group relative">

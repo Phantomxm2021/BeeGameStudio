@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowCard } from './WorkflowCard';
 
@@ -50,14 +50,19 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    const front = screen.getByTestId('workflow-card-front');
+    const frontCard = within(front).getByTestId('beegame-workflow-card-run_deck');
+    expect(within(front).getByTestId('workflow-card-controls')).toBeInTheDocument();
+    expect(within(front).getByTestId('workflow-card-deck-counter')).toHaveTextContent('2 / 2');
+    expect(screen.getAllByTestId('workflow-card-deck-counter')).toHaveLength(1);
+    expect(frontCard).toHaveAttribute('data-opaque-surface', 'true');
     expect(screen.getByText('当前阶段消息')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看上一阶段' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '查看上一阶段' }));
-    expect(screen.getAllByText('1 / 2')).toHaveLength(2);
+    expect(screen.getByTestId('workflow-card-deck-counter')).toHaveTextContent('1 / 2');
     expect(screen.getByText('历史阶段消息')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeEnabled();
@@ -66,7 +71,7 @@ describe('WorkflowCard', () => {
     const deck = screen.getByTestId('beegame-workflow-card-deck-run_deck');
     deck.focus();
     fireEvent.keyDown(deck, { key: 'ArrowRight' });
-    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    expect(screen.getByTestId('workflow-card-deck-counter')).toHaveTextContent('2 / 2');
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '重试' }));
@@ -569,7 +574,7 @@ describe('WorkflowCard', () => {
     );
 
     const card = screen.getByTestId('beegame-workflow-card-run_4');
-    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'border-white/15', 'bg-white/[0.04]');
+    expect(card).toHaveClass('w-full', 'max-w-[46rem]', 'border-white/15', 'bg-[#17181d]');
     expect(card).not.toHaveClass('border-sky-300/20', 'bg-black/40');
     expect(card).not.toHaveClass('bg-sky-300/[0.055]');
     expect(screen.getByText('00:01:05')).toBeInTheDocument();
@@ -749,7 +754,8 @@ describe('WorkflowCard', () => {
     expect(front).toHaveStyle({ width: 'calc(100% + 1.5rem)' });
     expect(front).toHaveAttribute('aria-current', 'true');
     expect(layers).toHaveLength(2);
-    expect(layers[0]).toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+    expect(layers[0]).toHaveClass('pointer-events-none', 'absolute', 'inset-0', 'bg-[#17181d]');
+    expect(layers.every(layer => layer.getAttribute('data-opaque-surface') === 'true')).toBe(true);
     expect(layers[0]).toHaveStyle({ transform: 'translate3d(10px, 8px, 0)' });
     expect(layers[1]).toHaveStyle({ transform: 'translate3d(20px, 16px, 0)' });
     expect(layers.every(layer => layer.getAttribute('aria-hidden') === 'true')).toBe(true);

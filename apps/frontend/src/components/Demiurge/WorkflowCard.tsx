@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type {
   WorkflowCardAction,
   WorkflowCardPayload,
@@ -106,6 +107,41 @@ export function WorkflowCard({
     lastProvenItemId: workflow.lastProvenItemId,
   };
 
+  const deckControls = isDeck ? (
+    <div
+      data-testid="workflow-card-controls"
+      className="flex items-center gap-0.5 rounded-full border border-white/10 bg-black/25 px-0.5 py-0.5"
+    >
+      <button
+        type="button"
+        onClick={selectPrevious}
+        disabled={!canSelectPrevious}
+        className="grid h-7 w-7 place-items-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-30"
+        aria-label="查看上一阶段"
+        title="查看上一阶段"
+      >
+        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+      </button>
+      <span
+        data-testid="workflow-card-deck-counter"
+        className="min-w-[3rem] text-center text-[11px] tabular-nums text-zinc-400"
+        aria-live="polite"
+      >
+        {selectedIndex + 1} / {stageSnapshots.length}
+      </span>
+      <button
+        type="button"
+        onClick={selectNext}
+        disabled={!canSelectNext}
+        className="grid h-7 w-7 place-items-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-30"
+        aria-label="查看下一阶段"
+        title="查看下一阶段"
+      >
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </div>
+  ) : undefined;
+
   return (
     <div
       data-testid={`beegame-workflow-card-deck-${workflow.runId}`}
@@ -114,31 +150,6 @@ export function WorkflowCard({
       className="min-w-0 w-full outline-none focus-visible:ring-2 focus-visible:ring-white/20"
       aria-label="工作流阶段卡片"
     >
-      {isDeck ? (
-        <div className="mb-2 flex items-center justify-between gap-3 px-1 text-xs text-zinc-500">
-          <button
-            type="button"
-            onClick={selectPrevious}
-            disabled={!canSelectPrevious}
-            className="rounded-full px-2 py-1 transition-colors hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="查看上一阶段"
-          >
-            查看上一阶段
-          </button>
-          <span className="tabular-nums" aria-live="polite">
-            {selectedIndex + 1} / {stageSnapshots.length}
-          </span>
-          <button
-            type="button"
-            onClick={selectNext}
-            disabled={!canSelectNext}
-            className="rounded-full px-2 py-1 transition-colors hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="查看下一阶段"
-          >
-            查看下一阶段
-          </button>
-        </div>
-      ) : null}
       <div className={isDeck ? 'relative min-w-0 w-full overflow-visible pr-6 pb-6' : 'relative min-w-0 w-full'}>
         <div
           data-testid="workflow-card-deck"
@@ -156,10 +167,11 @@ export function WorkflowCard({
                 key={snapshot.stageId}
                 data-testid={`workflow-card-stack-layer-${depth}`}
                 data-workflow-card-layer="true"
+                data-opaque-surface="true"
                 data-stage-id={snapshot.stageId}
                 data-stack-depth={depth}
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 rounded-3xl border border-white/10 bg-white/[0.025] shadow-sm backdrop-blur-xl"
+                className="pointer-events-none absolute inset-0 rounded-3xl border border-white/10 bg-[#17181d] shadow-sm"
                 style={{
                   transform: `translate3d(${offset}px, ${verticalOffset}px, 0)`,
                   zIndex: 10 - depth,
@@ -185,6 +197,7 @@ export function WorkflowCard({
               isLatest={selectedIndex === stageSnapshots.length - 1}
               nextAction={selectedIndex === stageSnapshots.length - 1 ? workflow.nextAction : undefined}
               recovery={selectedIndex === stageSnapshots.length - 1 ? recovery : undefined}
+              headerControls={deckControls}
               onAction={onAction}
             />
           </motion.div>
