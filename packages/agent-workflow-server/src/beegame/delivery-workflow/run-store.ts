@@ -711,13 +711,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     run: DeliveryRun,
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
-    acceptedUnits: AcceptedWorkflowUnit[] = [],
+    acceptedUnits: AcceptedWorkflowUnit[],
+    previous: DeliveryRun | null,
+    events: WorkflowEvent[],
   ): Promise<DeliveryRun> {
-    // Read the authoritative previous run and journal before writing the new
-    // snapshot.  Stage card timing is derived only from this durable history,
-    // so a write-ahead marker can be replayed without changing the boundary.
-    const previous = await loadUnlocked()
-    const events = await readEventsUnlocked()
     const createdAt = event.createdAt ?? now()
     const ordinaryEventBase = {
       ...event,
@@ -749,7 +746,11 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         : undefined
     const ordinaryEvent = {
       ...ordinaryEventBase,
-      ...(stageSnapshot ? { stageSnapshot } : {}),
+      // tasks.planned has a strict event schema; all other workflow events
+      // retain the catch-all stage card extension.
+      ...(stageSnapshot && event.type !== 'tasks.planned'
+        ? { stageSnapshot }
+        : {}),
     } as WorkflowEvent
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
@@ -790,7 +791,12 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
     acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
-    return persistCommitUnlocked(run, event, acceptedUnits)
+    // Read the authoritative previous run and journal before writing the new
+    // snapshot. Stage card timing is derived only from this durable history,
+    // so a write-ahead marker can be replayed without changing the boundary.
+    const previous = await loadUnlocked()
+    const events = await readEventsUnlocked()
+    return persistCommitUnlocked(run, event, acceptedUnits, previous, events)
   }
 
   async function commit(
@@ -850,7 +856,26 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           'recovery_snapshot_changed',
         )
       }
-      return persistCommitUnlocked(input.run, input.event, input.acceptedUnits)
+      // A recovery replacement may intentionally target malformed or obsolete
+      // JSON. Only replay a previous run when the expected source parses;
+      // otherwise persist against an empty previous snapshot context.
+      let previous: DeliveryRun | null = null
+      let sourceParses = false
+      try {
+        parseDeliveryRun(JSON.parse(source) as unknown)
+        sourceParses = true
+      } catch {
+        // The expected digest authorizes replacing an unreadable snapshot.
+      }
+      if (sourceParses) previous = await loadUnlocked()
+      const events = await readEventsUnlocked()
+      return persistCommitUnlocked(
+        input.run,
+        input.event,
+        input.acceptedUnits ?? [],
+        previous,
+        events,
+      )
     })
   }
 

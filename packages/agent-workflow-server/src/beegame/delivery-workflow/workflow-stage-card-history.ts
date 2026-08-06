@@ -298,22 +298,37 @@ export function activeElapsedWithinStage(input: {
 }): number {
   const startedAt = Date.parse(input.stageStartedAt)
   const endedAt = Date.parse(input.stageEndedAt)
-  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return 0
-  const boundary = Math.max(startedAt, endedAt)
+  if (
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(endedAt) ||
+    endedAt < startedAt
+  )
+    return 0
+  const relevantEvents = input.events
+    .map((event, index) => ({
+      event,
+      index,
+      eventAt: Date.parse(event.createdAt),
+    }))
+    .filter(
+      entry =>
+        Number.isFinite(entry.eventAt) &&
+        entry.eventAt >= startedAt &&
+        entry.eventAt <= endedAt,
+    )
+    .sort(
+      (left, right) => left.eventAt - right.eventAt || left.index - right.index,
+    )
   let activeSince: number | undefined = startedAt
   let elapsedMs = 0
-  for (const event of input.events) {
-    const eventAt = Date.parse(event.createdAt)
-    if (!Number.isFinite(eventAt) || eventAt < startedAt || eventAt > boundary)
-      continue
+  for (const { event, eventAt } of relevantEvents) {
     if (event.status === 'running') activeSince ??= eventAt
     else if (activeSince !== undefined) {
-      elapsedMs += Math.max(0, eventAt - activeSince)
+      elapsedMs += Math.max(0, Math.min(endedAt, eventAt) - activeSince)
       activeSince = undefined
     }
   }
-  if (activeSince !== undefined)
-    elapsedMs += Math.max(0, boundary - activeSince)
+  if (activeSince !== undefined) elapsedMs += Math.max(0, endedAt - activeSince)
   return elapsedMs
 }
 

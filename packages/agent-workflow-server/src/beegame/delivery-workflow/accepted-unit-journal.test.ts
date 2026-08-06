@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,10 +14,14 @@ import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
+  type WorkflowEvent,
   type WorkerDispatchRequest,
 } from './types'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
-import { isFrozenWorkflowStageCardEvent } from './workflow-stage-card-history'
+import {
+  activeElapsedWithinStage,
+  isFrozenWorkflowStageCardEvent,
+} from './workflow-stage-card-history'
 
 function run(): DeliveryRun {
   return createTestDeliveryRun({
@@ -819,6 +824,124 @@ describe('accepted workflow unit journal', () => {
       (await store.readEvents()).filter(isFrozenWorkflowStageCardEvent),
     ).toHaveLength(0)
     expect((await store.load())?.currentMessage).toBe('durable progress')
+  })
+
+  test('sorts journal events before calculating active elapsed time', () => {
+    const event = (
+      eventId: string,
+      createdAt: string,
+      status: WorkflowEvent['status'],
+    ): WorkflowEvent => ({
+      eventId,
+      runId: 'accepted-unit-run',
+      type: 'workflow.progress',
+      phase: 'BRIEF_CONFIRMED',
+      status,
+      revision: {
+        document: 'document-revision',
+        workspace: 'workspace-revision',
+      },
+      createdAt,
+    })
+
+    expect(
+      activeElapsedWithinStage({
+        // An accepted-unit event can be appended after an ordinary event even
+        // though its acceptedAt timestamp is older.
+        events: [
+          event('running-late', '2026-08-06T00:00:08.000Z', 'running'),
+          event('waiting-early', '2026-08-06T00:00:05.000Z', 'completed'),
+          event('running-older', '2026-08-06T00:00:02.000Z', 'running'),
+        ],
+        stageStartedAt: '2026-08-06T00:00:00.000Z',
+        stageEndedAt: '2026-08-06T00:00:10.000Z',
+      }),
+    ).toBe(7000)
+  })
+
+  test('replaces a malformed expected-digest snapshot without reloading it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'malformed-replacement-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const malformed = '{"schemaVersion":'
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(store.paths.snapshot, malformed, 'utf8')
+    const expectedDigest = createHash('sha256').update(malformed).digest('hex')
+    const next = {
+      ...run(),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+    }
+
+    await expect(
+      store.replaceSnapshotIfDigest({
+        expectedDigest,
+        run: next,
+        event: {
+          runId: next.runId,
+          type: 'workflow.run.reconstructed',
+          phase: next.phase,
+          status: next.status,
+          revision: next.revision,
+          eventId: 'malformed-replacement',
+          createdAt: '2026-08-06T00:00:05.000Z',
+        },
+      }),
+    ).resolves.toMatchObject({ phase: 'DOCUMENT_DRAFTING' })
+    expect((await store.readEvents()).map(event => event.eventId)).toEqual([
+      'malformed-replacement',
+    ])
+  })
+
+  test('keeps strict tasks.planned receipts free of catch-all stage fields', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'strict-task-plan-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...createTestDeliveryRun({
+        runId: 'strict-task-plan-run',
+        projectId: 'strict-task-plan-project',
+        ownerId: 'accepted-unit-owner',
+        checklistApproved: true,
+      }),
+      phase: 'ATOMIC_TASK_PLANNING' as const,
+    }
+    const task = {
+      id: 'task-id',
+      title: 'Synthetic task',
+      checklistIds: ['check-id'],
+      resourceIds: ['resource-id'],
+      contentIds: ['content-id'],
+      dependsOn: [],
+      allowedPaths: ['src/'],
+      expectedArtifacts: ['src/artifact.ts'],
+      verification: [
+        {
+          kind: 'test' as const,
+          commandOrAction: 'synthetic verification',
+          expectedResult: 'pass',
+        },
+      ],
+      status: 'pending' as const,
+      attempt: 0,
+      evidenceRefs: [],
+    }
+    const next = { ...initial, phase: 'IMPLEMENTATION' as const, tasks: [task] }
+    await store.save(initial)
+    await store.commit(next, {
+      runId: next.runId,
+      type: 'tasks.planned',
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      eventId: 'tasks-planned',
+      createdAt: '2026-08-06T00:00:05.000Z',
+      taskGraph: [task],
+    })
+
+    const event = (await store.readEvents()).find(
+      candidate => candidate.eventId === 'tasks-planned',
+    )
+    expect(event).toBeDefined()
+    expect(event).not.toHaveProperty('stageSnapshot')
   })
 
   test('journals the final review check when reconciliation replaces its cycle with an approval', () => {
