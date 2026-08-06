@@ -119,6 +119,11 @@ export function matchResourceRequirements(
       .map(pack => [pack.id, pack] as const),
   )
   const readyIds = readyDependencyIds(elements)
+  const immutableIds = new Set(
+    elements
+      .filter(element => element.status === 'ready' && hasImmutableContentHash(element))
+      .map(element => element.id),
+  )
   const deliveryByFormat = new Map(
     request.deliveryCapabilities.map(capability => [
       normalizeFormat(capability.sourceFormat),
@@ -137,7 +142,7 @@ export function matchResourceRequirements(
   return {
     groups: request.requirements.map(requirement => {
       const candidates: ResourceRequirementCandidate[] = []
-      const unclassifiedElementIds: string[] = []
+      let unclassifiedElementCount = 0
       for (const element of elements) {
         const pack = publishedById.get(element.packId)
         if (
@@ -151,9 +156,23 @@ export function matchResourceRequirements(
         const styles = element.styleOverride
           ? [element.styleOverride]
           : normalizedPackStyles(pack)
+        const delivery = deliveryByFormat.get(fileExtension(element.path))
+        if (!delivery || !requirement.profile.dimensions.includes(dimension))
+          continue
         if (
-          !requirement.profile.dimensions.includes(dimension) ||
           !assetKind ||
+          !hasImmutableContentHash(element) ||
+          !hasCompleteDependencyClosure(element, immutableIds) ||
+          (requirement.profile.styles.length > 0 && styles.length === 0) ||
+          (requirement.profile.capabilities.length > 0 &&
+            element.capabilities === undefined) ||
+          (requirement.profile.usageTags.length > 0 &&
+            !(element.usageTags?.length ?? 0))
+        ) {
+          unclassifiedElementCount += 1
+          continue
+        }
+        if (
           !requirement.profile.assetKinds.includes(assetKind) ||
           (requirement.profile.styles.length > 0 &&
             !intersectsNormalized(requirement.profile.styles, styles)) ||
@@ -164,18 +183,9 @@ export function matchResourceRequirements(
           continue
         if (
           requirement.profile.usageTags.length > 0 &&
-          !(element.usageTags?.length ?? 0)
-        ) {
-          unclassifiedElementIds.push(element.id)
-          continue
-        }
-        if (
-          requirement.profile.usageTags.length > 0 &&
           !intersects(requirement.profile.usageTags, element.usageTags ?? [])
         )
           continue
-        const delivery = deliveryByFormat.get(fileExtension(element.path))
-        if (!delivery) continue
         candidates.push({ ...summarizeElement(pack, element), delivery })
       }
       candidates.sort(
@@ -185,19 +195,26 @@ export function matchResourceRequirements(
           compareText(left.packId, right.packId) ||
           compareText(left.elementId, right.elementId),
       )
-      unclassifiedElementIds.sort(compareText)
       return {
         requirementId: requirement.requirementId,
         status: candidates.length
           ? ('matched' as const)
-          : unclassifiedElementIds.length
+          : unclassifiedElementCount
             ? ('unclassified' as const)
             : ('no-match' as const),
         candidates: candidates.slice(0, limit),
-        unclassifiedElementIds,
+        unclassifiedElementCount,
       }
     }),
   }
+}
+
+function hasImmutableContentHash(element: ResourceElement): boolean {
+  const value = element.specs.contentHash
+  if (typeof value !== 'string' || value.length !== 64) return false
+  for (const character of value.toLocaleLowerCase())
+    if (!'0123456789abcdef'.includes(character)) return false
+  return true
 }
 
 function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], filters?: ResourceCatalogFilter): boolean {

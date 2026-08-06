@@ -352,8 +352,8 @@ describe('resource-content worker prompts', () => {
         },
       },
     })
-    expect(prompt).toContain('ResourceLibrary list_packs')
-    expect(prompt).toContain('complete_resource_inventory exactly once')
+    expect(prompt).toContain('ResourceLibrary match_requirements')
+    expect(prompt).toContain('CommitResourceInventory exactly once')
     expect(prompt).toContain('resource-finding')
   })
 

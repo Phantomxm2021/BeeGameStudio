@@ -8,6 +8,11 @@ import {
   ProjectResourceApplication,
   type ProjectResourceSelectionClient,
 } from './project-resource-application'
+import {
+  getOrCreateResourceInventoryTransaction,
+  getOrCreateResourceMatchObservation,
+} from './resource-match-observation'
+import { resourceInventoryPlanRevision } from './resource-inventory-revision'
 
 const MAX_CANDIDATES_PER_REQUIREMENT = 8
 const resourceLibraryInputSchema = z
@@ -27,15 +32,17 @@ export function createNativeResourceLibraryTool(options: {
   buildTool: BuildTool
   workspacePath: string
   client: ProjectResourceSelectionClient
-  deliveryCapabilities: readonly ResourceDeliveryCapability[]
+  resolveDeliveryCapabilities: (
+    targetFormats: readonly string[],
+  ) => readonly ResourceDeliveryCapability[]
+  assertDispatchAuthority(): Promise<void>
 }): unknown {
   const application = new ProjectResourceApplication(options.client)
-  let callInFlight = false
+  let called = false
 
   return options.buildTool({
     name: 'ResourceLibrary',
     alwaysLoad: true,
-    maxResultSizeChars: 48_000,
     inputSchema: resourceLibraryInputSchema,
     isConcurrencySafe: () => false,
     isReadOnly: () => true,
@@ -54,14 +61,24 @@ export function createNativeResourceLibraryTool(options: {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(_input: ResourceLibraryInput) {
-      if (callInFlight) {
-        throw new Error('ResourceLibrary accepts one match operation at a time.')
-      }
-      callInFlight = true
-      try {
-        const manifest = await readBeeGameAssetManifest(options.workspacePath)
-        const result = await application.matchRequirements({
-          requirements: manifest.requirements.map(requirement => ({
+      if (called)
+        throw new Error('ResourceLibrary bounded matching is already complete for this worker dispatch.')
+      called = true
+      const manifest = await readBeeGameAssetManifest(options.workspacePath)
+      await options.assertDispatchAuthority()
+      const planRevision = resourceInventoryPlanRevision(manifest)
+      const transaction = await getOrCreateResourceInventoryTransaction({
+        workspacePath: options.workspacePath,
+        planRevision,
+      })
+      const observation = await getOrCreateResourceMatchObservation({
+        workspacePath: options.workspacePath,
+        transactionId: transaction.transactionId,
+        planRevision,
+        match: () => application.matchRequirements({
+          requirements: manifest.requirements
+            .filter(requirement => requirement.required !== false)
+            .map(requirement => ({
             requirementId: requirement.id,
             profile: {
               dimensions: requirement.acquisition_profile.dimensions,
@@ -71,13 +88,14 @@ export function createNativeResourceLibraryTool(options: {
               styles: requirement.acquisition_profile.styles,
             },
           })),
-          deliveryCapabilities: options.deliveryCapabilities,
+          deliveryCapabilities: options.resolveDeliveryCapabilities(
+            manifest.project_target?.asset_format_capabilities ?? [],
+          ),
           maxCandidatesPerRequirement: MAX_CANDIDATES_PER_REQUIREMENT,
-        })
-        return { data: compactMatchResult(result) }
-      } finally {
-        callInFlight = false
-      }
+        }),
+      })
+      await options.assertDispatchAuthority()
+      return { data: compactMatchResult(observation.result) }
     },
     renderToolUseMessage() {
       return 'Resource Library · match requirements'
@@ -99,7 +117,7 @@ function compactMatchResult(result: Awaited<ReturnType<ProjectResourceApplicatio
       requirement_id: group.requirementId,
       status: group.status,
       candidates: group.candidates.map(compactCandidate),
-      unclassified_element_ids: group.unclassifiedElementIds,
+      unclassified_element_count: group.unclassifiedElementCount,
     })),
   }
 }

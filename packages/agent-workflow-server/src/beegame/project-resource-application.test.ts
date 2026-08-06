@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,7 +24,7 @@ describe('ProjectResourceApplication', () => {
       const result = await new ProjectResourceApplication(
         resourceClient(),
         async () => new Response(new Uint8Array([1, 2, 3])),
-      ).acquireResources(workspace, [
+      ).acquireResources(workspace, 'revision-a', [
         {
           resourceId: 'material-a',
           packId: 'pack-a',
@@ -64,12 +65,43 @@ describe('ProjectResourceApplication', () => {
     }
     try {
       await expect(
-        new ProjectResourceApplication(client).acquireResources(workspace, [
+        new ProjectResourceApplication(client).acquireResources(workspace, 'revision-a', [
           selection,
           selection,
         ]),
       ).rejects.toThrow('Resource ids must be unique')
       expect(called).toBe(false)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects downloaded bytes that differ from the frozen Catalog content hash', async () => {
+    const workspace = await createWorkspace()
+    const client = resourceClient()
+    const resolve = client.resolveResources
+    client.resolveResources = async (catalogRevision, selections) =>
+      (await resolve(catalogRevision, selections)).map(selection => ({
+        ...selection,
+        sourceHash: 'b'.repeat(64),
+      }))
+    try {
+      const result = await new ProjectResourceApplication(
+        client,
+        async () => new Response(new Uint8Array([1, 2, 3])),
+      ).acquireResources(workspace, 'revision-a', [{
+        resourceId: 'material-a',
+        packId: 'pack-a',
+        expectedPackVersion: '1.0.0',
+        elementId: 'element-a',
+        destinationPath: 'assets/runtime/library',
+        selectionReason: ['Observed fit.'],
+      }])
+      expect(result.resources).toEqual([expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('frozen Catalog content hash'),
+      })])
+      expect(result.manifest.resources).toEqual([])
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -82,7 +114,7 @@ function resourceClient(calls: unknown[] = []): ProjectResourceSelectionClient {
       calls.push(['match', input])
       return { catalogRevision: 'revision-a', groups: [] }
     },
-    resolveResources: async selections =>
+    resolveResources: async (_catalogRevision, selections) =>
       selections.map(selection => ({
         resourceId: selection.resourceId,
         packId: selection.packId,
@@ -90,6 +122,7 @@ function resourceClient(calls: unknown[] = []): ProjectResourceSelectionClient {
         elementId: selection.elementId,
         elementPath: 'model.glb',
         sourceUrl: 'https://download.invalid/model',
+        sourceHash: createHash('sha256').update(new Uint8Array([1, 2, 3])).digest('hex'),
         selectionReason: selection.selectionReason,
         dependencies: [],
       })),

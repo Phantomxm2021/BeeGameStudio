@@ -62,6 +62,7 @@ import {
 } from '../beegame/delivery-workflow/document-review-input'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 const RECOVERY_PROJECT_ID = 'recovery-project'
 const RECOVERY_RUN_ID = 'recovery-run'
 const RECOVERY_BRIEF = JSON.stringify({
@@ -317,7 +318,7 @@ async function matrixTerminal(input: {
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
-      requirements: [{ id: 'matrix-requirement', required: true }],
+      requirements: [{ id: 'matrix-requirement', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
       resources: [],
     })
     return {
@@ -541,7 +542,7 @@ async function createWorkerRecoveryRun(input: {
       },
       requirements:
         needsInventoryGap || needsVerifiedInventory
-          ? [{ id: 'matrix-requirement', required: true }]
+          ? [{ id: 'matrix-requirement', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }]
           : [],
       resources: [],
     })
@@ -777,7 +778,7 @@ async function createStaleReviewerRecoveryFixture() {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'fixture-requirement', required: true }],
+    requirements: [{ id: 'fixture-requirement', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
     resources: [],
   })
   await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
@@ -1779,7 +1780,7 @@ describe('delivery workflow recovery', () => {
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
-      requirements: [{ id: 'world.visual', required: true }],
+      requirements: [{ id: 'world.visual', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
       resources: [],
     })
     await mkdir(join(workspace, 'assets/runtime'), { recursive: true })

@@ -21,6 +21,7 @@ import { resolveResourceProductionTask } from './resource-task-resolver'
 import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
 
 const roots: string[] = []
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 
 afterEach(async () => {
   await Promise.all(
@@ -273,7 +274,7 @@ async function writePlan(workspace: string): Promise<void> {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'world.visual', required: true }],
+    requirements: [{ id: 'world.visual', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
     resources: [],
   })
 }

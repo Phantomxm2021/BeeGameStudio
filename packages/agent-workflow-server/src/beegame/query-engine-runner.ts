@@ -25,9 +25,10 @@ import {
 import {
   normalizeResourceLibraryCall,
   RESOURCE_LIBRARY_ACTIONS,
-  type ResourceLibraryAction,
 } from './native-resource-library-call'
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
+import { createNativeResourceInventoryCommitTool } from './native-resource-inventory-commit-tool'
+import { configuredResourceDeliveryCapabilities } from './resource-delivery-adapters'
 import {
   createNativeResourceContentTool,
   resourceContentCommitContractSchema,
@@ -363,25 +364,8 @@ export class NativeSandboxNetworkPermissionBroker {
   }
 }
 
-type NativeResourceLibraryCall = {
-  action: ResourceLibraryAction
-  input: Record<string, unknown>
-}
-
-/**
- * Applies mutation permission semantics to the one native ResourceLibrary
- * tool. Session grants are scoped to one exact ResourceLibrary action.
- */
+/** Validates and allows the sole read-only ResourceLibrary match action. */
 export class NativeResourceLibraryPermissionBroker {
-  private readonly allowedForSession = new Set<string>()
-  private readonly inFlight = new Map<string, Promise<PermissionDecision>>()
-
-  constructor(
-    private readonly getRequestPermission: () =>
-      | BeeGameSessionRunnerStartInput['requestPermission']
-      | undefined,
-  ) {}
-
   authorize(input: {
     toolName: string
     toolInput: Record<string, unknown>
@@ -404,91 +388,15 @@ export class NativeResourceLibraryPermissionBroker {
         toolUseID: input.toolUseID,
       })
     }
-    const delegated: NativeResourceLibraryCall = {
-      action: normalized.validAction,
-      input: normalized.input,
-    }
-    const mutationAction = delegated.action === 'import_resources'
-    if (!mutationAction) {
-      return Promise.resolve({
-        behavior: 'allow',
-        updatedInput: input.toolInput,
-        decisionReason: {
-          type: 'other',
-          reason: 'beegame_read_only_resource_library',
-        },
-        toolUseID: input.toolUseID,
-      })
-    }
-
-    const capabilityKey = `ResourceLibrary:${delegated.action}`
-    if (this.allowedForSession.has(capabilityKey)) {
-      return Promise.resolve({
-        behavior: 'allow',
-        updatedInput: input.toolInput,
-        decisionReason: {
-          type: 'other',
-          reason: 'beegame_session_resource_library_grant',
-        },
-        toolUseID: input.toolUseID,
-      })
-    }
-
-    const pending = this.inFlight.get(capabilityKey)
-    if (pending)
-      return pending.then(decision => ({
-        ...decision,
-        toolUseID: input.toolUseID,
-      }))
-    const requestPermission = this.getRequestPermission()
-    if (!requestPermission) {
-      return Promise.resolve({
-        behavior: 'deny',
-        message: 'Dashboard permission channel is unavailable.',
-        decisionReason: {
-          type: 'other',
-          reason: 'dashboard_permission_context_missing',
-        },
-        toolUseID: input.toolUseID,
-      })
-    }
-
-    const request = requestPermission({
+    return Promise.resolve({
+      behavior: 'allow',
+      updatedInput: input.toolInput,
+      decisionReason: {
+        type: 'other',
+        reason: 'beegame_read_only_resource_library',
+      },
       toolUseID: input.toolUseID,
-      toolName: 'ResourceLibrary',
-      message: `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} selected Resource Library resource(s) to be downloaded into this project?`,
-      input: delegated.input,
     })
-      .then(decision => {
-        if (decision.behavior === 'allow' && decision.scope === 'session') {
-          this.allowedForSession.add(capabilityKey)
-        }
-        if (decision.behavior === 'allow') {
-          return {
-            behavior: 'allow' as const,
-            updatedInput: input.toolInput,
-            decisionReason: {
-              type: 'other',
-              reason: 'dashboard_permission_approved',
-            },
-            toolUseID: input.toolUseID,
-          }
-        }
-        return {
-          behavior: 'deny' as const,
-          message: decision.message ?? 'Denied from dashboard',
-          decisionReason: {
-            type: 'other',
-            reason: 'dashboard_permission_denied',
-          },
-          toolUseID: input.toolUseID,
-        }
-      })
-      .finally(() => {
-        this.inFlight.delete(capabilityKey)
-      })
-    this.inFlight.set(capabilityKey, request)
-    return request
   }
 }
 
@@ -708,13 +616,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.workflowDocumentAuthorMode,
     )
     const assetManifestTool =
-      this.input.workflowWorkerType === 'resource-planner' ||
-      this.input.workflowWorkerType === 'resource-curator'
+      this.input.workflowWorkerType === 'resource-planner'
         ? createNativeAssetManifestTool({
             buildTool: definition => call(toolModule, 'buildTool', definition),
             workspacePath: this.input.cwd,
-            provisionalResourceAdapters:
-              CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS,
             resourceLibraryUsage:
               confirmedResourceLibraryUsage(this.confirmedBriefContext) ??
               (() => {
@@ -722,14 +627,45 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
                   'Resource preparation requires a confirmed Resource Library policy.',
                 )
               })(),
-            allowedActions:
-              this.input.workflowWorkerType === 'resource-planner'
-                ? ['submit_resource_plan']
-                : [
-                    'author_provisional_resources',
-                    'prune_unbound_resources',
-                    'complete_resource_inventory',
-                  ],
+          })
+        : undefined
+    const assertResourceInventoryAuthority = async () => {
+      const dispatchId = this.input.workflowDispatchId
+      const requestPermission =
+        this.input.requestPermission ??
+        this.currentSubmitInput?.requestPermission
+      if (!dispatchId || !requestPermission)
+        throw new Error('Resource inventory mutation authority is unavailable.')
+      const decision = await requestPermission({
+        toolUseID: `resource-inventory-authority:${dispatchId}`,
+        toolName: 'CommitResourceInventoryAuthority',
+        message: 'Verify the active Resource Curator dispatch.',
+        input: { dispatchId },
+      })
+      if (decision.behavior !== 'allow')
+        throw new Error(
+          decision.message ??
+            'Resource inventory dispatch is no longer active.',
+        )
+    }
+    const resourceInventoryCommitTool =
+      this.input.resourceSelectionConfig &&
+      this.input.workflowWorkerType === 'resource-curator'
+        ? createNativeResourceInventoryCommitTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+            dispatchId:
+              this.input.workflowDispatchId ??
+              (() => {
+                throw new Error('Resource Curator dispatch identity is required.')
+              })(),
+            client: createResourceSelectionClient({
+              ...this.input.resourceSelectionConfig,
+              fetchImpl: PLATFORM_SERVICE_FETCH,
+            }),
+            provisionalAdapters: CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS,
+            fetchImpl: PLATFORM_SERVICE_FETCH,
+            assertMutationAuthority: assertResourceInventoryAuthority,
           })
         : undefined
     const resourceTool =
@@ -742,14 +678,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               ...this.input.resourceSelectionConfig,
               fetchImpl: PLATFORM_SERVICE_FETCH,
             }),
-            deliveryCapabilities: CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS.map(
-              adapter => ({
-                sourceFormat: adapter.format,
-                disposition: 'direct' as const,
-                targetFormat: adapter.format,
-                adapterId: `direct-${adapter.format}`,
-              }),
-            ),
+            resolveDeliveryCapabilities: configuredResourceDeliveryCapabilities,
+            assertDispatchAuthority: assertResourceInventoryAuthority,
           })
         : undefined
     const resourceContentTool =
@@ -851,6 +781,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const workflowTools = [
       assetManifestTool,
       resourceTool,
+      resourceInventoryCommitTool,
       resourceContentTool,
       atomicTaskPlanTool,
       implementationResultTool,
@@ -877,11 +808,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     )
     this.appState = appState
     const resourceLibraryPermissionBroker =
-      new NativeResourceLibraryPermissionBroker(
-        () =>
-          this.input.requestPermission ??
-          this.currentSubmitInput?.requestPermission,
-      )
+      new NativeResourceLibraryPermissionBroker()
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -1519,14 +1446,7 @@ export function selectBeeGameWorkerTools(
     return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
   }
   if (workflowWorkerType === 'resource-curator') {
-    const resourceToolNames = new Set([
-      'Glob',
-      'Grep',
-      'LS',
-      'NotebookRead',
-      'Read',
-    ])
-    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
+    return []
   }
   if (workflowWorkerType === 'resource-content-author') {
     const resourceToolNames = new Set(['Read'])

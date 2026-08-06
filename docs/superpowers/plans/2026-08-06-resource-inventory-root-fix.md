@@ -18,11 +18,11 @@
 - Modify: `packages/beegame-resource-core/src/index.ts`
 - Test: `packages/beegame-resource-core/src/__tests__/catalog.test.ts`
 
-- [ ] **Step 1: Write failing tests for exact structured matching**
+- [x] **Step 1: Write failing tests for exact structured matching**
 
-Add tests proving that matching accepts requirement profiles containing dimensions, asset kinds, usage tags, capabilities and styles; returns a fixed maximum candidate count; reports `unclassified` for elements missing required semantic metadata; and computes `direct`, `convert` or `unsupported` only from an explicit delivery capability map. Include FBX→GLB and OGG direct-delivery cases. Do not use requirement names, element names, paths, keywords or regular expressions in expectations.
+Add tests proving that matching accepts requirement profiles containing dimensions, asset kinds, usage tags, capabilities and styles; returns a fixed maximum candidate count; reports only an aggregate `unclassified` count for elements missing required semantic metadata; and computes `direct`, `convert` or `unsupported` only from an explicit delivery capability map. Include FBX→GLB and OGG direct-delivery cases. Do not use requirement names, element names, paths, keywords or regular expressions in expectations.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -32,7 +32,7 @@ bun test packages/beegame-resource-core/src/__tests__/catalog.test.ts
 
 Expected: FAIL because requirement match contracts and `matchResourceRequirements` do not exist.
 
-- [ ] **Step 3: Implement the minimal core contracts and matcher**
+- [x] **Step 3: Implement the minimal core contracts and matcher**
 
 Add canonical types equivalent to:
 
@@ -55,7 +55,7 @@ export type ResourceDeliveryCapability = {
 
 Implement one stable matcher that intersects only explicit metadata, sorts by exact metadata coverage and stable IDs, caps candidates per requirement, and separates metadata-incomplete elements into `unclassified` without treating them as no-match.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the same test and expect all catalog tests to pass.
 
@@ -69,21 +69,21 @@ Run the same test and expect all catalog tests to pass.
 - Test: `packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.test.ts`
 - Test: `packages/agent-workflow-server/src/beegame/document-readiness-audit.test.ts`
 
-- [ ] **Step 1: Write failing profile-boundary tests**
+- [x] **Step 1: Write failing profile-boundary tests**
 
 Require every Manifest requirement to carry one strict `acquisition_profile`. Prove the planner cannot omit it, cannot invent free-text fields, and that Foundation readiness rejects an Asset Plan whose source-format wording is used as a runtime admission whitelist.
 
-- [ ] **Step 2: Verify RED with focused tests**
+- [x] **Step 2: Verify RED with focused tests**
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.test.ts packages/agent-workflow-server/src/beegame/document-readiness-audit.test.ts
 ```
 
-- [ ] **Step 3: Implement the strict profile schema and authority prompt**
+- [x] **Step 3: Implement the strict profile schema and authority prompt**
 
 Extend `BeeGameAssetRequirement` and `submit_resource_plan` with the Resource Core profile. Update the planner and Reviewer authority so `asset_format_capabilities` means runtime-consumable output formats and acquisition profiles describe source semantics. Keep Resource Library policy and roots service-owned.
 
-- [ ] **Step 4: Verify GREEN and update existing fixtures mechanically**
+- [x] **Step 4: Verify GREEN and update existing fixtures mechanically**
 
 Update test fixtures with explicit profiles appropriate to their declared resource kind; do not insert a permissive default in production parsing.
 
@@ -97,29 +97,23 @@ Update test fixtures with explicit profiles appropriate to their declared resour
 - Modify: `packages/agent-workflow-server/src/beegame/native-resource-library-tool.ts`
 - Test: `packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts`
 
-- [ ] **Step 1: Write failing server/client/tool tests**
+- [x] **Step 1: Write failing server/client/tool tests**
 
-Prove `/api/resource-catalog/matches` accepts profiles plus delivery capabilities and returns one bounded catalog revision with candidate groups. Prove the Workflow tool schema exposes only `match_requirements`; `list_packs`, `inspect_pack` and direct `import_resources` are rejected for the Curator.
+Prove `/api/resource-catalog/matches` accepts profiles plus delivery capabilities and returns one bounded catalog revision with candidate groups. Prove the Workflow tool schema exposes only the canonical bounded matching operation and rejects every unsupported action.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 bun test packages/beegame-resource-server/src/__tests__/app.test.ts packages/agent-workflow-server/src/__tests__/resource-selection-client.test.ts packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts
 ```
 
-- [ ] **Step 3: Implement one endpoint and one Workflow action**
+- [x] **Step 3: Implement one endpoint and one Workflow action**
 
 The resource service loads current published catalog facts, calls the core matcher, and returns only bounded candidate facts. The client parses the strict response. The native tool caches the exact match result for the current dispatch and returns it without pagination cursors.
 
-- [ ] **Step 4: Verify GREEN and scan the Curator production lane**
+- [x] **Step 4: Verify GREEN and scan the Curator production lane**
 
-Run the focused tests, then:
-
-```bash
-rg -n "list_packs|inspect_pack|import_resources" packages/agent-workflow-server/src/beegame
-```
-
-Expected: old action names remain only outside the Resource Curator production contract or in explicit rejection tests scheduled for deletion in Task 6.
+Run the focused tests, then scan the Resource Curator production lane for any non-canonical browsing, direct import or mutation action. Expected: only bounded matching and atomic inventory commit remain.
 
 ### Task 4: Target delivery adapters and durable inventory commit
 
@@ -133,25 +127,25 @@ Expected: old action names remain only outside the Resource Curator production c
 - Test: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts`
 - Test: `packages/agent-workflow-server/src/beegame/asset-contracts-resource-binding.test.ts`
 
-- [ ] **Step 1: Write failing commit and conversion tests**
+- [x] **Step 1: Write failing commit and conversion tests**
 
-Cover: exact observed candidate identities; one decision per required group; placeholder rejection when selectable candidates exist; proven no-match acceptance; FBX source copied with dependency closure then converted to GLB under `assets/generated/**`; OGG direct use when declared; prepared receipt recovery without repeating completed acquisition; stale plan/catalog rejection; one resource identity across source and generated files.
+Cover: exact observed candidate identities; one-or-more library decisions or one placeholder per required group; one resource reused across several bindings; placeholder rejection when selectable candidates exist; proven no-match acceptance; FBX source copied with dependency closure then converted to GLB under `assets/generated/**`; OGG direct use when declared; prepared receipt recovery across a replacement dispatch without repeating completed acquisition; stale plan/catalog and content-hash rejection; one resource identity across source and generated files.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts packages/agent-workflow-server/src/beegame/asset-contracts-resource-binding.test.ts
 ```
 
-- [ ] **Step 3: Implement the target adapter registry**
+- [x] **Step 3: Implement the target adapter registry**
 
 Register explicit target-owned capabilities. Implement FBX dependency-closure conversion with AssimpJS `glb2`; preserve exact source files, write generated output atomically, and keep generated files under the same Manifest resource record. Direct formats copy without conversion. Do not add a shared fallback adapter.
 
-- [ ] **Step 4: Implement `CommitResourceInventory`**
+- [x] **Step 4: Implement `CommitResourceInventory`**
 
-Persist a strict receipt with `prepared | applying | committed`, frozen decisions, completed operations, output hashes and final bindings. Reconcile an existing receipt before starting work. Validate the complete decision set before mutation and derive the terminal result only from a committed receipt plus current file audit.
+Persist the first match as the plan transaction's immutable observation so a new Continue dispatch adopts it instead of rematching. Persist one decision-independent strict receipt with `prepared | applying | committed`, frozen decisions, staged resource IDs, output hashes and many-to-many bindings. Validate active-dispatch authority before receipt preparation, staging advancement and publication. Pass the frozen Catalog revision into resolution and validate every downloaded source/dependency against its inspected content hash. Acquire and convert only in a receipt-specific staging workspace; after every staged resource validates, publish all files and one canonical Manifest. Reconcile exact same-hash files left by an interrupted publication, but reject conflicting bytes. Remove committed staging/current pointers and derive the terminal result only from a committed receipt plus current file audit.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run both tests and confirm an interrupted commit resumes without invoking candidate selection again.
 
@@ -168,25 +162,25 @@ Run both tests and confirm an interrupted commit resumes without invoking candid
 - Test: `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts`
 - Test: `packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.test.ts`
 
-- [ ] **Step 1: Write failing integration tests**
+- [x] **Step 1: Write failing integration tests**
 
 Prove the Curator receives no generic file or shell tools, calls one match and one commit, and terminal bindings come from the committed receipt. Simulate `session.stopped` and process restart; assert durable dispatch becomes `interrupted`, `thinking` becomes `idle`, elapsed time freezes, and Continue resumes the same prepared commit.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 bun test packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.test.ts
 ```
 
-- [ ] **Step 3: Wire the new tools and terminal**
+- [x] **Step 3: Wire the new tools and terminal**
 
 Remove AssetManifest mutation access from the Curator. Supply only projected authority, Manifest plan and the two native resource operations. Read terminal state from the committed inventory receipt and preserve the existing `ResourceInventoryReceipt` as the sole completed Workflow state.
 
-- [ ] **Step 4: Unify stopped transport reconciliation**
+- [x] **Step 4: Unify stopped transport reconciliation**
 
 At status polling and startup recovery, route stopped/missing sessions with a running durable dispatch through the existing interruption transition. Reject late progress events by dispatch authority. Do not classify user stop as failure.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run the focused tests and inspect assertions for stopped, interrupted and resumed states.
 
@@ -198,20 +192,17 @@ Run the focused tests and inspect assertions for stopped, interrupted and resume
 - Modify: `docs/beegame-native-game-delivery-architecture.md`
 - Modify: `docs/beegame-resource-semantic-contract.md`
 
-- [ ] **Step 1: Delete dual-track production logic**
+- [x] **Step 1: Delete dual-track production logic**
 
-Remove Workflow `list_packs`, `inspect_pack`, direct `import_resources`, Curator AssetManifest placeholder mutation, model-reconstructed final bindings, and obsolete prompts/tests. Keep Resource Library administration browsing separate from Workflow.
+Remove Workflow catalog pagination, direct import, Curator AssetManifest placeholder mutation, model-reconstructed final bindings, and obsolete prompts/tests. Keep Resource Library administration browsing separate from Workflow.
 
-- [ ] **Step 2: Audit forbidden residuals**
+- [x] **Step 2: Audit forbidden residuals**
 
-```bash
-rg -n "list_packs|inspect_pack|complete_resource_inventory|author_provisional_resources" packages/agent-workflow-server/src/beegame
-rg -n "token limit|wall-clock limit|tool-call limit|attempt limit" packages/agent-workflow-server/src/beegame/delivery-workflow
-```
+Scan the Resource Curator production lane for retired browsing/import/mutation actions and scan the resource Workflow for token, wall-clock, tool-call or attempt limits.
 
 Expected: no old Curator production path or resource business limit remains.
 
-- [ ] **Step 3: Run focused and package verification**
+- [x] **Step 3: Run focused and package verification**
 
 ```bash
 bun test packages/beegame-resource-core/src packages/beegame-resource-server/src packages/agent-workflow-server/src/beegame packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts

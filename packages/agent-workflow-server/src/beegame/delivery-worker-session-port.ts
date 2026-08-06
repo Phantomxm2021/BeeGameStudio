@@ -53,6 +53,7 @@ import {
   readResourceContentCommitReceipt,
   resourceContentCommitContractSchema,
 } from './native-resource-content-tool'
+import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 
 function reviewerSubmissionContract(
   request: WorkerDispatchRequest,
@@ -727,7 +728,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'resource-planner'
           ? 'Use AssetManifest submit_resource_plan as the only mutation and stop after it is accepted.'
           : request?.workerType === 'resource-curator'
-            ? 'Use ResourceLibrary and AssetManifest as the only resource mutation path. Finish with AssetManifest complete_resource_inventory.'
+            ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
             : ''
       const workerPrompt = [
         languageInstruction,
@@ -871,6 +872,27 @@ export function createBeeGameDeliveryWorkerPort(input: {
           eventOffsets.get(dispatchId) ?? 0,
         )
         const request = requests.get(dispatchId)
+        if (request?.workerType === 'resource-curator') {
+          const receipt = await readCurrentCommittedResourceInventoryReceipt(
+            request.workspacePath,
+          )
+          if (receipt) {
+            const contract = auditAssetContract(request.workspacePath)
+            return resourceCuratorTerminalSchema.parse({
+              revision: request.revision,
+              workerType: 'resource-curator',
+              status: 'completed',
+              catalogObserved: true,
+              resourceIds: contract.resources.map(resource => resource.id),
+              bindings: receipt.bindings,
+              writtenPaths: [
+                'assets/asset-manifest.json',
+                ...contract.resources.flatMap(resource => resource.filePaths),
+              ],
+              taskMetrics: resourceTaskMetrics(events),
+            })
+          }
+        }
         if (request?.workerType === 'resource-content-author') {
           const receipt = readResourceContentCommitReceipt(
             request.workspacePath,
@@ -928,15 +950,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
             throw new Error(
               result.text || 'worker turn did not produce a terminal result',
             )
-          if (
-            request?.workerType === 'resource-planner' ||
-            request?.workerType === 'resource-curator'
-          ) {
-            return createDeterministicResourceTaskTerminal({
+          if (request?.workerType === 'resource-planner') {
+            return createDeterministicResourcePlannerTerminal({
               request,
               events,
             })
           }
+          if (request?.workerType === 'resource-curator')
+            throw new Error(
+              'resource curator completed without an accepted durable inventory receipt',
+            )
           if (request?.workerType === 'resource-content-author')
             throw new Error(
               'resource content author completed without an accepted durable receipt',
@@ -970,9 +993,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
             closedTurnDrained = true
             continue
           }
-          throw new Error(
+          const error = new Error(
             'worker stopped before producing a durable terminal result',
           )
+          error.name = 'WorkerNeedsActionError'
+          throw error
         }
         await new Promise(resolve => setTimeout(resolve, 250))
       }
@@ -1066,9 +1091,11 @@ async function createDeterministicStructuredTerminal(input: {
     case 'question-answerer':
       return createDeterministicQuestionAnswerTerminal(input)
     case 'resource-planner':
+      return createDeterministicResourcePlannerTerminal(input)
     case 'resource-curator':
+      throw new Error('resource curator terminal requires a committed durable inventory receipt')
     case 'resource-content-author':
-      return createDeterministicResourceTaskTerminal(input)
+      throw new Error('resource content terminal requires a committed durable content receipt')
   }
 }
 
@@ -1402,8 +1429,6 @@ function validationScopeContains(scope: string, artifactPath: string): boolean {
   )
 }
 
-const RESOURCE_MUTATION_ACTIONS = new Set(['import_resources'])
-
 const WORKSPACE_MUTATION_TOOLS = new Set([
   'Write',
   'Edit',
@@ -1422,17 +1447,9 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
     }
     if (event.type !== 'tool.started') continue
     const toolName = String(event.payload?.toolName ?? '')
-    const toolInput = event.payload?.input
-    const resourceAction =
-      toolName === 'ResourceLibrary' &&
-      toolInput &&
-      typeof toolInput === 'object' &&
-      !Array.isArray(toolInput)
-        ? String((toolInput as Record<string, unknown>).action ?? '')
-        : ''
     if (
       WORKSPACE_MUTATION_TOOLS.has(toolName) ||
-      RESOURCE_MUTATION_ACTIONS.has(resourceAction) ||
+      toolName === 'CommitResourceInventory' ||
       toolName === 'AssetManifest' ||
       toolName === 'CommitResourceContent'
     )
@@ -1462,14 +1479,12 @@ function hasInFlightTool(
   return active.size > 0
 }
 
-async function createDeterministicResourceTaskTerminal(input: {
+async function createDeterministicResourcePlannerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const taskMetrics = resourceTaskMetrics(input.events)
   const contract = auditAssetContract(input.request.workspacePath)
-  const resourceIds = contract.resources.map(resource => resource.id)
-  const contentIds = contract.content.files.map(file => file.id)
   const observedMutationPaths = completedMutationPaths(
     input.request.workspacePath,
     input.events,
@@ -1482,62 +1497,22 @@ async function createDeterministicResourceTaskTerminal(input: {
       ...observedMutationPaths,
     ]),
   ]
-  if (input.request.workerType === 'resource-planner') {
-    const submission = completedToolInputs(input.events, 'AssetManifest').find(
-      candidate => candidate.action === 'submit_resource_plan',
+  if (input.request.workerType !== 'resource-planner')
+    throw new Error('resource planner terminal received another worker type')
+  const submission = completedToolInputs(input.events, 'AssetManifest').find(
+    candidate => candidate.action === 'submit_resource_plan',
+  )
+  if (!submission || !contract.present || contract.requirements.length === 0)
+    throw new Error(
+      'resource planner completed without an accepted canonical resource plan',
     )
-    if (!submission || !contract.present || contract.requirements.length === 0)
-      throw new Error(
-        'resource planner completed without an accepted canonical resource plan',
-      )
-    return resourcePlannerTerminalSchema.parse({
-      revision: input.request.revision,
-      workerType: 'resource-planner' as const,
-      status: 'completed' as const,
-      writtenPaths: ['assets/asset-manifest.json'],
-      taskMetrics,
-    })
-  }
-  if (input.request.workerType === 'resource-curator') {
-    const catalogObserved = completedToolInputs(
-      input.events,
-      'ResourceLibrary',
-    ).some(candidate => candidate.action === 'list_packs')
-    const submission = completedToolInputs(input.events, 'AssetManifest').find(
-      candidate => candidate.action === 'complete_resource_inventory',
-    )
-    if (!submission || !Array.isArray(submission.bindings))
-      throw new Error(
-        'resource curator completed without complete_resource_inventory',
-      )
-    const bindings = submission.bindings.map(binding => {
-      if (!binding || typeof binding !== 'object' || Array.isArray(binding))
-        throw new Error('resource inventory binding is invalid')
-      const value = binding as Record<string, unknown>
-      if (
-        typeof value.requirement_id !== 'string' ||
-        !Array.isArray(value.resource_ids)
-      )
-        throw new Error('resource inventory binding is invalid')
-      return {
-        requirementId: value.requirement_id,
-        resourceIds: value.resource_ids.filter(
-          (id): id is string => typeof id === 'string' && id.length > 0,
-        ),
-      }
-    })
-    return resourceCuratorTerminalSchema.parse({
-      revision: input.request.revision,
-      workerType: 'resource-curator' as const,
-      status: 'completed' as const,
-      catalogObserved,
-      resourceIds,
-      bindings,
-      writtenPaths,
-      taskMetrics,
-    })
-  }
-  throw new Error('resource task worker type is invalid')
+  return resourcePlannerTerminalSchema.parse({
+    revision: input.request.revision,
+    workerType: 'resource-planner' as const,
+    status: 'completed' as const,
+    writtenPaths: ['assets/asset-manifest.json'],
+    taskMetrics,
+  })
 }
 
 function resourceTaskMetrics(
@@ -1563,15 +1538,8 @@ function resourceTaskMetrics(
       input && typeof input === 'object' && !Array.isArray(input)
         ? String((input as Record<string, unknown>).action ?? '')
         : ''
-    if (toolName === 'ResourceLibrary') return action === 'import_resources'
-    return (
-      toolName === 'AssetManifest' &&
-      [
-        'submit_resource_plan',
-        'author_provisional_resources',
-        'prune_unbound_resources',
-      ].includes(action)
-    )
+    if (toolName === 'CommitResourceInventory') return true
+    return toolName === 'AssetManifest' && action === 'submit_resource_plan'
   }).length
   return {
     catalogPayloadBytes: catalogCalls.reduce(

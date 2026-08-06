@@ -1,19 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createResourceSelectionClient } from '../beegame/resource-selection-client'
 
-const facets = {
-  dimensions: [],
-  primaryCategories: [],
-  categories: [],
-  styles: [],
-  gameTypes: [],
-  packTags: [],
-  usageTags: [],
-  assetKinds: [],
-  capabilities: [],
-  formats: [],
-}
-
 describe('Resource selection service client', () => {
   test('matches all requirements through one strict bounded endpoint', async () => {
     const requests: Array<{ url: string; body: unknown }> = []
@@ -29,7 +16,7 @@ describe('Resource selection service client', () => {
             candidates: [{ ...catalogElement(), assetKind: 'model', delivery: {
               sourceFormat: 'fbx', disposition: 'convert', targetFormat: 'glb', adapterId: 'converter',
             } }],
-            unclassifiedElementIds: [],
+            unclassifiedElementCount: 0,
           }],
         })
       },
@@ -49,60 +36,17 @@ describe('Resource selection service client', () => {
     expect(requests).toEqual([{ url: 'https://resource.invalid/api/resource-catalog/matches', body: request }])
   })
 
-  test('lists compact Packs through the Pack catalog endpoint', async () => {
-    const requests: Array<{ url: string; body: unknown }> = []
-    const client = createResourceSelectionClient({
-      baseUrl: 'https://resource.invalid/',
-      serviceToken: 'token',
-      fetchImpl: async (input, init) => {
-        requests.push({
-          url: String(input),
-          body: JSON.parse(String(init?.body)),
-        })
-        return Response.json({
-          items: [catalogPack()],
-          total: 1,
-          facets,
-        })
-      },
-    })
-    await expect(
-      client.listPacks({ filters: { dimensions: ['3D'] }, limit: 8 }),
-    ).resolves.toEqual(expect.objectContaining({ total: 1 }))
-    expect(requests).toEqual([
-      {
-        url: 'https://resource.invalid/api/resource-catalog/packs',
-        body: { filters: { dimensions: ['3D'] }, limit: 8 },
-      },
-    ])
-  })
-
-  test('inspects only the selected Pack elements', async () => {
-    const requests: string[] = []
-    const client = createResourceSelectionClient({
-      baseUrl: 'https://resource.invalid',
-      serviceToken: 'token',
-      fetchImpl: async input => {
-        requests.push(String(input))
-        return Response.json({ items: [catalogElement()], total: 1, facets })
-      },
-    })
-    await expect(client.inspectPack('pack/a', { limit: 4 })).resolves.toEqual(
-      expect.objectContaining({ total: 1 }),
-    )
-    expect(requests).toEqual([
-      'https://resource.invalid/api/resource-catalog/packs/pack%2Fa/elements',
-    ])
-  })
-
   test('resolves exact resource identities through the sole acquisition endpoint', async () => {
     const client = createResourceSelectionClient({
       baseUrl: 'https://resource.invalid',
       serviceToken: 'token',
-      fetchImpl: async input => {
+      fetchImpl: async (input, init) => {
         expect(String(input)).toBe(
           'https://resource.invalid/api/resource-library/resolve',
         )
+        expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
+          catalogRevision: 'revision-a',
+        }))
         return Response.json({
           selections: [
             {
@@ -112,6 +56,7 @@ describe('Resource selection service client', () => {
               elementId: 'element-a',
               elementPath: 'model.glb',
               sourceUrl: 'https://download.invalid/model',
+              sourceHash: 'a'.repeat(64),
               selectionReason: ['Observed target fit.'],
               dependencies: [],
             },
@@ -120,7 +65,7 @@ describe('Resource selection service client', () => {
       },
     })
     await expect(
-      client.resolveResources([
+      client.resolveResources('revision-a', [
         {
           resourceId: 'resource-a',
           packId: 'pack-a',
@@ -138,35 +83,17 @@ describe('Resource selection service client', () => {
     ])
   })
 
-  test('rejects an invalid Pack response instead of inventing metadata', async () => {
+  test('rejects an invalid match response instead of inventing metadata', async () => {
     const client = createResourceSelectionClient({
       baseUrl: 'https://resource.invalid',
       serviceToken: 'token',
-      fetchImpl: async () => Response.json({ items: [], total: 0 }),
+      fetchImpl: async () => Response.json({ groups: [] }),
     })
-    await expect(client.listPacks({})).rejects.toThrow(
-      'Resource catalog response is invalid',
+    await expect(client.matchRequirements({ requirements: [], deliveryCapabilities: [] })).rejects.toThrow(
+      'Resource requirement match response is invalid',
     )
   })
 })
-
-function catalogPack() {
-  return {
-    packId: 'pack-a',
-    packVersion: '1.0.0',
-    packName: 'Pack',
-    dimension: '3D',
-    primaryCategory: 'environment',
-    styles: [],
-    gameTypes: [],
-    tags: [],
-    usageTags: [],
-    assetKinds: [],
-    capabilities: [],
-    formats: ['glb'],
-    readyElementCount: 1,
-  }
-}
 
 function catalogElement() {
   return {

@@ -1,7 +1,5 @@
 export const RESOURCE_LIBRARY_ACTIONS = [
-  'list_packs',
-  'inspect_pack',
-  'import_resources',
+  'match_requirements',
 ] as const
 
 export type ResourceLibraryAction = (typeof RESOURCE_LIBRARY_ACTIONS)[number]

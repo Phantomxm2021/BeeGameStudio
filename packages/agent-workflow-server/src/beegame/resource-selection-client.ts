@@ -1,8 +1,5 @@
 import type {
   ResourceCatalogElement,
-  ResourceCatalogPack,
-  ResourceCatalogPage,
-  ResourceCatalogRequest,
   ResourceRequirementMatchRequest,
   ResourceRequirementMatchResult,
 } from '@bee-game-studio/beegame-resource-core'
@@ -21,6 +18,7 @@ export type ResourceSelectionDependencyResult = {
   elementPath: string
   referencePath: string
   sourceUrl: string
+  sourceHash: string
   kind?: string
 }
 export type ResourceSelectionResult = {
@@ -36,6 +34,7 @@ export type ResourceSelectionResult = {
   usageTags?: string[]
   dimension?: '2D' | '3D' | 'agnostic'
   sourceUrl: string
+  sourceHash: string
   assetKind?: string
   capabilities?: string[]
   contentProfile?: Record<string, unknown>
@@ -43,11 +42,7 @@ export type ResourceSelectionResult = {
   relations?: ResourceSelectionElementRelation[]
   dependencies?: ResourceSelectionDependencyResult[]
 }
-export type ResourceCatalogInput = ResourceCatalogRequest
 export type ResourceCatalogElementResult = ResourceCatalogElement
-export type ResourceCatalogElementPage =
-  ResourceCatalogPage<ResourceCatalogElement>
-export type ResourceCatalogPackPage = ResourceCatalogPage<ResourceCatalogPack>
 export type ResourceSelectionInput = {
   resourceId: string
   packId: string
@@ -76,7 +71,8 @@ export function createResourceSelectionClient(options: {
   transportRetryDelayMs?: number
 }) {
   const fetchImpl = options.fetchImpl ?? fetch
-  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  let baseUrl = options.baseUrl
+  while (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1)
   const transportRetryAttempts = Number.isFinite(options.transportRetryAttempts)
     ? Math.max(0, Math.trunc(options.transportRetryAttempts!))
     : 2
@@ -96,38 +92,12 @@ export function createResourceSelectionClient(options: {
         )
       return parseRequirementMatchResponse(body)
     },
-    async listPacks(
-      input: ResourceCatalogInput,
-    ): Promise<ResourceCatalogPackPage> {
-      const response = await servicePost('/api/resource-catalog/packs', input)
-      const body = await response.json().catch(() => undefined)
-      if (!response.ok)
-        throw new Error(
-          errorMessage(body) ||
-            `Resource Pack catalog browse failed (${response.status})`,
-        )
-      return parseCatalogPage(body, parseCatalogPack)
-    },
-    async inspectPack(
-      packId: string,
-      input: ResourceCatalogInput,
-    ): Promise<ResourceCatalogElementPage> {
-      const response = await servicePost(
-        `/api/resource-catalog/packs/${encodeURIComponent(packId)}/elements`,
-        input,
-      )
-      const body = await response.json().catch(() => undefined)
-      if (!response.ok)
-        throw new Error(
-          errorMessage(body) ||
-            `Resource Pack inspection failed (${response.status})`,
-        )
-      return parseCatalogPage(body, parseCatalogElement)
-    },
     async resolveResources(
+      catalogRevision: string,
       selections: ResourceSelectionInput[],
     ): Promise<ResourceResolvedSelection[]> {
       const response = await servicePost('/api/resource-library/resolve', {
+        catalogRevision,
         selections,
       })
       const body = (await response.json().catch(() => undefined)) as
@@ -179,7 +149,7 @@ export function createResourceSelectionClient(options: {
   }
 }
 
-function parseRequirementMatchResponse(
+export function parseRequirementMatchResponse(
   value: unknown,
 ): ResourceRequirementMatchResponse {
   if (
@@ -201,7 +171,8 @@ function parseRequirementMatchResponse(
           String(group.status),
         ) ||
         !Array.isArray(group.candidates) ||
-        !stringArray(group.unclassifiedElementIds)
+        !Number.isSafeInteger(group.unclassifiedElementCount) ||
+        Number(group.unclassifiedElementCount) < 0
       ) {
         throw new Error('Resource requirement match group is invalid')
       }
@@ -237,76 +208,9 @@ function parseRequirementMatchResponse(
             },
           }
         }),
-        unclassifiedElementIds: group.unclassifiedElementIds,
+        unclassifiedElementCount: Number(group.unclassifiedElementCount),
       }
     }),
-  }
-}
-
-function parseCatalogPack(value: unknown): ResourceCatalogPack {
-  if (!isRecord(value)) throw new Error('Resource catalog Pack is invalid')
-  for (const key of [
-    'packId',
-    'packVersion',
-    'packName',
-    'dimension',
-    'primaryCategory',
-  ] as const) {
-    if (typeof value[key] !== 'string' || !value[key].trim())
-      throw new Error('Resource catalog Pack is invalid')
-  }
-  for (const key of [
-    'styles',
-    'gameTypes',
-    'tags',
-    'usageTags',
-    'assetKinds',
-    'capabilities',
-    'formats',
-  ] as const) {
-    if (!Array.isArray(value[key]))
-      throw new Error('Resource catalog Pack is invalid')
-  }
-  if (typeof value.readyElementCount !== 'number')
-    throw new Error('Resource catalog Pack is invalid')
-  return value as unknown as ResourceCatalogPack
-}
-
-function parseCatalogPage<T>(
-  value: unknown,
-  parseItem: (item: unknown) => T,
-): ResourceCatalogPage<T> {
-  if (
-    !isRecord(value) ||
-    !Array.isArray(value.items) ||
-    typeof value.total !== 'number' ||
-    !isRecord(value.facets)
-  ) {
-    throw new Error('Resource catalog response is invalid')
-  }
-  const facets = value.facets
-  for (const key of [
-    'dimensions',
-    'primaryCategories',
-    'categories',
-    'styles',
-    'gameTypes',
-    'packTags',
-    'usageTags',
-    'assetKinds',
-    'capabilities',
-    'formats',
-  ]) {
-    if (!stringArray(facets[key]))
-      throw new Error('Resource catalog facets are invalid')
-  }
-  return {
-    items: value.items.map(parseItem),
-    total: value.total,
-    ...(typeof value.nextCursor === 'string' && value.nextCursor
-      ? { nextCursor: value.nextCursor }
-      : {}),
-    facets: facets as ResourceCatalogPage<T>['facets'],
   }
 }
 
@@ -396,6 +300,8 @@ function parseSelectionRecord(value: unknown): ResourceSelectionResult {
       throw new Error('Resource selection response is invalid')
   if (typeof row.sourceUrl !== 'string' || !row.sourceUrl.trim())
     throw new Error('Resource selection response is invalid')
+  if (!isSha256String(row.sourceHash))
+    throw new Error('Resource selection source hash is invalid')
   const dependencies = Array.isArray(row.dependencies)
     ? row.dependencies.map(value => parseDependency(value, true))
     : []
@@ -438,6 +344,7 @@ function parseSelectionRecord(value: unknown): ResourceSelectionResult {
       ? { dimension: row.dimension }
       : {}),
     sourceUrl: String(row.sourceUrl),
+    sourceHash: String(row.sourceHash),
     ...(typeof row.assetKind === 'string' ? { assetKind: row.assetKind } : {}),
     ...(capabilities?.length ? { capabilities } : {}),
     ...(contentProfile ? { contentProfile } : {}),
@@ -528,7 +435,8 @@ function parseDependency(
   }
   if (
     sourceUrlRequired &&
-    (typeof row.sourceUrl !== 'string' || !row.sourceUrl.trim())
+    ((typeof row.sourceUrl !== 'string' || !row.sourceUrl.trim()) ||
+      !isSha256String(row.sourceHash))
   )
     throw new Error('Resource selection dependency is invalid')
   return {
@@ -538,8 +446,16 @@ function parseDependency(
     elementPath: String(row.elementPath),
     referencePath: String(row.referencePath),
     sourceUrl: sourceUrlRequired ? String(row.sourceUrl) : '',
+    sourceHash: sourceUrlRequired ? String(row.sourceHash) : '',
     ...(typeof row.kind === 'string' && row.kind.trim()
       ? { kind: row.kind }
       : {}),
   }
+}
+
+function isSha256String(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length !== 64) return false
+  for (const character of value.toLocaleLowerCase())
+    if (!'0123456789abcdef'.includes(character)) return false
+  return true
 }

@@ -11,6 +11,8 @@ import {
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+
 describe('delivery workflow resource entry', () => {
   let workspace = ''
 
@@ -28,7 +30,7 @@ describe('delivery workflow resource entry', () => {
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
-      requirements: [{ id: 'visual.player', required: true }],
+      requirements: [{ id: 'visual.player', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
       resources: [],
     })
 

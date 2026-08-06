@@ -33,6 +33,7 @@ type Tool = {
 }
 
 const roots: string[] = []
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 
 afterEach(async () => {
   await Promise.all(
@@ -56,9 +57,9 @@ async function createWorkspace(options?: {
       generated_asset_root: 'assets/generated',
     },
     requirements: [
-      { id: 'req-model', required: true },
+      { id: 'req-model', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE },
       ...(options?.includeMissingAudio
-        ? [{ id: 'req-audio', required: true }]
+        ? [{ id: 'req-audio', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }]
         : []),
     ],
     resources: [

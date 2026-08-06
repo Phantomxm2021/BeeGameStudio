@@ -77,8 +77,8 @@ describe('BeeGame session runtime resilience', () => {
   test('treats canonical resource mutations as durable progress', () => {
     for (const [toolName, input] of [
       ['Write', {}],
-      ['AssetManifest', { action: 'author_provisional_resources' }],
-      ['ResourceLibrary', { action: 'import_resources' }],
+      ['AssetManifest', { action: 'submit_resource_plan' }],
+      ['CommitResourceInventory', { decisions: [] }],
       ['CommitResourceContent', { action: 'commit' }],
     ] as const) {
       expect(
@@ -102,7 +102,7 @@ describe('BeeGame session runtime resilience', () => {
         payload: {
           type: 'tool_event',
           toolName: 'ResourceLibrary',
-          input: { action: 'list_packs' },
+          input: { action: 'match_requirements' },
         },
         createdAt: new Date(),
       }),
@@ -416,8 +416,7 @@ describe('BeeGame session runtime resilience', () => {
                   id: 'resource-catalog-1',
                   name: 'ResourceLibrary',
                   input: {
-                    action: 'list_packs',
-                    filters: { dimensions: ['3D'] },
+                    action: 'match_requirements',
                   },
                 },
               ],
@@ -453,27 +452,30 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
     const run = await store.load()
 
-    expect(run?.currentMessage).toBe('正在浏览资源库…')
+    expect(run?.currentMessage).toBe('正在匹配资源需求…')
     expect(run?.lastProgressAt).toBe(startedAt)
     manager.dispose()
   })
 
-  test('auto-approves only an exact Resource Library import for the resource worker', async () => {
+  test('auto-approves only an exact inventory commit for the resource worker', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-permission-'))
     const workspacePath = join(root, 'workspace')
     let decision: DashboardPermissionDecision | undefined
     let outsideDecision: DashboardPermissionDecision | undefined
+    let activeAuthority: DashboardPermissionDecision | undefined
+    let staleAuthority: DashboardPermissionDecision | undefined
     const runner: BeeGameSessionRunner = {
       start: async startInput => ({
         submit: async () => {
           decision = await startInput.requestPermission?.({
             toolUseID: 'resource-import-1',
-            toolName: 'ResourceLibrary',
-            message: 'Import selected resources',
+            toolName: 'CommitResourceInventory',
+            message: 'Commit selected resources',
             input: {
-              action: 'import_resources',
-              selections: [
+              decisions: [
                 {
+                  kind: 'library',
+                  requirement_id: 'visual.resource',
                   resource_id: 'selected-resource',
                   pack_id: 'pack-1',
                   expected_pack_version: '1.0.0',
@@ -486,12 +488,13 @@ describe('BeeGame session runtime resilience', () => {
           })
           outsideDecision = await startInput.requestPermission?.({
             toolUseID: 'resource-import-outside',
-            toolName: 'ResourceLibrary',
-            message: 'Import selected resources',
+            toolName: 'CommitResourceInventory',
+            message: 'Commit selected resources',
             input: {
-              action: 'import_resources',
-              selections: [
+              decisions: [
                 {
+                  kind: 'library',
+                  requirement_id: 'visual.resource',
                   resource_id: 'outside-resource',
                   pack_id: 'pack-1',
                   expected_pack_version: '1.0.0',
@@ -501,6 +504,18 @@ describe('BeeGame session runtime resilience', () => {
                 },
               ],
             },
+          })
+          activeAuthority = await startInput.requestPermission?.({
+            toolUseID: 'resource-authority-active',
+            toolName: 'CommitResourceInventoryAuthority',
+            message: 'Verify active dispatch',
+            input: { dispatchId: 'dispatch-1' },
+          })
+          staleAuthority = await startInput.requestPermission?.({
+            toolUseID: 'resource-authority-stale',
+            toolName: 'CommitResourceInventoryAuthority',
+            message: 'Verify stale dispatch',
+            input: { dispatchId: 'dispatch-stale' },
           })
         },
         stop: () => undefined,
@@ -526,6 +541,11 @@ describe('BeeGame session runtime resilience', () => {
       behavior: 'deny',
       message: expect.stringContaining('outside the current project workspace'),
     })
+    expect(activeAuthority).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(staleAuthority).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringContaining('no longer active'),
+    })
     expect(
       manager.pendingPermissionsForProject(
         'user-1',
@@ -545,7 +565,7 @@ describe('BeeGame session runtime resilience', () => {
       decision: 'allow',
       scope: 'once',
       autoApproved: true,
-      reason: 'workflow_resource_preparer_import',
+      reason: 'workflow_resource_inventory_commit',
     })
     manager.dispose()
   })
@@ -564,6 +584,9 @@ describe('BeeGame session runtime resilience', () => {
       requirements: [
         {
           id: 'model',
+          acquisition_profile: {
+            dimensions: ['3D'], asset_kinds: ['model'], usage_tags: [], capabilities: [], styles: [],
+          },
         },
       ],
       resources: [],
@@ -668,14 +691,15 @@ describe('BeeGame session runtime resilience', () => {
                 }),
               },
             })
-          decisions.import = await startInput.requestPermission?.({
+          decisions.commit = await startInput.requestPermission?.({
             toolUseID: 'repair-import',
-            toolName: 'ResourceLibrary',
-            message: 'Import replacement inventory',
+            toolName: 'CommitResourceInventory',
+            message: 'Commit replacement inventory',
             input: {
-              action: 'import_resources',
-              selections: [
+              decisions: [
                 {
+                  kind: 'library',
+                  requirement_id: 'model',
                   resource_id: 'replacement',
                   pack_id: 'pack-1',
                   expected_pack_version: '1.0.0',
@@ -712,44 +736,26 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(decisions.manifestWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('only through AssetManifest'),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
     expect(decisions.sourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('outside its declared phase scope'),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
-    expect(decisions.unsupportedResourceWrite).toMatchObject({
-      behavior: 'deny',
-      message: expect.stringContaining('author_provisional_resources'),
-    })
+    expect(decisions.unsupportedResourceWrite).toMatchObject({ behavior: 'deny' })
     expect(decisions.binaryResourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('AssetManifest'),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
     expect(decisions.textRuntimeResourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('author_provisional_resources'),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
-    expect(decisions.programmaticResourceWrite).toEqual({
-      behavior: 'allow',
-      scope: 'once',
-    })
+    expect(decisions.programmaticResourceWrite).toMatchObject({ behavior: 'deny' })
     expect(decisions.invalidProgrammaticResourceWrite).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining(
-        'must match beegame-programmatic-audio-v1 before it is written',
-      ),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
-    expect(
-      manager
-        .events(session.id)
-        .find(
-          event =>
-            event.payload?.toolUseID ===
-              'invalid-programmatic-resource-write' &&
-            event.type === 'permission.resolved',
-        )?.payload?.reasonCode,
-    ).toBe('resource_contract_invalid')
     expect(
       manager
         .events(session.id)
@@ -759,7 +765,7 @@ describe('BeeGame session runtime resilience', () => {
             event.type === 'permission.resolved',
         )?.payload?.reasonCode,
     ).toBeUndefined()
-    expect(decisions.import).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(decisions.commit).toEqual({ behavior: 'allow', scope: 'once' })
     expect(
       manager.pendingPermissionsForProject(
         'user-1',
@@ -810,7 +816,7 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(decision).toMatchObject({
       behavior: 'deny',
-      message: expect.stringContaining('only through AssetManifest'),
+      message: expect.stringContaining('CommitResourceInventory'),
     })
     manager.dispose()
   })
@@ -1202,7 +1208,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('keeps Resource Library imports interactive for other workflow workers', async () => {
+  test('does not grant Resource Library access to unrelated workflow workers', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-non-resource-permission-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined
@@ -1212,19 +1218,9 @@ describe('BeeGame session runtime resilience', () => {
           decisionPromise = startInput.requestPermission?.({
             toolUseID: 'implementation-import-1',
             toolName: 'ResourceLibrary',
-            message: 'Import selected resources',
+            message: 'Use resource matching outside the resource phase',
             input: {
-              action: 'import_resources',
-              selections: [
-                {
-                  resource_id: 'selected-resource',
-                  pack_id: 'pack-1',
-                  expected_pack_version: '1.0.0',
-                  element_id: 'element-1',
-                  destination_path: 'assets/runtime/selected-resource',
-                  selection_reason: ['Observed fit.'],
-                },
-              ],
+              action: 'match_requirements',
             },
           })
         },

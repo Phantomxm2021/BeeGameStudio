@@ -66,7 +66,7 @@ describe('resource catalog browsing', () => {
     expect(page.items.map(item => item.elementId)).toEqual(['ground', 'wall'])
     expect(new Set(page.items.map(item => item.packId))).toEqual(new Set(['world-kit']))
     expect(page.items.every(item => !('roleId' in item))).toBe(true)
-    expect(page.items[0]?.technicalFacts).toEqual({ boundsSizeY: 4, hasTextureCoordinates: true })
+    expect(page.items[0]?.technicalFacts).toEqual(expect.objectContaining({ boundsSizeY: 4, hasTextureCoordinates: true }))
   })
 
   test('exposes authored preview descriptors without signing source URLs', () => {
@@ -239,9 +239,72 @@ describe('bounded requirement matching', () => {
       expect.objectContaining({
         status: 'unclassified',
         candidates: [],
-        unclassifiedElementIds: ['untagged-model'],
+        unclassifiedElementCount: 1,
       }),
     )
+  })
+
+  test('keeps the wire result bounded when many eligible elements lack semantic metadata', () => {
+    const unclassified = Array.from({ length: 1_000 }, (_, index) =>
+      element(
+        `unclassified-${index}`,
+        'world-kit',
+        `models/unclassified-${index}.glb`,
+        'models',
+        'model',
+        [],
+        [],
+      ),
+    )
+    const result = matchResourceRequirements(packs, unclassified, {
+      requirements: [{
+        requirementId: 'environment-model',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model'],
+          usageTags: ['environment'], capabilities: [], styles: ['Stylized'],
+        },
+      }],
+      deliveryCapabilities: [{
+        sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb',
+      }],
+    })
+
+    expect(result.groups[0]).toEqual(expect.objectContaining({
+      status: 'unclassified',
+      candidates: [],
+      unclassifiedElementCount: 1_000,
+    }))
+    expect(JSON.stringify(result).length).toBeLessThan(256)
+  })
+
+  test('keeps semantically incomplete eligible elements out of no-match', () => {
+    const incomplete = {
+      ...element(
+        'incomplete', 'world-kit', 'models/incomplete.glb',
+        'models', 'model', ['environment'], [],
+      ),
+      assetKind: undefined,
+      capabilities: undefined,
+    }
+    const result = matchResourceRequirements(packs, [incomplete], {
+      requirements: [{
+        requirementId: 'environment-model',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model'],
+          usageTags: ['environment'], capabilities: ['modular'],
+          styles: ['Stylized'],
+        },
+      }],
+      deliveryCapabilities: [{
+        sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb',
+      }],
+    })
+
+    expect(result.groups[0]).toEqual(expect.objectContaining({
+      status: 'unclassified',
+      candidates: [],
+      unclassifiedElementCount: 1,
+    }))
   })
 })
 
@@ -256,6 +319,9 @@ function element(
 ): ResourceElement {
   return {
     id, packId, name: id, path, category, kind: assetKind, assetKind,
-    specs: id === 'ground' ? { boundsSizeY: 4, hasTextureCoordinates: true } : {}, usageTags, capabilities, dependencies: [], status: 'ready',
+    specs: {
+      contentHash: 'a'.repeat(64),
+      ...(id === 'ground' ? { boundsSizeY: 4, hasTextureCoordinates: true } : {}),
+    }, usageTags, capabilities, dependencies: [], status: 'ready',
   }
 }

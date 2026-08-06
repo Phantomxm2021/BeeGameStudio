@@ -45,6 +45,7 @@ import type { WorkerTerminalResult } from '../beegame/delivery-workflow/worker-c
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 const workspaces: string[] = []
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 
 function minimumRepairPlan(
   request: WorkerDispatchRequest,
@@ -2644,7 +2645,7 @@ async function createWorkspace(): Promise<string> {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'REQ-1', required: true }],
+    requirements: [{ id: 'REQ-1', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
     resources: [
       {
         id: 'RES-1',

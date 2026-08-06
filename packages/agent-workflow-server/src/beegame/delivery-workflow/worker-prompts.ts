@@ -476,9 +476,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'resource-curator':
       return [
         'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
-        'Use ResourceLibrary list_packs to compare compact Pack facts, inspect_pack for the selected Pack elements, and import_resources only for exact observed Pack versions and element IDs. Judge suitability from authored metadata and technical facts, never from filename, keywords, regular expressions, project names or requirement IDs.',
-        'A suitable Pack or resource may satisfy several requirements. Preserve exact dependency closure, local paths and hashes. When no suitable library material exists, create an independent provisional resource through AssetManifest; it must use the same Manifest identity and loading path as a later replacement.',
-        'After every required requirement has at least one verified resource, call AssetManifest complete_resource_inventory exactly once with complete requirement-to-resource bindings. Do not write content or gameplay code.',
+        'Call ResourceLibrary match_requirements once. Judge the bounded candidates from authored metadata and technical facts, never from filename, keywords, regular expressions, project names or requirement IDs.',
+        'A suitable candidate may satisfy its requirement through direct delivery or a declared target conversion adapter. Choose exact candidate identities. Use a placeholder decision only for a service-proven no-match group; unclassified material is not no-match.',
+        'Submit one complete decision set through CommitResourceInventory. It is the only mutation and terminal operation, preserves exact dependency closure, resumes durable progress after interruption, and derives bindings from the committed inventory. Do not write content or gameplay code.',
       ].join(' ')
     case 'resource-content-author':
       return [
@@ -520,7 +520,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'resource-planner':
       return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
     case 'resource-curator':
-      return 'Call AssetManifest complete_resource_inventory exactly once after all files are verified and registered. Do not return terminal JSON.'
+      return 'Call CommitResourceInventory exactly once with the complete bounded-match decision set. The committed receipt is the terminal; do not return terminal JSON.'
     case 'resource-content-author':
       return 'Call CommitResourceContent exactly once with either the complete canonical commit or the exact needs_inventory requirement IDs. The accepted call is the terminal; do not return terminal JSON or completion prose.'
     case 'atomic-task-planner':

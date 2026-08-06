@@ -23,6 +23,7 @@
     "@bee-game-studio/security-core": "workspace:*",
     "@bee-game-studio/workflow-engine": "workspace:*",
     "@xmldom/xmldom": "^0.8.11",
+    "assimpjs": "^0.0.10",
     "fonteditor-core": "^2.6.2",
     "hono": "^4.12.15",
     "zod": "^4.3.6"

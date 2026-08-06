@@ -16,6 +16,7 @@ export type ProjectResourceSelectionClient = {
     input: ResourceRequirementMatchRequest,
   ): Promise<ResourceRequirementMatchResponse>
   resolveResources(
+    catalogRevision: string,
     selections: Array<{
       resourceId: string
       packId: string
@@ -31,6 +32,16 @@ type ProjectResourceFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>
+
+type ProjectResourceConvert = (
+  files: Array<{ name: string; bytes: Uint8Array }>,
+  delivery: {
+    disposition: 'direct' | 'convert'
+    source_format: string
+    target_format: string
+    adapter_id?: string
+  },
+) => Promise<{ filename: string; bytes: Uint8Array }>
 
 export type ProjectResourceAcquisition = {
   resourceId: string
@@ -57,6 +68,7 @@ export class ProjectResourceApplication {
   constructor(
     private readonly client: ProjectResourceSelectionClient,
     private readonly fetchImpl: ProjectResourceFetch = fetch,
+    private readonly convert?: ProjectResourceConvert,
   ) {}
 
   matchRequirements(input: ResourceRequirementMatchRequest) {
@@ -65,6 +77,7 @@ export class ProjectResourceApplication {
 
   async acquireResources(
     workspacePath: string,
+    catalogRevision: string,
     selections: Array<{
       resourceId: string
       packId: string
@@ -72,6 +85,12 @@ export class ProjectResourceApplication {
       elementId: string
       destinationPath: string
       selectionReason: string[]
+      delivery?: {
+        disposition: 'direct' | 'convert'
+        sourceFormat: string
+        targetFormat: string
+        adapterId?: string
+      }
     }>,
   ): Promise<ProjectResourceAcquisitionResult> {
     const before = await readBeeGameAssetManifest(workspacePath)
@@ -86,7 +105,7 @@ export class ProjectResourceApplication {
     if (duplicateIds.length)
       throw new Error(`Resource ids must be unique: ${duplicateIds.join(', ')}`)
 
-    const resolved = await this.client.resolveResources(selections)
+    const resolved = await this.client.resolveResources(catalogRevision, selections)
     const resolvedById = new Map(
       resolved.map(selection => [selection.resourceId, selection]),
     )
@@ -115,6 +134,7 @@ export class ProjectResourceApplication {
             element_id: selection.elementId,
             element_path: selection.elementPath,
             source_url: selection.sourceUrl,
+            source_hash: selection.sourceHash,
             selection_reason: request.selectionReason,
             ...(selection.assetKind ? { asset_kind: selection.assetKind } : {}),
             ...(selection.capabilities?.length
@@ -126,17 +146,31 @@ export class ProjectResourceApplication {
             ...(selection.technicalFacts
               ? { technical_facts: selection.technicalFacts }
               : {}),
+            ...(request.delivery
+              ? {
+                  delivery: {
+                    disposition: request.delivery.disposition,
+                    source_format: request.delivery.sourceFormat,
+                    target_format: request.delivery.targetFormat,
+                    ...(request.delivery.adapterId
+                      ? { adapter_id: request.delivery.adapterId }
+                      : {}),
+                  },
+                }
+              : {}),
             dependencies: selection.dependencies?.map(dependency => ({
               key: dependency.key,
               parent_key: dependency.parentKey,
               element_id: dependency.elementId,
               element_path: dependency.elementPath,
               reference_path: dependency.referencePath,
-              source_url: dependency.sourceUrl,
+                  source_url: dependency.sourceUrl,
+                  source_hash: dependency.sourceHash,
               ...(dependency.kind ? { kind: dependency.kind } : {}),
             })),
           },
           this.fetchImpl,
+          { ...(this.convert ? { convert: this.convert } : {}) },
         )
         resources.push({
           resourceId: acquired.resource.id,

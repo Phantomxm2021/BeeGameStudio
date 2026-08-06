@@ -79,14 +79,15 @@ Agent 保留判断 Pack 风格、候选适用性、复用方式、placeholder �
 
 ### 5.1 Catalog 合同
 
-Catalog 只允许以下 Pack-first 单一路径：
+Catalog 只允许一次有界的 requirement-aware 匹配：
 
-1. `list_packs`：返回紧凑 Pack 摘要、稳定 `pack_id`、版本、客观分类、维度、格式能力和元素计数；
-2. `inspect_pack`：只返回已选 Pack 的元素摘要、准确 `element_id`、依赖与技术事实；
-3. `import_resources`：只导入本 dispatch 已观察到的准确 Pack version 与 element；
-4. 导入服务负责依赖闭包、下载、hash、路径校验和 Manifest 登记。
+1. 服务从 canonical Manifest 读取每个 requirement 的结构化 acquisition profile；
+2. 服务使用资源库已经审计的维度、资源类型、用途、能力、风格与目标 delivery capability 做确定性交集；
+3. 每个 requirement 最多返回固定数量的候选，以及稳定 Pack/version/element、依赖摘要、技术事实、不可变 source content hash 和 delivery disposition；
+4. 缺少必要语义元数据或 content hash 的元素只返回聚合计数，不返回内部 ID 列表，也不能被当作 no-match；
+5. Curator 一次提交完整选择；一个 requirement 可选择多个资源，同一资源也可绑定多个 requirement。服务按 frozen Catalog revision 解析依赖闭包，并逐文件核对 content hash，再负责下载、转换、路径校验与 Manifest 原子登记。
 
-`list_packs` 与 `inspect_pack` 使用 schema 枚举和 cursor，不使用名称关键词、正则或项目类型硬编码。结果只返回选择所需的客观字段，不重复完整文档、历史查询、长描述或无关元素元数据。不得保留扁平全库查询、别名或兼容 handler。
+匹配不接受名称关键词、正则、项目类型或文件名推断，不提供分页浏览、第二导入入口、别名或兼容 handler。结果只返回选择所需的客观字段，不重复完整文档、历史查询、长描述或无关元素元数据。
 
 ### 5.2 库内资源与 placeholder
 
@@ -97,7 +98,7 @@ Catalog 只允许以下 Pack-first 单一路径：
 - placeholder 生成能力由目标的 format capability/adapter 提供，共享层不能固定 Web、Unity、Godot、Prefab、TSX 或某一媒体格式集合；
 - placeholder 不能写在玩法源码内，也不能启用第二 loader；后期可替换文件或 Manifest 路径而不改玩法逻辑。
 
-每次成功导入或创作都必须先完成文件写入、hash 与 Manifest 原子登记，才算 durable progress。库存 Worker 最终提交结构化覆盖声明；服务只验证声明中的 requirement ID 全部来自 plan、resource ID 全部真实存在且 verified。该 terminal 是当前库存 task 的 checkpoint 证明，不成为项目事实，也不供 Reviewer 或实现阶段消费；最终语义覆盖仍只由 canonical JSON/YAML 拥有。
+库存 Worker 通过唯一 `CommitResourceInventory` 提交完整决策。首次 bounded match 在返回 Agent 前按 plan transaction 固化为唯一 observation；同进程并发 replacement dispatch 共享同一个 in-flight match，持久化采用 create-once，旧 dispatch 不能覆盖新事务。Continue 即使创建新 dispatch，也必须先通过 active-dispatch 校验后接管同一 transaction，不能重新匹配。commit 不能再次查询 Catalog。服务在 active dispatch 校验后持久化与 decision 无关命名的唯一 frozen receipt；后续提交若改变 decision set 必须拒绝，不能生成第二 receipt。文件取得、转换或 placeholder 创作只写入该 receipt 的 staging workspace；每个完成资源及其全部输出文件哈希立即写回 receipt，主项目此时保持零变更。Resolve 必须提交 frozen Catalog revision，并从计算该 revision 的同一 Catalog 快照解析 Pack、element、依赖与 content hash，不能校验后再次读取可变 Catalog。下载的 source 与依赖必须逐一匹配 frozen content hash。全部 staging 文件与 receipt 冻结哈希一致后再次校验 active dispatch，并一次发布所有资源文件与唯一 canonical Manifest。发布中断留下的同 hash 文件可由同一 receipt 对账继续，冲突文件必须拒绝。重启只从同一 receipt 的 staging 断点继续，不重新匹配、重新选择或重复下载。committed 后删除 staging/current pointer，只保留 immutable receipt 作为事务证据；最终语义覆盖仍只由 canonical JSON/YAML 拥有。
 
 ## 6. Task 3：JSON/YAML 内容描述
 
@@ -200,10 +201,10 @@ Workflow Card 的资源阶段显示固定四项：
 
 ### C. 替换 Resource Library 工具合同
 
-- Catalog 只提供 `list_packs`、`inspect_pack`、`import_resources`；
-- 收窄 wire payload，只保留客观选择事实；
-- 导入和 Manifest 登记保持一个事务边界；
-- 删除旧 action、旧 evidence 解析和旧测试。
+- Workflow 只提供一次结构化 requirement 匹配与一次原子库存提交；
+- 收窄 wire payload，只保留有界候选、未分类聚合计数和客观选择事实；
+- 取得、转换、placeholder、Manifest 登记和 binding 保持一个 durable transaction；
+- 删除分页浏览、直接导入、Manifest 旁路写入及其 evidence、prompt 和测试。
 
 完成判据：Agent 不能导入未在当前 dispatch inspect 的 element；重启后已登记文件不会再次下载。
 

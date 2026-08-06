@@ -62,11 +62,8 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
-import {
-  BEEGAME_RESOURCE_ROOTS,
-  readBeeGameAssetManifestSync,
-} from './asset-contracts'
-import { parseBeeGameProgrammaticAudioText } from './programmatic-audio-resource'
+import { BEEGAME_RESOURCE_ROOTS } from './asset-contracts'
+import { resourceInventoryCommitInputSchema } from './native-resource-inventory-commit-tool'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -262,6 +259,7 @@ export type BeeGameSessionRunnerStartInput = {
   /** Workflow identity is propagated into the native permission boundary. */
   workflowWorker?: boolean
   workflowWorkerType?: string
+  workflowDispatchId?: string
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
@@ -445,36 +443,28 @@ function resourceWorkerActivityMessage(
   record: SessionRecord,
   event: BeeGameEvent,
 ): string | undefined {
-  if (
-    record.workflowWorkerType !== 'resource-curator' ||
-    event.type !== 'tool.started' ||
-    event.payload?.toolName !== 'ResourceLibrary'
-  )
+  if (record.workflowWorkerType !== 'resource-curator' || event.type !== 'tool.started')
     return undefined
+  if (event.payload?.toolName === 'CommitResourceInventory') {
+    return record.language === 'zh-TW'
+      ? '正在提交資源庫存…'
+      : record.language === 'zh'
+        ? '正在提交资源库存…'
+        : 'Committing the resource inventory…'
+  }
+  if (event.payload?.toolName !== 'ResourceLibrary') return undefined
   const input = event.payload.input
   if (!input || typeof input !== 'object' || Array.isArray(input))
     return undefined
   const action = String((input as Record<string, unknown>).action ?? '')
   const traditional = record.language === 'zh-TW'
   const chinese = record.language === 'zh' || traditional
-  if (action === 'list_packs')
+  if (action === 'match_requirements')
     return chinese
       ? traditional
-        ? '正在瀏覽資源庫…'
-        : '正在浏览资源库…'
-      : 'Browsing the Resource Library…'
-  if (action === 'inspect_pack')
-    return chinese
-      ? traditional
-        ? '正在檢查資源包…'
-        : '正在检查资源包…'
-      : 'Inspecting a Resource Pack…'
-  if (action === 'import_resources')
-    return chinese
-      ? traditional
-        ? '正在匯入已選資源…'
-        : '正在导入已选资源…'
-      : 'Importing selected resources…'
+        ? '正在匹配資源需求…'
+        : '正在匹配资源需求…'
+      : 'Matching resource requirements…'
   return undefined
 }
 
@@ -1359,6 +1349,9 @@ export class BeeGameSessionManager {
             ...(record.workflowWorkerType
               ? { workflowWorkerType: record.workflowWorkerType }
               : {}),
+            ...(record.workflowDispatchId
+              ? { workflowDispatchId: record.workflowDispatchId }
+              : {}),
             ...(record.workflowDocumentReviewContract
               ? {
                   workflowDocumentReviewContract:
@@ -1877,7 +1870,6 @@ export class BeeGameSessionManager {
         decision: 'deny',
         autoDenied: true,
         reason: policyDecision.message,
-        ...(policyDecision.code ? { reasonCode: policyDecision.code } : {}),
         input: request.input,
       })
       return Promise.resolve({
@@ -1899,19 +1891,6 @@ export class BeeGameSessionManager {
         scope: 'once',
         autoApproved: true,
         reason: policyDecision.message ?? 'workflow_phase_scope',
-        input: request.input,
-      })
-      return Promise.resolve({ behavior: 'allow', scope: 'once' })
-    }
-    if (isWorkflowResourceImportPermission(record, request)) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        scope: 'once',
-        autoApproved: true,
-        reason: 'workflow_resource_preparer_import',
         input: request.input,
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
@@ -2149,10 +2128,9 @@ export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
   const toolName = getDashboardPayloadString(event.payload, 'toolName')
   if (isFileMutationTool(toolName)) return true
   if (toolName === 'AssetManifest') return true
+  if (toolName === 'CommitResourceInventory') return true
   if (toolName === 'CommitResourceContent') return true
-  if (toolName !== 'ResourceLibrary') return false
-  const input = getDashboardPayloadRecord(event.payload, 'input')
-  return input?.action === 'import_resources'
+  return false
 }
 
 export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
@@ -3663,8 +3641,60 @@ function getBeeGamePermissionPolicyDecision(
 ): {
   behavior: 'auto_allow' | 'auto_deny' | 'ask_user'
   message?: string
-  code?: 'resource_target_format_unsupported' | 'resource_contract_invalid'
 } {
+  if (
+    request.toolName === 'CommitResourceInventoryAuthority' &&
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-curator'
+  ) {
+    const dispatchId = request.input.dispatchId
+    const active =
+      typeof dispatchId === 'string' &&
+      dispatchId === record.workflowDispatchId &&
+      record.session.status === 'running'
+    return active
+      ? {
+          behavior: 'auto_allow',
+          message: 'workflow_resource_inventory_authority',
+        }
+      : {
+          behavior: 'auto_deny',
+          message: 'Resource inventory dispatch is no longer active.',
+        }
+  }
+  if (
+    request.toolName === 'CommitResourceInventory' &&
+    record.workflowWorker === true &&
+    record.workflowWorkerType === 'resource-curator'
+  ) {
+    const parsed = resourceInventoryCommitInputSchema.safeParse(request.input)
+    if (!parsed.success)
+      return {
+        behavior: 'auto_deny',
+        message:
+          'CommitResourceInventory requires one complete canonical inventory decision set.',
+      }
+    const allowedPaths = record.workflowAllowedPaths ?? []
+    if (
+      parsed.data.decisions.some(
+        decision =>
+          !isPathInsideWorkflowScope(
+            record.session.cwd,
+            allowedPaths,
+            decision.destination_path,
+          ),
+      )
+    )
+      return {
+        behavior: 'auto_deny',
+        message:
+          'CommitResourceInventory cannot deliver a resource outside the current project workspace and declared resource roots.',
+      }
+    return {
+      behavior: 'auto_allow',
+      message: 'workflow_resource_inventory_commit',
+    }
+  }
   if (
     request.toolName === 'CommitResourceContentAuthority' &&
     record.workflowWorker === true &&
@@ -3794,26 +3824,20 @@ function getBeeGamePermissionPolicyDecision(
         message: 'workflow_resource_content_read_scope',
       }
     }
-    const runtimeMutationPath = isFileMutationTool(request.toolName)
-      ? extractPermissionPaths(request.input).find(path => {
-          const absolute = isAbsolute(path)
-            ? resolve(path)
-            : resolve(record.session.cwd, path)
-          const projectRelative = relative(record.session.cwd, absolute)
-          return (
-            projectRelative === BEEGAME_RESOURCE_ROOTS.runtime ||
-            projectRelative.startsWith(`${BEEGAME_RESOURCE_ROOTS.runtime}/`)
-          )
-        })
-      : undefined
-    if (runtimeMutationPath) {
+    if (
+      (record.workflowWorkerType === 'resource-planner' ||
+        record.workflowWorkerType === 'resource-curator') &&
+      isFileMutationTool(request.toolName)
+    ) {
       return {
         behavior: 'auto_deny',
         message:
-          'Resource production mutates runtime assets only through ResourceLibrary import_resources or AssetManifest author_provisional_resources so file creation and inventory registration remain one operation.',
+          record.workflowWorkerType === 'resource-planner'
+            ? 'Resource Planner commits the canonical plan only through AssetManifest.'
+            : 'Resource Curator commits delivered files, placeholders, and inventory bindings only through CommitResourceInventory.',
       }
     }
-    const binaryPath = extractPermissionPaths(request.input).find(path => {
+    const binaryPath = request.toolName === 'Read' && extractPermissionPaths(request.input).find(path => {
       const absolute = isAbsolute(path)
         ? resolve(path)
         : resolve(record.session.cwd, path)
@@ -3835,7 +3859,7 @@ function getBeeGamePermissionPolicyDecision(
       return {
         behavior: 'auto_deny',
         message:
-          'Resource production cannot read or write binary media through generic file tools. Use AssetManifest author_provisional_resources for target-adapter output, or ResourceLibrary import_resources for existing media.',
+          'Resource production cannot read or write binary media through generic file tools. Use CommitResourceInventory for library delivery, conversion, or service-proven placeholders.',
       }
     }
   }
@@ -3863,28 +3887,6 @@ function getBeeGamePermissionPolicyDecision(
       return {
         behavior: 'auto_deny',
         message: 'The resource manifest is mutated only through AssetManifest.',
-      }
-    }
-    if (isResourceProductionWorker(record.workflowWorkerType)) {
-      const resourceContractViolation =
-        canonicalProgrammaticAudioMutationViolation(record.session.cwd, request)
-      if (resourceContractViolation) {
-        return {
-          behavior: 'auto_deny',
-          message: resourceContractViolation,
-          code: 'resource_contract_invalid',
-        }
-      }
-      const formatViolation = resourceMutationFormatViolation(
-        record.session.cwd,
-        request,
-      )
-      if (formatViolation) {
-        return {
-          behavior: 'auto_deny',
-          message: formatViolation,
-          code: 'resource_target_format_unsupported',
-        }
       }
     }
     if (
@@ -3953,139 +3955,6 @@ function hasCompletedTool(
     if (event.type === 'tool.completed' && started.has(toolUseID)) return true
   }
   return false
-}
-
-function resourceMutationFormatViolation(
-  workspacePath: string,
-  request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>,
-): string | undefined {
-  const paths = extractPermissionPaths(request.input)
-  if (paths.length === 0) return undefined
-  let manifest: unknown
-  try {
-    manifest = readBeeGameAssetManifestSync(workspacePath)
-  } catch {
-    return 'Resource files cannot be authored until the canonical asset manifest establishes the target format capabilities.'
-  }
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
-    return 'Resource files cannot be authored because the canonical asset manifest is invalid.'
-  const target = (manifest as Record<string, unknown>).project_target
-  if (!target || typeof target !== 'object' || Array.isArray(target))
-    return 'Resource files cannot be authored until the canonical asset manifest establishes the project target.'
-  const targetRecord = target as Record<string, unknown>
-  const runtimeAssetRoot =
-    typeof targetRecord.runtime_asset_root === 'string'
-      ? targetRecord.runtime_asset_root.trim()
-      : ''
-  const capabilities = Array.isArray(targetRecord.asset_format_capabilities)
-    ? targetRecord.asset_format_capabilities
-        .filter((value): value is string => typeof value === 'string')
-        .map(normalizeResourceFormat)
-        .filter(Boolean)
-    : []
-  if (!runtimeAssetRoot || capabilities.length === 0)
-    return 'Resource files cannot be authored until the canonical asset manifest establishes the runtime asset root and target format capabilities.'
-  const allowed = new Set(capabilities)
-  for (const path of paths) {
-    if (!isPathInsideWorkflowScope(workspacePath, [runtimeAssetRoot], path))
-      continue
-    const format = normalizeResourceFormat(extname(path).slice(1))
-    if (
-      format === 'json' &&
-      !allowed.has(format) &&
-      isCanonicalProgrammaticAudioWrite(request)
-    )
-      continue
-    if (!format || !allowed.has(format))
-      return `Resource production cannot write a ${format || 'formatless'} file because the canonical project target does not support that format: ${path}`
-  }
-  return undefined
-}
-
-function canonicalProgrammaticAudioMutationViolation(
-  workspacePath: string,
-  request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>,
-): string | undefined {
-  if (
-    request.toolName === 'Write' &&
-    typeof request.input.content === 'string'
-  ) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(request.input.content)
-    } catch {
-      return undefined
-    }
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed) ||
-      (parsed as Record<string, unknown>).format !==
-        'beegame-programmatic-audio-v1'
-    )
-      return undefined
-    try {
-      parseBeeGameProgrammaticAudioText(request.input.content)
-      return undefined
-    } catch (error) {
-      return `Canonical programmatic audio must match beegame-programmatic-audio-v1 before it is written: ${error instanceof Error ? error.message : String(error)}`
-    }
-  }
-
-  if (request.toolName === 'Write') return undefined
-  for (const path of extractPermissionPaths(request.input)) {
-    if (extname(path).toLowerCase() !== '.json') continue
-    const absolutePath = isAbsolute(path) ? path : resolve(workspacePath, path)
-    try {
-      const content = readFileSync(absolutePath, 'utf8')
-      const parsed = JSON.parse(content) as unknown
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        !Array.isArray(parsed) &&
-        (parsed as Record<string, unknown>).format ===
-          'beegame-programmatic-audio-v1'
-      )
-        return 'Canonical programmatic audio resources must be rewritten atomically with Write so the complete executable schema can be validated before mutation.'
-    } catch {}
-  }
-  return undefined
-}
-
-function isCanonicalProgrammaticAudioWrite(
-  request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>,
-): boolean {
-  if (request.toolName !== 'Write' || typeof request.input.content !== 'string')
-    return false
-  try {
-    parseBeeGameProgrammaticAudioText(request.input.content)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function normalizeResourceFormat(value: string): string {
-  const normalized = value.trim().toLowerCase()
-  const withoutDot = normalized.startsWith('.')
-    ? normalized.slice(1)
-    : normalized
-  const slash = withoutDot.lastIndexOf('/')
-  return slash >= 0 ? withoutDot.slice(slash + 1) : withoutDot
-}
-
-function isWorkflowResourceImportPermission(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): boolean {
-  return (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-curator' &&
-    request.toolName === 'ResourceLibrary' &&
-    request.input.action === 'import_resources' &&
-    Array.isArray(request.input.selections) &&
-    request.input.selections.length > 0
-  )
 }
 
 function isPathInsideWorkflowScope(

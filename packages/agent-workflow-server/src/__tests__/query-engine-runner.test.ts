@@ -146,7 +146,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
+    ).toEqual([])
 
     for (const workerType of [
       'implementation-worker',
@@ -166,7 +166,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(selectBeeGameWorkerTools(tools, 'unrelated-agent')).toEqual(tools)
   })
 
-  test('keeps the Curator read-only outside native resource tools', () => {
+  test('removes every generic tool from the Curator', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -181,7 +181,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read'])
+    ).toEqual([])
   })
 
   test('removes generic mutation and exploration from Resource Content Author', () => {
@@ -203,7 +203,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual(['Read'])
   })
 
-  test('keeps Curator exploration read-only without shell or nested agents', () => {
+  test('keeps Curator discovery inside the native bounded match tool', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
@@ -218,7 +218,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       selectBeeGameWorkerTools(tools, 'resource-curator').map(
         tool => (tool as { name: string }).name,
       ),
-    ).toEqual(['Read', 'Glob'])
+    ).toEqual([])
   })
 
   test('removes generic file tools from the canonical document lane', () => {
@@ -397,17 +397,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   })
 
   test('allows the native read-only ResourceLibrary lane without prompting', async () => {
-    const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeResourceLibraryPermissionBroker(
-      () => async request => {
-        requests.push(request)
-        return { behavior: 'allow' }
-      },
-    )
-    const toolInput = {
-      action: 'list_packs',
-      filters: { dimensions: ['3D'] },
-    }
+    const broker = new NativeResourceLibraryPermissionBroker()
+    const toolInput = { action: 'match_requirements' }
 
     expect(
       await broker.authorize({
@@ -421,17 +412,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         updatedInput: toolInput,
       }),
     )
-    expect(requests).toEqual([])
   })
 
   test('rejects an invented ResourceLibrary action with the supported contract', async () => {
-    const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeResourceLibraryPermissionBroker(
-      () => async request => {
-        requests.push(request)
-        return { behavior: 'allow' }
-      },
-    )
+    const broker = new NativeResourceLibraryPermissionBroker()
 
     expect(
       await broker.authorize({
@@ -445,97 +429,9 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       expect.objectContaining({
         behavior: 'deny',
         message:
-          'Unsupported ResourceLibrary action "match". Allowed actions: list_packs, inspect_pack, import_resources.',
+          'Unsupported ResourceLibrary action "match". Allowed actions: match_requirements.',
       }),
     )
-    expect(requests).toEqual([])
-  })
-
-  test('keeps a ResourceLibrary mutation grant scoped to this worker session', async () => {
-    const requests: Array<Record<string, unknown>> = []
-    const broker = new NativeResourceLibraryPermissionBroker(
-      () => async request => {
-        requests.push(request)
-        return { behavior: 'allow', scope: 'session' }
-      },
-    )
-    const toolInput = {
-      action: 'import_resources',
-      selections: [
-        {
-          resource_id: 'primary-character',
-          pack_id: 'pack-a',
-          expected_pack_version: '1.0.0',
-          element_id: 'character-a',
-          destination_path: 'assets/runtime/character',
-          selection_reason: ['Observed fit.'],
-        },
-      ],
-    }
-
-    expect(
-      (
-        await broker.authorize({
-          toolName: 'ResourceLibrary',
-          toolInput,
-          toolUseID: 'write-1',
-        })
-      )?.behavior,
-    ).toBe('allow')
-    expect(
-      (
-        await broker.authorize({
-          toolName: 'ResourceLibrary',
-          toolInput,
-          toolUseID: 'write-2',
-        })
-      )?.behavior,
-    ).toBe('allow')
-    expect(requests).toEqual([
-      expect.objectContaining({
-        toolName: 'ResourceLibrary',
-        input: toolInput,
-      }),
-    ])
-
-    const separateSession = new NativeResourceLibraryPermissionBroker(
-      () => async request => {
-        requests.push(request)
-        return { behavior: 'deny' }
-      },
-    )
-    expect(
-      (
-        await separateSession.authorize({
-          toolName: 'ResourceLibrary',
-          toolInput,
-          toolUseID: 'write-3',
-        })
-      )?.behavior,
-    ).toBe('deny')
-    expect(requests).toHaveLength(2)
-  })
-
-  test('never treats a session ResourceLibrary grant as approval for another deferred tool', async () => {
-    const broker = new NativeResourceLibraryPermissionBroker(
-      () => async () => ({
-        behavior: 'allow',
-        scope: 'session',
-      }),
-    )
-    await broker.authorize({
-      toolName: 'ResourceLibrary',
-      toolInput: { action: 'import_resources', selections: [] },
-      toolUseID: 'resource-write',
-    })
-
-    expect(
-      await broker.authorize({
-        toolName: 'ExecuteExtraTool',
-        toolInput: { tool_name: 'UnrelatedDeferredTool', params: {} },
-        toolUseID: 'unrelated-write',
-      }),
-    ).toBeUndefined()
   })
 
   test('fails at session startup when required native sandbox is unavailable', async () => {

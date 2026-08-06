@@ -49,6 +49,7 @@ import {
 } from './types'
 
 const OWNER_ID = 'owner-recovery'
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 const PROJECT_ID = 'project-recovery'
 const RUN_ID = 'run-recovery'
 const BRIEF = 'Confirmed synthetic delivery authority.'
@@ -95,7 +96,7 @@ async function createProjectionFixture(
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'requirement-id', required: true }],
+    requirements: [{ id: 'requirement-id', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
     resources: [],
   })
   await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })

@@ -36,7 +36,7 @@ Resource Library candidate facts include a deterministic delivery disposition:
 
 Only `direct` and `convert` candidates are selectable. Importing a `convert` candidate copies exact source material and dependency closure, then the adapter atomically writes generated output. The Manifest keeps one resource record with source provenance and generated delivery files; it does not create a second semantic resource.
 
-The first implementation supports the source forms already demonstrated by the current Resource Library and target: FBX/GLB/GLTF model material and OGG/WAV audio material. The adapter registry, not shared workflow logic, owns those capabilities.
+The first implementation supports the source forms already demonstrated by the current Resource Library and target: FBX/GLB/GLTF model material and OGG/WAV audio material. FBX may use the configured FBX→GLB adapter; OGG is direct-delivery only when the target declares OGG. This plan does not require an OGG→WAV converter. The adapter registry, not shared workflow logic, owns all capabilities.
 
 ### 2. Add one bounded requirement-aware catalog operation
 
@@ -46,22 +46,22 @@ Replace agent-driven whole-pack pagination with `match_requirements` as the inve
 
 The Resource Library service evaluates authored pack metadata, inspected element facts, semantic categories/capabilities, target delivery disposition, and style/dimension constraints. It returns a bounded candidate set per requirement group plus a catalog revision. Each candidate contains exact Pack/version/element identity, technical facts, dependency summary, delivery disposition, and the requirements it may cover.
 
-The low-level `list_packs` and `inspect_pack` production actions are removed from the Resource Curator. Resource Library administration may retain its own browsing APIs, but Workflow has one candidate-acquisition lane.
+Low-level catalog browsing and direct import are not Resource Curator capabilities. Resource Library administration retains its separate management UI, while Workflow has one candidate-acquisition lane.
 
-Sparse metadata does not silently mean no-match. Elements missing required semantic inspection are reported as `unclassified`; they are not paginated through the LLM. Catalog inspection must enrich them outside the Workflow before they can become candidates.
+Sparse metadata does not silently mean no-match. Elements missing required semantic inspection or an immutable source content hash are reported as `unclassified` with only a bounded aggregate count; their internal IDs are never returned to the LLM. Catalog inspection must enrich them outside the Workflow before they can become candidates.
 
 ### 3. Persist one canonical inventory commit
 
-After one bounded match result, the Curator submits one complete decision set through `CommitResourceInventory`. The service persists one commit receipt under `.beegame/workflow/resource-inventory-commits/` before mutation. It stores:
+Before returning the first bounded match result, the service persists one current inventory transaction for the Manifest plan revision and one immutable observation keyed by that transaction. A reconstructed Curator, including a Continue dispatch with a new dispatch ID, adopts that exact transaction only after active-dispatch validation. Neither the Curator nor `CommitResourceInventory` can issue a second match for the transaction. The Curator then submits one complete decision set through `CommitResourceInventory`. The service verifies active-dispatch authority and persists one decision-independent commit receipt path under `.beegame/workflow/resource-inventory-commits/` before staging. It stores:
 
 - Manifest plan revision and catalog revision;
-- one decision per required requirement group;
+- one or more library decisions, or exactly one placeholder decision, per required requirement group;
 - selected candidate identity and delivery disposition;
 - deterministic no-match status and placeholder specification;
-- prepared, applying, or committed state plus each completed file operation;
+- prepared, applying, or committed state plus each staged resource and its frozen output-file hashes;
 - final resource IDs and requirement bindings.
 
-The service applies exact imports, conversions and placeholders from that frozen receipt. On interruption it resumes the same receipt from its completed operations; it never asks the LLM to select again. A failed operation remains an exact receipt failure and is not converted into no-match.
+The service applies exact imports, conversions and placeholders only inside a receipt-specific staging workspace. Resolution computes the revision, identities, dependency closure and source hashes from one in-memory published Catalog snapshot; it cannot re-read mutable Pack rows after accepting the revision. Every downloaded root/dependency must equal its frozen content hash. The project Manifest and runtime/generated roots remain unchanged until every staged file equals the output hashes frozen in the durable receipt. Immediately before publication, the service revalidates active-dispatch authority, then publishes all files and one canonical Manifest as one resumable transaction. Exact orphan files left before the Manifest index publication are reconciled by hash; conflicting bytes are rejected. On interruption it resumes the same receipt from its staged resources; it never asks the LLM to select again. A failed operation remains an exact receipt failure and is not converted into no-match. After commit, staging and the current-transaction pointer are removed.
 
 The final Workflow inventory receipt is derived from the committed receipt and current audited files. The LLM does not reconstruct bindings from conversation history. There is no second inventory state: the commit receipt is transactional until committed, then `resourceProductionState.inventoryReceipt` is authoritative and the receipt is only immutable commit evidence.
 
@@ -69,12 +69,12 @@ The final Workflow inventory receipt is derived from the committed receipt and c
 
 For each required group, the service issues exactly one current-revision candidate set:
 
-1. Agent chooses one or more suitable candidates and imports them; or
+1. Agent chooses one or more suitable candidates and imports them; the same selected resource may satisfy several requirement groups; or
 2. Agent accepts the service-proven no-match result and authors a placeholder.
 
 The complete commit is rejected when a placeholder decision targets a group with selectable candidates. This removes the current browse-and-placeholder dual behavior.
 
-When every required group has exactly one decision, the service applies and validates the commit, then derives the inventory receipt automatically. The Resource Curator never reproduces bindings from historical tool calls.
+When every required group has either one or more library decisions or exactly one placeholder decision, the service applies and validates the commit, then derives the many-to-many inventory bindings automatically. The Resource Curator never reproduces bindings from historical tool calls.
 
 ### 5. Reconcile worker lifecycle
 
@@ -107,7 +107,7 @@ It does not receive generic `Glob`, `Grep`, `LS`, `Read`, or shell tools. The se
 Automated tests must prove:
 
 1. Resource plans require structured acquisition profiles and never infer them from prose or identifiers.
-2. FBX and OGG candidates are not rejected merely because runtime outputs are GLB/GLTF and WAV.
+2. FBX candidates remain eligible through an explicitly configured FBX→GLB adapter, and OGG candidates remain eligible when OGG is a declared direct target format; no undeclared audio conversion is inferred.
 3. Requirement matching is bounded and does not expose pack pagination to the Resource Curator.
 4. Selectable candidates block placeholder authoring; a proven no-match allows it.
 5. A prepared inventory commit resumes incomplete file operations without repeating selection or completed downloads.

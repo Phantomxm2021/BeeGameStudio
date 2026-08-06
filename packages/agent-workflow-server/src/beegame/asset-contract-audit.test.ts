@@ -9,6 +9,8 @@ import {
 } from './asset-contracts'
 import { validateBeeGameContentDocuments } from './content-contracts'
 
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+
 const canonicalContentManifest: BeeGameAssetManifest = {
   version: 8,
   project_target: {
@@ -17,7 +19,7 @@ const canonicalContentManifest: BeeGameAssetManifest = {
     content_root: 'assets/content',
     generated_asset_root: 'assets/generated',
   },
-  requirements: [{ id: 'req-model', required: true }],
+  requirements: [{ id: 'req-model', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
   resources: [
     {
       id: 'res-model',
@@ -124,7 +126,7 @@ describe('modular v8 asset and content audit', () => {
           content_root: 'assets/content',
           generated_asset_root: 'assets/generated',
         },
-        requirements: [{ id: 'world.layout', required: true }],
+        requirements: [{ id: 'world.layout', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
         resources: [
           {
             id: 'world-art',

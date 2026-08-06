@@ -11,14 +11,16 @@ describe('BeeGame canonical modular resource contract', () => {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'visual.player', required: true }],
+    requirements: [{ id: 'visual.player', required: true, acquisition_profile: {
+      dimensions: ['2D'], asset_kinds: ['image'], usage_tags: [], capabilities: [], styles: [],
+    } }],
     resources: [],
   }
 
   it('accepts the single resource-content manifest', () => {
     expect(parseCanonicalBeeGameAssetManifest(manifest)).toMatchObject({
       version: 8,
-      requirements: [{ id: 'visual.player', required: true }],
+      requirements: [{ id: 'visual.player', required: true, acquisition_profile: expect.any(Object) }],
       resources: [],
     })
   })
@@ -26,7 +28,7 @@ describe('BeeGame canonical modular resource contract', () => {
   it('rejects retired and unknown manifest state', () => {
     expect(() => parseCanonicalBeeGameAssetManifest({
       ...manifest,
-      requirements: [{ id: 'visual.player', required: true, status: 'ready' }],
+      requirements: [{ ...manifest.requirements[0], status: 'ready' }],
       retired_records: [],
     })).toThrow(/unknown fields|unknown field/i)
   })

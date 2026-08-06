@@ -89,7 +89,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('accepts only the curator inventory receipt terminal contract', async () => {
+  test('rejects curator tool history when no durable inventory receipt exists', async () => {
     const workspacePath = await createResourceWorkspace()
     try {
       await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
@@ -106,40 +106,21 @@ describe('delivery worker session credentials', () => {
           asset_kind: 'data',
         },
       ])
-      const terminal = await runResourceTerminal({
+      await expect(runResourceTerminal({
         workspacePath,
         workerType: 'resource-curator',
         catalogObserved: true,
-        toolName: 'AssetManifest',
+        toolName: 'CommitResourceInventory',
         toolInput: {
-          action: 'complete_resource_inventory',
-          bindings: [
+          decisions: [
             {
               requirement_id: 'world.visual',
-              resource_ids: ['world-resource'],
+              resource_id: 'world-resource',
+              kind: 'placeholder',
             },
           ],
         },
-      })
-
-      expect(terminal).toMatchObject({
-        revision: 'revision-resource-terminal',
-        workerType: 'resource-curator',
-        status: 'completed',
-        catalogObserved: true,
-        resourceIds: ['world-resource'],
-        bindings: [
-          {
-            requirementId: 'world.visual',
-            resourceIds: ['world-resource'],
-          },
-        ],
-        taskMetrics: {
-          catalogPayloadBytes: expect.any(Number),
-          catalogCallTypes: ['list_packs'],
-          canonicalMutationCount: 0,
-        },
-      })
+      })).rejects.toThrow('without an accepted durable inventory receipt')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -1464,7 +1445,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('reports an in-flight Resource Library import as unsafe to interrupt', async () => {
+  test('reports an in-flight inventory commit as unsafe to interrupt', async () => {
     const events: Array<{
       id: string
       type: 'tool.started' | 'tool.completed'
@@ -1473,7 +1454,7 @@ describe('delivery worker session credentials', () => {
       payload: {
         toolUseID: string
         toolName: string
-        input: { action: string; selections: unknown[] }
+        input: Record<string, unknown>
       }
     }> = [
       {
@@ -1483,8 +1464,8 @@ describe('delivery worker session credentials', () => {
         createdAt: new Date(),
         payload: {
           toolUseID: 'import-batch',
-          toolName: 'ResourceLibrary',
-          input: { action: 'import_resources', selections: [] },
+          toolName: 'CommitResourceInventory',
+          input: { decisions: [] },
         },
       },
     ]
@@ -1523,8 +1504,8 @@ describe('delivery worker session credentials', () => {
       createdAt: new Date(),
       payload: {
         toolUseID: 'import-batch',
-        toolName: 'ResourceLibrary',
-        input: { action: 'import_resources', selections: [] },
+        toolName: 'CommitResourceInventory',
+        input: { decisions: [] },
       },
     })
     await expect(
@@ -1669,7 +1650,9 @@ function resourcePlanManifest() {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'world.visual', required: true }],
+    requirements: [{ id: 'world.visual', required: true, acquisition_profile: {
+      dimensions: ['agnostic' as const], asset_kinds: ['data' as const], usage_tags: [], capabilities: [], styles: [],
+    } }],
     resources: [],
   }
 }
@@ -1680,7 +1663,7 @@ async function runResourceTerminal(input: {
     | 'resource-planner'
     | 'resource-curator'
     | 'resource-content-author'
-  toolName: 'AssetManifest' | 'CommitResourceContent'
+  toolName: 'AssetManifest' | 'CommitResourceInventory' | 'CommitResourceContent'
   toolInput: Record<string, unknown>
   contract?: Record<string, unknown>
   catalogObserved?: boolean
@@ -1696,8 +1679,8 @@ async function runResourceTerminal(input: {
             payload: {
               toolUseID: 'resource-catalog-tool',
               toolName: 'ResourceLibrary',
-              input: { action: 'list_packs' },
-              output: JSON.stringify({ items: [] }),
+              input: { action: 'match_requirements' },
+              output: JSON.stringify({ groups: [] }),
             },
           },
         ]

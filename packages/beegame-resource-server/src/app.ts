@@ -23,6 +23,7 @@ import {
   type ResourceUsageTag,
   type ResourceDeliveryCapability,
   type ResourceRequirementMatchRequest,
+  type ResourceElement,
   type ResourcePack,
   type ResourceFolder,
   type ResourceRepository,
@@ -82,12 +83,9 @@ export function createBeeGameResourceServerApp(
       }
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
-          '/api/resource-catalog/packs',
           '/api/resource-catalog/matches',
-            '/api/resource-library/resolve',
-          ].includes(pathname)) ||
-        (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
-        (request.method === 'POST' && /^\/api\/resource-catalog\/packs\/[^/]+\/elements$/.test(pathname))
+          '/api/resource-library/resolve',
+        ].includes(pathname))
       ) &&
         Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
       const user = options.currentUser ?? (await resolveUser(request))
@@ -132,12 +130,13 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'POST' && pathname === '/api/resource-catalog/matches') {
         const matchRequest = parseResourceRequirementMatchRequest(await request.json())
         const packs = await options.repository.listPacks()
+        const publishedPacks = packs.filter(pack => pack.status === 'published')
         const elements = (await Promise.all(
-          packs.filter(pack => pack.status === 'published').map(pack => options.repository.listElements(pack.id)),
+          publishedPacks.map(pack => options.repository.listElements(pack.id)),
         )).flat()
-        const matched = matchResourceRequirements(packs, elements, matchRequest)
+        const matched = matchResourceRequirements(publishedPacks, elements, matchRequest)
         return corsResponse(Response.json({
-          catalogRevision: await catalogRevision(packs, elements),
+          catalogRevision: await catalogRevision(publishedPacks, elements),
           ...matched,
         }), options.corsOrigin)
       }
@@ -168,11 +167,23 @@ export function createBeeGameResourceServerApp(
                 'Resource download URLs are not configured',
               ), options.corsOrigin)
         const requested = parseResourceSelections(await request.json())
+        const publishedPacks = (await options.repository.listPacks())
+          .filter(pack => pack.status === 'published')
+        const publishedElements = (await Promise.all(
+          publishedPacks.map(pack => options.repository.listElements(pack.id)),
+        )).flat()
+        if (await catalogRevision(publishedPacks, publishedElements) !== requested.catalogRevision)
+          throw new ResourceRequestValidationError('Resource Catalog changed after bounded matching; resume requires a new inventory transaction')
+        const packById = new Map(publishedPacks.map(pack => [pack.id, pack]))
+        const elementsByPack = new Map(publishedPacks.map(pack => [
+          pack.id,
+          publishedElements.filter(element => element.packId === pack.id),
+        ]))
         const resolved = []
-        for (const selection of requested) {
-          const pack = await options.repository.getPack(selection.packId)
-          if (!pack || pack.status !== 'published') throw new ResourceRequestValidationError(`Published Resource Pack ${selection.packId} was not found`)
-          const elements = await options.repository.listElements(pack.id)
+        for (const selection of requested.selections) {
+          const pack = packById.get(selection.packId)
+          if (!pack) throw new ResourceRequestValidationError(`Published Resource Pack ${selection.packId} was not found`)
+          const elements = elementsByPack.get(pack.id) ?? []
           const element = elements.find(candidate => candidate.id === selection.elementId && candidate.status === 'ready')
           if (!element) throw new ResourceRequestValidationError(`Ready Resource element ${selection.elementId} was not found in Pack ${pack.id}`)
           if (pack.version !== selection.expectedPackVersion) {
@@ -182,13 +193,17 @@ export function createBeeGameResourceServerApp(
           if (!candidate) throw new ResourceRequestValidationError(`Resource element ${selection.elementId} has an incomplete dependency closure`)
           resolved.push({
             ...candidate,
-              resourceId: selection.resourceId,
+            resourceId: selection.resourceId,
             destinationPath: selection.destinationPath,
             selectionReason: selection.selectionReason,
             sourceUrl: await options.getElementResourceUrl(pack.id, element.id),
+            sourceHash: requiredElementContentHash(element),
             dependencies: await Promise.all((candidate.dependencies ?? []).map(async dependency => ({
               ...dependency,
               sourceUrl: await options.getElementResourceUrl!(pack.id, dependency.elementId),
+              sourceHash: requiredElementContentHash(
+                elements.find(item => item.id === dependency.elementId),
+              ),
             }))),
           })
         }
@@ -541,11 +556,11 @@ function parseResourceRequirementMatchRequest(value: unknown): ResourceRequireme
     throw new ResourceRequestValidationError('Resource requirement match request must be an object')
   }
   const record = value as Record<string, unknown>
-  if (!Array.isArray(record.requirements) || record.requirements.length === 0 || record.requirements.length > 128) {
-    throw new ResourceRequestValidationError('Resource requirement match request must contain from 1 to 128 requirements')
+  if (!Array.isArray(record.requirements) || record.requirements.length === 0) {
+    throw new ResourceRequestValidationError('Resource requirement match request must contain at least one requirement')
   }
-  if (!Array.isArray(record.deliveryCapabilities) || record.deliveryCapabilities.length === 0 || record.deliveryCapabilities.length > 128) {
-    throw new ResourceRequestValidationError('Resource requirement match request must contain from 1 to 128 delivery capabilities')
+  if (!Array.isArray(record.deliveryCapabilities) || record.deliveryCapabilities.length === 0) {
+    throw new ResourceRequestValidationError('Resource requirement match request must contain at least one delivery capability')
   }
   const requirements = record.requirements.map((value, index) => {
     const item = requiredRecord(value, `Resource requirement ${index + 1}`)
@@ -604,22 +619,45 @@ function normalizedRequiredFormat(value: unknown, label: string): string {
   return (format.startsWith('.') ? format.slice(1) : format).toLocaleLowerCase()
 }
 
-async function catalogRevision(packs: readonly ResourcePack[], elements: readonly { id: string; packId: string; path: string; status: string }[]): Promise<string> {
-  const facts = JSON.stringify({
-    packs: packs.map(pack => [pack.id, pack.version, pack.status]).sort(),
-    elements: elements.map(element => [element.packId, element.id, element.path, element.status]).sort(),
-  })
+async function catalogRevision(packs: readonly ResourcePack[], elements: readonly ResourceElement[]): Promise<string> {
+  const facts = JSON.stringify(canonicalizeCatalogFacts({
+    packs: packs.toSorted((left, right) => left.id.localeCompare(right.id)),
+    elements: elements.toSorted((left, right) =>
+      left.packId.localeCompare(right.packId) || left.id.localeCompare(right.id),
+    ),
+  }))
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(facts))
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function parseResourceSelections(value: unknown): Array<{
-  resourceId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }> {
+function canonicalizeCatalogFacts(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeCatalogFacts)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalizeCatalogFacts(item)]),
+  )
+}
+
+function parseResourceSelections(value: unknown): {
+  catalogRevision: string
+  selections: Array<{
+    resourceId: string
+    packId: string
+    expectedPackVersion: string
+    elementId: string
+    destinationPath?: string
+    selectionReason: string[]
+  }>
+} {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Resource import request must be an object')
-  const selections = (value as Record<string, unknown>).selections
+  const recordValue = value as Record<string, unknown>
+  const catalogRevision = requiredString(recordValue.catalogRevision, 'Resource import catalogRevision')
+  const selections = recordValue.selections
   if (!Array.isArray(selections) || selections.length === 0) throw new ResourceRequestValidationError('At least one explicit Resource element selection is required')
-  if (selections.length > 64) throw new ResourceRequestValidationError('At most 64 Resource elements may be resolved at once')
-  return selections.map((value, index) => {
+  return { catalogRevision, selections: selections.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} is invalid`)
     const record = value as Record<string, unknown>
     const resourceId = requiredString(record.resourceId,
@@ -635,7 +673,7 @@ function parseResourceSelections(value: unknown): Array<{
     const destinationPath = typeof record.destinationPath === 'string' && record.destinationPath.trim() ? record.destinationPath.trim() : undefined
     return {
       resourceId, packId, expectedPackVersion, elementId, ...(destinationPath ? { destinationPath } : {}), selectionReason }
-  })
+  }) }
 }
 
 function optionalBoundedInteger(value: unknown, name: string, minimum: number, maximum: number): number | undefined {
@@ -647,6 +685,16 @@ function optionalBoundedInteger(value: unknown, name: string, minimum: number, m
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new ResourceRequestValidationError(`${name} is required`)
   return value.trim()
+}
+
+function requiredElementContentHash(element: ResourceElement | undefined): string {
+  const value = element?.specs.contentHash
+  if (typeof value !== 'string' || value.length !== 64)
+    throw new ResourceRequestValidationError('Resolved Resource element has no immutable content hash')
+  for (const character of value.toLocaleLowerCase())
+    if (!'0123456789abcdef'.includes(character))
+      throw new ResourceRequestValidationError('Resolved Resource element content hash is invalid')
+  return value
 }
 
 function validatedEnumList(

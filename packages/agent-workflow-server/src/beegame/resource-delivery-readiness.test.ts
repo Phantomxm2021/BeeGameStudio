@@ -6,6 +6,7 @@ import { writeBeeGameAssetManifest } from './asset-contracts'
 import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
 const roots: string[] = []
+const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 afterEach(async () =>
   Promise.all(
     roots.splice(0).map(root => rm(root, { recursive: true, force: true })),
@@ -31,7 +32,7 @@ describe('resource-content readiness', () => {
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
-      requirements: [{ id: 'visual.player', required: true }],
+      requirements: [{ id: 'visual.player', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
       resources: [
         {
           id: 'player-art',

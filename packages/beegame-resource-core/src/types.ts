@@ -307,7 +307,7 @@ export type ResourceRequirementMatchGroup = {
   requirementId: string
   status: 'matched' | 'no-match' | 'unclassified'
   candidates: readonly ResourceRequirementCandidate[]
-  unclassifiedElementIds: readonly string[]
+  unclassifiedElementCount: number
 }
 
 export type ResourceRequirementMatchResult = {
