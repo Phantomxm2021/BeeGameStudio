@@ -183,6 +183,11 @@ import type {
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
 import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
+import {
+  isWorkflowStageCardSnapshot,
+  projectWorkflowStageCardHistory,
+  type WorkflowStageCardSnapshot,
+} from './beegame/delivery-workflow/workflow-stage-card-history'
 import { openDocumentReviewFindings } from './beegame/delivery-workflow/document-review-findings'
 import {
   projectAssetDisplayTasks,
@@ -5057,20 +5062,26 @@ async function readBeeGameWorkflowSnapshot(
       }
       throw error
     }
+    const events = await store.readEvents()
     if (!inspection.currentRun)
       return createWorkflowStateErrorView(
         inspection.error ??
           new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
-        lastProvenWorkflowSummary(await store.readEvents()),
+        lastProvenWorkflowSummary(events),
       )
     const { pendingEvents: _pendingEvents, ...run } = inspection.currentRun
-    const timing = workflowElapsedTiming(
-      await store.readEvents(),
-      run as DeliveryRun,
-    )
+    const deliveryRun = run as DeliveryRun
+    const timing = workflowElapsedTiming(events, deliveryRun)
+    const stageSnapshots = projectWorkflowStageCardHistory({
+      run: deliveryRun,
+      events,
+      workspacePath,
+      now: new Date().toISOString(),
+    })
     return {
       ...(run as unknown as JsonObject),
       ...timing,
+      stageSnapshots,
     }
   } catch (error) {
     return createWorkflowStateErrorView(error)
@@ -5711,6 +5722,7 @@ function workflowViewForDisplay(
         ),
       )
     : {}
+  const stageSnapshots = workflowStageSnapshotsForDisplay(workflow)
   return {
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
@@ -5791,7 +5803,91 @@ function workflowViewForDisplay(
       ? { failureReason: workflowBlockedReason(workflow) }
       : {}),
     ...(nextAction ? { nextAction } : {}),
+    ...(stageSnapshots ? { stageSnapshots } : {}),
   }
+}
+
+function workflowStageSnapshotsForDisplay(
+  workflow: JsonObject,
+): JsonObject[] | undefined {
+  if (!Array.isArray(workflow.stageSnapshots)) return undefined
+  const currentProgress = projectDeliveryProgress(workflow)
+  const reached = workflow.stageSnapshots.filter(
+    (value): value is WorkflowStageCardSnapshot =>
+      isWorkflowStageCardSnapshot(value) &&
+      currentProgress !== undefined &&
+      value.phaseIndex <= currentProgress.phaseIndex,
+  )
+  if (reached.length === 0) return undefined
+  return reached.map((snapshot, index) => {
+    const isLive =
+      currentProgress !== undefined &&
+      index === reached.length - 1 &&
+      snapshot.stageId === currentProgress.stageId &&
+      snapshot.phaseIndex === currentProgress.phaseIndex
+    const tasks = snapshot.tasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      ...(task.operation ? { operation: task.operation } : {}),
+      ...(Number.isFinite(Number(task.attempt))
+        ? { attempt: Number(task.attempt) }
+        : {}),
+      ...(typeof task.failureReason === 'string' && task.failureReason.trim()
+        ? { failureReason: task.failureReason.trim() }
+        : {}),
+    }))
+    const block = snapshot.block
+      ? {
+          message: sanitizeWorkflowDisplayMessage(snapshot.block.message),
+          ...(isLive &&
+          (snapshot.block.nextAction === 'resume' ||
+            snapshot.block.nextAction === 'retry')
+            ? { nextAction: snapshot.block.nextAction }
+            : {}),
+        }
+      : undefined
+    return {
+      stageId: snapshot.stageId,
+      phaseIndex: snapshot.phaseIndex,
+      phaseCount: snapshot.phaseCount,
+      status: snapshot.status,
+      currentPhase: snapshot.currentPhase,
+      ...(snapshot.substage ? { substage: snapshot.substage } : {}),
+      ...(snapshot.convergencePass
+        ? { convergencePass: snapshot.convergencePass }
+        : {}),
+      ...(snapshot.documentStep
+        ? { documentStep: snapshot.documentStep }
+        : {}),
+      ...(snapshot.reviewMode ? { reviewMode: snapshot.reviewMode } : {}),
+      ...(snapshot.reviewTarget
+        ? { reviewTarget: snapshot.reviewTarget }
+        : {}),
+      ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
+      ...(snapshot.worker ? { worker: snapshot.worker } : {}),
+      ...(snapshot.message
+        ? { message: sanitizeWorkflowDisplayMessage(snapshot.message) }
+        : {}),
+      ...(snapshot.executionStatus
+        ? { executionStatus: snapshot.executionStatus }
+        : {}),
+      ...(snapshot.currentItemId
+        ? { currentItemId: snapshot.currentItemId }
+        : {}),
+      tasks,
+      completedTaskCount: snapshot.completedTaskCount,
+      totalTaskCount: snapshot.totalTaskCount,
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt,
+      ...(snapshot.completedAt
+        ? { completedAt: snapshot.completedAt }
+        : {}),
+      elapsedMs: snapshot.elapsedMs,
+      ...(snapshot.activeSince ? { activeSince: snapshot.activeSince } : {}),
+      ...(block ? { block } : {}),
+    }
+  })
 }
 
 function resourceProductionTaskForDisplay(
