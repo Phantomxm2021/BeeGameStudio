@@ -684,14 +684,26 @@ export function projectWorkflowStageCardHistory(input: {
 }): WorkflowStageCardSnapshot[] {
   const live = projectDeliveryProgress(asWorkflowRecord(input.run))
   if (!live) return []
-  const cards = new Map<DeliveryProgressStage, WorkflowStageCardSnapshot>()
-  for (const event of input.events) {
-    if (!isFrozenWorkflowStageCardEvent(event)) continue
+  const cards = new Map<
+    DeliveryProgressStage,
+    { snapshot: WorkflowStageCardSnapshot; event: FrozenWorkflowStageCardEvent }
+  >()
+  const runEvents = input.events.filter(
+    event => event.runId === input.run.runId,
+  )
+  for (const event of runEvents) {
+    if (
+      event.runId !== input.run.runId ||
+      !isFrozenWorkflowStageCardEvent(event)
+    )
+      continue
     const snapshot = event.stageSnapshot
     if (snapshot.phaseIndex >= live.phaseIndex) continue
-    cards.set(snapshot.stageId, snapshot)
+    const existing = cards.get(snapshot.stageId)
+    if (!existing || isNewerFrozenEvent(event, existing.event))
+      cards.set(snapshot.stageId, { snapshot, event })
   }
-  const reachedEvents = input.events.filter(
+  const reachedEvents = runEvents.filter(
     event =>
       isFrozenWorkflowStageCardEvent(event) &&
       event.stageSnapshot.phaseIndex < live.phaseIndex,
@@ -703,17 +715,31 @@ export function projectWorkflowStageCardHistory(input: {
     timing: {
       now: input.now,
       stageStartedAt,
-      events: input.events,
+      events: runEvents,
     },
   })
-  if (!current)
-    return [...cards.values()].sort(
-      (left, right) => left.phaseIndex - right.phaseIndex,
-    )
-  return [
-    ...[...cards.values()].sort(
-      (left, right) => left.phaseIndex - right.phaseIndex,
-    ),
-    current,
-  ]
+  const frozenCards = [...cards.values()]
+    .map(value => value.snapshot)
+    .sort((left, right) => left.phaseIndex - right.phaseIndex)
+  if (!current) return frozenCards
+  return [...frozenCards, current]
+}
+
+function isNewerFrozenEvent(
+  candidate: FrozenWorkflowStageCardEvent,
+  existing: FrozenWorkflowStageCardEvent,
+): boolean {
+  const candidateCompletedAt = Date.parse(
+    candidate.stageSnapshot.completedAt ?? '',
+  )
+  const existingCompletedAt = Date.parse(
+    existing.stageSnapshot.completedAt ?? '',
+  )
+  if (candidateCompletedAt !== existingCompletedAt)
+    return candidateCompletedAt > existingCompletedAt
+  const candidateCreatedAt = Date.parse(candidate.createdAt)
+  const existingCreatedAt = Date.parse(existing.createdAt)
+  if (candidateCreatedAt !== existingCreatedAt)
+    return candidateCreatedAt > existingCreatedAt
+  return candidate.eventId.localeCompare(existing.eventId) > 0
 }

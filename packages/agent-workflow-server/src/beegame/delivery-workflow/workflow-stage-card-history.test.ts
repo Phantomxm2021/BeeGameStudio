@@ -70,6 +70,7 @@ describe('workflow stage card history', () => {
     })
     const current: DeliveryRun = {
       ...base,
+      runId: 'run-stage-history',
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
     }
@@ -79,7 +80,21 @@ describe('workflow stage card history', () => {
       events: [
         frozenEvent(1, 'BRIEF_CONFIRMED'),
         frozenEvent(2, 'DOCUMENT_DRAFTING'),
-        frozenEvent(2, 'DOCUMENT_DRAFTING', { message: 'latest frozen value' }),
+        frozenEvent(2, 'DOCUMENT_DRAFTING', {
+          message: 'latest frozen value',
+          completedAt: '2026-08-06T00:00:09.000Z',
+        }),
+        frozenEvent(2, 'DOCUMENT_DRAFTING', {
+          message: 'older frozen value',
+          completedAt: '2026-08-06T00:00:08.000Z',
+        }),
+        {
+          ...frozenEvent(2, 'DOCUMENT_DRAFTING', {
+            message: 'foreign run value',
+            completedAt: '2026-08-06T00:00:10.000Z',
+          }),
+          runId: 'another-run',
+        },
         frozenEvent(8, 'IMPLEMENTATION'),
       ],
       now: current.updatedAt,
