@@ -48,6 +48,48 @@ export interface WorkflowCardTask {
   failureReason?: string
 }
 
+export type WorkflowCardSubstage =
+  | 'INITIAL_DRAFTING'
+  | 'INITIAL_REVIEW'
+  | 'REPAIR_PLANNING'
+  | 'REPAIRING'
+  | 'CLOSURE_REVIEW'
+  | 'CHECKLIST_DRAFTING'
+  | 'CHECKLIST_REVIEW'
+
+export interface WorkflowCardStageSnapshot {
+  stageId: string
+  status: WorkflowCardStatus
+  currentPhase?: string
+  /** One-based current position in the server-owned delivery phase order. */
+  phaseIndex: number
+  phaseCount?: number
+  substage?: WorkflowCardSubstage
+  convergencePass?: number
+  documentStep?: string
+  reviewMode?: 'initial' | 'closure'
+  reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  worker?: string
+  thinking?: string
+  executionStatus?: string
+  currentItemId?: string
+  tasks?: WorkflowCardTask[]
+  completedTaskCount?: number
+  totalTaskCount?: number
+  createdAt?: string
+  completedAt?: string
+  updatedAt?: string
+  stageStartedAt?: string
+  /** Accumulated active execution time before the current active interval. */
+  elapsedMs?: number
+  /** Start of the current active interval; absent while paused or terminal. */
+  activeSince?: string
+  block?: {
+    message: string
+    nextAction?: string
+  }
+}
+
 export type WorkflowCardAction = 'resume' | 'retry'
 
 export type WorkflowRecoveryUnitKind =
@@ -69,13 +111,7 @@ export interface WorkflowCardPayload {
   /** One-based current position in the server-owned delivery phase order. */
   phaseIndex?: number
   phaseCount?: number
-  substage?:
-    | 'INITIAL_DRAFTING'
-    | 'INITIAL_REVIEW'
-    | 'REPAIR_PLANNING'
-    | 'REPAIRING'
-    | 'CLOSURE_REVIEW'
-    | 'CHECKLIST_DRAFTING'
+  substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
   reviewMode?: 'initial' | 'closure'
@@ -95,6 +131,7 @@ export interface WorkflowCardPayload {
   elapsedMs?: number
   /** Start of the current active interval; absent while paused or terminal. */
   activeSince?: string
+  stageSnapshots?: WorkflowCardStageSnapshot[]
   nextAction?: WorkflowCardAction
   /** True only when the server can recover from the durable workflow state. */
   recoverable?: boolean
