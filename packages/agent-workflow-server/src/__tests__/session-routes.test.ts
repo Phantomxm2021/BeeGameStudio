@@ -30,6 +30,8 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
+  type DeliveryRun,
+  type WorkflowEvent,
 } from '../beegame/delivery-workflow/types'
 import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
 
@@ -974,4 +976,165 @@ describe('delivery workflow session continuation', () => {
       for (const cleanup of cleanups) cleanup()
     }
   })
+
+  it('serves frozen stage history plus one live current card without writing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-stage-history-route-'))
+    temporaryDirectories.push(root)
+    const projectsRoot = join(root, 'projects')
+    const ownerId = 'stage-history-owner'
+    const projectId = 'stage-history-project'
+    const workspace = join(projectsRoot, 'users', ownerId, projectId)
+    await mkdir(workspace, { recursive: true })
+    const app = createAgentWorkflowApp({
+      currentUser: { id: ownerId, role: 'owner' },
+      dashboardDataRoot: join(root, 'dashboard'),
+      defaultWorkspacePath: projectsRoot,
+      modelConfigStore: false,
+      skillsConfig: false,
+    })
+    const projectResponse = await app.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: projectId,
+        name: 'Stage history fixture',
+        root_path: workspace,
+        created_at: Date.now(),
+      }),
+    })
+    expect(projectResponse.status).toBe(200)
+
+    const baseRun = createTestDeliveryRun({
+      runId: 'stage-history-route-run',
+      projectId,
+      ownerId,
+    })
+    const run: DeliveryRun = {
+      ...baseRun,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      currentMessage: 'live stage status',
+      blockedReason: 'current-only recovery detail',
+      usage: {
+        input_tokens: 1,
+        cache_read_tokens: 2,
+        cache_creation_tokens: 3,
+        completion_tokens: 4,
+        total_tokens: 10,
+      },
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2026-08-06T00:00:10.000Z',
+    }
+    const store = createRunStore(workspace, ownerId)
+    await store.save(run)
+    await store.appendEvent(frozenStageEvent(run, 1, 'BRIEF_CONFIRMED'))
+    await store.appendEvent(frozenStageEvent(run, 2, 'DOCUMENT_DRAFTING'))
+
+    const snapshotBeforeRead = await readFile(store.paths.snapshot, 'utf8')
+    const eventsBeforeRead = await readFile(store.paths.events, 'utf8')
+    const response = await app.request(`/api/projects/${projectId}/workflow`)
+    const payload = (await response.json()) as {
+      workflow?: Record<string, unknown>
+    }
+    expect(response.status).toBe(200)
+    const workflow = payload.workflow as Record<string, unknown>
+    const cards = workflow.stageSnapshots as Array<Record<string, unknown>>
+    expect(cards.map(card => card.phaseIndex)).toEqual([1, 2, 3])
+    expect(cards[0]).toMatchObject({
+      stageId: 'BRIEF_CONFIRMED',
+      status: 'completed',
+      message: 'frozen stage status',
+      block: { message: 'frozen recovery detail' },
+    })
+    expect(cards[0]?.block).not.toHaveProperty('nextAction')
+    expect(cards.at(-1)).toMatchObject({
+      stageId: 'DOCUMENT_REVIEW',
+      status: 'running',
+      message: 'live stage status',
+      block: {
+        message: 'current-only recovery detail',
+        nextAction: 'retry',
+      },
+    })
+    expect(cards.at(-1)?.usage).toBeUndefined()
+    expect(cards.at(-1)?.evidence).toBeUndefined()
+    expect(workflow.nextAction).toBeUndefined()
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(
+      snapshotBeforeRead,
+    )
+    expect(await readFile(store.paths.events, 'utf8')).toBe(eventsBeforeRead)
+    const runtimeResponse = await app.request(
+      `/api/projects/${projectId}/runtime-state`,
+    )
+    const runtimePayload = (await runtimeResponse.json()) as {
+      workflow?: Record<string, unknown>
+    }
+    expect(runtimeResponse.status).toBe(200)
+    expect(
+      (runtimePayload.workflow?.stageSnapshots as unknown[]).length,
+    ).toBe(3)
+
+    const legacyRun = { ...run, runId: 'legacy-stage-history-run' }
+    const legacyWorkspace = join(projectsRoot, 'users', ownerId, 'legacy')
+    await mkdir(legacyWorkspace, { recursive: true })
+    const legacyStore = createRunStore(legacyWorkspace, ownerId)
+    const legacyProjectId = 'legacy-stage-history-project'
+    await legacyStore.save({ ...legacyRun, projectId: legacyProjectId })
+    const legacyProjectResponse = await app.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: legacyProjectId,
+        name: 'Legacy stage history fixture',
+        root_path: legacyWorkspace,
+        created_at: Date.now(),
+      }),
+    })
+    expect(legacyProjectResponse.status).toBe(200)
+    const legacyResponse = await app.request(
+      `/api/projects/${legacyProjectId}/workflow`,
+    )
+    const legacyPayload = (await legacyResponse.json()) as {
+      workflow?: Record<string, unknown>
+    }
+    expect(legacyResponse.status).toBe(200)
+    const legacyCards = legacyPayload.workflow?.stageSnapshots as Array<
+      Record<string, unknown>
+    >
+    expect(legacyCards).toHaveLength(1)
+    expect(legacyCards[0]?.stageId).toBe('DOCUMENT_REVIEW')
+  })
 })
+
+function frozenStageEvent(
+  run: DeliveryRun,
+  phaseIndex: 1 | 2,
+  phase: 'BRIEF_CONFIRMED' | 'DOCUMENT_DRAFTING',
+): WorkflowEvent {
+  const createdAt = `2026-08-06T00:00:0${phaseIndex}.000Z`
+  return {
+    eventId: `stage-history-event-${phaseIndex}`,
+    runId: run.runId,
+    type: 'phase.entered',
+    phase,
+    status: 'running',
+    revision: run.revision,
+    createdAt,
+    stageSnapshot: {
+      stageId: phase,
+      phaseIndex,
+      phaseCount: 11,
+      status: 'completed',
+      currentPhase: phase,
+      message: 'frozen stage status',
+      tasks: [],
+      completedTaskCount: 0,
+      totalTaskCount: 0,
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: createdAt,
+      elapsedMs: 1000,
+      block: { message: 'frozen recovery detail', nextAction: 'retry' },
+    },
+  }
+}

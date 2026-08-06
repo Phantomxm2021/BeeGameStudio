@@ -17,6 +17,7 @@ describe('delivery display progress', () => {
         },
       }),
     ).toEqual({
+      stageId: 'DOCUMENT_CONVERGENCE',
       phaseIndex: 4,
       phaseCount: 11,
       substage: 'REPAIR_PLANNING',
@@ -35,6 +36,7 @@ describe('delivery display progress', () => {
         },
       }),
     ).toEqual({
+      stageId: 'DOCUMENT_CONVERGENCE',
       phaseIndex: 4,
       phaseCount: 11,
       substage: 'CLOSURE_REVIEW',
@@ -46,6 +48,7 @@ describe('delivery display progress', () => {
         documentStep: 'CHECKLIST_DRAFTING',
       }),
     ).toEqual({
+      stageId: 'DOCUMENT_CONVERGENCE',
       phaseIndex: 4,
       phaseCount: 11,
       substage: 'CHECKLIST_DRAFTING',
@@ -65,6 +68,7 @@ describe('delivery display progress', () => {
         documentReviewState: { activeCycle: completeCycle },
       }),
     ).toEqual({
+      stageId: 'COMPREHENSIVE_CONVERGENCE',
       phaseIndex: 6,
       phaseCount: 11,
       substage: 'INITIAL_REVIEW',
@@ -84,6 +88,7 @@ describe('delivery display progress', () => {
         },
       }),
     ).toEqual({
+      stageId: 'COMPREHENSIVE_CONVERGENCE',
       phaseIndex: 6,
       phaseCount: 11,
       substage: 'REPAIRING',
@@ -102,6 +107,7 @@ describe('delivery display progress', () => {
         },
       }),
     ).toEqual({
+      stageId: 'COMPREHENSIVE_CONVERGENCE',
       phaseIndex: 6,
       phaseCount: 11,
       substage: 'REPAIRING',
@@ -111,10 +117,12 @@ describe('delivery display progress', () => {
 
   test('shifts downstream stages after comprehensive convergence', () => {
     expect(projectDeliveryProgress({ phase: 'RESOURCE_PREPARATION' })).toEqual({
+      stageId: 'RESOURCE_PREPARATION',
       phaseIndex: 5,
       phaseCount: 11,
     })
     expect(projectDeliveryProgress({ phase: 'DELIVERY' })).toEqual({
+      stageId: 'DELIVERY',
       phaseIndex: 11,
       phaseCount: 11,
     })
@@ -127,6 +135,7 @@ describe('delivery display progress', () => {
         documentStep: 'FOUNDATION_DRAFTING',
       }),
     ).toEqual({
+      stageId: 'DOCUMENT_DRAFTING',
       phaseIndex: 2,
       phaseCount: 11,
       substage: 'INITIAL_DRAFTING',

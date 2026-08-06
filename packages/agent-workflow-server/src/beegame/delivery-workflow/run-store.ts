@@ -11,6 +11,12 @@ import {
 } from 'node:fs/promises'
 import { parseDeliveryRun, parseWorkflowEvent } from './schema'
 import { assertDeliveryRunInvariants } from './transition'
+import {
+  activeElapsedWithinStage,
+  freezePreviousStageCard,
+  isFrozenWorkflowStageCardEvent,
+  lastStageBoundaryAt,
+} from './workflow-stage-card-history'
 import type {
   DeliveryRun,
   DispatchRecord,
@@ -705,19 +711,60 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     run: DeliveryRun,
     event: Omit<WorkflowEvent, 'eventId' | 'createdAt'> &
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
-    acceptedUnits: AcceptedWorkflowUnit[] = [],
+    acceptedUnits: AcceptedWorkflowUnit[],
+    previous: DeliveryRun | null,
+    events: WorkflowEvent[],
   ): Promise<DeliveryRun> {
-    const ordinaryEvent = {
+    const createdAt = event.createdAt ?? now()
+    const ordinaryEventBase = {
       ...event,
       runId: run.runId,
       phase: run.phase,
       status: run.status,
       revision: run.revision,
       eventId: event.eventId ?? randomUUID(),
-      createdAt: event.createdAt ?? now(),
+      createdAt,
+    }
+    const runEvents = events.filter(event => event.runId === run.runId)
+    const frozenEvents = runEvents.filter(isFrozenWorkflowStageCardEvent)
+    const stageStartedAt = previous
+      ? lastStageBoundaryAt(previous.createdAt, frozenEvents)
+      : undefined
+    const stageSnapshot =
+      previous && stageStartedAt
+        ? freezePreviousStageCard({
+            previous,
+            next: run,
+            workspacePath: resolve(workspacePath),
+            stageStartedAt,
+            stageEndedAt: createdAt,
+            elapsedMs: activeElapsedWithinStage({
+              events: runEvents,
+              stageStartedAt,
+              stageEndedAt: createdAt,
+            }),
+          })
+        : undefined
+    const ordinaryEvent = {
+      ...ordinaryEventBase,
+      // tasks.planned has a strict event schema; all other workflow events
+      // retain the catch-all stage card extension.
+      ...(stageSnapshot && event.type !== 'tasks.planned'
+        ? { stageSnapshot }
+        : {}),
     } as WorkflowEvent
+    const stageSnapshotEvent =
+      stageSnapshot && event.type === 'tasks.planned'
+        ? ({
+            ...ordinaryEventBase,
+            eventId: randomUUID(),
+            type: 'workflow.stage_snapshot',
+            stageSnapshot,
+          } as WorkflowEvent)
+        : undefined
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
+      ...(stageSnapshotEvent ? [stageSnapshotEvent] : []),
       ...acceptedUnits.map(
         unit =>
           ({
@@ -755,11 +802,12 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
     acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
-    // Recover a previous marker before replacing the snapshot. This keeps a
-    // failed append retryable and prevents a later commit from overwriting
-    // an event that was waiting for journal recovery.
-    await loadUnlocked()
-    return persistCommitUnlocked(run, event, acceptedUnits)
+    // Read the authoritative previous run and journal before writing the new
+    // snapshot. Stage card timing is derived only from this durable history,
+    // so a write-ahead marker can be replayed without changing the boundary.
+    const previous = await loadUnlocked()
+    const events = await readEventsUnlocked()
+    return persistCommitUnlocked(run, event, acceptedUnits, previous, events)
   }
 
   async function commit(
@@ -819,7 +867,26 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           'recovery_snapshot_changed',
         )
       }
-      return persistCommitUnlocked(input.run, input.event, input.acceptedUnits)
+      // A recovery replacement may intentionally target malformed or obsolete
+      // JSON. Only replay a previous run when the expected source parses;
+      // otherwise persist against an empty previous snapshot context.
+      let previous: DeliveryRun | null = null
+      let sourceParses = false
+      try {
+        parseDeliveryRun(JSON.parse(source) as unknown)
+        sourceParses = true
+      } catch {
+        // The expected digest authorizes replacing an unreadable snapshot.
+      }
+      if (sourceParses) previous = await loadUnlocked()
+      const events = await readEventsUnlocked()
+      return persistCommitUnlocked(
+        input.run,
+        input.event,
+        input.acceptedUnits ?? [],
+        previous,
+        events,
+      )
     })
   }
 

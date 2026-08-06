@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,15 +7,21 @@ import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
+import { transitionDeliveryRun } from './transition'
 import { commitCanonicalDocument } from '../native-canonical-document-tool'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
+  type WorkflowEvent,
   type WorkerDispatchRequest,
 } from './types'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
+import {
+  activeElapsedWithinStage,
+  isFrozenWorkflowStageCardEvent,
+} from './workflow-stage-card-history'
 
 function run(): DeliveryRun {
   return createTestDeliveryRun({
@@ -735,6 +742,288 @@ describe('accepted workflow unit journal', () => {
       events.filter(event => event.type === 'workflow.unit.accepted'),
     ).toHaveLength(1)
     expect((await store.load())?.pendingEvents).toBeUndefined()
+  })
+
+  test('freezes the completed stage card exactly once at a semantic stage boundary', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-boundary-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...run(),
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2026-08-06T00:00:00.000Z',
+    }
+    await store.commit(initial, {
+      runId: initial.runId,
+      type: 'run.created',
+      phase: initial.phase,
+      status: initial.status,
+      revision: initial.revision,
+      eventId: 'run-created',
+      createdAt: '2026-08-06T00:00:01.000Z',
+    })
+
+    const transitioned = transitionDeliveryRun(initial, {
+      type: 'documents_ready',
+    })
+    const transitionedAt = '2026-08-06T00:00:05.000Z'
+    const phaseEntered = {
+      runId: transitioned.runId,
+      type: 'phase.entered',
+      phase: transitioned.phase,
+      status: transitioned.status,
+      revision: transitioned.revision,
+      eventId: 'documents-ready',
+      createdAt: transitionedAt,
+    }
+    await store.commit(transitioned, phaseEntered)
+
+    const reloaded = await store.load()
+    const events = await store.readEvents()
+    const boundaryEvents = events.filter(isFrozenWorkflowStageCardEvent)
+    expect(reloaded?.phase).toBe('DOCUMENT_DRAFTING')
+    expect(boundaryEvents).toHaveLength(1)
+    expect(boundaryEvents[0]).toMatchObject({
+      eventId: 'documents-ready',
+      createdAt: transitionedAt,
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        status: 'completed',
+        completedAt: transitionedAt,
+        elapsedMs: 5000,
+      },
+    })
+
+    await store.commit(transitioned, phaseEntered)
+    expect(
+      (await store.readEvents()).filter(isFrozenWorkflowStageCardEvent),
+    ).toHaveLength(1)
+  })
+
+  test('scopes frozen stage timing to the current run', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-run-scope-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...run(),
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2026-08-06T00:00:00.000Z',
+    }
+    await store.commit(initial, {
+      runId: initial.runId,
+      type: 'run.created',
+      phase: initial.phase,
+      status: initial.status,
+      revision: initial.revision,
+      eventId: 'run-created-scope',
+      createdAt: '2026-08-06T00:00:01.000Z',
+    })
+
+    await store.appendEvent({
+      runId: 'foreign-run',
+      type: 'phase.entered',
+      phase: 'BRIEF_CONFIRMED',
+      status: 'completed',
+      revision: initial.revision,
+      eventId: 'foreign-stage-boundary',
+      createdAt: '2026-08-06T00:00:04.000Z',
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        phaseIndex: 1,
+        phaseCount: 11,
+        status: 'completed',
+        currentPhase: 'BRIEF_CONFIRMED',
+        tasks: [],
+        completedTaskCount: 0,
+        totalTaskCount: 0,
+        createdAt: '2026-08-06T00:00:00.000Z',
+        updatedAt: '2026-08-06T00:00:04.000Z',
+        completedAt: '2026-08-06T00:00:04.000Z',
+        elapsedMs: 4000,
+      },
+    })
+
+    const transitioned = transitionDeliveryRun(initial, {
+      type: 'documents_ready',
+    })
+    await store.commit(transitioned, {
+      runId: transitioned.runId,
+      type: 'phase.entered',
+      phase: transitioned.phase,
+      status: transitioned.status,
+      revision: transitioned.revision,
+      eventId: 'documents-ready-scope',
+      createdAt: '2026-08-06T00:00:05.000Z',
+    })
+
+    const boundary = (await store.readEvents()).find(
+      event => event.eventId === 'documents-ready-scope',
+    )
+    expect(boundary).toMatchObject({
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        elapsedMs: 5000,
+      },
+    })
+  })
+
+  test('does not attach a frozen stage card to an intra-stage commit', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-intra-stage-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = run()
+    await store.save(initial)
+    const next = {
+      ...initial,
+      currentMessage: 'durable progress',
+      updatedAt: '2026-08-06T00:00:05.000Z',
+    }
+
+    await store.commit(next, {
+      runId: next.runId,
+      type: 'workflow.progress',
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      eventId: 'same-stage-progress',
+      createdAt: '2026-08-06T00:00:05.000Z',
+    })
+
+    expect(
+      (await store.readEvents()).filter(isFrozenWorkflowStageCardEvent),
+    ).toHaveLength(0)
+    expect((await store.load())?.currentMessage).toBe('durable progress')
+  })
+
+  test('sorts journal events before calculating active elapsed time', () => {
+    const event = (
+      eventId: string,
+      createdAt: string,
+      status: WorkflowEvent['status'],
+    ): WorkflowEvent => ({
+      eventId,
+      runId: 'accepted-unit-run',
+      type: 'workflow.progress',
+      phase: 'BRIEF_CONFIRMED',
+      status,
+      revision: {
+        document: 'document-revision',
+        workspace: 'workspace-revision',
+      },
+      createdAt,
+    })
+
+    expect(
+      activeElapsedWithinStage({
+        // An accepted-unit event can be appended after an ordinary event even
+        // though its acceptedAt timestamp is older.
+        events: [
+          event('running-late', '2026-08-06T00:00:08.000Z', 'running'),
+          event('waiting-early', '2026-08-06T00:00:05.000Z', 'completed'),
+          event('running-older', '2026-08-06T00:00:02.000Z', 'running'),
+        ],
+        stageStartedAt: '2026-08-06T00:00:00.000Z',
+        stageEndedAt: '2026-08-06T00:00:10.000Z',
+      }),
+    ).toBe(7000)
+  })
+
+  test('replaces a malformed expected-digest snapshot without reloading it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'malformed-replacement-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const malformed = '{"schemaVersion":'
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(store.paths.snapshot, malformed, 'utf8')
+    const expectedDigest = createHash('sha256').update(malformed).digest('hex')
+    const next = {
+      ...run(),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+    }
+
+    await expect(
+      store.replaceSnapshotIfDigest({
+        expectedDigest,
+        run: next,
+        event: {
+          runId: next.runId,
+          type: 'workflow.run.reconstructed',
+          phase: next.phase,
+          status: next.status,
+          revision: next.revision,
+          eventId: 'malformed-replacement',
+          createdAt: '2026-08-06T00:00:05.000Z',
+        },
+      }),
+    ).resolves.toMatchObject({ phase: 'DOCUMENT_DRAFTING' })
+    expect((await store.readEvents()).map(event => event.eventId)).toEqual([
+      'malformed-replacement',
+    ])
+  })
+
+  test('keeps strict tasks.planned receipts valid while journaling their stage boundary', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'strict-task-plan-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...createTestDeliveryRun({
+        runId: 'strict-task-plan-run',
+        projectId: 'strict-task-plan-project',
+        ownerId: 'accepted-unit-owner',
+        checklistApproved: true,
+      }),
+      phase: 'ATOMIC_TASK_PLANNING' as const,
+    }
+    const task = {
+      id: 'task-id',
+      title: 'Synthetic task',
+      checklistIds: ['check-id'],
+      resourceIds: ['resource-id'],
+      contentIds: ['content-id'],
+      dependsOn: [],
+      allowedPaths: ['src/'],
+      expectedArtifacts: ['src/artifact.ts'],
+      verification: [
+        {
+          kind: 'test' as const,
+          commandOrAction: 'synthetic verification',
+          expectedResult: 'pass',
+        },
+      ],
+      status: 'pending' as const,
+      attempt: 0,
+      evidenceRefs: [],
+    }
+    const next = { ...initial, phase: 'IMPLEMENTATION' as const, tasks: [task] }
+    await store.save(initial)
+    await store.commit(next, {
+      runId: next.runId,
+      type: 'tasks.planned',
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      eventId: 'tasks-planned',
+      createdAt: '2026-08-06T00:00:05.000Z',
+      taskGraph: [task],
+    })
+
+    const events = await store.readEvents()
+    const event = events.find(
+      candidate => candidate.eventId === 'tasks-planned',
+    )
+    expect(event).toBeDefined()
+    expect(event).not.toHaveProperty('stageSnapshot')
+    const stageSnapshotEvent = events.find(
+      candidate => candidate.type === 'workflow.stage_snapshot',
+    )
+    expect(stageSnapshotEvent).toMatchObject({
+      runId: next.runId,
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      createdAt: '2026-08-06T00:00:05.000Z',
+      stageSnapshot: {
+        stageId: 'ATOMIC_TASK_PLANNING',
+        status: 'completed',
+      },
+    })
+    expect(isFrozenWorkflowStageCardEvent(stageSnapshotEvent)).toBe(true)
   })
 
   test('journals the final review check when reconciliation replaces its cycle with an approval', () => {

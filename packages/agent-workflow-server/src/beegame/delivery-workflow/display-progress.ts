@@ -27,20 +27,25 @@ export const DELIVERY_PROGRESS_SUBSTAGES = [
 export type DeliveryProgressSubstage =
   (typeof DELIVERY_PROGRESS_SUBSTAGES)[number]
 
+export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
+
+export type DeliveryProgress = {
+  stageId: DeliveryProgressStage
+  phaseIndex: number
+  phaseCount: number
+  substage?: DeliveryProgressSubstage
+  convergencePass?: number
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
 }
 
-export function projectDeliveryProgress(workflow: Record<string, unknown>):
-  | {
-      phaseIndex: number
-      phaseCount: number
-      substage?: DeliveryProgressSubstage
-      convergencePass?: number
-    }
-  | undefined {
+export function projectDeliveryProgress(
+  workflow: Record<string, unknown>,
+): DeliveryProgress | undefined {
   const reviewState = record(workflow.documentReviewState)
   const cycle = record(reviewState?.activeCycle)
   const repairPlan = record(cycle?.repairPlan)
@@ -97,6 +102,7 @@ export function projectDeliveryProgress(workflow: Record<string, unknown>):
       ? passValue
       : undefined
   return {
+    stageId: progressStage,
     phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf(progressStage) + 1,
     phaseCount: DELIVERY_PROGRESS_STAGES.length,
     ...(substage ? { substage } : {}),

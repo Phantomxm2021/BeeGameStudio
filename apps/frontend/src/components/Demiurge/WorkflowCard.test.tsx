@@ -17,6 +17,80 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
+  it('renders a stage deck with navigation and only exposes the latest action', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_deck',
+          status: 'blocked',
+          currentPhase: 'IMPLEMENTATION',
+          stageSnapshots: [
+            {
+              stageId: 'DOCUMENT_REVIEW',
+              status: 'completed',
+              currentPhase: 'DOCUMENT_REVIEW',
+              phaseIndex: 1,
+              phaseCount: 2,
+              thinking: '历史阶段消息',
+              block: { message: '历史阶段错误' },
+            },
+            {
+              stageId: 'IMPLEMENTATION',
+              status: 'blocked',
+              currentPhase: 'IMPLEMENTATION',
+              phaseIndex: 2,
+              phaseCount: 2,
+              thinking: '当前阶段消息',
+            },
+          ],
+          nextAction: 'retry',
+        }}
+        onAction={onAction}
+      />,
+    );
+
+    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    expect(screen.getByText('当前阶段消息')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看上一阶段' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看上一阶段' }));
+    expect(screen.getAllByText('1 / 2')).toHaveLength(2);
+    expect(screen.getByText('历史阶段消息')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '查看上一阶段' })).toBeDisabled();
+
+    const deck = screen.getByTestId('beegame-workflow-card-deck-run_deck');
+    deck.focus();
+    fireEvent.keyDown(deck, { key: 'ArrowRight' });
+    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    });
+    expect(onAction).toHaveBeenCalledWith('retry');
+  });
+
+  it('adapts a legacy payload to one stage without inventing deck history', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'legacy_card',
+          status: 'completed',
+          currentPhase: 'DELIVERY',
+          thinking: '单卡内容',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('单卡内容')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看上一阶段' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 \/ 1/)).not.toBeInTheDocument();
+  });
+
   it('renders the stage, durable message, execution detail and task progress', () => {
     render(
       <WorkflowCard
@@ -582,5 +656,140 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('00:01:00')).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(2_000));
     expect(screen.getByText('00:01:02')).toBeInTheDocument();
+  });
+
+  it('moves one stage per horizontal pointer drag while preserving the selected stage identity', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_pointer_drag',
+          status: 'completed',
+          currentPhase: 'THREE',
+          stageSnapshots: [
+            { stageId: 'ONE', status: 'completed', currentPhase: 'ONE', phaseIndex: 1, phaseCount: 3 },
+            { stageId: 'TWO', status: 'completed', currentPhase: 'TWO', phaseIndex: 2, phaseCount: 3 },
+            { stageId: 'THREE', status: 'completed', currentPhase: 'THREE', phaseIndex: 3, phaseCount: 3 },
+          ],
+        }}
+      />,
+    );
+    const front = screen.getByTestId('workflow-card-front');
+
+    fireEvent.pointerDown(front, { pointerId: 1, clientX: 80, clientY: 40, button: 0 });
+    fireEvent.pointerMove(front, { pointerId: 1, clientX: 180, clientY: 42 });
+    fireEvent.pointerUp(front, { pointerId: 1, clientX: 180, clientY: 42 });
+    expect(front).toHaveAttribute('data-stage-id', 'TWO');
+
+    fireEvent.pointerDown(front, { pointerId: 2, clientX: 180, clientY: 40, button: 0 });
+    fireEvent.pointerMove(front, { pointerId: 2, clientX: 70, clientY: 42 });
+    fireEvent.pointerUp(front, { pointerId: 2, clientX: 70, clientY: 42 });
+    expect(front).toHaveAttribute('data-stage-id', 'THREE');
+  });
+
+  it('does not drag from nested controls or links', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_pointer_targets',
+          status: 'blocked',
+          currentPhase: 'TWO',
+          stageSnapshots: [
+            { stageId: 'ONE', status: 'completed', currentPhase: 'ONE', phaseIndex: 1, phaseCount: 2 },
+            {
+              stageId: 'TWO',
+              status: 'blocked',
+              currentPhase: 'TWO',
+              phaseIndex: 2,
+              phaseCount: 2,
+              thinking: '[阶段链接](https://example.com)',
+            },
+          ],
+          nextAction: 'retry',
+        }}
+        onAction={vi.fn()}
+      />,
+    );
+    const front = screen.getByTestId('workflow-card-front');
+    const action = screen.getByRole('button', { name: '重试' });
+    const link = screen.getByRole('link', { name: '阶段链接' });
+
+    for (const [target, pointerId] of [
+      [action, 1],
+      [link, 2],
+    ] as const) {
+      fireEvent.pointerDown(target, { pointerId, clientX: 80, clientY: 40, button: 0 });
+      fireEvent.pointerMove(target, { pointerId, clientX: 220, clientY: 42 });
+      fireEvent.pointerUp(target, { pointerId, clientX: 220, clientY: 42 });
+    }
+    expect(front).toHaveAttribute('data-stage-id', 'TWO');
+  });
+
+  it('renders no more than two inert stepped back layers with a stable footprint', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_stepped_stack',
+          status: 'completed',
+          currentPhase: 'FOUR',
+          stageSnapshots: [
+            { stageId: 'ONE', status: 'completed', currentPhase: 'ONE', phaseIndex: 1, phaseCount: 4 },
+            { stageId: 'TWO', status: 'completed', currentPhase: 'TWO', phaseIndex: 2, phaseCount: 4 },
+            { stageId: 'THREE', status: 'completed', currentPhase: 'THREE', phaseIndex: 3, phaseCount: 4 },
+            { stageId: 'FOUR', status: 'completed', currentPhase: 'FOUR', phaseIndex: 4, phaseCount: 4 },
+          ],
+        }}
+      />,
+    );
+    const deck = screen.getByTestId('workflow-card-deck');
+    const front = screen.getByTestId('workflow-card-front');
+    const layers = screen.getAllByTestId(/workflow-card-stack-layer-/);
+    expect(deck).toHaveAttribute('aria-label', '工作流阶段卡片组');
+    expect(deck.parentElement).toHaveClass('pr-6', 'pb-6');
+    expect(deck).toHaveClass('w-full');
+    expect(front).toHaveStyle({ width: 'calc(100% + 1.5rem)' });
+    expect(front).toHaveAttribute('aria-current', 'true');
+    expect(layers).toHaveLength(2);
+    expect(layers[0]).toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+    expect(layers[0]).toHaveStyle({ transform: 'translate3d(10px, 8px, 0)' });
+    expect(layers[1]).toHaveStyle({ transform: 'translate3d(20px, 16px, 0)' });
+    expect(layers.every(layer => layer.getAttribute('aria-hidden') === 'true')).toBe(true);
+  });
+
+  it('uses a short modest transition when reduced motion is preferred', () => {
+    const previousMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes('prefers-reduced-motion'),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    try {
+      render(
+        <WorkflowCard
+          workflow={{
+            runId: 'run_reduced_motion',
+            status: 'completed',
+            currentPhase: 'TWO',
+            stageSnapshots: [
+              { stageId: 'ONE', status: 'completed', currentPhase: 'ONE', phaseIndex: 1, phaseCount: 2 },
+              { stageId: 'TWO', status: 'completed', currentPhase: 'TWO', phaseIndex: 2, phaseCount: 2 },
+            ],
+          }}
+        />,
+      );
+      const front = screen.getByTestId('workflow-card-front');
+      expect(front).toHaveAttribute('data-reduced-motion', 'true');
+      const layers = screen.getAllByTestId(/workflow-card-stack-layer-/);
+      expect(layers[0]).toHaveStyle({ transform: 'translate3d(4px, 3px, 0)' });
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: previousMatchMedia });
+    }
   });
 });
