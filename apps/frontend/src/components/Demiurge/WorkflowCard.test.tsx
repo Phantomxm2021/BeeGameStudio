@@ -17,6 +17,80 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
+  it('renders a stage deck with navigation and only exposes the latest action', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_deck',
+          status: 'blocked',
+          currentPhase: 'IMPLEMENTATION',
+          stageSnapshots: [
+            {
+              stageId: 'DOCUMENT_REVIEW',
+              status: 'completed',
+              currentPhase: 'DOCUMENT_REVIEW',
+              phaseIndex: 1,
+              phaseCount: 2,
+              thinking: '历史阶段消息',
+              block: { message: '历史阶段错误' },
+            },
+            {
+              stageId: 'IMPLEMENTATION',
+              status: 'blocked',
+              currentPhase: 'IMPLEMENTATION',
+              phaseIndex: 2,
+              phaseCount: 2,
+              thinking: '当前阶段消息',
+            },
+          ],
+          nextAction: 'retry',
+        }}
+        onAction={onAction}
+      />,
+    );
+
+    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    expect(screen.getByText('当前阶段消息')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看上一阶段' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看上一阶段' }));
+    expect(screen.getAllByText('1 / 2')).toHaveLength(2);
+    expect(screen.getByText('历史阶段消息')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看下一阶段' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '查看上一阶段' })).toBeDisabled();
+
+    const deck = screen.getByTestId('beegame-workflow-card-deck-run_deck');
+    deck.focus();
+    fireEvent.keyDown(deck, { key: 'ArrowRight' });
+    expect(screen.getAllByText('2 / 2')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    });
+    expect(onAction).toHaveBeenCalledWith('retry');
+  });
+
+  it('adapts a legacy payload to one stage without inventing deck history', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'legacy_card',
+          status: 'completed',
+          currentPhase: 'DELIVERY',
+          thinking: '单卡内容',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('单卡内容')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看上一阶段' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 \/ 1/)).not.toBeInTheDocument();
+  });
+
   it('renders the stage, durable message, execution detail and task progress', () => {
     render(
       <WorkflowCard
