@@ -6,6 +6,7 @@ import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
+import { transitionDeliveryRun } from './transition'
 import { commitCanonicalDocument } from '../native-canonical-document-tool'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -15,6 +16,7 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
+import { isFrozenWorkflowStageCardEvent } from './workflow-stage-card-history'
 
 function run(): DeliveryRun {
   return createTestDeliveryRun({
@@ -735,6 +737,88 @@ describe('accepted workflow unit journal', () => {
       events.filter(event => event.type === 'workflow.unit.accepted'),
     ).toHaveLength(1)
     expect((await store.load())?.pendingEvents).toBeUndefined()
+  })
+
+  test('freezes the completed stage card exactly once at a semantic stage boundary', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-boundary-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = {
+      ...run(),
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2026-08-06T00:00:00.000Z',
+    }
+    await store.commit(initial, {
+      runId: initial.runId,
+      type: 'run.created',
+      phase: initial.phase,
+      status: initial.status,
+      revision: initial.revision,
+      eventId: 'run-created',
+      createdAt: '2026-08-06T00:00:01.000Z',
+    })
+
+    const transitioned = transitionDeliveryRun(initial, {
+      type: 'documents_ready',
+    })
+    const transitionedAt = '2026-08-06T00:00:05.000Z'
+    const phaseEntered = {
+      runId: transitioned.runId,
+      type: 'phase.entered',
+      phase: transitioned.phase,
+      status: transitioned.status,
+      revision: transitioned.revision,
+      eventId: 'documents-ready',
+      createdAt: transitionedAt,
+    }
+    await store.commit(transitioned, phaseEntered)
+
+    const reloaded = await store.load()
+    const events = await store.readEvents()
+    const boundaryEvents = events.filter(isFrozenWorkflowStageCardEvent)
+    expect(reloaded?.phase).toBe('DOCUMENT_DRAFTING')
+    expect(boundaryEvents).toHaveLength(1)
+    expect(boundaryEvents[0]).toMatchObject({
+      eventId: 'documents-ready',
+      createdAt: transitionedAt,
+      stageSnapshot: {
+        stageId: 'BRIEF_CONFIRMED',
+        status: 'completed',
+        completedAt: transitionedAt,
+        elapsedMs: 5000,
+      },
+    })
+
+    await store.commit(transitioned, phaseEntered)
+    expect(
+      (await store.readEvents()).filter(isFrozenWorkflowStageCardEvent),
+    ).toHaveLength(1)
+  })
+
+  test('does not attach a frozen stage card to an intra-stage commit', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'stage-card-intra-stage-'))
+    const store = createRunStore(workspace, 'accepted-unit-owner')
+    const initial = run()
+    await store.save(initial)
+    const next = {
+      ...initial,
+      currentMessage: 'durable progress',
+      updatedAt: '2026-08-06T00:00:05.000Z',
+    }
+
+    await store.commit(next, {
+      runId: next.runId,
+      type: 'workflow.progress',
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      eventId: 'same-stage-progress',
+      createdAt: '2026-08-06T00:00:05.000Z',
+    })
+
+    expect(
+      (await store.readEvents()).filter(isFrozenWorkflowStageCardEvent),
+    ).toHaveLength(0)
+    expect((await store.load())?.currentMessage).toBe('durable progress')
   })
 
   test('journals the final review check when reconciliation replaces its cycle with an approval', () => {

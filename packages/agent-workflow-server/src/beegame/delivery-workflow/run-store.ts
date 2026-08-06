@@ -11,6 +11,12 @@ import {
 } from 'node:fs/promises'
 import { parseDeliveryRun, parseWorkflowEvent } from './schema'
 import { assertDeliveryRunInvariants } from './transition'
+import {
+  activeElapsedWithinStage,
+  freezePreviousStageCard,
+  isFrozenWorkflowStageCardEvent,
+  lastStageBoundaryAt,
+} from './workflow-stage-card-history'
 import type {
   DeliveryRun,
   DispatchRecord,
@@ -707,14 +713,43 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
     acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
-    const ordinaryEvent = {
+    // Read the authoritative previous run and journal before writing the new
+    // snapshot.  Stage card timing is derived only from this durable history,
+    // so a write-ahead marker can be replayed without changing the boundary.
+    const previous = await loadUnlocked()
+    const events = await readEventsUnlocked()
+    const createdAt = event.createdAt ?? now()
+    const ordinaryEventBase = {
       ...event,
       runId: run.runId,
       phase: run.phase,
       status: run.status,
       revision: run.revision,
       eventId: event.eventId ?? randomUUID(),
-      createdAt: event.createdAt ?? now(),
+      createdAt,
+    }
+    const frozenEvents = events.filter(isFrozenWorkflowStageCardEvent)
+    const stageStartedAt = previous
+      ? lastStageBoundaryAt(previous.createdAt, frozenEvents)
+      : undefined
+    const stageSnapshot =
+      previous && stageStartedAt
+        ? freezePreviousStageCard({
+            previous,
+            next: run,
+            workspacePath: resolve(workspacePath),
+            stageStartedAt,
+            stageEndedAt: createdAt,
+            elapsedMs: activeElapsedWithinStage({
+              events,
+              stageStartedAt,
+              stageEndedAt: createdAt,
+            }),
+          })
+        : undefined
+    const ordinaryEvent = {
+      ...ordinaryEventBase,
+      ...(stageSnapshot ? { stageSnapshot } : {}),
     } as WorkflowEvent
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
@@ -755,10 +790,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       Partial<Pick<WorkflowEvent, 'eventId' | 'createdAt'>>,
     acceptedUnits: AcceptedWorkflowUnit[] = [],
   ): Promise<DeliveryRun> {
-    // Recover a previous marker before replacing the snapshot. This keeps a
-    // failed append retryable and prevents a later commit from overwriting
-    // an event that was waiting for journal recovery.
-    await loadUnlocked()
     return persistCommitUnlocked(run, event, acceptedUnits)
   }
 
