@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import type {
   WorkflowCardAction,
   WorkflowCardPayload,
@@ -53,7 +54,13 @@ export function WorkflowCard({
     canSelectNext,
     selectPrevious,
     selectNext,
+    dragOffset,
+    isDragging,
+    prefersReducedMotion,
+    dragHandlers,
   } = useWorkflowCardDeck(stageSnapshots);
+  const framerReducedMotion = useReducedMotion();
+  const reducedMotion = Boolean(framerReducedMotion || prefersReducedMotion);
   const selectedSnapshot = stageSnapshots.find(snapshot => snapshot.stageId === selectedStageId) || stageSnapshots.at(-1);
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -68,9 +75,30 @@ export function WorkflowCard({
     [canSelectNext, canSelectPrevious, selectNext, selectPrevious],
   );
 
+  const isDeck = stageSnapshots.length > 1;
+  const stackLayers = useMemo(() => {
+    if (!isDeck || selectedIndex < 0) return [];
+    const previous = stageSnapshots
+      .slice(0, selectedIndex)
+      .reverse()
+      .slice(0, 2);
+    if (previous.length >= 2) return previous;
+    return [
+      ...previous,
+      ...stageSnapshots.slice(selectedIndex + 1, selectedIndex + 1 + (2 - previous.length)),
+    ];
+  }, [isDeck, selectedIndex, stageSnapshots]);
+  const frontTransition = useMemo(
+    () =>
+      isDragging
+        ? { duration: 0 }
+        : reducedMotion
+          ? { duration: 0.12, ease: 'easeOut' as const }
+          : { type: 'spring' as const, stiffness: 340, damping: 32, mass: 0.8 },
+    [isDragging, reducedMotion],
+  );
   if (!selectedSnapshot) return null;
 
-  const isDeck = stageSnapshots.length > 1;
   const recovery = {
     recoverable: workflow.recoverable,
     lastProvenPhase: workflow.lastProvenPhase,
@@ -111,14 +139,57 @@ export function WorkflowCard({
           </button>
         </div>
       ) : null}
-      <WorkflowStageCard
-        runId={workflow.runId}
-        snapshot={selectedSnapshot}
-        isLatest={selectedIndex === stageSnapshots.length - 1}
-        nextAction={selectedIndex === stageSnapshots.length - 1 ? workflow.nextAction : undefined}
-        recovery={selectedIndex === stageSnapshots.length - 1 ? recovery : undefined}
-        onAction={onAction}
-      />
+      <div className={isDeck ? 'relative min-w-0 w-full overflow-visible pr-6 pb-6' : 'relative min-w-0 w-full'}>
+        <div
+          data-testid="workflow-card-deck"
+          role="group"
+          aria-label="工作流阶段卡片组"
+          className="relative min-w-0 w-full overflow-visible"
+          {...dragHandlers}
+        >
+          {stackLayers.map((snapshot, layerIndex) => {
+            const depth = layerIndex + 1;
+            const offset = reducedMotion ? depth * 4 : depth * 10;
+            const verticalOffset = reducedMotion ? depth * 3 : depth * 8;
+            return (
+              <div
+                key={snapshot.stageId}
+                data-testid={`workflow-card-stack-layer-${depth}`}
+                data-workflow-card-layer="true"
+                data-stage-id={snapshot.stageId}
+                data-stack-depth={depth}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-3xl border border-white/10 bg-white/[0.025] shadow-sm backdrop-blur-xl"
+                style={{
+                  transform: `translate3d(${offset}px, ${verticalOffset}px, 0)`,
+                  zIndex: 10 - depth,
+                }}
+              />
+            );
+          })}
+          <motion.div
+            data-testid="workflow-card-front"
+            data-dragging={isDragging ? 'true' : 'false'}
+            data-reduced-motion={reducedMotion ? 'true' : 'false'}
+            data-stage-id={selectedSnapshot.stageId}
+            aria-current="true"
+            className="relative z-20 min-w-0 w-full"
+            animate={{ x: dragOffset }}
+            initial={false}
+            transition={frontTransition}
+            style={{ touchAction: 'pan-y', width: isDeck ? 'calc(100% + 1.5rem)' : '100%' }}
+          >
+            <WorkflowStageCard
+              runId={workflow.runId}
+              snapshot={selectedSnapshot}
+              isLatest={selectedIndex === stageSnapshots.length - 1}
+              nextAction={selectedIndex === stageSnapshots.length - 1 ? workflow.nextAction : undefined}
+              recovery={selectedIndex === stageSnapshots.length - 1 ? recovery : undefined}
+              onAction={onAction}
+            />
+          </motion.div>
+        </div>
+      </div>
     </div>
   );
 }
