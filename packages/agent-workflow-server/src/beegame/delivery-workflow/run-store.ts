@@ -752,8 +752,18 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         ? { stageSnapshot }
         : {}),
     } as WorkflowEvent
+    const stageSnapshotEvent =
+      stageSnapshot && event.type === 'tasks.planned'
+        ? ({
+            ...ordinaryEventBase,
+            eventId: randomUUID(),
+            type: 'workflow.stage_snapshot',
+            stageSnapshot,
+          } as WorkflowEvent)
+        : undefined
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
+      ...(stageSnapshotEvent ? [stageSnapshotEvent] : []),
       ...acceptedUnits.map(
         unit =>
           ({

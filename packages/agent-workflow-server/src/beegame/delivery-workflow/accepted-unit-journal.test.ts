@@ -892,7 +892,7 @@ describe('accepted workflow unit journal', () => {
     ])
   })
 
-  test('keeps strict tasks.planned receipts free of catch-all stage fields', async () => {
+  test('keeps strict tasks.planned receipts valid while journaling their stage boundary', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'strict-task-plan-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')
     const initial = {
@@ -937,11 +937,27 @@ describe('accepted workflow unit journal', () => {
       taskGraph: [task],
     })
 
-    const event = (await store.readEvents()).find(
+    const events = await store.readEvents()
+    const event = events.find(
       candidate => candidate.eventId === 'tasks-planned',
     )
     expect(event).toBeDefined()
     expect(event).not.toHaveProperty('stageSnapshot')
+    const stageSnapshotEvent = events.find(
+      candidate => candidate.type === 'workflow.stage_snapshot',
+    )
+    expect(stageSnapshotEvent).toMatchObject({
+      runId: next.runId,
+      phase: next.phase,
+      status: next.status,
+      revision: next.revision,
+      createdAt: '2026-08-06T00:00:05.000Z',
+      stageSnapshot: {
+        stageId: 'ATOMIC_TASK_PLANNING',
+        status: 'completed',
+      },
+    })
+    expect(isFrozenWorkflowStageCardEvent(stageSnapshotEvent)).toBe(true)
   })
 
   test('journals the final review check when reconciliation replaces its cycle with an approval', () => {
