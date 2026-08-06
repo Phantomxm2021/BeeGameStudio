@@ -53,6 +53,8 @@ describe('WorkflowCard', () => {
     const front = screen.getByTestId('workflow-card-front');
     const frontCard = within(front).getByTestId('beegame-workflow-card-run_deck');
     expect(within(front).getByTestId('workflow-card-controls')).toBeInTheDocument();
+    expect(within(front).getByTestId('workflow-card-controls')).toHaveClass('absolute', 'bottom-4', 'right-4');
+    expect(frontCard).toHaveClass('relative');
     expect(within(front).getByTestId('workflow-card-deck-counter')).toHaveTextContent('2 / 2');
     expect(screen.getAllByTestId('workflow-card-deck-counter')).toHaveLength(1);
     expect(frontCard).toHaveAttribute('data-opaque-surface', 'true');

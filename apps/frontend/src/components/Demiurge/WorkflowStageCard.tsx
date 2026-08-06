@@ -507,9 +507,9 @@ export function WorkflowStageCard({
       data-testid={`beegame-workflow-card-${runId}`}
       data-stage-id={snapshot.stageId}
       data-opaque-surface="true"
-      className="box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-white/15 bg-[#17181d] text-zinc-100 shadow-sm"
+      className="relative box-border min-w-0 w-full max-w-[46rem] overflow-hidden rounded-3xl border border-white/15 bg-[#17181d] text-zinc-100 shadow-sm"
     >
-      <div className="px-4 py-4">
+      <div className="px-4 pb-16 pt-4">
         <div className="flex items-start gap-3">
           <WorkflowStatusIcon status={snapshot.status} />
           <div className="min-w-0 flex-1">
@@ -531,7 +531,6 @@ export function WorkflowStageCard({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {headerControls}
                 <span className="text-xs text-zinc-400">{statusLabel[snapshot.status]}</span>
                 {hasFailureDetails && snapshot.block ? (
                   <div className="group relative">
@@ -647,6 +646,7 @@ export function WorkflowStageCard({
           </div>
         </div>
       </div>
+      {headerControls}
     </section>
   );
 }

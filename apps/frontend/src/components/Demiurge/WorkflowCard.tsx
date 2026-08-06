@@ -110,7 +110,7 @@ export function WorkflowCard({
   const deckControls = isDeck ? (
     <div
       data-testid="workflow-card-controls"
-      className="flex items-center gap-0.5 rounded-full border border-white/10 bg-black/25 px-0.5 py-0.5"
+      className="absolute bottom-4 right-4 flex items-center gap-0.5 rounded-full border border-white/10 bg-black/25 px-0.5 py-0.5"
     >
       <button
         type="button"
