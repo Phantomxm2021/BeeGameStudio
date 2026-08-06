@@ -59,8 +59,26 @@ export function buildReviewerContinuationPrompt(
     artifactPathsByCheck,
     mode: request.contract.reviewMode,
   })
+  const packetProjection = projectReviewerPacketProjection({
+    reviewAuthority: request.contract.reviewAuthority,
+    reviewArtifacts: request.contract.reviewArtifacts,
+    referenceIndex: request.contract.referenceIndex,
+    currentCheckIds,
+    artifactPathsByCheck,
+  })
   return [
-    'Continue the same frozen-revision Reviewer execution session. The authority artifacts and reference index already in this conversation remain the only review source. Review only this next durable packet; do not repeat earlier checks or emit a cycle verdict.',
+    'Continue the same frozen-revision Reviewer execution session. This durable packet contains its complete canonical artifact and stable reference projection; use it without relying on earlier conversation messages or summaries. Review only this packet; do not repeat earlier checks or emit a cycle verdict. Artifact IDs only join the wire dictionary and are never valid evidence or subject identities; submit only stable referenceId values.',
+    ...(packetProjection.reviewAuthority === undefined
+      ? []
+      : [
+          '--- BEGIN REVIEW AUTHORITY ---',
+          JSON.stringify(packetProjection.reviewAuthority),
+          '--- END REVIEW AUTHORITY ---',
+        ]),
+    ...formatReviewArtifacts(packetProjection.reviewArtifacts),
+    '--- BEGIN REVIEW REFERENCE INDEX ---',
+    JSON.stringify(packetProjection.referenceIndex),
+    '--- END REVIEW REFERENCE INDEX ---',
     '--- BEGIN REVIEW ACTIVE PACKET ---',
     JSON.stringify({
       currentCheckIds,
@@ -76,6 +94,119 @@ export function buildReviewerContinuationPrompt(
     '--- END REVIEW ACTIVE PACKET ---',
     terminalInstruction(request),
   ].join('\n')
+}
+
+function projectReviewerPacketProjection(input: {
+  reviewAuthority: unknown
+  reviewArtifacts: unknown
+  referenceIndex: unknown
+  currentCheckIds: unknown
+  artifactPathsByCheck: unknown
+}): {
+  reviewAuthority: unknown
+  reviewArtifacts: unknown[]
+  referenceIndex: unknown
+} {
+  const currentCheckIds = Array.isArray(input.currentCheckIds)
+    ? input.currentCheckIds.filter(
+        (value): value is string => typeof value === 'string',
+      )
+    : []
+  const artifactPathsByCheck =
+    input.artifactPathsByCheck &&
+    typeof input.artifactPathsByCheck === 'object' &&
+    !Array.isArray(input.artifactPathsByCheck)
+      ? (input.artifactPathsByCheck as Record<string, unknown>)
+      : {}
+  const allowedPaths = new Set(
+    currentCheckIds.flatMap(checkId => {
+      const paths = artifactPathsByCheck[checkId]
+      return Array.isArray(paths)
+        ? paths.filter((path): path is string => typeof path === 'string')
+        : []
+    }),
+  )
+  const reviewArtifacts = Array.isArray(input.reviewArtifacts)
+    ? input.reviewArtifacts.filter(
+        artifact =>
+          artifact !== null &&
+          typeof artifact === 'object' &&
+          !Array.isArray(artifact) &&
+          typeof (artifact as Record<string, unknown>).path === 'string' &&
+          allowedPaths.has(
+            (artifact as Record<string, unknown>).path as string,
+          ),
+      )
+    : []
+  const reviewAuthority = allowedPaths.has('reviewAuthority')
+    ? structuredReviewAuthority(input.reviewAuthority)
+    : undefined
+  if (
+    !input.referenceIndex ||
+    typeof input.referenceIndex !== 'object' ||
+    Array.isArray(input.referenceIndex)
+  )
+    return {
+      reviewAuthority,
+      reviewArtifacts,
+      referenceIndex: input.referenceIndex,
+    }
+
+  const referenceIndex = input.referenceIndex as Record<string, unknown>
+  const artifacts = Array.isArray(referenceIndex.artifacts)
+    ? referenceIndex.artifacts.filter(
+        artifact =>
+          artifact !== null &&
+          typeof artifact === 'object' &&
+          !Array.isArray(artifact) &&
+          typeof (artifact as Record<string, unknown>).path === 'string' &&
+          allowedPaths.has(
+            (artifact as Record<string, unknown>).path as string,
+          ),
+      )
+    : []
+  const artifactIds = new Set(
+    artifacts.flatMap(artifact => {
+      const artifactId = (artifact as Record<string, unknown>).artifactId
+      return typeof artifactId === 'string' ? [artifactId] : []
+    }),
+  )
+  const references = Array.isArray(referenceIndex.references)
+    ? referenceIndex.references.filter(
+        reference =>
+          reference !== null &&
+          typeof reference === 'object' &&
+          !Array.isArray(reference) &&
+          typeof (reference as Record<string, unknown>).artifactId ===
+            'string' &&
+          artifactIds.has(
+            (reference as Record<string, unknown>).artifactId as string,
+          ),
+      )
+    : []
+  const contentIdsByPath =
+    referenceIndex.contentIdsByPath &&
+    typeof referenceIndex.contentIdsByPath === 'object' &&
+    !Array.isArray(referenceIndex.contentIdsByPath)
+      ? Object.fromEntries(
+          Object.entries(
+            referenceIndex.contentIdsByPath as Record<string, unknown>,
+          ).filter(([path]) => allowedPaths.has(path)),
+        )
+      : {}
+  const includesManifest = allowedPaths.has('assets/asset-manifest.json')
+  return {
+    reviewAuthority,
+    reviewArtifacts,
+    referenceIndex: {
+      ...referenceIndex,
+      artifacts,
+      references,
+      requirementIds: includesManifest ? referenceIndex.requirementIds : [],
+      resourceIds: includesManifest ? referenceIndex.resourceIds : [],
+      contentIdsByPath,
+    },
+  }
 }
 
 function formatContract(request: WorkerDispatchRequest): string {

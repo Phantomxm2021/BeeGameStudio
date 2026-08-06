@@ -16,7 +16,10 @@ import {
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type DocumentReviewCheckId,
 } from '../beegame/delivery-workflow/types'
-import { buildDocumentReviewReferenceIndex } from '../beegame/delivery-workflow/document-review-input'
+import {
+  buildDocumentReviewReferenceIndex,
+  buildDocumentReviewWireReferenceIndex,
+} from '../beegame/delivery-workflow/document-review-input'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
@@ -28,6 +31,14 @@ function reviewerContract(
   atomicCheckId: DocumentReviewCheckId = 'cross_document_consistency',
   cycleId = 'cycle-review',
 ) {
+  const reviewArtifacts = [
+    {
+      path: 'systemDeliveryContract',
+      content: '{"roots":{"content":"assets/content"}}\n',
+    },
+    { path: 'docs/GDD.md', content: '# Rules\n' },
+    { path: 'docs/TECHNICAL_DESIGN.md', content: '# Rules\n' },
+  ]
   return {
     cycleId,
     reviewScope: 'foundation' as const,
@@ -38,14 +49,15 @@ function reviewerContract(
       confirmedBriefContext: 'Confirmed brief',
       confirmedBriefDigest: 'service-owned-digest',
     },
-    reviewArtifacts: [
-      {
-        path: 'systemDeliveryContract',
-        content: '{"roots":{"content":"assets/content"}}\n',
-      },
-      { path: 'docs/GDD.md', content: '# Rules\n' },
-      { path: 'docs/TECHNICAL_DESIGN.md', content: '# Rules\n' },
-    ],
+    reviewArtifacts,
+    referenceIndex: buildDocumentReviewWireReferenceIndex([
+      { path: 'reviewAuthority', content: 'Confirmed brief' },
+      ...reviewArtifacts,
+    ]),
+    criteriaByCheck: { [atomicCheckId]: [] },
+    artifactPathsByCheck: {
+      [atomicCheckId]: reviewArtifacts.map(artifact => artifact.path),
+    },
   }
 }
 
@@ -930,6 +942,61 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('preserves the last rejected Reviewer packet contract error', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-review-rejection-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-reviewer-rejection' }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay() {},
+      events() {
+        return [
+          {
+            id: 'review-tool-rejected',
+            type: 'tool.failed',
+            text: 'SubmitDocumentReviewPacket failed',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'SubmitDocumentReviewPacket',
+              input: { checks: [] },
+              output: 'unknown document review referenceId: a3',
+            },
+          },
+          {
+            id: 'review-result',
+            type: 'result',
+            text: 'Unable to submit.',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-review-rejection',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: reviewerContract(),
+      })
+      await port.submit('dispatch-review-rejection', 'Review packet')
+      await expect(
+        port.waitForTerminal?.('dispatch-review-rejection'),
+      ).rejects.toThrow('unknown document review referenceId: a3')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('reuses one frozen-revision reviewer execution session across serial packets', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-review-session-reuse-'),
@@ -1060,7 +1127,8 @@ describe('delivery worker session credentials', () => {
       expect(prompts[1]).toContain(
         'Continue the same frozen-revision Reviewer execution session',
       )
-      expect(prompts[1]).not.toContain('BEGIN REVIEW REFERENCE INDEX')
+      expect(prompts[1]).toContain('BEGIN REVIEW REFERENCE INDEX')
+      expect(prompts[1]).toContain('BEGIN REVIEW ARTIFACT')
       expect(prompts[2]).toStartWith('new frozen projection')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

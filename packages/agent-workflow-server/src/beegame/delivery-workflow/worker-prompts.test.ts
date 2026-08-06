@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { buildWorkerPrompt } from './worker-prompts'
+import {
+  buildReviewerContinuationPrompt,
+  buildWorkerPrompt,
+} from './worker-prompts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import type { WorkerDispatchRequest } from './types'
 
@@ -173,6 +176,88 @@ describe('resource-content worker prompts', () => {
     expect(prompt.slice(activeStart)).toContain('brief_alignment')
     expect(prompt.slice(activeStart)).toContain('"criteriaByCheck"')
     expect(prompt).toContain('"confirmedBriefContext":{"idea":"defend"}')
+  })
+
+  test('makes each Reviewer continuation packet self-contained from the canonical projection', () => {
+    const prompt = buildReviewerContinuationPrompt({
+      dispatchId: 'packet-2',
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'closure',
+        reviewAuthority: {
+          confirmedBriefContext: '{"idea":"defend"}',
+          confirmedBriefDigest: 'brief-digest',
+        },
+        reviewArtifacts: [
+          { path: 'docs/GDD.md', content: '# Rules\nStable body' },
+          { path: 'docs/AUDIO_DESIGN.md', content: '# Audio\nStable cues' },
+          { path: 'docs/ASSET_PLAN.md', content: '# Assets\nUnrelated' },
+        ],
+        referenceIndex: {
+          artifacts: [
+            { artifactId: 'a0', path: 'reviewAuthority' },
+            { artifactId: 'a2', path: 'docs/GDD.md' },
+            { artifactId: 'a8', path: 'docs/AUDIO_DESIGN.md' },
+            { artifactId: 'a9', path: 'docs/ASSET_PLAN.md' },
+          ],
+          references: [
+            {
+              referenceId: 'ref-authority',
+              artifactId: 'a0',
+              path: 'reviewAuthority',
+              anchor: '$',
+            },
+            {
+              referenceId: 'ref-gdd',
+              artifactId: 'a2',
+              path: 'docs/GDD.md',
+              anchor: '# Rules',
+            },
+            {
+              referenceId: 'ref-audio',
+              artifactId: 'a8',
+              path: 'docs/AUDIO_DESIGN.md',
+              anchor: '# Audio',
+            },
+            {
+              referenceId: 'ref-assets',
+              artifactId: 'a9',
+              path: 'docs/ASSET_PLAN.md',
+              anchor: '# Assets',
+            },
+          ],
+        },
+        currentCheckIds: ['ui_audio_consistency'],
+        criteriaByCheck: { ui_audio_consistency: [] },
+        artifactPathsByCheck: {
+          ui_audio_consistency: [
+            'reviewAuthority',
+            'docs/GDD.md',
+            'docs/AUDIO_DESIGN.md',
+          ],
+        },
+        priorFindings: [],
+      },
+    })
+
+    expect(prompt).toContain('BEGIN REVIEW ARTIFACT docs/GDD.md')
+    expect(prompt).toContain('BEGIN REVIEW ARTIFACT docs/AUDIO_DESIGN.md')
+    expect(prompt).not.toContain('BEGIN REVIEW ARTIFACT docs/ASSET_PLAN.md')
+    expect(prompt).toContain('BEGIN REVIEW AUTHORITY')
+    expect(prompt).toContain('"confirmedBriefContext":{"idea":"defend"}')
+    expect(prompt).toContain('BEGIN REVIEW REFERENCE INDEX')
+    expect(prompt).toContain('ref-authority')
+    expect(prompt).toContain('ref-gdd')
+    expect(prompt).toContain('ref-audio')
+    expect(prompt).not.toContain('ref-assets')
+    expect(prompt).not.toContain('reference index already in this conversation')
   })
 
   test('projects only relevant open findings into the active Reviewer packet', () => {

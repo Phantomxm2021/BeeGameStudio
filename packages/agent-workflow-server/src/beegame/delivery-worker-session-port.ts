@@ -1098,6 +1098,19 @@ function failedToolCount(
   ).length
 }
 
+function lastFailedToolOutput(
+  events: ReturnType<BeeGameSessionManager['events']>,
+  toolName: string,
+): string | undefined {
+  for (const event of [...events].reverse()) {
+    if (event.type !== 'tool.failed' || event.payload?.toolName !== toolName)
+      continue
+    const output = event.payload.output
+    if (typeof output === 'string' && output.trim()) return output.trim()
+  }
+  return undefined
+}
+
 async function writeCanonicalTerminalEvidence(input: {
   workspacePath: string
   evidencePath: string
@@ -1198,10 +1211,16 @@ async function createDeterministicDocumentReviewTerminal(input: {
       errors.push(error instanceof Error ? error.message : String(error))
     }
   }
+  const rejectedOutput = lastFailedToolOutput(
+    input.events,
+    'SubmitDocumentReviewPacket',
+  )
   throw new Error(
     errors.length
       ? `document review result does not match the active contract: ${errors.join('; ')}`
-      : 'worker terminal result is missing a valid SubmitDocumentReviewPacket call',
+      : rejectedOutput
+        ? `document review submission rejected: ${rejectedOutput}`
+        : 'worker terminal result is missing a valid SubmitDocumentReviewPacket call',
   )
 }
 
