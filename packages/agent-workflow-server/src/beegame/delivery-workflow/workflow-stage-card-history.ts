@@ -4,6 +4,7 @@ import {
   type DeliveryProgressStage,
   type DeliveryProgressSubstage,
 } from './display-progress'
+import { DELIVERY_PHASES } from './schema'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
@@ -237,7 +238,34 @@ export function isWorkflowStageCardSnapshot(
 export function isFrozenWorkflowStageCardEvent(
   event: unknown,
 ): event is FrozenWorkflowStageCardEvent {
-  return isRecord(event) && isWorkflowStageCardSnapshot(event.stageSnapshot)
+  if (!isRecord(event)) return false
+  if (
+    typeof event.eventId !== 'string' ||
+    !event.eventId.trim() ||
+    typeof event.runId !== 'string' ||
+    !event.runId.trim() ||
+    typeof event.type !== 'string' ||
+    !event.type.trim() ||
+    !DELIVERY_PHASES.includes(
+      event.phase as (typeof DELIVERY_PHASES)[number],
+    ) ||
+    !DELIVERY_RUN_STATUSES.includes(event.status as DeliveryRunStatus) ||
+    !finiteDate(event.createdAt)
+  )
+    return false
+  const revision = event.revision
+  if (
+    !isRecord(revision) ||
+    typeof revision.document !== 'string' ||
+    !revision.document.trim() ||
+    typeof revision.workspace !== 'string' ||
+    !revision.workspace.trim()
+  )
+    return false
+  return (
+    isWorkflowStageCardSnapshot(event.stageSnapshot) &&
+    event.stageSnapshot.status === 'completed'
+  )
 }
 
 /** Returns the latest completed stage boundary represented by frozen events. */
@@ -459,6 +487,7 @@ function elapsedTiming(
   const createdAt = timing?.stageStartedAt ?? run.createdAt
   const end = timing?.stageEndedAt ?? timing?.now ?? run.updatedAt
   let elapsedMs = timing?.elapsedMs
+  let activeSinceAt: number | undefined
   if (!Number.isFinite(elapsedMs)) {
     if (timing?.events) {
       if (run.status === 'running') {
@@ -482,6 +511,10 @@ function elapsedTiming(
             activeSince = undefined
           }
         }
+        if (activeSince !== undefined && Number.isFinite(endedAt)) {
+          durableElapsed += Math.max(0, endedAt - activeSince)
+          activeSinceAt = activeSince
+        }
         elapsedMs = durableElapsed
       } else {
         elapsedMs = activeElapsedWithinStage({
@@ -498,7 +531,12 @@ function elapsedTiming(
     }
   }
   const activeSince =
-    run.status === 'running' ? (timing?.activeSince ?? createdAt) : undefined
+    run.status === 'running'
+      ? (timing?.activeSince ??
+        (activeSinceAt !== undefined
+          ? new Date(activeSinceAt).toISOString()
+          : createdAt))
+      : undefined
   return {
     createdAt,
     elapsedMs: Math.max(0, elapsedMs ?? 0),

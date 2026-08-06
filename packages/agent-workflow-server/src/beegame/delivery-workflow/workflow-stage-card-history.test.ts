@@ -126,11 +126,41 @@ describe('workflow stage card history', () => {
     expect(card?.tasks?.some(task => task.operation === 'write')).toBe(true)
   })
 
+  test('includes an open running interval in the live elapsed time', () => {
+    const run = createTestDeliveryRun({
+      projectId: 'project-open-interval',
+      ownerId: 'owner-open-interval',
+      foundationDraftComplete: false,
+    })
+    const card = projectCurrentStageCard({
+      run: {
+        ...run,
+        createdAt: '2026-08-06T00:00:00.000Z',
+        updatedAt: '2026-08-06T00:00:02.000Z',
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+      },
+      workspacePath,
+      timing: {
+        now: '2026-08-06T00:00:10.000Z',
+        events: [eventAt('2026-08-06T00:00:02.000Z', 'running')],
+      },
+    })
+    expect(card?.elapsedMs).toBe(8000)
+    expect(card?.activeSince).toBe('2026-08-06T00:00:02.000Z')
+  })
+
   test('validates snapshots and frozen events structurally', () => {
     const event = frozenEvent(1, 'BRIEF_CONFIRMED')
     const snapshot = event.stageSnapshot as Record<string, unknown>
     expect(isWorkflowStageCardSnapshot(event.stageSnapshot)).toBe(true)
     expect(isFrozenWorkflowStageCardEvent(event)).toBe(true)
+    expect(isFrozenWorkflowStageCardEvent({ ...event, eventId: '' })).toBe(
+      false,
+    )
+    expect(
+      isFrozenWorkflowStageCardEvent({ ...event, revision: undefined }),
+    ).toBe(false)
     expect(
       isWorkflowStageCardSnapshot({
         ...snapshot,
@@ -147,6 +177,12 @@ describe('workflow stage card history', () => {
       isFrozenWorkflowStageCardEvent({
         ...event,
         stageSnapshot: { ...snapshot, phaseIndex: 2 },
+      }),
+    ).toBe(false)
+    expect(
+      isFrozenWorkflowStageCardEvent({
+        ...event,
+        stageSnapshot: { ...snapshot, status: 'running' },
       }),
     ).toBe(false)
   })
