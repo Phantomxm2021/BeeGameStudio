@@ -64,8 +64,7 @@ R2 canonical object
   -> compact semantic evidence projection
   -> AI structured classification
   -> server validation against the frozen content hash
-  -> high-confidence atomic usage-tag commit
-  -> low-confidence pending semantic_suggestion
+  -> atomic usage-tag commit
   -> existing catalog matcher
 ```
 
@@ -110,33 +109,22 @@ that rejects any value outside those enums.
 The model cannot submit a final resource row. The server owns the decision and
 the write.
 
-## Per-element decision and confirmation contract
+## Per-element decision and commit contract
 
 The batch is only a transport and billing unit. It never defines a shared
-semantic label set. Every model decision, pending suggestion and administrator
-confirmation is owned by exactly one `elementId` and carries its own
-`usageTags`, content hash and curator revision. Two elements may happen to
-receive the same tags, but that is the result of two independent decisions.
+semantic label set. Every model decision is owned by exactly one `elementId`
+and carries its own `usageTags`, content hash and curator revision. Two
+elements may happen to receive the same tags, but that is the result of two
+independent decisions.
 
-The confirmation contract is an ordered set of element decisions:
-
-```text
-decisions: [
-  {
-    elementId,
-    usageTags,
-    sourceContentHash,
-    suggestionRevision
-  }
-]
-```
-
-The server rejects a shared `usageTags` value paired with multiple
-`elementIds`, missing or duplicate decisions, stale hashes, and decisions for
-elements outside the requested Pack. The UI may provide an explicit
-"accept all suggestions" action, but it must submit each resource's own
-suggestion through this same per-element contract. It must not provide a
-global tag picker that applies one tag set to heterogeneous elements.
+The server validates each decision against the frozen content hash, visual
+evidence, allowed vocabulary and curator revision, then writes the decision's
+`usageTags` directly to that element with `usage_tags_mode = override`. The
+confidence value is diagnostic context for the processing receipt; it does not
+create a second pending state or require a manual confirmation step.
+`manual-only` is the sole explicit exclusion and is never overwritten by AI.
+Full reanalysis may replace an existing AI-owned tag set; the normal
+missing-only run preserves existing element-owned tags.
 
 For visual recognition, model elements use bounded rendered previews and
 inspected geometry/material facts; images use bounded image previews and image
@@ -204,28 +192,18 @@ changes, the old semantic result is not reused.
 
 ## Persistence rules
 
-Only elements without an effective confirmed usage tag are eligible for AI
-classification. Existing element, folder or Pack policy is authoritative and
-is never overwritten by AI.
+Elements without element-owned tags are eligible for the normal AI run. Full
+reanalysis also includes existing AI-owned tags, but never `manual-only`.
 
-For a valid high-confidence result with content evidence:
+For any valid result with content evidence:
 
 1. The server verifies the element still exists and its content hash matches.
 2. The server verifies every tag and evidence item.
-3. The server writes `usage_tags` with element-level confirmed mode.
-4. The server clears any pending `semantic_suggestion` in the same update.
+3. The server writes `usage_tags` with element-level override mode.
 
-For medium/low confidence or insufficient evidence:
-
-- `usage_tags` is unchanged.
-- The structured result is stored in the existing non-searchable
-  `semantic_suggestion` field.
-- The existing curation workbench can confirm or reject it through the existing
-  one-batch transport operation using the per-element decision contract.
-
-The pending suggestion is not a second semantic fact and is never consumed by
-catalog matching. It exists only to preserve a recoverable AI decision until a
-final canonical commit is made.
+Confidence does not select a different persistence path. If evidence or
+schema validation fails, the result is rejected and the item is requeued; no
+temporary semantic record is created.
 
 ## Batch and scope policy
 
@@ -264,10 +242,11 @@ instead of spinning inside the current batch.
 | Model render or Atlas failure | Exclude the item from the current model call, requeue it with the render diagnostic, and retry it in the next batch |
 | Model response invalid | Item remains failed; do not write partial tags |
 | Unknown tag | Reject the result and record validation error |
-| Missing `content_preview` evidence | Reject the batch result, persist no tag or suggestion, and requeue the item |
+| Missing `content_preview` evidence | Reject the batch result, persist no tag, and requeue the item |
 | Content hash changed | Reject stale result and enqueue the current hash |
 | Process restart | Requeue interrupted items only |
-| Existing confirmed tags | Skip; do not overwrite |
+| Existing AI-owned tags in a missing-only run | Skip; do not overwrite |
+| Existing AI-owned tags in a full run | Replace with the newly validated decision |
 
 No failure path creates a second search route or silently converts a failed
 classification into a placeholder.
@@ -280,18 +259,18 @@ The implementation is ready only when all of the following are true:
    usage-tag options.
 2. An AI result with an unknown tag, missing evidence or stale content hash
    cannot change the canonical element row.
-3. A high-confidence result changes only `usage_tags`, mode and the pending
-   suggestion field; technical facts and `asset_kind` are unchanged.
-4. A low-confidence result is visible to the existing curation workbench but
-   cannot affect catalog matching.
+3. A validated result of any confidence changes only `usage_tags` and mode;
+   technical facts and `asset_kind` are unchanged.
+4. There is no pending semantic state between AI validation and catalog
+   matching.
 5. A restart resumes unfinished items without re-running accepted items.
 6. A single element failure does not stop the Pack job.
 7. A real published catalog match uses the confirmed tags and returns the
    existing candidate/bundle contract.
 8. The frontend renders options from the API rather than a duplicate constant.
 9. A heterogeneous batch cannot cause one resource's tags to be written to
-   another resource; an explicit bulk accept preserves each element's own
-   decision.
+   another resource; each provider result is committed by its stable element
+   identity.
 10. No legacy semantic path, feedback path, compatibility path or second
    resource fact source remains.
 11. A new-project end-to-end run confirms that resources are selected from the
@@ -300,7 +279,7 @@ The implementation is ready only when all of the following are true:
 ## Explicit implementation boundary
 
 The implementation may add only the semantic job state, model adapter contract,
-strict validation, atomic confirmation and tests required by this design. It
+strict validation, atomic tag commit and tests required by this design. It
 must not refactor unrelated Workflow or Resource Library behavior. Before any
 code is changed, the implementation plan must map each change to this document
 and identify the old path that will be removed.

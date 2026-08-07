@@ -142,7 +142,7 @@ if (import.meta.main) {
             requests: metadata,
             results: result.results ?? [],
             commitDecision: async decision => {
-              const saved = await repository.commitSemanticDecision?.(packId, decision, new Date().toISOString(), { commitMode: analysisMode === 'all' ? 'refresh-suggestion' : 'standard' })
+              const saved = await repository.commitSemanticDecision?.(packId, decision, { replaceExisting: analysisMode === 'all' })
               if (!saved) throw new Error('Resource semantic metadata commit is not configured')
               return { receiptId: saved.receiptId }
             },
@@ -768,9 +768,6 @@ export function toResourceElement(row: Record<string, unknown>): ResourceElement
         : {},
     ...(Array.isArray(row.usage_tags) && row.usage_tags.length ? { usageTags: row.usage_tags.map(String) as ResourceElement['usageTags'] } : {}),
     ...(typeof row.usage_tags_mode === 'string' ? { usageTagsMode: row.usage_tags_mode as ResourceElement['usageTagsMode'] } : {}),
-    ...(row.semantic_suggestion && typeof row.semantic_suggestion === 'object' && !Array.isArray(row.semantic_suggestion)
-      ? { semanticSuggestion: row.semantic_suggestion as ResourceElement['semanticSuggestion'] }
-      : {}),
     ...(typeof row.asset_kind === 'string' ? { assetKind: row.asset_kind as ResourceElement['assetKind'] } : {}),
     ...(Array.isArray(row.capabilities) && row.capabilities.length ? { capabilities: row.capabilities.map(String) as ResourceElement['capabilities'] } : {}),
     ...(row.content_profile && typeof row.content_profile === 'object' ? { contentProfile: row.content_profile as ResourceElement['contentProfile'] } : {}),

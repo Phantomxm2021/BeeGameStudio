@@ -66,10 +66,10 @@ assets.
 
 1. Sign in as an authorized resource administrator and create a draft Pack.
 2. Upload or re-inspect a file. Confirm technical facts and dependency bindings
-   come from the inspector, while searchable usage tags are written to the
-   element only after a confirmed curation decision. Pack and folder semantic
-   defaults do not exist in the active schema or API. Use the single curation
-   workbench for any pending batch; suggestions are not searchable.
+   come from the inspector. Run the single durable AI semantic job; every
+   validated decision writes that element's usage tags directly. Pack and
+   folder semantic defaults do not exist in the active schema or API. A failed
+   item remains visible in the same processing list for retry.
 3. Publish a ready Pack and call the Agent catalog API. Confirm an unrelated
    invalid element does not hide a valid root, a root with an unavailable
    dependency is excluded, and a multi-file requirement returns one bounded
@@ -86,19 +86,11 @@ assets.
 
 ## Development cutover evidence
 
-On 2026-08-06 the configured development database was migrated to the
-canonical `semantic_suggestion` column and the existing Resource Library was
-reinspected through the durable processing-job path. The run covered 2,955
-elements across 25 Packs. The final read-only ledger check found 2,955 unique
-elements with successful processing records and no queued or running items.
-One transient R2 certificate-verification failure was retained in the original
-job history and succeeded on a targeted durable retry; it was not recorded as
-a false success. A real catalog match against a published element returned a
-matched bundle with one candidate and no diagnostics. The curation audit still
-reports 798 ready elements without confirmed semantic usage tags (654 in
-published Packs and 144 in the archived Pack); these remain in the one
-batch-confirmation workbench and were deliberately not guessed from filenames
-or categories. New-project end-to-end acceptance remains a separate check and
+The current development cutover removes the obsolete semantic-suggestion
+column and uses the durable AI processing job as the only semantic write path.
+Each successful visual decision is persisted directly to the element row;
+failed items remain retryable and are never represented as a second pending
+semantic state. New-project end-to-end acceptance remains a separate check and
 has not been marked complete.
 
 ## Operational notes
@@ -111,11 +103,11 @@ has not been marked complete.
 - Matching returns only `matched` bundles or `no-match` plus structured
   diagnostics. Workflow must select one returned bundle; it must not rebuild
   candidates, paginate the catalog, or create a second discovery path.
-- The curation queue is temporary review state on the canonical element row.
-  Confirmation writes element-owned usage tags with `usage_tags_mode =
-  override` and clears the suggestion in one batch; rejection clears it without
-  changing confirmed metadata. Pack/folder semantic defaults are removed, so
-  unclassified elements have no effective usage tags and never enter matching.
+- The curation queue is a read-only projection of ready elements without
+  element-owned semantic tags. AI writes element-owned usage tags with
+  `usage_tags_mode = override`; manual-only elements are excluded. Pack/folder
+  semantic defaults are removed, so unclassified elements have no effective
+  usage tags and never enter matching.
 - The browser upload queue persists resumable task metadata locally. A refresh
   requires the user to resume the task, rather than silently uploading files.
 - Storage reconciliation is evaluated during the publish gate. Missing objects

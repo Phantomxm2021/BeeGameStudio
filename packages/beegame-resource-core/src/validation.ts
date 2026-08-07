@@ -7,7 +7,6 @@ import {
   RESOURCE_PACK_PRIMARY_CATEGORIES,
   RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
-  RESOURCE_SEMANTIC_EVIDENCE_SOURCES,
   type ResourceElement,
   type ResourcePack,
 } from './types'
@@ -73,9 +72,6 @@ export function validateResourceElement(value: unknown): ResourceElement {
   if (value.usageTagsMode !== undefined && !isAllowed(value.usageTagsMode, ['inherit', 'override', 'manual-only'] as const)) {
     throw new ResourceValidationError('Element usageTagsMode is unsupported')
   }
-  if (value.semanticSuggestion !== undefined && !isSemanticSuggestion(value.semanticSuggestion)) {
-    throw new ResourceValidationError('Element semanticSuggestion must contain controlled curation values')
-  }
   if (value.assetKind !== undefined && !isAllowed(value.assetKind, RESOURCE_ASSET_KINDS)) {
     throw new ResourceValidationError('Element assetKind is unsupported')
   }
@@ -125,22 +121,6 @@ function isElementRelation(value: unknown): boolean {
   if (typeof value.targetElementId !== 'string' || !value.targetElementId.trim()) return false
   if (value.role !== undefined && (typeof value.role !== 'string' || !value.role.trim())) return false
   return value.required === undefined || typeof value.required === 'boolean'
-}
-
-function isSemanticSuggestion(value: unknown): boolean {
-  if (!isRecord(value)) return false
-  if (value.sourceContentHash !== undefined && !isResourceContentHash(value.sourceContentHash)) return false
-  if (!Array.isArray(value.usageTags) || value.usageTags.some(item => !isAllowed(item, RESOURCE_USAGE_TAGS))) return false
-  if (!Array.isArray(value.styles) || value.styles.some(item => typeof item !== 'string' || !item.trim())) return false
-  if (!Array.isArray(value.relations) || value.relations.some(relation => !isElementRelation(relation))) return false
-  if (!Array.isArray(value.evidence) || value.evidence.some(item => !isSemanticEvidence(item))) return false
-  if (!isAllowed(value.confidence, ['high', 'medium', 'low'] as const)) return false
-  return typeof value.generatedAt === 'string' && Boolean(value.generatedAt.trim()) && typeof value.generatorRevision === 'string' && Boolean(value.generatorRevision.trim())
-}
-
-function isSemanticEvidence(value: unknown): boolean {
-  if (!isRecord(value) || !isAllowed(value.source, RESOURCE_SEMANTIC_EVIDENCE_SOURCES)) return false
-  return typeof value.reference === 'string' && Boolean(value.reference.trim()) && typeof value.observation === 'string' && Boolean(value.observation.trim())
 }
 
 function isDependencyBinding(value: unknown): value is { referencePath: string; dependencyElementId: string; kind?: string } {

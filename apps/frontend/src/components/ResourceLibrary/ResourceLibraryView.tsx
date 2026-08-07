@@ -38,7 +38,7 @@ type ResourceLibraryApi = Pick<
   | 'createPack' | 'listFolders' | 'createFolder' | 'updateFolder' | 'deleteFolder'
   | 'updateElement' | 'inspectElement' | 'startProcessingJob' | 'getLatestProcessingJob' | 'getProcessingJob' | 'retryProcessingJob' | 'cancelProcessingJob' | 'getElementResourceUrl'
   | 'deleteElement' | 'publishPack' | 'archivePack' | 'getPublishReadiness'
-> & Partial<Pick<typeof resourceLibraryApi, 'getCurationQueue' | 'confirmCuration' | 'rejectCuration'>>;
+> & Partial<Pick<typeof resourceLibraryApi, 'getCurationQueue' | 'startSemanticCuration' | 'getLatestSemanticCurationJob' | 'getSemanticCurationJob' | 'retrySemanticCuration'>>;
 
 type ResourceLibraryViewProps = {
   apiClient?: ResourceLibraryApi;
@@ -683,7 +683,7 @@ function PackBrowser({
     if (!apiClient.getCurationQueue) return () => { active = false; };
     void apiClient.getCurationQueue(pack.id).then(queue => {
       if (!active) return;
-      setPendingCurationCount(queue.counts.pendingSuggestions);
+      setPendingCurationCount(queue.counts.pendingItems);
       setUsageTagOptions([...queue.usageTagOptions]);
     }).catch(() => {
       if (active) {
@@ -926,7 +926,7 @@ function PackBrowser({
           <button type="button" className="h-[33px] border-0 px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05]" onClick={onEditPack}>编辑 Pack</button>
           <button type="button" disabled={pack.status === 'published'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>{pack.status === 'archived' ? '重新发布' : '发布'}</button>
           </div>
-          {apiClient.getCurationQueue && apiClient.confirmCuration && apiClient.rejectCuration ? <button type="button" onClick={() => setCurationOpen(true)} className="h-[33px] rounded-full border border-sky-200/30 px-[13px] text-[11px] font-medium text-sky-100 transition-colors hover:bg-sky-300/10">资源整理{pendingCurationCount ? ` · ${pendingCurationCount}` : ''}</button> : null}
+          {apiClient.getCurationQueue ? <button type="button" onClick={() => setCurationOpen(true)} className="h-[33px] rounded-full border border-sky-200/30 px-[13px] text-[11px] font-medium text-sky-100 transition-colors hover:bg-sky-300/10">资源整理{pendingCurationCount ? ` · ${pendingCurationCount}` : ''}</button> : null}
           {pack.status !== 'archived' ? <button type="button" onClick={() => void onArchivePack()} className="h-[33px] rounded-full border border-amber-300/35 px-[13px] text-[11px] font-medium text-amber-100 transition-colors hover:bg-amber-300/10">归档 Pack</button> : <span className="type-caption-2 text-amber-200">已归档</span>}
         </div>
       </header>
@@ -965,7 +965,7 @@ function PackBrowser({
       </div>
       {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} onCancel={onCancelUploads} onDismiss={onDismissUploads} /> : null}
       {inspectionJob ? <InspectionProgressCover isZh={isZh} job={inspectionJob} elements={elements} onClose={() => setInspectionJob(null)} onCancel={async () => setInspectionJob(await apiClient.cancelProcessingJob(pack.id, inspectionJob.id))} onRetry={async () => setInspectionJob(await apiClient.retryProcessingJob(pack.id, inspectionJob.id))} /> : null}
-      {curationOpen && apiClient.getCurationQueue && apiClient.confirmCuration && apiClient.rejectCuration ? <CurationWorkbench packId={pack.id} api={apiClient as ResourceCurationApi} onClose={() => { setCurationOpen(false); void onRefreshWorkspace(); void apiClient.getCurationQueue?.(pack.id).then(queue => setPendingCurationCount(queue.counts.pendingSuggestions)); }} /> : null}
+      {curationOpen && apiClient.getCurationQueue ? <CurationWorkbench packId={pack.id} api={apiClient as ResourceCurationApi} onClose={() => { setCurationOpen(false); void onRefreshWorkspace(); void apiClient.getCurationQueue?.(pack.id).then(queue => setPendingCurationCount(queue.counts.pendingItems)); }} /> : null}
       {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );

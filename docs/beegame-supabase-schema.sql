@@ -319,7 +319,6 @@ create table if not exists public.beegame_resource_elements (
   preview jsonb,
   specs jsonb not null default '{}'::jsonb,
   usage_tags text[] not null default '{}',
-  semantic_suggestion jsonb,
   usage_tags_mode text not null default 'inherit' check (usage_tags_mode in ('inherit', 'override', 'manual-only')),
   asset_kind text,
   capabilities text[] not null default '{}',
@@ -482,8 +481,6 @@ alter table public.beegame_resource_processing_jobs
   add column if not exists analysis_mode text not null default 'missing';
 alter table public.beegame_resource_processing_jobs
   add column if not exists retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null;
-alter table public.beegame_resource_elements
-  add column if not exists semantic_suggestion jsonb;
 update public.beegame_resource_elements
 set usage_tags_mode = 'override'
 where usage_tags_mode = 'inherit' and cardinality(usage_tags) > 0;

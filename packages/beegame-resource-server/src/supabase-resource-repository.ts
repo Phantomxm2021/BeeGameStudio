@@ -4,14 +4,12 @@ import {
   withResourceExternalTransport,
   type PackSummary,
   type ResourceCategory,
-  type ResourceCurationBatchInput,
   type ResourceCurationQueue,
   type ResourceElement,
   type ResourceFolder,
   type ResourceCatalogPack,
   type ResourcePack,
   type ResourceSemanticCommitResult,
-  type ResourceSemanticCommitMode,
   type ResourceSemanticModelDecision,
   type ResourceRepository,
 } from '@bee-game-studio/beegame-resource-core'
@@ -44,11 +42,10 @@ type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath' 
 }
 
 type ElementRow = Omit<ResourceElement,
-  | 'packId' | 'preview' | 'usageTags' | 'usageTagsMode' | 'usageTagsSource' | 'semanticSuggestion' | 'assetKind' | 'capabilities' | 'contentProfile' | 'relations' | 'dependencyBindings' | 'styleOverride' | 'dimensionOverride'> & {
+  | 'packId' | 'preview' | 'usageTags' | 'usageTagsMode' | 'usageTagsSource' | 'assetKind' | 'capabilities' | 'contentProfile' | 'relations' | 'dependencyBindings' | 'styleOverride' | 'dimensionOverride'> & {
   pack_id: string
   preview?: ResourceElement['preview'] | null
   usage_tags?: string[] | null
-  semantic_suggestion?: ResourceElement['semanticSuggestion'] | null
   usage_tags_mode?: ResourceElement['usageTagsMode'] | null
   asset_kind?: ResourceElement['assetKind'] | null
   capabilities?: ResourceElement['capabilities'] | null
@@ -182,7 +179,6 @@ export function createSupabaseResourceRepository(
     specs: row.specs,
     ...(row.usage_tags?.length ? { usageTags: row.usage_tags as ResourceElement['usageTags'] } : {}),
     ...(row.usage_tags_mode ? { usageTagsMode: row.usage_tags_mode } : {}),
-    ...(row.semantic_suggestion ? { semanticSuggestion: row.semantic_suggestion } : {}),
     ...(row.asset_kind ? { assetKind: row.asset_kind } : {}),
     ...(row.capabilities?.length ? { capabilities: row.capabilities } : {}),
     ...(row.content_profile ? { contentProfile: row.content_profile } : {}),
@@ -318,11 +314,11 @@ export function createSupabaseResourceRepository(
       return true
     },
     async updateElement(packId, elementId, input) {
-      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ name: input.name, path: input.path, category: input.category, kind: input.kind, preview: input.preview, specs: input.specs, usage_tags: input.usageTags, usage_tags_mode: input.usageTagsMode, semantic_suggestion: input.semanticSuggestion === undefined ? undefined : input.semanticSuggestion, asset_kind: input.assetKind, capabilities: input.capabilities, content_profile: input.contentProfile, relations: input.relations, dependencies: input.dependencies, dependency_bindings: input.dependencyBindings, status: input.status, style_override: input.styleOverride, dimension_override: input.dimensionOverride }) }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
+      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ name: input.name, path: input.path, category: input.category, kind: input.kind, preview: input.preview, specs: input.specs, usage_tags: input.usageTags, usage_tags_mode: input.usageTagsMode, asset_kind: input.assetKind, capabilities: input.capabilities, content_profile: input.contentProfile, relations: input.relations, dependencies: input.dependencies, dependency_bindings: input.dependencyBindings, status: input.status, style_override: input.styleOverride, dimension_override: input.dimensionOverride }) }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
       if (!rows[0]) return undefined
       return (await resolveRows(packId, [rows[0]]))[0]
     },
-    async commitSemanticDecision(packId, decision: ResourceSemanticModelDecision, generatedAt: string, options?: { commitMode?: ResourceSemanticCommitMode }): Promise<ResourceSemanticCommitResult> {
+    async commitSemanticDecision(packId, decision: ResourceSemanticModelDecision, options?: { replaceExisting?: boolean }): Promise<ResourceSemanticCommitResult> {
       const rows = await request<ElementRow>('beegame_resource_elements', {
         pack_id: `eq.${packId}`,
         id: `eq.${decision.elementId}`,
@@ -332,22 +328,19 @@ export function createSupabaseResourceRepository(
       const current = toElement(currentRow)
       const resolved = (await resolveRows(packId, [currentRow]))[0]
       if (!resolved) throw new Error('Resource element not found')
-      const result = applyResourceSemanticDecision(current, decision, generatedAt, resolved.usageTags ?? [], options)
+      const result = applyResourceSemanticDecision(current, decision, options)
       if (result.outcome === 'skipped') return { ...result, element: resolved }
-      const body = result.outcome === 'committed'
-        ? { usage_tags: result.element.usageTags ?? [], usage_tags_mode: 'override', semantic_suggestion: null }
-        : { semantic_suggestion: result.element.semanticSuggestion }
       const semanticCommitFilters = {
         id: `eq.${decision.elementId}`,
         pack_id: `eq.${packId}`,
         'specs->>contentHash': `eq.${decision.sourceContentHash}`,
-        ...(options?.commitMode === 'refresh-suggestion' || current.usageTagsMode === 'override'
+        ...(options?.replaceExisting || current.usageTagsMode === 'override'
           ? {}
           : { usage_tags_mode: 'eq.inherit' }),
       }
       const updated = await mutate<ElementRow>('beegame_resource_elements', {
         method: 'PATCH',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ usage_tags: result.element.usageTags ?? [], usage_tags_mode: 'override' }),
       }, {
         ...semanticCommitFilters,
       })
@@ -357,61 +350,17 @@ export function createSupabaseResourceRepository(
     },
     async listCuration(packId): Promise<ResourceCurationQueue> {
       const elements = await this.listElements(packId)
-      const items = elements.filter(element => element.status === 'ready' && (element.usageTagsMode !== 'override' || Boolean(element.semanticSuggestion)))
+      const items = elements.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only')
       return {
         items,
         counts: {
-          pendingSuggestions: items.length,
-          missingSemanticTags: elements.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override').length,
+          pendingItems: items.length,
+          missingSemanticTags: elements.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only').length,
           technicalIssues: elements.filter(element => !element.assetKind || typeof element.specs.contentHash !== 'string').length,
           dependencyIssues: elements.filter(element => element.dependencies.some(id => !elements.some(candidate => candidate.id === id))).length,
         },
         usageTagOptions: RESOURCE_USAGE_TAGS,
       }
-    },
-    async confirmCuration(packId, input: ResourceCurationBatchInput) {
-      if (!input.decisions.length) throw new Error('Resource curation decisions are required')
-      const decisionIds = input.decisions.map(decision => decision.elementId)
-      if (new Set(decisionIds).size !== decisionIds.length || input.decisions.some(decision => !decision.usageTags.length)) throw new Error('Resource curation decisions are invalid')
-      const current = await Promise.all(input.decisions.map(decision => this.getElement(packId, decision.elementId)))
-      const updates = input.decisions.map((decision, index) => {
-        const element = current[index]
-        if (!element) throw new Error('Resource curation element selection is invalid')
-        if (decision.sourceContentHash && element.specs.contentHash !== decision.sourceContentHash) throw new Error('Resource curation decision content hash is stale')
-        if (element.semanticSuggestion) {
-          if (decision.sourceContentHash !== element.semanticSuggestion.sourceContentHash || decision.suggestionRevision !== element.semanticSuggestion.generatorRevision) {
-            throw new Error('Resource curation decision is stale')
-          }
-        }
-        return { decision, element }
-      })
-      const rows: ElementRow[] = []
-      for (const { decision } of updates) {
-        const body = JSON.stringify({ usage_tags: [...new Set(decision.usageTags)], usage_tags_mode: 'override', ...(decision.styleOverride === undefined ? {} : { style_override: decision.styleOverride }), semantic_suggestion: null })
-        const updated = await mutate<ElementRow>('beegame_resource_elements', {
-          method: 'PATCH',
-          body,
-        }, { id: `eq.${encodeURIComponent(decision.elementId)}`, pack_id: `eq.${encodeURIComponent(packId)}` })
-        if (!updated[0]) throw new Error('Resource curation element selection is invalid')
-        rows.push(updated[0])
-      }
-      if (rows.length !== input.decisions.length) throw new Error('Resource curation selection is invalid')
-      const rowsById = new Map(rows.map(row => [row.id, row]))
-      return resolveRows(packId, input.decisions.map(decision => rowsById.get(decision.elementId)!).filter(Boolean))
-    },
-    async rejectCuration(packId, input) {
-      if (!input.elementIds.length) throw new Error('Resource curation selection is required')
-      const rows: ElementRow[] = []
-      for (const elementIds of partitionResourceElementIdsForMutation(apiBase, packId, input.elementIds)) {
-        const ids = elementIds.map(id => encodeURIComponent(id)).join(',')
-        rows.push(...await mutate<ElementRow>('beegame_resource_elements', {
-          method: 'PATCH',
-          body: JSON.stringify({ semantic_suggestion: null }),
-        }, { id: `in.(${ids})`, pack_id: `eq.${encodeURIComponent(packId)}` }))
-      }
-      if (rows.length !== input.elementIds.length) throw new Error('Resource curation selection is invalid')
-      const rowsById = new Map(rows.map(row => [row.id, row]))
-      return resolveRows(packId, input.elementIds.map(id => rowsById.get(id)!).filter(Boolean))
     },
     async deleteElement(packId, elementId) {
       const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'DELETE' }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })

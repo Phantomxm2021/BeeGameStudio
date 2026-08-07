@@ -40,7 +40,7 @@ describe('resource service app', () => {
       elements: [
         { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: [], status: 'ready' },
         { id: 'untagged', packId: 'semantic-pack', name: 'Untagged', path: 'b/untagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, dependencies: [], status: 'ready' },
-        { id: 'pending', packId: 'semantic-pack', name: 'Pending', path: 'c/pending.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, dependencies: [], status: 'ready', semanticSuggestion: { usageTags: ['prop'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'test', observation: 'pending' }], confidence: 'medium', generatedAt: '2026-08-07T00:00:00.000Z', generatorRevision: 'test' } },
+        { id: 'manual-only', packId: 'semantic-pack', name: 'Manual Only', path: 'c/manual-only.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, dependencies: [], usageTagsMode: 'manual-only', status: 'ready' },
       ],
     })
     let started: { packId: string; elementIds?: readonly string[]; options?: { kind?: string; analysisMode?: string; curatorRevision?: string; ownerId?: string; modelConfigId?: string } } | undefined
@@ -55,7 +55,7 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/semantic-pack/semantic-curation', { method: 'POST' }))
 
     expect(response.status).toBe(202)
-    expect(started).toEqual({ packId: 'semantic-pack', elementIds: ['untagged', 'pending'], options: { kind: 'semantic-curate-elements', analysisMode: 'missing', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
+    expect(started).toEqual({ packId: 'semantic-pack', elementIds: ['untagged'], options: { kind: 'semantic-curate-elements', analysisMode: 'missing', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
   })
 
   test('starts full semantic reanalysis for every ready non-manual element', async () => {
@@ -64,7 +64,7 @@ describe('resource service app', () => {
       elements: [
         { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: [], status: 'ready' },
         { id: 'manual', packId: 'semantic-pack', name: 'Manual', path: 'b/manual.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, usageTags: ['environment'], usageTagsMode: 'manual-only', dependencies: [], status: 'ready' },
-        { id: 'suggested', packId: 'semantic-pack', name: 'Suggested', path: 'c/suggested.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, usageTags: ['prop'], semanticSuggestion: { usageTags: ['building'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'test', observation: 'pending' }], confidence: 'medium', generatedAt: '2026-08-07T00:00:00.000Z', generatorRevision: 'test' }, dependencies: [], status: 'ready' },
+        { id: 'existing', packId: 'semantic-pack', name: 'Existing', path: 'c/existing.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, usageTags: ['prop'], dependencies: [], status: 'ready' },
       ],
     })
     let started: { elementIds?: readonly string[]; options?: { kind?: string; analysisMode?: string; curatorRevision?: string; ownerId?: string; modelConfigId?: string } } | undefined
@@ -79,7 +79,7 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/semantic-pack/semantic-curation', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'all' }) }))
 
     expect(response.status).toBe(202)
-    expect(started).toEqual({ elementIds: ['tagged', 'suggested'], options: { kind: 'semantic-curate-elements', analysisMode: 'all', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
+    expect(started).toEqual({ elementIds: ['tagged', 'existing'], options: { kind: 'semantic-curate-elements', analysisMode: 'all', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
   })
 
   test('returns 503 instead of creating a semantic job without a configured model', async () => {
