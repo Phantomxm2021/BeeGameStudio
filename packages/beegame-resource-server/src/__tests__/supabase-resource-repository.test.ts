@@ -32,54 +32,10 @@ describe('Supabase resource repository', () => {
       evidence: [{ source: 'content_profile', reference: 'components:mesh:0', observation: 'A mesh is present.' }], curatorRevision: 'semantic-curator-v1',
     }
 
-    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+    const result = await repository.commitSemanticDecision!('pack-1', decision)
 
     expect(result.outcome).toBe('committed')
-    expect(patchBody).toEqual({ usage_tags: ['building'], usage_tags_mode: 'override', semantic_suggestion: null })
-  })
-
-  test('keeps a large curation confirmation below the PostgREST URL limit', async () => {
-    const elementIds = Array.from({ length: 260 }, (_, index) => `element-${index.toString().padStart(3, '0')}-${'x'.repeat(32)}`)
-    const rows = elementIds.map(id => ({
-      id,
-      pack_id: 'pack-1',
-      name: id,
-      path: `models/${id}.glb`,
-      category: 'models',
-      kind: 'model',
-      specs: {},
-      usage_tags: [],
-      usage_tags_mode: 'inherit',
-      dependencies: [],
-      status: 'ready',
-    }))
-    const patchRequests: Array<{ url: string; body: Record<string, unknown> }> = []
-    const repository = createSupabaseResourceRepository({
-      baseUrl: 'https://supabase.test',
-      serviceRoleKey: 'secret-key',
-      fetchImpl: async (request, init) => {
-        const url = new URL(request instanceof Request ? request.url : String(request))
-        if (init?.method === 'PATCH') {
-          const body = JSON.parse(String(init.body)) as Record<string, unknown>
-          patchRequests.push({ url: url.toString(), body })
-          const id = url.searchParams.get('id') ?? ''
-          return Response.json(rows.filter(row => id === `eq.${row.id}`).map(row => ({ ...row, ...body })))
-        }
-        if (url.pathname.endsWith('/beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Pack', styles: ['stylized'], game_types: ['strategy'], dimension: '3D', primary_category: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }])
-        if (url.pathname.endsWith('/beegame_resource_folders')) return Response.json([])
-        return Response.json(rows)
-      },
-    })
-
-    const result = await repository.confirmCuration!('pack-1', {
-      decisions: elementIds.map((elementId, index) => ({ elementId, usageTags: [index % 2 ? 'environment' : 'building'] })),
-    })
-
-    expect(result).toHaveLength(elementIds.length)
-    expect(patchRequests).toHaveLength(elementIds.length)
-    expect(patchRequests.every(request => request.url.length < 8_000)).toBe(true)
-    expect(patchRequests[0]?.body.usage_tags).toEqual(['building'])
-    expect(patchRequests[1]?.body.usage_tags).toEqual(['environment'])
+    expect(patchBody).toEqual({ usage_tags: ['building'], usage_tags_mode: 'override' })
   })
 
   test('rejects a stale semantic result before writing the row', async () => {
@@ -99,7 +55,7 @@ describe('Supabase resource repository', () => {
       evidence: [{ source: 'content_profile', reference: 'components:mesh:0', observation: 'A mesh is present.' }], curatorRevision: 'semantic-curator-v1',
     }
 
-    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).rejects.toThrow('content hash is stale')
+    await expect(repository.commitSemanticDecision!('pack-1', decision)).rejects.toThrow('content hash is stale')
     expect(patchCalled).toBe(false)
   })
 

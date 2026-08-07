@@ -1151,76 +1151,92 @@ export function createAgentWorkflowApp(
     try {
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       if (!isObject(body)) return c.json({ error: 'Invalid semantic curation request' }, 400)
-      const ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
-      const modelConfigId = typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
-      const modelType = parseResourceSemanticModelType(body.modelType)
-      const runtimeEnv = parseResourceSemanticRuntimeEnv(body.runtimeEnv)
-      const packId = typeof body.packId === 'string' ? body.packId.trim() : ''
-      const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
-      const batchId = typeof body.batchId === 'string' ? body.batchId.trim() : ''
-      const curatorRevision = typeof body.curatorRevision === 'string' ? body.curatorRevision.trim() : ''
-      const items = parseResourceSemanticBatchItems(body.items)
-      if (!ownerId || !modelConfigId || !modelType || !runtimeEnv || !packId || !jobId || !batchId || !curatorRevision || !items.length || items.length > 8) return c.json({ error: 'Resource semantic model identity, batch identity, curator revision, provider, and runtime are required' }, 400)
-      let visualInput: ResourceSemanticVisualInput
-      try {
-        visualInput = parseResourceSemanticVisualInput(body.visualInput)
-        assertResourceSemanticVisualInput(visualInput, new Set(items.map(item => item.elementId)))
-      } catch (error) {
-        return c.json({ error: error instanceof Error ? error.message : 'Resource semantic visual input is invalid' }, 400)
+      const operation = body.operation
+      if (operation === 'submit') {
+        if (!Array.isArray(body.requests) || body.requests.length === 0 || body.requests.length > 256) return c.json({ error: 'Resource semantic provider batch requests are required' }, 400)
+        if (!modelRuntimeHost.batch) return c.json({ error: 'Native resource semantic provider batch is not configured' }, 503)
+        const requests = []
+        for (const raw of body.requests) {
+          try {
+            if (!isObject(raw) || typeof raw.customId !== 'string' || !isObject(raw.request)) throw new Error('Resource semantic provider batch request identity is invalid')
+            const request = parseResourceSemanticModelBatchRequest(raw.request, raw.customId)
+            requests.push({
+            customId: request.customId,
+            input: {
+              cwd: dashboardDataRoot,
+              modelType: request.modelType,
+              runtimeEnv: request.runtimeEnv,
+              systemPrompt: buildResourceSemanticCuratorSystemPrompt(request.curatorRevision),
+              structuredOutput: {
+                name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
+                description: 'Submit the complete canonical semantic decision batch.',
+                inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
+              },
+              maxTokens: getResourceSemanticModelOutputTokens(request.items.length),
+              messages: [{
+                role: 'user' as const,
+                content: [
+                  { type: 'text' as const, text: JSON.stringify({ items: request.items.map(item => ({ elementId: item.elementId, projection: item.projection })), visualInput: request.visualInput.mode === 'individual' ? { mode: request.visualInput.mode, images: request.visualInput.images.map(image => ({ elementId: image.elementId })) } : { mode: request.visualInput.mode, cells: request.visualInput.cells } }) },
+                  ...(request.visualInput.mode === 'individual'
+                    ? request.visualInput.images.map(image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 } }))
+                    : [{ type: 'image' as const, source: { type: 'base64' as const, media_type: request.visualInput.image.mediaType, data: request.visualInput.image.dataBase64 } }]),
+                ],
+              }],
+              querySource: `beegame_resource_semantic_curation:${request.jobId}:${request.batchId}:${request.customId}`,
+            },
+            })
+          } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Resource semantic provider batch request is invalid' }, 400)
+          }
+        }
+        return c.json(await modelRuntimeHost.batch.submit(requests))
       }
-      const visualInputSummary = visualInput.mode === 'individual'
-        ? { mode: visualInput.mode, images: visualInput.images.map(image => ({ elementId: image.elementId })) }
-        : { mode: visualInput.mode, cells: visualInput.cells }
-      const visualImageBlocks = visualInput.mode === 'individual'
-        ? visualInput.images.map(image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 } }))
-        : [{ type: 'image' as const, source: { type: 'base64' as const, media_type: visualInput.image.mediaType, data: visualInput.image.dataBase64 } }]
-      let modelUsage: BeeGameModelUsage | undefined
-      let creditsMicro = 0
-      const usageRecorder = billingConfig.mode === 'remote'
-        ? createUsageRecorder({
-          sessionId: jobId,
-          record: input => dashboardRepository.recordUsageForUser(ownerId, input),
-          debit: input => dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
-          onSettled: result => { creditsMicro = result.creditsMicro },
-        })
-        : undefined
-      const querySource = `beegame_resource_semantic_curation:${jobId}:${batchId}`
-      const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
-        cwd: dashboardDataRoot,
-        modelType,
-        runtimeEnv,
-        systemPrompt: buildResourceSemanticCuratorSystemPrompt(curatorRevision),
-        structuredOutput: {
-          name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
-          description: 'Submit the complete canonical semantic decision batch.',
-          inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
-        },
-        maxTokens: getResourceSemanticModelOutputTokens(items.length),
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: JSON.stringify({ items: items.map(item => ({ elementId: item.elementId, projection: item.projection })), visualInput: visualInputSummary }) },
-            ...visualImageBlocks,
-          ],
-        }],
-        querySource,
-      }, async (usage, source) => {
-        modelUsage = usage
-        if (usageRecorder) await usageRecorder(usage, source)
-      }, billingConfig.mode === 'remote')
-      return c.json({
-        content,
-        ...(modelUsage ? {
-          usage: {
-            inputTokens: modelUsage.input_tokens,
-            cacheReadTokens: modelUsage.cache_read_tokens,
-            cacheCreationTokens: modelUsage.cache_creation_tokens,
-            outputTokens: modelUsage.output_tokens,
-            totalTokens: modelUsage.total_tokens,
-            creditsMicro,
+      if (operation === 'retrieve') {
+        const ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
+        const modelConfigId = typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
+        const modelType = parseResourceSemanticModelType(body.modelType)
+        const runtimeEnv = parseResourceSemanticRuntimeEnv(body.runtimeEnv)
+        const providerBatchId = typeof body.providerBatchId === 'string' ? body.providerBatchId.trim() : ''
+        const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
+        const batchId = typeof body.batchId === 'string' ? body.batchId.trim() : ''
+        if (!ownerId || !modelConfigId || !modelType || !runtimeEnv || !providerBatchId || !jobId || !batchId) return c.json({ error: 'Resource semantic provider batch identity, provider, and runtime are required' }, 400)
+        if (!modelRuntimeHost.batch) return c.json({ error: 'Native resource semantic provider batch is not configured' }, 503)
+        const result = await modelRuntimeHost.batch.retrieve(providerBatchId, {
+          cwd: dashboardDataRoot,
+          modelType,
+          runtimeEnv,
+          structuredOutput: {
+            name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
+            description: 'Submit the complete canonical semantic decision batch.',
+            inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
           },
-        } : {}),
-      })
+          querySource: `beegame_resource_semantic_curation:${jobId}:${batchId}`,
+        })
+        if (result.status !== 'ended') return c.json({ status: 'processing' })
+        let settledCreditsMicro = 0
+        const usageRecorder = billingConfig.mode === 'remote'
+          ? createUsageRecorder({
+            sessionId: jobId,
+            record: input => dashboardRepository.recordUsageForUser(ownerId, input),
+            debit: input => dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
+            onSettled: result => { settledCreditsMicro = result.creditsMicro },
+          })
+          : undefined
+        const results = []
+        for (const providerResult of result.results ?? []) {
+          const usage = providerResult.generation?.usage
+          if (usage && usageRecorder) await usageRecorder(usage, `beegame_resource_semantic_curation:${jobId}:${batchId}:${providerResult.customId}`)
+          results.push({
+            customId: providerResult.customId,
+            status: providerResult.status,
+            ...(providerResult.generation ? { content: providerResult.generation.content } : {}),
+            ...(usage ? { usage: { inputTokens: usage.input_tokens, cacheReadTokens: usage.cache_read_tokens, cacheCreationTokens: usage.cache_creation_tokens, outputTokens: usage.output_tokens, totalTokens: usage.total_tokens, creditsMicro: settledCreditsMicro } } : {}),
+            ...(providerResult.error ? { error: providerResult.error } : {}),
+          })
+        }
+        return c.json({ status: 'ended', results })
+      }
+      return c.json({ error: 'Resource semantic curation operation is required' }, 400)
     } catch (error) {
       return resourceSemanticCurationRouteError(c, error)
     }
@@ -8148,6 +8164,37 @@ type ResourceSemanticBatchItemInput = {
   elementId: string
   attempt: number
   projection: Record<string, unknown>
+}
+
+type ResourceSemanticModelBatchRequestInput = {
+  customId: string
+  ownerId: string
+  modelConfigId: string
+  modelType: RuntimeModelConfig['modelType']
+  runtimeEnv: Record<string, string>
+  packId: string
+  jobId: string
+  batchId: string
+  curatorRevision: string
+  items: ResourceSemanticBatchItemInput[]
+  visualInput: ResourceSemanticVisualInput
+}
+
+function parseResourceSemanticModelBatchRequest(value: unknown, customId: string): ResourceSemanticModelBatchRequestInput {
+  if (!isObject(value)) throw new Error('Resource semantic provider batch request must be an object')
+  const ownerId = typeof value.ownerId === 'string' ? value.ownerId.trim() : ''
+  const modelConfigId = typeof value.modelConfigId === 'string' ? value.modelConfigId.trim() : ''
+  const modelType = parseResourceSemanticModelType(value.modelType)
+  const runtimeEnv = parseResourceSemanticRuntimeEnv(value.runtimeEnv)
+  const packId = typeof value.packId === 'string' ? value.packId.trim() : ''
+  const jobId = typeof value.jobId === 'string' ? value.jobId.trim() : ''
+  const batchId = typeof value.batchId === 'string' ? value.batchId.trim() : ''
+  const curatorRevision = typeof value.curatorRevision === 'string' ? value.curatorRevision.trim() : ''
+  const items = parseResourceSemanticBatchItems(value.items)
+  if (!customId.trim() || !ownerId || !modelConfigId || !modelType || !runtimeEnv || !packId || !jobId || !batchId || !curatorRevision || !items.length) throw new Error('Resource semantic model identity, batch identity, curator revision, provider, and runtime are required')
+  const visualInput = parseResourceSemanticVisualInput(value.visualInput)
+  assertResourceSemanticVisualInput(visualInput, new Set(items.map(item => item.elementId)))
+  return { customId: customId.trim(), ownerId, modelConfigId, modelType, runtimeEnv, packId, jobId, batchId, curatorRevision, items, visualInput }
 }
 
 function parseResourceSemanticBatchItems(value: unknown): ResourceSemanticBatchItemInput[] {

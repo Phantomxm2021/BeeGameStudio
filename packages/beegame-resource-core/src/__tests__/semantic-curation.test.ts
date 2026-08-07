@@ -4,7 +4,6 @@ import {
   assertResourceSemanticVisualDecision,
   assertResourceSemanticVisualInput,
   applyResourceSemanticDecision,
-  isResourceSemanticCommitEligible,
   parseResourceSemanticModelDecision,
 } from '../semantic-curation'
 import type { ResourceElement } from '../types'
@@ -32,13 +31,7 @@ describe('canonical resource semantic decisions', () => {
     expect(parsed.usageTags).toEqual(['environment', 'terrain'])
     expect(parsed.sourceContentHash).toBe(contentHash)
     expect(parsed.elementId).toBe('element-1')
-    expect(isResourceSemanticCommitEligible(parsed)).toBe(true)
-  })
-
-  test('keeps medium confidence decisions as durable suggestions', () => {
-    const parsed = parseResourceSemanticModelDecision(decision({ confidence: 'medium' }))
-
-    expect(isResourceSemanticCommitEligible(parsed)).toBe(false)
+    expect(parsed.confidence).toBe('high')
   })
 
   test('rejects a role that confuses a texture asset kind with a usage tag', () => {
@@ -106,16 +99,27 @@ describe('canonical resource semantic decisions', () => {
     expect(() => parseResourceSemanticModelDecision(decision({ curator_revision: '' }))).toThrow('curator_revision must be a non-empty string')
   })
 
-  test('full analysis preserves existing tags and stores a fresh AI suggestion', () => {
+  test('full analysis replaces existing AI tags with the latest decision', () => {
     const parsed = parseResourceSemanticModelDecision(decision({ usageTags: ['building'] }))
     const result = applyResourceSemanticDecision({
       id: 'element-1', packId: 'pack-1', name: 'Asset', path: 'asset.glb', category: 'models', kind: 'model',
       specs: { contentHash }, usageTags: ['environment'], usageTagsMode: 'override', dependencies: [], status: 'ready',
-    }, parsed, '2026-08-07T00:00:00.000Z', ['environment'], { commitMode: 'refresh-suggestion' })
+    }, parsed, { replaceExisting: true })
 
-    expect(result.outcome).toBe('suggested')
-    expect(result.element.usageTags).toEqual(['environment'])
-    expect(result.element.semanticSuggestion?.usageTags).toEqual(['building'])
+    expect(result.outcome).toBe('committed')
+    expect(result.element.usageTags).toEqual(['building'])
+  })
+
+  test('commits medium and low confidence decisions through the canonical tag path', () => {
+    for (const confidence of ['medium', 'low'] as const) {
+      const parsed = parseResourceSemanticModelDecision(decision({ confidence }))
+      const result = applyResourceSemanticDecision({
+        id: 'element-1', packId: 'pack-1', name: 'Asset', path: 'asset.glb', category: 'models', kind: 'model',
+        specs: { contentHash }, usageTagsMode: 'inherit', dependencies: [], status: 'ready',
+      }, parsed)
+      expect(result.outcome).toBe('committed')
+      expect(result.element.usageTags).toEqual(['environment', 'terrain'])
+    }
   })
 
   test('never analyzes or changes a manual-only element', () => {
@@ -125,7 +129,7 @@ describe('canonical resource semantic decisions', () => {
       specs: { contentHash }, usageTags: ['environment' as const], usageTagsMode: 'manual-only' as const, dependencies: [], status: 'ready',
     }
 
-    const result = applyResourceSemanticDecision(element, parsed, '2026-08-07T00:00:00.000Z', ['environment'], { commitMode: 'refresh-suggestion' })
+    const result = applyResourceSemanticDecision(element, parsed, { replaceExisting: true })
 
     expect(result.outcome).toBe('skipped')
     expect(result.element).toEqual(element)

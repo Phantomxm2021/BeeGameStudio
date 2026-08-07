@@ -78,15 +78,6 @@ export type ResourceElement = {
   relations?: readonly { kind: string; targetElementId: string; role?: string; required?: boolean }[]
   dependencies: readonly string[]
   dependencyBindings?: readonly { referencePath: string; dependencyElementId: string; kind?: string }[]
-  semanticSuggestion?: {
-    usageTags: readonly string[]
-    styles: readonly string[]
-    relations: readonly { kind: string; targetElementId: string; role?: string; required?: boolean }[]
-    evidence: readonly { source: 'content_profile' | 'technical_facts' | 'content_preview'; reference: string; observation: string }[]
-    confidence: 'high' | 'medium' | 'low'
-    generatedAt: string
-    generatorRevision: string
-  }
   status: string
   styleOverride?: string | null
   dimensionOverride?: '2D' | '3D' | 'agnostic'
@@ -104,29 +95,12 @@ export type ResourceProcessingUsage = {
   totalTokens: number
   creditsMicro: number
 }
-export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements' | 'semantic-curate-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; usage?: ResourceProcessingUsage; analysisMode?: 'missing' | 'all'; retryOfJobId?: string; createdAt: string; updatedAt: string }
+export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements' | 'semantic-curate-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; usage?: ResourceProcessingUsage; analysisMode?: 'missing' | 'all'; retryOfJobId?: string; providerBatchId?: string; providerBatchStatus?: 'submitting' | 'processing' | 'ended' | 'unknown'; createdAt: string; updatedAt: string }
 export type ResourceSemanticCurationStartOptions = { mode?: 'missing' | 'all' }
 export type ResourceCurationQueue = {
-  items: readonly (ResourceElement & { semanticSuggestion?: NonNullable<ResourceElement['semanticSuggestion']> })[]
-  counts: { pendingSuggestions: number; missingSemanticTags: number; technicalIssues: number; dependencyIssues: number }
+  items: readonly ResourceElement[]
+  counts: { pendingItems: number; missingSemanticTags: number; technicalIssues: number; dependencyIssues: number }
   usageTagOptions: readonly string[]
-}
-export type ResourceCurationDecision = {
-  elementId: string
-  usageTags: readonly string[]
-  sourceContentHash?: string
-  suggestionRevision?: string
-  styleOverride?: string | null
-}
-export type ResourceCurationBatchInput = {
-  decisions: readonly ResourceCurationDecision[]
-}
-export type ResourceCurationRejectInput = {
-  elementIds: readonly string[]
-}
-export type ResourceCurationMutationResult = {
-  updatedElementIds: readonly string[]
-  counts?: ResourceCurationQueue['counts']
 }
 export type ResourceElementUploadOptions = {
   signal?: AbortSignal;
@@ -274,18 +248,6 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     },
     async getCurationQueue(packId: string): Promise<ResourceCurationQueue> {
       return request<ResourceCurationQueue>(`/api/resource-packs/${encodeURIComponent(packId)}/curation`)
-    },
-    async confirmCuration(packId: string, input: ResourceCurationBatchInput): Promise<ResourceCurationMutationResult> {
-      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/curation/confirm`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
-      const result = (await response.json().catch(() => undefined)) as (ResourceCurationMutationResult & { error?: { code?: string; message?: string } }) | undefined
-      if (!response.ok || !result?.updatedElementIds) throw new ResourceLibraryApiError(result?.error?.message || `Resource curation confirmation failed (${response.status})`, response.status, result?.error?.code || 'resource_curation_confirm_failed')
-      return result
-    },
-    async rejectCuration(packId: string, input: ResourceCurationRejectInput): Promise<ResourceCurationMutationResult> {
-      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/curation/reject`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
-      const result = (await response.json().catch(() => undefined)) as (ResourceCurationMutationResult & { error?: { code?: string; message?: string } }) | undefined
-      if (!response.ok || !result?.updatedElementIds) throw new ResourceLibraryApiError(result?.error?.message || `Resource curation rejection failed (${response.status})`, response.status, result?.error?.code || 'resource_curation_reject_failed')
-      return result
     },
     async startSemanticCuration(packId: string, options: ResourceSemanticCurationStartOptions = {}): Promise<ResourceProcessingJob> {
       const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/semantic-curation`), { method: 'POST', ...(options.mode ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(options) } : {}) })

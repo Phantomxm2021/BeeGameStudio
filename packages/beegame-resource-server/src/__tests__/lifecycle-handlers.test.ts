@@ -423,8 +423,7 @@ describe('Supabase resource lifecycle handlers', () => {
       id: 'element-1', pack_id: 'pack-1', name: 'hero.glb', path: 'models/hero.glb',
       category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready',
       style_override: 'stylized', dimension_override: '3D', usage_tags: ['character'],
-      semantic_suggestion: { usageTags: ['building'], styles: [], relations: [], evidence: ['confirmed folder policy'], confidence: 'high', generatedAt: '2026-01-01T00:00:00.000Z', generatorRevision: 'test' },
-    })).toEqual(expect.objectContaining({ packId: 'pack-1', styleOverride: 'stylized', dimensionOverride: '3D', usageTags: ['character'], semanticSuggestion: expect.objectContaining({ usageTags: ['building'] }) }))
+    })).toEqual(expect.objectContaining({ packId: 'pack-1', styleOverride: 'stylized', dimensionOverride: '3D', usageTags: ['character'] }))
   })
 
   test('preserves null to clear an element style override', () => {

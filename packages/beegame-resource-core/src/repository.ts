@@ -1,5 +1,5 @@
-import { RESOURCE_USAGE_TAGS, type PackSummary, type ResourceCatalogPack, type ResourceCategory, type ResourceCurationBatchInput, type ResourceCurationRejectInput, type ResourceCurationQueue, type ResourceElement, type ResourceFolder, type ResourcePack } from './types'
-import { applyResourceSemanticDecision, type ResourceSemanticCommitMode, type ResourceSemanticCommitResult, type ResourceSemanticModelDecision } from './semantic-curation'
+import { RESOURCE_USAGE_TAGS, type PackSummary, type ResourceCatalogPack, type ResourceCategory, type ResourceCurationQueue, type ResourceElement, type ResourceFolder, type ResourcePack } from './types'
+import { applyResourceSemanticDecision, type ResourceSemanticCommitResult, type ResourceSemanticModelDecision } from './semantic-curation'
 import { validateResourceElement, validateResourcePack } from './validation'
 import { assertResourcePackPublishable } from './publish-readiness'
 import { resolveEffectiveResourceMetadata } from './metadata-policy'
@@ -19,10 +19,8 @@ export type ResourceRepository = {
   updateFolder(packId: string, folderId: string, input: { name?: string }): Promise<ResourceFolder | undefined>
   deleteFolder(packId: string, folderId: string): Promise<boolean>
   updateElement(packId: string, elementId: string, input: Partial<ResourceElement>): Promise<ResourceElement | undefined>
-  commitSemanticDecision?(packId: string, decision: ResourceSemanticModelDecision, generatedAt: string, options?: { commitMode?: ResourceSemanticCommitMode }): Promise<ResourceSemanticCommitResult>
+  commitSemanticDecision?(packId: string, decision: ResourceSemanticModelDecision, options?: { replaceExisting?: boolean }): Promise<ResourceSemanticCommitResult>
   listCuration?(packId: string): Promise<ResourceCurationQueue>
-  confirmCuration?(packId: string, input: ResourceCurationBatchInput): Promise<ResourceElement[]>
-  rejectCuration?(packId: string, input: ResourceCurationRejectInput): Promise<ResourceElement[]>
   deleteElement(packId: string, elementId: string): Promise<boolean>
   publishPack(packId: string): Promise<ResourcePack>
   archivePack(packId: string): Promise<ResourcePack>
@@ -112,11 +110,10 @@ export function createInMemoryResourceRepository(input: {
       elements[elements.indexOf(element)] = updated
       return updated
     },
-    async commitSemanticDecision(packId, decision, generatedAt, options) {
+    async commitSemanticDecision(packId, decision, options) {
       const element = elements.find(candidate => candidate.packId === packId && candidate.id === decision.elementId)
       if (!element) throw new Error('Resource element not found')
-      const effective = resolvedElement(element)
-      const result = applyResourceSemanticDecision(element, decision, generatedAt, effective.usageTags ?? [], options)
+      const result = applyResourceSemanticDecision(element, decision, options)
       const stored = validateResourceElement(result.element)
       elements[elements.indexOf(element)] = stored
       return { ...result, element: resolvedElement(stored) }
@@ -126,59 +123,18 @@ export function createInMemoryResourceRepository(input: {
       const scoped = elements.filter(element => element.packId === packId)
       const resolved = pack ? scoped.map(resolvedElement) : scoped
       const items = scoped
-        .filter(element => element.status === 'ready' && (element.usageTagsMode !== 'override' || Boolean(element.semanticSuggestion)))
+        .filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only')
         .map(element => resolvedElement(element))
       return {
         items,
         counts: {
-          pendingSuggestions: items.length,
-          missingSemanticTags: scoped.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override').length,
+          pendingItems: items.length,
+          missingSemanticTags: scoped.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only').length,
           technicalIssues: resolved.filter(element => !element.assetKind || !element.specs.contentHash).length,
           dependencyIssues: resolved.filter(element => element.dependencies.some(id => !scoped.some(candidate => candidate.id === id))).length,
         },
         usageTagOptions: RESOURCE_USAGE_TAGS,
       }
-    },
-    async confirmCuration(packId, input) {
-      if (!input.decisions.length) throw new Error('Resource curation decisions are required')
-      const decisionIds = input.decisions.map(decision => decision.elementId)
-      if (new Set(decisionIds).size !== decisionIds.length || input.decisions.some(decision => !decision.usageTags.length)) {
-        throw new Error('Resource curation decisions are invalid')
-      }
-      const selected = elements.filter(element => element.packId === packId && decisionIds.includes(element.id))
-      if (selected.length !== input.decisions.length) throw new Error('Resource curation element selection is invalid')
-      const selectedById = new Map(selected.map(element => [element.id, element]))
-      const updates = input.decisions.map(decision => {
-        const element = selectedById.get(decision.elementId)
-        if (!element) throw new Error('Resource curation element selection is invalid')
-        if (decision.sourceContentHash && element.specs.contentHash !== decision.sourceContentHash) throw new Error('Resource curation decision content hash is stale')
-        if (element.semanticSuggestion) {
-          if (decision.sourceContentHash !== element.semanticSuggestion.sourceContentHash || decision.suggestionRevision !== element.semanticSuggestion.generatorRevision) {
-            throw new Error('Resource curation decision is stale')
-          }
-        }
-        return { element, decision }
-      })
-      for (const { element, decision } of updates) {
-        const updated = validateResourceElement({
-          ...element,
-          usageTags: [...new Set(decision.usageTags)],
-          usageTagsMode: 'override',
-          ...(decision.styleOverride === undefined ? {} : { styleOverride: decision.styleOverride ?? undefined }),
-          semanticSuggestion: undefined,
-        })
-        elements[elements.indexOf(element)] = updated
-      }
-      return selected.map(element => resolvedElement(elements.find(candidate => candidate.id === element.id)!))
-    },
-    async rejectCuration(packId, input) {
-      const selected = elements.filter(element => element.packId === packId && input.elementIds.includes(element.id))
-      if (selected.length !== input.elementIds.length) throw new Error('Resource curation element selection is invalid')
-      for (const element of selected) {
-        const { semanticSuggestion: _discarded, ...withoutSuggestion } = element
-        elements[elements.indexOf(element)] = withoutSuggestion
-      }
-      return selected.map(element => resolvedElement(elements.find(candidate => candidate.id === element.id)!))
     },
     async deleteElement(packId, elementId) {
       const element = elements.find(item => item.id === elementId && item.packId === packId)

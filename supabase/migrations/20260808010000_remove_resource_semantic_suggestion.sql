@@ -2,6 +2,9 @@ begin;
 
 drop view if exists public.beegame_resource_pack_catalog;
 
+alter table public.beegame_resource_elements
+  drop column if exists semantic_suggestion;
+
 create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as

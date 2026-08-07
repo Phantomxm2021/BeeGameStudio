@@ -46,16 +46,15 @@ describe('in-memory resource repository', () => {
       curatorRevision: 'semantic-curator-v1',
     }
 
-    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+    const result = await repository.commitSemanticDecision!('pack-1', decision)
     const stored = await repository.getElement('pack-1', 'element-1')
 
     expect(result.outcome).toBe('committed')
     expect(result.receiptId).toContain('element-1')
     expect(stored).toEqual(expect.objectContaining({ usageTags: ['ui'], usageTagsMode: 'override', assetKind: 'sprite-sheet', specs: expect.objectContaining({ width: 512 }) }))
-    expect(stored?.semanticSuggestion).toBeUndefined()
   })
 
-  test('stores medium confidence as a suggestion without making it searchable', async () => {
+  test('applies every AI usage tag regardless of confidence', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [pack],
       elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit' }],
@@ -66,32 +65,11 @@ describe('in-memory resource repository', () => {
       curatorRevision: 'semantic-curator-v1',
     }
 
-    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+    const result = await repository.commitSemanticDecision!('pack-1', decision)
     const stored = await repository.getElement('pack-1', 'element-1')
 
-    expect(result.outcome).toBe('suggested')
-    expect(stored?.usageTags).toEqual([])
-    expect(stored?.semanticSuggestion).toEqual(expect.objectContaining({ sourceContentHash: 'a'.repeat(64), confidence: 'medium', usageTags: ['ui'] }))
-  })
-
-  test('confirms heterogeneous curation decisions independently per element', async () => {
-    const repository = createInMemoryResourceRepository({
-      packs: [pack],
-      elements: [
-        { ...element, id: 'element-a', specs: { ...element.specs, contentHash: 'a'.repeat(64) }, usageTags: undefined, usageTagsMode: 'inherit', semanticSuggestion: { sourceContentHash: 'a'.repeat(64), usageTags: ['building'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'a', observation: 'building evidence' }], confidence: 'high', generatedAt: '2026-01-01T00:00:00.000Z', generatorRevision: 'revision-a' } },
-        { ...element, id: 'element-b', specs: { ...element.specs, contentHash: 'b'.repeat(64) }, usageTags: undefined, usageTagsMode: 'inherit', semanticSuggestion: { sourceContentHash: 'b'.repeat(64), usageTags: ['environment'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'b', observation: 'environment evidence' }], confidence: 'high', generatedAt: '2026-01-01T00:00:00.000Z', generatorRevision: 'revision-b' } },
-      ],
-    })
-
-    await repository.confirmCuration!('pack-1', {
-      decisions: [
-        { elementId: 'element-a', usageTags: ['building'], sourceContentHash: 'a'.repeat(64), suggestionRevision: 'revision-a' },
-        { elementId: 'element-b', usageTags: ['environment'], sourceContentHash: 'b'.repeat(64), suggestionRevision: 'revision-b' },
-      ],
-    })
-
-    await expect(repository.getElement('pack-1', 'element-a')).resolves.toEqual(expect.objectContaining({ usageTags: ['building'], usageTagsMode: 'override' }))
-    await expect(repository.getElement('pack-1', 'element-b')).resolves.toEqual(expect.objectContaining({ usageTags: ['environment'], usageTagsMode: 'override' }))
+    expect(result.outcome).toBe('committed')
+    expect(stored).toEqual(expect.objectContaining({ usageTags: ['ui'], usageTagsMode: 'override' }))
   })
 
   test('rejects a semantic decision when the content hash is stale', async () => {
@@ -102,7 +80,7 @@ describe('in-memory resource repository', () => {
       curatorRevision: 'semantic-curator-v1',
     }
 
-    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).rejects.toThrow('content hash is stale')
+    await expect(repository.commitSemanticDecision!('pack-1', decision)).rejects.toThrow('content hash is stale')
   })
 
   test('lists Pack summaries with element counts', async () => {
@@ -156,7 +134,7 @@ describe('in-memory resource repository', () => {
       curatorRevision: 'semantic-curator-v1',
     }
 
-    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).resolves.toEqual(expect.objectContaining({ outcome: 'committed' }))
+    await expect(repository.commitSemanticDecision!('pack-1', decision)).resolves.toEqual(expect.objectContaining({ outcome: 'committed' }))
     await expect(repository.getElement('pack-1', 'element-1')).resolves.toEqual(expect.objectContaining({ usageTags: ['character'], usageTagsMode: 'override', usageTagsSource: 'element' }))
   })
 

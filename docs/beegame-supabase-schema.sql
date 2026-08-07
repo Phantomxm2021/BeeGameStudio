@@ -319,7 +319,6 @@ create table if not exists public.beegame_resource_elements (
   preview jsonb,
   specs jsonb not null default '{}'::jsonb,
   usage_tags text[] not null default '{}',
-  semantic_suggestion jsonb,
   usage_tags_mode text not null default 'inherit' check (usage_tags_mode in ('inherit', 'override', 'manual-only')),
   asset_kind text,
   capabilities text[] not null default '{}',
@@ -353,6 +352,8 @@ create table if not exists public.beegame_resource_processing_jobs (
   model_config_id text,
   analysis_mode text not null default 'missing' check (analysis_mode in ('missing', 'all')),
   retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null,
+  provider_batch_id text,
+  provider_batch_status text check (provider_batch_status is null or provider_batch_status in ('submitting', 'processing', 'ended', 'unknown')),
   kind text not null check (kind in ('inspect-elements', 'semantic-curate-elements')),
   status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
   total_items integer not null default 0 check (total_items >= 0),
@@ -396,6 +397,9 @@ create index if not exists beegame_resource_processing_jobs_pack_status_idx
   on public.beegame_resource_processing_jobs (pack_id, status, created_at desc);
 create index if not exists beegame_resource_processing_jobs_retry_of_idx
   on public.beegame_resource_processing_jobs (retry_of_job_id);
+create index if not exists beegame_resource_processing_jobs_provider_batch_idx
+  on public.beegame_resource_processing_jobs (provider_batch_id)
+  where provider_batch_id is not null and status in ('queued', 'running');
 create index if not exists beegame_resource_processing_items_job_status_idx
   on public.beegame_resource_processing_items (job_id, status, created_at);
 
@@ -417,7 +421,20 @@ create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as
 with selectable_elements as (
-  select e.*
+  select
+    e.id,
+    e.pack_id,
+    e.status,
+    e.usage_tags_mode,
+    e.usage_tags,
+    e.asset_kind,
+    e.specs,
+    e.dependencies,
+    e.dependency_bindings,
+    e.relations,
+    e.category,
+    e.capabilities,
+    e.path
   from public.beegame_resource_elements e
   where e.status = 'ready'
     and e.usage_tags_mode = 'override'
@@ -477,8 +494,6 @@ alter table public.beegame_resource_processing_jobs
   add column if not exists analysis_mode text not null default 'missing';
 alter table public.beegame_resource_processing_jobs
   add column if not exists retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null;
-alter table public.beegame_resource_elements
-  add column if not exists semantic_suggestion jsonb;
 update public.beegame_resource_elements
 set usage_tags_mode = 'override'
 where usage_tags_mode = 'inherit' and cardinality(usage_tags) > 0;

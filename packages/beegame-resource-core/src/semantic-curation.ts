@@ -6,7 +6,6 @@ import {
   type ResourceContentProfile,
   type ResourceElement,
   type ResourceSemanticEvidence,
-  type ResourceSemanticSuggestion,
   type ResourceTechnicalFacts,
   type ResourceUsageTag,
 } from './types'
@@ -179,8 +178,7 @@ export class ResourceSemanticDecisionError extends Error {
   }
 }
 
-export type ResourceSemanticCommitOutcome = 'committed' | 'suggested' | 'skipped'
-export type ResourceSemanticCommitMode = 'standard' | 'refresh-suggestion'
+export type ResourceSemanticCommitOutcome = 'committed' | 'skipped'
 export type ResourceSemanticCommitResult = {
   receiptId: string
   outcome: ResourceSemanticCommitOutcome
@@ -225,34 +223,12 @@ export function parseResourceSemanticModelDecision(value: unknown): ResourceSema
   }
 }
 
-export function isResourceSemanticCommitEligible(
-  decision: ResourceSemanticModelDecision,
-): boolean {
-  return decision.confidence === 'high' && decision.usageTags.length > 0 && decision.evidence.length > 0
-}
-
 export function isResourceUsageTag(value: unknown): value is ResourceUsageTag {
   return isAllowed(value, RESOURCE_USAGE_TAGS)
 }
 
 export function isResourceContentHash(value: unknown): value is string {
   return typeof value === 'string' && value.length === 64 && [...value].every(character => '0123456789abcdef'.includes(character))
-}
-
-export function buildResourceSemanticAISuggestion(
-  decision: ResourceSemanticModelDecision,
-  generatedAt: string,
-): ResourceSemanticSuggestion {
-  return {
-    sourceContentHash: decision.sourceContentHash,
-    usageTags: decision.usageTags,
-    styles: [],
-    relations: [],
-    evidence: decision.evidence,
-    confidence: decision.confidence,
-    generatedAt,
-    generatorRevision: decision.curatorRevision,
-  }
 }
 
 export function semanticDecisionReceiptId(decision: ResourceSemanticModelDecision): string {
@@ -262,9 +238,7 @@ export function semanticDecisionReceiptId(decision: ResourceSemanticModelDecisio
 export function applyResourceSemanticDecision(
   element: ResourceElement,
   decision: ResourceSemanticModelDecision,
-  generatedAt: string,
-  effectiveUsageTags: readonly ResourceUsageTag[],
-  options: { commitMode?: ResourceSemanticCommitMode } = {},
+  options: { replaceExisting?: boolean } = {},
 ): ResourceSemanticCommitResult {
   if (element.id !== decision.elementId) throw new ResourceSemanticDecisionError('semantic decision element identity does not match')
   if (element.specs.contentHash !== decision.sourceContentHash) throw new ResourceSemanticDecisionError('semantic decision content hash is stale')
@@ -272,35 +246,14 @@ export function applyResourceSemanticDecision(
   if (element.usageTagsMode === 'manual-only') return { receiptId, outcome: 'skipped', element }
   const hasElementOwnedUsageTags = element.usageTagsMode === 'override' ||
     (element.usageTagsMode === undefined && Boolean(element.usageTags?.length))
-  if (options.commitMode !== 'refresh-suggestion' && hasElementOwnedUsageTags) return { receiptId, outcome: 'skipped', element }
-  if (options.commitMode === 'refresh-suggestion') {
-    return {
-      receiptId,
-      outcome: 'suggested',
-      element: {
-        ...element,
-        semanticSuggestion: buildResourceSemanticAISuggestion(decision, generatedAt),
-      },
-    }
-  }
-  if (isResourceSemanticCommitEligible(decision)) {
-    return {
-      receiptId,
-      outcome: 'committed',
-      element: {
-        ...element,
-        usageTags: decision.usageTags,
-        usageTagsMode: 'override',
-        semanticSuggestion: undefined,
-      },
-    }
-  }
+  if (!options.replaceExisting && hasElementOwnedUsageTags) return { receiptId, outcome: 'skipped', element }
   return {
     receiptId,
-    outcome: 'suggested',
+    outcome: 'committed',
     element: {
       ...element,
-      semanticSuggestion: buildResourceSemanticAISuggestion(decision, generatedAt),
+      usageTags: decision.usageTags,
+      usageTagsMode: 'override',
     },
   }
 }

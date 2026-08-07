@@ -158,17 +158,6 @@ export type ResourceElementStatus =
 export type ResourceUsageTagsMode = 'inherit' | 'override' | 'manual-only'
 export type ResourceUsageTagsSource = 'element' | 'none'
 
-export type ResourceSemanticSuggestion = {
-  sourceContentHash?: string
-  usageTags: readonly ResourceUsageTag[]
-  styles: readonly string[]
-  relations: readonly ResourceElementRelation[]
-  evidence: readonly ResourceSemanticEvidence[]
-  confidence: 'high' | 'medium' | 'low'
-  generatedAt: string
-  generatorRevision: string
-}
-
 export type ResourceFolder = {
   id: string
   packId: string
@@ -230,8 +219,6 @@ export type ResourceElement = {
   usageTagsMode?: ResourceUsageTagsMode
   /** Read-only provenance of the effective usageTags returned by a repository. */
   usageTagsSource?: ResourceUsageTagsSource
-  /** Temporary curation input; it is never used by catalog reads or matching. */
-  semanticSuggestion?: ResourceSemanticSuggestion
   assetKind?: ResourceAssetKind
   capabilities?: readonly ResourceCapability[]
   /** Inspected contents of this logical asset root (for example one GLB). */
@@ -336,14 +323,12 @@ export type ResourceMatchDiagnostic = {
   count: number
 }
 
-export type ResourceCurationQueueItem = ResourceElement & {
-  semanticSuggestion?: ResourceSemanticSuggestion
-}
+export type ResourceCurationQueueItem = ResourceElement
 
 export type ResourceCurationQueue = {
   items: readonly ResourceCurationQueueItem[]
   counts: {
-    pendingSuggestions: number
+    pendingItems: number
     missingSemanticTags: number
     technicalIssues: number
     dependencyIssues: number
@@ -355,17 +340,12 @@ export type ResourceCurationDecision = {
   elementId: string
   usageTags: readonly ResourceUsageTag[]
   sourceContentHash?: string
-  suggestionRevision?: string
   styleOverride?: string | null
 }
 
 /** A batch transports independent element decisions; it never carries shared tags. */
 export type ResourceCurationBatchInput = {
   decisions: readonly ResourceCurationDecision[]
-}
-
-export type ResourceCurationRejectInput = {
-  elementIds: readonly string[]
 }
 
 export type ResourceRequirementMatchGroup = {

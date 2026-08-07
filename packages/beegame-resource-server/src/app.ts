@@ -22,8 +22,6 @@ import {
   type ResourceCategory,
   type ResourceAssetKind,
   type ResourceCapability,
-  type ResourceCurationBatchInput,
-  type ResourceCurationRejectInput,
   type ResourceEmbeddedComponentKind,
   type ResourceRelationKind,
   type ResourceUsageTag,
@@ -115,31 +113,12 @@ export function createBeeGameResourceServerApp(
         }
       }
       try {
-      const curationMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/curation(?:\/(confirm|reject))?$/)
+      const curationMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/curation$/)
       if (curationMatch) {
         const packId = decodeURIComponent(curationMatch[1])
-        if (request.method === 'GET' && !curationMatch[2]) {
+        if (request.method === 'GET') {
           if (!options.repository.listCuration) return corsResponse(jsonError(503, 'not_configured', 'Resource curation is not configured'), options.corsOrigin)
           return corsResponse(Response.json(await options.repository.listCuration(packId)), options.corsOrigin)
-        }
-        if (request.method === 'POST' && curationMatch[2]) {
-          const action = curationMatch[2]
-          const input = await request.json()
-          let updated: ResourceElement[] | undefined
-          let auditedElementIds: readonly string[]
-          if (action === 'confirm') {
-            const parsed = parseResourceCurationBatch(input)
-            updated = await options.repository.confirmCuration?.(packId, parsed)
-            auditedElementIds = parsed.decisions.map(decision => decision.elementId)
-          } else {
-            const parsed = parseResourceCurationReject(input)
-            updated = await options.repository.rejectCuration?.(packId, parsed)
-            auditedElementIds = parsed.elementIds
-          }
-          if (!updated) return corsResponse(jsonError(503, 'not_configured', 'Resource curation is not configured'), options.corsOrigin)
-          await audit({ actorId: user!.id, action: `curation.${action}`, packId, metadata: { elementIds: auditedElementIds } })
-          const queue = await options.repository.listCuration?.(packId)
-          return corsResponse(Response.json({ updatedElementIds: updated.map(element => element.id), ...(queue ? { counts: queue.counts } : {}) }), options.corsOrigin)
         }
         return corsResponse(jsonError(405, 'method_not_allowed', 'Resource curation method is not supported'), options.corsOrigin)
       }
@@ -332,7 +311,7 @@ export function createBeeGameResourceServerApp(
         const modelConfigId = await options.semanticCuration.resolveModelConfigId(modelConfigOwnerId, requestedModelConfigId)
         const elements = await options.repository.listElements(packId)
         const elementIds = elements
-          .filter(element => element.status === 'ready' && resolveResourceSemanticVisualKind(element) !== undefined && element.usageTagsMode !== 'manual-only' && (analysisMode === 'all' || (element.usageTagsMode !== 'override' || Boolean(element.semanticSuggestion))))
+          .filter(element => element.status === 'ready' && resolveResourceSemanticVisualKind(element) !== undefined && element.usageTagsMode !== 'manual-only' && (analysisMode === 'all' || element.usageTagsMode !== 'override'))
           .filter(element => isResourceContentHash(element.specs.contentHash))
           .map(element => element.id)
         const job = await options.resourceProcessing.start(packId, elementIds, { kind: 'semantic-curate-elements', analysisMode, curatorRevision: options.semanticCuration.curatorRevision, ownerId: modelConfigOwnerId, modelConfigId })
@@ -633,40 +612,6 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
   }
 }
 
-function parseResourceCurationBatch(value: unknown): ResourceCurationBatchInput {
-  const record = requiredRecord(value, 'Resource curation request')
-  if (!Array.isArray(record.decisions) || record.decisions.length === 0) {
-    throw new ResourceRequestValidationError('Resource curation decisions must be a non-empty array')
-  }
-  const decisions = record.decisions.map((value, index) => {
-    const decision = requiredRecord(value, `Resource curation decision ${index + 1}`)
-    const elementId = requiredString(decision.elementId, `Resource curation decision ${index + 1} elementId`)
-    const usageTags = validatedEnumList(decision.usageTags, RESOURCE_USAGE_TAGS, `Resource curation decision ${index + 1} usageTags`) as ResourceCurationBatchInput['decisions'][number]['usageTags']
-    if (!usageTags?.length) throw new ResourceRequestValidationError(`Resource curation decision ${index + 1} usageTags are required`)
-    const sourceContentHash = decision.sourceContentHash === undefined ? undefined : requiredString(decision.sourceContentHash, `Resource curation decision ${index + 1} sourceContentHash`)
-    if (sourceContentHash !== undefined && !isResourceContentHash(sourceContentHash)) throw new ResourceRequestValidationError(`Resource curation decision ${index + 1} sourceContentHash is invalid`)
-    const suggestionRevision = decision.suggestionRevision === undefined ? undefined : requiredString(decision.suggestionRevision, `Resource curation decision ${index + 1} suggestionRevision`)
-    const styleOverride = decision.styleOverride === undefined
-      ? undefined
-      : decision.styleOverride === null
-        ? null
-        : requiredString(decision.styleOverride, `Resource curation decision ${index + 1} styleOverride`)
-    return { elementId, usageTags, ...(sourceContentHash === undefined ? {} : { sourceContentHash }), ...(suggestionRevision === undefined ? {} : { suggestionRevision }), ...(styleOverride === undefined ? {} : { styleOverride }) }
-  })
-  if (new Set(decisions.map(decision => decision.elementId)).size !== decisions.length) throw new ResourceRequestValidationError('Resource curation decision elementIds must be unique')
-  return { decisions }
-}
-
-function parseResourceCurationReject(value: unknown): ResourceCurationRejectInput {
-  const record = requiredRecord(value, 'Resource curation rejection request')
-  const rawIds = record.elementIds
-  if (!Array.isArray(rawIds) || rawIds.length === 0 || rawIds.some(item => typeof item !== 'string' || !item.trim())) {
-    throw new ResourceRequestValidationError('Resource curation elementIds must be a non-empty array of strings')
-  }
-  const elementIds = [...new Set(rawIds.map(item => String(item).trim()))]
-  if (elementIds.length !== rawIds.length) throw new ResourceRequestValidationError('Resource curation elementIds must be unique')
-  return { elementIds }
-}
 
 function parseResourceRequirementMatchRequest(value: unknown): ResourceRequirementMatchRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

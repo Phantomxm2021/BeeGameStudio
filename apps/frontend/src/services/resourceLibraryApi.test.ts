@@ -158,15 +158,4 @@ describe('resource library API', () => {
     await expect(api.listPacks()).rejects.toMatchObject({ status: 403, code: 'forbidden' })
   })
 
-  test('confirms one curation batch through the canonical resource endpoint', async () => {
-    const requests: Array<{ url: string; init?: RequestInit }> = []
-    const api = createResourceLibraryApi(async (input, init) => {
-      requests.push({ url: String(input), init })
-      return new Response(JSON.stringify({ updatedElementIds: ['element-a'], counts: { pendingSuggestions: 0, missingSemanticTags: 0, technicalIssues: 0, dependencyIssues: 0 } }), { status: 200 })
-    })
-    await expect(api.confirmCuration('pack/1', { decisions: [{ elementId: 'element-a', usageTags: ['building'] }] })).resolves.toEqual(expect.objectContaining({ updatedElementIds: ['element-a'] }))
-    expect(requests[0]?.url).toBe('/api/resource-packs/pack%2F1/curation/confirm')
-    expect(requests[0]?.init?.method).toBe('POST')
-    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ decisions: [{ elementId: 'element-a', usageTags: ['building'] }] })
-  })
 })
