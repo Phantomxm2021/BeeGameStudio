@@ -2,6 +2,7 @@ import { resolve4 as resolve4FromDns, resolve6 as resolve6FromDns } from 'node:d
 import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
 import { isIP } from 'node:net'
+import type { ConnectionOptions } from 'node:tls'
 // Bun resolves the bare `undici` specifier to its compatibility shim, whose
 // Agent does not implement the Dispatcher lifecycle. Use the package entrypoint
 // explicitly so pinned DNS lookups are enforced by a real Undici dispatcher.
@@ -26,6 +27,11 @@ export type ApprovedOutboundTarget = {
   trustedDevelopmentProxy?: true
   lookup: (hostname: string, options: unknown, callback: LookupCallback) => void
 }
+
+export type PinnedUndiciTlsOptions = Pick<
+  ConnectionOptions,
+  'ca' | 'cert' | 'key' | 'passphrase'
+>
 
 export type OutboundTargetRejectionCode =
   | 'invalid_url'
@@ -121,8 +127,16 @@ export function createPinnedHttpsAgent(target: ApprovedOutboundTarget): HttpsAge
   return new HttpsAgent({ lookup: target.lookup as never })
 }
 
-export function createPinnedUndiciDispatcher(target: ApprovedOutboundTarget): UndiciAgent {
-  return new UndiciAgent({ connect: { lookup: target.lookup as never } })
+export function createPinnedUndiciDispatcher(
+  target: ApprovedOutboundTarget,
+  options: { tls?: PinnedUndiciTlsOptions } = {},
+): UndiciAgent {
+  return new UndiciAgent({
+    connect: {
+      ...options.tls,
+      lookup: target.lookup as never,
+    },
+  })
 }
 
 function isAllowedProtocol(url: URL, allowHttp: boolean): boolean {

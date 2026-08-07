@@ -295,7 +295,6 @@ create table if not exists public.beegame_resource_packs (
   license text not null,
   version text not null,
   status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
-  element_defaults jsonb not null default '{}'::jsonb,
   cover_path text,
   element_count integer not null default 0 check (element_count >= 0),
   description text,
@@ -320,6 +319,7 @@ create table if not exists public.beegame_resource_elements (
   preview jsonb,
   specs jsonb not null default '{}'::jsonb,
   usage_tags text[] not null default '{}',
+  semantic_suggestion jsonb,
   usage_tags_mode text not null default 'inherit' check (usage_tags_mode in ('inherit', 'override', 'manual-only')),
   asset_kind text,
   capabilities text[] not null default '{}',
@@ -341,7 +341,6 @@ create table if not exists public.beegame_resource_folders (
   name text not null,
   parent_id text references public.beegame_resource_folders(id) on delete cascade,
   path text not null,
-  element_defaults jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (pack_id, path)
@@ -350,11 +349,21 @@ create table if not exists public.beegame_resource_folders (
 create table if not exists public.beegame_resource_processing_jobs (
   id text primary key,
   pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
-  kind text not null check (kind in ('inspect-elements')),
+  owner_id uuid,
+  model_config_id text,
+  analysis_mode text not null default 'missing' check (analysis_mode in ('missing', 'all')),
+  retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null,
+  kind text not null check (kind in ('inspect-elements', 'semantic-curate-elements')),
   status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
   total_items integer not null default 0 check (total_items >= 0),
   completed_items integer not null default 0 check (completed_items >= 0),
   failed_items integer not null default 0 check (failed_items >= 0),
+  input_tokens bigint not null default 0 check (input_tokens >= 0),
+  cache_read_tokens bigint not null default 0 check (cache_read_tokens >= 0),
+  cache_creation_tokens bigint not null default 0 check (cache_creation_tokens >= 0),
+  output_tokens bigint not null default 0 check (output_tokens >= 0),
+  total_tokens bigint not null default 0 check (total_tokens >= 0),
+  credits_micro bigint not null default 0 check (credits_micro >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -365,6 +374,18 @@ create table if not exists public.beegame_resource_processing_items (
   element_id text not null references public.beegame_resource_elements(id) on delete cascade,
   status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
   attempts integer not null default 0 check (attempts >= 0),
+  input_tokens bigint not null default 0 check (input_tokens >= 0),
+  cache_read_tokens bigint not null default 0 check (cache_read_tokens >= 0),
+  cache_creation_tokens bigint not null default 0 check (cache_creation_tokens >= 0),
+  output_tokens bigint not null default 0 check (output_tokens >= 0),
+  total_tokens bigint not null default 0 check (total_tokens >= 0),
+  credits_micro bigint not null default 0 check (credits_micro >= 0),
+  source_content_hash text,
+  curator_revision text,
+  batch_id text,
+  batch_receipt_id text,
+  failure_stage text check (failure_stage is null or failure_stage in ('runtime_transport', 'model_request', 'model_response', 'usage_billing')),
+  failure_trace_id text,
   last_error text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -373,11 +394,11 @@ create table if not exists public.beegame_resource_processing_items (
 
 create index if not exists beegame_resource_processing_jobs_pack_status_idx
   on public.beegame_resource_processing_jobs (pack_id, status, created_at desc);
+create index if not exists beegame_resource_processing_jobs_retry_of_idx
+  on public.beegame_resource_processing_jobs (retry_of_job_id);
 create index if not exists beegame_resource_processing_items_job_status_idx
   on public.beegame_resource_processing_items (job_id, status, created_at);
 
-alter table public.beegame_resource_packs
-  add column if not exists element_defaults jsonb not null default '{}'::jsonb;
 alter table public.beegame_resource_packs
   add column if not exists styles text[] not null default '{}';
 alter table public.beegame_resource_packs
@@ -395,6 +416,37 @@ alter table public.beegame_resource_packs
 create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as
+with selectable_elements as (
+  select e.*
+  from public.beegame_resource_elements e
+  where e.status = 'ready'
+    and e.usage_tags_mode = 'override'
+    and cardinality(e.usage_tags) > 0
+    and e.asset_kind is not null
+    and length(coalesce(e.specs ->> 'contentHash', '')) = 64
+    and not exists (
+      select 1
+      from jsonb_array_elements_text(e.dependencies) dependency_id
+      left join public.beegame_resource_elements dependency
+        on dependency.id = dependency_id
+      where dependency.id is null or dependency.status <> 'ready'
+    )
+    and not exists (
+      select 1
+      from jsonb_array_elements(e.dependency_bindings) binding
+      left join public.beegame_resource_elements dependency
+        on dependency.id = binding ->> 'dependencyElementId'
+      where dependency.id is null or dependency.status <> 'ready'
+    )
+    and not exists (
+      select 1
+      from jsonb_array_elements(e.relations) relation
+      left join public.beegame_resource_elements target
+        on target.id = relation ->> 'targetElementId'
+      where coalesce(relation ->> 'required', 'true') = 'true'
+        and (target.id is null or target.status <> 'ready')
+    )
+)
 select
   p.id as pack_id,
   p.version as pack_version,
@@ -407,8 +459,8 @@ select
   coalesce(p.tags, '{}') as tags,
   count(e.id)::integer as ready_element_count,
   coalesce(array_agg(distinct e.asset_kind) filter (where e.asset_kind is not null), '{}') as asset_kinds,
-  coalesce(array(select distinct unnest(e2.usage_tags) from public.beegame_resource_elements e2 where e2.pack_id = p.id and e2.status = 'ready'), '{}') as usage_tags,
-  coalesce(array(select distinct unnest(e3.capabilities) from public.beegame_resource_elements e3 where e3.pack_id = p.id and e3.status = 'ready'), '{}') as capabilities,
+  coalesce(array(select distinct unnest(e2.usage_tags) from selectable_elements e2 where e2.pack_id = p.id), '{}') as usage_tags,
+  coalesce(array(select distinct unnest(e3.capabilities) from selectable_elements e3 where e3.pack_id = p.id), '{}') as capabilities,
   coalesce(array_agg(distinct lower(reverse(split_part(reverse(e.path), '.', 1)))) filter (where e.id is not null and e.path like '%.%'), '{}') as formats,
   p.description,
   p.license,
@@ -416,13 +468,17 @@ select
   p.source,
   coalesce(p.compatible_engines, '{}') as compatible_engines
 from public.beegame_resource_packs p
-left join public.beegame_resource_elements e on e.pack_id = p.id and e.status = 'ready'
+left join selectable_elements e on e.pack_id = p.id
 where p.status = 'published'
 group by p.id;
-alter table public.beegame_resource_folders
-  add column if not exists element_defaults jsonb not null default '{}'::jsonb;
 alter table public.beegame_resource_elements
   add column if not exists usage_tags_mode text not null default 'inherit';
+alter table public.beegame_resource_processing_jobs
+  add column if not exists analysis_mode text not null default 'missing';
+alter table public.beegame_resource_processing_jobs
+  add column if not exists retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null;
+alter table public.beegame_resource_elements
+  add column if not exists semantic_suggestion jsonb;
 update public.beegame_resource_elements
 set usage_tags_mode = 'override'
 where usage_tags_mode = 'inherit' and cardinality(usage_tags) > 0;

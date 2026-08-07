@@ -8,6 +8,7 @@ import {
   computeWorkspaceRevision,
 } from './revision'
 import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
+import { auditAssetContract, type AssetContractAudit } from '../asset-contract-audit'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -43,6 +44,34 @@ export {
 
 const workspaceRecoveryQueues = new Map<string, Promise<void>>()
 const workspaceResumeQueues = new Map<string, Promise<DeliveryRun>>()
+
+export function shouldRefreshProvisionalResourceInventory(
+  run: Pick<DeliveryRun, 'phase' | 'resourceProductionState'>,
+  audit: Pick<AssetContractAudit, 'valid' | 'requirements' | 'resources'>,
+): boolean {
+  if (
+    !audit.valid ||
+    run.phase !== 'RESOURCE_PREPARATION' ||
+    run.resourceProductionState.currentTask !== 'RESOURCE_GATE'
+  )
+    return false
+
+  const requiredRequirementIds = new Set(
+    audit.requirements.filter(requirement => requirement.required).map(requirement => requirement.id),
+  )
+  const boundResourceIds = new Set(
+    run.resourceProductionState.inventoryReceipt?.bindings
+      .filter(binding => requiredRequirementIds.has(binding.requirementId))
+      .flatMap(binding => binding.resourceIds) ?? [],
+  )
+  return audit.resources.some(
+    resource =>
+      resource.provisional &&
+      resource.status === 'verified' &&
+      resource.issues.length === 0 &&
+      boundResourceIds.has(resource.id),
+  )
+}
 
 export class WorkflowRecoveryTransactionError extends Error {
   constructor(
@@ -988,6 +1017,22 @@ export async function retryRun(input: {
         })
     if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
       return acquired.run
+    const resourceRefresh =
+      !restoredHandoff &&
+      !changedReview &&
+      input.workspacePath &&
+      shouldRefreshProvisionalResourceInventory(
+        acquired.run,
+        auditAssetContract(input.workspacePath),
+      )
+    const retryBaseRun = resourceRefresh
+      ? {
+          ...acquired.run,
+          resourceProductionState: {
+            currentTask: 'RESOURCE_INVENTORY' as const,
+          },
+        }
+      : acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =
@@ -995,8 +1040,8 @@ export async function retryRun(input: {
       changedReview ??
       transitionDeliveryRun(
         {
-          ...acquired.run,
-          activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
+          ...retryBaseRun,
+          activeDispatch: replayable ? retryBaseRun.activeDispatch : undefined,
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
       )

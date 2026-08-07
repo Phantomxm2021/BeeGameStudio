@@ -8,4 +8,5 @@ export {
   type OutboundTargetInspection,
   type OutboundTargetPolicyOptions,
   type OutboundTargetRejectionCode,
+  type PinnedUndiciTlsOptions,
 } from './outbound-target-policy'

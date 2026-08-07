@@ -4,6 +4,7 @@ import {
   type ResourceElement,
   type ResourcePack,
 } from '../repository'
+import type { ResourceSemanticModelDecision } from '../semantic-curation'
 
 const pack: ResourcePack = {
   id: 'pack-1',
@@ -34,6 +35,76 @@ const element: ResourceElement = {
 }
 
 describe('in-memory resource repository', () => {
+  test('commits high-confidence semantic tags without changing technical facts', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [pack],
+      elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit', specs: { ...element.specs, width: 512 } }],
+    })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'a'.repeat(64), usageTags: ['ui'], confidence: 'high',
+      evidence: [{ source: 'content_preview', reference: 'preview:0', observation: 'The preview shows a user-interface element.' }],
+      curatorRevision: 'semantic-curator-v1',
+    }
+
+    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+    const stored = await repository.getElement('pack-1', 'element-1')
+
+    expect(result.outcome).toBe('committed')
+    expect(result.receiptId).toContain('element-1')
+    expect(stored).toEqual(expect.objectContaining({ usageTags: ['ui'], usageTagsMode: 'override', assetKind: 'sprite-sheet', specs: expect.objectContaining({ width: 512 }) }))
+    expect(stored?.semanticSuggestion).toBeUndefined()
+  })
+
+  test('stores medium confidence as a suggestion without making it searchable', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [pack],
+      elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit' }],
+    })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'a'.repeat(64), usageTags: ['ui'], confidence: 'medium',
+      evidence: [{ source: 'technical_facts', reference: 'mimeType', observation: 'The inspected format is an image.' }],
+      curatorRevision: 'semantic-curator-v1',
+    }
+
+    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+    const stored = await repository.getElement('pack-1', 'element-1')
+
+    expect(result.outcome).toBe('suggested')
+    expect(stored?.usageTags).toEqual([])
+    expect(stored?.semanticSuggestion).toEqual(expect.objectContaining({ sourceContentHash: 'a'.repeat(64), confidence: 'medium', usageTags: ['ui'] }))
+  })
+
+  test('confirms heterogeneous curation decisions independently per element', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [pack],
+      elements: [
+        { ...element, id: 'element-a', specs: { ...element.specs, contentHash: 'a'.repeat(64) }, usageTags: undefined, usageTagsMode: 'inherit', semanticSuggestion: { sourceContentHash: 'a'.repeat(64), usageTags: ['building'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'a', observation: 'building evidence' }], confidence: 'high', generatedAt: '2026-01-01T00:00:00.000Z', generatorRevision: 'revision-a' } },
+        { ...element, id: 'element-b', specs: { ...element.specs, contentHash: 'b'.repeat(64) }, usageTags: undefined, usageTagsMode: 'inherit', semanticSuggestion: { sourceContentHash: 'b'.repeat(64), usageTags: ['environment'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'b', observation: 'environment evidence' }], confidence: 'high', generatedAt: '2026-01-01T00:00:00.000Z', generatorRevision: 'revision-b' } },
+      ],
+    })
+
+    await repository.confirmCuration!('pack-1', {
+      decisions: [
+        { elementId: 'element-a', usageTags: ['building'], sourceContentHash: 'a'.repeat(64), suggestionRevision: 'revision-a' },
+        { elementId: 'element-b', usageTags: ['environment'], sourceContentHash: 'b'.repeat(64), suggestionRevision: 'revision-b' },
+      ],
+    })
+
+    await expect(repository.getElement('pack-1', 'element-a')).resolves.toEqual(expect.objectContaining({ usageTags: ['building'], usageTagsMode: 'override' }))
+    await expect(repository.getElement('pack-1', 'element-b')).resolves.toEqual(expect.objectContaining({ usageTags: ['environment'], usageTagsMode: 'override' }))
+  })
+
+  test('rejects a semantic decision when the content hash is stale', async () => {
+    const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'c'.repeat(64), usageTags: ['ui'], confidence: 'high',
+      evidence: [{ source: 'content_profile', reference: 'components:0', observation: 'A component is present.' }],
+      curatorRevision: 'semantic-curator-v1',
+    }
+
+    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).rejects.toThrow('content hash is stale')
+  })
+
   test('lists Pack summaries with element counts', async () => {
     const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
     await expect(repository.listPacks()).resolves.toEqual([
@@ -49,17 +120,44 @@ describe('in-memory resource repository', () => {
     await expect(repository.listElements('pack-1', 'ui')).resolves.toEqual([])
   })
 
-  test('resolves Pack and closest-folder usage defaults without changing technical metadata', async () => {
+  test('does not resolve Pack or folder metadata into element semantics', async () => {
     const repository = createInMemoryResourceRepository({
-      packs: [{ ...pack, elementDefaults: { usageTags: ['prop'] } }],
+      packs: [{ ...pack }],
       elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit', path: 'characters/heroes/idle.png' }],
     })
-    await repository.createFolder('pack-1', { id: 'characters', name: 'characters', elementDefaults: { usageTags: ['npc'] } })
-    await repository.createFolder('pack-1', { id: 'heroes', name: 'heroes', parentId: 'characters', elementDefaults: { usageTags: ['character'] } })
+    await repository.createFolder('pack-1', { id: 'characters', name: 'characters' })
+    await repository.createFolder('pack-1', { id: 'heroes', name: 'heroes', parentId: 'characters' })
 
     await expect(repository.getElement('pack-1', 'element-1')).resolves.toEqual(expect.objectContaining({
-      usageTags: ['character'], usageTagsMode: 'inherit', usageTagsSource: 'folder', kind: 'sprite-sheet',
+      usageTags: [], usageTagsMode: 'inherit', usageTagsSource: 'none', kind: 'sprite-sheet',
     }))
+  })
+
+  test('lists unclassified elements for semantic curation instead of treating them as confirmed', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack }],
+      elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit' }],
+    })
+
+    const queue = await repository.listCuration!('pack-1')
+
+    expect(queue.items.map(item => item.id)).toEqual(['element-1'])
+    expect(queue.counts.missingSemanticTags).toBe(1)
+  })
+
+  test('commits a high-confidence decision over unclassified element metadata', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack }],
+      elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit' }],
+    })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'a'.repeat(64), usageTags: ['character'], confidence: 'high',
+      evidence: [{ source: 'content_preview', reference: 'preview:0', observation: 'The preview shows a character.' }],
+      curatorRevision: 'semantic-curator-v1',
+    }
+
+    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).resolves.toEqual(expect.objectContaining({ outcome: 'committed' }))
+    await expect(repository.getElement('pack-1', 'element-1')).resolves.toEqual(expect.objectContaining({ usageTags: ['character'], usageTagsMode: 'override', usageTagsSource: 'element' }))
   })
 
   test('returns undefined for an unknown Pack', async () => {

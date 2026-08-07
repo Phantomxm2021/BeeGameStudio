@@ -1,0 +1,59 @@
+<style>
+  .nav-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; margin-top:24px; }
+  .nav-choice { cursor:pointer; border:1px solid rgba(255,255,255,.12); border-radius:20px; padding:18px; background:rgba(255,255,255,.035); transition:.2s ease; }
+  .nav-choice:hover { transform:translateY(-2px); border-color:rgba(98,215,255,.45); }
+  .nav-choice.selected { border-color:#62d7ff; }
+  .demo { position:relative; height:315px; margin-bottom:18px; }
+  .sheet { position:absolute; box-sizing:border-box; left:0; right:0; min-height:250px; border:1px solid rgba(255,255,255,.2); border-radius:22px; background:#151517; padding:20px; box-shadow:0 18px 45px rgba(0,0,0,.4); }
+  .sheet.old2 { top:24px; left:24px; right:-24px; opacity:.35; }
+  .sheet.old1 { top:12px; left:12px; right:-12px; opacity:.65; }
+  .sheet.front { top:0; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .title { color:#eee; font-weight:650; }
+  .status,.meta { color:#85858e; font-size:12px; }
+  .meta { margin-top:14px; }
+  .lines span { display:block; height:8px; margin-top:14px; border-radius:9px; background:#303036; }
+  .lines span:nth-child(2) { width:74%; }
+  .footer { position:absolute; left:20px; right:20px; bottom:18px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid #333; padding-top:12px; color:#777; font-size:12px; }
+  .dots { display:flex; align-items:center; gap:6px; }
+  .dot { width:5px; height:5px; border-radius:99px; background:#4d4d55; }
+  .dot.active { width:17px; background:#64d9ff; }
+  .arrows { display:flex; gap:6px; }
+  .arrow { display:grid; place-items:center; width:24px; height:24px; border:1px solid #3d3d43; border-radius:99px; color:#aaa; }
+  .counter { border-radius:99px; background:#29292e; padding:4px 9px; color:#aaa; }
+  .latest { color:#67d9ff; }
+  .caption h3 { margin:0 0 6px; font-size:16px; }
+  .caption p { margin:0; color:#999; font-size:13px; line-height:1.5; }
+  .recommended { display:inline-block; margin-bottom:9px; padding:3px 8px; border-radius:99px; background:rgba(98,215,255,.12); color:#77dcff; font-size:11px; }
+  @media (max-width:900px) { .nav-grid { grid-template-columns:1fr; } }
+</style>
+
+<h2>卡片切换提示：你希望保留多少显式控件？</h2>
+<p class="subtitle">三个方案都支持鼠标/触控横向拖拽、松手吸附，并支持键盘左右方向键。</p>
+
+<div class="nav-grid">
+  <div class="nav-choice" data-choice="a" onclick="toggleSelect(this)">
+    <div class="demo">
+      <div class="sheet old2"></div><div class="sheet old1"></div>
+      <div class="sheet front"><div class="top"><span class="title">基础文档初审</span><span class="status">已完成</span></div><div class="meta">Document Reviewer · 阶段快照</div><div class="lines"><span></span><span></span><span></span></div><div class="footer"><span>00:04:21</span></div></div>
+    </div>
+    <div class="caption"><h3>A · 纯拖拽</h3><p>最干净，但第一次使用时不易发现可切换，也不方便精准回到最新卡。</p></div>
+  </div>
+
+  <div class="nav-choice" data-choice="b" onclick="toggleSelect(this)">
+    <span class="recommended">推荐</span>
+    <div class="demo">
+      <div class="sheet old2"></div><div class="sheet old1"></div>
+      <div class="sheet front"><div class="top"><span class="title">基础文档初审</span><span class="status">已完成</span></div><div class="meta">Document Reviewer · 阶段快照</div><div class="lines"><span></span><span></span><span></span></div><div class="footer"><span>00:04:21</span><span class="dots"><i class="dot"></i><i class="dot active"></i><i class="dot"></i><i class="dot"></i></span><span class="latest">回到当前</span></div></div>
+    </div>
+    <div class="caption"><h3>B · 进度点 + 回到当前</h3><p>保持克制，同时明确当前位置；浏览历史时才显示“回到当前”。</p></div>
+  </div>
+
+  <div class="nav-choice" data-choice="c" onclick="toggleSelect(this)">
+    <div class="demo">
+      <div class="sheet old2"></div><div class="sheet old1"></div>
+      <div class="sheet front"><div class="top"><span class="title">基础文档初审</span><span class="counter">3 / 6</span><span class="status">已完成</span></div><div class="meta">Document Reviewer · 阶段快照</div><div class="lines"><span></span><span></span><span></span></div><div class="footer"><span>00:04:21</span><span class="arrows"><i class="arrow">‹</i><i class="arrow">›</i></span></div></div>
+    </div>
+    <div class="caption"><h3>C · 计数器 + 箭头</h3><p>最明确、最好点，但卡片控件更多，扑克牌的直接操控感稍弱。</p></div>
+  </div>
+</div>

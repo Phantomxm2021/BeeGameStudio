@@ -1,5 +1,6 @@
 import type {
   ResourceCatalogElement,
+  ResourceMatchDiagnostic,
   ResourceRequirementMatchRequest,
   ResourceRequirementMatchResult,
 } from '@bee-game-studio/beegame-resource-core'
@@ -167,51 +168,82 @@ export function parseRequirementMatchResponse(
         !isRecord(group) ||
         typeof group.requirementId !== 'string' ||
         !group.requirementId.trim() ||
-        !['matched', 'no-match', 'unclassified'].includes(
+        !['matched', 'no-match'].includes(
           String(group.status),
         ) ||
-        !Array.isArray(group.candidates) ||
-        !Number.isSafeInteger(group.unclassifiedElementCount) ||
-        Number(group.unclassifiedElementCount) < 0
+        !Array.isArray(group.bundles) ||
+        !Array.isArray(group.diagnostics)
       ) {
         throw new Error('Resource requirement match group is invalid')
       }
+      const diagnostics = group.diagnostics.map(parseMatchDiagnostic)
+      const bundles = group.bundles.map(bundle => {
+        if (
+          !isRecord(bundle) ||
+          typeof bundle.bundleId !== 'string' ||
+          !bundle.bundleId.trim() ||
+          !stringArray(bundle.coveredObligations) ||
+          !stringArray(bundle.uncoveredObligations) ||
+          !Array.isArray(bundle.candidates)
+        ) throw new Error('Resource requirement match bundle is invalid')
+        return {
+          bundleId: bundle.bundleId,
+          candidates: bundle.candidates.map(parseRequirementCandidate),
+          coveredObligations: bundle.coveredObligations,
+          uncoveredObligations: bundle.uncoveredObligations,
+        }
+      })
+      const status = group.status as 'matched' | 'no-match'
+      if ((status === 'matched') !== (bundles.length > 0))
+        throw new Error('Resource requirement match group status does not match its bundles')
       return {
         requirementId: group.requirementId,
-        status: group.status as 'matched' | 'no-match' | 'unclassified',
-        candidates: group.candidates.map(candidate => {
-          if (!isRecord(candidate) || !isRecord(candidate.delivery)) {
-            throw new Error('Resource requirement match candidate is invalid')
-          }
-          const delivery = candidate.delivery
-          if (
-            typeof delivery.sourceFormat !== 'string' ||
-            !delivery.sourceFormat.trim() ||
-            typeof delivery.targetFormat !== 'string' ||
-            !delivery.targetFormat.trim() ||
-            !['direct', 'convert'].includes(String(delivery.disposition)) ||
-            (delivery.adapterId !== undefined &&
-              (typeof delivery.adapterId !== 'string' ||
-                !delivery.adapterId.trim()))
-          ) {
-            throw new Error('Resource requirement match delivery is invalid')
-          }
-          return {
-            ...parseCatalogElement(candidate),
-            delivery: {
-              sourceFormat: delivery.sourceFormat,
-              disposition: delivery.disposition as 'direct' | 'convert',
-              targetFormat: delivery.targetFormat,
-              ...(typeof delivery.adapterId === 'string'
-                ? { adapterId: delivery.adapterId }
-                : {}),
-            },
-          }
-        }),
-        unclassifiedElementCount: Number(group.unclassifiedElementCount),
+        status,
+        bundles,
+        diagnostics,
       }
     }),
   }
+}
+
+function parseRequirementCandidate(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.delivery)) {
+    throw new Error('Resource requirement match candidate is invalid')
+  }
+  const delivery = value.delivery
+  if (
+    typeof delivery.sourceFormat !== 'string' ||
+    !delivery.sourceFormat.trim() ||
+    typeof delivery.targetFormat !== 'string' ||
+    !delivery.targetFormat.trim() ||
+    !['direct', 'convert'].includes(String(delivery.disposition)) ||
+    (delivery.adapterId !== undefined &&
+      (typeof delivery.adapterId !== 'string' || !delivery.adapterId.trim()))
+  ) {
+    throw new Error('Resource requirement match delivery is invalid')
+  }
+  return {
+    ...parseCatalogElement(value),
+    delivery: {
+      sourceFormat: delivery.sourceFormat,
+      disposition: delivery.disposition as 'direct' | 'convert',
+      targetFormat: delivery.targetFormat,
+      ...(typeof delivery.adapterId === 'string'
+        ? { adapterId: delivery.adapterId }
+        : {}),
+    },
+  }
+}
+
+function parseMatchDiagnostic(value: unknown): ResourceMatchDiagnostic {
+  if (!isRecord(value) ||
+      !['missing_semantics', 'technical_not_ready', 'dependency_not_ready', 'delivery_unsupported', 'coverage_gap'].includes(String(value.code)) ||
+      typeof value.count !== 'number' ||
+      !Number.isInteger(value.count) ||
+      value.count < 1) {
+    throw new Error('Resource requirement match diagnostic is invalid')
+  }
+  return { code: value.code as ResourceMatchDiagnostic['code'], count: value.count }
 }
 
 function parseCatalogElement(value: unknown): ResourceCatalogElement {

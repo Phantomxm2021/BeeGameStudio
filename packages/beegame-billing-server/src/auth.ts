@@ -1,6 +1,7 @@
 import type {
   BeeGameBillingUserContext,
 } from '@bee-game-studio/beegame-billing-core/billing-route-types'
+import type { TLSAwareFetch } from '../../../src/utils/mtls.js'
 
 type BillingUserResolver = (
   request: Request,
@@ -42,8 +43,9 @@ export function createBeeGameBillingAuthContext(
 
 export function createConfiguredBillingUserResolver(
   env: NodeJS.ProcessEnv = process.env,
+  options: { fetchImpl?: TLSAwareFetch } = {},
 ): BillingUserResolver | undefined {
-  const supabaseResolver = createSupabaseBillingUserResolver(env)
+  const supabaseResolver = createSupabaseBillingUserResolver(env, options.fetchImpl)
   return supabaseResolver
 }
 
@@ -57,6 +59,7 @@ export function hasBeeGameBillingPermission(
 
 function createSupabaseBillingUserResolver(
   env: NodeJS.ProcessEnv,
+  fetchImpl: TLSAwareFetch = globalThis.fetch.bind(globalThis),
 ): BillingUserResolver | undefined {
   const baseUrl = trimString(
     env.BEEGAME_SUPABASE_URL ??
@@ -72,7 +75,7 @@ function createSupabaseBillingUserResolver(
   return async request => {
     const token = getBearerToken(request)
     if (!token) return undefined
-    const response = await fetch(`${removeTrailingSlashes(baseUrl)}/rest/v1/rpc/beegame_current_user_context`, {
+    const response = await fetchImpl(`${removeTrailingSlashes(baseUrl)}/rest/v1/rpc/beegame_current_user_context`, {
       method: 'POST',
       headers: {
         apikey: apiKey,

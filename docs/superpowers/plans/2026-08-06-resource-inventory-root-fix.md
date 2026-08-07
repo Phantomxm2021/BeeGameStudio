@@ -20,7 +20,7 @@
 
 - [x] **Step 1: Write failing tests for exact structured matching**
 
-Add tests proving that matching accepts requirement profiles containing dimensions, asset kinds, usage tags, capabilities and styles; returns a fixed maximum candidate count; reports only an aggregate `unclassified` count for elements missing required semantic metadata; and computes `direct`, `convert` or `unsupported` only from an explicit delivery capability map. Include FBX→GLB and OGG direct-delivery cases. Do not use requirement names, element names, paths, keywords or regular expressions in expectations.
+Add tests proving that matching accepts requirement profiles containing dimensions, asset kinds, usage tags, capabilities and styles; returns a fixed maximum candidate count; excludes elements missing required semantic metadata; and computes `direct`, `convert` or `unsupported` only from an explicit delivery capability map. Include FBX→GLB and OGG direct-delivery cases. Do not use requirement names, element names, paths, keywords or regular expressions in expectations.
 
 - [x] **Step 2: Run the focused test and verify RED**
 
@@ -53,7 +53,7 @@ export type ResourceDeliveryCapability = {
 }
 ```
 
-Implement one stable matcher that intersects only explicit metadata, sorts by exact metadata coverage and stable IDs, caps candidates per requirement, and separates metadata-incomplete elements into `unclassified` without treating them as no-match.
+Implement one stable matcher that intersects only explicit metadata, sorts by exact metadata coverage and stable IDs, caps candidates per requirement, and excludes metadata-incomplete elements from the selection-ready catalog.
 
 - [x] **Step 4: Verify GREEN**
 
@@ -215,3 +215,116 @@ Expected: zero failures, TypeScript exit 0, diff check exit 0.
 - [ ] **Step 4: Run a new-project Chrome acceptance test**
 
 Start the normal BeeGame services, create one Web + React + 3D project with Resource Library `preferred`, and verify one bounded candidate operation, at least one library import when suitable, placeholders only for proven gaps, service restart continuation without repeated selection/download, correct Workflow status, and transition into Resource Content. Stop all services after the test.
+
+### Task 7: Remove the catalog-curation terminal from Workflow
+
+**Files:**
+- Modify: `packages/beegame-resource-core/src/types.ts`
+- Modify: `packages/beegame-resource-core/src/catalog.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/resource-selection-client.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/native-resource-library-tool.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts`
+- Test: `packages/beegame-resource-core/src/__tests__/catalog.test.ts`
+- Test: `packages/agent-workflow-server/src/__tests__/resource-selection-client.test.ts`
+- Test: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts`
+
+- [x] **Step 1: Write failing two-outcome tests**
+
+Change the tests to require exactly `matched | no-match`. A published element without selection-ready semantic facts must not appear as a candidate and must not create a third status. A group with no selectable candidate must permit one independently replaceable placeholder decision.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+```bash
+bun test packages/beegame-resource-core/src/__tests__/catalog.test.ts packages/agent-workflow-server/src/__tests__/resource-selection-client.test.ts packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts
+```
+
+Expected: FAIL because the current contracts expose a third catalog-curation status and reject its placeholder decision.
+
+- [x] **Step 3: Implement the single two-outcome protocol**
+
+Remove the retired third status and its aggregate count from Resource Core, HTTP parsing, compact Agent output, prompts and commit validation. Match only selection-ready candidates; return `no-match` when none qualify. Do not add a fallback parser or second decision lane.
+
+- [x] **Step 4: Verify GREEN and scan retired protocol names**
+
+Run the focused tests. Then scan production code for the retired third-status protocol in the Workflow resource lane; expected: zero occurrences.
+
+### Task 8: Make publication the selection-readiness boundary
+
+**Files:**
+- Modify: `packages/beegame-resource-core/src/publish-readiness.ts`
+- Test: `packages/beegame-resource-core/src/__tests__/authoring.test.ts`
+- Test: `packages/beegame-resource-core/src/__tests__/publish-readiness.test.ts`
+- Test: `packages/beegame-resource-core/src/__tests__/catalog.test.ts`
+
+- [x] **Step 1: Write failing publication-invariant tests**
+
+Prove publish readiness blocks a root element without an immutable content hash, typed asset kind or effective usage tags. Prove matching re-evaluates the same invariant and excludes the whole externally published Pack after any such fact becomes invalid.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+```bash
+bun test packages/beegame-resource-core/src/__tests__/authoring.test.ts packages/beegame-resource-core/src/__tests__/publish-readiness.test.ts packages/beegame-resource-core/src/__tests__/catalog.test.ts
+```
+
+- [x] **Step 3: Implement one publication boundary**
+
+Strengthen `evaluateResourcePackPublishReadiness` and make requirement matching admit only Packs that still satisfy that exact invariant. Do not infer semantics from names, paths, categories, project text or regular expressions. Existing invalid published data remains unavailable to Workflow until curated and republished.
+
+- [x] **Step 4: Verify GREEN**
+
+Run the focused tests and confirm publication and Workflow matching enforce the same invariant.
+
+### Task 9: Invalidate stale unprepared match observations
+
+**Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/resource-match-observation.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/native-resource-library-tool.ts`
+- Test: `packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts`
+- Test: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts`
+- Test: `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts`
+
+- [x] **Step 1: Write failing policy-revision recovery tests**
+
+Use a copied temporary workspace shaped like the reported project: completed upstream state, a failed `RESOURCE_INVENTORY` cursor, one old current transaction and one old observation. Prove Retry creates a new match transaction when the deterministic policy revision differs, preserves all upstream revisions and does not repeat accepted phases. Prove a prepared receipt remains resumable and is never invalidated.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+```bash
+bun test packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts
+```
+
+- [x] **Step 3: Implement deterministic policy identity**
+
+Persist one required match-policy revision on the current transaction and observation. Atomically replace only a stale unprepared current pointer. Never parse an obsolete observation as current state, never infer identity from a session, and never touch an existing prepared/applying/committed receipt.
+
+- [x] **Step 4: Verify the whole resource chain**
+
+Run Resource Core, Resource Server and Workflow resource suites; typecheck; scan for dual paths and old protocol names; then use the reported project's data copied into a temporary workspace to prove `match_requirements → CommitResourceInventory → Resource Content` reaches a durable terminal. Do not modify the reported project. Stop all services after testing.
+
+### Task 10: Guarantee no-match placeholder completion
+
+**Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/native-resource-inventory-commit-tool.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.ts`
+- Test: `packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.test.ts`
+- Test: `packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts`
+
+- [x] **Step 1: Write failing coverage and semantic-boundary tests**
+
+Prove every canonical asset kind can be represented by at least one configured provisional adapter, including a JSON program resource for non-media semantic kinds. Prove commit rejects a placeholder asset kind outside the requirement acquisition profile and the tool prompt lists the exact registered adapter contracts.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+```bash
+bun test packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.test.ts packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts
+```
+
+- [x] **Step 3: Implement one target adapter set and one validation path**
+
+Add the strict JSON program-resource adapter without a second Manifest or loader. Validate placeholder semantic kind, format and destination against the current requirement and registered target adapters before receipt preparation. Remove model-declared placeholder capabilities and project adapter descriptions through the existing commit tool prompt.
+
+- [x] **Step 4: Verify all-no-match completion**
+
+Commit a multi-kind all-`no-match` inventory through the same transaction and verify the service-derived receipt advances the task resolver to `RESOURCE_CONTENT`.

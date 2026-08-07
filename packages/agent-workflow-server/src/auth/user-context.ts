@@ -209,6 +209,7 @@ export function createSupabaseUserResolver(
 
 export function createConfiguredUserResolver(
   env: NodeJS.ProcessEnv = process.env,
+  options: { fetchImpl?: BeeGameFetch } = {},
 ): BeeGameUserResolver | undefined {
   const envResolver = createEnvTokenUserResolver(env)
   const supabaseResolver = createSupabaseUserResolver({
@@ -220,6 +221,7 @@ export function createConfiguredUserResolver(
       env.BEEGAME_SUPABASE_ANON_KEY ??
       env.SUPABASE_ANON_KEY ??
       env.VITE_SUPABASE_ANON_KEY,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   })
   if (!envResolver) return supabaseResolver
   if (!supabaseResolver) return envResolver

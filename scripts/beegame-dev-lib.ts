@@ -111,15 +111,6 @@ export function buildBeeGameDevPlan(
         env: buildSkillsEnv(input.env, ports),
       },
       {
-        name: 'resources',
-        // The dashboard reads candidates from this service. Keep it watching
-        // source changes so frontend refreshes cannot talk to stale selection
-        // rules during local development.
-        command: [bunExecutable, '--watch', 'packages/beegame-resource-server/src/index.ts'],
-        cwd: input.cwd,
-        env: buildResourceEnv(input.env, ports),
-      },
-      {
         name: 'runtime',
         // Keep the workflow runtime in sync with the frontend during local
         // product work. Without watch, UI changes can target stale API and
@@ -131,6 +122,16 @@ export function buildBeeGameDevPlan(
           ports,
           workspacePath,
         }),
+      },
+      {
+        name: 'resources',
+        // Start the workflow runtime before the resource worker so durable
+        // semantic-curation jobs can resume through the shared model bridge.
+        // The resource worker still owns the queue; it does not own a second
+        // model provider or configuration path.
+        command: [bunExecutable, '--watch', 'packages/beegame-resource-server/src/index.ts'],
+        cwd: input.cwd,
+        env: buildResourceEnv(input.env, ports),
       },
       {
         name: 'frontend',
@@ -188,6 +189,7 @@ function buildResourceEnv(
     ...serviceEnv,
     BEEGAME_RESOURCE_HOST: '127.0.0.1',
     BEEGAME_RESOURCE_PORT: String(ports.resources),
+    BEEGAME_RUNTIME_SERVER_URL: `http://127.0.0.1:${ports.runtime}`,
     BEEGAME_RESOURCE_SERVICE_TOKEN:
       baseEnv.BEEGAME_RESOURCE_SERVICE_TOKEN || LOCAL_RESOURCE_SELECTION_TOKEN,
   })

@@ -13,14 +13,20 @@ import type {
   BeeGameUsageBillingRecordInput,
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
 
 type JsonObject = Record<string, unknown>
 
 type SupabaseBillingConfig = {
   url: string
   serviceRoleKey: string
-  fetchImpl?: typeof fetch
+  fetchImpl?: BillingFetch
 }
+
+type BillingFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
 
 type SupabaseUsageWalletRow = {
   user_id: string
@@ -118,13 +124,13 @@ export function createBeeGameSupabaseBillingRepositoryFromEnv(
     env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY,
   )
   if (!url || !serviceRoleKey) return new MissingSupabaseBillingRepository()
-  return new SupabaseBillingRepository({ url, serviceRoleKey })
+  return new SupabaseBillingRepository({ url, serviceRoleKey, fetchImpl: createTLSAwareFetch() })
 }
 
 class SupabaseBillingRepository implements BeeGameBillingServerRepository {
   private readonly baseUrl: string
   private readonly serviceRoleKey: string
-  private readonly fetchImpl: typeof fetch
+  private readonly fetchImpl: BillingFetch
 
   constructor(config: SupabaseBillingConfig) {
     this.baseUrl = removeTrailingSlashes(config.url)

@@ -49,11 +49,13 @@ describe('agentic resource exploration routes', () => {
       groups: [{
         requirementId: 'visual.tower',
         status: 'matched',
-        candidates: [expect.objectContaining({
-          elementId: 'tower-a',
-          delivery: expect.objectContaining({ disposition: 'convert', targetFormat: 'glb' }),
+        diagnostics: [],
+        bundles: [expect.objectContaining({
+          candidates: [expect.objectContaining({
+            elementId: 'tower-a',
+            delivery: expect.objectContaining({ disposition: 'convert', targetFormat: 'glb' }),
+          })],
         })],
-        unclassifiedElementCount: 0,
       }],
     })
   })
@@ -111,14 +113,14 @@ describe('agentic resource exploration routes', () => {
   })
 
   test('returns reusable elements only from the Pack chosen by the Agent', async () => {
-    const app = appFor({ packs: [pack], elements: [{ ...element('ground', 'models/ground.glb', ['terrain']), specs: { boundsSizeY: 3, hasTextureCoordinates: true } }] })
+    const app = appFor({ packs: [pack], elements: [{ ...element('ground', 'models/ground.glb', ['terrain']), specs: { contentHash: 'a'.repeat(64), boundsSizeY: 3, hasTextureCoordinates: true } }] })
     const response = await post(app, `/api/resource-catalog/packs/${pack.id}/elements`, {
       filters: { usageTags: ['terrain'], formats: ['glb'] },
     })
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(expect.objectContaining({
-      items: [expect.objectContaining({ packId: pack.id, elementId: 'ground', technicalFacts: { boundsSizeY: 3, hasTextureCoordinates: true } })],
+      items: [expect.objectContaining({ packId: pack.id, elementId: 'ground', technicalFacts: expect.objectContaining({ boundsSizeY: 3, hasTextureCoordinates: true }) })],
     }))
   })
 

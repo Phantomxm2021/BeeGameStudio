@@ -3,11 +3,14 @@ import {
   createBeeGamePinnedFetch,
   ensureBeeGameMacroGlobals,
 } from './query-engine-runner'
+import { getTLSFetchOptions } from '../../../../src/utils/mtls.js'
 import type {
+  BeeGameModelRuntimeFailureStage,
   BeeGameModelUsage,
   ModelRuntimeWorkerRequest,
   ModelRuntimeWorkerResponse,
 } from './model-runtime-host'
+import { serializeStructuredModelToolResult } from './model-runtime-host'
 
 process.on('message', raw => {
   void handleMessage(raw as ModelRuntimeWorkerRequest)
@@ -28,13 +31,21 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       ),
     ]),
   )
-  const pinnedFetch = createBeeGamePinnedFetch(previousFetch, targets)
+  let pinnedFetch: ReturnType<typeof createBeeGamePinnedFetch> | undefined
+  let failureStage: BeeGameModelRuntimeFailureStage = 'model_request'
 
   try {
+    if (message.input.modelType) {
+      previousEnv.set('BEEGAME_RUNTIME_MODEL_TYPE', process.env.BEEGAME_RUNTIME_MODEL_TYPE)
+      process.env.BEEGAME_RUNTIME_MODEL_TYPE = message.input.modelType
+    }
     for (const [key, value] of Object.entries(message.input.runtimeEnv)) {
       previousEnv.set(key, process.env[key])
       process.env[key] = value
     }
+    pinnedFetch = createBeeGamePinnedFetch(previousFetch, targets, {
+      tls: getTLSFetchOptions().tls,
+    })
     process.chdir(message.input.cwd)
     globalThis.fetch = pinnedFetch
     ensureBeeGameMacroGlobals()
@@ -58,13 +69,31 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       model: String(getDefaultSonnetModel()),
       system: message.input.systemPrompt,
       messages: message.input.messages,
-      max_tokens: message.input.maxTokens ?? 8_192,
+      ...(message.input.maxTokens !== undefined
+        ? { max_tokens: message.input.maxTokens }
+        : {}),
       temperature: message.input.temperature,
       thinking: false,
       skipSystemPromptPrefix: true,
       querySource: message.input.querySource,
+      ...(message.input.structuredOutput
+        ? {
+            tools: [{
+              name: message.input.structuredOutput.name,
+              description: message.input.structuredOutput.description,
+              input_schema: message.input.structuredOutput.inputSchema,
+            }],
+            tool_choice: {
+              type: 'tool' as const,
+              name: message.input.structuredOutput.name,
+            },
+          }
+        : {}),
     })
-    const content = extractText(result)
+    failureStage = 'model_response'
+    const content = message.input.structuredOutput
+      ? serializeStructuredModelToolResult(result, message.input.structuredOutput.name)
+      : extractText(result)
     const usage = extractUsage(result)
     send({
       type: 'model.result',
@@ -77,11 +106,12 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       type: 'model.error',
       requestId: message.requestId,
       message: error instanceof Error ? error.message : 'Model runtime failed',
+      stage: failureStage,
     })
   } finally {
     process.chdir(previousCwd)
     globalThis.fetch = previousFetch
-    await pinnedFetch.close()
+    if (pinnedFetch) await pinnedFetch.close()
     for (const [key, value] of previousEnv) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value

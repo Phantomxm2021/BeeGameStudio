@@ -1,8 +1,12 @@
 import createAssimp from 'assimpjs'
 import type { ResourceInspectionFacts } from './model-processing'
+import type { ResourceModelPreviewGeometry, ResourceModelPreviewMesh } from './model-preview'
 import { normalizeResourceReference } from './resource-dependency-bindings'
 
 type JsonRecord = Record<string, unknown>
+const MAX_PREVIEW_MESHES = 64
+const MAX_PREVIEW_VERTICES = 4096
+const MAX_PREVIEW_FACES = 4096
 
 export function inspectAssimpDocument(document: unknown): ResourceInspectionFacts {
   const root = asRecord(document)
@@ -64,6 +68,47 @@ export function inspectAssimpDocument(document: unknown): ResourceInspectionFact
     facts.externalReferences = JSON.stringify(references)
   }
   return facts
+}
+
+export function extractAssimpPreviewGeometry(document: unknown): ResourceModelPreviewGeometry {
+  const root = asRecord(document)
+  const meshes = asRecords(root?.meshes)
+  const output: ResourceModelPreviewMesh[] = []
+  let totalFaces = 0
+
+  const appendMesh = (meshIndex: number, transform: Matrix4): void => {
+    if (output.length >= MAX_PREVIEW_MESHES || totalFaces >= MAX_PREVIEW_FACES) return
+    const mesh = meshes[meshIndex]
+    if (!mesh) return
+    const sourceVertices = asPreviewPoints(mesh.vertices).slice(0, MAX_PREVIEW_VERTICES)
+    const vertices = sourceVertices.map(point => transformPoint(transform, point) as [number, number, number])
+    const faces: [number, number, number][] = []
+    for (const face of asNumericArrays(mesh.faces)) {
+      for (let index = 1; index + 1 < face.length && faces.length < MAX_PREVIEW_FACES - totalFaces; index += 1) {
+        const triangle = [face[0]!, face[index]!, face[index + 1]!] as [number, number, number]
+        if (triangle.every(value => Number.isInteger(value) && value >= 0 && value < vertices.length)) faces.push(triangle)
+      }
+      if (faces.length >= MAX_PREVIEW_FACES - totalFaces) break
+    }
+    if (vertices.length && faces.length) {
+      output.push({ vertices, faces })
+      totalFaces += faces.length
+    }
+  }
+
+  const visit = (value: unknown, parent: Matrix4): void => {
+    const node = asRecord(value)
+    if (!node) return
+    const transform = multiplyMatrices(parent, readMatrix(node.transformation))
+    for (const meshIndex of Array.isArray(node.meshes) ? node.meshes : []) {
+      if (typeof meshIndex === 'number' && Number.isInteger(meshIndex)) appendMesh(meshIndex, transform)
+    }
+    for (const child of asRecords(node.children)) visit(child, transform)
+  }
+
+  if (root?.rootnode) visit(root.rootnode, IDENTITY_MATRIX)
+  if (!output.length) meshes.forEach((_mesh, index) => appendMesh(index, IDENTITY_MATRIX))
+  return { meshes: output }
 }
 
 type Bounds = { min: [number, number, number]; max: [number, number, number]; seen: boolean }
@@ -224,7 +269,8 @@ async function main(): Promise<void> {
   const converted = assimp.ConvertFileList(files, 'assjson')
   if (!converted.IsSuccess() || converted.FileCount() < 1) throw new Error(`Assimp conversion failed (${converted.GetErrorCode()})`)
   const document = JSON.parse(new TextDecoder().decode(converted.GetFile(0).GetContent())) as unknown
-  process.stdout.write(JSON.stringify(inspectAssimpDocument(document)))
+  if (process.argv.includes('--preview')) process.stdout.write(JSON.stringify({ geometry: extractAssimpPreviewGeometry(document) }))
+  else process.stdout.write(JSON.stringify(inspectAssimpDocument(document)))
 }
 
 function countSceneNodes(value: unknown): number {
@@ -239,6 +285,30 @@ function asRecord(value: unknown): JsonRecord | undefined {
 
 function asRecords(value: unknown): JsonRecord[] {
   return Array.isArray(value) ? value.map(asRecord).filter((item): item is JsonRecord => Boolean(item)) : []
+}
+
+function asNumericArrays(value: unknown): number[][] {
+  return Array.isArray(value)
+    ? value
+      .filter((item): item is unknown[] => Array.isArray(item))
+      .map(item => item.filter((entry): entry is number => typeof entry === 'number' && Number.isInteger(entry)))
+    : []
+}
+
+function asPreviewPoints(value: unknown): [number, number, number][] {
+  if (!Array.isArray(value)) return []
+  if (value.length && isPreviewPoint(value[0])) return value.filter(isPreviewPoint)
+  const points: [number, number, number][] = []
+  for (let index = 0; index + 2 < value.length; index += 3) {
+    const point = value.slice(index, index + 3)
+    if (isPreviewPoint(point)) points.push(point)
+  }
+  return points
+}
+
+function isPreviewPoint(value: unknown): value is [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) return false
+  return value.every(coordinate => typeof coordinate === 'number' && Number.isFinite(coordinate))
 }
 
 if (import.meta.main) {

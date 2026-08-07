@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { randomUUID } from 'node:crypto'
 import type { BeeGameBillingUserContext } from './billing-route-types'
 import type { BillingRouteDeps } from './billing-route-types'
 import {
@@ -22,14 +23,19 @@ export function createBeeGameBillingRouteApp(
   const app = new Hono()
 
   app.onError((error, c) => {
+    const traceId = randomUUID()
     console.error(
       `[BeeGame billing] ${c.req.method} ${c.req.path} failed:`,
-      error,
+      { traceId, error },
     )
     return c.json(
       {
         error: 'Billing request failed',
+        ...(c.req.path.startsWith('/api/internal/usage/')
+          ? { stage: 'usage_billing' as const }
+          : {}),
         message: toErrorMessage(error),
+        traceId,
       },
       500,
     )

@@ -43,6 +43,7 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'resource-curator',
+      workflowDispatchId: 'dispatch-resource-inventory',
       workflowAllowedPaths: ['assets/content/'],
       workflowProtectedPaths: ['assets/content/entities.json'],
     })
@@ -52,9 +53,36 @@ describe('process-isolated QueryEngine runner', () => {
       deliveryEvidenceDataRoot: '/tmp/evidence',
       workflowWorker: true,
       workflowWorkerType: 'resource-curator',
+      workflowDispatchId: 'dispatch-resource-inventory',
       workflowAllowedPaths: ['assets/content/'],
       workflowProtectedPaths: ['assets/content/entities.json'],
     })
+  })
+
+  test('rejects a workflow worker without a dispatch identity before serialization', () => {
+    expect(() =>
+      serializeQueryEngineStartInput({
+        sessionId: 'resource-worker',
+        cwd: '/tmp/project',
+        env: {},
+        approvedOutboundTargets: {},
+        workflowWorker: true,
+        workflowWorkerType: 'resource-curator',
+      }),
+    ).toThrow('Workflow worker dispatch identity is required.')
+  })
+
+  test('rejects a serialized workflow worker without a worker type', () => {
+    expect(() =>
+      deserializeQueryEngineStartInput({
+        sessionId: 'resource-worker',
+        cwd: '/tmp/project',
+        env: {},
+        approvedOutboundTargets: {},
+        workflowWorker: true,
+        workflowDispatchId: 'dispatch-resource-inventory',
+      }),
+    ).toThrow('Workflow worker type is required.')
   })
 
   test('forwards the active reviewer packet contract on every isolated turn', () => {
@@ -90,6 +118,7 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'document-reviewer',
+      workflowDispatchId: 'dispatch-review',
       workflowDocumentReviewContract: {
         scope: 'complete',
         mode: 'closure',
@@ -115,6 +144,7 @@ describe('process-isolated QueryEngine runner', () => {
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
       workflowWorker: true,
       workflowWorkerType: 'document-reviewer',
+      workflowDispatchId: 'dispatch-review',
       workflowDocumentReviewContract: {
         scope: 'complete',
         mode: 'closure',
@@ -133,6 +163,7 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'document-author',
+      workflowDispatchId: 'dispatch-1',
       workflowAllowedPaths: ['docs/GDD.md'],
       workflowDocumentAuthorMode: 'remediation',
       workflowCanonicalDocumentCommitContract: {
@@ -149,6 +180,7 @@ describe('process-isolated QueryEngine runner', () => {
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
       workflowWorker: true,
       workflowWorkerType: 'document-author',
+      workflowDispatchId: 'dispatch-1',
       workflowAllowedPaths: ['docs/GDD.md'],
       workflowDocumentAuthorMode: 'remediation',
       workflowCanonicalDocumentCommitContract: {
@@ -171,6 +203,7 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'resource-content-author',
+      workflowDispatchId: 'dispatch-content',
       workflowReadOnlyPaths: ['docs/GDD.md'],
       workflowResourceContentCommitContract: {
         dispatchId: 'dispatch-content',
@@ -206,6 +239,7 @@ describe('process-isolated QueryEngine runner', () => {
       approvedOutboundTargets: {},
       workflowWorker: true,
       workflowWorkerType: 'document-author',
+      workflowDispatchId: 'dispatch-repair-plan',
       workflowAllowedPaths: [],
       workflowDocumentAuthorMode: 'repair-planning',
       workflowDocumentRepairPlanContract: {
@@ -283,6 +317,35 @@ describe('process-isolated QueryEngine runner', () => {
           ),
         ]),
       ).resolves.toBeDefined()
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  test('starts a process-isolated Resource Curator with its exact dispatch identity', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'beegame-resource-curator-worker-'))
+    const runner = createProcessIsolatedQueryEngineRunner()
+    try {
+      const runtime = await runner.start({
+        sessionId: 'resource-curator-session',
+        cwd,
+        env: { BEEGAME_CONFIG_DIR: join(cwd, 'config') },
+        approvedOutboundTargets: {},
+        resourceSelectionConfig: {
+          baseUrl: 'https://resources.example.test',
+          serviceToken: 'service-token',
+        },
+        workflowWorker: true,
+        workflowWorkerType: 'resource-curator',
+        workflowDispatchId: 'dispatch-resource-inventory',
+        workflowAllowedPaths: ['assets/'],
+      })
+
+      const exited = (
+        runtime as unknown as { child: { exited: Promise<number> } }
+      ).child.exited
+      runtime.dispose?.()
+      await expect(exited).resolves.toBeDefined()
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

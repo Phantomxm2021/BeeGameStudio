@@ -1,5 +1,6 @@
 export type ResourceUserContext = {
   id: string
+  modelConfigOwnerId?: string
   role?: string
   permissions?: string[]
 }
@@ -58,10 +59,12 @@ export function createSupabaseResourceUserResolver(
 
 export function createConfiguredResourceUserResolver(
   env: NodeJS.ProcessEnv = process.env,
+  options: { fetchImpl?: ResourceFetch } = {},
 ): ResourceUserResolver | undefined {
   return createSupabaseResourceUserResolver({
     url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL ?? env.VITE_SUPABASE_URL,
     apiKey: env.BEEGAME_SUPABASE_ANON_KEY ?? env.SUPABASE_ANON_KEY ?? env.VITE_SUPABASE_ANON_KEY,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   })
 }
 
@@ -82,11 +85,16 @@ function toResourceUser(value: unknown): ResourceUserContext | undefined {
   const row = value as Record<string, unknown>
   const id = typeof row.id === 'string' ? row.id.trim() : ''
   if (!id) return undefined
+  const modelConfigOwnerId = typeof row.modelConfigOwnerId === 'string'
+    ? row.modelConfigOwnerId.trim()
+    : typeof row.model_config_owner_id === 'string'
+      ? row.model_config_owner_id.trim()
+      : ''
   const role = typeof row.role === 'string' ? row.role.trim() : undefined
   const permissions = Array.isArray(row.permissions)
     ? row.permissions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
     : undefined
-  return { id, ...(role ? { role } : {}), ...(permissions?.length ? { permissions } : {}) }
+  return { id, ...(modelConfigOwnerId ? { modelConfigOwnerId } : {}), ...(role ? { role } : {}), ...(permissions?.length ? { permissions } : {}) }
 }
 
 function trim(value: string | undefined): string {

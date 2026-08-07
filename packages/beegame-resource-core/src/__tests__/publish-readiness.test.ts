@@ -32,13 +32,22 @@ describe('resource pack publish readiness', () => {
     expect(evaluateResourcePackPublishReadiness(pack, [ready])).toEqual({ blocking: [], warnings: [], canPublish: true })
   })
 
+  test('publishes a Pack when an unrelated ready element is not selectable', () => {
+    const report = evaluateResourcePackPublishReadiness(pack, [ready, { ...ready, id: 'untagged', usageTags: [] }])
+    expect(report.canPublish).toBe(true)
+    expect(report.blocking).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ elementId: 'untagged' }),
+    ]))
+  })
+
   test('reports only concrete blocking repository facts', () => {
     const report = evaluateResourcePackPublishReadiness(
       { ...pack, license: 'unassigned', version: '' },
       [{ ...ready, dependencies: ['missing'], specs: { ...ready.specs, unresolvedTextureReferences: 'albedo.png' } }, { ...ready, id: 'duplicate' }],
     )
     expect(report.canPublish).toBe(false)
-    expect(report.blocking.map((issue) => issue.code)).toEqual(expect.arrayContaining(['license_missing', 'version_missing', 'dependency_missing', 'unresolved_texture', 'duplicate_path']))
+    expect(report.blocking.map((issue) => issue.code)).toEqual(expect.arrayContaining(['license_missing', 'version_missing']))
+    expect(report.warnings.map((issue) => issue.code)).toEqual(expect.arrayContaining(['dependency_missing', 'unresolved_texture', 'duplicate_path']))
   })
 
   test('reports actionable non-blocking processing and governance warnings', () => {
@@ -55,20 +64,20 @@ describe('resource pack publish readiness', () => {
     ]))
   })
 
-  test('blocks publication when a ready element has no explicit semantic capability', () => {
+  test('reports an untagged ready element without blocking Pack publication', () => {
     const report = evaluateResourcePackPublishReadiness(pack, [{ ...ready, usageTags: [] }])
-    expect(report.canPublish).toBe(false)
-    expect(report.blocking).toEqual(expect.arrayContaining([
+    expect(report.canPublish).toBe(true)
+    expect(report.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'usage_tags_missing', elementId: ready.id }),
     ]))
   })
 
-  test('blocks publication when a ready root lacks immutable identity or typed asset identity', () => {
+  test('reports incomplete element identity without blocking Pack publication', () => {
     const missingHash = evaluateResourcePackPublishReadiness(pack, [{
       ...ready,
       specs: { size: 1024, mimeType: 'model/gltf-binary' },
     }])
-    expect(missingHash.blocking).toEqual(expect.arrayContaining([
+    expect(missingHash.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'content_hash_missing', elementId: ready.id }),
     ]))
 
@@ -76,7 +85,7 @@ describe('resource pack publish readiness', () => {
       ...ready,
       assetKind: undefined,
     }])
-    expect(missingKind.blocking).toEqual(expect.arrayContaining([
+    expect(missingKind.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'asset_kind_missing', elementId: ready.id }),
     ]))
   })
@@ -107,7 +116,7 @@ describe('resource pack publish readiness', () => {
       dependencies: ['paint'],
     }
     const report = evaluateResourcePackPublishReadiness(pack, [dependent, { ...ready, id: 'paint', path: 'materials/paint.bin' }])
-    expect(report.blocking).toEqual(expect.arrayContaining([
+    expect(report.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'external_dependency_unmapped', elementId: ready.id }),
     ]))
 
@@ -131,14 +140,14 @@ describe('resource pack publish readiness', () => {
     expect(report.blocking.map(issue => issue.code)).not.toContain('unresolved_texture')
   })
 
-  test('blocks a required semantic relation whose target is missing or not ready', () => {
+  test('reports a required semantic relation issue without blocking Pack publication', () => {
     const report = evaluateResourcePackPublishReadiness(pack, [{
       ...ready,
       id: 'run',
       assetKind: 'animation-clip',
       relations: [{ kind: 'animation-for', targetElementId: 'hero-rig', required: true }],
     }])
-    expect(report.blocking).toEqual(expect.arrayContaining([
+    expect(report.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'semantic_relation_missing', elementId: 'run' }),
     ]))
   })

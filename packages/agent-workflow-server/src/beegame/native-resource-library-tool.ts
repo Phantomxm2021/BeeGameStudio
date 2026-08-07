@@ -1,6 +1,6 @@
 import type {
   ResourceDeliveryCapability,
-  ResourceRequirementCandidate,
+  ResourceRequirementCandidateBundle,
 } from '@bee-game-studio/beegame-resource-core'
 import { z } from 'zod/v4'
 import { readBeeGameAssetManifest } from './asset-contracts'
@@ -86,6 +86,15 @@ export function createNativeResourceLibraryTool(options: {
               usageTags: requirement.acquisition_profile.usage_tags,
               capabilities: requirement.acquisition_profile.capabilities,
               styles: requirement.acquisition_profile.styles,
+              ...(requirement.acquisition_profile.coverage
+                ? { coverage: requirement.acquisition_profile.coverage.map(obligation => ({
+                    ...(obligation.asset_kinds ? { assetKinds: obligation.asset_kinds } : {}),
+                    ...(obligation.usage_tags ? { usageTags: obligation.usage_tags } : {}),
+                    ...(obligation.capabilities ? { capabilities: obligation.capabilities } : {}),
+                    ...(obligation.relation_kinds ? { relationKinds: obligation.relation_kinds } : {}),
+                    ...(obligation.embedded_kinds ? { embeddedKinds: obligation.embedded_kinds } : {}),
+                  })) }
+                : {}),
             },
           })),
           deliveryCapabilities: options.resolveDeliveryCapabilities(
@@ -116,13 +125,22 @@ function compactMatchResult(result: Awaited<ReturnType<ProjectResourceApplicatio
     requirements: result.groups.map(group => ({
       requirement_id: group.requirementId,
       status: group.status,
-      candidates: group.candidates.map(compactCandidate),
-      unclassified_element_count: group.unclassifiedElementCount,
+      diagnostics: group.diagnostics,
+      bundles: group.bundles.map(compactBundle),
     })),
   }
 }
 
-function compactCandidate(candidate: ResourceRequirementCandidate) {
+function compactBundle(bundle: ResourceRequirementCandidateBundle) {
+  return {
+    bundle_id: bundle.bundleId,
+    covered_obligations: bundle.coveredObligations,
+    uncovered_obligations: bundle.uncoveredObligations,
+    candidates: bundle.candidates.map(compactCandidate),
+  }
+}
+
+function compactCandidate(candidate: ResourceRequirementCandidateBundle['candidates'][number]) {
   return {
     pack_id: candidate.packId,
     pack_version: candidate.packVersion,

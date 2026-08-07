@@ -16,9 +16,14 @@ import {
   RESOURCE_CAPABILITIES,
   RESOURCE_DIMENSIONS,
   RESOURCE_LIBRARY_USAGE,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
+  RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
+  withResourceExternalTransport,
   type ResourceAcquisitionProfile,
+  type ResourceEmbeddedComponentKind,
   type ResourceLibraryUsage,
+  type ResourceRelationKind,
 } from '@bee-game-studio/beegame-resource-core'
 import {
   parseBeeGameProgrammaticAudioText,
@@ -78,7 +83,16 @@ export type BeeGameAssetRequirement = {
     usage_tags: ResourceAcquisitionProfile['usageTags']
     capabilities: ResourceAcquisitionProfile['capabilities']
     styles: ResourceAcquisitionProfile['styles']
+    coverage?: readonly BeeGameAssetCoverageObligation[]
   }
+}
+
+export type BeeGameAssetCoverageObligation = {
+  asset_kinds?: ResourceAcquisitionProfile['assetKinds']
+  usage_tags?: ResourceAcquisitionProfile['usageTags']
+  capabilities?: ResourceAcquisitionProfile['capabilities']
+  relation_kinds?: readonly ResourceRelationKind[]
+  embedded_kinds?: readonly ResourceEmbeddedComponentKind[]
 }
 
 export type BeeGameResourceDependency = {
@@ -436,8 +450,14 @@ export async function publishBeeGameResourceInventoryFromStaging(
     if (JSON.stringify(resource.local_file_hashes) !== JSON.stringify(frozenOutputHashes[id]))
       throw new Error(`Staged resource output hashes differ from the durable receipt: ${id}`)
     const currentResource = current.resources.find(item => item.id === id)
+    const replacingProvisional = Boolean(
+      currentResource?.provisional &&
+      currentResource.source.type === 'agent-authored' &&
+      resource.source.type === 'resource-library',
+    )
     if (
       currentResource &&
+      !replacingProvisional &&
       (currentResource.root_path !== resource.root_path ||
         currentResource.file_paths.length !== resource.file_paths.length ||
         currentResource.file_paths.some(path => !resource.file_paths.includes(path)))
@@ -559,7 +579,10 @@ export async function addBeeGameLibraryResourceToWorkspace(
   const id = normalizeId(input.id)
   if (!id) throw new Error('Resource id is required')
   const existing = manifest.resources.find(resource => resource.id === id)
-  if (existing && !isSamePinnedLibraryResource(existing, input))
+  const replacingProvisional = Boolean(
+    existing?.provisional && existing.source.type === 'agent-authored',
+  )
+  if (existing && !isSamePinnedLibraryResource(existing, input) && !replacingProvisional)
     throw new Error(`Resource id belongs to a different source: ${id}`)
 
   const filename = sanitizeFilename(input.element_path)
@@ -582,7 +605,7 @@ export async function addBeeGameLibraryResourceToWorkspace(
         input.destination_path,
         filename,
       )
-  if (existing && (await resourceFilesMatchHashes(root, existing)))
+  if (existing && !replacingProvisional && (await resourceFilesMatchHashes(root, existing)))
     return { manifest, resource: existing }
 
   const rootBytes = await downloadResource(input.source_url, fetchImpl)
@@ -625,7 +648,7 @@ export async function addBeeGameLibraryResourceToWorkspace(
       )
     : sourceTargetPath
   const rootPath = normalizeRelativePath(root, deliveredTargetPath)
-  if (existing && existing.root_path !== rootPath)
+  if (existing && existing.root_path !== rootPath && !replacingProvisional)
     throw new Error(`Resource destination changed for pinned resource: ${id}`)
   const sourcePath = normalizeRelativePath(root, sourceTargetPath)
   const filePaths = [
@@ -635,6 +658,16 @@ export async function addBeeGameLibraryResourceToWorkspace(
       normalizeRelativePath(root, dependency.targetPath),
     ),
   ]
+  const pathOwners = new Map(
+    manifest.resources.flatMap(resource =>
+      resource.file_paths.map(path => [path, resource.id] as const),
+    ),
+  )
+  for (const path of filePaths) {
+    const owner = pathOwners.get(path)
+    if (owner && owner !== id)
+      throw new Error(`Resource destination path belongs to another resource: ${path}`)
+  }
   const localFileHashes = Object.fromEntries([
     [rootPath, sha256(converted?.bytes ?? rootBytes)],
     ...(sourcePath === rootPath ? [] : [[sourcePath, sha256(rootBytes)]]),
@@ -695,6 +728,17 @@ export async function addBeeGameLibraryResourceToWorkspace(
       : {}),
   }
   const updated = replaceResource(manifest, resource)
+  const retainedPaths = new Set(updated.resources.flatMap(item => item.file_paths))
+  const obsoletePaths = replacingProvisional
+    ? existing!.file_paths.filter(path => !retainedPaths.has(path))
+    : []
+  const obsoleteSnapshots = await Promise.all(obsoletePaths.map(async path => {
+    try {
+      return { path, bytes: await readFile(resolveInsideWorkspace(root, path)) }
+    } catch {
+      return { path }
+    }
+  }))
   const rollback = await commitResourceWrites([
     { targetPath: sourceTargetPath, bytes: rootBytes },
     ...(converted ? [{ targetPath: deliveredTargetPath, bytes: converted.bytes }] : []),
@@ -705,8 +749,16 @@ export async function addBeeGameLibraryResourceToWorkspace(
   ])
   try {
     await writeManifestAtomically(root, updated)
+    await Promise.all(obsoletePaths.map(path => rm(resolveInsideWorkspace(root, path), { force: true })))
   } catch (error) {
     await rollback()
+    await Promise.all(obsoleteSnapshots.map(async snapshot => {
+      if (!snapshot.bytes) return
+      const absolute = resolveInsideWorkspace(root, snapshot.path)
+      await mkdir(dirname(absolute), { recursive: true })
+      await writeFile(absolute, snapshot.bytes)
+    }))
+    await writeManifestAtomically(root, manifest)
     throw error
   }
   return { manifest: updated, resource }
@@ -1074,7 +1126,7 @@ function validateAcquisitionProfile(
   }
   rejectUnknownKeys(
     value,
-    ['dimensions', 'asset_kinds', 'usage_tags', 'capabilities', 'styles'],
+    ['dimensions', 'asset_kinds', 'usage_tags', 'capabilities', 'styles', 'coverage'],
     path,
     issues,
   )
@@ -1106,6 +1158,40 @@ function validateAcquisitionProfile(
   )
   if (!Array.isArray(value.styles) || !value.styles.every(isTrimmedString))
     issues.push(`${path}.styles must be an array of trimmed non-empty strings.`)
+  if (value.coverage !== undefined) {
+    validateCoverage(value.coverage, `${path}.coverage`, issues)
+    if (Array.isArray(value.capabilities) && value.capabilities.length > 0)
+      issues.push(`${path}.capabilities must be empty when coverage declares multiple resource parts.`)
+  }
+}
+
+function validateCoverage(value: unknown, path: string, issues: string[]): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    issues.push(`${path} must be a non-empty array.`)
+    return
+  }
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`
+    if (!isRecord(item)) {
+      issues.push(`${itemPath} must be an object.`)
+      return
+    }
+    rejectUnknownKeys(item, ['asset_kinds', 'usage_tags', 'capabilities', 'relation_kinds', 'embedded_kinds'], itemPath, issues)
+    const fields: Array<[string, readonly string[]]> = [
+      ['asset_kinds', RESOURCE_ASSET_KINDS],
+      ['usage_tags', RESOURCE_USAGE_TAGS],
+      ['capabilities', RESOURCE_CAPABILITIES],
+      ['relation_kinds', RESOURCE_RELATION_KINDS],
+      ['embedded_kinds', RESOURCE_EMBEDDED_COMPONENT_KINDS],
+    ]
+    let present = false
+    for (const [field, allowed] of fields) {
+      if (item[field] === undefined) continue
+      present = true
+      validateEnumArray(item[field], allowed, `${itemPath}.${field}`, issues)
+    }
+    if (!present) issues.push(`${itemPath} must declare at least one coverage constraint.`)
+  })
 }
 
 function validateEnumArray(
@@ -1452,7 +1538,12 @@ async function downloadResource(
     init?: RequestInit,
   ) => Promise<Response>,
 ): Promise<Uint8Array> {
-  const response = await fetchImpl(requiredString(url, 'Resource URL'))
+  const resourceUrl = requiredString(url, 'Resource URL')
+  const response = await withResourceExternalTransport({
+    service: 'resource-object',
+    operation: 'download resource content',
+    execute: () => fetchImpl(resourceUrl),
+  })
   if (!response.ok)
     throw new Error(`Resource download failed (${response.status})`)
   const bytes = new Uint8Array(await response.arrayBuffer())

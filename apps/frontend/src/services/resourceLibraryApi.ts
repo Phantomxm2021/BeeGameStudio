@@ -30,7 +30,6 @@ export type ResourcePackSummary = {
   licenseEvidence?: string
   compatibleEngines?: readonly string[]
   deprecatedAt?: string
-  elementDefaults?: { usageTags?: readonly string[] }
   elementCount: number
 }
 
@@ -50,12 +49,11 @@ export type CreateResourcePackInput = {
   licenseEvidence?: string
   compatibleEngines?: string[]
   deprecatedAt?: string
-  elementDefaults?: { usageTags?: readonly string[] }
 }
 
 export type UpdateResourcePackInput = Partial<Pick<
   CreateResourcePackInput,
-    | 'name' | 'styles' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version' | 'description' | 'tags' | 'source' | 'author' | 'licenseEvidence' | 'compatibleEngines' | 'deprecatedAt' | 'elementDefaults'
+    | 'name' | 'styles' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version' | 'description' | 'tags' | 'source' | 'author' | 'licenseEvidence' | 'compatibleEngines' | 'deprecatedAt'
 >>
 
 export type ResourceElement = {
@@ -69,7 +67,7 @@ export type ResourceElement = {
   specs: Record<string, string | number | boolean | null>
   usageTags?: readonly string[]
   usageTagsMode?: 'inherit' | 'override' | 'manual-only'
-  usageTagsSource?: 'element' | 'folder' | 'pack' | 'none'
+  usageTagsSource?: 'element' | 'none'
   assetKind?: string | null
   capabilities?: readonly string[]
   contentProfile?: {
@@ -80,16 +78,56 @@ export type ResourceElement = {
   relations?: readonly { kind: string; targetElementId: string; role?: string; required?: boolean }[]
   dependencies: readonly string[]
   dependencyBindings?: readonly { referencePath: string; dependencyElementId: string; kind?: string }[]
+  semanticSuggestion?: {
+    usageTags: readonly string[]
+    styles: readonly string[]
+    relations: readonly { kind: string; targetElementId: string; role?: string; required?: boolean }[]
+    evidence: readonly { source: 'content_profile' | 'technical_facts' | 'content_preview'; reference: string; observation: string }[]
+    confidence: 'high' | 'medium' | 'low'
+    generatedAt: string
+    generatorRevision: string
+  }
   status: string
   styleOverride?: string | null
   dimensionOverride?: '2D' | '3D' | 'agnostic'
 }
 
-export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string; elementDefaults?: { usageTags?: readonly string[] } }
+export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string }
 
 export type ResourcePublishIssue = { code: string; message: string; elementId?: string }
 export type ResourcePublishReadiness = { blocking: readonly ResourcePublishIssue[]; warnings: readonly ResourcePublishIssue[]; canPublish: boolean }
-export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; createdAt: string; updatedAt: string }
+export type ResourceProcessingUsage = {
+  inputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  outputTokens: number
+  totalTokens: number
+  creditsMicro: number
+}
+export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements' | 'semantic-curate-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; usage?: ResourceProcessingUsage; analysisMode?: 'missing' | 'all'; retryOfJobId?: string; createdAt: string; updatedAt: string }
+export type ResourceSemanticCurationStartOptions = { mode?: 'missing' | 'all' }
+export type ResourceCurationQueue = {
+  items: readonly (ResourceElement & { semanticSuggestion?: NonNullable<ResourceElement['semanticSuggestion']> })[]
+  counts: { pendingSuggestions: number; missingSemanticTags: number; technicalIssues: number; dependencyIssues: number }
+  usageTagOptions: readonly string[]
+}
+export type ResourceCurationDecision = {
+  elementId: string
+  usageTags: readonly string[]
+  sourceContentHash?: string
+  suggestionRevision?: string
+  styleOverride?: string | null
+}
+export type ResourceCurationBatchInput = {
+  decisions: readonly ResourceCurationDecision[]
+}
+export type ResourceCurationRejectInput = {
+  elementIds: readonly string[]
+}
+export type ResourceCurationMutationResult = {
+  updatedElementIds: readonly string[]
+  counts?: ResourceCurationQueue['counts']
+}
 export type ResourceElementUploadOptions = {
   signal?: AbortSignal;
   onProgress?: (loaded: number, total: number) => void;
@@ -199,13 +237,13 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       const result = await request<{ folders: ResourceFolder[] }>(`/api/resource-packs/${encodeURIComponent(packId)}/folders`)
       return result.folders
     },
-    async createFolder(packId: string, input: { id?: string; name: string; parentId?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
+    async createFolder(packId: string, input: { id?: string; name: string; parentId?: string }): Promise<ResourceFolder> {
       const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/folders`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = (await response.json()) as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
       return result.folder
     },
-    async updateFolder(packId: string, folderId: string, input: { name?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
+    async updateFolder(packId: string, folderId: string, input: { name?: string }): Promise<ResourceFolder> {
       const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = (await response.json()) as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder update failed (${response.status})`, response.status, result.error?.code || 'resource_folder_update_failed')
@@ -233,6 +271,41 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
         `/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`,
       )
       return result.element
+    },
+    async getCurationQueue(packId: string): Promise<ResourceCurationQueue> {
+      return request<ResourceCurationQueue>(`/api/resource-packs/${encodeURIComponent(packId)}/curation`)
+    },
+    async confirmCuration(packId: string, input: ResourceCurationBatchInput): Promise<ResourceCurationMutationResult> {
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/curation/confirm`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const result = (await response.json().catch(() => undefined)) as (ResourceCurationMutationResult & { error?: { code?: string; message?: string } }) | undefined
+      if (!response.ok || !result?.updatedElementIds) throw new ResourceLibraryApiError(result?.error?.message || `Resource curation confirmation failed (${response.status})`, response.status, result?.error?.code || 'resource_curation_confirm_failed')
+      return result
+    },
+    async rejectCuration(packId: string, input: ResourceCurationRejectInput): Promise<ResourceCurationMutationResult> {
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/curation/reject`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const result = (await response.json().catch(() => undefined)) as (ResourceCurationMutationResult & { error?: { code?: string; message?: string } }) | undefined
+      if (!response.ok || !result?.updatedElementIds) throw new ResourceLibraryApiError(result?.error?.message || `Resource curation rejection failed (${response.status})`, response.status, result?.error?.code || 'resource_curation_reject_failed')
+      return result
+    },
+    async startSemanticCuration(packId: string, options: ResourceSemanticCurationStartOptions = {}): Promise<ResourceProcessingJob> {
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/semantic-curation`), { method: 'POST', ...(options.mode ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(options) } : {}) })
+      const result = (await response.json().catch(() => undefined)) as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } } | undefined
+      if (!response.ok || !result?.job) throw new ResourceLibraryApiError(result?.error?.message || `Semantic curation failed (${response.status})`, response.status, result?.error?.code || 'resource_semantic_curation_failed')
+      return result.job
+    },
+    async getLatestSemanticCurationJob(packId: string): Promise<ResourceProcessingJob | undefined> {
+      const result = await request<{ job: ResourceProcessingJob | null }>(`/api/resource-packs/${encodeURIComponent(packId)}/semantic-curation`)
+      return result.job ?? undefined
+    },
+    async getSemanticCurationJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
+      const result = await request<{ job: ResourceProcessingJob }>(`/api/resource-packs/${encodeURIComponent(packId)}/semantic-curation/${encodeURIComponent(jobId)}`)
+      return result.job
+    },
+    async retrySemanticCuration(packId: string, jobId: string): Promise<ResourceProcessingJob> {
+      const response = await fetchImpl(resourceUrl(`/api/resource-packs/${encodeURIComponent(packId)}/semantic-curation/${encodeURIComponent(jobId)}/retry`), { method: 'POST' })
+      const result = (await response.json().catch(() => undefined)) as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } } | undefined
+      if (!response.ok || !result?.job) throw new ResourceLibraryApiError(result?.error?.message || `Semantic curation retry failed (${response.status})`, response.status, result?.error?.code || 'resource_semantic_curation_retry_failed')
+      return result.job
     },
     async getElementResourceUrl(packId: string, elementId: string): Promise<string> {
       const result = await request<{ url: string }>(

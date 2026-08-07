@@ -7,6 +7,7 @@ import {
   readBeeGameAssetManifest,
   registerBeeGameAuthoredResources,
 } from './asset-contracts'
+import type { ResourceAssetKind } from '@bee-game-studio/beegame-resource-core'
 
 export type ProvisionalResourceRequest = {
   id: string
@@ -21,6 +22,7 @@ export type ProvisionalResourceRequest = {
 
 export type ProvisionalResourceAdapter = {
   format: string
+  assetKinds: readonly ResourceAssetKind[]
   description: string
   author(input: { assetKind: string; parameters?: Record<string, unknown> }): {
     bytes: Uint8Array | string
@@ -34,60 +36,7 @@ export async function authorProvisionalResources(input: {
   resources: ProvisionalResourceRequest[]
   adapters: readonly ProvisionalResourceAdapter[]
 }) {
-  const adapters = input.adapters
-  if (!adapters.length)
-    throw new Error('The active target did not register provisional resource adapters')
-  const adapterByFormat = new Map(
-    adapters.map(adapter => [adapter.format, adapter]),
-  )
-  if (adapterByFormat.size !== adapters.length)
-    throw new Error('Provisional resource adapter formats must be unique')
-
-  const workspaceRoot = resolve(input.workspacePath)
-  const runtimeRoot = resolve(workspaceRoot, BEEGAME_RESOURCE_ROOTS.runtime)
-  const manifest = await readBeeGameAssetManifest(input.workspacePath)
-  const establishedFormats = new Set(
-    manifest.project_target?.asset_format_capabilities ?? [],
-  )
-  const ids = new Set<string>()
-  const paths = new Set<string>()
-  const authored = input.resources.map(resource => {
-    if (ids.has(resource.id))
-      throw new Error(`Provisional resource ids must be unique: ${resource.id}`)
-    if (paths.has(resource.destinationPath))
-      throw new Error(
-        `Provisional resource paths must be unique: ${resource.destinationPath}`,
-      )
-    ids.add(resource.id)
-    paths.add(resource.destinationPath)
-    if (!establishedFormats.has(resource.format))
-      throw new Error(
-        `The canonical resource plan does not allow format: ${resource.format}`,
-      )
-    const adapter = adapterByFormat.get(resource.format)
-    if (!adapter)
-      throw new Error(
-        `No provisional resource adapter is registered for format: ${resource.format}`,
-      )
-    const absolutePath = resolve(workspaceRoot, resource.destinationPath)
-    const runtimeRelative = relative(runtimeRoot, absolutePath)
-    if (
-      runtimeRelative === '' ||
-      runtimeRelative.startsWith('..') ||
-      isAbsolute(runtimeRelative)
-    )
-      throw new Error(
-        `Provisional resource path is outside ${BEEGAME_RESOURCE_ROOTS.runtime}: ${resource.destinationPath}`,
-      )
-    if (
-      extname(resource.destinationPath).slice(1).toLowerCase() !==
-      resource.format
-    )
-      throw new Error(
-        `Provisional resource format does not match destination_path: ${resource.destinationPath}`,
-      )
-    return { resource, absolutePath, output: adapter.author(resource) }
-  })
+  const authored = await prepareProvisionalResources(input)
 
   const snapshots: Array<{ path: string; previous?: Uint8Array }> = []
   try {
@@ -137,6 +86,79 @@ export async function authorProvisionalResources(input: {
     )
     throw error
   }
+}
+
+export async function validateProvisionalResources(input: {
+  workspacePath: string
+  resources: ProvisionalResourceRequest[]
+  adapters: readonly ProvisionalResourceAdapter[]
+}): Promise<void> {
+  await prepareProvisionalResources(input)
+}
+
+async function prepareProvisionalResources(input: {
+  workspacePath: string
+  resources: ProvisionalResourceRequest[]
+  adapters: readonly ProvisionalResourceAdapter[]
+}) {
+  const adapters = input.adapters
+  if (!adapters.length)
+    throw new Error('The active target did not register provisional resource adapters')
+  const adapterByFormat = new Map(
+    adapters.map(adapter => [adapter.format, adapter]),
+  )
+  if (adapterByFormat.size !== adapters.length)
+    throw new Error('Provisional resource adapter formats must be unique')
+
+  const workspaceRoot = resolve(input.workspacePath)
+  const runtimeRoot = resolve(workspaceRoot, BEEGAME_RESOURCE_ROOTS.runtime)
+  const manifest = await readBeeGameAssetManifest(input.workspacePath)
+  const establishedFormats = new Set(
+    manifest.project_target?.asset_format_capabilities ?? [],
+  )
+  const ids = new Set<string>()
+  const paths = new Set<string>()
+  return input.resources.map(resource => {
+    if (ids.has(resource.id))
+      throw new Error(`Provisional resource ids must be unique: ${resource.id}`)
+    if (paths.has(resource.destinationPath))
+      throw new Error(
+        `Provisional resource paths must be unique: ${resource.destinationPath}`,
+      )
+    ids.add(resource.id)
+    paths.add(resource.destinationPath)
+    if (!establishedFormats.has(resource.format))
+      throw new Error(
+        `The canonical resource plan does not allow format: ${resource.format}`,
+      )
+    const adapter = adapterByFormat.get(resource.format)
+    if (!adapter)
+      throw new Error(
+        `No provisional resource adapter is registered for format: ${resource.format}`,
+      )
+    if (!adapter.assetKinds.includes(resource.assetKind as ResourceAssetKind))
+      throw new Error(
+        `Provisional resource adapter ${resource.format} does not support asset kind: ${resource.assetKind}`,
+      )
+    const absolutePath = resolve(workspaceRoot, resource.destinationPath)
+    const runtimeRelative = relative(runtimeRoot, absolutePath)
+    if (
+      runtimeRelative === '' ||
+      runtimeRelative.startsWith('..') ||
+      isAbsolute(runtimeRelative)
+    )
+      throw new Error(
+        `Provisional resource path is outside ${BEEGAME_RESOURCE_ROOTS.runtime}: ${resource.destinationPath}`,
+      )
+    if (
+      extname(resource.destinationPath).slice(1).toLowerCase() !==
+      resource.format
+    )
+      throw new Error(
+        `Provisional resource format does not match destination_path: ${resource.destinationPath}`,
+      )
+    return { resource, absolutePath, output: adapter.author(resource) }
+  })
 }
 
 const PLACEHOLDER_COLORS = {

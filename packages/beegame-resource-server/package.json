@@ -18,8 +18,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bee-game-studio/agent-workflow": "workspace:*",
+    "@bee-game-studio/agent-workflow-server": "workspace:*",
     "@bee-game-studio/beegame-resource-core": "workspace:*",
     "@bee-game-studio/beegame-storage-core": "workspace:*",
-    "assimpjs": "^0.0.10"
+    "assimpjs": "^0.0.10",
+    "image-processor-napi": "workspace:*"
   }
 }

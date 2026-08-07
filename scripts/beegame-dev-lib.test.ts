@@ -30,8 +30,8 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(plan.processes.map(process => process.name)).toEqual([
       'billing',
       'skills',
-      'resources',
       'runtime',
+      'resources',
       'frontend',
     ])
     expect(plan.processes.find(process => process.name === 'resources')?.command).toEqual([

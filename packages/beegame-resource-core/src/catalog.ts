@@ -35,10 +35,10 @@ export function browseResourceCatalogPacks(
 ): ResourceCatalogPage<ResourceCatalogPack> {
   const catalogRequest = resolveCatalogRequest(request, 'packs')
   const published = packs.filter(pack => pack.status === 'published')
-  const readyIds = readyDependencyIds(elements)
   const readyByPack = new Map<string, ResourceElement[]>()
   for (const element of elements) {
-    if (element.status !== 'ready' || !hasCompleteDependencyClosure(element, readyIds)) continue
+    const pack = published.find(candidate => candidate.id === element.packId)
+    if (!pack || !isCatalogSelectableElement(pack, element, elements)) continue
     const list = readyByPack.get(element.packId) ?? []
     list.push(element)
     readyByPack.set(element.packId, list)
@@ -90,9 +90,11 @@ export function browseResourcePackElements(
   const catalogRequest = resolveCatalogRequest(request, `pack-elements:${packId}`)
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
-  const readyIds = readyDependencyIds(elements)
   const available = elements
-    .filter(element => element.packId === packId && element.status === 'ready' && packById.has(element.packId) && hasCompleteDependencyClosure(element, readyIds))
+    .filter(element => {
+      const pack = packById.get(element.packId)
+      return Boolean(pack && element.packId === packId && isCatalogSelectableElement(pack, element, elements))
+    })
   const eligible = available
     .filter(element => elementMatches(element, packById.get(element.packId)!, catalogRequest.filters))
     .sort((left, right) => {
@@ -140,9 +142,18 @@ export function matchResourceRequirements(
       const recordDiagnostic = (code: ResourceMatchDiagnostic['code']) => {
         diagnosticCounts.set(code, (diagnosticCounts.get(code) ?? 0) + 1)
       }
+      const hasCoverage = Boolean(requirement.profile.coverage?.length)
       for (const element of elements) {
         const pack = publishedById.get(element.packId)
         if (!pack) continue
+        if (element.usageTagsMode === 'manual-only') {
+          recordDiagnostic('missing_semantics')
+          continue
+        }
+        if (element.usageTagsMode === 'inherit') {
+          recordDiagnostic('missing_semantics')
+          continue
+        }
         const readiness = evaluateResourceElementSelectionReadiness(pack, element, elements)
         if (!readiness.selectionReady) {
           const code = readiness.blocking.some(issue => issue.code === 'dependency_missing' || issue.code === 'dependency_not_ready')
@@ -165,22 +176,22 @@ export function matchResourceRequirements(
           continue
         if (
           !assetKind ||
-          !requirement.profile.assetKinds.includes(assetKind) ||
+          (!hasCoverage && !requirement.profile.assetKinds.includes(assetKind)) ||
           (requirement.profile.styles.length > 0 && styles.length === 0) ||
-          (requirement.profile.capabilities.length > 0 && element.capabilities === undefined)
+          (!hasCoverage && requirement.profile.capabilities.length > 0 && element.capabilities === undefined)
         ) {
           continue
         }
         if (
           (requirement.profile.styles.length > 0 &&
             !intersectsNormalized(requirement.profile.styles, styles)) ||
-          !requirement.profile.capabilities.every(capability =>
+            !hasCoverage && !requirement.profile.capabilities.every(capability =>
             element.capabilities?.includes(capability),
           )
         )
           continue
         if (
-          requirement.profile.usageTags.length > 0 &&
+          !hasCoverage && requirement.profile.usageTags.length > 0 &&
           !intersects(requirement.profile.usageTags, element.usageTags ?? [])
         )
           continue
@@ -203,23 +214,34 @@ export function matchResourceRequirements(
       const bundles: ResourceRequirementCandidateBundle[] = []
       const maxBundles = Math.min(limit, 8)
       const buildBundle = (orderedCandidates: readonly ResourceRequirementCandidate[]): ResourceRequirementCandidateBundle | undefined => {
-        const selected: ResourceRequirementCandidate[] = []
-        const covered = new Set<number>()
-        for (const candidate of orderedCandidates) {
-          const gained = obligations.flatMap((obligation, index) =>
-            covered.has(index) || !candidateCoversObligation(candidate, obligation) ? [] : [index],
-          )
-          if (!gained.length) continue
-          selected.push(candidate)
-          gained.forEach(index => covered.add(index))
-          if (covered.size === obligations.length || selected.length >= limit) break
+        const states = new Map<string, number[]>([['', []]])
+        for (let candidateIndex = 0; candidateIndex < orderedCandidates.length; candidateIndex += 1) {
+          const candidate = orderedCandidates[candidateIndex]!
+          const snapshot = [...states.entries()]
+          for (const [coveredKey, selectedIndexes] of snapshot) {
+            const covered = coveredKey ? coveredKey.split(',').map(Number) : []
+            const gained = obligations.flatMap((obligation, index) =>
+              covered.includes(index) || !candidateCoversObligation(candidate, obligation) ? [] : [index],
+            )
+            if (!gained.length) continue
+            const nextCovered = [...new Set([...covered, ...gained])].sort((left, right) => left - right)
+            const nextKey = nextCovered.join(',')
+            const nextSelection = [...selectedIndexes, candidateIndex]
+            const previous = states.get(nextKey)
+            if (!previous || compareCandidateSelections(nextSelection, previous, orderedCandidates) < 0)
+              states.set(nextKey, nextSelection)
+          }
         }
-        if (!selected.length) return undefined
+        const completeKey = obligations.map((_, index) => index).join(',')
+        const selectedIndexes = states.get(completeKey)
+        if (!selectedIndexes?.length) return undefined
+        const selected = selectedIndexes.map(index => orderedCandidates[index]!)
+        const covered = obligations.map((_, index) => index)
         return {
           bundleId: `${requirement.requirementId}:${selected.map(candidate => candidate.elementId).join(',')}`,
           candidates: selected,
-          coveredObligations: [...covered].sort((left, right) => left - right).map(String),
-          uncoveredObligations: obligations.map((_, index) => String(index)).filter(index => !covered.has(Number(index))),
+          coveredObligations: covered.map(String),
+          uncoveredObligations: [],
         }
       }
       const bundle = buildBundle(candidates)
@@ -245,6 +267,17 @@ function candidateCoversObligation(
   if (obligation.relationKinds?.length && !obligation.relationKinds.every(kind => candidate.relations.some(relation => relation.kind === kind))) return false
   if (obligation.embeddedKinds?.length && !obligation.embeddedKinds.every(kind => candidate.contentProfile?.components.some(component => component.kind === kind))) return false
   return true
+}
+
+function compareCandidateSelections(
+  left: readonly number[],
+  right: readonly number[],
+  candidates: readonly ResourceRequirementCandidate[],
+): number {
+  if (left.length !== right.length) return left.length - right.length
+  const leftKey = left.map(index => candidates[index]!.elementId).join(',')
+  const rightKey = right.map(index => candidates[index]!.elementId).join(',')
+  return compareText(leftKey, rightKey)
 }
 
 function hasImmutableContentHash(element: ResourceElement): boolean {
@@ -526,16 +559,13 @@ function isCursorPayload(value: unknown): value is {
   )
 }
 
-function readyDependencyIds(elements: readonly ResourceElement[]): ReadonlySet<string> {
-  return new Set(elements.filter(element => element.status === 'ready').map(element => element.id))
-}
-
-function hasCompleteDependencyClosure(element: ResourceElement, readyIds: ReadonlySet<string>): boolean {
-  return (
-    element.dependencies.every(dependencyId => readyIds.has(dependencyId)) &&
-    (element.dependencyBindings ?? []).every(binding => readyIds.has(binding.dependencyElementId)) &&
-    (element.relations ?? []).every(relation => relation.required === false || readyIds.has(relation.targetElementId))
-  )
+function isCatalogSelectableElement(
+  pack: ResourcePack,
+  element: ResourceElement,
+  elements: readonly ResourceElement[],
+): boolean {
+  if (element.usageTagsMode === 'inherit' || element.usageTagsMode === 'manual-only') return false
+  return evaluateResourceElementSelectionReadiness(pack, element, elements).selectionReady
 }
 
 function includesFormat(formats: readonly string[], path: string): boolean {

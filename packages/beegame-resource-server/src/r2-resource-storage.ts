@@ -6,6 +6,7 @@ import {
   buildResourcePackObjectKey,
   sha256Hex,
 } from '@bee-game-studio/beegame-storage-core'
+import { withResourceExternalTransport } from '@bee-game-studio/beegame-resource-core'
 
 type FetchImplementation = (
   input: RequestInfo | URL,
@@ -77,9 +78,13 @@ export function createR2ResourceStorage(options: {
     path: string,
     init: RequestInit = {},
   ): Promise<T> => {
-    const response = await fetchImpl(`${baseUrl}/rest/v1/${path}`, {
-      ...init,
-      headers: { ...headers, ...init.headers },
+    const response = await withResourceExternalTransport({
+      service: 'supabase',
+      operation: `resource object metadata ${init.method ?? 'GET'}`,
+      execute: () => fetchImpl(`${baseUrl}/rest/v1/${path}`, {
+        ...init,
+        headers: { ...headers, ...init.headers },
+      }),
     })
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
@@ -184,11 +189,19 @@ export function createR2ResourceStorage(options: {
         throw new Error('Resource object metadata creation returned no row')
       const objectLocator = locator(row)
       try {
-        await options.driver.putObject(objectLocator, bytes, contentType, {
-          'beegame-object-id': id,
-          'beegame-sha256': checksum,
+        await withResourceExternalTransport({
+          service: 'resource-object',
+          operation: 'put resource object',
+          execute: () => options.driver.putObject(objectLocator, bytes, contentType, {
+            'beegame-object-id': id,
+            'beegame-sha256': checksum,
+          }),
         })
-        const head = await options.driver.headObject(objectLocator)
+        const head = await withResourceExternalTransport({
+          service: 'resource-object',
+          operation: 'verify resource object',
+          execute: () => options.driver.headObject(objectLocator),
+        })
         if (!head || head.byteSize !== input.file.size) {
           throw new Error('R2 Resource object verification failed')
         }
@@ -207,14 +220,22 @@ export function createR2ResourceStorage(options: {
               error instanceof Error ? error.message : 'Resource upload failed',
           },
         }).catch(() => undefined)
-        await options.driver.deleteObject(objectLocator).catch(() => undefined)
+        await withResourceExternalTransport({
+          service: 'resource-object',
+          operation: 'delete failed resource object',
+          execute: () => options.driver.deleteObject(objectLocator),
+        }).catch(() => undefined)
         throw error
       }
     },
     async getFile(storageObjectId, packId) {
       const row = await findReadyObject(storageObjectId, packId)
       if (!row) return undefined
-      const payload = await options.driver.getObject(locator(row))
+      const payload = await withResourceExternalTransport({
+        service: 'resource-object',
+        operation: 'read resource object',
+        execute: () => options.driver.getObject(locator(row)),
+      })
       if (!payload) return undefined
       const body = new ArrayBuffer(payload.bytes.byteLength)
       new Uint8Array(body).set(payload.bytes)
@@ -230,9 +251,13 @@ export function createR2ResourceStorage(options: {
     async createDownloadUrl(storageObjectId, packId) {
       const row = await findReadyObject(storageObjectId, packId)
       if (!row) return undefined
-      return options.driver.createDownloadUrl({
-        ...locator(row),
-        expiresInSeconds: 300,
+      return withResourceExternalTransport({
+        service: 'resource-object',
+        operation: 'create resource download URL',
+        execute: () => options.driver.createDownloadUrl({
+          ...locator(row),
+          expiresInSeconds: 300,
+        }),
       })
     },
     async updateLogicalPath(storageObjectId, packId, logicalPath) {
@@ -243,7 +268,11 @@ export function createR2ResourceStorage(options: {
     async delete(storageObjectId, packId) {
       const row = await findObject(storageObjectId, packId)
       if (!row) return false
-      await options.driver.deleteObject(locator(row))
+      await withResourceExternalTransport({
+        service: 'resource-object',
+        operation: 'delete resource object',
+        execute: () => options.driver.deleteObject(locator(row)),
+      })
       await patchObject(row.id, {
         status: 'deleted',
         deleted_at: new Date().toISOString(),

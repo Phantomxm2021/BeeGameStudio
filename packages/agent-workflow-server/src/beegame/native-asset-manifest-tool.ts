@@ -2,6 +2,8 @@ import {
   RESOURCE_ASSET_KINDS,
   RESOURCE_CAPABILITIES,
   RESOURCE_DIMENSIONS,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
+  RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
   type ResourceLibraryUsage,
 } from '@bee-game-studio/beegame-resource-core'
@@ -43,6 +45,13 @@ const requirementSchema = z
         usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)),
         capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)),
         styles: z.array(z.string().trim().min(1)),
+        coverage: z.array(z.object({
+          asset_kinds: z.array(z.enum(RESOURCE_ASSET_KINDS)).optional(),
+          usage_tags: z.array(z.enum(RESOURCE_USAGE_TAGS)).optional(),
+          capabilities: z.array(z.enum(RESOURCE_CAPABILITIES)).optional(),
+          relation_kinds: z.array(z.enum(RESOURCE_RELATION_KINDS)).optional(),
+          embedded_kinds: z.array(z.enum(RESOURCE_EMBEDDED_COMPONENT_KINDS)).optional(),
+        }).strict().refine(value => Object.values(value).some(item => item !== undefined), 'coverage entries require at least one constraint')).optional(),
       })
       .strict(),
   })

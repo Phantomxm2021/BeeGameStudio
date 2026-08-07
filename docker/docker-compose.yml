@@ -63,6 +63,7 @@ services:
     environment:
       BEEGAME_RESOURCE_HOST: 0.0.0.0
       BEEGAME_RESOURCE_PORT: 62177
+      BEEGAME_RUNTIME_SERVER_URL: http://beegame-runtime:62174
       BEEGAME_RESOURCE_SERVICE_TOKEN: ${BEEGAME_RESOURCE_SERVICE_TOKEN:-}
     ports:
       - "${BEEGAME_RESOURCE_PUBLIC_PORT:-62177}:62177"
@@ -73,6 +74,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    depends_on:
+      beegame-runtime:
+        condition: service_healthy
 
   beegame-runtime:
     build:
@@ -105,8 +109,6 @@ services:
       beegame-billing:
         condition: service_healthy
       beegame-skills:
-        condition: service_healthy
-      beegame-resources:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

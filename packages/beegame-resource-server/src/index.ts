@@ -1,47 +1,128 @@
-import { createInMemoryResourceRepository, type PackSummary, type ResourceElement, type ResourceFolder, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
+import { createInMemoryResourceRepository, resolveResourceSemanticVisualKind, type PackSummary, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
+import { resolveBeeGameResourceSemanticRuntimeOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
 import { createR2StorageDriver, resolveProjectStorageConfiguration } from '@bee-game-studio/beegame-storage-core'
 import { contentProfileFromInspection, inspectUploadedResource } from './resource-inspection'
-import { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
-import { createSubprocessModelProcessor } from './model-processing'
+import { createSupabaseResourceProcessingHandlers, type ResourceProcessingBatchRetry } from './resource-processing-jobs'
+import { createSubprocessModelPreviewProcessor, createSubprocessModelProcessor } from './model-processing'
 import { externalReferencesFromInspection, reconcileResourceDependencySpecs, resolveResourceDependencyBindings } from './resource-dependency-bindings'
 import { createR2ResourceStorage, type R2ResourceStorage } from './r2-resource-storage'
+import { buildResourceSemanticContentProjection, buildResourceSemanticVisualInput } from './semantic-curation-evidence'
+import { createResourceSemanticModelClient } from './semantic-curation-model'
+import { createSupabaseResourceModelConfigResolver } from './supabase-model-config-resolver'
+import { createConfiguredResourceUserResolver } from './auth'
+import { createResourceServerFetch } from './external-fetch'
 
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
 export { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
-export type { ResourceProcessingFailure, ResourceProcessingHandlers, ResourceProcessingJob, ResourceProcessingJobStatus } from './resource-processing-jobs'
-export { createSubprocessModelProcessor } from './model-processing'
-export type { ResourceInspectionFacts, ResourceModelProcessor } from './model-processing'
+export type { ResourceProcessingBatchItem, ResourceProcessingBatchReceipt, ResourceProcessingBatchRetry, ResourceProcessingFailure, ResourceProcessingHandlers, ResourceProcessingJob, ResourceProcessingJobStatus, ResourceProcessingUsage } from './resource-processing-jobs'
+export { createSubprocessModelPreviewProcessor, createSubprocessModelProcessor } from './model-processing'
+export type { ResourceInspectionFacts, ResourceModelPreviewProcessor, ResourceModelProcessor } from './model-processing'
 
 if (import.meta.main) {
   await loadResourceSupabaseEnv()
+  const resourceFetch = createResourceServerFetch()
   const { host, port } = resolveBeeGameResourceListenOptions()
   const baseUrl = process.env.BEEGAME_SUPABASE_URL
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
   const projectStorage = resolveProjectStorageConfiguration(process.env)
   const r2ResourceStorage = baseUrl && serviceRoleKey
     ? projectStorage.provider === 'r2'
-      ? createR2ResourceStorage({ baseUrl, serviceRoleKey, bucket: projectStorage.buckets['resource-private'], driver: createR2StorageDriver(projectStorage.r2) })
+      ? createR2ResourceStorage({ baseUrl, serviceRoleKey, bucket: projectStorage.buckets['resource-private'], driver: createR2StorageDriver(projectStorage.r2), fetchImpl: resourceFetch })
       : (() => { throw new Error('Resource Library storage provider must be R2') })()
     : undefined
   const modelProcessor = process.env.BEEGAME_RESOURCE_MODEL_PROCESSOR_ENABLED === '0' ? undefined : createSubprocessModelProcessor()
-  const inspectResourceElement = baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor, r2Storage: r2ResourceStorage }) : undefined
+  const modelPreviewProcessor = process.env.BEEGAME_RESOURCE_MODEL_PROCESSOR_ENABLED === '0' ? undefined : createSubprocessModelPreviewProcessor()
+  const repository = createConfiguredResourceRepository(process.env, resourceFetch, r2ResourceStorage)
+  const semanticRuntimeOptions = resolveBeeGameResourceSemanticRuntimeOptions(process.env)
+  const semanticConfigResolver = baseUrl && serviceRoleKey
+    ? createSupabaseResourceModelConfigResolver({ baseUrl, serviceRoleKey, fetchImpl: resourceFetch })
+    : undefined
+  let semanticModel: ReturnType<typeof createResourceSemanticModelClient> | undefined
+  if (semanticRuntimeOptions.configured && semanticConfigResolver) {
+    try {
+      semanticModel = createResourceSemanticModelClient({ runtimeServerUrl: semanticRuntimeOptions.runtimeServerUrl!, serviceToken: semanticRuntimeOptions.serviceToken!, fetchImpl: resourceFetch })
+    } catch (error) {
+      console.warn('Resource semantic model configuration rejected:', error)
+    }
+  }
+  const inspectResourceElement = baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) : undefined
   const resourceProcessing = baseUrl && serviceRoleKey && inspectResourceElement
-    ? createSupabaseResourceProcessingHandlers({ baseUrl, serviceRoleKey, inspectElement: inspectResourceElement })
+    ? createSupabaseResourceProcessingHandlers({
+      baseUrl, serviceRoleKey, inspectElement: inspectResourceElement, fetchImpl: resourceFetch,
+      canProcessKind: kind => kind === 'inspect-elements' || Boolean(semanticModel && semanticConfigResolver),
+      ...(semanticModel && semanticConfigResolver ? { processBatch: async (_kind, packId, batchId, contexts, analysisMode) => {
+        if (!contexts.length) throw new Error('Resource semantic processing batch is empty')
+        if (!contexts.every(context => context.ownerId && context.modelConfigId)) throw new Error('Resource semantic processing model identity is missing')
+        const curatorRevision = contexts[0]!.curatorRevision
+        if (!curatorRevision || contexts.some(context => context.curatorRevision !== curatorRevision)) throw new Error('Resource semantic processing curator revision is inconsistent')
+        const modelConfig = await semanticConfigResolver.resolve(contexts[0]!.ownerId!, contexts[0]!.modelConfigId!)
+        const loadedResults = await Promise.all(contexts.map(async context => {
+          try {
+            const element = await repository.getElement(packId, context.elementId)
+            if (!element) throw new Error('Resource element not found')
+            const source = await loadResourceSemanticSource(baseUrl!, serviceRoleKey!, r2ResourceStorage!, packId, element, resourceFetch, modelPreviewProcessor)
+            if (!source?.visualFile) throw new ResourceSemanticPreviewRequiredError('Resource semantic visual preview is unavailable')
+            const projection = buildResourceSemanticContentProjection(element)
+            if (context.sourceContentHash && context.sourceContentHash !== projection.sourceContentHash) throw new Error('Resource semantic processing content hash is stale')
+            return { kind: 'ready' as const, value: { context, element, file: source.file, visualFile: source.visualFile, projection } }
+          } catch (error) {
+            if (!(error instanceof ResourceSemanticPreviewRequiredError)) throw error
+            return { kind: 'retry' as const, value: { elementId: context.elementId, error: safeResourceProcessingMessage(error) } satisfies ResourceProcessingBatchRetry }
+          }
+        }))
+        let loaded = loadedResults.filter((result): result is Extract<(typeof loadedResults)[number], { kind: 'ready' }> => result.kind === 'ready').map(result => result.value)
+        const retryItems = loadedResults.filter((result): result is Extract<(typeof loadedResults)[number], { kind: 'retry' }> => result.kind === 'retry').map(result => result.value)
+        if (!loaded.length) return { batchId, items: [], retryItems }
+        let visualInput: Awaited<ReturnType<typeof buildResourceSemanticVisualInput>>
+        try {
+          visualInput = await buildResourceSemanticVisualInput(loaded.map(item => ({ elementId: item.context.elementId, file: item.visualFile })))
+        } catch (error) {
+          retryItems.push(...loaded.map(item => ({ elementId: item.context.elementId, error: safeResourceProcessingMessage(new ResourceSemanticPreviewRequiredError(error instanceof Error ? error.message : 'Resource semantic visual input could not be built')) })))
+          return { batchId, items: [], retryItems }
+        }
+        const result = await semanticModel.classifyBatch({
+          ownerId: contexts[0]!.ownerId!,
+          modelConfigId: modelConfig.id,
+          modelType: modelConfig.runtime.modelType,
+          runtimeEnv: modelConfig.runtime.env,
+          packId,
+          jobId: contexts[0]!.jobId,
+          batchId,
+          curatorRevision,
+          items: loaded.map(({ context, projection }) => ({ elementId: context.elementId, attempt: context.attempt, projection })),
+          visualInput,
+        })
+        try {
+          const receipts = []
+          for (const decision of result.decisions) {
+            const committed = await repository.commitSemanticDecision?.(packId, decision, new Date().toISOString(), { commitMode: analysisMode === 'all' ? 'refresh-suggestion' : 'standard' })
+            if (!committed) throw new Error('Resource semantic metadata commit is not configured')
+            receipts.push({ elementId: decision.elementId, receiptId: committed.receiptId })
+          }
+          return { batchId, items: receipts, retryItems, ...(result.usage ? { usage: result.usage } : {}) }
+        } catch (error) {
+          if (!result.usage || !error || typeof error !== 'object') throw error
+          Object.assign(error, { usage: result.usage })
+          throw error
+        }
+      } } : {}),
+    })
     : undefined
   const app = createBeeGameResourceServerApp({
-    repository: createConfiguredResourceRepository(process.env, r2ResourceStorage),
+    repository,
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
-    ...(baseUrl && serviceRoleKey ? { canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey }) } : {}),
-    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) : {}),
-    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) : {}),
+    ...(baseUrl && serviceRoleKey ? { currentUserResolver: createConfiguredResourceUserResolver(process.env, { fetchImpl: resourceFetch }), canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey, fetchImpl: resourceFetch }) } : {}),
+    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) : {}),
+    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) : {}),
     ...(inspectResourceElement ? { inspectResourceElement } : {}),
     ...(resourceProcessing ? { resourceProcessing } : {}),
-    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage }) } : {}),
-    ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
+    ...(semanticModel && semanticConfigResolver ? { semanticCuration: { curatorRevision: semanticRuntimeOptions.curatorRevision, resolveModelConfigId: async (ownerId: string, requestedId?: string) => (await semanticConfigResolver.resolve(ownerId, requestedId)).id } } : {}),
+    ...(baseUrl && serviceRoleKey && r2ResourceStorage ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) } : {}),
+    ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey, fetchImpl: resourceFetch }) } : {}),
     addResourceElement: baseUrl && serviceRoleKey && r2ResourceStorage ? async (packId, request) => {
       const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
       if (!(file instanceof File)) throw new Error('Element file is required')
@@ -57,7 +138,7 @@ if (import.meta.main) {
       const contentProfile = contentProfileFromInspection(inspection)
       row.content_profile = contentProfile
       row.capabilities = capabilitiesFromContentProfile(contentProfile)
-      const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers, body: JSON.stringify(row) })
+      const saved = await resourceFetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers, body: JSON.stringify(row) })
       if (!saved.ok) {
         await r2ResourceStorage.delete(r2Object.storageObjectId, storagePackId)
         throw new Error('Element metadata persistence failed')
@@ -80,6 +161,56 @@ function capabilitiesFromContentProfile(profile: NonNullable<ResourceElement['co
     kinds.has('texture') ? 'contains-textures' : undefined,
     kinds.has('morph-target') ? 'morph-targets' : undefined,
   ].filter((value): value is NonNullable<ResourceElement['capabilities']>[number] => Boolean(value))
+}
+
+async function loadResourceSemanticSource(
+  baseUrl: string,
+  serviceRoleKey: string,
+  r2Storage: R2ResourceStorage,
+  packId: string,
+  element: ResourceElement,
+  fetchImpl: import('./external-fetch').ResourceServerFetch,
+  modelPreviewProcessor?: (file: File) => Promise<File | undefined>,
+) {
+  const kind = resolveResourceSemanticPreviewKind(element)
+  if (!kind) throw new ResourceSemanticPreviewRequiredError('Resource semantic visual preview is unsupported for this resource')
+  const metadata = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(element.id)}&pack_id=eq.${encodeURIComponent(packId)}&select=storage_object_id`, {
+    headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}` },
+  })
+  if (!metadata.ok) throw new Error(`Resource semantic preview lookup failed (${metadata.status})`)
+  const row = ((await metadata.json()) as Array<{ storage_object_id?: unknown }>)[0]
+  if (typeof row?.storage_object_id !== 'string' || !row.storage_object_id.trim()) throw new Error('Resource semantic preview storage object is missing')
+  const file = await r2Storage.getFile(row.storage_object_id, packId)
+  if (!file) throw new Error('Resource semantic preview content is unavailable')
+  if (kind === 'model') {
+    if (!modelPreviewProcessor) throw new ResourceSemanticPreviewRequiredError('Resource model semantic preview processor is unavailable')
+    let visualFile: File | undefined
+    try {
+      visualFile = await modelPreviewProcessor(file)
+    } catch (error) {
+      throw new ResourceSemanticPreviewRequiredError(`Resource model semantic preview could not be rendered: ${safeResourceProcessingMessage(error)}`)
+    }
+    if (!visualFile || !visualFile.type.trim().toLowerCase().startsWith('image/')) throw new ResourceSemanticPreviewRequiredError('Resource model semantic preview could not be rendered')
+    return { file, visualFile }
+  }
+  if (!file.type.trim().toLowerCase().startsWith('image/')) throw new ResourceSemanticPreviewRequiredError('Resource image semantic preview content is unavailable')
+  return { file, visualFile: file }
+}
+
+export class ResourceSemanticPreviewRequiredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ResourceSemanticPreviewRequiredError'
+  }
+}
+
+export function resolveResourceSemanticPreviewKind(element: ResourceElement): 'image' | 'model' | undefined {
+  return resolveResourceSemanticVisualKind(element)
+}
+
+function safeResourceProcessingMessage(error: unknown): string {
+  const value = error instanceof Error ? error.message : String(error)
+  return value.replaceAll('\r', ' ').replaceAll('\n', ' ').replaceAll('\t', ' ').slice(0, 500)
 }
 
 const INSPECTION_DERIVED_CAPABILITIES = new Set<string>([
@@ -251,7 +382,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     return response.json() as Promise<T[]>
   }
   type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string; storage_object_id?: string | null }
-  type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string; element_defaults?: ResourceFolder['elementDefaults'] | null }
+  type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
   const storageObjectId = (element: ElementRow): string => {
     if (typeof element.storage_object_id !== 'string') throw new Error('Resource element storage object is required')
     return element.storage_object_id
@@ -297,7 +428,6 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       if (!folder) return undefined
       const name = Object.hasOwn(body, 'name') ? String(body.name || '').trim() : folder.name
       if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
-      const elementDefaults = Object.hasOwn(body, 'elementDefaults') ? body.elementDefaults : (folder.element_defaults ?? {})
       const parent = folder.parent_id ? folders.find((item) => item.id === folder.parent_id) : undefined
       const nextPath = parent ? `${parent.path}/${name}` : name
       if (folders.some((item) => item.id !== folderId && item.path === nextPath)) throw new Error('Folder path already exists')
@@ -311,7 +441,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
           if (!element) throw new Error('Resource element metadata is inconsistent')
           await options.r2Storage.updateLogicalPath(storageObjectId(element), packId, move.to)
         }
-        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name, element_defaults: elementDefaults } : {}), path: replacePath(item.path) })
+        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name } : {}), path: replacePath(item.path) })
         for (const item of elements) await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { path: replacePath(item.path) })
       } catch (error) {
         for (const move of [...moves].reverse()) {
@@ -320,7 +450,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
         }
         throw error
       }
-      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath, ...(elementDefaults && typeof elementDefaults === 'object' ? { elementDefaults: elementDefaults as ResourceFolder['elementDefaults'] } : {}) }
+      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath }
     },
     deleteResourceFolder: async (packId: string, folderId: string) => {
       const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
@@ -350,14 +480,15 @@ async function loadResourceSupabaseEnv(): Promise<void> {
     if (!(await file.exists())) continue
     const text = await file.text()
     for (const line of text.split(/\r?\n/)) {
-      const match = line.match(/^\s*(BEEGAME_(?:SUPABASE_(?:URL|SERVICE_ROLE_KEY|ANON_KEY)|PROJECT_STORAGE_PROVIDER|R2_(?:ACCOUNT_ID|ENDPOINT|ACCESS_KEY_ID|SECRET_ACCESS_KEY|PROJECT_BUCKET|RESOURCE_BUCKET|DELIVERY_BUCKET|LOG_BUCKET)))\s*=\s*(.*)\s*$/)
+      const match = line.match(/^\s*(BEEGAME_(?:SUPABASE_(?:URL|SERVICE_ROLE_KEY|ANON_KEY)|CONFIG_ENCRYPTION_KEY|PROJECT_STORAGE_PROVIDER|R2_(?:ACCOUNT_ID|ENDPOINT|ACCESS_KEY_ID|SECRET_ACCESS_KEY|PROJECT_BUCKET|RESOURCE_BUCKET|DELIVERY_BUCKET|LOG_BUCKET)|RUNTIME_SERVER_URL|RESOURCE_SEMANTIC_CURATOR_REVISION))\s*=\s*(.*)\s*$/)
       if (match?.[1] && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '')
     }
   }
 }
 
 function createConfiguredResourceRepository(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: import('./external-fetch').ResourceServerFetch,
   r2Storage?: R2ResourceStorage,
 ) {
   const baseUrl = env.BEEGAME_SUPABASE_URL?.trim()
@@ -367,6 +498,7 @@ function createConfiguredResourceRepository(
     return createSupabaseResourceRepository({
       baseUrl,
       serviceRoleKey,
+      fetchImpl,
       getStorageObjectUrl: (storageObjectId: string, packId: string) => r2Storage.createDownloadUrl(storageObjectId, packId),
     })
   }
@@ -403,7 +535,7 @@ export function toPackUpdateRow(body: Record<string, unknown>): Record<string, u
   const editable: Record<string, string> = {
     name: 'name', styles: 'styles', gameTypes: 'game_types', dimension: 'dimension',
     primaryCategory: 'primary_category', categories: 'categories', license: 'license', version: 'version',
-    description: 'description', tags: 'tags', source: 'source', author: 'author', licenseEvidence: 'license_evidence', compatibleEngines: 'compatible_engines', deprecatedAt: 'deprecated_at', elementDefaults: 'element_defaults',
+    description: 'description', tags: 'tags', source: 'source', author: 'author', licenseEvidence: 'license_evidence', compatibleEngines: 'compatible_engines', deprecatedAt: 'deprecated_at',
   }
   const row: Record<string, unknown> = {}
   for (const [input, column] of Object.entries(editable)) {
@@ -582,10 +714,10 @@ export function toResourcePack(row: Record<string, unknown>): PackSummary {
     ...(typeof row.license_evidence === 'string' && row.license_evidence ? { licenseEvidence: row.license_evidence } : {}),
     ...(Array.isArray(row.compatible_engines) && row.compatible_engines.length ? { compatibleEngines: row.compatible_engines.map(String) } : {}),
     ...(typeof row.deprecated_at === 'string' && row.deprecated_at ? { deprecatedAt: row.deprecated_at } : {}),
-    ...(row.element_defaults && typeof row.element_defaults === 'object' && !Array.isArray(row.element_defaults) ? { elementDefaults: row.element_defaults as ResourcePack['elementDefaults'] } : {}),
     elementCount: typeof row.element_count === 'number' ? row.element_count : 0,
   }
 }
+
 
 export function toResourceElement(row: Record<string, unknown>): ResourceElement {
   return {
@@ -596,6 +728,9 @@ export function toResourceElement(row: Record<string, unknown>): ResourceElement
         : {},
     ...(Array.isArray(row.usage_tags) && row.usage_tags.length ? { usageTags: row.usage_tags.map(String) as ResourceElement['usageTags'] } : {}),
     ...(typeof row.usage_tags_mode === 'string' ? { usageTagsMode: row.usage_tags_mode as ResourceElement['usageTagsMode'] } : {}),
+    ...(row.semantic_suggestion && typeof row.semantic_suggestion === 'object' && !Array.isArray(row.semantic_suggestion)
+      ? { semanticSuggestion: row.semantic_suggestion as ResourceElement['semanticSuggestion'] }
+      : {}),
     ...(typeof row.asset_kind === 'string' ? { assetKind: row.asset_kind as ResourceElement['assetKind'] } : {}),
     ...(Array.isArray(row.capabilities) && row.capabilities.length ? { capabilities: row.capabilities.map(String) as ResourceElement['capabilities'] } : {}),
     ...(row.content_profile && typeof row.content_profile === 'object' ? { contentProfile: row.content_profile as ResourceElement['contentProfile'] } : {}),

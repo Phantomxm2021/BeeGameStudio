@@ -1032,6 +1032,40 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(pinnedLookupCalls).toBe(0)
   })
 
+  test('passes the model runtime TLS configuration into the pinned dispatcher', async () => {
+    const target: ApprovedOutboundTarget = {
+      url: new URL('https://provider.runtime.test/v1'),
+      addresses: ['93.184.216.34'],
+      lookup: (_hostname, _options, callback) =>
+        callback(null, '93.184.216.34', 4),
+    }
+    const tls = {
+      ca: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
+      cert: '-----BEGIN CERTIFICATE-----\nCLIENT\n-----END CERTIFICATE-----',
+      key: '-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----',
+      passphrase: 'test-passphrase',
+    }
+    const calls: Array<{ init?: RequestInit }> = []
+    const wrapped = createBeeGamePinnedFetch(
+      (async (_input, init) => {
+        calls.push({ init })
+        return new Response('{}')
+      }) as typeof fetch,
+      { OPENAI_BASE_URL: target },
+      { tls },
+    )
+
+    await wrapped('https://provider.runtime.test/v1/chat/completions')
+
+    const dispatcher = (calls[0]?.init as RequestInit & { dispatcher?: object }).dispatcher
+    expect(dispatcher).toBeDefined()
+    const optionsSymbol = Object.getOwnPropertySymbols(dispatcher!)
+      .find(symbol => symbol.description === 'options')
+    expect(optionsSymbol).toBeDefined()
+    expect((dispatcher as Record<symbol, { connect?: Record<string, unknown> }>)[optionsSymbol!].connect)
+      .toMatchObject(tls)
+  })
+
   test('rejects redirect-capable requests and cannot reuse a dispatcher across ports', async () => {
     const target: ApprovedOutboundTarget = {
       url: new URL('https://provider.runtime.test/v1'),

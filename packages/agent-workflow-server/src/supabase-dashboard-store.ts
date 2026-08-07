@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
 import {
   decryptSecret,
   encryptSecret,
   isSecretEnvelope,
 } from './security/secret-crypto'
+import {
+  mapStoredModelConfigToRuntime,
+} from '@bee-game-studio/agent-workflow'
 import type {
   ModelConfigInput,
   ModelConfigSnapshotRecord,
@@ -48,8 +52,13 @@ type SupabaseConfig = {
   anonKey: string
   authToken?: string
   assetBucket?: string
-  fetchImpl?: typeof fetch
+  fetchImpl?: SupabaseFetch
 }
+
+type SupabaseFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
 
 type JsonObject = Record<string, unknown>
 
@@ -261,6 +270,7 @@ type SupabaseDeploymentRow = {
 
 export function createSupabaseDashboardStoreFromEnv(
   env: Env = process.env,
+  fetchImpl: SupabaseFetch = createTLSAwareFetch(),
 ): SupabaseDashboardStore | undefined {
   const url = (
     env.BEEGAME_SUPABASE_URL ??
@@ -284,6 +294,7 @@ export function createSupabaseDashboardStoreFromEnv(
         env.SUPABASE_ASSET_BUCKET ??
         ''
       ).trim() || undefined,
+    fetchImpl,
   })
 }
 
@@ -292,7 +303,7 @@ export class SupabaseDashboardStore {
   private readonly anonKey: string
   private readonly authToken?: string
   private readonly assetBucket: string
-  private readonly fetchImpl: typeof fetch
+  private readonly fetchImpl: SupabaseFetch
   private readonly workspaceIds = new Map<string, string>()
 
   constructor(config: SupabaseConfig) {
@@ -1370,54 +1381,12 @@ function modelConfigRowToRuntimeEnv(
   const apiKey = row.api_key_ciphertext
     ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
     : ''
-  const models = toModelMap(row.models)
-  const modelEnv = (values: Record<string, string | null | undefined>) =>
-    Object.fromEntries(
-      Object.entries(values).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && Boolean(entry[1]),
-      ),
-    )
-
-  switch (row.provider) {
-    case 'anthropic-compatible':
-      return modelEnv({
-        ANTHROPIC_BASE_URL: row.base_url,
-        ANTHROPIC_AUTH_TOKEN: apiKey,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: models.fast,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: models.balanced,
-        ANTHROPIC_DEFAULT_OPUS_MODEL: models.strong,
-      })
-    case 'openai-compatible':
-      return modelEnv({
-        CLAUDE_CODE_USE_OPENAI: '1',
-        OPENAI_BASE_URL: row.base_url,
-        OPENAI_API_KEY: apiKey,
-        OPENAI_DEFAULT_HAIKU_MODEL: models.fast,
-        OPENAI_DEFAULT_SONNET_MODEL: models.balanced,
-        OPENAI_DEFAULT_OPUS_MODEL: models.strong,
-      })
-    case 'gemini':
-      return modelEnv({
-        CLAUDE_CODE_USE_GEMINI: '1',
-        GEMINI_BASE_URL: row.base_url,
-        GEMINI_API_KEY: apiKey,
-        GEMINI_DEFAULT_HAIKU_MODEL: models.fast,
-        GEMINI_DEFAULT_SONNET_MODEL: models.balanced,
-        GEMINI_DEFAULT_OPUS_MODEL: models.strong,
-      })
-    case 'grok':
-      return modelEnv({
-        CLAUDE_CODE_USE_GROK: '1',
-        GROK_BASE_URL: row.base_url,
-        GROK_API_KEY: apiKey,
-        GROK_DEFAULT_HAIKU_MODEL: models.fast,
-        GROK_DEFAULT_SONNET_MODEL: models.balanced,
-        GROK_DEFAULT_OPUS_MODEL: models.strong,
-      })
-    default:
-      return {}
-  }
+  return mapStoredModelConfigToRuntime({
+    provider: row.provider as Parameters<typeof mapStoredModelConfigToRuntime>[0]['provider'],
+    ...(row.base_url ? { baseUrl: row.base_url } : {}),
+    apiKey,
+    models: toModelMap(row.models),
+  }).env
 }
 
 function maskSecret(secret: string): string {

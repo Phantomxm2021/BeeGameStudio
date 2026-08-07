@@ -17,6 +17,16 @@ export type TLSConfig = MTLSConfig & {
   ca?: string | string[] | Buffer
 }
 
+export type TLSAwareFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
+type TLSAwareFetchInit = RequestInit & {
+  dispatcher?: unknown
+  tls?: unknown
+}
+
 /**
  * Get mTLS configuration from environment variables
  */
@@ -149,6 +159,23 @@ export function getTLSFetchOptions(): {
   })
 
   return { dispatcher: agent }
+}
+
+/**
+ * Creates the one outbound HTTP transport used by local service clients.
+ * Certificate verification remains enabled; this only supplies configured
+ * CA/mTLS material to runtimes that do not inherit it from the parent process.
+ */
+export function createTLSAwareFetch(
+  baseFetch: TLSAwareFetch = globalThis.fetch.bind(globalThis),
+  tlsOptions: ReturnType<typeof getTLSFetchOptions> = getTLSFetchOptions(),
+): TLSAwareFetch {
+  const transportOptions: TLSAwareFetchInit = {
+    ...(tlsOptions.dispatcher ? { dispatcher: tlsOptions.dispatcher } : {}),
+    ...(tlsOptions.tls ? { tls: tlsOptions.tls } : {}),
+  }
+  if (Object.keys(transportOptions).length === 0) return baseFetch
+  return (input, init) => baseFetch(input, { ...init, ...transportOptions })
 }
 
 /**

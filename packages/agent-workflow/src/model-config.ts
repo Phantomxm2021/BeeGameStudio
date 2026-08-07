@@ -50,6 +50,13 @@ export type RuntimeModelConfig = {
   env: Record<string, string>
 }
 
+export type StoredModelConfigRuntimeInput = {
+  provider: ModelProviderKind
+  baseUrl?: string
+  apiKey: string
+  models: ModelTierMap
+}
+
 type StoredModelConfig = Omit<PublicModelConfig, 'apiKeyPreview' | 'apiKey'> & {
   apiKey: string
 }
@@ -183,6 +190,12 @@ export function mapModelConfigToRuntime(
   const record = configs.get(id)
   if (!record) return undefined
 
+  return mapStoredModelConfigToRuntime(record)
+}
+
+export function mapStoredModelConfigToRuntime(
+  record: StoredModelConfigRuntimeInput,
+): RuntimeModelConfig {
   switch (record.provider) {
     case 'anthropic-compatible':
       return {

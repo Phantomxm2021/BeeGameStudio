@@ -22,11 +22,92 @@ const repository = createInMemoryResourceRepository({
   elements: [{
     id: 'element-1', packId: 'pack-1', name: 'Character Idle', path: 'characters/idle.png',
     category: 'sprites', kind: 'sprite-sheet', preview: { kind: 'image', path: 'previews/idle.png' },
-    specs: { width: 256, height: 256 }, usageTags: ['character'], dependencies: [], status: 'ready',
+    specs: { width: 256, height: 256, contentHash: 'a'.repeat(64) }, assetKind: 'sprite-sheet', usageTags: ['character'], dependencies: [], status: 'ready',
   }],
 })
 
+function repositoryPack(id: string) {
+  return {
+    id, name: 'Semantic Pack', styles: ['Stylized'], gameTypes: ['strategy'],
+    dimension: '3D' as const, primaryCategory: '3d-assets' as const, categories: ['models' as const], license: 'internal', version: '1.0.0', status: 'published' as const,
+  }
+}
+
 describe('resource service app', () => {
+  test('starts semantic curation only for ready elements without effective tags', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [repositoryPack('semantic-pack')],
+      elements: [
+        { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: [], status: 'ready' },
+        { id: 'untagged', packId: 'semantic-pack', name: 'Untagged', path: 'b/untagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, dependencies: [], status: 'ready' },
+        { id: 'pending', packId: 'semantic-pack', name: 'Pending', path: 'c/pending.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, dependencies: [], status: 'ready', semanticSuggestion: { usageTags: ['prop'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'test', observation: 'pending' }], confidence: 'medium', generatedAt: '2026-08-07T00:00:00.000Z', generatorRevision: 'test' } },
+      ],
+    })
+    let started: { packId: string; elementIds?: readonly string[]; options?: { kind?: string; analysisMode?: string; curatorRevision?: string; ownerId?: string; modelConfigId?: string } } | undefined
+    const job = { id: 'semantic-job-1', packId: 'semantic-pack', kind: 'semantic-curate-elements' as const, status: 'queued' as const, totalItems: 1, completedItems: 0, failedItems: 0, createdAt: '2026-08-07T00:00:00.000Z', updatedAt: '2026-08-07T00:00:00.000Z' }
+    const app = createBeeGameResourceServerApp({
+      repository: localRepository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      semanticCuration: { curatorRevision: 'semantic-curator-v1', resolveModelConfigId: async () => 'model-1' },
+      resourceProcessing: { start: async (packId, elementIds, options) => { started = { packId, elementIds, options }; return job }, latest: async () => job, get: async () => job, retry: async () => job, cancel: async () => ({ ...job, status: 'cancelled' }) },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/semantic-pack/semantic-curation', { method: 'POST' }))
+
+    expect(response.status).toBe(202)
+    expect(started).toEqual({ packId: 'semantic-pack', elementIds: ['untagged', 'pending'], options: { kind: 'semantic-curate-elements', analysisMode: 'missing', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
+  })
+
+  test('starts full semantic reanalysis for every ready non-manual element', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [repositoryPack('semantic-pack')],
+      elements: [
+        { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: [], status: 'ready' },
+        { id: 'manual', packId: 'semantic-pack', name: 'Manual', path: 'b/manual.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, usageTags: ['environment'], usageTagsMode: 'manual-only', dependencies: [], status: 'ready' },
+        { id: 'suggested', packId: 'semantic-pack', name: 'Suggested', path: 'c/suggested.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, usageTags: ['prop'], semanticSuggestion: { usageTags: ['building'], styles: [], relations: [], evidence: [{ source: 'content_profile', reference: 'test', observation: 'pending' }], confidence: 'medium', generatedAt: '2026-08-07T00:00:00.000Z', generatorRevision: 'test' }, dependencies: [], status: 'ready' },
+      ],
+    })
+    let started: { elementIds?: readonly string[]; options?: { kind?: string; analysisMode?: string; curatorRevision?: string; ownerId?: string; modelConfigId?: string } } | undefined
+    const job = { id: 'semantic-job-1', packId: 'semantic-pack', kind: 'semantic-curate-elements' as const, status: 'queued' as const, totalItems: 2, completedItems: 0, failedItems: 0, createdAt: '2026-08-07T00:00:00.000Z', updatedAt: '2026-08-07T00:00:00.000Z' }
+    const app = createBeeGameResourceServerApp({
+      repository: localRepository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      semanticCuration: { curatorRevision: 'semantic-curator-v1', resolveModelConfigId: async () => 'model-1' },
+      resourceProcessing: { start: async (_packId, elementIds, options) => { started = { elementIds, options }; return job }, latest: async () => job, get: async () => job, retry: async () => job, cancel: async () => ({ ...job, status: 'cancelled' }) },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/semantic-pack/semantic-curation', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'all' }) }))
+
+    expect(response.status).toBe(202)
+    expect(started).toEqual({ elementIds: ['tagged', 'suggested'], options: { kind: 'semantic-curate-elements', analysisMode: 'all', curatorRevision: 'semantic-curator-v1', ownerId: 'admin-1', modelConfigId: 'model-1' } })
+  })
+
+  test('returns 503 instead of creating a semantic job without a configured model', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      resourceProcessing: { start: async () => { throw new Error('must not start') }, latest: async () => undefined, get: async () => undefined, retry: async () => undefined, cancel: async () => undefined },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/semantic-curation', { method: 'POST' }))
+
+    expect(response.status).toBe(503)
+  })
+
+  test('restores the latest durable semantic curation job without requiring model configuration', async () => {
+    const job = { id: 'semantic-job-1', packId: 'pack-1', kind: 'semantic-curate-elements' as const, status: 'completed' as const, totalItems: 1, completedItems: 1, failedItems: 0, createdAt: '2026-08-07T00:00:00.000Z', updatedAt: '2026-08-07T00:00:05.000Z' }
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      resourceProcessing: { start: async () => job, latest: async () => job, get: async () => job, retry: async () => job, cancel: async () => undefined },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/semantic-curation'))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ job })
+  })
+
   test('exposes health without requiring an authenticated resource administrator', async () => {
     const app = createBeeGameResourceServerApp({ repository })
     const response = await app.fetch(new Request('http://resource.test/health'))
@@ -54,6 +135,26 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs'))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ packs: [expect.objectContaining({ id: 'pack-1', elementCount: 1 })] })
+  })
+
+  test('catalog summary count matches the same element-level readiness used for discovery', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [repositoryPack('count-pack')],
+      elements: [
+        { id: 'selectable', packId: 'count-pack', name: 'Selectable', path: 'selectable.glb', category: 'models', kind: 'model', assetKind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['environment'], dependencies: [], status: 'ready' },
+        { id: 'uncurated', packId: 'count-pack', name: 'Uncurated', path: 'uncurated.glb', category: 'models', kind: 'model', assetKind: 'model', specs: { contentHash: 'b'.repeat(64) }, dependencies: [], status: 'ready' },
+      ],
+    })
+    const app = createBeeGameResourceServerApp({ repository: localRepository })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-catalog/packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    }))
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).items).toEqual([
+      expect.objectContaining({ packId: 'count-pack', readyElementCount: 1 }),
+    ])
   })
 
   test('writes a Pack creation audit event without exposing audit storage to the browser', async () => {
@@ -91,7 +192,7 @@ describe('resource service app', () => {
     ]))
   })
 
-  test('updates folder semantic defaults without requiring a rename', async () => {
+  test('rejects folder semantic defaults because element tags are the only semantic authority', async () => {
     const localRepository = createInMemoryResourceRepository({
       packs: [{ id: 'policy-pack', name: 'Policy',
           styles: ['Stylized'], gameTypes: ['action'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
@@ -104,8 +205,8 @@ describe('resource service app', () => {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ elementDefaults: { usageTags: ['environment'] } }),
     }))
 
-    expect(response.status).toBe(200)
-    await expect(localRepository.getElement('policy-pack', 'asset')).resolves.toEqual(expect.objectContaining({ usageTags: ['environment'], usageTagsSource: 'folder' }))
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ error: expect.objectContaining({ code: 'element_defaults_removed' }) }))
   })
 
   test('creates and resumes an audited persistent processing job', async () => {
@@ -238,7 +339,7 @@ describe('resource service app', () => {
       repository: createInMemoryResourceRepository({
         packs: [{ id: 'archived-pack', name: 'Archived',
             styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'archived', deprecatedAt: '2026-07-12T00:00:00.000Z' }],
-        elements: [{ id: 'archived-element', packId: 'archived-pack', name: 'character.png', path: 'sprites/character.png', category: 'sprites', kind: 'image', specs: {}, usageTags: ['character'], dependencies: [], status: 'ready' }],
+        elements: [{ id: 'archived-element', packId: 'archived-pack', name: 'character.png', path: 'sprites/character.png', category: 'sprites', kind: 'image', assetKind: 'image', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['character'], dependencies: [], status: 'ready' }],
       }),
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
     })
@@ -368,7 +469,7 @@ describe('resource service app', () => {
     })
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/element-1', {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ usageTags: ['unclassified-free-text'] }),
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ usageTags: ['unsupported-free-text'] }),
     }))
 
     expect(response.status).toBe(400)

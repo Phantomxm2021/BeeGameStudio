@@ -61,7 +61,7 @@ describe('resource pack validation', () => {
     )
   })
 
-  test('accepts an element with inherited Pack metadata', () => {
+  test('accepts an unclassified element without semantic tags', () => {
     const element = {
       id: 'element-1',
       packId: 'pack-1',

@@ -12,11 +12,13 @@ describe('Resource selection service client', () => {
         return Response.json({
           catalogRevision: 'revision-a',
           groups: [{
-            requirementId: 'visual.tower', status: 'matched',
-            candidates: [{ ...catalogElement(), assetKind: 'model', delivery: {
-              sourceFormat: 'fbx', disposition: 'convert', targetFormat: 'glb', adapterId: 'converter',
-            } }],
-            unclassifiedElementCount: 0,
+            requirementId: 'visual.tower', status: 'matched', diagnostics: [],
+            bundles: [{
+              bundleId: 'bundle-1', coveredObligations: ['obligation-1'], uncoveredObligations: [],
+              candidates: [{ ...catalogElement(), assetKind: 'model', delivery: {
+                sourceFormat: 'fbx', disposition: 'convert', targetFormat: 'glb', adapterId: 'converter',
+              } }],
+            }],
           }],
         })
       },
@@ -93,6 +95,40 @@ describe('Resource selection service client', () => {
       'Resource requirement match response is invalid',
     )
   })
+
+  test('rejects a match status that contradicts its bundle set', async () => {
+    const client = createResourceSelectionClient({
+      baseUrl: 'https://resource.invalid',
+      serviceToken: 'token',
+      fetchImpl: async () => Response.json({
+        catalogRevision: 'revision-a',
+        groups: [{
+          requirementId: 'visual.tower',
+          status: 'no-match',
+          diagnostics: [],
+          bundles: [{
+            bundleId: 'bundle-1', coveredObligations: ['obligation-1'], uncoveredObligations: [],
+            candidates: [{
+              ...catalogElement(),
+              assetKind: 'model',
+              delivery: {
+                sourceFormat: 'fbx',
+                disposition: 'convert',
+                targetFormat: 'glb',
+                adapterId: 'converter',
+              },
+            }],
+          }],
+        }],
+      }),
+    })
+
+    await expect(client.matchRequirements({
+      requirements: [],
+      deliveryCapabilities: [],
+    })).rejects.toThrow('status does not match its bundles')
+  })
+
 })
 
 function catalogElement() {

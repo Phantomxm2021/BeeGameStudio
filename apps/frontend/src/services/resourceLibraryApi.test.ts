@@ -2,6 +2,47 @@ import { describe, expect, test } from 'vitest'
 import { createResourceLibraryApi } from './resourceLibraryApi'
 
 describe('resource library API', () => {
+  test('starts and polls the durable semantic curation job through one endpoint family', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const api = createResourceLibraryApi(async (input, init) => {
+      requests.push({ url: String(input), init })
+      if (String(input).endsWith('/semantic-curation')) return new Response(JSON.stringify({ job: { id: 'job-1', kind: 'semantic-curate-elements', status: 'queued', totalItems: 2, completedItems: 0, failedItems: 0 } }), { status: 202 })
+      return new Response(JSON.stringify({ job: { id: 'job-1', kind: 'semantic-curate-elements', status: 'running', totalItems: 2, completedItems: 1, failedItems: 0 } }), { status: 200 })
+    })
+
+    await expect(api.startSemanticCuration('pack/1')).resolves.toMatchObject({ id: 'job-1', kind: 'semantic-curate-elements' })
+    await expect(api.getSemanticCurationJob('pack/1', 'job/1')).resolves.toMatchObject({ completedItems: 1 })
+
+    expect(requests[0]?.url).toBe('/api/resource-packs/pack%2F1/semantic-curation')
+    expect(requests[0]?.init?.method).toBe('POST')
+    expect(requests[1]?.url).toBe('/api/resource-packs/pack%2F1/semantic-curation/job%2F1')
+  })
+
+  test('starts a full semantic reanalysis with an explicit durable mode', async () => {
+    let request: { url: string; init?: RequestInit } | undefined
+    const api = createResourceLibraryApi(async (input, init) => {
+      request = { url: String(input), init }
+      return new Response(JSON.stringify({ job: { id: 'job-all', kind: 'semantic-curate-elements', status: 'queued', totalItems: 3, completedItems: 0, failedItems: 0, analysisMode: 'all' } }), { status: 202 })
+    })
+
+    await expect(api.startSemanticCuration('pack/1', { mode: 'all' })).resolves.toMatchObject({ id: 'job-all', analysisMode: 'all' })
+
+    expect(request?.url).toBe('/api/resource-packs/pack%2F1/semantic-curation')
+    expect(request?.init?.method).toBe('POST')
+    expect(JSON.parse(String(request?.init?.body))).toEqual({ mode: 'all' })
+  })
+
+  test('restores the latest durable semantic curation job when the dialog is reopened', async () => {
+    const requests: string[] = []
+    const api = createResourceLibraryApi(async input => {
+      requests.push(String(input))
+      return new Response(JSON.stringify({ job: { id: 'job-1', kind: 'semantic-curate-elements', status: 'completed', totalItems: 2, completedItems: 2, failedItems: 0, usage: { inputTokens: 10, cacheReadTokens: 2, cacheCreationTokens: 0, outputTokens: 3, totalTokens: 15, creditsMicro: 4 }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:10.000Z' } }), { status: 200 })
+    })
+
+    await expect(api.getLatestSemanticCurationJob('pack/1')).resolves.toMatchObject({ id: 'job-1', status: 'completed', usage: { totalTokens: 15 } })
+    expect(requests[0]).toBe('/api/resource-packs/pack%2F1/semantic-curation')
+  })
+
   test('creates a draft Pack from authoring metadata', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const api = createResourceLibraryApi(async (input, init) => {
@@ -115,5 +156,17 @@ describe('resource library API', () => {
       { status: 403 },
     ))
     await expect(api.listPacks()).rejects.toMatchObject({ status: 403, code: 'forbidden' })
+  })
+
+  test('confirms one curation batch through the canonical resource endpoint', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const api = createResourceLibraryApi(async (input, init) => {
+      requests.push({ url: String(input), init })
+      return new Response(JSON.stringify({ updatedElementIds: ['element-a'], counts: { pendingSuggestions: 0, missingSemanticTags: 0, technicalIssues: 0, dependencyIssues: 0 } }), { status: 200 })
+    })
+    await expect(api.confirmCuration('pack/1', { decisions: [{ elementId: 'element-a', usageTags: ['building'] }] })).resolves.toEqual(expect.objectContaining({ updatedElementIds: ['element-a'] }))
+    expect(requests[0]?.url).toBe('/api/resource-packs/pack%2F1/curation/confirm')
+    expect(requests[0]?.init?.method).toBe('POST')
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ decisions: [{ elementId: 'element-a', usageTags: ['building'] }] })
   })
 })

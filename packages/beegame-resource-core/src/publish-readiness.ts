@@ -105,7 +105,7 @@ export function evaluateResourcePackPublishReadiness(
 
   for (const element of activeElements) {
     if (['queued', 'uploading', 'failed'].includes(element.status)) {
-      blocking.push({ code: 'element_not_ready', message: `Element ${element.name} is not ready`, elementId: element.id })
+      warnings.push({ code: 'element_not_ready', message: `Element ${element.name} is not ready`, elementId: element.id })
     }
     const externalReferences = externalReferencePaths(element.specs.externalReferences)
     const boundReferences = new Set((element.dependencyBindings ?? []).flatMap(binding => {
@@ -114,10 +114,10 @@ export function evaluateResourcePackPublishReadiness(
     }))
     const unresolvedTextures = externalReferencePaths(element.specs.unresolvedTextureReferences)
     if (unresolvedTextures.some(reference => !boundReferences.has(reference))) {
-      blocking.push({ code: 'unresolved_texture', message: `Element ${element.name} has unresolved texture references`, elementId: element.id })
+      warnings.push({ code: 'unresolved_texture', message: `Element ${element.name} has unresolved texture references`, elementId: element.id })
     }
     if (externalReferences.some(reference => !boundReferences.has(reference))) {
-      blocking.push({ code: 'external_dependency_unmapped', message: `Element ${element.name} has external file references without dependency mappings`, elementId: element.id })
+      warnings.push({ code: 'external_dependency_unmapped', message: `Element ${element.name} has external file references without dependency mappings`, elementId: element.id })
     }
     if (element.status === 'ready' && (!Number.isFinite(Number(element.specs.size)) || Number(element.specs.size) <= 0)) {
       warnings.push({ code: 'size_missing', message: `Element ${element.name} has no recorded file size`, elementId: element.id })
@@ -126,13 +126,13 @@ export function evaluateResourcePackPublishReadiness(
       warnings.push({ code: 'mime_type_missing', message: `Element ${element.name} has no recorded MIME type`, elementId: element.id })
     }
     if (element.status === 'ready' && !dependencyElementIds.has(element.id) && !element.usageTags?.length) {
-      blocking.push({ code: 'usage_tags_missing', message: `Element ${element.name} has no declared usage tags`, elementId: element.id })
+      warnings.push({ code: 'usage_tags_missing', message: `Element ${element.name} has no declared usage tags`, elementId: element.id })
     }
     if (element.status === 'ready' && !hasImmutableContentHash(element)) {
-      blocking.push({ code: 'content_hash_missing', message: `Element ${element.name} has no immutable content hash`, elementId: element.id })
+      warnings.push({ code: 'content_hash_missing', message: `Element ${element.name} has no immutable content hash`, elementId: element.id })
     }
     if (element.status === 'ready' && !element.assetKind) {
-      blocking.push({ code: 'asset_kind_missing', message: `Element ${element.name} has no typed asset kind`, elementId: element.id })
+      warnings.push({ code: 'asset_kind_missing', message: `Element ${element.name} has no typed asset kind`, elementId: element.id })
     }
     if (element.status === 'ready' && element.kind === 'model' && (!element.contentProfile || element.contentProfile.inspection.status !== 'complete')) {
       warnings.push({ code: 'content_profile_incomplete', message: `Element ${element.name} has not been fully inspected as a logical asset`, elementId: element.id })
@@ -152,23 +152,23 @@ export function evaluateResourcePackPublishReadiness(
   const readyIds = new Set(readyElements.map((element) => element.id))
   for (const element of readyElements) {
     for (const dependencyId of element.dependencies) {
-      if (!ids.has(dependencyId)) blocking.push({ code: 'dependency_missing', message: `Element ${element.name} references a missing dependency`, elementId: element.id })
-      else if (!readyIds.has(dependencyId)) blocking.push({ code: 'dependency_not_ready', message: `Element ${element.name} references a dependency that is not ready`, elementId: element.id })
+      if (!ids.has(dependencyId)) warnings.push({ code: 'dependency_missing', message: `Element ${element.name} references a missing dependency`, elementId: element.id })
+      else if (!readyIds.has(dependencyId)) warnings.push({ code: 'dependency_not_ready', message: `Element ${element.name} references a dependency that is not ready`, elementId: element.id })
     }
     for (const binding of element.dependencyBindings ?? []) {
       if (!ids.has(binding.dependencyElementId)) {
-        blocking.push({ code: 'dependency_binding_missing', message: `Element ${element.name} maps an external reference to a missing dependency`, elementId: element.id })
+        warnings.push({ code: 'dependency_binding_missing', message: `Element ${element.name} maps an external reference to a missing dependency`, elementId: element.id })
       } else if (!readyIds.has(binding.dependencyElementId)) {
-        blocking.push({ code: 'dependency_binding_not_ready', message: `Element ${element.name} maps an external reference to a dependency that is not ready`, elementId: element.id })
+        warnings.push({ code: 'dependency_binding_not_ready', message: `Element ${element.name} maps an external reference to a dependency that is not ready`, elementId: element.id })
       } else if (!element.dependencies.includes(binding.dependencyElementId)) {
-        blocking.push({ code: 'dependency_binding_unlisted', message: `Element ${element.name} has a dependency mapping that is not declared in its dependency list`, elementId: element.id })
+        warnings.push({ code: 'dependency_binding_unlisted', message: `Element ${element.name} has a dependency mapping that is not declared in its dependency list`, elementId: element.id })
       }
     }
     for (const relation of element.relations ?? []) {
       if (!ids.has(relation.targetElementId)) {
-        blocking.push({ code: 'semantic_relation_missing', message: `Element ${element.name} has a semantic relation to a missing element`, elementId: element.id })
+        warnings.push({ code: 'semantic_relation_missing', message: `Element ${element.name} has a semantic relation to a missing element`, elementId: element.id })
       } else if (relation.required !== false && !readyIds.has(relation.targetElementId)) {
-        blocking.push({ code: 'semantic_relation_not_ready', message: `Element ${element.name} requires a semantic relation that is not ready`, elementId: element.id })
+        warnings.push({ code: 'semantic_relation_not_ready', message: `Element ${element.name} requires a semantic relation that is not ready`, elementId: element.id })
       }
     }
   }
@@ -177,7 +177,7 @@ export function evaluateResourcePackPublishReadiness(
   const seenContentHashes = new Map<string, string>()
   for (const element of readyElements) {
     const existing = seenPaths.get(element.path)
-    if (existing) blocking.push({ code: 'duplicate_path', message: `Elements ${existing} and ${element.name} share the same path`, elementId: element.id })
+    if (existing) warnings.push({ code: 'duplicate_path', message: `Elements ${existing} and ${element.name} share the same path`, elementId: element.id })
     else seenPaths.set(element.path, element.name)
     const contentHash = typeof element.specs.contentHash === 'string' ? element.specs.contentHash.trim() : ''
     if (contentHash) {
@@ -229,9 +229,6 @@ function normalizeExternalReferencePath(value: string): string | undefined {
 
 export function assertResourcePackPublishable(pack: ResourcePack, elements: readonly ResourceElement[]): ResourcePublishReadiness {
   const report = evaluateResourcePackPublishReadiness(pack, elements)
-  // Preserve the long-standing lifecycle error for callers that distinguish an
-  // in-progress upload from the rest of the quality report.
-  if (report.blocking.some((issue) => issue.code === 'element_not_ready')) throw new Error('Pack has incomplete uploads')
   if (!report.canPublish) throw new Error(report.blocking.map((issue) => issue.message).join('; '))
   return report
 }

@@ -247,6 +247,9 @@ describe('resource-content worker prompts', () => {
       'Do not duplicate one content or resource defect under a foundation check',
     )
     expect(prompt).toContain(
+      'reject acquisition profiles that encode composition or runtime duties as source-intrinsic capabilities',
+    )
+    expect(prompt).toContain(
       'three additions in two serial packets: resource_semantic_fitness, then content_structure_fitness with resource_content_consistency',
     )
   })
@@ -285,6 +288,8 @@ describe('resource-content worker prompts', () => {
     })
 
     expect(prompt).toContain('structured acquisition_profile')
+    expect(prompt).toContain('source-intrinsic')
+    expect(prompt).toContain('Composition, placement, scaling, connection, scene assembly and runtime behavior')
     expect(prompt).toContain('runtime-consumable output formats')
     expect(prompt).toContain('Never use target output formats as source-format')
   })

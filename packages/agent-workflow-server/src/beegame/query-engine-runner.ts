@@ -6,6 +6,7 @@ import { getMacroDefines } from '../../../../scripts/defines'
 import {
   createPinnedUndiciDispatcher,
   type ApprovedOutboundTarget,
+  type PinnedUndiciTlsOptions,
 } from '@bee-game-studio/security-core'
 import { getDefaultBeeGameBuiltinSkillsDir } from '@bee-game-studio/beegame-skills-core/store'
 import type {
@@ -1530,6 +1531,7 @@ export async function closeBeeGameRuntimeDispatcher(
 export function createBeeGamePinnedFetch(
   baseFetch: typeof fetch,
   approvedOutboundTargets: Record<string, ApprovedOutboundTarget>,
+  options: { tls?: PinnedUndiciTlsOptions } = {},
 ): PinnedRuntimeFetch {
   const dispatchers = new Map<
     string,
@@ -1540,7 +1542,10 @@ export function createBeeGamePinnedFetch(
       !target.trustedDevelopmentProxy &&
       !dispatchers.has(target.url.origin)
     ) {
-      dispatchers.set(target.url.origin, createPinnedUndiciDispatcher(target))
+      dispatchers.set(
+        target.url.origin,
+        createPinnedUndiciDispatcher(target, { tls: options.tls }),
+      )
     }
   }
   const approvedOrigins = new Map(

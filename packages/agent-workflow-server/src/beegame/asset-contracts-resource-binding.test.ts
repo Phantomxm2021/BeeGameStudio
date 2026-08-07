@@ -50,4 +50,35 @@ describe('source and delivered resource binding', () => {
     ])
     expect(resource.source).toEqual(expect.objectContaining({ type: 'resource-library', element_id: 'tower' }))
   })
+
+  test('retries a transient certificate transport failure without changing the pinned resource', async () => {
+    const sourceBytes = new TextEncoder().encode('Kaydara FBX Binary  test')
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-download-'))
+    roots.push(workspace)
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['fbx'], resource_library_usage: 'preferred',
+        runtime_asset_root: 'assets/runtime', content_root: 'assets/content', generated_asset_root: 'assets/generated',
+      },
+      requirements: [{ id: 'visual.tower', required: true, acquisition_profile: {
+        dimensions: ['3D'], asset_kinds: ['model'], usage_tags: ['building'], capabilities: [], styles: [],
+      } }],
+      resources: [],
+    })
+    let calls = 0
+    const result = await addBeeGameLibraryResourceToWorkspace(workspace, {
+      id: 'tower.model', destination_path: 'assets/runtime/library',
+      pack_id: 'pack-a', pack_version: '1.0.0', element_id: 'tower', element_path: 'tower.fbx',
+      source_url: 'https://resource.invalid/tower.fbx', selection_reason: ['Structured match.'],
+      source_hash: createHash('sha256').update(sourceBytes).digest('hex'), asset_kind: 'model',
+    }, async () => {
+      calls += 1
+      if (calls < 3) throw Object.assign(new Error('certificate verification failed'), { code: 'UNKNOWN_CERTIFICATE_VERIFICATION_ERROR' })
+      return new Response(sourceBytes)
+    })
+
+    expect(calls).toBe(3)
+    expect(result.resource.source).toEqual(expect.objectContaining({ type: 'resource-library', element_id: 'tower' }))
+  })
 })

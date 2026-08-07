@@ -46,7 +46,9 @@ describe('billing app error handling', () => {
     expect(response.status).toBe(500)
     expect(await response.json()).toEqual({
       error: 'Billing request failed',
+      stage: 'usage_billing',
       message: 'Supabase function beegame_debit_realtime_usage is missing',
+      traceId: expect.any(String),
     })
   })
 })

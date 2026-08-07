@@ -17,6 +17,7 @@ import {
   createBeeGameSupabaseBillingRepositoryFromEnv,
   type BeeGameBillingServerRepository,
 } from './supabase-billing-repository'
+import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
 
 export type BeeGameBillingServerAppOptions = {
   billingConfig?: BeeGameBillingConfig
@@ -30,9 +31,10 @@ export type BeeGameBillingServerAppOptions = {
 export function createBeeGameBillingServerApp(
   options: BeeGameBillingServerAppOptions = {},
 ): ReturnType<typeof createBeeGameBillingRouteApp> {
+  const serviceFetch = createTLSAwareFetch()
   const authContext = createBeeGameBillingAuthContext({
     currentUser: options.currentUser,
-    currentUserResolver: options.currentUserResolver ?? createConfiguredBillingUserResolver(),
+    currentUserResolver: options.currentUserResolver ?? createConfiguredBillingUserResolver(process.env, { fetchImpl: serviceFetch }),
   })
   const repository =
     options.repository ?? createBeeGameSupabaseBillingRepositoryFromEnv()

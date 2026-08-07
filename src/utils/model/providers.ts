@@ -15,6 +15,12 @@ export type APIProvider =
 export function getAPIProvider(
   settings: Pick<SettingsJson, 'modelType'> = getInitialSettings(),
 ): APIProvider {
+  const runtimeModelType = process.env.BEEGAME_RUNTIME_MODEL_TYPE
+  if (runtimeModelType === 'anthropic') return 'firstParty'
+  if (runtimeModelType === 'openai') return 'openai'
+  if (runtimeModelType === 'gemini') return 'gemini'
+  if (runtimeModelType === 'grok') return 'grok'
+
   const modelType = settings.modelType
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'

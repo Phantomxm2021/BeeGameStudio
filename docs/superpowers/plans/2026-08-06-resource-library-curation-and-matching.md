@@ -1,5 +1,10 @@
 # Resource Library Curation and Matching Implementation Plan
 
+> Superseded for semantic classification by
+> `docs/superpowers/specs/2026-08-06-ai-resource-semantic-curation-design.md`
+> and `docs/superpowers/plans/2026-08-07-ai-resource-semantic-curation.md`.
+> The historical provider described below is not a runtime path.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Resource Library metadata reusable after one curation pass, expose valid elements and multi-element bundles to Workflow, and create placeholders only for proven gaps.
@@ -7,6 +12,17 @@
 **Architecture:** Keep one canonical element record. Technical facts are produced by the existing inspector; semantic usage and style values are confirmed through Pack/folder/element policy and are the only searchable values. A temporary suggestion on the same element record is not searchable and is cleared on confirmation or rejection. The first suggestion provider may only project already-confirmed Pack/folder policy and objectively inspected facts; it must leave unprovable roles pending instead of using filenames, keywords, an LLM or an unbounded heuristic. Resource Core computes element-scoped readiness and bounded candidate bundles; the resource server persists and exposes that result; Resource Curator selects exact returned identities through the existing single inventory commit.
 
 **Tech Stack:** TypeScript, Bun, Zod v4, Supabase REST repository, R2 resource storage, React/Vite frontend, Vitest/Bun tests.
+
+## Execution status (2026-08-06)
+
+- [x] Canonical element metadata, effective Pack/folder policy, element-scoped readiness and multi-element bundle contracts.
+- [x] Supabase/in-memory curation queue, one batch confirmation/rejection API, and temporary non-searchable suggestions.
+- [x] Workflow bundle projection and exact bundle-member validation in the single inventory commit.
+- [x] Resource Library curation workbench with one batch mutation per decision.
+- [x] Focused core, resource-server, Workflow-resource and frontend tests plus TypeScript/build verification.
+- [x] Apply the canonical schema to the configured development database and perform the one-time existing-library reinspection.
+- [x] Run the real catalog acceptance against the configured Resource Library without modifying user example projects.
+- [ ] Run the new-project end-to-end acceptance; this requires a fresh user project and must be performed without modifying existing example projects.
 
 ---
 

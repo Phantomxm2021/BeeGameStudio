@@ -5,62 +5,32 @@ import type {
 } from './session-manager'
 import type { SerializedQueryEngineStartInput } from './query-engine-worker-protocol'
 
+function assertWorkflowWorkerIdentity(input: {
+  workflowWorker?: boolean
+  workflowWorkerType?: string
+  workflowDispatchId?: string
+}): void {
+  if (!input.workflowWorker) return
+  if (!input.workflowWorkerType?.trim())
+    throw new Error('Workflow worker type is required.')
+  if (!input.workflowDispatchId?.trim())
+    throw new Error('Workflow worker dispatch identity is required.')
+}
+
 export function serializeQueryEngineStartInput(
   input: BeeGameSessionRunnerStartInput,
 ): SerializedQueryEngineStartInput {
+  assertWorkflowWorkerIdentity(input)
+  const {
+    approvedOutboundTargets,
+    onNativeTaskNotification: _onNativeTaskNotification,
+    requestPermission: _requestPermission,
+    ...serializableInput
+  } = input
   return {
-    sessionId: input.sessionId,
-    ...(input.deliveryEvidenceDataRoot
-      ? { deliveryEvidenceDataRoot: input.deliveryEvidenceDataRoot }
-      : {}),
-    ...(input.resumeSessionId
-      ? { resumeSessionId: input.resumeSessionId }
-      : {}),
-    ...(input.language ? { language: input.language } : {}),
-    cwd: input.cwd,
-    env: input.env,
-    ...(input.resourceSelectionConfig
-      ? { resourceSelectionConfig: input.resourceSelectionConfig }
-      : {}),
-    ...(input.workflowWorker ? { workflowWorker: true } : {}),
-    ...(input.workflowWorkerType
-      ? { workflowWorkerType: input.workflowWorkerType }
-      : {}),
-    ...(input.workflowAllowedPaths
-      ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
-      : {}),
-    ...(input.workflowProtectedPaths
-      ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
-      : {}),
-    ...(input.workflowReadOnlyPaths
-      ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
-      : {}),
-    ...(input.workflowDocumentAuthorMode
-      ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
-      : {}),
-    ...(input.workflowDocumentRepairPlanContract
-      ? {
-          workflowDocumentRepairPlanContract:
-            input.workflowDocumentRepairPlanContract,
-        }
-      : {}),
-    ...(input.workflowCanonicalDocumentCommitContract
-      ? {
-          workflowCanonicalDocumentCommitContract:
-            input.workflowCanonicalDocumentCommitContract,
-        }
-      : {}),
-    ...(input.workflowResourceContentCommitContract
-      ? {
-          workflowResourceContentCommitContract:
-            input.workflowResourceContentCommitContract,
-        }
-      : {}),
-    ...(input.workflowDocumentReviewContract
-      ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
-      : {}),
+    ...serializableInput,
     approvedOutboundTargets: Object.fromEntries(
-      Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
+      Object.entries(approvedOutboundTargets).map(([key, target]) => [
         key,
         {
           url: target.url.toString(),
@@ -77,59 +47,12 @@ export function serializeQueryEngineStartInput(
 export function deserializeQueryEngineStartInput(
   input: SerializedQueryEngineStartInput,
 ): BeeGameSessionRunnerStartInput {
+  assertWorkflowWorkerIdentity(input)
+  const { approvedOutboundTargets, ...runnerInput } = input
   return {
-    sessionId: input.sessionId,
-    ...(input.deliveryEvidenceDataRoot
-      ? { deliveryEvidenceDataRoot: input.deliveryEvidenceDataRoot }
-      : {}),
-    ...(input.resumeSessionId
-      ? { resumeSessionId: input.resumeSessionId }
-      : {}),
-    ...(input.language ? { language: input.language } : {}),
-    cwd: input.cwd,
-    env: input.env,
-    ...(input.resourceSelectionConfig
-      ? { resourceSelectionConfig: input.resourceSelectionConfig }
-      : {}),
-    ...(input.workflowWorker ? { workflowWorker: true } : {}),
-    ...(input.workflowWorkerType
-      ? { workflowWorkerType: input.workflowWorkerType }
-      : {}),
-    ...(input.workflowAllowedPaths
-      ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
-      : {}),
-    ...(input.workflowProtectedPaths
-      ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
-      : {}),
-    ...(input.workflowReadOnlyPaths
-      ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
-      : {}),
-    ...(input.workflowDocumentAuthorMode
-      ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
-      : {}),
-    ...(input.workflowDocumentRepairPlanContract
-      ? {
-          workflowDocumentRepairPlanContract:
-            input.workflowDocumentRepairPlanContract,
-        }
-      : {}),
-    ...(input.workflowCanonicalDocumentCommitContract
-      ? {
-          workflowCanonicalDocumentCommitContract:
-            input.workflowCanonicalDocumentCommitContract,
-        }
-      : {}),
-    ...(input.workflowResourceContentCommitContract
-      ? {
-          workflowResourceContentCommitContract:
-            input.workflowResourceContentCommitContract,
-        }
-      : {}),
-    ...(input.workflowDocumentReviewContract
-      ? { workflowDocumentReviewContract: input.workflowDocumentReviewContract }
-      : {}),
+    ...runnerInput,
     approvedOutboundTargets: Object.fromEntries(
-      Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
+      Object.entries(approvedOutboundTargets).map(([key, target]) => [
         key,
         createApprovedTarget(
           target.url,

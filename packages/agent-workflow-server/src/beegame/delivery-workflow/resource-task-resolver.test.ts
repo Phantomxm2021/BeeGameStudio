@@ -17,6 +17,8 @@ import {
   computeResourceContentDigest,
   computeResourceInventoryRevision,
 } from './revision'
+import { retryRun, shouldRefreshProvisionalResourceInventory } from './recovery'
+import { createRunStore } from './run-store'
 import { resolveResourceProductionTask } from './resource-task-resolver'
 import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
 
@@ -159,6 +161,68 @@ describe('resource production task resolver', () => {
     expect(result?.resourceProductionState.inventoryReceipt).toBeUndefined()
   })
 
+  test('retries a gated provisional inventory through the resource stage only', async () => {
+    const workspace = await createWorkspace()
+    await writePlan(workspace)
+    await writeInventory(workspace)
+    await writeContent(workspace)
+    const source = await runWithReceipt(workspace)
+    const run: DeliveryRun = {
+      ...source,
+      phase: 'RESOURCE_PREPARATION',
+      status: 'needs_action',
+      blockedReason: 'Resource inventory can be refreshed.',
+      resourceProductionState: {
+        currentTask: 'RESOURCE_GATE',
+        inventoryReceipt: source.resourceProductionState.inventoryReceipt,
+        contentReceipt: {
+          contentDigest: await computeResourceContentDigest(workspace),
+          acceptedAt: new Date().toISOString(),
+        },
+      },
+    }
+    const audit = {
+      valid: true,
+      requirements: [{ id: 'world.visual', required: true, issues: [] }],
+      resources: [{
+        id: 'world-resource',
+        status: 'verified',
+        sourceType: 'agent-authored',
+        rootPath: 'assets/runtime/world.dat',
+        filePaths: ['assets/runtime/world.dat'],
+        provisional: true,
+        issues: [],
+      }],
+    }
+    expect(shouldRefreshProvisionalResourceInventory(run, audit)).toBe(true)
+
+    const store = createRunStore(workspace, run.ownerId)
+    await store.commit(run, {
+      runId: run.runId,
+      type: 'run.created',
+      phase: run.phase,
+      status: run.status,
+      revision: run.revision,
+      projectId: run.projectId,
+      ownerId: run.ownerId,
+      createdAt: run.createdAt,
+    })
+    const retried = await retryRun({
+      store,
+      runId: run.runId,
+      workspacePath: workspace,
+    })
+    expect(retried).toMatchObject({
+      phase: 'RESOURCE_PREPARATION',
+      status: 'running',
+      resourceProductionState: {
+        currentTask: 'RESOURCE_INVENTORY',
+      },
+    })
+    expect(retried.resourceProductionState.inventoryReceipt).toBeUndefined()
+    expect(retried.resourceProductionState.contentReceipt).toBeUndefined()
+  })
+
   test('rejects a content request that reopens already verified inventory', async () => {
     const workspace = await createWorkspace()
     await writePlan(workspace)
@@ -255,6 +319,7 @@ function createRun(): DeliveryRun {
     runId: 'run-resource-resolver',
     projectId: 'project-resource-resolver',
     ownerId: 'owner-resource-resolver',
+    checklistApproved: true,
   })
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { createSubprocessModelProcessor } from '../model-processing'
-import { inspectAssimpDocument } from '../model-processor-worker'
+import { createSubprocessModelPreviewProcessor, createSubprocessModelProcessor } from '../model-processing'
+import { extractAssimpPreviewGeometry, inspectAssimpDocument } from '../model-processor-worker'
+import { renderResourceModelPreview } from '../model-preview'
 
 describe('isolated model processing', () => {
   test('extracts objective geometry, rig, animation, material, and dependency facts', () => {
@@ -102,4 +103,49 @@ describe('isolated model processing', () => {
       boundsSizeZ: 10,
     }))
   })
+
+  test('extracts a bounded engine-neutral preview geometry from Assimp output', () => {
+    const geometry = extractAssimpPreviewGeometry({
+      rootnode: { meshes: [0], children: [] },
+      meshes: [{
+        vertices: [-1, 0, 0, 1, 0, 0, 0, 2, 0],
+        faces: [[0, 1, 2]],
+      }],
+    })
+
+    expect(geometry).toEqual({
+      meshes: [{
+        vertices: [[-1, 0, 0], [1, 0, 0], [0, 2, 0]],
+        faces: [[0, 1, 2]],
+      }],
+    })
+  })
+
+  test('renders model geometry into an image file for Atlas input', async () => {
+    const preview = await renderResourceModelPreview({
+      meshes: [{
+        vertices: [[-1, 0, 0], [1, 0, 0], [0, 2, 0]],
+        faces: [[0, 1, 2]],
+      }],
+    })
+
+    expect(preview).toBeInstanceOf(File)
+    expect(preview?.type).toBe('image/png')
+    expect(preview?.size).toBeGreaterThan(0)
+  })
+
+  test('creates a model preview processor that returns a visual file', async () => {
+    const processor = createSubprocessModelPreviewProcessor({ timeoutMs: 30_000 })
+    const file = new File([
+      'v 0 0 0\n',
+      'v 1 0 0\n',
+      'v 0 1 0\n',
+      'f 1 2 3\n',
+    ], 'triangle.obj', { type: 'text/plain' })
+
+    await expect(processor(file)).resolves.toEqual(expect.objectContaining({
+      type: 'image/png',
+      size: expect.any(Number),
+    }))
+  }, 35_000)
 })

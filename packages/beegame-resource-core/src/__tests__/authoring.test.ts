@@ -44,6 +44,6 @@ describe('resource pack authoring domain', () => {
       styles: ['Clean'], gameTypes: ['puzzle'],
       dimension: '2D', primaryCategory: 'ui-kit', categories: ['ui'], license: 'internal', version: '0.1.0', status: 'draft',
     })
-    await expect(repository.publishPack('pack-2')).rejects.toThrow('incomplete uploads')
+    await expect(repository.publishPack('pack-2')).rejects.toThrow('no ready elements')
   })
 })

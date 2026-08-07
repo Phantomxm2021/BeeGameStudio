@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createSupabaseResourceRepository as createRepository } from '../supabase-resource-repository'
+import type { ResourceSemanticModelDecision } from '@bee-game-studio/beegame-resource-core'
 
 type RepositoryOptions = Parameters<typeof createRepository>[0]
 
@@ -10,6 +11,98 @@ function createSupabaseResourceRepository(
 }
 
 describe('Supabase resource repository', () => {
+  test('commits only semantic fields after re-reading the current content hash', async () => {
+    let patchBody: Record<string, unknown> | undefined
+    const row = { id: 'element-1', pack_id: 'pack-1', name: 'Tower', path: 'models/tower.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64), vertices: 8 }, usage_tags: [], usage_tags_mode: 'inherit', asset_kind: 'model', dependencies: [], status: 'ready' }
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
+      fetchImpl: async (request, init) => {
+        const url = request instanceof Request ? request.url : String(request)
+        if (init?.method === 'PATCH') {
+          patchBody = JSON.parse(String(init.body)) as Record<string, unknown>
+          return Response.json([{ ...row, ...patchBody }])
+        }
+        if (url.includes('beegame_resource_elements')) return Response.json([row])
+        if (url.includes('beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Pack', styles: ['stylized'], game_types: ['strategy'], dimension: '3D', primary_category: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }])
+        return Response.json([])
+      },
+    })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'a'.repeat(64), usageTags: ['building'], confidence: 'high',
+      evidence: [{ source: 'content_profile', reference: 'components:mesh:0', observation: 'A mesh is present.' }], curatorRevision: 'semantic-curator-v1',
+    }
+
+    const result = await repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')
+
+    expect(result.outcome).toBe('committed')
+    expect(patchBody).toEqual({ usage_tags: ['building'], usage_tags_mode: 'override', semantic_suggestion: null })
+  })
+
+  test('keeps a large curation confirmation below the PostgREST URL limit', async () => {
+    const elementIds = Array.from({ length: 260 }, (_, index) => `element-${index.toString().padStart(3, '0')}-${'x'.repeat(32)}`)
+    const rows = elementIds.map(id => ({
+      id,
+      pack_id: 'pack-1',
+      name: id,
+      path: `models/${id}.glb`,
+      category: 'models',
+      kind: 'model',
+      specs: {},
+      usage_tags: [],
+      usage_tags_mode: 'inherit',
+      dependencies: [],
+      status: 'ready',
+    }))
+    const patchRequests: Array<{ url: string; body: Record<string, unknown> }> = []
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async (request, init) => {
+        const url = new URL(request instanceof Request ? request.url : String(request))
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          patchRequests.push({ url: url.toString(), body })
+          const id = url.searchParams.get('id') ?? ''
+          return Response.json(rows.filter(row => id === `eq.${row.id}`).map(row => ({ ...row, ...body })))
+        }
+        if (url.pathname.endsWith('/beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Pack', styles: ['stylized'], game_types: ['strategy'], dimension: '3D', primary_category: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }])
+        if (url.pathname.endsWith('/beegame_resource_folders')) return Response.json([])
+        return Response.json(rows)
+      },
+    })
+
+    const result = await repository.confirmCuration!('pack-1', {
+      decisions: elementIds.map((elementId, index) => ({ elementId, usageTags: [index % 2 ? 'environment' : 'building'] })),
+    })
+
+    expect(result).toHaveLength(elementIds.length)
+    expect(patchRequests).toHaveLength(elementIds.length)
+    expect(patchRequests.every(request => request.url.length < 8_000)).toBe(true)
+    expect(patchRequests[0]?.body.usage_tags).toEqual(['building'])
+    expect(patchRequests[1]?.body.usage_tags).toEqual(['environment'])
+  })
+
+  test('rejects a stale semantic result before writing the row', async () => {
+    let patchCalled = false
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
+      fetchImpl: async (request, init) => {
+        const url = request instanceof Request ? request.url : String(request)
+        if (init?.method === 'PATCH') { patchCalled = true; return Response.json([]) }
+        if (url.includes('beegame_resource_elements')) return Response.json([{ id: 'element-1', pack_id: 'pack-1', name: 'Tower', path: 'models/tower.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, usage_tags: [], usage_tags_mode: 'inherit', dependencies: [], status: 'ready' }])
+        if (url.includes('beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Pack', styles: ['stylized'], game_types: ['strategy'], dimension: '3D', primary_category: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }])
+        return Response.json([])
+      },
+    })
+    const decision: ResourceSemanticModelDecision = {
+      elementId: 'element-1', sourceContentHash: 'a'.repeat(64), usageTags: ['building'], confidence: 'high',
+      evidence: [{ source: 'content_profile', reference: 'components:mesh:0', observation: 'A mesh is present.' }], curatorRevision: 'semantic-curator-v1',
+    }
+
+    await expect(repository.commitSemanticDecision!('pack-1', decision, '2026-08-07T00:00:00.000Z')).rejects.toThrow('content hash is stale')
+    expect(patchCalled).toBe(false)
+  })
+
   test('loads Pack summaries without exposing service credentials to callers', async () => {
     const requests: Request[] = []
     const repository = createSupabaseResourceRepository({

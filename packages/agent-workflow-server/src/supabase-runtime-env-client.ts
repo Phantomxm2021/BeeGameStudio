@@ -2,8 +2,9 @@ import {
   decryptSecret,
   isSecretEnvelope,
 } from './security/secret-crypto'
+import { createTLSAwareFetch, type TLSAwareFetch } from '../../../src/utils/mtls.js'
 
-type BeeGameFetch = typeof fetch
+type BeeGameFetch = TLSAwareFetch
 
 const MODEL_SECRET_ENV_KEYS = new Set([
   'ANTHROPIC_AUTH_TOKEN',
@@ -117,10 +118,12 @@ export class SupabaseRuntimeEnvClient {
   }
 }
 
-export function createSupabaseRuntimeEnvClientFromEnv():
+export function createSupabaseRuntimeEnvClientFromEnv(
+  fetchImpl: BeeGameFetch = createTLSAwareFetch(),
+):
   | SupabaseRuntimeEnvClient
   | undefined {
-  const client = new SupabaseRuntimeEnvClient()
+  const client = new SupabaseRuntimeEnvClient({ fetchImpl })
   return client.isConfigured() ? client : undefined
 }
 

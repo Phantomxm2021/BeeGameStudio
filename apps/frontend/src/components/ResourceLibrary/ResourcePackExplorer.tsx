@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react'
-import { ChevronRight, File, Folder, FolderOpen, FolderPlus, FolderUp, Pencil, ScanSearch, Tags, Trash2, Upload } from 'lucide-react'
+import { ChevronRight, File, Folder, FolderOpen, FolderPlus, FolderUp, Pencil, ScanSearch, Trash2, Upload } from 'lucide-react'
 import { Tree, type NodeRendererProps, type RowRendererProps } from 'react-arborist'
 import type { ExplorerNode } from './resourcePackExplorerTree'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu'
@@ -19,11 +19,10 @@ type ResourcePackExplorerProps = {
   onRenameElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onInspectElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onInspectAll?: () => void
-  onConfigureDefaults?: (node?: ExplorerNode) => void
   onDeleteElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onMoveElements?: (elements: Array<NonNullable<ExplorerNode['element']>>, destination: ExplorerNode) => void
   onCreateFolder?: () => void
-  labels?: { upload: string; uploadFolder?: string; rename: string; inspect: string; inspectAll: string; defaults: string; delete: string; newFolder: string }
+  labels?: { upload: string; uploadFolder?: string; rename: string; inspect: string; inspectAll: string; delete: string; newFolder: string }
 }
 
 const TREE_WIDTH = 236
@@ -45,11 +44,10 @@ export function ResourcePackExplorer({
   onRenameElement,
   onInspectElement,
   onInspectAll,
-  onConfigureDefaults,
   onDeleteElement,
   onMoveElements,
   onCreateFolder,
-  labels = { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', defaults: 'Default metadata', delete: 'Delete', newFolder: 'New folder' },
+  labels = { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete', newFolder: 'New folder' },
 }: ResourcePackExplorerProps) {
   const nodesById = useMemo(() => {
     const nodes = new Map<string, ExplorerNode>()
@@ -121,7 +119,7 @@ export function ResourcePackExplorer({
       </Tree>
     </div>
       </ContextMenuTrigger>
-      <ExplorerContextMenu node={contextNode} tree={tree} labels={labels} onCreateFolder={onCreateFolder} onUploadToFolder={onUploadToFolder} onUploadFolderToFolder={onUploadFolderToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onInspectElement={onInspectElement} onInspectAll={onInspectAll} onConfigureDefaults={onConfigureDefaults} onDeleteElement={onDeleteElement} />
+      <ExplorerContextMenu node={contextNode} tree={tree} labels={labels} onCreateFolder={onCreateFolder} onUploadToFolder={onUploadToFolder} onUploadFolderToFolder={onUploadFolderToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onInspectElement={onInspectElement} onInspectAll={onInspectAll} onDeleteElement={onDeleteElement} />
     </ContextMenu>
   )
 }
@@ -214,11 +212,11 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
     </div>
 }
 
-function ExplorerContextMenu({ node, tree, labels, onCreateFolder, onUploadToFolder, onUploadFolderToFolder, onRenameFolder, onDeleteFolder, onRenameElement, onInspectElement, onInspectAll, onConfigureDefaults, onDeleteElement }: Pick<ResourcePackExplorerProps, 'labels' | 'onCreateFolder' | 'onUploadToFolder' | 'onUploadFolderToFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onRenameElement' | 'onInspectElement' | 'onInspectAll' | 'onConfigureDefaults' | 'onDeleteElement'> & { node?: ExplorerNode; tree: ExplorerNode }) {
+function ExplorerContextMenu({ node, tree, labels, onCreateFolder, onUploadToFolder, onUploadFolderToFolder, onRenameFolder, onDeleteFolder, onRenameElement, onInspectElement, onInspectAll, onDeleteElement }: Pick<ResourcePackExplorerProps, 'labels' | 'onCreateFolder' | 'onUploadToFolder' | 'onUploadFolderToFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onRenameElement' | 'onInspectElement' | 'onInspectAll' | 'onDeleteElement'> & { node?: ExplorerNode; tree: ExplorerNode }) {
   const current = node ?? tree
-  const menuLabels = labels ?? { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', defaults: 'Default metadata', delete: 'Delete', newFolder: 'New folder' }
+  const menuLabels = labels ?? { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete', newFolder: 'New folder' }
   const uploadFolderLabel = menuLabels.uploadFolder ?? 'Upload folder'
   if (current.kind === 'file' && current.element) return <ContextMenuContent><ContextMenuItem onSelect={() => onInspectElement?.(current.element!)}><ScanSearch />{menuLabels.inspect}</ContextMenuItem><ContextMenuItem onSelect={() => onRenameElement?.(current.element!)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteElement?.(current.element!)}><Trash2 />{menuLabels.delete}</ContextMenuItem></ContextMenuContent>
-  if (current.id !== 'root') return <ContextMenuContent><ContextMenuItem onSelect={() => onUploadToFolder?.(current)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(current)}><FolderUp />{uploadFolderLabel}</ContextMenuItem>{current.folder ? <><ContextMenuItem onSelect={() => onConfigureDefaults?.(current)}><Tags />{menuLabels.defaults}</ContextMenuItem><ContextMenuItem onSelect={() => onRenameFolder?.(current)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteFolder?.(current)}><Trash2 />{menuLabels.delete}</ContextMenuItem></> : null}</ContextMenuContent>
-  return <ContextMenuContent><ContextMenuItem onSelect={onCreateFolder}><FolderPlus />{menuLabels.newFolder}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadToFolder?.(tree)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(tree)}><FolderUp />{uploadFolderLabel}</ContextMenuItem><ContextMenuItem onSelect={() => onConfigureDefaults?.()}><Tags />{menuLabels.defaults}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem onSelect={onInspectAll}><ScanSearch />{menuLabels.inspectAll}</ContextMenuItem></ContextMenuContent>
+  if (current.id !== 'root') return <ContextMenuContent><ContextMenuItem onSelect={() => onUploadToFolder?.(current)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(current)}><FolderUp />{uploadFolderLabel}</ContextMenuItem>{current.folder ? <><ContextMenuItem onSelect={() => onRenameFolder?.(current)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteFolder?.(current)}><Trash2 />{menuLabels.delete}</ContextMenuItem></> : null}</ContextMenuContent>
+  return <ContextMenuContent><ContextMenuItem onSelect={onCreateFolder}><FolderPlus />{menuLabels.newFolder}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadToFolder?.(tree)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(tree)}><FolderUp />{uploadFolderLabel}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem onSelect={onInspectAll}><ScanSearch />{menuLabels.inspectAll}</ContextMenuItem></ContextMenuContent>
 }

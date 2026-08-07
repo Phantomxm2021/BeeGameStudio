@@ -7,6 +7,7 @@ import {
   RESOURCE_PACK_PRIMARY_CATEGORIES,
   RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
+  resolveResourceSemanticVisualKind,
   browseResourcePackElements,
   browseResourceCatalogPacks,
   browseResourceCatalogPackSummaries,
@@ -16,10 +17,15 @@ import {
   matchResourceRequirements,
   resolveExactResourceElement,
   searchResourcePacks,
+  isResourceContentHash,
   type ResourceDimension,
   type ResourceCategory,
   type ResourceAssetKind,
   type ResourceCapability,
+  type ResourceCurationBatchInput,
+  type ResourceCurationRejectInput,
+  type ResourceEmbeddedComponentKind,
+  type ResourceRelationKind,
   type ResourceUsageTag,
   type ResourceDeliveryCapability,
   type ResourceRequirementMatchRequest,
@@ -63,6 +69,10 @@ export type BeeGameResourceServerAppOptions = {
   recordAuditEvent?: (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => Promise<void>
   serviceSelectionToken?: string
   resourceProcessing?: Omit<ResourceProcessingHandlers, 'resumePending'>
+  semanticCuration?: {
+    curatorRevision: string
+    resolveModelConfigId: (ownerId: string, requestedId?: string) => Promise<string>
+  }
 }
 
 export function createBeeGameResourceServerApp(
@@ -105,6 +115,34 @@ export function createBeeGameResourceServerApp(
         }
       }
       try {
+      const curationMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/curation(?:\/(confirm|reject))?$/)
+      if (curationMatch) {
+        const packId = decodeURIComponent(curationMatch[1])
+        if (request.method === 'GET' && !curationMatch[2]) {
+          if (!options.repository.listCuration) return corsResponse(jsonError(503, 'not_configured', 'Resource curation is not configured'), options.corsOrigin)
+          return corsResponse(Response.json(await options.repository.listCuration(packId)), options.corsOrigin)
+        }
+        if (request.method === 'POST' && curationMatch[2]) {
+          const action = curationMatch[2]
+          const input = await request.json()
+          let updated: ResourceElement[] | undefined
+          let auditedElementIds: readonly string[]
+          if (action === 'confirm') {
+            const parsed = parseResourceCurationBatch(input)
+            updated = await options.repository.confirmCuration?.(packId, parsed)
+            auditedElementIds = parsed.decisions.map(decision => decision.elementId)
+          } else {
+            const parsed = parseResourceCurationReject(input)
+            updated = await options.repository.rejectCuration?.(packId, parsed)
+            auditedElementIds = parsed.elementIds
+          }
+          if (!updated) return corsResponse(jsonError(503, 'not_configured', 'Resource curation is not configured'), options.corsOrigin)
+          await audit({ actorId: user!.id, action: `curation.${action}`, packId, metadata: { elementIds: auditedElementIds } })
+          const queue = await options.repository.listCuration?.(packId)
+          return corsResponse(Response.json({ updatedElementIds: updated.map(element => element.id), ...(queue ? { counts: queue.counts } : {}) }), options.corsOrigin)
+        }
+        return corsResponse(jsonError(405, 'method_not_allowed', 'Resource curation method is not supported'), options.corsOrigin)
+      }
       if (request.method === 'GET' && pathname === '/api/resource-search') {
         const url = new URL(request.url)
         return corsResponse(Response.json({ packs: searchResourcePacks(await options.repository.listPacks(), {
@@ -212,7 +250,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
           const body = (await request.json()) as Record<string, unknown>
-          assertElementDefaults(body.elementDefaults)
+          if (Object.hasOwn(body, 'elementDefaults')) return corsResponse(jsonError(400, 'element_defaults_removed', 'Pack semantic defaults are removed; classify each element explicitly'), options.corsOrigin)
           const styles = stringList(body.styles)
           const pack = await options.repository.createPack({
             id: typeof body.id === 'string' && body.id ? body.id : `pack-${crypto.randomUUID()}`,
@@ -230,7 +268,6 @@ export function createBeeGameResourceServerApp(
             ...(typeof body.author === 'string' && body.author.trim() ? { author: body.author.trim() } : {}),
             ...(typeof body.licenseEvidence === 'string' && body.licenseEvidence.trim() ? { licenseEvidence: body.licenseEvidence.trim() } : {}),
             ...(stringList(body.compatibleEngines) ? { compatibleEngines: stringList(body.compatibleEngines) } : {}),
-            ...(body.elementDefaults ? { elementDefaults: body.elementDefaults as ResourcePack['elementDefaults'] } : {}),
           }, { createdBy: user!.id })
           await audit({ actorId: user!.id, action: 'pack.created', packId: pack.id, metadata: { primaryCategory: pack.primaryCategory, dimension: pack.dimension } })
           return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
@@ -255,7 +292,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'PATCH' && patchMatch) {
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
         const body = (await request.json()) as Record<string, unknown>
-        assertElementDefaults(body.elementDefaults)
+        if (Object.hasOwn(body, 'elementDefaults')) return corsResponse(jsonError(400, 'element_defaults_removed', 'Pack semantic defaults are removed; classify each element explicitly'), options.corsOrigin)
         const pack = await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body)
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'pack.updated', packId: decodeURIComponent(patchMatch[1]), metadata: { fields: Object.keys(body).sort() } })
@@ -274,10 +311,55 @@ export function createBeeGameResourceServerApp(
         await audit({ actorId: user!.id, action: 'pack.cover_uploaded', packId, metadata: { filename: file.name } })
         return corsResponse(Response.json({ pack }), options.corsOrigin)
       }
+      const semanticCurationCollectionMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/semantic-curation$/)
+      const semanticCurationJobMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/semantic-curation\/([^/]+)$/)
+      const semanticCurationRetryMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/semantic-curation\/([^/]+)\/retry$/)
+      if (semanticCurationCollectionMatch && request.method === 'GET') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const job = await options.resourceProcessing.latest(decodeURIComponent(semanticCurationCollectionMatch[1]), 'semantic-curate-elements')
+        return corsResponse(Response.json({ job: job ?? null }), options.corsOrigin)
+      }
+      if (semanticCurationCollectionMatch && request.method === 'POST') {
+        if (!options.resourceProcessing || !options.semanticCuration) {
+          return corsResponse(jsonError(503, 'not_configured', 'Resource semantic curation model is not configured'), options.corsOrigin)
+        }
+        const packId = decodeURIComponent(semanticCurationCollectionMatch[1])
+        const body = (await request.json().catch(() => ({}))) as { modelConfigId?: unknown; mode?: unknown }
+        const analysisMode = body.mode === undefined ? 'missing' : body.mode === 'all' ? 'all' : body.mode === 'missing' ? 'missing' : undefined
+        if (!analysisMode) return corsResponse(jsonError(400, 'invalid_semantic_curation_mode', 'Semantic curation mode must be missing or all'), options.corsOrigin)
+        const requestedModelConfigId = typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() || undefined : undefined
+        const modelConfigOwnerId = user!.modelConfigOwnerId ?? user!.id
+        const modelConfigId = await options.semanticCuration.resolveModelConfigId(modelConfigOwnerId, requestedModelConfigId)
+        const elements = await options.repository.listElements(packId)
+        const elementIds = elements
+          .filter(element => element.status === 'ready' && resolveResourceSemanticVisualKind(element) !== undefined && element.usageTagsMode !== 'manual-only' && (analysisMode === 'all' || (element.usageTagsMode !== 'override' || Boolean(element.semanticSuggestion))))
+          .filter(element => isResourceContentHash(element.specs.contentHash))
+          .map(element => element.id)
+        const job = await options.resourceProcessing.start(packId, elementIds, { kind: 'semantic-curate-elements', analysisMode, curatorRevision: options.semanticCuration.curatorRevision, ownerId: modelConfigOwnerId, modelConfigId })
+        await audit({ actorId: user!.id, action: 'semantic_curation.started', packId, metadata: { jobId: job.id, totalItems: job.totalItems, analysisMode } })
+        return corsResponse(Response.json({ job }, { status: 202 }), options.corsOrigin)
+      }
+      if (semanticCurationRetryMatch && request.method === 'POST') {
+        if (!options.resourceProcessing || !options.semanticCuration) return corsResponse(jsonError(503, 'not_configured', 'Resource semantic curation model is not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(semanticCurationRetryMatch[1]); const jobId = decodeURIComponent(semanticCurationRetryMatch[2])
+        const current = await options.resourceProcessing.get(packId, jobId)
+        if (!current || current.kind !== 'semantic-curate-elements') return corsResponse(jsonError(404, 'not_found', 'Semantic curation job not found'), options.corsOrigin)
+        const job = await options.resourceProcessing.retry(packId, jobId)
+        if (!job) return corsResponse(jsonError(404, 'not_found', 'Semantic curation job not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'semantic_curation.retried', packId, metadata: { jobId } })
+        return corsResponse(Response.json({ job }), options.corsOrigin)
+      }
+      if (semanticCurationJobMatch && request.method === 'GET') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(semanticCurationJobMatch[1]); const jobId = decodeURIComponent(semanticCurationJobMatch[2])
+        const job = await options.resourceProcessing.get(packId, jobId)
+        if (!job || job.kind !== 'semantic-curate-elements') return corsResponse(jsonError(404, 'not_found', 'Semantic curation job not found'), options.corsOrigin)
+        return corsResponse(Response.json({ job }), options.corsOrigin)
+      }
       const processingCollectionMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/processing-jobs$/)
       if (processingCollectionMatch && request.method === 'GET') {
         if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
-        const job = await options.resourceProcessing.latest(decodeURIComponent(processingCollectionMatch[1]))
+        const job = await options.resourceProcessing.latest(decodeURIComponent(processingCollectionMatch[1]), 'inspect-elements')
         return corsResponse(Response.json({ job: job ?? null }), options.corsOrigin)
       }
       if (processingCollectionMatch && request.method === 'POST') {
@@ -324,11 +406,11 @@ export function createBeeGameResourceServerApp(
       }
       if (folderMatch && request.method === 'POST') {
         try {
-          const body = (await request.json()) as { id?: string; name?: string; parentId?: string; elementDefaults?: unknown }
+          const body = (await request.json()) as { id?: string; name?: string; parentId?: string }
           if (!body.name) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
-          assertElementDefaults(body.elementDefaults)
+          if (Object.hasOwn(body, 'elementDefaults')) return corsResponse(jsonError(400, 'element_defaults_removed', 'Folder semantic defaults are removed; classify each element explicitly'), options.corsOrigin)
           const packId = decodeURIComponent(folderMatch[1])
-          const folder = await options.repository.createFolder(packId, { id: body.id || `folder-${crypto.randomUUID()}`, name: body.name, parentId: body.parentId, ...(body.elementDefaults ? { elementDefaults: body.elementDefaults as ResourceFolder['elementDefaults'] } : {}) })
+          const folder = await options.repository.createFolder(packId, { id: body.id || `folder-${crypto.randomUUID()}`, name: body.name, parentId: body.parentId })
           await audit({ actorId: user!.id, action: 'folder.created', packId, metadata: { folderId: folder.id, path: folder.path } })
           return corsResponse(Response.json({ folder }, { status: 201 }), options.corsOrigin)
         } catch (error) {
@@ -339,11 +421,11 @@ export function createBeeGameResourceServerApp(
       if (folderPatchMatch && request.method === 'PATCH') {
         const packId = decodeURIComponent(folderPatchMatch[1])
         const folderId = decodeURIComponent(folderPatchMatch[2])
-        const body = (await request.json()) as { name?: unknown; elementDefaults?: unknown }
+        const body = (await request.json()) as { name?: unknown }
         if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
-        assertElementDefaults(body.elementDefaults)
-        if (body.name === undefined && body.elementDefaults === undefined) return corsResponse(jsonError(400, 'invalid_folder', 'Folder update is empty'), options.corsOrigin)
-        const update = { ...(typeof body.name === 'string' ? { name: body.name } : {}), ...(body.elementDefaults !== undefined ? { elementDefaults: body.elementDefaults as ResourceFolder['elementDefaults'] } : {}) }
+        if (Object.hasOwn(body, 'elementDefaults')) return corsResponse(jsonError(400, 'element_defaults_removed', 'Folder semantic defaults are removed; classify each element explicitly'), options.corsOrigin)
+        if (body.name === undefined) return corsResponse(jsonError(400, 'invalid_folder', 'Folder update is empty'), options.corsOrigin)
+        const update = { ...(typeof body.name === 'string' ? { name: body.name } : {}) }
         const folder = (options.updateResourceFolder ? await options.updateResourceFolder(packId, folderId, update) : await options.repository.updateFolder(packId, folderId, update)) as { path?: string } | undefined
         if (!folder) return corsResponse(jsonError(404, 'not_found', 'Resource folder not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'folder.updated', packId, metadata: { folderId, path: folder.path } })
@@ -427,7 +509,7 @@ export function createBeeGameResourceServerApp(
         const elementId = decodeURIComponent(elementPatchMatch[2])
         const saved = await options.updateResourceElement(packId, elementId, body)
         if (!saved) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
-        // Return the repository view so inherited Pack/folder metadata is
+        // Return the repository view so the canonical element metadata is
         // visible immediately after an explicit element update.
         const element =
             (await options.repository.getElement(packId, elementId)) ?? saved
@@ -551,6 +633,41 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
   }
 }
 
+function parseResourceCurationBatch(value: unknown): ResourceCurationBatchInput {
+  const record = requiredRecord(value, 'Resource curation request')
+  if (!Array.isArray(record.decisions) || record.decisions.length === 0) {
+    throw new ResourceRequestValidationError('Resource curation decisions must be a non-empty array')
+  }
+  const decisions = record.decisions.map((value, index) => {
+    const decision = requiredRecord(value, `Resource curation decision ${index + 1}`)
+    const elementId = requiredString(decision.elementId, `Resource curation decision ${index + 1} elementId`)
+    const usageTags = validatedEnumList(decision.usageTags, RESOURCE_USAGE_TAGS, `Resource curation decision ${index + 1} usageTags`) as ResourceCurationBatchInput['decisions'][number]['usageTags']
+    if (!usageTags?.length) throw new ResourceRequestValidationError(`Resource curation decision ${index + 1} usageTags are required`)
+    const sourceContentHash = decision.sourceContentHash === undefined ? undefined : requiredString(decision.sourceContentHash, `Resource curation decision ${index + 1} sourceContentHash`)
+    if (sourceContentHash !== undefined && !isResourceContentHash(sourceContentHash)) throw new ResourceRequestValidationError(`Resource curation decision ${index + 1} sourceContentHash is invalid`)
+    const suggestionRevision = decision.suggestionRevision === undefined ? undefined : requiredString(decision.suggestionRevision, `Resource curation decision ${index + 1} suggestionRevision`)
+    const styleOverride = decision.styleOverride === undefined
+      ? undefined
+      : decision.styleOverride === null
+        ? null
+        : requiredString(decision.styleOverride, `Resource curation decision ${index + 1} styleOverride`)
+    return { elementId, usageTags, ...(sourceContentHash === undefined ? {} : { sourceContentHash }), ...(suggestionRevision === undefined ? {} : { suggestionRevision }), ...(styleOverride === undefined ? {} : { styleOverride }) }
+  })
+  if (new Set(decisions.map(decision => decision.elementId)).size !== decisions.length) throw new ResourceRequestValidationError('Resource curation decision elementIds must be unique')
+  return { decisions }
+}
+
+function parseResourceCurationReject(value: unknown): ResourceCurationRejectInput {
+  const record = requiredRecord(value, 'Resource curation rejection request')
+  const rawIds = record.elementIds
+  if (!Array.isArray(rawIds) || rawIds.length === 0 || rawIds.some(item => typeof item !== 'string' || !item.trim())) {
+    throw new ResourceRequestValidationError('Resource curation elementIds must be a non-empty array of strings')
+  }
+  const elementIds = [...new Set(rawIds.map(item => String(item).trim()))]
+  if (elementIds.length !== rawIds.length) throw new ResourceRequestValidationError('Resource curation elementIds must be unique')
+  return { elementIds }
+}
+
 function parseResourceRequirementMatchRequest(value: unknown): ResourceRequirementMatchRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ResourceRequestValidationError('Resource requirement match request must be an object')
@@ -565,6 +682,7 @@ function parseResourceRequirementMatchRequest(value: unknown): ResourceRequireme
   const requirements = record.requirements.map((value, index) => {
     const item = requiredRecord(value, `Resource requirement ${index + 1}`)
     const profile = requiredRecord(item.profile, `Resource requirement ${index + 1} profile`)
+    const coverage = parseResourceCoverage(profile.coverage, `Resource requirement ${index + 1} coverage`)
     return {
       requirementId: requiredString(item.requirementId, `Resource requirement ${index + 1} requirementId`),
       profile: {
@@ -573,6 +691,7 @@ function parseResourceRequirementMatchRequest(value: unknown): ResourceRequireme
         usageTags: requiredEnumList(profile.usageTags, RESOURCE_USAGE_TAGS, `Resource requirement ${index + 1} usageTags`) as ResourceUsageTag[],
         capabilities: requiredEnumList(profile.capabilities, RESOURCE_CAPABILITIES, `Resource requirement ${index + 1} capabilities`) as ResourceCapability[],
         styles: requiredStringList(profile.styles, `Resource requirement ${index + 1} styles`),
+        ...(coverage ? { coverage } : {}),
       },
     }
   })
@@ -590,6 +709,29 @@ function parseResourceRequirementMatchRequest(value: unknown): ResourceRequireme
   })
   const maxCandidatesPerRequirement = optionalBoundedInteger(record.maxCandidatesPerRequirement, 'maxCandidatesPerRequirement', 1, 32)
   return { requirements, deliveryCapabilities, ...(maxCandidatesPerRequirement ? { maxCandidatesPerRequirement } : {}) }
+}
+
+function parseResourceCoverage(value: unknown, label: string): Array<{
+  assetKinds?: ResourceAssetKind[]
+  usageTags?: ResourceUsageTag[]
+  capabilities?: ResourceCapability[]
+  relationKinds?: ResourceRelationKind[]
+  embeddedKinds?: ResourceEmbeddedComponentKind[]
+}> | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0) throw new ResourceRequestValidationError(`${label} must be a non-empty array`)
+  return value.map((item, index) => {
+    const entry = requiredRecord(item, `${label} ${index + 1}`)
+    const result = {
+      ...(entry.assetKinds === undefined ? {} : { assetKinds: requiredEnumList(entry.assetKinds, RESOURCE_ASSET_KINDS, `${label} ${index + 1} assetKinds`) as ResourceAssetKind[] }),
+      ...(entry.usageTags === undefined ? {} : { usageTags: requiredEnumList(entry.usageTags, RESOURCE_USAGE_TAGS, `${label} ${index + 1} usageTags`) as ResourceUsageTag[] }),
+      ...(entry.capabilities === undefined ? {} : { capabilities: requiredEnumList(entry.capabilities, RESOURCE_CAPABILITIES, `${label} ${index + 1} capabilities`) as ResourceCapability[] }),
+      ...(entry.relationKinds === undefined ? {} : { relationKinds: requiredEnumList(entry.relationKinds, RESOURCE_RELATION_KINDS, `${label} ${index + 1} relationKinds`) as ResourceRelationKind[] }),
+      ...(entry.embeddedKinds === undefined ? {} : { embeddedKinds: requiredEnumList(entry.embeddedKinds, RESOURCE_EMBEDDED_COMPONENT_KINDS, `${label} ${index + 1} embeddedKinds`) as ResourceEmbeddedComponentKind[] }),
+    }
+    if (!Object.keys(result).length) throw new ResourceRequestValidationError(`${label} ${index + 1} must declare a coverage constraint`)
+    return result
+  })
 }
 
 function requiredRecord(value: unknown, label: string): Record<string, unknown> {
@@ -710,6 +852,13 @@ function validatedEnumList(
   return values
 }
 
+function validatedEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    throw new ResourceRequestValidationError(`${label} is unsupported`)
+  }
+  return value as T
+}
+
 function assertElementUsageTags(body: Record<string, unknown>): void {
   if (Object.hasOwn(body, 'usageTagsMode') && !['inherit', 'override', 'manual-only'].includes(String(body.usageTagsMode))) {
     throw new ResourceRequestValidationError('Element usageTagsMode is unsupported')
@@ -718,15 +867,6 @@ function assertElementUsageTags(body: Record<string, unknown>): void {
   const value = body.usageTags
   if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string' || !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag))) {
     throw new ResourceRequestValidationError('Element usageTags must contain supported values')
-  }
-}
-
-function assertElementDefaults(value: unknown): void {
-  if (value === undefined) return
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Element defaults must be an object')
-  const usageTags = (value as Record<string, unknown>).usageTags
-  if (usageTags !== undefined && (!Array.isArray(usageTags) || usageTags.some(tag => typeof tag !== 'string' || !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag)))) {
-    throw new ResourceRequestValidationError('Element default usageTags must contain supported values')
   }
 }
 

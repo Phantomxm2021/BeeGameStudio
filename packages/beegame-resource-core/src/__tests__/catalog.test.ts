@@ -222,6 +222,49 @@ describe('bounded requirement matching', () => {
     expect(result.groups[0]?.bundles[0]?.coveredObligations).toEqual(['0', '1'])
   })
 
+  test('does not force composition capabilities onto one candidate', () => {
+    const model = element('capability-model', 'world-kit', 'models/capability.glb', 'models', 'model', ['building'], ['contains-materials'])
+    const texture = element('capability-texture', 'world-kit', 'textures/capability.png', 'textures', 'texture', ['building'], ['contains-textures'])
+    const result = matchResourceRequirements([packs[0]!], [model, texture], {
+      requirements: [{
+        requirementId: 'composed-asset',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model', 'texture'], usageTags: [],
+          capabilities: ['contains-materials', 'contains-textures'], styles: ['Stylized'],
+          coverage: [{ assetKinds: ['model'] }, { assetKinds: ['texture'] }],
+        },
+      }],
+      deliveryCapabilities: [
+        { sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb' },
+        { sourceFormat: 'png', disposition: 'direct', targetFormat: 'png' },
+      ],
+    })
+
+    expect(result.groups[0]?.status).toBe('matched')
+    expect(result.groups[0]?.bundles[0]?.candidates.map(item => item.elementId)).toEqual(['capability-model', 'capability-texture'])
+  })
+
+  test('chooses the smallest complete coverage bundle deterministically', () => {
+    const first = element('a-model', 'world-kit', 'models/first.glb', 'models', 'model', ['building'], [])
+    const second = element('b-texture', 'world-kit', 'textures/second.png', 'textures', 'texture', ['building'], [])
+    const complete = {
+      ...element('z-complete-model', 'world-kit', 'models/complete.glb', 'models', 'model', ['building'], []),
+      contentProfile: { packaging: 'self-contained' as const, components: [{ id: 'mesh:0', kind: 'mesh' as const }], inspection: { status: 'complete' as const, source: 'server' as const } },
+    }
+    const result = matchResourceRequirements([packs[0]!], [first, second, complete], {
+      requirements: [{
+        requirementId: 'smallest-bundle',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model'], usageTags: ['building'], capabilities: [], styles: ['Stylized'],
+          coverage: [{ embeddedKinds: ['mesh'] }, { assetKinds: ['model'] }],
+        },
+      }],
+      deliveryCapabilities: [{ sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb' }],
+    })
+
+    expect(result.groups[0]?.bundles[0]?.candidates.map(item => item.elementId)).toEqual(['z-complete-model'])
+  })
+
   test('excludes non-selection-ready material and returns the sole no-match outcome', () => {
     const incomplete = element(
       'untagged-model',
@@ -260,6 +303,28 @@ describe('bounded requirement matching', () => {
         bundles: [],
       }),
     )
+  })
+
+  test('requires an exact external dependency binding before exposing a model candidate', () => {
+    const texture = element('bound-texture', 'world-kit', 'textures/base.png', 'textures', 'texture', [], [])
+    const model = {
+      ...element('bound-model', 'world-kit', 'models/hero.fbx', 'models', 'model', ['building'], []),
+      specs: { ...element('bound-model', 'world-kit', 'models/hero.fbx', 'models', 'model', ['building'], []).specs, externalReferences: JSON.stringify(['textures/base.png']) },
+      dependencies: ['bound-texture'],
+    }
+    const request = {
+      requirements: [{ requirementId: 'model', profile: {
+        dimensions: ['3D'] as const, assetKinds: ['model'] as const, usageTags: ['building'] as const, capabilities: [], styles: ['Stylized'],
+      } }],
+      deliveryCapabilities: [
+        { sourceFormat: 'fbx', disposition: 'convert' as const, targetFormat: 'glb' },
+      ],
+    }
+    expect(matchResourceRequirements([packs[0]!], [model, texture], request).groups[0]?.status).toBe('no-match')
+    expect(matchResourceRequirements([packs[0]!], [{
+      ...model,
+      dependencyBindings: [{ referencePath: 'textures/base.png', dependencyElementId: 'bound-texture' }],
+    }, texture], request).groups[0]?.status).toBe('matched')
   })
 
   test('keeps the two-outcome wire result bounded when catalog administration has incomplete material', () => {
@@ -353,6 +418,30 @@ describe('bounded requirement matching', () => {
       status: 'matched',
       bundles: [expect.objectContaining({ candidates: [expect.objectContaining({ elementId: 'valid-environment' })] })],
     }))
+  })
+
+  test('does not use inherited Pack tags as candidate evidence', () => {
+    const inherited = {
+      ...element(
+        'inherited-environment', 'world-kit', 'models/inherited.glb',
+        'models', 'model', ['environment'], [],
+      ),
+      usageTagsMode: 'inherit' as const,
+    }
+    const result = matchResourceRequirements([packs[0]!], [inherited], {
+      requirements: [{
+        requirementId: 'environment-model',
+        profile: {
+          dimensions: ['3D'], assetKinds: ['model'],
+          usageTags: ['environment'], capabilities: [], styles: ['Stylized'],
+        },
+      }],
+      deliveryCapabilities: [{
+        sourceFormat: 'glb', disposition: 'direct', targetFormat: 'glb',
+      }],
+    })
+
+    expect(result.groups[0]).toEqual(expect.objectContaining({ status: 'no-match', bundles: [] }))
   })
 })
 

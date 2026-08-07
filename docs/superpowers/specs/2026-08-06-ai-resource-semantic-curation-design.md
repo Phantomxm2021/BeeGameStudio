@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed design for review. This document is the authority for the AI
-semantic-curation implementation. It does not change the Resource Library or
-any user example project by itself.
+Implementation authority for AI semantic curation. It does not change the
+Resource Library or any user example project by itself.
 
 ## Goal
 
@@ -70,36 +69,121 @@ R2 canonical object
   -> existing catalog matcher
 ```
 
-The AI reads the canonical R2 object through the resource service. It receives
-only the evidence needed for that element: content hash, MIME/format, size,
-technical facts, content profile, dependency summary and an engine-neutral
-content preview or extract when the format supports one. The model must use
-actual content evidence; filenames and paths are context only and never a
-classification rule.
+The AI reads the canonical R2 object through the resource service. Semantic
+curation is preview-first: only a resource that can produce a bounded visual
+preview enters the model request. Models and meshes are rendered by the
+engine-neutral preview processor; images and textures are normalized into
+preview images. Resources without a visual renderer remain unclassified and
+are not sent through a structured-only path.
+
+The visual input is one canonical contract. For one or two resources, it
+contains ordered individual JPEG images. For more than two resources, it
+contains one JPEG Atlas with an ordered cell-to-element map. The original
+resource bytes and library record are never changed, and the previews/Atlas
+are never stored as library resources. Raw binary is never placed in the
+structured text projection; it is delivered to the model as multimodal image
+input.
+
+The structured projection contains only bounded identity and technical context.
+Category, kind, asset kind, content profile, technical facts, and dependencies
+cannot replace the rendered visual evidence. Every visual decision must cite a
+`content_preview` evidence item tied to its supplied image or Atlas cell.
+Filenames and paths are not part of the semantic projection and cannot
+influence classification.
 
 The output is a strict object containing:
 
 - `element_id`
 - `source_content_hash`
-- `usage_tags`, each drawn from `RESOURCE_USAGE_TAGS`
+- `usageTags`, each drawn from `RESOURCE_USAGE_TAGS` (the model response field)
 - `confidence`: `high`, `medium` or `low`
-- `evidence`, a non-empty structured list pointing to inspected content facts
+- `evidence`, a non-empty structured list that includes `content_preview` for
+  every visual decision and points to the supplied image or Atlas cell
 - `curator_revision`
+
+The durable element row uses `usage_tags`; the Workflow bridge prompt and
+semantic model response use the exact `usageTags` field and evidence-source
+enums from the core contract for every request. The model is not expected to
+discover the vocabulary from prose, and the parser remains the final authority
+that rejects any value outside those enums.
 
 The model cannot submit a final resource row. The server owns the decision and
 the write.
 
+## Per-element decision and confirmation contract
+
+The batch is only a transport and billing unit. It never defines a shared
+semantic label set. Every model decision, pending suggestion and administrator
+confirmation is owned by exactly one `elementId` and carries its own
+`usageTags`, content hash and curator revision. Two elements may happen to
+receive the same tags, but that is the result of two independent decisions.
+
+The confirmation contract is an ordered set of element decisions:
+
+```text
+decisions: [
+  {
+    elementId,
+    usageTags,
+    sourceContentHash,
+    suggestionRevision
+  }
+]
+```
+
+The server rejects a shared `usageTags` value paired with multiple
+`elementIds`, missing or duplicate decisions, stale hashes, and decisions for
+elements outside the requested Pack. The UI may provide an explicit
+"accept all suggestions" action, but it must submit each resource's own
+suggestion through this same per-element contract. It must not provide a
+global tag picker that applies one tag set to heterogeneous elements.
+
+For visual recognition, model elements use bounded rendered previews and
+inspected geometry/material facts; images use bounded image previews and image
+facts. Audio, documents, and other non-renderable resources do not enter this
+semantic model path until they have an explicit visual preview renderer.
+Dependencies remain context and never become a substitute semantic tag. If a
+render or visual-input build fails, the item is requeued. If the model result
+does not cite visual evidence, the result is rejected before persistence.
+
+Provider-specific function-call argument envelopes are normalized once at the
+Workflow model-runtime boundary. The semantic curator receives only the
+canonical tool input; transport fields such as `raw_arguments` are never part
+of the semantic decision contract and are not accepted by the semantic parser.
+
 ## Durable processing
 
 Semantic classification uses the existing durable resource-processing job
-boundary with a semantic-curation job kind. Each element is one durable item.
-The job stores the input content hash and curator revision so a retry is
-idempotent and stale output cannot overwrite a changed resource.
+boundary with a semantic-curation job kind. Each element is one durable item,
+but the worker claims up to eight ordered items as one model batch. A batch has
+one stable durable identity and one provider usage receipt; the returned
+decisions are validated as a complete set before any element commit. The job
+stores the input content hash and curator revision so a retry is idempotent and
+stale output cannot overwrite a changed resource. The accepted batch receipt
+is recorded on the claimed items, so a restart resumes that batch rather than
+creating a second queue or re-running completed items.
+
+The job also stores the effective model-config owner and `modelConfigId`.
+Those identities point to the same model configuration managed by Workflow
+Settings. The resource service resolves that record from the existing backend
+configuration store and sends the resulting runtime environment through the
+existing Workflow model runtime bridge. It does not read a resource-specific
+model URL, token, or model name, and it never selects a fallback provider.
+The persisted `modelType` is part of that same request identity and must cross
+the bridge with the runtime environment. The isolated model worker must use
+that request-scoped provider before any local Claude settings; local settings
+must never redirect a Resource Library request to another provider.
 
 There is no artificial per-task wall-clock or token kill switch. Concurrency
 is a throughput setting only. A slow model request remains a running item; a
 process restart requeues only interrupted items. One failed element records a
 failure and does not stop other elements in the same Pack.
+
+The structured model output allocation is derived from the current batch size
+and is not a job token quota or a workflow kill switch. This prevents a
+complete decision batch from being silently truncated by the runtime's generic
+default output size. A provider-reported truncation is recorded as a distinct
+provider output failure.
 
 If the same element hash and curator revision already have an accepted result,
 the job reuses that result rather than invoking the model again. If the hash
@@ -124,7 +208,7 @@ For medium/low confidence or insufficient evidence:
 - The structured result is stored in the existing non-searchable
   `semantic_suggestion` field.
 - The existing curation workbench can confirm or reject it through the existing
-  one-batch curation operation.
+  one-batch transport operation using the per-element decision contract.
 
 The pending suggestion is not a second semantic fact and is never consumed by
 catalog matching. It exists only to preserve a recoverable AI decision until a
@@ -138,19 +222,34 @@ published catalog selection. The job processes items in deterministic Pack and
 element order and does not load the whole Resource Library into one model
 request.
 
-The existing 798 untagged elements are therefore handled as independent
-durable items: published elements first, archived elements second. No resource
-is copied, renamed, converted or replaced by a placeholder during semantic
-curation.
+All renderable untagged elements are handled as independent durable items in
+ordered batches of at most eight: published elements first, archived elements
+second. Non-renderable elements remain unclassified until a visual renderer is
+available. No library resource is copied, renamed, or replaced by a
+placeholder during semantic curation; an ephemeral rendered preview is the
+only allowed conversion.
+
+For a batch of one or two renderable items, the model request contains the
+individual preview images. For a batch larger than two, it contains one JPEG
+Atlas and its ordered cell map. Both forms are the same `visualInput` contract
+and are validated before the request is sent.
+
+Each accepted semantic batch receipt partitions the claimed durable items into
+completed decisions and explicit `retryItems`. The partition is exact: an
+item cannot be both accepted and retried, and no claimed item may be omitted.
+Retried items are requeued with their current diagnostic and selected after
+older queued work; a batch containing only retries schedules a later batch
+instead of spinning inside the current batch.
 
 ## Failure handling
 
 | Condition | Result |
 | --- | --- |
 | R2 read failure | Item remains failed with the storage error; retry the item |
+| Model render or Atlas failure | Exclude the item from the current model call, requeue it with the render diagnostic, and retry it in the next batch |
 | Model response invalid | Item remains failed; do not write partial tags |
 | Unknown tag | Reject the result and record validation error |
-| Empty evidence | Keep tags unchanged and store a low-confidence pending result |
+| Missing `content_preview` evidence | Reject the batch result, persist no tag or suggestion, and requeue the item |
 | Content hash changed | Reject stale result and enqueue the current hash |
 | Process restart | Requeue interrupted items only |
 | Existing confirmed tags | Skip; do not overwrite |
@@ -175,10 +274,13 @@ The implementation is ready only when all of the following are true:
 7. A real published catalog match uses the confirmed tags and returns the
    existing candidate/bundle contract.
 8. The frontend renders options from the API rather than a duplicate constant.
-9. No legacy semantic path, feedback path, compatibility path or second
+9. A heterogeneous batch cannot cause one resource's tags to be written to
+   another resource; an explicit bulk accept preserves each element's own
+   decision.
+10. No legacy semantic path, feedback path, compatibility path or second
    resource fact source remains.
-10. A new-project end-to-end run confirms that resources are selected from the
-    catalog; no user example project is modified.
+11. A new-project end-to-end run confirms that resources are selected from the
+   catalog; no user example project is modified.
 
 ## Explicit implementation boundary
 

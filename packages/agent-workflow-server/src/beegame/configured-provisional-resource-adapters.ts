@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { RESOURCE_ASSET_KINDS } from '@bee-game-studio/beegame-resource-core'
 import {
   compactPlaceholderGltf,
   compactPlaceholderPng,
@@ -26,11 +27,12 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
   [
     {
       format: 'gltf',
+      assetKinds: ['model', 'mesh'],
       description:
         'gltf: self-contained provisional 3D model; asset_kind must be model; optional parameters.color',
       author(input) {
-        if (input.assetKind !== 'model')
-          throw new Error('gltf provisional resources require asset_kind model')
+        if (!['model', 'mesh'].includes(input.assetKind))
+          throw new Error('gltf provisional resources require asset_kind model or mesh')
         const parameters = visualParametersSchema.parse(input.parameters)
         const color = parameters?.color ?? 'neutral'
         return {
@@ -48,11 +50,12 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
     },
     {
       format: 'png',
+      assetKinds: ['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas', 'frame-animation', 'tileset', 'tilemap', 'ui-document'],
       description:
         'png: self-contained provisional visual; asset_kind must be image, texture, sprite or ui-document; optional parameters.color',
       author(input) {
         if (
-          !['image', 'texture', 'sprite', 'ui-document'].includes(
+          !['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas', 'frame-animation', 'tileset', 'tilemap', 'ui-document'].includes(
             input.assetKind,
           )
         )
@@ -76,10 +79,11 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
     },
     {
       format: 'wav',
+      assetKinds: ['audio-clip', 'audio-cue', 'audio-bank', 'music', 'ambience', 'voice'],
       description:
         'wav: self-contained provisional PCM cue bank; asset_kind must be audio-cue or audio-bank; parameters.cue_ids is required',
       author(input) {
-        if (!['audio-cue', 'audio-bank'].includes(input.assetKind))
+        if (!['audio-clip', 'audio-cue', 'audio-bank', 'music', 'ambience', 'voice'].includes(input.assetKind))
           throw new Error(
             'wav provisional resources require an audio asset_kind',
           )
@@ -94,6 +98,29 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
             bit_depth: 16,
             cue_count: parameters.cue_ids.length,
             cue_duration_seconds: 0.5,
+          },
+        }
+      },
+    },
+    {
+      format: 'json',
+      assetKinds: RESOURCE_ASSET_KINDS,
+      description:
+        'json: engine-neutral programmatic placeholder recipe for any canonical asset_kind; optional JSON object parameters',
+      author(input) {
+        const parameters = input.parameters ?? {}
+        const document = {
+          version: 1,
+          kind: 'programmatic-placeholder',
+          asset_kind: input.assetKind,
+          parameters,
+        }
+        return {
+          bytes: `${JSON.stringify(document, null, 2)}\n`,
+          descriptor: { representation: 'programmatic-recipe' },
+          technicalFacts: {
+            format: 'json',
+            schema: 'beegame-programmatic-placeholder-v1',
           },
         }
       },

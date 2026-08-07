@@ -2759,6 +2759,45 @@ describe('delivery workflow recovery', () => {
     expect(retried).toMatchObject({ status: 'running' })
   })
 
+  test('retries a failed Resource Inventory from its durable cursor', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-inventory-retry-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      checklistApproved: true,
+    })
+    await store.save({
+      ...initial,
+      phase: 'RESOURCE_PREPARATION',
+      status: 'failed',
+      blockedReason: 'resource inventory worker failed before commit',
+      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
+      activeDispatch: {
+        dispatchId: 'dispatch-inventory',
+        workerType: 'resource-curator',
+        phase: 'RESOURCE_PREPARATION',
+        taskId: 'RESOURCE_INVENTORY',
+        revision: initial.revision.document,
+        status: 'failed',
+        failureReason: 'resource inventory worker failed before commit',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      },
+    })
+
+    const retried = await retryRun({ store, runId: initial.runId })
+
+    expect(retried).toMatchObject({
+      phase: 'RESOURCE_PREPARATION',
+      status: 'running',
+      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
+    })
+    expect(retried.activeDispatch).toBeUndefined()
+  })
+
   test('starts retry idle timing from the new dispatch instead of stale run progress', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-progress-'))
     const store = createRunStore(workspace, 'owner-1')

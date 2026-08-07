@@ -5,6 +5,7 @@ import {
 } from './resource-inventory-commit'
 import type { ProjectResourceSelectionClient } from './project-resource-application'
 import type { ProvisionalResourceAdapter } from './provisional-resource-adapters'
+import { readBeeGameAssetManifest } from './asset-contracts'
 
 const commonDecision = {
   requirement_id: z.string().trim().min(1),
@@ -28,7 +29,6 @@ export const resourceInventoryCommitInputSchema = z.object({
       format: z.string().trim().min(1),
       reason: z.string().trim().min(1),
       asset_kind: z.string().trim().min(1),
-      capabilities: z.array(z.string().trim().min(1)).optional(),
       parameters: z.record(z.string(), z.unknown()).optional(),
     }).strict(),
   ])).min(1),
@@ -56,10 +56,19 @@ export function createNativeResourceInventoryCommitTool(options: {
       return 'Validate and durably apply one complete Resource Library or proven-no-match decision for every required resource group.'
     },
     async prompt() {
+      const manifest = await readBeeGameAssetManifest(options.workspacePath)
+      const allowedFormats = new Set(
+        manifest.project_target?.asset_format_capabilities ?? [],
+      )
+      const activeAdapters = options.provisionalAdapters.filter(adapter =>
+        allowedFormats.has(adapter.format),
+      )
       return [
         'Submit exactly one complete decision set after ResourceLibrary match_requirements.',
-        'Choose exact returned candidate identities. A placeholder is allowed only for a no-match group and remains a normal independently replaceable project resource.',
+        'Choose exact identities from one returned bundle per requirement. A placeholder is allowed only for a no-match group and remains a normal independently replaceable project resource.',
+        'When replacing an existing provisional resource, keep its project resource_id so the library resource replaces it in place.',
         'This is the only Resource Curator mutation and terminal operation. It persists progress before downloading or converting and resumes incomplete operations after interruption.',
+        `Active target provisional adapters: ${activeAdapters.map(adapter => adapter.description).join(' | ')}`,
       ].join(' ')
     },
     async checkPermissions(input: Input) {
@@ -88,7 +97,6 @@ export function createNativeResourceInventoryCommitTool(options: {
               reason: decision.reason,
               selectionReason: decision.selection_reason,
               assetKind: decision.asset_kind,
-              ...(decision.capabilities ? { capabilities: decision.capabilities } : {}),
               ...(decision.parameters ? { parameters: decision.parameters } : {}),
             },
       )

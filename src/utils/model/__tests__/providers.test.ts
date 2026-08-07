@@ -78,6 +78,7 @@ function isFirstPartyAnthropicBaseUrlTest(): boolean {
 
 describe('getAPIProvider', () => {
   const envKeys = [
+    'BEEGAME_RUNTIME_MODEL_TYPE',
     'CLAUDE_CODE_USE_GEMINI',
     'CLAUDE_CODE_USE_BEDROCK',
     'CLAUDE_CODE_USE_VERTEX',

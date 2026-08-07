@@ -103,6 +103,31 @@ describe('resolveApprovedOutboundTarget', () => {
     await dispatcher.close()
   })
 
+  test('keeps explicit TLS trust material on the pinned dispatcher', async () => {
+    const target = await resolveApprovedOutboundTarget('https://api.example.test/v1', publicResolvers)
+    expect(target).not.toBeNull()
+
+    const dispatcher = createPinnedUndiciDispatcher(target!, {
+      tls: {
+        ca: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
+        cert: '-----BEGIN CERTIFICATE-----\nCLIENT\n-----END CERTIFICATE-----',
+        key: '-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----',
+        passphrase: 'test-passphrase',
+      },
+    })
+    const optionsSymbol = Object.getOwnPropertySymbols(dispatcher)
+      .find(symbol => symbol.description === 'options')
+    expect(optionsSymbol).toBeDefined()
+    expect((dispatcher as unknown as Record<symbol, { connect?: Record<string, unknown> }>)[optionsSymbol!].connect)
+      .toMatchObject({
+        ca: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
+        cert: '-----BEGIN CERTIFICATE-----\nCLIENT\n-----END CERTIFICATE-----',
+        key: '-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----',
+        passphrase: 'test-passphrase',
+      })
+    await dispatcher.close()
+  })
+
   test('permits the development proxy range only for an explicitly allowlisted hostname', async () => {
     const target = await resolveApprovedOutboundTarget('https://provider.example.test/v1', {
       resolve4: async () => ['198.18.0.212'],

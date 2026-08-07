@@ -7,11 +7,20 @@ import {
   listModelConfigs,
   mapModelConfigToRuntime,
   type ModelProviderKind,
+  type RuntimeModelConfig,
 } from '@bee-game-studio/agent-workflow'
 import {
   RESOURCE_LIBRARY_USAGE,
+  RESOURCE_USAGE_TAGS,
   type ResourceLibraryUsage,
 } from '../../beegame-resource-core/src/types'
+import {
+  assertResourceSemanticVisualInput,
+  RESOURCE_SEMANTIC_EVIDENCE_SOURCES,
+  RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
+  RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
+  type ResourceSemanticVisualInput,
+} from '../../beegame-resource-core/src/semantic-curation'
 import {
   BeeGameSessionManager,
   formatBeeGameEventForDisplay,
@@ -31,6 +40,7 @@ import {
 } from './beegame/session-manager'
 import {
   createProcessIsolatedModelRuntimeHost,
+  BeeGameModelRuntimeError,
   type BeeGameModelGenerateInput,
   type BeeGameModelUsage,
   type BeeGameModelRuntimeHost,
@@ -123,6 +133,7 @@ import {
   resolveSessionWorkspacePath,
 } from './local-runtime-service'
 import { createSupabaseDashboardStoreFromEnv } from './supabase-dashboard-store'
+import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
 import { createSupabaseRuntimeEnvClientFromEnv } from './supabase-runtime-env-client'
 import {
   createInvitationServiceFromEnv,
@@ -130,7 +141,10 @@ import {
   type InvitationService,
 } from './invitation-service'
 import { resolveBeeGameBillingConfig } from '@bee-game-studio/beegame-billing-core/billing-config'
-import { createRemoteUsageBillingClient } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import {
+  BeeGameUsageBillingError,
+  createRemoteUsageBillingClient,
+} from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { registerBeeGameBillingStoreRoutes } from '@bee-game-studio/beegame-billing-core/billing-route-groups'
 import { MAX_SKILL_REQUEST_BYTES } from '@bee-game-studio/beegame-skills-core/client'
 import {
@@ -198,6 +212,60 @@ import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/work
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
 type JsonObject = Record<string, unknown>
+
+const RESOURCE_SEMANTIC_MODEL_MIN_OUTPUT_TOKENS = 4_096
+const RESOURCE_SEMANTIC_MODEL_OUTPUT_TOKENS_PER_ITEM = 1_024
+
+function getResourceSemanticModelOutputTokens(itemCount: number): number {
+  return Math.max(
+    RESOURCE_SEMANTIC_MODEL_MIN_OUTPUT_TOKENS,
+    itemCount * RESOURCE_SEMANTIC_MODEL_OUTPUT_TOKENS_PER_ITEM,
+  )
+}
+
+function buildResourceSemanticCuratorSystemPrompt(curatorRevision: string): string {
+  return [
+    'Classify every inspected resource in one batch for the BeeGame Resource Library.',
+    'Submit exactly one call to the required structured submission tool and do not emit markdown, explanation, or code fence text.',
+    'The tool input top-level key must be exactly decisions and its value must contain exactly one decision per supplied item.',
+    'Do not add batchId, jobId, curatorRevision, analysis, summary, or any other top-level field.',
+    'Each decision object keys must be exactly: element_id, source_content_hash, usageTags, confidence, evidence, curator_revision.',
+    'element_id and source_content_hash must be copied from the supplied item projection.',
+    'The visualInput is mandatory. One or two elements are supplied as individual rendered images; more than two elements are supplied as one rendered Atlas with an ordered cell map.',
+    'Use the supplied rendered image as the required basis for every usage-tag decision. Structured facts are context only and never replace the image. Do not infer identity from pixels, filenames, or paths.',
+    `Canonical usageTags are exactly: ${RESOURCE_USAGE_TAGS.join(', ')}. usageTags must be an array containing only these values; use an empty array when the evidence is insufficient.`,
+    'confidence must be high, medium, or low.',
+    `evidence must be an array of objects with source, reference, and observation. Every decision must include one content_preview evidence item whose reference is exactly the decision element_id. Evidence source is exactly one of: ${RESOURCE_SEMANTIC_EVIDENCE_SOURCES.join(', ')}. Structured observations must remain grounded in the supplied technical facts, content profile, or dependency summary, but they cannot replace visual evidence.`,
+    `curator_revision must be exactly ${JSON.stringify(curatorRevision)} in every decision.`,
+    'Do not infer a gameplay role from a filename or path. Do not invent an asset or claim that a resource is suitable when the projection does not establish it.',
+  ].join('\n')
+}
+
+const RESOURCE_MODEL_RUNTIME_KEYS = new Set([
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_OPENAI',
+  'OPENAI_BASE_URL',
+  'OPENAI_API_KEY',
+  'OPENAI_DEFAULT_HAIKU_MODEL',
+  'OPENAI_DEFAULT_SONNET_MODEL',
+  'OPENAI_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_GEMINI',
+  'GEMINI_BASE_URL',
+  'GEMINI_API_KEY',
+  'GEMINI_DEFAULT_HAIKU_MODEL',
+  'GEMINI_DEFAULT_SONNET_MODEL',
+  'GEMINI_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_GROK',
+  'GROK_BASE_URL',
+  'GROK_API_KEY',
+  'GROK_DEFAULT_HAIKU_MODEL',
+  'GROK_DEFAULT_SONNET_MODEL',
+  'GROK_DEFAULT_OPUS_MODEL',
+])
 
 type BeeGameArtifactIndexItem = {
   path: string
@@ -430,15 +498,16 @@ export function createAgentWorkflowApp(
   const dashboardDataRoot = getDashboardDataRoot(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
-  const supabaseStore = createSupabaseDashboardStoreFromEnv()
+  const serviceFetch = createTLSAwareFetch()
+  const supabaseStore = createSupabaseDashboardStoreFromEnv(process.env, serviceFetch)
   const supabaseRuntimeEnvClient = supabaseStore
-    ? createSupabaseRuntimeEnvClientFromEnv()
+    ? createSupabaseRuntimeEnvClientFromEnv(serviceFetch)
     : undefined
   const invitationService =
     options.invitationService === false
       ? undefined
       : (options.invitationService ?? createInvitationServiceFromEnv())
-  const configuredUserResolver = createConfiguredUserResolver()
+  const configuredUserResolver = createConfiguredUserResolver(process.env, { fetchImpl: serviceFetch })
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
     sessionStorePath: options.sessionStorePath,
     isOriginAllowed: origin => Boolean(resolveApiCorsOrigin(origin)),
@@ -505,7 +574,7 @@ export function createAgentWorkflowApp(
     dashboardDataRoot,
     supabaseStore,
     supabaseRuntimeEnvClient,
-    remoteUsageBilling: createRemoteUsageBillingClient(billingConfig),
+    remoteUsageBilling: createRemoteUsageBillingClient(billingConfig, serviceFetch),
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
@@ -1033,6 +1102,10 @@ export function createAgentWorkflowApp(
   })
 
   app.use('/api/*', async (c, next) => {
+    if (c.req.path === '/api/internal/resource-semantic-curation') {
+      await next()
+      return
+    }
     if (options.currentUser) {
       await next()
       return
@@ -1069,6 +1142,89 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/health', c => c.json({ status: 'ok' }))
+
+  app.post('/api/internal/resource-semantic-curation', async c => {
+    const serviceToken = options.resourceSelectionRuntimeConfig?.serviceToken
+    if (!serviceToken || c.req.header('x-beegame-resource-service-token') !== serviceToken) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    try {
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      if (!isObject(body)) return c.json({ error: 'Invalid semantic curation request' }, 400)
+      const ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
+      const modelConfigId = typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
+      const modelType = parseResourceSemanticModelType(body.modelType)
+      const runtimeEnv = parseResourceSemanticRuntimeEnv(body.runtimeEnv)
+      const packId = typeof body.packId === 'string' ? body.packId.trim() : ''
+      const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
+      const batchId = typeof body.batchId === 'string' ? body.batchId.trim() : ''
+      const curatorRevision = typeof body.curatorRevision === 'string' ? body.curatorRevision.trim() : ''
+      const items = parseResourceSemanticBatchItems(body.items)
+      if (!ownerId || !modelConfigId || !modelType || !runtimeEnv || !packId || !jobId || !batchId || !curatorRevision || !items.length || items.length > 8) return c.json({ error: 'Resource semantic model identity, batch identity, curator revision, provider, and runtime are required' }, 400)
+      let visualInput: ResourceSemanticVisualInput
+      try {
+        visualInput = parseResourceSemanticVisualInput(body.visualInput)
+        assertResourceSemanticVisualInput(visualInput, new Set(items.map(item => item.elementId)))
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : 'Resource semantic visual input is invalid' }, 400)
+      }
+      const visualInputSummary = visualInput.mode === 'individual'
+        ? { mode: visualInput.mode, images: visualInput.images.map(image => ({ elementId: image.elementId })) }
+        : { mode: visualInput.mode, cells: visualInput.cells }
+      const visualImageBlocks = visualInput.mode === 'individual'
+        ? visualInput.images.map(image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 } }))
+        : [{ type: 'image' as const, source: { type: 'base64' as const, media_type: visualInput.image.mediaType, data: visualInput.image.dataBase64 } }]
+      let modelUsage: BeeGameModelUsage | undefined
+      let creditsMicro = 0
+      const usageRecorder = billingConfig.mode === 'remote'
+        ? createUsageRecorder({
+          sessionId: jobId,
+          record: input => dashboardRepository.recordUsageForUser(ownerId, input),
+          debit: input => dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
+          onSettled: result => { creditsMicro = result.creditsMicro },
+        })
+        : undefined
+      const querySource = `beegame_resource_semantic_curation:${jobId}:${batchId}`
+      const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
+        cwd: dashboardDataRoot,
+        modelType,
+        runtimeEnv,
+        systemPrompt: buildResourceSemanticCuratorSystemPrompt(curatorRevision),
+        structuredOutput: {
+          name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
+          description: 'Submit the complete canonical semantic decision batch.',
+          inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
+        },
+        maxTokens: getResourceSemanticModelOutputTokens(items.length),
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: JSON.stringify({ items: items.map(item => ({ elementId: item.elementId, projection: item.projection })), visualInput: visualInputSummary }) },
+            ...visualImageBlocks,
+          ],
+        }],
+        querySource,
+      }, async (usage, source) => {
+        modelUsage = usage
+        if (usageRecorder) await usageRecorder(usage, source)
+      }, billingConfig.mode === 'remote')
+      return c.json({
+        content,
+        ...(modelUsage ? {
+          usage: {
+            inputTokens: modelUsage.input_tokens,
+            cacheReadTokens: modelUsage.cache_read_tokens,
+            cacheCreationTokens: modelUsage.cache_creation_tokens,
+            outputTokens: modelUsage.output_tokens,
+            totalTokens: modelUsage.total_tokens,
+            creditsMicro,
+          },
+        } : {}),
+      })
+    } catch (error) {
+      return resourceSemanticCurationRouteError(c, error)
+    }
+  })
 
   registerBeeGameBillingStoreRoutes(app, {
     billingConfig,
@@ -3765,6 +3921,41 @@ function tracedRouteError(
   )
 }
 
+function resourceSemanticCurationRouteError(
+  c: Context,
+  error: unknown,
+): Response {
+  const traceId = randomUUID()
+  const stage = error instanceof BeeGameUsageBillingError
+    ? error.stage
+    : error instanceof BeeGameModelRuntimeError
+      ? error.stage
+      : 'model_request'
+  const message = error instanceof Error && error.message.trim()
+    ? error.message
+    : 'Resource semantic runtime failed'
+  const upstreamTraceId = error instanceof BeeGameUsageBillingError
+    ? error.traceId
+    : undefined
+  console.warn('[BeeGame] resource semantic curation failed', {
+    traceId,
+    ...(upstreamTraceId ? { upstreamTraceId } : {}),
+    stage,
+    cause: error instanceof Error ? error.name : 'unknown_error',
+    causeMessage: message,
+    ...(process.env.NODE_ENV !== 'production' && error instanceof Error && error.stack
+      ? { causeStack: error.stack }
+      : {}),
+  })
+  return c.json({
+    error: 'Resource semantic runtime failed',
+    code: 'resource_semantic_runtime_failed',
+    stage,
+    message,
+    traceId,
+  }, 502)
+}
+
 function tracedRouteResponse(
   route: string,
   error: unknown,
@@ -4041,7 +4232,7 @@ function createUsageRecorder(input: {
     idempotencyKey: string
     metadata?: Record<string, unknown>
     usageSource?: 'runtime_snapshot' | 'model_runtime_host'
-  }) => Promise<unknown>
+  }) => Promise<{ creditsMicro: number }>
   debit: (input: {
     sessionId: string
     projectId?: string
@@ -4055,7 +4246,8 @@ function createUsageRecorder(input: {
     idempotencyKey: string
     metadata?: Record<string, unknown>
     usageSource?: 'runtime_snapshot' | 'model_runtime_host'
-  }) => Promise<unknown>
+  }) => Promise<{ creditsMicro: number }>
+  onSettled?: (result: { creditsMicro: number }) => void | Promise<void>
 }): (usage: BeeGameModelUsage, querySource: string) => Promise<void> {
   return async (usage, querySource) => {
     const normalizedUsage = {
@@ -4080,7 +4272,8 @@ function createUsageRecorder(input: {
       usageSource: 'model_runtime_host' as const,
     }
     await input.record(recordInput)
-    await input.debit(recordInput)
+    const debitResult = await input.debit(recordInput)
+    await input.onSettled?.(debitResult)
   }
 }
 
@@ -7939,6 +8132,75 @@ function getDocumentLanguageName(language: BeeGameSessionLanguage): string {
     pt: 'Portuguese',
   }
   return names[language]
+}
+
+function parseResourceSemanticRuntimeEnv(value: unknown): Record<string, string> | undefined {
+  if (!isObject(value)) return undefined
+  const runtimeEnv: Record<string, string> = {}
+  for (const [key, raw] of Object.entries(value)) {
+    if (!RESOURCE_MODEL_RUNTIME_KEYS.has(key) || typeof raw !== 'string' || !raw.trim()) continue
+    runtimeEnv[key] = raw
+  }
+  return Object.keys(runtimeEnv).length ? runtimeEnv : undefined
+}
+
+type ResourceSemanticBatchItemInput = {
+  elementId: string
+  attempt: number
+  projection: Record<string, unknown>
+}
+
+function parseResourceSemanticBatchItems(value: unknown): ResourceSemanticBatchItemInput[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) return []
+  const items: ResourceSemanticBatchItemInput[] = []
+  for (const raw of value) {
+    if (!isObject(raw)) return []
+    const elementId = typeof raw.elementId === 'string' ? raw.elementId.trim() : ''
+    const attempt = typeof raw.attempt === 'number' && Number.isSafeInteger(raw.attempt) && raw.attempt > 0 ? raw.attempt : 0
+    if (!elementId || !attempt || !isObject(raw.projection) || raw.projection.elementId !== elementId) return []
+    if (items.some(item => item.elementId === elementId)) return []
+    items.push({ elementId, attempt, projection: raw.projection })
+  }
+  return items
+}
+
+function parseResourceSemanticVisualInput(value: unknown): ResourceSemanticVisualInput {
+  if (!isObject(value) || (value.mode !== 'individual' && value.mode !== 'atlas')) {
+    throw new Error('Resource semantic visual input mode is required')
+  }
+  if (value.mode === 'individual') {
+    if (!Array.isArray(value.images) || value.images.length < 1 || value.images.length > 2) {
+      throw new Error('Resource semantic individual visual input requires one or two images')
+    }
+    return {
+      mode: 'individual',
+      images: value.images.map((raw, index) => {
+        if (!isObject(raw) || typeof raw.elementId !== 'string' || !raw.elementId.trim() || raw.mediaType !== 'image/jpeg' || typeof raw.dataBase64 !== 'string' || !raw.dataBase64.trim()) {
+          throw new Error(`Resource semantic individual image ${index + 1} is invalid`)
+        }
+        return { elementId: raw.elementId.trim(), mediaType: 'image/jpeg', dataBase64: raw.dataBase64 }
+      }),
+    }
+  }
+  if (!isObject(value.image) || value.image.mediaType !== 'image/jpeg' || typeof value.image.dataBase64 !== 'string' || !value.image.dataBase64.trim() || !Array.isArray(value.cells)) {
+    throw new Error('Resource semantic Atlas visual input is invalid')
+  }
+  return {
+    mode: 'atlas',
+    image: { mediaType: 'image/jpeg', dataBase64: value.image.dataBase64 },
+    cells: value.cells.map((raw, index) => {
+      if (!isObject(raw) || raw.ordinal !== index || typeof raw.elementId !== 'string' || !raw.elementId.trim()) {
+        throw new Error(`Resource semantic Atlas cell ${index + 1} is invalid`)
+      }
+      return { ordinal: index, elementId: raw.elementId.trim() }
+    }),
+  }
+}
+
+function parseResourceSemanticModelType(value: unknown): RuntimeModelConfig['modelType'] | undefined {
+  return value === 'anthropic' || value === 'openai' || value === 'gemini' || value === 'grok'
+    ? value
+    : undefined
 }
 
 async function readJson(

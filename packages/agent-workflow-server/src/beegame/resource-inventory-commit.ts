@@ -15,6 +15,7 @@ import {
 import {
   authorProvisionalResources,
   type ProvisionalResourceAdapter,
+  validateProvisionalResources,
 } from './provisional-resource-adapters'
 import { convertResourceDelivery } from './resource-delivery-adapters'
 import { auditAssetContract } from './asset-contract-audit'
@@ -48,7 +49,6 @@ export type ResourceInventoryDecision =
       reason: string
       selectionReason: string[]
       assetKind: string
-      capabilities?: string[]
       parameters?: Record<string, unknown>
     }
 
@@ -93,7 +93,6 @@ const resourceInventoryDecisionSchema = z.discriminatedUnion('kind', [
     reason: nonEmptyString,
     selectionReason: z.array(nonEmptyString).min(1),
     assetKind: nonEmptyString,
-    capabilities: z.array(nonEmptyString).optional(),
     parameters: z.record(z.string(), z.unknown()).optional(),
   }).strict(),
 ])
@@ -170,9 +169,16 @@ export async function commitResourceInventory(options: {
     transactionId: transaction.transactionId,
     planRevision,
   })
-  const decisions = validateDecisionCoverage(
+  const proposedDecisions = validateDecisionCoverage(
     manifest.requirements.filter(item => item.required !== false).map(item => item.id),
     options.input.decisions,
+  )
+  const previousReceipt = await readCurrentCommittedResourceInventoryReceipt(
+    options.workspacePath,
+  )
+  const decisions = preserveProvisionalResourceIds(
+    proposedDecisions,
+    previousReceipt?.decisions ?? [],
   )
   const receiptPath = join(
     options.workspacePath,
@@ -201,29 +207,76 @@ export async function commitResourceInventory(options: {
     }
   } else {
     const deliveryByResource: Record<string, ResourceDeliveryCapability> = {}
+    const decisionsByRequirement = new Map<string, ResourceInventoryDecision[]>()
     for (const decision of decisions) {
-      const group = observation.result.groups.find(
-        item => item.requirementId === decision.requirementId,
-      )
-      if (!group) throw new Error(`Resource match group is missing: ${decision.requirementId}`)
-      if (decision.kind === 'placeholder') {
-        if (group.status !== 'no-match') {
-          throw new Error(`Placeholder is forbidden because ${decision.requirementId} has selectable Resource Library candidates or unclassified material`)
+      const group = decisionsByRequirement.get(decision.requirementId) ?? []
+      group.push(decision)
+      decisionsByRequirement.set(decision.requirementId, group)
+    }
+    for (const [requirementId, requirementDecisions] of decisionsByRequirement) {
+      const group = observation.result.groups.find(item => item.requirementId === requirementId)
+      if (!group) throw new Error(`Resource match group is missing: ${requirementId}`)
+      const placeholders = requirementDecisions.filter((decision): decision is Extract<ResourceInventoryDecision, { kind: 'placeholder' }> => decision.kind === 'placeholder')
+      if (placeholders.length) {
+        if (group.status !== 'no-match' || placeholders.length !== requirementDecisions.length) {
+          throw new Error(`Placeholder is forbidden because ${requirementId} has selectable Resource Library bundles`)
         }
-      } else {
-        const candidate = group.candidates.find(candidate =>
+        const decision = placeholders[0]!
+        const requirement = manifest.requirements.find(item => item.id === requirementId)
+        if (!requirement)
+          throw new Error(`Resource requirement is missing: ${requirementId}`)
+        if (!requirement.acquisition_profile.asset_kinds.some(kind => kind === decision.assetKind))
+          throw new Error(`Resource placeholder asset kind is not declared by ${requirementId}`)
+        const adapter = options.provisionalAdapters.find(item => item.format === decision.format)
+        if (!adapter)
+          throw new Error(`No provisional resource adapter is registered for format: ${decision.format}`)
+        if (!adapter.assetKinds.some(kind => kind === decision.assetKind))
+          throw new Error(`Provisional resource adapter ${decision.format} does not support asset kind: ${decision.assetKind}`)
+        continue
+      }
+      if (group.status !== 'matched')
+        throw new Error(`Library decision is not allowed for no-match requirement: ${requirementId}`)
+      const libraryDecisions = requirementDecisions.filter((decision): decision is Extract<ResourceInventoryDecision, { kind: 'library' }> => decision.kind === 'library')
+      const bundle = group.bundles.find(candidateBundle => libraryDecisions.every(decision =>
+        candidateBundle.candidates.some(candidate =>
           candidate.packId === decision.packId &&
           candidate.packVersion === decision.expectedPackVersion &&
-          candidate.elementId === decision.elementId
+          candidate.elementId === decision.elementId,
+        )))
+      if (!bundle)
+        throw new Error(`Library decisions do not exactly cover one returned Resource Library bundle: ${requirementId}`)
+      for (const decision of libraryDecisions) {
+        const candidate = bundle.candidates.find(candidate =>
+          candidate.packId === decision.packId &&
+          candidate.packVersion === decision.expectedPackVersion &&
+          candidate.elementId === decision.elementId,
         )
         if (!candidate)
-          throw new Error(`Library decision is not an exact candidate for ${decision.requirementId}`)
+          throw new Error(`Library decision is not an exact bundle member for ${requirementId}`)
         const established = deliveryByResource[decision.resourceId]
         if (established && canonicalResourceInventoryRevision(established) !== canonicalResourceInventoryRevision(candidate.delivery))
           throw new Error(`Reused resource has inconsistent delivery capabilities: ${decision.resourceId}`)
         deliveryByResource[decision.resourceId] = candidate.delivery
       }
     }
+    const provisionalResources = decisions
+      .filter((decision): decision is Extract<ResourceInventoryDecision, { kind: 'placeholder' }> =>
+        decision.kind === 'placeholder')
+      .map(decision => ({
+        id: decision.resourceId,
+        destinationPath: decision.destinationPath,
+        format: decision.format,
+        reason: decision.reason,
+        selectionReason: decision.selectionReason,
+        assetKind: decision.assetKind,
+        ...(decision.parameters ? { parameters: decision.parameters } : {}),
+      }))
+    if (provisionalResources.length)
+      await validateProvisionalResources({
+        workspacePath: options.workspacePath,
+        adapters: options.provisionalAdapters,
+        resources: provisionalResources,
+      })
     receipt = {
       version: 1,
       state: 'prepared',
@@ -288,7 +341,6 @@ export async function commitResourceInventory(options: {
           reason: decision.reason,
           selectionReason: decision.selectionReason,
           assetKind: decision.assetKind,
-          ...(decision.capabilities ? { capabilities: decision.capabilities } : {}),
           ...(decision.parameters ? { parameters: decision.parameters } : {}),
         }],
       })
@@ -406,6 +458,27 @@ function uniqueResourceDecisions(
     if (seen.has(decision.resourceId)) return false
     seen.add(decision.resourceId)
     return true
+  })
+}
+
+function preserveProvisionalResourceIds(
+  decisions: readonly ResourceInventoryDecision[],
+  previousDecisions: readonly ResourceInventoryDecision[],
+): ResourceInventoryDecision[] {
+  const provisionalByRequirement = new Map(
+    previousDecisions
+      .filter((decision): decision is Extract<ResourceInventoryDecision, { kind: 'placeholder' }> =>
+        decision.kind === 'placeholder',
+      )
+      .map(decision => [decision.requirementId, decision.resourceId] as const),
+  )
+  const assigned = new Set<string>()
+  return decisions.map(decision => {
+    if (decision.kind !== 'library') return decision
+    const provisionalId = provisionalByRequirement.get(decision.requirementId)
+    if (!provisionalId || assigned.has(provisionalId)) return decision
+    assigned.add(provisionalId)
+    return { ...decision, resourceId: provisionalId }
   })
 }
 

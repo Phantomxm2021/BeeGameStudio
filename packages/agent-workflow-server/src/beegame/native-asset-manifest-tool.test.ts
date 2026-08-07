@@ -35,6 +35,26 @@ describe('native AssetManifest planning tool', () => {
     await expect(tool.call(input)).rejects.toThrow('acquisition_profile')
   })
 
+  test('rejects aggregate capabilities when coverage declares multiple resource parts', async () => {
+    const workspace = await createWorkspace()
+    const tool = createTool(workspace)
+    const input = planInput() as Record<string, unknown>
+    input.requirements = [{
+      id: 'visual.player',
+      required: true,
+      acquisition_profile: {
+        dimensions: ['3D'],
+        asset_kinds: ['model', 'texture'],
+        usage_tags: ['character'],
+        capabilities: ['contains-materials'],
+        styles: ['stylized'],
+        coverage: [{ asset_kinds: ['model'] }, { asset_kinds: ['texture'] }],
+      },
+    }]
+
+    await expect(tool.call(input)).rejects.toThrow('capabilities must be empty when coverage declares multiple resource parts')
+  })
+
   test('does not expose acquisition, placeholder or inventory completion actions', async () => {
     const workspace = await createWorkspace()
     const tool = createTool(workspace)

@@ -36,6 +36,16 @@ export const RESOURCE_USAGE_TAGS = [
 ] as const
 export type ResourceUsageTag = (typeof RESOURCE_USAGE_TAGS)[number]
 
+export const RESOURCE_SEMANTIC_EVIDENCE_SOURCES = [
+  'content_profile', 'technical_facts', 'content_preview',
+] as const
+export type ResourceSemanticEvidenceSource = (typeof RESOURCE_SEMANTIC_EVIDENCE_SOURCES)[number]
+export type ResourceSemanticEvidence = {
+  source: ResourceSemanticEvidenceSource
+  reference: string
+  observation: string
+}
+
 /**
  * Technical asset identity. Categories remain useful for browsing, while an
  * asset kind tells project tooling what the element actually represents.
@@ -145,23 +155,15 @@ export type ResourcePackStatus = 'draft' | 'published' | 'archived'
 export type ResourceElementStatus =
   | 'queued' | 'uploading' | 'ready' | 'failed' | 'hidden' | 'archived'
 
-/**
- * Explicit authoring policy inherited by logical assets. Only semantic fields
- * belong here: technical identity and inspected capabilities must continue to
- * come from the file itself or an explicit element override.
- */
-export type ResourceElementDefaults = {
-  usageTags?: readonly ResourceUsageTag[]
-}
-
 export type ResourceUsageTagsMode = 'inherit' | 'override' | 'manual-only'
-export type ResourceUsageTagsSource = 'element' | 'folder' | 'pack' | 'none'
+export type ResourceUsageTagsSource = 'element' | 'none'
 
 export type ResourceSemanticSuggestion = {
+  sourceContentHash?: string
   usageTags: readonly ResourceUsageTag[]
   styles: readonly string[]
   relations: readonly ResourceElementRelation[]
-  evidence: readonly string[]
+  evidence: readonly ResourceSemanticEvidence[]
   confidence: 'high' | 'medium' | 'low'
   generatedAt: string
   generatorRevision: string
@@ -173,7 +175,6 @@ export type ResourceFolder = {
   name: string
   parentId?: string
   path: string
-  elementDefaults?: ResourceElementDefaults
 }
 
 export type ResourcePack = {
@@ -196,7 +197,6 @@ export type ResourcePack = {
   licenseEvidence?: string
   compatibleEngines?: readonly string[]
   deprecatedAt?: string
-  elementDefaults?: ResourceElementDefaults
 }
 
 export type ResourcePreview = {
@@ -226,7 +226,7 @@ export type ResourceElement = {
   specs: Record<string, string | number | boolean>
   /** Explicit semantic capabilities. Empty means the element is manual-only. */
   usageTags?: readonly ResourceUsageTag[]
-  /** Controls whether usageTags override or inherit authored Pack/folder policy. */
+  /** Controls whether usageTags are unclassified, accepted, or manually excluded. */
   usageTagsMode?: ResourceUsageTagsMode
   /** Read-only provenance of the effective usageTags returned by a repository. */
   usageTagsSource?: ResourceUsageTagsSource
@@ -334,6 +334,38 @@ export type ResourceRequirementCandidateBundle = {
 export type ResourceMatchDiagnostic = {
   code: 'missing_semantics' | 'technical_not_ready' | 'dependency_not_ready' | 'delivery_unsupported' | 'coverage_gap'
   count: number
+}
+
+export type ResourceCurationQueueItem = ResourceElement & {
+  semanticSuggestion?: ResourceSemanticSuggestion
+}
+
+export type ResourceCurationQueue = {
+  items: readonly ResourceCurationQueueItem[]
+  counts: {
+    pendingSuggestions: number
+    missingSemanticTags: number
+    technicalIssues: number
+    dependencyIssues: number
+  }
+  usageTagOptions: readonly ResourceUsageTag[]
+}
+
+export type ResourceCurationDecision = {
+  elementId: string
+  usageTags: readonly ResourceUsageTag[]
+  sourceContentHash?: string
+  suggestionRevision?: string
+  styleOverride?: string | null
+}
+
+/** A batch transports independent element decisions; it never carries shared tags. */
+export type ResourceCurationBatchInput = {
+  decisions: readonly ResourceCurationDecision[]
+}
+
+export type ResourceCurationRejectInput = {
+  elementIds: readonly string[]
 }
 
 export type ResourceRequirementMatchGroup = {

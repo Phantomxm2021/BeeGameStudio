@@ -1,5 +1,10 @@
 import type { BeeGameBillingConfig } from './billing-config'
 
+type BillingFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
 export type BeeGameUsageBillingUsage = {
   prompt_tokens: number
   completion_tokens: number
@@ -56,9 +61,25 @@ export type BeeGameUsageBillingClient = {
   ) => Promise<BeeGameUsageBillingRecordResult>
 }
 
+export class BeeGameUsageBillingError extends Error {
+  readonly stage = 'usage_billing' as const
+
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    options: { cause?: unknown; traceId?: string } = {},
+  ) {
+    super(message, options)
+    this.name = 'BeeGameUsageBillingError'
+    this.traceId = options.traceId
+  }
+
+  readonly traceId?: string
+}
+
 export function createRemoteUsageBillingClient(
   billingConfig: BeeGameBillingConfig,
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  fetchImpl: BillingFetch = globalThis.fetch.bind(globalThis),
 ): BeeGameUsageBillingClient | undefined {
   if (billingConfig.mode !== 'remote') return undefined
   if (!billingConfig.remoteApiBaseUrl || !billingConfig.creditControlToken) {
@@ -85,7 +106,7 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
-    private readonly fetchImpl: typeof fetch,
+    private readonly fetchImpl: BillingFetch,
   ) {}
 
   recordUsage(
@@ -112,20 +133,30 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
     path: string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    const response = await this.fetchImpl(
-      buildUsageBillingUrl(this.baseUrl, path),
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-beegame-credit-control-token': this.token,
+    let response: Response
+    try {
+      response = await this.fetchImpl(
+        buildUsageBillingUrl(this.baseUrl, path),
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-beegame-credit-control-token': this.token,
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      },
-    )
+      )
+    } catch (error) {
+      throw new BeeGameUsageBillingError(
+        error instanceof Error ? error.message : 'Usage billing transport failed',
+        true,
+        { cause: error },
+      )
+    }
     const payload = (await response.json().catch(() => ({}))) as {
       message?: unknown
       error?: unknown
+      traceId?: unknown
     }
     if (!response.ok) {
       const message =
@@ -134,7 +165,12 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
           : typeof payload.error === 'string'
             ? payload.error
             : `Usage billing request failed with ${response.status}`
-      throw new Error(message)
+      throw new BeeGameUsageBillingError(message, response.status >= 500, {
+        traceId:
+          typeof payload.traceId === 'string' && payload.traceId.trim()
+            ? payload.traceId
+            : undefined,
+      })
     }
     return payload as T
   }
