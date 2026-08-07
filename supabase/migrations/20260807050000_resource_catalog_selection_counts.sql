@@ -6,7 +6,20 @@ create view public.beegame_resource_pack_catalog
 with (security_invoker = true)
 as
 with selectable_elements as (
-  select e.*
+  select
+    e.id,
+    e.pack_id,
+    e.status,
+    e.usage_tags_mode,
+    e.usage_tags,
+    e.asset_kind,
+    e.specs,
+    e.dependencies,
+    e.dependency_bindings,
+    e.relations,
+    e.category,
+    e.capabilities,
+    e.path
   from public.beegame_resource_elements e
   where e.status = 'ready'
     and e.usage_tags_mode = 'override'
