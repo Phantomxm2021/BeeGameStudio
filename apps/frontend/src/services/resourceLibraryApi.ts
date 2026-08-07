@@ -104,7 +104,7 @@ export type ResourceProcessingUsage = {
   totalTokens: number
   creditsMicro: number
 }
-export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements' | 'semantic-curate-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; usage?: ResourceProcessingUsage; analysisMode?: 'missing' | 'all'; retryOfJobId?: string; createdAt: string; updatedAt: string }
+export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements' | 'semantic-curate-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; usage?: ResourceProcessingUsage; analysisMode?: 'missing' | 'all'; retryOfJobId?: string; providerBatchId?: string; providerBatchStatus?: 'submitting' | 'processing' | 'ended' | 'unknown'; createdAt: string; updatedAt: string }
 export type ResourceSemanticCurationStartOptions = { mode?: 'missing' | 'all' }
 export type ResourceCurationQueue = {
   items: readonly (ResourceElement & { semanticSuggestion?: NonNullable<ResourceElement['semanticSuggestion']> })[]

@@ -154,14 +154,27 @@ of the semantic decision contract and are not accepted by the semantic parser.
 ## Durable processing
 
 Semantic classification uses the existing durable resource-processing job
-boundary with a semantic-curation job kind. Each element is one durable item,
-but the worker claims up to eight ordered items as one model batch. A batch has
-one stable durable identity and one provider usage receipt; the returned
-decisions are validated as a complete set before any element commit. The job
-stores the input content hash and curator revision so a retry is idempotent and
-stale output cannot overwrite a changed resource. The accepted batch receipt
-is recorded on the claimed items, so a restart resumes that batch rather than
-creating a second queue or re-running completed items.
+boundary with a semantic-curation job kind. One durable semantic job submits
+one native Provider Batch containing independent ordered subrequests of at
+most eight rendered elements each. The Batch envelope is transport and billing
+only; it is not a giant prompt and it never merges the visual context of two
+subrequests. Every subrequest has a stable `custom_id`; result order is never
+used as identity.
+
+The job stores the provider Batch ID before polling. A restart resumes polling
+that exact ID and reconstructs the subrequest item mapping from the durable
+ordered item rows. It never resubmits from chat history, browser state or an
+in-memory promise. If submission outcome is ambiguous, the job records
+`provider_batch_status = unknown` and stops rather than silently creating a
+duplicate native Batch. Provider errors, expiry and malformed subresponses
+are scoped to only their subrequest and become durable retry items; successful
+subrequests remain accepted.
+
+The input content hash and curator revision remain frozen so stale output
+cannot overwrite a changed resource. The accepted batch receipt is recorded
+on each completed item after all provider results are validated. There is one
+semantic route, one durable job ledger and one decision parser; no synchronous
+semantic fallback, compatibility path, feedback queue or second ledger exists.
 
 The job also stores the effective model-config owner and `modelConfigId`.
 Those identities point to the same model configuration managed by Workflow
@@ -223,11 +236,13 @@ element order and does not load the whole Resource Library into one model
 request.
 
 All renderable untagged elements are handled as independent durable items in
-ordered batches of at most eight: published elements first, archived elements
-second. Non-renderable elements remain unclassified until a visual renderer is
-available. No library resource is copied, renamed, or replaced by a
-placeholder during semantic curation; an ephemeral rendered preview is the
-only allowed conversion.
+ordered subrequests of at most eight: published elements first, archived
+elements second. A large Pack therefore creates one native Provider Batch
+containing many independent subrequests, not many synchronous calls and not
+one oversized prompt. Non-renderable elements remain unclassified until a
+visual renderer is available. No library resource is copied, renamed, or
+replaced by a placeholder during semantic curation; an ephemeral rendered
+preview is the only allowed conversion.
 
 For a batch of one or two renderable items, the model request contains the
 individual preview images. For a batch larger than two, it contains one JPEG

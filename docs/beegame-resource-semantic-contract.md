@@ -63,3 +63,15 @@ structured metadata alone.
     semantic result and requeues it through the existing durable job. No
     fallback classifier, feedback path, compatibility path, or second queue is
     created.
+15. Semantic curation submits one native Provider Batch per durable semantic
+    job. The Provider Batch contains independent requests of at most eight
+    rendered elements each; it is not one giant prompt and does not merge
+    request context. Each request has a stable `custom_id`, and results are
+    matched only by that identity.
+16. The durable job stores the native `provider_batch_id` before polling.
+    Recovery polls that exact ID and never creates a second submission from
+    chat history, browser state, or an in-memory promise. An ambiguous
+    submission is marked `unknown` and is never silently resubmitted.
+17. Native Batch support is a capability requirement for semantic curation.
+    A configured provider without a native multimodal Batch adapter fails
+    closed before semantic work starts; it does not use synchronous fallback.

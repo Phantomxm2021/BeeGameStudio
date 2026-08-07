@@ -11,6 +11,7 @@ import { externalReferencesFromInspection, reconcileResourceDependencySpecs, res
 import { createR2ResourceStorage, type R2ResourceStorage } from './r2-resource-storage'
 import { buildResourceSemanticContentProjection, buildResourceSemanticVisualInput } from './semantic-curation-evidence'
 import { createResourceSemanticModelClient } from './semantic-curation-model'
+import { buildResourceSemanticSubrequestMetadata, convertResourceSemanticProviderResults, partitionResourceSemanticBatch, resourceSemanticSubrequestId } from './semantic-curation-batch'
 import { createSupabaseResourceModelConfigResolver } from './supabase-model-config-resolver'
 import { createConfiguredResourceUserResolver } from './auth'
 import { createResourceServerFetch } from './external-fetch'
@@ -18,7 +19,7 @@ import { createResourceServerFetch } from './external-fetch'
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
 export { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
-export type { ResourceProcessingBatchItem, ResourceProcessingBatchReceipt, ResourceProcessingBatchRetry, ResourceProcessingFailure, ResourceProcessingHandlers, ResourceProcessingJob, ResourceProcessingJobStatus, ResourceProcessingUsage } from './resource-processing-jobs'
+export type { ResourceProcessingBatchContext, ResourceProcessingBatchItem, ResourceProcessingBatchReceipt, ResourceProcessingBatchRetry, ResourceProcessingFailure, ResourceProcessingHandlers, ResourceProcessingJob, ResourceProcessingJobStatus, ResourceProcessingProviderBatchResult, ResourceProcessingProviderBatchStatus, ResourceProcessingProviderBatchSubmission, ResourceProcessingUsage } from './resource-processing-jobs'
 export { createSubprocessModelPreviewProcessor, createSubprocessModelProcessor } from './model-processing'
 export type { ResourceInspectionFacts, ResourceModelPreviewProcessor, ResourceModelProcessor } from './model-processing'
 
@@ -54,7 +55,12 @@ if (import.meta.main) {
     ? createSupabaseResourceProcessingHandlers({
       baseUrl, serviceRoleKey, inspectElement: inspectResourceElement, fetchImpl: resourceFetch,
       canProcessKind: kind => kind === 'inspect-elements' || Boolean(semanticModel && semanticConfigResolver),
-      ...(semanticModel && semanticConfigResolver ? { processBatch: async (_kind, packId, batchId, contexts, analysisMode) => {
+      ...(semanticModel && semanticConfigResolver ? {
+        assertProviderBatchReady: async (ownerId: string, modelConfigId: string) => {
+          const modelConfig = await semanticConfigResolver.resolve(ownerId, modelConfigId)
+          if (modelConfig.runtime.modelType !== 'anthropic') throw new Error(`Native provider batch is not supported for model provider "${modelConfig.runtime.modelType}"`)
+        },
+        submitProviderBatch: async (_kind, packId, batchId, contexts, _analysisMode) => {
         if (!contexts.length) throw new Error('Resource semantic processing batch is empty')
         if (!contexts.every(context => context.ownerId && context.modelConfigId)) throw new Error('Resource semantic processing model identity is missing')
         const curatorRevision = contexts[0]!.curatorRevision
@@ -76,40 +82,74 @@ if (import.meta.main) {
         }))
         let loaded = loadedResults.filter((result): result is Extract<(typeof loadedResults)[number], { kind: 'ready' }> => result.kind === 'ready').map(result => result.value)
         const retryItems = loadedResults.filter((result): result is Extract<(typeof loadedResults)[number], { kind: 'retry' }> => result.kind === 'retry').map(result => result.value)
-        if (!loaded.length) return { batchId, items: [], retryItems }
-        let visualInput: Awaited<ReturnType<typeof buildResourceSemanticVisualInput>>
-        try {
-          visualInput = await buildResourceSemanticVisualInput(loaded.map(item => ({ elementId: item.context.elementId, file: item.visualFile })))
-        } catch (error) {
-          retryItems.push(...loaded.map(item => ({ elementId: item.context.elementId, error: safeResourceProcessingMessage(new ResourceSemanticPreviewRequiredError(error instanceof Error ? error.message : 'Resource semantic visual input could not be built')) })))
-          return { batchId, items: [], retryItems }
+        if (!loaded.length) return { retryItems }
+        const loadedById = new Map(loaded.map(item => [item.context.elementId, item]))
+        const requests = []
+        for (const [ordinal, subcontexts] of partitionResourceSemanticBatch(loaded.map(item => item.context)).entries()) {
+          const customId = resourceSemanticSubrequestId(batchId, ordinal)
+          const subloaded = subcontexts.map(context => loadedById.get(context.elementId)!).filter(Boolean)
+          requests.push({
+            customId,
+            ownerId: contexts[0]!.ownerId!,
+            modelConfigId: modelConfig.id,
+            modelType: modelConfig.runtime.modelType,
+            runtimeEnv: modelConfig.runtime.env,
+            packId,
+            jobId: contexts[0]!.jobId,
+            batchId,
+            curatorRevision,
+            items: subloaded.map(item => ({ elementId: item.context.elementId, attempt: item.context.attempt, projection: item.projection })),
+            visualInput: await buildResourceSemanticVisualInput(subloaded.map(item => ({ elementId: item.context.elementId, file: item.visualFile }))),
+          })
         }
-        const result = await semanticModel.classifyBatch({
-          ownerId: contexts[0]!.ownerId!,
-          modelConfigId: modelConfig.id,
-          modelType: modelConfig.runtime.modelType,
-          runtimeEnv: modelConfig.runtime.env,
-          packId,
-          jobId: contexts[0]!.jobId,
-          batchId,
-          curatorRevision,
-          items: loaded.map(({ context, projection }) => ({ elementId: context.elementId, attempt: context.attempt, projection })),
-          visualInput,
-        })
-        try {
-          const receipts = []
-          for (const decision of result.decisions) {
-            const committed = await repository.commitSemanticDecision?.(packId, decision, new Date().toISOString(), { commitMode: analysisMode === 'all' ? 'refresh-suggestion' : 'standard' })
-            if (!committed) throw new Error('Resource semantic metadata commit is not configured')
-            receipts.push({ elementId: decision.elementId, receiptId: committed.receiptId })
-          }
-          return { batchId, items: receipts, retryItems, ...(result.usage ? { usage: result.usage } : {}) }
-        } catch (error) {
-          if (!result.usage || !error || typeof error !== 'object') throw error
-          Object.assign(error, { usage: result.usage })
-          throw error
-        }
-      } } : {}),
+        const submission = await semanticModel.submitBatch({ requests })
+        return { ...submission, retryItems }
+      },
+        retrieveProviderBatch: async (_kind, packId, batchId, providerBatchId, contexts, analysisMode) => {
+          if (!contexts.length) throw new Error('Resource semantic processing batch is empty')
+          if (!contexts.every(context => context.ownerId && context.modelConfigId)) throw new Error('Resource semantic processing model identity is missing')
+          const curatorRevision = contexts[0]!.curatorRevision
+          if (!curatorRevision || contexts.some(context => context.curatorRevision !== curatorRevision)) throw new Error('Resource semantic processing curator revision is inconsistent')
+          const modelConfig = await semanticConfigResolver.resolve(contexts[0]!.ownerId!, contexts[0]!.modelConfigId!)
+          const metadata = buildResourceSemanticSubrequestMetadata({
+            batchId,
+            contexts,
+            requestFor: (subcontexts, customId) => ({
+              customId,
+              curatorRevision,
+              items: subcontexts.map(context => ({
+                elementId: context.elementId,
+                attempt: context.attempt,
+                projection: {
+                  elementId: context.elementId,
+                  sourceContentHash: context.sourceContentHash ?? '',
+                },
+              })),
+            }),
+          })
+          const result = await semanticModel.retrieveBatch({
+            ownerId: contexts[0]!.ownerId!,
+            modelConfigId: modelConfig.id,
+            modelType: modelConfig.runtime.modelType,
+            runtimeEnv: modelConfig.runtime.env,
+            providerBatchId,
+            jobId: contexts[0]!.jobId,
+            batchId,
+          })
+          if (result.status === 'processing') return { status: 'processing' as const }
+          const committed = await convertResourceSemanticProviderResults({
+            batchId,
+            requests: metadata,
+            results: result.results ?? [],
+            commitDecision: async decision => {
+              const saved = await repository.commitSemanticDecision?.(packId, decision, new Date().toISOString(), { commitMode: analysisMode === 'all' ? 'refresh-suggestion' : 'standard' })
+              if (!saved) throw new Error('Resource semantic metadata commit is not configured')
+              return { receiptId: saved.receiptId }
+            },
+          })
+          return { status: 'ended' as const, receipt: committed }
+        },
+      } : {}),
     })
     : undefined
   const app = createBeeGameResourceServerApp({

@@ -182,7 +182,11 @@ function TabButton({ active, onClick, controls, children }: { active: boolean; o
 function SemanticProcessingPanel({ job, queue, now, canRetry, canReanalyze, retrying, onRetry, onReanalyze }: { job: ResourceProcessingJob; queue?: ResourceCurationQueue; now: number; canRetry: boolean; canReanalyze: boolean; retrying: boolean; onRetry: () => void; onReanalyze: () => void }) {
   const processed = job.completedItems + job.failedItems
   const stage = processingStage(job.status)
-  const statusText = job.status === 'running' ? `${stage} · 处理中` : stage
+  const statusText = job.providerBatchStatus === 'unknown'
+    ? '原生批处理状态未知'
+    : job.providerBatchStatus === 'processing'
+      ? '原生批处理 · 处理中'
+      : job.status === 'running' ? `${stage} · 处理中` : stage
   const failures = job.failures ?? []
   const names = new Map((queue?.items ?? []).map(item => [item.id, item.name]))
   return <div className="space-y-5">
