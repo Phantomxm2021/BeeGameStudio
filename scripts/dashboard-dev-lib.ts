@@ -65,6 +65,7 @@ export function buildFrontendEnv(input: FrontendEnvInput): Record<string, string
 
 export function buildApiEnv(input: {
   apiPort: number
+  frontendPort: number
   workspacePath: string
   baseEnv: Record<string, string | undefined>
 }): Record<string, string> {
@@ -72,7 +73,20 @@ export function buildApiEnv(input: {
     ...omitRuntimeHostForbiddenEnv(input.baseEnv),
     AGENT_WORKFLOW_PORT: String(input.apiPort),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
+    BEEGAME_API_CORS_ORIGINS: appendApiCorsOrigin(
+      input.baseEnv.BEEGAME_API_CORS_ORIGINS,
+      `http://127.0.0.1:${input.frontendPort}`,
+    ),
   })
+}
+
+function appendApiCorsOrigin(value: string | undefined, origin: string): string {
+  const origins = (value ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+  if (!origins.includes(origin)) origins.push(origin)
+  return origins.join(',')
 }
 
 export function resolveProductionApiBase(input: ProductionApiBaseInput): string {

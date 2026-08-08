@@ -36,6 +36,7 @@ const apiProcess = Bun.spawn([bunExecutable, 'scripts/dashboard-server-dev.ts'],
   cwd: process.cwd(),
   env: buildApiEnv({
     apiPort,
+    frontendPort,
     workspacePath: options.workspacePath,
     baseEnv: process.env,
   }),

@@ -76,6 +76,7 @@ describe('BeeGame local dev launcher helpers', () => {
       BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:41176',
       BEEGAME_RESOURCE_SERVER_URL: 'http://127.0.0.1:41177',
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
+      BEEGAME_API_CORS_ORIGINS: 'http://127.0.0.1:41173',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
       NO_PROXY: '127.0.0.1,project.supabase.co',

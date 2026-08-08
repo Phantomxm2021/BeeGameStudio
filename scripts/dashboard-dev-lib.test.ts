@@ -36,6 +36,7 @@ describe('dashboard dev launcher helpers', () => {
   test('does not pass Supabase service-role secrets to the runtime host', () => {
     const env = buildApiEnv({
       apiPort: 62174,
+      frontendPort: 62173,
       workspacePath: '/repo/Projects',
       baseEnv: {
         BEEGAME_SUPABASE_URL: 'https://project.supabase.co',
@@ -51,6 +52,7 @@ describe('dashboard dev launcher helpers', () => {
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(env.AGENT_WORKFLOW_PORT).toBe('62174')
     expect(env.AGENT_WORKFLOW_WORKSPACE_PATH).toBe('/repo/Projects')
+    expect(env.BEEGAME_API_CORS_ORIGINS).toBe('http://127.0.0.1:62173')
   })
 
   test('keeps production frontend on same-origin api by default', () => {

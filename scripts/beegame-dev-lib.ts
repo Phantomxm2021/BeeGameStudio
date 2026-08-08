@@ -208,6 +208,10 @@ function buildRuntimeEnv(input: {
     NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
+    BEEGAME_API_CORS_ORIGINS: appendApiCorsOrigin(
+      input.baseEnv.BEEGAME_API_CORS_ORIGINS,
+      `http://127.0.0.1:${input.ports.frontend}`,
+    ),
     BEEGAME_BILLING_MODE: 'remote',
     BEEGAME_BILLING_API_BASE_URL: `http://127.0.0.1:${input.ports.billing}`,
     BEEGAME_SKILLS_API_BASE_URL: `http://127.0.0.1:${input.ports.skills}`,
@@ -216,6 +220,15 @@ function buildRuntimeEnv(input: {
     BEEGAME_RESOURCE_SERVICE_TOKEN:
       input.baseEnv.BEEGAME_RESOURCE_SERVICE_TOKEN || LOCAL_RESOURCE_SELECTION_TOKEN,
   })
+}
+
+function appendApiCorsOrigin(value: string | undefined, origin: string): string {
+  const origins = (value ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+  if (!origins.includes(origin)) origins.push(origin)
+  return origins.join(',')
 }
 
 /**
