@@ -99,7 +99,7 @@ function errSummary(e: unknown): string {
 
 async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
   const client = clientRef.client
-  if (client === null) return { kind: 'dead' }
+  if (client === null) return { kind: 'dead', reason: 'runagent-threw' }
   const schemaInstruction = params.schema
     ? '\n\n以单独 JSON 对象回答（无围栏无解释），匹配 schema：\n' +
       JSON.stringify(params.schema)
@@ -116,23 +116,27 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
       }),
     )
     const outputTokens = resp.usage.output_tokens
-    if (resp.stop_reason === 'max_tokens') return { kind: 'dead' }
+    if (resp.stop_reason === 'max_tokens') {
+      return { kind: 'dead', reason: 'no-structured-output' }
+    }
     const text = resp.content
       .map(block => (block.type === 'text' ? block.text : ''))
       .join('')
       .trim()
     if (params.schema) {
       const parsed = extractJsonObject(text)
-      if (parsed === null) return { kind: 'dead' }
+      if (parsed === null) {
+        return { kind: 'dead', reason: 'no-structured-output' }
+      }
       if (!validateAgainstSchema(parsed, params.schema).valid) {
-        return { kind: 'dead' }
+        return { kind: 'dead', reason: 'invalid-structured-output' }
       }
       return { kind: 'ok', output: parsed as object, usage: { outputTokens } }
     }
     return { kind: 'ok', output: text, usage: { outputTokens } }
   } catch (e) {
     console.error(`  ✗ ${errSummary(e)}`)
-    return { kind: 'dead' }
+    return { kind: 'dead', reason: 'runagent-threw' }
   } finally {
     release()
   }

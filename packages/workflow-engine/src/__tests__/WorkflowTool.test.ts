@@ -19,7 +19,10 @@ function mockPorts(
   const ports: WorkflowPorts = {
     agentRunner: {
       runAgentToResult: async (p: AgentRunParams) =>
-        results.get(p.prompt) ?? { kind: 'dead' },
+        results.get(p.prompt) ?? {
+          kind: 'dead',
+          reason: 'runagent-threw',
+        },
     },
     progressEmitter: { emit: e => void events.push(e) },
     taskRegistrar: {

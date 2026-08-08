@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import type { AgentRunResult } from '../types.js'
 
 // Directly construct type shapes to verify JSON round-trip (core requirement for resume persistence).
 test('AgentRunResult ok branch can JSON round-trip', () => {
@@ -13,13 +14,16 @@ test('AgentRunResult ok branch can JSON round-trip', () => {
 })
 
 test('AgentRunResult skipped/dead branch can JSON round-trip', () => {
-  for (const kind of ['skipped', 'dead'] as const) {
-    const round = JSON.parse(JSON.stringify({ kind }))
-    expect(round.kind).toBe(kind)
+  const results: AgentRunResult[] = [
+    { kind: 'skipped' },
+    { kind: 'dead', reason: 'runagent-threw' },
+  ]
+  for (const result of results) {
+    const round = JSON.parse(JSON.stringify(result))
+    expect(round.kind).toBe(result.kind)
   }
 })
 
-// dead carries optional reason/detail: journal persistence preserves cause of death for post-hoc audit / panel display.
 test('AgentRunResult dead with reason/detail can JSON round-trip', () => {
   const dead = {
     kind: 'dead' as const,
@@ -32,14 +36,27 @@ test('AgentRunResult dead with reason/detail can JSON round-trip', () => {
   expect(round.reason).toBe('no-structured-output')
 })
 
-// Backward compatible with old journals: reason/detail both optional, missing is still valid dead.
-test('AgentRunResult dead without reason is still valid (backward compatible with old journal)', () => {
-  const legacy = { kind: 'dead' as const }
-  const round = JSON.parse(JSON.stringify(legacy))
-  expect(round.kind).toBe('dead')
-  expect(round.reason).toBeUndefined()
-  expect(round.detail).toBeUndefined()
+test('AgentRunResult invalid-structured-output reason can JSON round-trip', () => {
+  const dead: AgentRunResult = {
+    kind: 'dead',
+    reason: 'invalid-structured-output',
+    detail: "must have required property 'count'",
+  }
+  const round = JSON.parse(JSON.stringify(dead))
+  expect(round).toEqual(dead)
+  expect(round.reason).toBe('invalid-structured-output')
 })
+
+// @ts-expect-error dead results require an explicit current-protocol reason
+const deadWithoutReason: AgentRunResult = { kind: 'dead' }
+void deadWithoutReason
+
+const deadWithUnknownReason: AgentRunResult = {
+  kind: 'dead',
+  // @ts-expect-error unclassified terminal state is not a durable protocol value
+  reason: 'unknown',
+}
+void deadWithUnknownReason
 
 test('JournalEntry shape is stable', () => {
   const entry = {

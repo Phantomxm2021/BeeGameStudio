@@ -30,7 +30,11 @@ test('FileJournalStore append → read preserves order, truncate clears', async 
       seq: 0,
       result: { kind: 'ok' as const, output: 'x', usage: { outputTokens: 1 } },
     }
-    const e2 = { key: 'k2', seq: 1, result: { kind: 'dead' as const } }
+    const e2 = {
+      key: 'k2',
+      seq: 1,
+      result: { kind: 'dead' as const, reason: 'runagent-threw' as const },
+    }
     await store.append('run-1', e1)
     await store.append('run-1', e2)
     const got = await store.read('run-1')

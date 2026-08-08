@@ -9,7 +9,12 @@ import { createHostHandle, type WorkflowPorts } from '../ports.js'
 
 function mockPorts(): WorkflowPorts {
   return {
-    agentRunner: { runAgentToResult: async () => ({ kind: 'dead' }) },
+    agentRunner: {
+      runAgentToResult: async () => ({
+        kind: 'dead',
+        reason: 'runagent-threw',
+      }),
+    },
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),

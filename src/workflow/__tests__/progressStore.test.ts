@@ -169,7 +169,7 @@ test('agent_done persists outputShape (ok·object / ok·text / dead none)', () =
     runId: 'r1',
     agentId: 2,
     phase: 'A',
-    result: { kind: 'dead' },
+    result: { kind: 'dead', reason: 'runagent-threw' },
   })
   const agents = store.get('r1')!.agents
   expect(agents.find(a => a.id === 0)?.outputShape).toBe('object')

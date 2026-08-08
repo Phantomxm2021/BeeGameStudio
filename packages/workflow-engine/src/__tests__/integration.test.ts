@@ -41,7 +41,7 @@ function canonicalPorts(runsDir: string): {
             usage: { outputTokens: 2 },
           }
         }
-        return { kind: 'dead' }
+        return { kind: 'dead', reason: 'runagent-threw' }
       },
     },
     progressEmitter: emitter,

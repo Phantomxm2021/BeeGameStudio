@@ -60,8 +60,13 @@ return { research, quick }
 
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    // registry 优先，agentRunner 仅作形状占位（不会被调到）
-    agentRunner: { runAgentToResult: async () => ({ kind: 'dead' }) },
+    // registry is the sole execution path
+    agentRunner: {
+      runAgentToResult: async () => ({
+        kind: 'dead',
+        reason: 'runagent-threw',
+      }),
+    },
     agentAdapterRegistry: registry,
     progressEmitter: {
       emit: e => {

@@ -10,7 +10,10 @@ function build(results: Map<string, AgentRunResult>) {
   const ports: WorkflowPorts = {
     agentRunner: {
       runAgentToResult: async (p: AgentRunParams) =>
-        results.get(p.prompt) ?? { kind: 'dead' },
+        results.get(p.prompt) ?? {
+          kind: 'dead',
+          reason: 'runagent-threw',
+        },
     },
     progressEmitter: emitter,
     taskRegistrar: {

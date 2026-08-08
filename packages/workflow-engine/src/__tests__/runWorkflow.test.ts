@@ -14,7 +14,10 @@ function portsWith(
   return {
     agentRunner: {
       runAgentToResult: async (p: AgentRunParams) =>
-        results.get(p.prompt) ?? { kind: 'dead' },
+        results.get(p.prompt) ?? {
+          kind: 'dead',
+          reason: 'runagent-threw',
+        },
     },
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
@@ -45,7 +48,10 @@ function portsWithEvents(
     ports: {
       agentRunner: {
         runAgentToResult: async (p: AgentRunParams) =>
-          results.get(p.prompt) ?? { kind: 'dead' },
+          results.get(p.prompt) ?? {
+            kind: 'dead',
+            reason: 'runagent-threw',
+          },
       },
       progressEmitter: { emit: e => void events.push(e) },
       taskRegistrar: {

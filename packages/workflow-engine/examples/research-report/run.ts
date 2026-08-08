@@ -93,7 +93,7 @@ function errSummary(e: unknown): string {
  */
 async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
   const client = clientRef.client
-  if (client === null) return { kind: 'dead' }
+  if (client === null) return { kind: 'dead', reason: 'runagent-threw' }
 
   const schemaInstruction = params.schema
     ? '\n\n你必须以一个【单独的 JSON 对象】作为整段回答（不要 Markdown 代码围栏、不要任何解释），该对象须匹配如下 JSON Schema：\n' +
@@ -116,15 +116,21 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
 
     if (params.schema) {
       // 截断的 JSON 几乎必然不完整 → 直接判 dead（而非让解析模糊失败）
-      if (truncated) return { kind: 'dead' }
+      if (truncated) {
+        return { kind: 'dead', reason: 'no-structured-output' }
+      }
       const text = resp.content
         .map(block => (block.type === 'text' ? block.text : ''))
         .join('')
         .trim()
       const parsed = extractJsonObject(text)
-      if (parsed === null) return { kind: 'dead' }
+      if (parsed === null) {
+        return { kind: 'dead', reason: 'no-structured-output' }
+      }
       const { valid } = validateAgainstSchema(parsed, params.schema)
-      if (!valid) return { kind: 'dead' }
+      if (!valid) {
+        return { kind: 'dead', reason: 'invalid-structured-output' }
+      }
       return { kind: 'ok', output: parsed as object, usage: { outputTokens } }
     }
     const text = resp.content
@@ -139,7 +145,7 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
     return { kind: 'ok', output: text, usage: { outputTokens } }
   } catch (e) {
     console.error(paint.red(`  ✗ ${errSummary(e)}`))
-    return { kind: 'dead' }
+    return { kind: 'dead', reason: 'runagent-threw' }
   } finally {
     release()
   }
