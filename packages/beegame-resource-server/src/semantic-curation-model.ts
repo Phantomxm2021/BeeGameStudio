@@ -142,7 +142,13 @@ export function createResourceSemanticModelClient(options: {
     async submitBatch(input) {
       if (!input.requests.length || input.requests.length > 256) throw new ResourceSemanticModelResponseError('Resource semantic provider batch request count is invalid')
       for (const request of input.requests) validateBatchRequest(request)
-      const body = await post({ operation: 'submit', requests: input.requests })
+      const body = await post({
+        operation: 'submit',
+        requests: input.requests.map(request => ({
+          customId: request.customId,
+          request,
+        })),
+      })
       const providerBatchId = typeof body.providerBatchId === 'string' ? body.providerBatchId.trim() : ''
       if (!providerBatchId) throw new ResourceSemanticModelResponseError('Resource semantic provider batch id is missing')
       return { providerBatchId }

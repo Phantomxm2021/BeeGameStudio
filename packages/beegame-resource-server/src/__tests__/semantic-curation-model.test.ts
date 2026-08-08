@@ -53,7 +53,17 @@ describe('resource semantic provider batch contract', () => {
     const result = await client.submitBatch({ requests: [request] })
     expect(result).toEqual({ providerBatchId: 'provider-batch-1' })
     expect(body?.operation).toBe('submit')
-    expect(body?.requests).toEqual([expect.objectContaining({ customId: 'job-1:subrequest:0' })])
+    expect(body?.requests).toEqual([{
+      customId: 'job-1:subrequest:0',
+      request: expect.objectContaining({
+        ownerId: 'owner-1',
+        modelConfigId: 'model-1',
+        packId: 'pack-1',
+        jobId: 'job-1',
+        batchId: 'batch-1',
+        curatorRevision: 'semantic-curator-v1',
+      }),
+    }])
   })
 
   test('retrieves provider results without a second semantic route and preserves usage', async () => {
