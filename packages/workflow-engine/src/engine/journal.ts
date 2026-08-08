@@ -54,12 +54,29 @@ export function createFileJournalStore(runsDir: string): JournalStore {
           )
         }
       }
+      const seenSeq = new Set<number>()
+      for (const entry of entries) {
+        if (seenSeq.has(entry.seq)) {
+          throw new WorkflowJournalError(
+            `workflow journal contains duplicate sequence ${entry.seq}`,
+          )
+        }
+        seenSeq.add(entry.seq)
+      }
       // Parallel completion order differs from call order; resume must use the explicit sequence.
       return entries.sort((a, b) => a.seq - b.seq)
     },
     async append(runId, entry) {
-      await mkdir(join(runsDir, runId), { recursive: true })
-      await appendFile(pathOf(runId), JSON.stringify(entry) + '\n', 'utf-8')
+      try {
+        await mkdir(join(runsDir, runId), { recursive: true })
+        await appendFile(pathOf(runId), JSON.stringify(entry) + '\n', 'utf-8')
+      } catch (error) {
+        if (error instanceof WorkflowJournalError) throw error
+        throw new WorkflowJournalError(
+          `failed to append workflow journal: ${pathOf(runId)}`,
+          { cause: error },
+        )
+      }
     },
     async truncate(runId) {
       await rm(join(runsDir, runId), { recursive: true, force: true })
@@ -155,7 +172,7 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
       'tokenCount',
     ]) ||
     !('output' in value) ||
-    (typeof value.output !== 'string' && !isRecord(value.output)) ||
+    (typeof value.output !== 'string' && !isObjectValue(value.output)) ||
     !isRecord(value.usage) ||
     !hasOnlyKeys(value.usage, ['outputTokens']) ||
     typeof value.usage.outputTokens !== 'number' ||
@@ -181,6 +198,10 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isObjectValue(value: unknown): value is object {
+  return typeof value === 'object' && value !== null
 }
 
 function isDeadReason(value: unknown): value is DeadReason {

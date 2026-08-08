@@ -309,6 +309,37 @@ test('scriptChanged=true → truncate journal and run all live', async () => {
   }
 })
 
+test('scriptChanged journal reset failure emits a visible terminal event', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wf-run-journal-reset-error-'))
+  try {
+    const { ports, events } = portsWithEvents(dir, new Map())
+    ports.journalStore = {
+      read: async () => [],
+      append: async () => {},
+      truncate: async () => {
+        throw new Error('journal reset failed')
+      },
+    }
+    const result = await runWorkflow({
+      script: `return agent('never-dispatch')`,
+      runId: 'run-journal-reset-error',
+      ports,
+      host: createHostHandle(null),
+      signal: new AbortController().signal,
+      cwd: dir,
+      budgetTotal: null,
+      resume: true,
+      scriptChanged: true,
+    })
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('journal reset failed')
+    expect(events.filter(e => e.type === 'run_started')).toHaveLength(0)
+    expect(events.filter(e => e.type === 'run_done')).toHaveLength(1)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('script runtime throw (non-syntax error) → failed', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-run-'))
   try {

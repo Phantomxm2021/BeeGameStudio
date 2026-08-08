@@ -75,7 +75,23 @@ export async function runWorkflow(
       return { status: 'failed', error }
     }
   } else if (opts.scriptChanged) {
-    await ports.journalStore.truncate(opts.runId)
+    try {
+      await ports.journalStore.truncate(opts.runId)
+    } catch (e) {
+      const error =
+        e instanceof WorkflowJournalError
+          ? e.message
+          : new WorkflowJournalError('workflow journal reset failed', {
+              cause: e,
+            }).message
+      ports.progressEmitter.emit({
+        type: 'run_done',
+        runId: opts.runId,
+        status: 'failed',
+        error,
+      })
+      return { status: 'failed', error }
+    }
     journalInvalidated = true
   }
 

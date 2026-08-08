@@ -88,7 +88,12 @@ export function createProgressStoreFromBus(bus: ProgressBus): ProgressStore {
     if (event.type === 'log') return
     const runId = event.runId
     const existing = byId.get(runId)
-    if (!existing && event.type !== 'run_started') return
+    if (
+      !existing &&
+      event.type !== 'run_started' &&
+      event.type !== 'run_done'
+    )
+      return
     const p = existing ?? ensure(runId, event.type === 'run_started' ? event.workflowName : 'workflow')
     if (p.status === 'completed' || p.status === 'failed' || p.status === 'killed') return
     p.updatedAt = Date.now()

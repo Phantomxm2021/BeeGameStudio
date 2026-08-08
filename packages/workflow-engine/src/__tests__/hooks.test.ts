@@ -4,7 +4,11 @@ import { createEngineContext } from '../engine/context.js'
 import { maxConcurrency, Semaphore } from '../engine/concurrency.js'
 import { agentCallKey } from '../engine/journal.js'
 import { makeHooks, type SubWorkflowRunner } from '../engine/hooks.js'
-import { WorkflowError, WorkflowAbortedError } from '../engine/errors.js'
+import {
+  WorkflowError,
+  WorkflowAbortedError,
+  WorkflowJournalError,
+} from '../engine/errors.js'
 import { createBufferingEmitter } from '../progress/events.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import type {
@@ -27,6 +31,7 @@ type CtxOverrides = Partial<{
   pending: { kind: 'skip' | 'retry' } | null
   journal: JournalEntry[]
   appended: JournalEntry[]
+  appendError: Error | null
   budgetTotal: number | null
   signal: AbortSignal
   truncated: string[]
@@ -84,6 +89,7 @@ function buildCtx(overrides: CtxOverrides = {}): {
     journalStore: {
       read: async () => [],
       append: async (_id: string, entry: JournalEntry) => {
+        if (overrides.appendError) throw overrides.appendError
         overrides.appended?.push(entry)
       },
       truncate: async (id: string) => {
@@ -478,6 +484,24 @@ test('agent journal hit does not call runner', async () => {
   const hooks = makeHooks(ctx, async () => null)
   expect(await hooks.agent('hi')).toBe('cached')
   expect(called).toBe(0)
+})
+
+test('parallel durable journal failure aborts instead of becoming a null item', async () => {
+  const error = new WorkflowJournalError('journal append failed')
+  const { hooks } = buildCtx({ appendError: error })
+
+  await expect(hooks.parallel([() => hooks.agent('persist-me')])).rejects.toBe(
+    error,
+  )
+})
+
+test('pipeline durable journal failure aborts instead of becoming a null item', async () => {
+  const error = new WorkflowJournalError('journal append failed')
+  const { hooks } = buildCtx({ appendError: error })
+
+  await expect(
+    hooks.pipeline(['persist-me'], prev => hooks.agent(String(prev))),
+  ).rejects.toBe(error)
 })
 
 test('valid structured output journal hit is revalidated and skips runner', async () => {

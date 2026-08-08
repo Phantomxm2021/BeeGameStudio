@@ -7,7 +7,11 @@ import type {
   ProgressEvent,
 } from '../types.js'
 import type { EngineContext } from './context.js'
-import { WorkflowAbortedError, WorkflowError } from './errors.js'
+import {
+  WorkflowAbortedError,
+  WorkflowError,
+  WorkflowJournalError,
+} from './errors.js'
 import { agentCallKey } from './journal.js'
 import type { WorkflowHooks } from './script.js'
 import {
@@ -232,14 +236,22 @@ export function makeHooks(
       if (result.kind === 'ok') {
         ctx.resources.budget.addOutputTokens(result.usage.outputTokens)
       }
-      emit({ type: 'agent_done', agentId, label, phase, result })
 
       const entry: JournalEntry = { key, seq: agentId, result }
+      try {
+        await ctx.ports.journalStore.append(ctx.runId, entry)
+      } catch (error) {
+        if (error instanceof WorkflowJournalError) throw error
+        throw new WorkflowJournalError(
+          `failed to append workflow journal for ${ctx.runId}`,
+          { cause: error },
+        )
+      }
       // Key point: push order = completion order (not call order); read() already re-sorts by seq,
       // so during resume the call order aligns with the journal order and the key index stays stable.
       ctx.journal.push(entry)
       ctx.journalIndex++
-      await ctx.ports.journalStore.append(ctx.runId, entry)
+      emit({ type: 'agent_done', agentId, label, phase, result })
       return resultToOutput(result)
     } finally {
       release()
@@ -257,6 +269,7 @@ export function makeHooks(
         try {
           return await t()
         } catch (e) {
+          if (e instanceof WorkflowJournalError) throw e
           // The "null on error" contract is unchanged, but it should log — otherwise the workflow author cannot locate why an agent failed
           ctx.ports.logger.warn(
             `parallel thunk #${i} failed: ${(e as Error).message}`,
@@ -287,6 +300,7 @@ export function makeHooks(
           }
           return prev as R
         } catch (e) {
+          if (e instanceof WorkflowJournalError) throw e
           ctx.ports.logger.warn(
             `pipeline item #${index} failed: ${(e as Error).message}`,
           )

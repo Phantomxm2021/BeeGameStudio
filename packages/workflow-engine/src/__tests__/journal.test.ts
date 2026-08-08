@@ -79,6 +79,49 @@ test('FileJournalStore read sorts by seq — resume stable when parallel complet
   }
 })
 
+test('FileJournalStore rejects duplicate sequence numbers', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wf-journal-duplicate-seq-'))
+  try {
+    const store = createFileJournalStore(dir)
+    const record = {
+      key: 'same-seq',
+      seq: 4,
+      result: { kind: 'skipped' as const },
+    }
+    await mkdir(join(dir, 'duplicate'), { recursive: true })
+    await writeFile(
+      join(dir, 'duplicate', 'journal.jsonl'),
+      `${JSON.stringify(record)}\n${JSON.stringify({ ...record, key: 'other' })}\n`,
+    )
+    await expect(store.read('duplicate')).rejects.toThrow(
+      'duplicate sequence 4',
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('FileJournalStore preserves array outputs during recovery', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wf-journal-array-output-'))
+  try {
+    const store = createFileJournalStore(dir)
+    const output = [{ id: 'one' }, { id: 'two' }]
+    await store.append('array-output', {
+      key: 'array-output',
+      seq: 0,
+      result: { kind: 'ok', output, usage: { outputTokens: 1 } },
+    })
+    const entries = await store.read('array-output')
+    expect(entries[0]!.result).toEqual({
+      kind: 'ok',
+      output,
+      usage: { outputTokens: 1 },
+    })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('agentCallKey varies with schema', () => {
   const k0 = agentCallKey('p', { prompt: 'p' })
   const k1 = agentCallKey('p', { prompt: 'p', schema: { type: 'object' } })

@@ -113,6 +113,19 @@ test('run_done failed terminal state records error', () => {
   expect(r.error).toBe('boom')
 })
 
+test('run_done remains visible when startup failed before run_started', () => {
+  const { bus, store } = newStore()
+  bus.emit({
+    type: 'run_done',
+    runId: 'startup-failed',
+    status: 'failed',
+    error: 'workflow journal read failed',
+  })
+  const r = store.get('startup-failed')!
+  expect(r.status).toBe('failed')
+  expect(r.error).toBe('workflow journal read failed')
+})
+
 test('log event does not trigger notify', () => {
   const { bus, store } = newStore()
   let calls = 0
