@@ -28,6 +28,8 @@ A migration layer would parse old entries and rewrite them into the current repr
 
 `WorkflowPorts` requires exactly one `AgentAdapterRegistry`. `agentRunner` is removed from the port contract. Every agent call resolves exactly one adapter and executes through that adapter. A missing route or default adapter is a configuration error and fails before model execution.
 
+The obsolete `AgentRunner` type is removed rather than retained as an unused public export. Required port behavior is explicit: `Logger.warn` is required, so engine failures cannot silently lose their warning channel through an old partial port implementation.
+
 The root CLI wiring registers its Claude backend as the registry default. It no longer supplies an unreachable `agentRunner` implementation. Standalone examples must create and populate a registry in the same way; examples do not receive a special execution path.
 
 ## Canonical journal boundary
@@ -91,7 +93,7 @@ Implementation follows test-first changes:
 
 ## Acceptance criteria
 
-- Production code contains no `agentRunner` fallback, stringified Workflow argument normalization, missing journal sequence fallback, optional dead reason, or `unknown` dead reason.
+- Production code contains no `AgentRunner`, optional warning port, `agentRunner` fallback, stringified Workflow argument normalization, missing journal sequence fallback, optional dead reason, or `unknown` dead reason.
 - Journal corruption cannot cause completed calls to execute again.
 - One adapter registry is the only execution authority.
 - Existing valid current-protocol journals resume deterministically.
