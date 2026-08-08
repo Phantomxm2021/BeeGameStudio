@@ -177,6 +177,75 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('workflow manager disposal waits for active turns and durable usage', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-dispose-barrier-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const run = createTestDeliveryRun({
+      runId: 'run-dispose-barrier',
+      projectId: 'project-dispose-barrier',
+      ownerId: 'user-1',
+    })
+    const dispatchId = 'dispatch-dispose-barrier'
+    const store = createRunStore(workspacePath, 'user-1')
+    await store.save({
+      ...run,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      status: 'running',
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: run.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+    let releaseTurn!: () => void
+    let turnStarted!: () => void
+    const started = new Promise<void>(resolve => {
+      turnStarted = resolve
+    })
+    const turnGate = new Promise<void>(resolve => {
+      releaseTurn = resolve
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ onMessage }) => {
+          onMessage(usageMessage(11))
+          turnStarted()
+          await turnGate
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: run.runId,
+      workflowDispatchId: dispatchId,
+      workflowWorkerType: 'document-author',
+    })
+    await manager.send(session.id, 'run assigned unit')
+    await started
+
+    const disposal = manager.dispose()
+    expect(disposal).toBeInstanceOf(Promise)
+    let disposalSettled = false
+    void disposal.then(() => {
+      disposalSettled = true
+    })
+    await Promise.resolve()
+    expect(disposalSettled).toBe(false)
+
+    releaseTurn()
+    await disposal
+    expect((await store.load())?.usage?.total_tokens).toBe(11)
+  })
+
   test('preserves structured transport retryability across worker boundaries', () => {
     const nativeError = Object.assign(new Error('transport failed'), {
       cause: { code: 'CERTIFICATE_VERIFY_FAILED' },

@@ -1026,9 +1026,9 @@ export function createAgentWorkflowApp(
     options.previewReadinessProbe,
     process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
   )
-  options.registerCleanup?.(() => {
+  options.registerCleanup?.(async () => {
     beeGamePreviews.dispose()
-    beeGameSessions.dispose()
+    await beeGameSessions.dispose()
   })
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,

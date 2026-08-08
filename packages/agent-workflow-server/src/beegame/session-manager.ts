@@ -1203,7 +1203,8 @@ export class BeeGameSessionManager {
     if (record.workflowUsageWriteError) throw record.workflowUsageWriteError
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    const workflowDrains: Promise<void>[] = []
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
       // messages. Aborting a runner while leaving the record "running" lets
@@ -1219,15 +1220,23 @@ export class BeeGameSessionManager {
         })
       }
       if (record.workflowWorker) {
-        void this.flushWorkflowUsage(record.session.id).catch(error => {
-          console.error('[BeeGame] Failed to flush workflow token usage', {
-            runId: record.workflowRunId,
-            dispatchId: record.workflowDispatchId,
-            cause: error instanceof Error ? error.message : String(error),
-          })
-        })
+        workflowDrains.push(
+          (async () => {
+            await record.activeTurn?.catch(() => undefined)
+            await record.workflowUsageWriteTail.catch(() => undefined)
+            await record.usageWriteTail.catch(() => undefined)
+            if (record.workflowUsageWriteError) {
+              console.error('[BeeGame] Failed to flush workflow token usage', {
+                runId: record.workflowRunId,
+                dispatchId: record.workflowDispatchId,
+                cause: record.workflowUsageWriteError.message,
+              })
+            }
+          })(),
+        )
       }
     }
+    await Promise.all(workflowDrains)
   }
 
   /**
