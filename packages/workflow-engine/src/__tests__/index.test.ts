@@ -58,9 +58,9 @@ test('engine constant values are stable', () => {
 test('createWorkflowTool returns complete descriptor shape', () => {
   const tool = wf.createWorkflowTool({
     agentAdapterRegistry: createTestRegistry(async () => ({
-        kind: 'dead',
-        reason: 'runagent-threw',
-      })),
+      kind: 'dead',
+      reason: 'runagent-threw',
+    })),
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),

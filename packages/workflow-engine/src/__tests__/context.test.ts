@@ -11,9 +11,9 @@ import { createTestRegistry } from './testRegistry.js'
 function mockPorts(): WorkflowPorts {
   return {
     agentAdapterRegistry: createTestRegistry(async () => ({
-        kind: 'dead',
-        reason: 'runagent-threw',
-      })),
+      kind: 'dead',
+      reason: 'runagent-threw',
+    })),
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),

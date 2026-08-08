@@ -64,8 +64,8 @@ export async function runWorkflow(
         e instanceof WorkflowJournalError
           ? e.message
           : new WorkflowJournalError('workflow journal read failed', {
-                cause: e,
-              }).message
+              cause: e,
+            }).message
       ports.progressEmitter.emit({
         type: 'run_done',
         runId: opts.runId,

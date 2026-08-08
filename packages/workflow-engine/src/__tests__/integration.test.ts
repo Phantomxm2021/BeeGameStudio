@@ -22,9 +22,8 @@ function canonicalPorts(runsDir: string): {
   const { emitter, events } = createBufferingEmitter()
   const agentCalls: AgentRunParams[] = []
   const ports: WorkflowPorts = {
-    agentAdapterRegistry: createTestRegistry(async (
-        params: AgentRunParams,
-      ): Promise<AgentRunResult> => {
+    agentAdapterRegistry: createTestRegistry(
+      async (params: AgentRunParams): Promise<AgentRunResult> => {
         agentCalls.push(params)
         const p = params.prompt
         if (p.startsWith('review-')) {
@@ -42,7 +41,8 @@ function canonicalPorts(runsDir: string): {
           }
         }
         return { kind: 'dead', reason: 'runagent-threw' }
-      }),
+      },
+    ),
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -145,9 +145,8 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
     let round = 0
     const { emitter, events } = createBufferingEmitter()
     const ports: WorkflowPorts = {
-      agentAdapterRegistry: createTestRegistry(async (
-          p: AgentRunParams,
-        ): Promise<AgentRunResult> => {
+      agentAdapterRegistry: createTestRegistry(
+        async (p: AgentRunParams): Promise<AgentRunResult> => {
           round++
           // rounds 1-2 return findings, round 3+ returns empty → converges
           const found = round <= 2 ? [{ b: round }] : []
@@ -156,7 +155,8 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
             output: { bugs: found },
             usage: { outputTokens: 1 },
           }
-        }),
+        },
+      ),
       progressEmitter: emitter,
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -218,9 +218,9 @@ test('resume compatibility: second run hits journal, agents do not re-run', asyn
     let calls = 0
     const makePorts = (): WorkflowPorts => ({
       agentAdapterRegistry: createTestRegistry(async () => {
-          calls++
-          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-        }),
+        calls++
+        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),

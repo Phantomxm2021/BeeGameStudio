@@ -275,10 +275,10 @@ test('workflow aborted → onFinish routes to kill', async () => {
     const ac = new AbortController()
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async () => ({
-          kind: 'ok',
-          output: 'x',
-          usage: { outputTokens: 1 },
-        })),
+        kind: 'ok',
+        output: 'x',
+        usage: { outputTokens: 1 },
+      })),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'run-x', signal: ac.signal }),
@@ -323,9 +323,9 @@ test('args are passed through without JSON normalization', async () => {
     const capturedPrompts: unknown[] = []
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async (p: AgentRunParams) => {
-          capturedPrompts.push(p.prompt)
-          return { kind: 'ok', output: 'done', usage: { outputTokens: 1 } }
-        }),
+        capturedPrompts.push(p.prompt)
+        return { kind: 'ok', output: 'done', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({
@@ -375,9 +375,9 @@ test('args keeps original value for non-legal JSON string without throwing', asy
     const capturedPrompts: unknown[] = []
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async (p: AgentRunParams) => {
-          capturedPrompts.push(p.prompt)
-          return { kind: 'ok', output: 'ok', usage: { outputTokens: 1 } }
-        }),
+        capturedPrompts.push(p.prompt)
+        return { kind: 'ok', output: 'ok', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({

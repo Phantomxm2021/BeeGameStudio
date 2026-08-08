@@ -34,9 +34,12 @@ export function createFileJournalStore(runsDir: string): JournalStore {
         raw = await readFile(path, 'utf-8')
       } catch (error) {
         if (isErrno(error) && error.code === 'ENOENT') return []
-        throw new WorkflowJournalError(`failed to read workflow journal: ${path}`, {
-          cause: error,
-        })
+        throw new WorkflowJournalError(
+          `failed to read workflow journal: ${path}`,
+          {
+            cause: error,
+          },
+        )
       }
       const entries: JournalEntry[] = []
       for (const [index, line] of raw.split('\n').entries()) {
@@ -77,13 +80,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
   return Object.keys(value).every(key => keys.includes(key))
 }
 
 function parseJournalEntry(value: unknown, line: number): JournalEntry {
   if (!isRecord(value) || !hasOnlyKeys(value, ['key', 'seq', 'result'])) {
-    throw new WorkflowJournalError(`journal line ${line} has an invalid entry shape`)
+    throw new WorkflowJournalError(
+      `journal line ${line} has an invalid entry shape`,
+    )
   }
   if (typeof value.key !== 'string' || value.key.trim().length === 0) {
     throw new WorkflowJournalError(`journal line ${line} has an invalid key`)
@@ -93,7 +101,9 @@ function parseJournalEntry(value: unknown, line: number): JournalEntry {
     !Number.isInteger(value.seq) ||
     value.seq < 0
   ) {
-    throw new WorkflowJournalError(`journal line ${line} has an invalid sequence`)
+    throw new WorkflowJournalError(
+      `journal line ${line} has an invalid sequence`,
+    )
   }
   return {
     key: value.key,
@@ -108,7 +118,9 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
   }
   if (value.kind === 'skipped') {
     if (!hasOnlyKeys(value, ['kind'])) {
-      throw new WorkflowJournalError(`journal line ${line} has an invalid skipped result`)
+      throw new WorkflowJournalError(
+        `journal line ${line} has an invalid skipped result`,
+      )
     }
     return { kind: 'skipped' }
   }
@@ -118,7 +130,9 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
       !isDeadReason(value.reason) ||
       (value.detail !== undefined && typeof value.detail !== 'string')
     ) {
-      throw new WorkflowJournalError(`journal line ${line} has an invalid dead result`)
+      throw new WorkflowJournalError(
+        `journal line ${line} has an invalid dead result`,
+      )
     }
     return {
       kind: 'dead',
@@ -127,7 +141,9 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
     } as AgentRunResult
   }
   if (value.kind !== 'ok') {
-    throw new WorkflowJournalError(`journal line ${line} has an unknown result kind`)
+    throw new WorkflowJournalError(
+      `journal line ${line} has an unknown result kind`,
+    )
   }
   if (
     !hasOnlyKeys(value, [
@@ -149,7 +165,9 @@ function parseAgentRunResult(value: unknown, line: number): AgentRunResult {
     (value.toolCount !== undefined && !isFiniteNonNegative(value.toolCount)) ||
     (value.tokenCount !== undefined && !isFiniteNonNegative(value.tokenCount))
   ) {
-    throw new WorkflowJournalError(`journal line ${line} has an invalid ok result`)
+    throw new WorkflowJournalError(
+      `journal line ${line} has an invalid ok result`,
+    )
   }
   return {
     kind: 'ok',

@@ -116,9 +116,9 @@ test('resume: journal hit skips runner call', async () => {
     let called = 0
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async () => {
-          called++
-          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-        }),
+        called++
+        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -260,9 +260,9 @@ test('scriptChanged=true → truncate journal and run all live', async () => {
     let called = 0
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async () => {
-          called++
-          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-        }),
+        called++
+        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -506,14 +506,14 @@ test('maxConcurrency passthrough: parallel agents bounded by run-level concurren
     let peak = 0
     const ports: WorkflowPorts = {
       agentAdapterRegistry: createTestRegistry(async () => {
-          active++
-          peak = Math.max(peak, active)
-          await new Promise(r => {
-            setTimeout(r, 8)
-          })
-          active--
-          return { kind: 'ok', output: 'x', usage: { outputTokens: 1 } }
-        }),
+        active++
+        peak = Math.max(peak, active)
+        await new Promise(r => {
+          setTimeout(r, 8)
+        })
+        active--
+        return { kind: 'ok', output: 'x', usage: { outputTokens: 1 } }
+      }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),

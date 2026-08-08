@@ -152,15 +152,8 @@ export function makeHooks(
         onProgress,
         ...(ctx.ports.taskRegistrar.registerAgentAbort
           ? {
-              registerAgentAbort: (
-                id: number,
-                ac: AbortController,
-              ): void => {
-                ctx.ports.taskRegistrar.registerAgentAbort?.(
-                  ctx.runId,
-                  id,
-                  ac,
-                )
+              registerAgentAbort: (id: number, ac: AbortController): void => {
+                ctx.ports.taskRegistrar.registerAgentAbort?.(ctx.runId, id, ac)
               },
             }
           : {}),

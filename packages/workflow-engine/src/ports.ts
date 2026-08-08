@@ -1,8 +1,5 @@
 import type { AgentAdapterRegistry } from './agentAdapter.js'
-import type {
-  JournalEntry,
-  ProgressEvent,
-} from './types.js'
+import type { JournalEntry, ProgressEvent } from './types.js'
 
 /**
  * Opaque host handle. The core side constructs one per tool call, containing toolUseContext/
@@ -95,7 +92,7 @@ export type Logger = {
   debug(msg: string): void
   event(name: string, metadata?: Record<string, unknown>): void
   /**
-      * Warning-level log (e.g. errors swallowed when a single parallel/pipeline item fails).
+   * Warning-level log (e.g. errors swallowed when a single parallel/pipeline item fails).
    */
   warn(msg: string): void
 }

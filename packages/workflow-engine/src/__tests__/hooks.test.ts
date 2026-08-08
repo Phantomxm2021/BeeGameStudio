@@ -136,9 +136,7 @@ test('agent skipped → null and not counted', async () => {
 
 test('agent dead → null', async () => {
   const { hooks } = buildCtx({
-    agentResults: new Map([
-      ['hi', { kind: 'dead', reason: 'runagent-threw' }],
-    ]),
+    agentResults: new Map([['hi', { kind: 'dead', reason: 'runagent-threw' }]]),
   })
   expect(await hooks.agent('hi')).toBeNull()
 })
@@ -689,9 +687,7 @@ test('phase switch emits phase_started/done; log emits log', () => {
 
 test('agent dead also counts in agentCountBox', async () => {
   const { hooks, ctx } = buildCtx({
-    agentResults: new Map([
-      ['x', { kind: 'dead', reason: 'runagent-threw' }],
-    ]),
+    agentResults: new Map([['x', { kind: 'dead', reason: 'runagent-threw' }]]),
   })
   await hooks.agent('x')
   expect(ctx.resources.agentCountBox.value).toBe(1)
