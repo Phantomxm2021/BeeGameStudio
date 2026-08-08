@@ -977,6 +977,77 @@ describe('delivery workflow session continuation', () => {
     }
   })
 
+  it('reconciles a running workflow whose worker disappeared before rendering it', async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), 'beegame-orphaned-workflow-read-'),
+    )
+    temporaryDirectories.push(root)
+    const projectsRoot = join(root, 'projects')
+    const ownerId = 'orphaned-workflow-owner'
+    const projectId = 'orphaned-workflow-project'
+    const workspace = join(projectsRoot, 'users', ownerId, projectId)
+    await mkdir(workspace, { recursive: true })
+    const app = createAgentWorkflowApp({
+      currentUser: { id: ownerId, role: 'owner' },
+      dashboardDataRoot: join(root, 'dashboard'),
+      defaultWorkspacePath: projectsRoot,
+      modelConfigStore: false,
+      skillsConfig: false,
+    })
+
+    const projectResponse = await app.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: projectId,
+        name: 'Orphaned workflow fixture',
+        root_path: workspace,
+        created_at: Date.now(),
+      }),
+    })
+    expect(projectResponse.status).toBe(200)
+
+    const ownerBrief = JSON.stringify({
+      kind: 'confirmed_build_brief',
+      resource_library_usage: 'optional',
+    })
+    const run = createTestDeliveryRun({
+      runId: 'orphaned-workflow-run',
+      projectId,
+      ownerId,
+      confirmedBriefContext: ownerBrief,
+      foundationDraftComplete: true,
+    })
+    const store = createRunStore(workspace, ownerId)
+    await store.save({
+      ...run,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      activeDispatch: {
+        dispatchId: 'orphaned-review-dispatch',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: run.revision.document,
+        status: 'running',
+        startedAt: run.updatedAt,
+      },
+    })
+
+    const response = await app.request(`/api/projects/${projectId}/workflow`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflow: {
+        status: 'stopped',
+        nextAction: 'resume',
+      },
+    })
+    expect(await store.load()).toMatchObject({
+      status: 'stopped',
+      thinking: 'idle',
+      activeDispatch: { status: 'interrupted' },
+    })
+  })
+
   it('serves frozen stage history plus one live current card without writing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-stage-history-route-'))
     temporaryDirectories.push(root)

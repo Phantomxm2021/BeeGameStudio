@@ -2633,7 +2633,11 @@ export function createAgentWorkflowApp(
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath) return c.json({ workflow: null, events: [] })
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
+      const run = await readBeeGameWorkflowSnapshot(
+        workspacePath,
+        user.id,
+        dispatch => beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
+      )
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents()).filter(
@@ -2675,7 +2679,11 @@ export function createAgentWorkflowApp(
       if (!workspacePath) return c.json({ events: [] })
       const after = c.req.query('after') || undefined
       const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(workspacePath, user.id)
+      const run = await readBeeGameWorkflowSnapshot(
+        workspacePath,
+        user.id,
+        dispatch => beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
+      )
       const events =
         run && typeof run.runId === 'string' && !run.workflowStateError
           ? (await store.readEvents(after)).filter(
@@ -5082,6 +5090,8 @@ async function getBeeGameProjectRuntimeState(input: {
       ? await readBeeGameWorkflowSnapshot(
           input.project.root_path,
           input.user.id,
+          dispatch =>
+            input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
         )
       : null
     const usage = workflow
@@ -5131,6 +5141,8 @@ async function getBeeGameProjectRuntimeState(input: {
   const workflowSnapshot = await readBeeGameWorkflowSnapshot(
     sessionRef.workspacePath,
     input.user.id,
+    dispatch =>
+      input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
   )
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
@@ -5249,6 +5261,7 @@ async function getBeeGameProjectRuntimeState(input: {
 async function readBeeGameWorkflowSnapshot(
   workspacePath: string,
   ownerId: string,
+  sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
 ): Promise<JsonObject | null> {
   try {
     const store = createRunStore(workspacePath, ownerId)
@@ -5271,14 +5284,23 @@ async function readBeeGameWorkflowSnapshot(
       }
       throw error
     }
-    const events = await store.readEvents()
     if (!inspection.currentRun)
       return createWorkflowStateErrorView(
         inspection.error ??
           new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
-        lastProvenWorkflowSummary(events),
+        lastProvenWorkflowSummary(await store.readEvents()),
       )
-    const { pendingEvents: _pendingEvents, ...run } = inspection.currentRun
+    let currentRun = inspection.currentRun
+    const activeDispatch = currentRun.activeDispatch
+    if (
+      activeDispatch?.status === 'running' &&
+      !(await sessionIsOpen(activeDispatch))
+    ) {
+      const reconciled = await store.reconcile(async () => false)
+      if (reconciled) currentRun = reconciled
+    }
+    const events = await store.readEvents()
+    const { pendingEvents: _pendingEvents, ...run } = currentRun
     const deliveryRun = run as DeliveryRun
     const timing = workflowElapsedTiming(events, deliveryRun)
     const stageSnapshots = projectWorkflowStageCardHistory({
