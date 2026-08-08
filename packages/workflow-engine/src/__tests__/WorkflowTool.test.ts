@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createWorkflowTool } from '../tool/WorkflowTool.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import type { AgentRunParams, AgentRunResult, ProgressEvent } from '../types.js'
+import { createResultRegistry, createTestRegistry } from './testRegistry.js'
 
 function mockPorts(
   runsDir: string,
@@ -17,13 +18,7 @@ function mockPorts(
   const events: ProgressEvent[] = []
   const runStatus = new Map<string, string>()
   const ports: WorkflowPorts = {
-    agentRunner: {
-      runAgentToResult: async (p: AgentRunParams) =>
-        results.get(p.prompt) ?? {
-          kind: 'dead',
-          reason: 'runagent-threw',
-        },
-    },
+    agentAdapterRegistry: createResultRegistry(results),
     progressEmitter: { emit: e => void events.push(e) },
     taskRegistrar: {
       register: () => ({
@@ -41,7 +36,7 @@ function mockPorts(
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: runsDir,
@@ -279,13 +274,11 @@ test('workflow aborted → onFinish routes to kill', async () => {
     const runStatus = new Map<string, string>()
     const ac = new AbortController()
     const ports: WorkflowPorts = {
-      agentRunner: {
-        runAgentToResult: async () => ({
+      agentAdapterRegistry: createTestRegistry(async () => ({
           kind: 'ok',
           output: 'x',
           usage: { outputTokens: 1 },
-        }),
-      },
+        })),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'run-x', signal: ac.signal }),
@@ -300,7 +293,7 @@ test('workflow aborted → onFinish routes to kill', async () => {
         truncate: async () => {},
       },
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {} },
+      logger: { debug: () => {}, event: () => {}, warn: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -324,17 +317,15 @@ test('workflow aborted → onFinish routes to kill', async () => {
   }
 })
 
-test('args defensively parses when a JSON-stringified object (backward compatible with old z.string() contract)', async () => {
+test('args are passed through without JSON normalization', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-tool-'))
   try {
     const capturedPrompts: unknown[] = []
     const ports: WorkflowPorts = {
-      agentRunner: {
-        runAgentToResult: async (p: AgentRunParams) => {
+      agentAdapterRegistry: createTestRegistry(async (p: AgentRunParams) => {
           capturedPrompts.push(p.prompt)
           return { kind: 'ok', output: 'done', usage: { outputTokens: 1 } }
-        },
-      },
+        }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({
@@ -352,7 +343,7 @@ test('args defensively parses when a JSON-stringified object (backward compatibl
         truncate: async () => {},
       },
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {} },
+      logger: { debug: () => {}, event: () => {}, warn: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -362,8 +353,7 @@ test('args defensively parses when a JSON-stringified object (backward compatibl
     const tool = createWorkflowTool(ports)
     await tool.call(
       {
-        script: `return agent(args.commit)`,
-        // simulate stringified JSON sent by model under old contract
+        script: `return agent(typeof args === 'string' ? args : 'not-a-string')`,
         args: '{"commit":"abc123"}',
       },
       undefined,
@@ -373,9 +363,7 @@ test('args defensively parses when a JSON-stringified object (backward compatibl
     await new Promise(r => {
       setTimeout(r, 50)
     })
-    // if args not normalized: args.commit === undefined (string has no commit property)
-    // if args normalized: args.commit === 'abc123'
-    expect(capturedPrompts).toContain('abc123')
+    expect(capturedPrompts).toContain('{"commit":"abc123"}')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -386,12 +374,10 @@ test('args keeps original value for non-legal JSON string without throwing', asy
   try {
     const capturedPrompts: unknown[] = []
     const ports: WorkflowPorts = {
-      agentRunner: {
-        runAgentToResult: async (p: AgentRunParams) => {
+      agentAdapterRegistry: createTestRegistry(async (p: AgentRunParams) => {
           capturedPrompts.push(p.prompt)
           return { kind: 'ok', output: 'ok', usage: { outputTokens: 1 } }
-        },
-      },
+        }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({
@@ -409,7 +395,7 @@ test('args keeps original value for non-legal JSON string without throwing', asy
         truncate: async () => {},
       },
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {} },
+      logger: { debug: () => {}, event: () => {}, warn: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,

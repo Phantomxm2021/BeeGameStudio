@@ -12,6 +12,7 @@ import { createFileJournalStore } from '../engine/journal.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import { createBufferingEmitter } from '../progress/events.js'
 import type { AgentRunParams, AgentRunResult, ProgressEvent } from '../types.js'
+import { createTestRegistry } from './testRegistry.js'
 
 function canonicalPorts(runsDir: string): {
   ports: WorkflowPorts
@@ -21,8 +22,7 @@ function canonicalPorts(runsDir: string): {
   const { emitter, events } = createBufferingEmitter()
   const agentCalls: AgentRunParams[] = []
   const ports: WorkflowPorts = {
-    agentRunner: {
-      runAgentToResult: async (
+    agentAdapterRegistry: createTestRegistry(async (
         params: AgentRunParams,
       ): Promise<AgentRunResult> => {
         agentCalls.push(params)
@@ -42,8 +42,7 @@ function canonicalPorts(runsDir: string): {
           }
         }
         return { kind: 'dead', reason: 'runagent-threw' }
-      },
-    },
+      }),
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -54,7 +53,7 @@ function canonicalPorts(runsDir: string): {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: runsDir,
@@ -146,8 +145,7 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
     let round = 0
     const { emitter, events } = createBufferingEmitter()
     const ports: WorkflowPorts = {
-      agentRunner: {
-        runAgentToResult: async (
+      agentAdapterRegistry: createTestRegistry(async (
           p: AgentRunParams,
         ): Promise<AgentRunResult> => {
           round++
@@ -158,8 +156,7 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
             output: { bugs: found },
             usage: { outputTokens: 1 },
           }
-        },
-      },
+        }),
       progressEmitter: emitter,
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -170,7 +167,7 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {} },
+      logger: { debug: () => {}, event: () => {}, warn: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -220,12 +217,10 @@ test('resume compatibility: second run hits journal, agents do not re-run', asyn
   try {
     let calls = 0
     const makePorts = (): WorkflowPorts => ({
-      agentRunner: {
-        runAgentToResult: async () => {
+      agentAdapterRegistry: createTestRegistry(async () => {
           calls++
           return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-        },
-      },
+        }),
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -236,7 +231,7 @@ test('resume compatibility: second run hits journal, agents do not re-run', asyn
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {} },
+      logger: { debug: () => {}, event: () => {}, warn: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,

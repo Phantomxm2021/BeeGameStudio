@@ -49,19 +49,24 @@ function buildCtx(overrides: CtxOverrides = {}): {
 } {
   const { emitter, events } = createBufferingEmitter()
   const results = overrides.agentResults ?? new Map<string, AgentRunResult>()
+  const runner =
+    overrides.runner ??
+    (async (params: AgentRunParams): Promise<AgentRunResult> =>
+      results.get(params.prompt) ?? {
+        kind: 'dead',
+        reason: 'runagent-threw',
+      })
+  const agentAdapterRegistry =
+    overrides.agentAdapterRegistry ??
+    new AgentAdapterRegistry()
+      .register({
+        id: 'test',
+        capabilities: { structuredOutput: true },
+        run: runner,
+      })
+      .default('test')
   const ports: WorkflowPorts = {
-    agentRunner: {
-      runAgentToResult: overrides.runner
-        ? overrides.runner
-        : async (params: AgentRunParams) =>
-            results.get(params.prompt) ?? {
-              kind: 'dead',
-              reason: 'runagent-threw',
-            },
-    },
-    ...(overrides.agentAdapterRegistry
-      ? { agentAdapterRegistry: overrides.agentAdapterRegistry }
-      : {}),
+    agentAdapterRegistry,
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -89,7 +94,7 @@ function buildCtx(overrides: CtxOverrides = {}): {
     logger: {
       debug: () => {},
       event: () => {},
-      ...(overrides.loggerWarn ? { warn: overrides.loggerWarn } : {}),
+      warn: overrides.loggerWarn ?? (() => {}),
     },
     hostFactory: () => ({
       handle: createHostHandle(null),
@@ -424,12 +429,16 @@ test('agent journal hit does not call runner', async () => {
   let called = 0
   const { emitter } = createBufferingEmitter()
   const ports: WorkflowPorts = {
-    agentRunner: {
-      runAgentToResult: async () => {
-        called++
-        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-      },
-    },
+    agentAdapterRegistry: new AgentAdapterRegistry()
+      .register({
+        id: 'test',
+        capabilities: { structuredOutput: true },
+        run: async () => {
+          called++
+          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+        },
+      })
+      .default('test'),
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -444,7 +453,7 @@ test('agent journal hit does not call runner', async () => {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: '/tmp',
@@ -817,7 +826,7 @@ test('agent concurrency bounded by semaphore (does not exceed maxConcurrency)', 
   expect(peak).toBeLessThanOrEqual(maxConcurrency())
 })
 
-test('agentAdapterRegistry takes priority over agentRunner (dispatched to adapter by route)', async () => {
+test('agentAdapterRegistry dispatches the selected adapter', async () => {
   const called: string[] = []
   const registry = new AgentAdapterRegistry()
     .register({
@@ -835,10 +844,6 @@ test('agentAdapterRegistry takes priority over agentRunner (dispatched to adapte
     .default('ad')
   const { hooks } = buildCtx({
     agentAdapterRegistry: registry,
-    runner: async () => {
-      called.push('runner')
-      return { kind: 'ok', output: 'from-runner', usage: { outputTokens: 1 } }
-    },
   })
   expect(await hooks.agent('x')).toBe('from-adapter')
   expect(called).toEqual(['adapter'])
@@ -846,7 +851,6 @@ test('agentAdapterRegistry takes priority over agentRunner (dispatched to adapte
 
 test('agentAdapterRegistry result is validated at the same engine boundary', async () => {
   let adapterCalls = 0
-  let runnerCalls = 0
   const registry = new AgentAdapterRegistry()
     .register({
       id: 'ad',
@@ -863,20 +867,11 @@ test('agentAdapterRegistry result is validated at the same engine boundary', asy
     .default('ad')
   const { ctx, hooks } = buildCtx({
     agentAdapterRegistry: registry,
-    runner: async () => {
-      runnerCalls++
-      return {
-        kind: 'ok',
-        output: { count: 1 },
-        usage: { outputTokens: 1 },
-      }
-    },
     loggerWarn: () => {},
   })
 
   expect(await hooks.agent('p', { schema: STRUCTURED_SCHEMA })).toBeNull()
   expect(adapterCalls).toBe(2)
-  expect(runnerCalls).toBe(0)
   const final = ctx.journal[0]!.result
   expect(final.kind === 'dead' ? final.reason : undefined).toBe(
     'invalid-structured-output',

@@ -4,7 +4,11 @@ import { WORKFLOW_DIR_NAME } from '../constants.js'
 import type { HostHandle, WorkflowPorts } from '../ports.js'
 import type { JournalEntry, WorkflowRunResult } from '../types.js'
 import { createEngineContext } from './context.js'
-import { WorkflowAbortedError, WorkflowError } from './errors.js'
+import {
+  WorkflowAbortedError,
+  WorkflowError,
+  WorkflowJournalError,
+} from './errors.js'
 import { makeHooks, type SubWorkflowRunner } from './hooks.js'
 import { resolveNamedWorkflow } from './namedWorkflows.js'
 import { parseScript, type ParsedScript } from './script.js'
@@ -53,7 +57,23 @@ export async function runWorkflow(
   let journal: JournalEntry[] = []
   let journalInvalidated = false
   if (opts.resume && !opts.scriptChanged) {
-    journal = await ports.journalStore.read(opts.runId)
+    try {
+      journal = await ports.journalStore.read(opts.runId)
+    } catch (e) {
+      const error =
+        e instanceof WorkflowJournalError
+          ? e.message
+          : new WorkflowJournalError('workflow journal read failed', {
+                cause: e,
+              }).message
+      ports.progressEmitter.emit({
+        type: 'run_done',
+        runId: opts.runId,
+        status: 'failed',
+        error,
+      })
+      return { status: 'failed', error }
+    }
   } else if (opts.scriptChanged) {
     await ports.journalStore.truncate(opts.runId)
     journalInvalidated = true

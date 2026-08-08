@@ -11,7 +11,7 @@
 ## 它演示了什么
 
 - **库可独立使用**：`run.ts` 只 `import { runWorkflow, ... } from '@bee-game-studio/workflow-engine'`，自己组装 7 个端口，不依赖 `src/` 任何核心模块。
-- **agent 后端直连 Anthropic SDK**：`agentRunner` 调 `client.messages.create`，子 agent = 一次模型调用（不经核心 `runAgent`、不经 Workflow 工具）。
+- **agent 后端直连 Anthropic SDK**：默认 `AgentAdapterRegistry` adapter 调 `client.messages.create`，子 agent = 一次模型调用（不经核心 `runAgent`、不经 Workflow 工具）。
 - **真实 LLM + 结构化输出**：`agent(schema)` → prompt 追加 JSON 指令 → 提取 JSON → `validateAgainstSchema`（Ajv）校验，失败回退 `dead`。
 - **引擎能力全覆盖**：`parallel`（屏障，多角度 fan-out）→ `pipeline`（无屏障，逐条深挖）→ `phase` / `log` / `args`。
 

@@ -34,9 +34,6 @@ test('createWorkflowPorts assembles full ports (incl. agentAdapterRegistry and p
   expect(typeof ports.taskRegistrar.register).toBe('function')
   expect(typeof ports.taskRegistrar.kill).toBe('function')
   expect(typeof ports.hostFactory).toBe('function')
-  // agentRunner fallback fields still exist (WorkflowPorts required)
-  expect(ports.agentRunner).toBeDefined()
-  expect(typeof ports.agentRunner.runAgentToResult).toBe('function')
 
   // progressEmitter via bus → store: emit a run_started, store can see it
   ports.progressEmitter.emit({

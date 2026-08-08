@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { agentCallKey, createFileJournalStore } from '../engine/journal.js'
+import { WorkflowJournalError } from '../engine/errors.js'
 import type { AgentRunParams } from '../types.js'
 
 const base: AgentRunParams = { prompt: 'do something' }
@@ -111,6 +112,47 @@ test('FileJournalStore read for non-existent run → []', async () => {
   try {
     const store = createFileJournalStore(dir)
     expect(await store.read('never-existed')).toEqual([])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('FileJournalStore rejects malformed records instead of replaying them', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wf-journal-invalid-'))
+  try {
+    const store = createFileJournalStore(dir)
+    const records = [
+      '{',
+      JSON.stringify({ key: 'k', result: { kind: 'skipped' } }),
+      JSON.stringify({ key: 'k', seq: 0, result: { kind: 'dead' } }),
+      JSON.stringify({
+        key: 'k',
+        seq: 0,
+        result: { kind: 'skipped' },
+        extra: true,
+      }),
+    ]
+    await mkdir(join(dir, 'broken'), { recursive: true })
+    await writeFile(join(dir, 'broken', 'journal.jsonl'), records.join('\n'))
+    await expect(store.read('broken')).rejects.toBeInstanceOf(
+      WorkflowJournalError,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('FileJournalStore rejects journal I/O errors but keeps missing run empty', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wf-journal-io-'))
+  try {
+    const store = createFileJournalStore(dir)
+    await mkdir(join(dir, 'directory-journal', 'journal.jsonl'), {
+      recursive: true,
+    })
+    await expect(store.read('directory-journal')).rejects.toBeInstanceOf(
+      WorkflowJournalError,
+    )
+    expect(await store.read('missing')).toEqual([])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

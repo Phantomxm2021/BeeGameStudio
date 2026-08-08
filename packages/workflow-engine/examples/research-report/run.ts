@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
+  AgentAdapterRegistry,
   createFileJournalStore,
   createHostHandle,
   runWorkflow,
@@ -87,7 +88,7 @@ function errSummary(e: unknown): string {
 }
 
 /**
- * 真实 LLM agentRunner：一次 messages.create（经 API 并发信号量 + 重试）。
+ * 真实 LLM adapter：一次 messages.create（经 API 并发信号量 + 重试）。
  * schema 模式：prompt 追加 JSON 指令 → 取文本 → 提取 JSON → Ajv 校验 → 失败返回 dead。
  * 非 schema：返回纯文本。
  */
@@ -250,12 +251,18 @@ function printProgress(e: ProgressEvent): void {
 /** 组装端口：agent 后端直连 SDK，其余为自包含实现，不触达核心层。 */
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    agentRunner: { runAgentToResult: llmAgent },
+    agentAdapterRegistry: new AgentAdapterRegistry()
+      .register({
+        id: 'anthropic',
+        capabilities: { structuredOutput: true },
+        run: llmAgent,
+      })
+      .default('anthropic'),
     progressEmitter: { emit: printProgress },
     taskRegistrar: makeTaskRegistrar(),
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

@@ -3,18 +3,13 @@ import { createEngineContext } from '../engine/context.js'
 import { makeHooks } from '../engine/hooks.js'
 import { createBufferingEmitter } from '../progress/events.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
-import type { AgentRunParams, AgentRunResult } from '../types.js'
+import type { AgentRunResult } from '../types.js'
+import { createResultRegistry } from './testRegistry.js'
 
 function build(results: Map<string, AgentRunResult>) {
   const { emitter, events } = createBufferingEmitter()
   const ports: WorkflowPorts = {
-    agentRunner: {
-      runAgentToResult: async (p: AgentRunParams) =>
-        results.get(p.prompt) ?? {
-          kind: 'dead',
-          reason: 'runagent-threw',
-        },
-    },
+    agentAdapterRegistry: createResultRegistry(results),
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -29,7 +24,7 @@ function build(results: Map<string, AgentRunResult>) {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       signal: new AbortController().signal,

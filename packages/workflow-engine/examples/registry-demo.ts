@@ -60,13 +60,6 @@ return { research, quick }
 
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    // registry is the sole execution path
-    agentRunner: {
-      runAgentToResult: async () => ({
-        kind: 'dead',
-        reason: 'runagent-threw',
-      }),
-    },
     agentAdapterRegistry: registry,
     progressEmitter: {
       emit: e => {
@@ -92,7 +85,7 @@ function makePorts(runsDir: string): WorkflowPorts {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

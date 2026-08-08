@@ -129,7 +129,7 @@ export function createWorkflowTool(
             host.cwd,
           )
         } catch (e) {
-          ports.logger.warn?.(
+          ports.logger.warn(
             `inline script persist failed: ${(e as Error).message}`,
           )
         }
@@ -138,9 +138,7 @@ export function createWorkflowTool(
       // Detached execution
       void runWorkflow({
         script,
-        ...(input.args !== undefined
-          ? { args: normalizeArgs(input.args) }
-          : {}),
+        ...(input.args !== undefined ? { args: input.args } : {}),
         runId,
         workflowName,
         ports,
@@ -205,21 +203,6 @@ function formatValue(v: unknown): string {
     return JSON.stringify(v).slice(0, 500)
   } catch {
     return String(v)
-  }
-}
-
-/**
- * Defensively normalize args: under the legacy `z.string()` contract the model may send a stringified JSON object.
- * Only normalize when the string JSON.parses to an object/array; plain strings, numbers, etc. are preserved as-is.
- */
-function normalizeArgs(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed === 'object' && parsed !== null) return parsed
-    return raw
-  } catch {
-    return raw
   }
 }
 

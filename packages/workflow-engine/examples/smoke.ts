@@ -13,6 +13,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
+  AgentAdapterRegistry,
   createFileJournalStore,
   createHostHandle,
   runWorkflow,
@@ -179,7 +180,13 @@ function extractJsonObject(text: string): unknown | null {
 
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    agentRunner: { runAgentToResult: llmAgent },
+    agentAdapterRegistry: new AgentAdapterRegistry()
+      .register({
+        id: 'anthropic',
+        capabilities: { structuredOutput: true },
+        run: llmAgent,
+      })
+      .default('anthropic'),
     progressEmitter: {
       emit: (e: ProgressEvent) => {
         if (e.type === 'phase_started') console.log(`\n━ phase: ${e.phase}`)
@@ -204,7 +211,7 @@ function makePorts(runsDir: string): WorkflowPorts {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {} },
+    logger: { debug: () => {}, event: () => {}, warn: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

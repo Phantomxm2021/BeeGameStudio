@@ -177,14 +177,6 @@ export function createWorkflowPorts(opts: {
   return {
     hostFactory: makeHostFactory(),
     agentAdapterRegistry: registry,
-    agentRunner: {
-      // Dead-code fallback: hooks always go through agentAdapterRegistry (required on ports). Reaching here means the registry was not registered — fail-fast.
-      async runAgentToResult() {
-        throw new Error(
-          'workflow agentRunner fallback reached — agentAdapterRegistry must be set on ports',
-        )
-      },
-    },
     progressEmitter: {
       emit(event) {
         opts.bus.emit(event) // → store reducer + telemetry

@@ -42,8 +42,6 @@ function fakePorts(
     adapterThrow?: string
     /** adapter.run return value (default ok). */
     adapterResult?: AgentRunResult
-    /** agentRunner.runAgentToResult return value (fallback path, default throws). */
-    runnerResult?: AgentRunResult
   } = {},
 ): {
   ports: WorkflowPorts
@@ -98,14 +96,6 @@ function fakePorts(
                 )
               },
       }),
-    },
-    agentRunner: {
-      runAgentToResult:
-        opts.runnerResult !== undefined
-          ? async () => opts.runnerResult
-          : async () => {
-              throw new Error('should not reach')
-            },
     },
     progressEmitter: {
       emit: (e: ProgressEvent) => bus.emit(e),

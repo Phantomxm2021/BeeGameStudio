@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { createHostHandle, isHostHandle, unwrapHostHandle } from '../ports.js'
+import {
+  createHostHandle,
+  isHostHandle,
+  unwrapHostHandle,
+  type WorkflowPorts,
+} from '../ports.js'
+import { AgentAdapterRegistry } from '../agentAdapter.js'
 
 test('createHostHandle wraps any bundle and is opaque externally', () => {
   const bundle = { secret: 'ctx', nested: { a: 1 } }
@@ -17,8 +23,15 @@ test('plain object is not a HostHandle', () => {
 test('ports object satisfies the minimal shape', () => {
   // compile-time shape validation: the assignment below passing means the ports contract is self-consistent
   const noop = (): void => {}
-  const ports = {
-    agentRunner: { runAgentToResult: noop },
+  const registry = new AgentAdapterRegistry()
+    .register({
+      id: 'test',
+      capabilities: { structuredOutput: true },
+      run: async () => ({ kind: 'dead', reason: 'runagent-threw' as const }),
+    })
+    .default('test')
+  const ports: WorkflowPorts = {
+    agentAdapterRegistry: registry,
     progressEmitter: { emit: noop },
     taskRegistrar: {
       register: () => ({
@@ -36,7 +49,7 @@ test('ports object satisfies the minimal shape', () => {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: noop, event: noop },
+    logger: { debug: noop, event: noop, warn: noop },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: '/tmp',
@@ -44,8 +57,19 @@ test('ports object satisfies the minimal shape', () => {
       toolUseId: 'tu-1',
     }),
   }
-  expect(ports.taskRegistrar.register().runId).toBe('run-1')
-  expect(ports.hostFactory().toolUseId).toBe('tu-1')
+  expect(
+    ports.taskRegistrar.register(
+      { workflowName: 'test' },
+      createHostHandle(null),
+    ).runId,
+  ).toBe('run-1')
+  expect(
+    ports.hostFactory({
+      context: null,
+      canUseTool: null,
+      parentMessage: undefined,
+    }).toolUseId,
+  ).toBe('tu-1')
 })
 
 test('unwrapHostHandle retrieves the original bundle (same reference)', () => {

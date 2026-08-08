@@ -1,14 +1,12 @@
 import type { AgentAdapterRegistry } from './agentAdapter.js'
 import type {
-  AgentRunParams,
-  AgentRunResult,
   JournalEntry,
   ProgressEvent,
 } from './types.js'
 
 /**
  * Opaque host handle. The core side constructs one per tool call, containing toolUseContext/
- * canUseTool/parentMessage, etc. The package never inspects its internals; it only passes it through to the AgentRunner.
+ * canUseTool/parentMessage, etc. The package never inspects its internals; it only passes it through to the selected AgentAdapter.
  * This is the only coupling seam between the package and the core layer, and it is opaque.
  */
 const HOST_HANDLE = Symbol('workflow.hostHandle')
@@ -34,14 +32,6 @@ export function isHostHandle(value: unknown): value is HostHandle {
 /** Used by the core-side adapter: unwraps (only the adapter should call this). */
 export function unwrapHostHandle(handle: HostHandle): HostBundle {
   return (handle as { [k: symbol]: HostBundle })[HOST_HANDLE]
-}
-
-/** Backend for the agent() hook. */
-export type AgentRunner = {
-  runAgentToResult(
-    params: AgentRunParams,
-    host: HostHandle,
-  ): Promise<AgentRunResult>
 }
 
 /** Progress event emitter. */
@@ -105,15 +95,14 @@ export type Logger = {
   debug(msg: string): void
   event(name: string, metadata?: Record<string, unknown>): void
   /**
-   * Warning-level log (e.g. errors swallowed when a single parallel/pipeline item fails).
-   * Optional: old ports implementations may omit it; hooks tolerate it with `?.()`.
+      * Warning-level log (e.g. errors swallowed when a single parallel/pipeline item fails).
    */
-  warn?(msg: string): void
+  warn(msg: string): void
 }
 
 /** Ready-to-use context the engine extracts from the host (handle + basic fields). */
 export type WorkflowHostContext = {
-  /** Opaque handle passed through to the AgentRunner (contains toolUseContext/canUseTool/parentMessage). */
+  /** Opaque handle passed through to the selected AgentAdapter (contains toolUseContext/canUseTool/parentMessage). */
   handle: HostHandle
   cwd: string
   /** Token budget cap; null means unlimited. */
@@ -134,12 +123,8 @@ export type HostFactory = (args: {
 
 /** Aggregate of all ports. Injected into createWorkflowTool(ports). */
 export type WorkflowPorts = {
-  agentRunner: AgentRunner
-  /**
-   * Multi-backend adapter registry. When provided, takes precedence over agentRunner — hooks.agent routes
-   * to adapter.run via the registry; when omitted, falls back to agentRunner (backward compatibility).
-   */
-  agentAdapterRegistry?: AgentAdapterRegistry
+  /** Sole execution authority for every agent() call. */
+  agentAdapterRegistry: AgentAdapterRegistry
   progressEmitter: ProgressEmitter
   taskRegistrar: TaskRegistrar
   journalStore: JournalStore
