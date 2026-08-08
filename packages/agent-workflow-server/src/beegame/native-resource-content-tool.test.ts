@@ -32,6 +32,24 @@ type Tool = {
   ): Record<string, unknown>
 }
 
+type ContentDocumentInput = {
+  path: string
+  schema: 'beegame-content-v1'
+  id: string
+  kind: string
+  fulfills: string[]
+  resources: string[]
+  data: Record<string, unknown>
+}
+
+function resourceContentDocuments(
+  ...documents: ContentDocumentInput[]
+): Record<string, Omit<ContentDocumentInput, 'path'>> {
+  return Object.fromEntries(
+    documents.map(({ path, ...document }) => [path, document]),
+  )
+}
+
 const roots: string[] = []
 const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
 
@@ -82,7 +100,10 @@ async function createWorkspace(options?: {
   return workspace
 }
 
-async function createTool(workspacePath: string): Promise<Tool> {
+async function createTool(
+  workspacePath: string,
+  writablePaths = ['assets/content/resource-registry.json'],
+): Promise<Tool> {
   return createNativeResourceContentTool({
     buildTool: definition => definition,
     workspacePath,
@@ -98,7 +119,7 @@ async function createTool(workspacePath: string): Promise<Tool> {
       inventoryBindings: [
         { requirementId: 'req-model', resourceIds: ['res-model'] },
       ],
-      protectedPaths: [],
+      writablePaths,
     },
     assertMutationAuthority: () => undefined,
   }) as Tool
@@ -108,7 +129,7 @@ async function commitRegistryOnly(workspacePath: string): Promise<void> {
   const tool = await createTool(workspacePath)
   await tool.call({
     action: 'commit',
-    documents: [
+    documents: resourceContentDocuments(
       {
         path: 'assets/content/resource-registry.json',
         schema: 'beegame-content-v1',
@@ -122,7 +143,7 @@ async function commitRegistryOnly(workspacePath: string): Promise<void> {
           ],
         },
       },
-    ],
+    ),
   })
 }
 
@@ -150,7 +171,10 @@ describe('native canonical resource content commit', () => {
 
   test('maps an accepted runtime result into a tool result block', async () => {
     const workspace = await createWorkspace()
-    const tool = await createTool(workspace)
+    const tool = await createTool(workspace, [
+      'assets/content/resource-registry.json',
+      'assets/content/world.yaml',
+    ])
 
     expect(
       tool.mapToolResultToToolResultBlockParam(
@@ -480,13 +504,13 @@ describe('native canonical resource content commit', () => {
   test('rejects the complete invalid set before mutating content files', async () => {
     const workspace = await createWorkspace()
     await mkdir(join(workspace, 'assets/content'), { recursive: true })
-    await writeFile(join(workspace, 'assets/content/existing.json'), 'stable')
+    await writeFile(join(workspace, 'assets/content/existing.txt'), 'stable')
     const tool = await createTool(workspace)
 
     await expect(
       tool.call({
         action: 'commit',
-        documents: [
+        documents: resourceContentDocuments(
           {
             path: 'assets/content/resource-registry.json',
             schema: 'beegame-content-v1',
@@ -496,21 +520,24 @@ describe('native canonical resource content commit', () => {
             resources: ['res-model'],
             data: { bindings: [] },
           },
-        ],
+        ),
       }),
     ).rejects.toThrow('unknown requirement')
     expect(
-      await readFile(join(workspace, 'assets/content/existing.json'), 'utf8'),
+      await readFile(join(workspace, 'assets/content/existing.txt'), 'utf8'),
     ).toBe('stable')
   })
 
   test('serializes and writes one complete valid JSON/YAML set', async () => {
     const workspace = await createWorkspace()
-    const tool = await createTool(workspace)
+    const tool = await createTool(workspace, [
+      'assets/content/resource-registry.json',
+      'assets/content/world.yaml',
+    ])
 
     const result = await tool.call({
       action: 'commit',
-      documents: [
+      documents: resourceContentDocuments(
         {
           path: 'assets/content/resource-registry.json',
           schema: 'beegame-content-v1',
@@ -533,7 +560,7 @@ describe('native canonical resource content commit', () => {
           resources: [],
           data: { worlds: { main: { instances: [] } } },
         },
-      ],
+      ),
     })
 
     expect(result.data).toMatchObject({
@@ -559,7 +586,7 @@ describe('native canonical resource content commit', () => {
     await expect(
       tool.call({
         action: 'commit',
-        documents: [
+        documents: resourceContentDocuments(
           {
             path: 'assets/content/resource-registry.json',
             schema: 'beegame-content-v1',
@@ -582,7 +609,7 @@ describe('native canonical resource content commit', () => {
             resources: [],
             data: { worlds: { main: { instances: [] } } },
           },
-        ],
+        ),
       }),
     ).resolves.toMatchObject({ data: { accepted: true } })
     expect(
@@ -616,14 +643,14 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: ['assets/content/world.yaml'],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority: () => undefined,
     }) as Tool
 
     const result = await tool.call({
       action: 'commit',
-      documents: [
+      documents: resourceContentDocuments(
         {
           path: 'assets/content/resource-registry.json',
           schema: 'beegame-content-v1',
@@ -637,7 +664,7 @@ describe('native canonical resource content commit', () => {
             ],
           },
         },
-      ],
+      ),
     })
 
     expect(
@@ -659,6 +686,57 @@ describe('native canonical resource content commit', () => {
     ).toEqual(['assets/content/resource-registry.json'])
   })
 
+  test('rejects a submission that does not exactly cover the frozen writable paths', async () => {
+    const workspace = await createWorkspace()
+    const tool = await createTool(workspace)
+
+    await expect(
+      tool.call({
+        action: 'commit',
+        documents: resourceContentDocuments(
+          {
+            path: 'assets/content/world.yaml',
+            schema: 'beegame-content-v1',
+            id: 'world',
+            kind: 'world-definition',
+            fulfills: [],
+            resources: [],
+            data: { worlds: { main: { instances: [] } } },
+          },
+        ),
+      }),
+    ).rejects.toThrow(
+      'Resource Content documents must exactly cover writable paths: assets/content/resource-registry.json.',
+    )
+  })
+
+  test('rejects distinct object keys that normalize to the same canonical path', async () => {
+    const workspace = await createWorkspace()
+    const tool = await createTool(workspace)
+    const document = {
+      schema: 'beegame-content-v1' as const,
+      id: 'registry',
+      kind: 'resource-registry',
+      fulfills: ['req-model'],
+      resources: ['res-model'],
+      data: {
+        bindings: [{ requirementId: 'req-model', resourceIds: ['res-model'] }],
+      },
+    }
+
+    await expect(
+      tool.call({
+        action: 'commit',
+        documents: {
+          'assets/content/resource-registry.json': document,
+          'assets/content/./resource-registry.json': document,
+        },
+      }),
+    ).rejects.toThrow(
+      'Resource Content documents must use unique canonical paths after normalization.',
+    )
+  })
+
   test('rejects a stale dispatch immediately before publication', async () => {
     const workspace = await createWorkspace()
     let checks = 0
@@ -674,7 +752,7 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority() {
         checks += 1
@@ -685,7 +763,7 @@ describe('native canonical resource content commit', () => {
     await expect(
       tool.call({
         action: 'commit',
-        documents: [
+        documents: resourceContentDocuments(
           {
             path: 'assets/content/resource-registry.json',
             schema: 'beegame-content-v1',
@@ -699,7 +777,7 @@ describe('native canonical resource content commit', () => {
               ],
             },
           },
-        ],
+        ),
       }),
     ).rejects.toThrow('no longer active')
     await expect(
@@ -727,7 +805,7 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority() {
         if (!active) throw new Error('dispatch was replaced')
@@ -736,7 +814,7 @@ describe('native canonical resource content commit', () => {
 
     const commit = tool.call({
       action: 'commit',
-      documents: [
+      documents: resourceContentDocuments(
         {
           path: 'assets/content/resource-registry.json',
           schema: 'beegame-content-v1',
@@ -751,7 +829,7 @@ describe('native canonical resource content commit', () => {
             stagingPayload: 'x'.repeat(16 * 1024 * 1024),
           },
         },
-      ],
+      ),
     })
 
     while (
@@ -794,7 +872,7 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority() {
         checks += 1
@@ -805,7 +883,7 @@ describe('native canonical resource content commit', () => {
     await expect(
       tool.call({
         action: 'commit',
-        documents: [
+        documents: resourceContentDocuments(
           {
             path: 'assets/content/resource-registry.json',
             schema: 'beegame-content-v1',
@@ -819,7 +897,7 @@ describe('native canonical resource content commit', () => {
               ],
             },
           },
-        ],
+        ),
       }),
     ).rejects.toThrow('dispatch stopped at publication')
     expect(checks).toBe(4)
@@ -849,7 +927,7 @@ describe('native canonical resource content commit', () => {
         requiredRequirementIds: ['req-model'],
         verifiedResourceIds: ['res-model'],
         inventoryBindings: [],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority: () => undefined,
     }) as Tool
@@ -857,7 +935,7 @@ describe('native canonical resource content commit', () => {
     await expect(
       tool.call({
         action: 'commit',
-        documents: [
+        documents: resourceContentDocuments(
           {
             path: 'assets/content/resource-registry.json',
             schema: 'beegame-content-v1',
@@ -871,7 +949,7 @@ describe('native canonical resource content commit', () => {
               ],
             },
           },
-        ],
+        ),
       }),
     ).rejects.toThrow('exactly match the frozen inventory receipt')
   })
@@ -890,7 +968,7 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority: () => undefined,
     }) as Tool
@@ -929,7 +1007,7 @@ describe('native canonical resource content commit', () => {
         inventoryBindings: [
           { requirementId: 'req-model', resourceIds: ['res-model'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
       assertMutationAuthority() {
         throw new Error('dispatch is no longer active')

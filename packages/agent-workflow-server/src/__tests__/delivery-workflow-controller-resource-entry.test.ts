@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { computeDocumentRevision } from '../beegame/delivery-workflow/revision'
+import { reconcileRunOnStartup } from '../beegame/delivery-workflow/recovery'
 import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
@@ -169,6 +170,88 @@ describe('delivery workflow resource entry', () => {
     expect(dispatched?.contract).not.toHaveProperty('reviewRemediation')
   })
 
+  test('does not reconcile a dispatch while its worker transport is starting', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-starting-'))
+    let request: WorkerDispatchRequest | undefined
+    let enteredStart!: () => void
+    let releaseStart!: () => void
+    const startEntered = new Promise<void>(resolve => {
+      enteredStart = resolve
+    })
+    const startReleased = new Promise<void>(resolve => {
+      releaseStart = resolve
+    })
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: 'owner-resource-starting',
+      workerPort: {
+        async start(nextRequest) {
+          request = nextRequest
+          enteredStart()
+          await startReleased
+          return {
+            sessionId: 'resource-starting-session',
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const initial = createTestDeliveryRun({
+      runId: 'run-resource-starting',
+      projectId: 'project-resource-starting',
+      ownerId: 'owner-resource-starting',
+      checklistApproved: true,
+    })
+    await writeBeeGameAssetManifest(workspace, {
+      version: 8,
+      project_target: {
+        asset_format_capabilities: ['png'],
+        runtime_asset_root: 'assets/runtime',
+        content_root: 'assets/content',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [
+        {
+          id: 'visual.starting',
+          required: true,
+          acquisition_profile: TEST_ACQUISITION_PROFILE,
+        },
+      ],
+      resources: [],
+    })
+    await controller.store.save({
+      ...initial,
+      phase: 'RESOURCE_PREPARATION',
+      documentStep: undefined,
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    })
+
+    const progress = controller.ensureProgress(initial)
+    await startEntered
+    expect(request?.dispatchId).toBeTruthy()
+
+    const reconciled = await reconcileRunOnStartup({
+      store: controller.store,
+      sessionIsOpen: dispatch =>
+        controller.dispatcher.workerIsOpen(dispatch.dispatchId),
+    })
+    expect(reconciled).toMatchObject({
+      status: 'running',
+      activeDispatch: {
+        dispatchId: request?.dispatchId,
+        status: 'running',
+      },
+    })
+
+    releaseStart()
+    await progress
+  })
+
   test('keeps execution retry accounting while dispatching the sole semantic remediation contract', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-retry-'))
     let starts = 0
@@ -202,13 +285,14 @@ describe('delivery workflow resource entry', () => {
       severity: 'blocking' as const,
       owner: 'resource' as const,
       evidence: [
-        { path: 'assets/asset-manifest.json', anchor: '/requirements/0' },
+        { path: 'assets/runtime/resource-retry.glb', anchor: '$' },
       ],
       subjects: [
         {
-          path: 'assets/asset-manifest.json',
-          anchor: '/requirements/0',
+          path: 'assets/runtime/resource-retry.glb',
+          anchor: '$',
           requirementId: 'resource-retry-requirement',
+          resourceId: 'resource-retry-resource',
         },
       ],
       observation: 'The resource contract remains incomplete.',

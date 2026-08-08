@@ -31,7 +31,7 @@ export const resourceInventoryCommitInputSchema = z.object({
       asset_kind: z.string().trim().min(1),
       parameters: z.record(z.string(), z.unknown()).optional(),
     }).strict(),
-  ])).min(1),
+  ])).default([]),
 }).strict()
 
 type Input = z.infer<typeof resourceInventoryCommitInputSchema>
@@ -53,20 +53,34 @@ export function createNativeResourceInventoryCommitTool(options: {
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
     async description() {
-      return 'Validate and durably apply one complete Resource Library or proven-no-match decision for every required resource group.'
+      return 'Validate and durably apply one complete Resource Library or proven-no-match decision set for every required resource group.'
     },
     async prompt() {
       const manifest = await readBeeGameAssetManifest(options.workspacePath)
+      const runtimeAssetRoot = manifest.project_target?.runtime_asset_root
+      if (!runtimeAssetRoot)
+        throw new Error('Canonical resource plan is missing runtime_asset_root')
       const allowedFormats = new Set(
         manifest.project_target?.asset_format_capabilities ?? [],
       )
       const activeAdapters = options.provisionalAdapters.filter(adapter =>
         allowedFormats.has(adapter.format),
       )
+      const existingProvisionalResources = manifest.resources
+        .filter(resource => resource.provisional)
+        .map(resource =>
+          `${resource.id} -> root_path=${resource.root_path}; file_paths=${resource.file_paths.join(', ')}`,
+        )
       return [
         'Submit exactly one complete decision set after ResourceLibrary match_requirements.',
-        'Choose exact identities from one returned bundle per requirement. A placeholder is allowed only for a no-match group and remains a normal independently replaceable project resource.',
+        'When a previous CommitResourceInventory call has already created a prepared or applying durable receipt, resume that exact frozen receipt by submitting decisions: []; do not reconstruct or change the decision set. Otherwise submit the complete set below.',
+        'Choose exact identities from one returned bundle per requirement when matched. For a no-match group, submit one or more independently replaceable placeholder resources when one resource cannot cover every declared duty; never mix placeholders with library decisions for the same requirement.',
+        'For every decision, selection_reason must be a non-empty array of strings. For a placeholder, asset_kind must be copied exactly from that requirement’s placeholder_asset_kinds returned by ResourceLibrary; never guess a kind or add fields outside the schema.',
+        `Library decisions must use exactly kind=library, requirement_id, resource_id, pack_id, expected_pack_version (copy the candidate pack_version here), element_id, destination_path and selection_reason. Do not send bundle_id or pack_version. Placeholder decisions must use exactly kind=placeholder, requirement_id, resource_id, destination_path, format, reason, asset_kind, optional parameters and selection_reason. Every destination_path must be under ${runtimeAssetRoot}; do not use the content or generated asset roots.`,
         'When replacing an existing provisional resource, keep its project resource_id so the library resource replaces it in place.',
+        existingProvisionalResources.length
+          ? `Existing provisional resource paths are canonical and immutable for their resource_id; when reusing one of these IDs, copy its exact root_path and file_paths instead of inventing a new path: ${existingProvisionalResources.join(' | ')}`
+          : '',
         'This is the only Resource Curator mutation and terminal operation. It persists progress before downloading or converting and resumes incomplete operations after interruption.',
         `Active target provisional adapters: ${activeAdapters.map(adapter => adapter.description).join(' | ')}`,
       ].join(' ')

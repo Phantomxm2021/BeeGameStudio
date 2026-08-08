@@ -123,6 +123,33 @@ describe('in-memory resource repository', () => {
     expect(queue.counts.missingSemanticTags).toBe(1)
   })
 
+  test('does not treat an empty override tag set as confirmed semantic metadata', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack }],
+      elements: [{ ...element, usageTags: [], usageTagsMode: 'override' }],
+    })
+
+    const queue = await repository.listCuration!('pack-1')
+
+    expect(queue.items.map(item => item.id)).toEqual(['element-1'])
+    expect(queue.counts.missingSemanticTags).toBe(1)
+  })
+
+  test('excludes an untagged dependency-only element from semantic curation', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack }],
+      elements: [
+        { ...element, usageTags: [], usageTagsMode: 'override' },
+        { ...element, id: 'model-1', name: 'Model', path: 'models/model.glb', category: 'models', kind: 'model', assetKind: 'model', dependencies: ['element-1'], usageTags: ['prop'], usageTagsMode: 'override' },
+      ],
+    })
+
+    const queue = await repository.listCuration!('pack-1')
+
+    expect(queue.items.map(item => item.id)).toEqual([])
+    expect(queue.counts.missingSemanticTags).toBe(0)
+  })
+
   test('commits a high-confidence decision over unclassified element metadata', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [{ ...pack }],

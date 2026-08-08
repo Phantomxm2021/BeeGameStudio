@@ -130,15 +130,14 @@ async function createProjectionFixture(
       inventoryBindings: [
         { requirementId: 'requirement-id', resourceIds: ['resource-id'] },
       ],
-      protectedPaths: [],
+      writablePaths: ['assets/content/resource.json'],
     },
     assertMutationAuthority: () => undefined,
   }) as { call(value: unknown): Promise<unknown> }
   await resourceContentTool.call({
     action: 'commit',
-    documents: [
-      {
-        path: 'assets/content/resource.json',
+    documents: {
+      'assets/content/resource.json': {
         schema: 'beegame-content-v1',
         id: 'content-id',
         kind: 'resource-registry',
@@ -150,7 +149,7 @@ async function createProjectionFixture(
           ],
         },
       },
-    ],
+    },
   })
   const sourceContent = await readFile(
     join(workspacePath, 'docs', 'GDD.md'),

@@ -1,6 +1,8 @@
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions.mjs'
 import { randomUUID } from 'crypto'
+import { normalizeOpenAIUsage } from './openaiUsage.js'
+import { assertProviderCompletionReason } from './providerTerminal.js'
 
 /**
  * Adapt an OpenAI streaming response into Anthropic BetaRawMessageStreamEvent.
@@ -35,16 +37,27 @@ import { randomUUID } from 'crypto'
 export async function* adaptOpenAIStreamToAnthropic(
   stream: AsyncIterable<ChatCompletionChunk>,
   model: string,
+  options?: { includeCacheWriteTokens?: boolean },
 ): AsyncGenerator<BetaRawMessageStreamEvent, void> {
   const messageId = `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`
 
   let started = false
   let currentContentIndex = -1
 
-  // Track tool_use blocks: tool_calls index → { contentIndex, id, name, arguments }
+  // Track tool calls by provider index until the provider has supplied a
+  // usable function name. OpenAI-compatible streams are allowed to split the
+  // id/name metadata from the argument fragments; opening an Anthropic block
+  // on the first fragment would permanently emit an empty name and make the
+  // downstream tool executor reject an otherwise recoverable call.
   const toolBlocks = new Map<
     number,
-    { contentIndex: number; id: string; name: string; arguments: string }
+    {
+      contentIndex: number
+      id: string
+      name: string
+      arguments: string
+      started: boolean
+    }
   >()
 
   // Track thinking block state
@@ -55,13 +68,13 @@ export async function* adaptOpenAIStreamToAnthropic(
   let visibleTextStarted = false
   let emptyThinkingMarkerEmitted = false
 
-  // Track usage — all four Anthropic fields, populated from OpenAI usage fields:
-  // rawInputTokens tracks the raw prompt_tokens (OpenAI total, including cached).
-  // inputTokens is the derived Anthropic value (non-cached only = rawInputTokens - cachedReadTokens).
+  // Track raw OpenAI usage across chunks. The normalized Anthropic fields are
+  // disjoint: ordinary input + cache reads + cache writes = total input.
   let rawInputTokens = 0
-  let inputTokens = 0
   let outputTokens = 0
-  let cachedReadTokens = 0
+  let rawCacheReadTokens = 0
+  let rawCacheWriteTokens = 0
+  let usage = normalizeOpenAIUsage({ totalInputTokens: 0, outputTokens: 0 })
 
   // Track all open content block indices (for cleanup)
   const openBlockIndices = new Set<number>()
@@ -77,16 +90,32 @@ export async function* adaptOpenAIStreamToAnthropic(
     // Extract usage from any chunk that carries it.
     if (chunk.usage) {
       rawInputTokens = chunk.usage.prompt_tokens ?? rawInputTokens
-      const rawCached =
-        ((chunk.usage as any).prompt_tokens_details?.cached_tokens as
-          | number
-          | undefined) ?? cachedReadTokens
-      // Anthropic's input_tokens = non-cached input only. OpenAI's prompt_tokens
-      // includes cached tokens, so subtract. Clamp to 0 in case cached > total
-      // due to a streaming race.
-      inputTokens = Math.max(0, rawInputTokens - rawCached)
       outputTokens = chunk.usage.completion_tokens ?? outputTokens
-      cachedReadTokens = rawCached
+
+      const usageRecord = chunk.usage as unknown as Record<string, unknown>
+      const detailsValue = usageRecord.prompt_tokens_details
+      const details =
+        detailsValue && typeof detailsValue === 'object'
+          ? (detailsValue as Record<string, unknown>)
+          : undefined
+      if (typeof details?.cached_tokens === 'number') {
+        rawCacheReadTokens = details.cached_tokens
+      }
+      if (
+        options?.includeCacheWriteTokens &&
+        typeof details?.cache_write_tokens === 'number'
+      ) {
+        rawCacheWriteTokens = details.cache_write_tokens
+      } else if (!options?.includeCacheWriteTokens) {
+        rawCacheWriteTokens = 0
+      }
+
+      usage = normalizeOpenAIUsage({
+        totalInputTokens: rawInputTokens,
+        outputTokens,
+        cacheReadTokens: rawCacheReadTokens,
+        cacheWriteTokens: rawCacheWriteTokens,
+      })
     }
 
     // Emit message_start on first chunk
@@ -104,10 +133,8 @@ export async function* adaptOpenAIStreamToAnthropic(
           stop_reason: null,
           stop_sequence: null,
           usage: {
-            input_tokens: inputTokens,
+            ...usage,
             output_tokens: 0,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: cachedReadTokens,
           },
         },
       } as unknown as BetaRawMessageStreamEvent
@@ -124,9 +151,9 @@ export async function* adaptOpenAIStreamToAnthropic(
     const reasoningContent = (delta as any).reasoning_content
     if (reasoningContent != null) {
       const hasReasoningDelta = reasoningContent !== ''
-      const shouldOpenThinking = hasReasoningDelta || (
-        !visibleTextStarted && !emptyThinkingMarkerEmitted
-      )
+      const shouldOpenThinking =
+        hasReasoningDelta ||
+        (!visibleTextStarted && !emptyThinkingMarkerEmitted)
 
       // Some OpenAI-compatible providers repeat reasoning_content: "" on
       // ordinary visible-text chunks. That is not a transition back into
@@ -221,6 +248,24 @@ export async function* adaptOpenAIStreamToAnthropic(
         const tcIndex = tc.index
 
         if (!toolBlocks.has(tcIndex)) {
+          toolBlocks.set(tcIndex, {
+            contentIndex: -1,
+            id: tc.id?.trim() || '',
+            name: tc.function?.name?.trim() || '',
+            arguments: '',
+            started: false,
+          })
+        }
+
+        const block = toolBlocks.get(tcIndex)!
+        if (tc.id?.trim()) block.id = tc.id.trim()
+        if (tc.function?.name?.trim()) block.name = tc.function.name.trim()
+
+        // Stream argument fragments
+        const argFragment = tc.function?.arguments
+        if (argFragment) block.arguments += argFragment
+
+        if (!block.started && block.name) {
           // Close thinking block if open
           if (thinkingBlockOpen) {
             yield {
@@ -241,18 +286,12 @@ export async function* adaptOpenAIStreamToAnthropic(
             textBlockOpen = false
           }
 
-          // Start new tool_use block
           currentContentIndex++
+          block.contentIndex = currentContentIndex
+          block.started = true
           const toolId =
-            tc.id || `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`
-          const toolName = tc.function?.name || ''
-
-          toolBlocks.set(tcIndex, {
-            contentIndex: currentContentIndex,
-            id: toolId,
-            name: toolName,
-            arguments: '',
-          })
+            block.id || `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`
+          block.id = toolId
           openBlockIndices.add(currentContentIndex)
 
           yield {
@@ -261,19 +300,25 @@ export async function* adaptOpenAIStreamToAnthropic(
             content_block: {
               type: 'tool_use',
               id: toolId,
-              name: toolName,
+              name: block.name,
               input: {},
             },
           } as BetaRawMessageStreamEvent
-        }
 
-        // Stream argument fragments
-        const argFragment = tc.function?.arguments
-        if (argFragment) {
-          toolBlocks.get(tcIndex)!.arguments += argFragment
+          if (block.arguments) {
+            yield {
+              type: 'content_block_delta',
+              index: block.contentIndex,
+              delta: {
+                type: 'input_json_delta',
+                partial_json: block.arguments,
+              },
+            } as BetaRawMessageStreamEvent
+          }
+        } else if (block.started && argFragment) {
           yield {
             type: 'content_block_delta',
-            index: toolBlocks.get(tcIndex)!.contentIndex,
+            index: block.contentIndex,
             delta: {
               type: 'input_json_delta',
               partial_json: argFragment,
@@ -303,7 +348,13 @@ export async function* adaptOpenAIStreamToAnthropic(
         textBlockOpen = false
       }
 
-      for (const [, block] of toolBlocks) {
+      for (const [toolIndex, block] of toolBlocks) {
+        if (!block.started) {
+          const missing = block.name ? 'id' : 'name'
+          throw new Error(
+            `Provider returned an incomplete tool call at index ${toolIndex}: missing ${missing}`,
+          )
+        }
         if (openBlockIndices.has(block.contentIndex)) {
           yield {
             type: 'content_block_stop',
@@ -318,6 +369,8 @@ export async function* adaptOpenAIStreamToAnthropic(
     }
   }
 
+  assertProviderCompletionReason(pendingFinishReason)
+
   // Safety: close any remaining open blocks
   for (const idx of openBlockIndices) {
     yield {
@@ -327,32 +380,25 @@ export async function* adaptOpenAIStreamToAnthropic(
   }
 
   // Emit message_delta + message_stop
-  if (pendingFinishReason !== null) {
-    const stopReason =
-      pendingFinishReason === 'length'
-        ? 'max_tokens'
-        : pendingHasToolCalls
-          ? 'tool_use'
-          : mapFinishReason(pendingFinishReason)
+  const stopReason =
+    pendingFinishReason === 'length'
+      ? 'max_tokens'
+      : pendingHasToolCalls
+        ? 'tool_use'
+        : mapFinishReason(pendingFinishReason)
 
-    yield {
-      type: 'message_delta',
-      delta: {
-        stop_reason: stopReason,
-        stop_sequence: null,
-      },
-      usage: {
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
-        cache_read_input_tokens: cachedReadTokens,
-        cache_creation_input_tokens: 0,
-      },
-    } as BetaRawMessageStreamEvent
+  yield {
+    type: 'message_delta',
+    delta: {
+      stop_reason: stopReason,
+      stop_sequence: null,
+    },
+    usage,
+  } as BetaRawMessageStreamEvent
 
-    yield {
-      type: 'message_stop',
-    } as BetaRawMessageStreamEvent
-  }
+  yield {
+    type: 'message_stop',
+  } as BetaRawMessageStreamEvent
 }
 
 /**

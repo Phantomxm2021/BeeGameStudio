@@ -35,10 +35,10 @@ describe('BeeGame local dev launcher helpers', () => {
       'frontend',
     ])
     expect(plan.processes.find(process => process.name === 'resources')?.command).toEqual([
-      'bun', '--watch', 'packages/beegame-resource-server/src/index.ts',
+      'bun', 'packages/beegame-resource-server/src/index.ts',
     ])
     expect(plan.processes.find(process => process.name === 'runtime')?.command).toEqual([
-      'bun', '--watch', 'scripts/dashboard-server-dev.ts',
+      'bun', 'scripts/dashboard-server-dev.ts',
     ])
   })
 

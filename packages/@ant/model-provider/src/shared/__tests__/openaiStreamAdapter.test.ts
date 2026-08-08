@@ -34,11 +34,15 @@ function makeChunk(
 }
 
 /** Collect all emitted Anthropic events from the stream adapter for assertion */
-async function collectEvents(chunks: ChatCompletionChunk[]) {
+async function collectEvents(
+  chunks: ChatCompletionChunk[],
+  options?: { includeCacheWriteTokens?: boolean },
+) {
   const events: any[] = []
   for await (const event of adaptOpenAIStreamToAnthropic(
     mockStream(chunks),
     'gpt-4o',
+    options,
   )) {
     events.push(event)
   }
@@ -46,6 +50,44 @@ async function collectEvents(chunks: ChatCompletionChunk[]) {
 }
 
 describe('adaptOpenAIStreamToAnthropic', () => {
+  test('rejects an empty stream without finish_reason', async () => {
+    await expect(collectEvents([])).rejects.toThrow(
+      'Provider response ended without a completion reason',
+    )
+  })
+
+  test('rejects a reasoning stream that ends without finish_reason', async () => {
+    await expect(
+      collectEvents([
+        makeChunk({
+          choices: [
+            {
+              index: 0,
+              delta: { reasoning_content: 'Still reasoning' },
+              finish_reason: null,
+            },
+          ],
+        }),
+      ]),
+    ).rejects.toThrow('Provider response ended without a completion reason')
+  })
+
+  test('rejects a text stream that ends without finish_reason', async () => {
+    await expect(
+      collectEvents([
+        makeChunk({
+          choices: [
+            {
+              index: 0,
+              delta: { content: 'Partial response' },
+              finish_reason: null,
+            },
+          ],
+        }),
+      ]),
+    ).rejects.toThrow('Provider response ended without a completion reason')
+  })
+
   test('emits message_start on first chunk', async () => {
     const events = await collectEvents([
       makeChunk({
@@ -182,6 +224,89 @@ describe('adaptOpenAIStreamToAnthropic', () => {
     ) as any[]
     const fullArgs = jsonDeltas.map(d => d.delta.partial_json).join('')
     expect(fullArgs).toBe('{"command":"ls"}')
+  })
+
+  test('waits for a streamed tool name before opening the tool block', async () => {
+    const events = await collectEvents([
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: { arguments: '{"action":"' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_late_metadata',
+                  function: { name: 'CommitResourceContent', arguments: 'commit"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      }),
+    ])
+
+    const blockStart = events.find(e => e.type === 'content_block_start') as any
+    expect(blockStart.content_block).toMatchObject({
+      type: 'tool_use',
+      id: 'call_late_metadata',
+      name: 'CommitResourceContent',
+    })
+    const jsonDeltas = events.filter(
+      e =>
+        e.type === 'content_block_delta' &&
+        e.delta.type === 'input_json_delta',
+    ) as any[]
+    expect(jsonDeltas.map(event => event.delta.partial_json).join('')).toBe(
+      '{"action":"commit"}',
+    )
+  })
+
+  test('rejects a streamed tool call that never supplies a tool name', async () => {
+    await expect(
+      collectEvents([
+        makeChunk({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_missing_name',
+                    function: { arguments: '{}' },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        }),
+        makeChunk({
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        }),
+      ]),
+    ).rejects.toThrow('Provider returned an incomplete tool call')
   })
 
   test('maps finish_reason stop to end_turn', async () => {
@@ -467,24 +592,51 @@ describe('thinking support (reasoning_content)', () => {
   test('does not split visible text when empty reasoning markers repeat', async () => {
     const events = await collectEvents([
       makeChunk({
-        choices: [{ index: 0, delta: { reasoning_content: '', content: 'First' }, finish_reason: null }],
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: '', content: 'First' },
+            finish_reason: null,
+          },
+        ],
       }),
       makeChunk({
-        choices: [{ index: 0, delta: { reasoning_content: '', content: ' second' }, finish_reason: null }],
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: '', content: ' second' },
+            finish_reason: null,
+          },
+        ],
       }),
       makeChunk({
-        choices: [{ index: 0, delta: { reasoning_content: '', content: ' third.' }, finish_reason: null }],
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: '', content: ' third.' },
+            finish_reason: null,
+          },
+        ],
       }),
       makeChunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
     ])
 
-    const starts = events.filter(event => event.type === 'content_block_start') as any[]
-    expect(starts.map(event => event.content_block.type)).toEqual(['thinking', 'text'])
-
-    const textDeltas = events.filter(event =>
-      event.type === 'content_block_delta' && event.delta.type === 'text_delta',
+    const starts = events.filter(
+      event => event.type === 'content_block_start',
     ) as any[]
-    expect(textDeltas.map(event => event.delta.text).join('')).toBe('First second third.')
+    expect(starts.map(event => event.content_block.type)).toEqual([
+      'thinking',
+      'text',
+    ])
+
+    const textDeltas = events.filter(
+      event =>
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta',
+    ) as any[]
+    expect(textDeltas.map(event => event.delta.text).join('')).toBe(
+      'First second third.',
+    )
     expect(new Set(textDeltas.map(event => event.index))).toEqual(new Set([1]))
   })
 
@@ -611,6 +763,60 @@ describe('thinking support (reasoning_content)', () => {
 })
 
 describe('prompt caching support', () => {
+  test('maps official OpenAI cache writes when explicitly enabled', async () => {
+    const events = await collectEvents(
+      [
+        makeChunk({
+          choices: [
+            { index: 0, delta: { content: 'hi' }, finish_reason: null },
+          ],
+        }),
+        makeChunk({
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          usage: {
+            prompt_tokens: 1000,
+            completion_tokens: 50,
+            total_tokens: 1050,
+            prompt_tokens_details: {
+              cached_tokens: 600,
+              cache_write_tokens: 250,
+            },
+          } as any,
+        }),
+      ],
+      { includeCacheWriteTokens: true },
+    )
+
+    const msgDelta = events.find(e => e.type === 'message_delta') as any
+    expect(msgDelta.usage.input_tokens).toBe(150)
+    expect(msgDelta.usage.cache_read_input_tokens).toBe(600)
+    expect(msgDelta.usage.cache_creation_input_tokens).toBe(250)
+  })
+
+  test('ignores cache writes for compatible providers by default', async () => {
+    const events = await collectEvents([
+      makeChunk({
+        choices: [{ index: 0, delta: { content: 'hi' }, finish_reason: null }],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 1000,
+          completion_tokens: 50,
+          total_tokens: 1050,
+          prompt_tokens_details: {
+            cached_tokens: 600,
+            cache_write_tokens: 250,
+          },
+        } as any,
+      }),
+    ])
+
+    const msgDelta = events.find(e => e.type === 'message_delta') as any
+    expect(msgDelta.usage.input_tokens).toBe(400)
+    expect(msgDelta.usage.cache_creation_input_tokens).toBe(0)
+  })
+
   test('maps cached_tokens to cache_read_input_tokens', async () => {
     const events = await collectEvents([
       makeChunk({

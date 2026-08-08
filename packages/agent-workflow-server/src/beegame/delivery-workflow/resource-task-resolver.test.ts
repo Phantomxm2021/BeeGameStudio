@@ -11,6 +11,7 @@ import {
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
+  resourceContentAuthorityPaths,
   startResourcePreparation,
 } from './resource-stage'
 import {
@@ -32,6 +33,21 @@ afterEach(async () => {
 })
 
 describe('resource production task resolver', () => {
+  test('projects only cited authority documents for resource content repair', () => {
+    expect(
+      resourceContentAuthorityPaths([
+        {
+          evidence: [
+            { path: 'systemDeliveryContract', anchor: '/content' },
+            { path: 'docs/TECHNICAL_DESIGN.md', anchor: '## 2' },
+            { path: 'assets/content/scene-definitions.yaml', anchor: '/data' },
+          ],
+        },
+      ]),
+    ).toEqual(['docs/TECHNICAL_DESIGN.md'])
+    expect(resourceContentAuthorityPaths(undefined)).toHaveLength(6)
+  })
+
   test('derives the four tasks only from canonical artifacts and receipts', async () => {
     const workspace = await createWorkspace()
     let run = createRun()
@@ -121,6 +137,72 @@ describe('resource production task resolver', () => {
         workspacePath: workspace,
       }),
     ).resolves.toMatchObject({ task: 'RESOURCE_GATE' })
+  })
+
+  test('routes manifest requirement findings to the plan before inventory', async () => {
+    const workspace = await createWorkspace()
+    await writePlan(workspace)
+    await writeInventory(workspace)
+    await writeContent(workspace)
+    const run = withResourceFinding(await runWithReceipt(workspace), {
+      path: 'assets/asset-manifest.json',
+      anchor: '$.requirements[0].acquisition_profile',
+      requirementId: 'world.visual',
+    })
+    await expect(
+      resolveResourceProductionTask({ run, workspacePath: workspace }),
+    ).resolves.toMatchObject({ task: 'RESOURCE_PLAN' })
+  })
+
+  test('passes only the active resource repair target to its worker', async () => {
+    const workspace = await createWorkspace()
+    await writePlan(workspace)
+    await writeInventory(workspace)
+    await writeContent(workspace)
+    const run = {
+      ...withResourceFinding(await runWithReceipt(workspace), {
+        path: 'assets/asset-manifest.json',
+        anchor: '$.requirements[0].acquisition_profile',
+        requirementId: 'world.visual',
+      }),
+      phase: 'RESOURCE_PREPARATION' as const,
+    }
+    run.documentReviewState.activeCycle!.findings.push({
+      findingId: 'resource-content-finding',
+      checkId: 'resource_content_consistency',
+      severity: 'blocking',
+      owner: 'resource',
+      evidence: [{ path: 'assets/content/world.json', anchor: '$.data' }],
+      subjects: [
+        {
+          path: 'assets/content/world.json',
+          anchor: '$.data',
+          contentId: 'world-content',
+        },
+      ],
+      observation: 'Content requires repair.',
+      blockingImpact: 'Content is not ready.',
+      requiredOutcome: 'Repair the content subject.',
+    })
+    let request: unknown
+    await startResourcePreparation({
+      run,
+      workspacePath: workspace,
+      dispatcher: {
+        async dispatch(value) {
+          request = value
+          return value
+        },
+      },
+    })
+    expect(request).toMatchObject({
+      workerType: 'resource-planner',
+      contract: {
+        remediation: {
+          findings: [{ findingId: 'resource-finding' }],
+        },
+      },
+    })
   })
 
   test('turns a deterministic Gate failure into one retryable inventory task', async () => {
@@ -275,6 +357,17 @@ describe('resource production task resolver', () => {
         data: {},
       })}\n`,
     )
+    await writeFile(
+      join(workspace, 'assets/content/event-definitions.json'),
+      `${JSON.stringify({
+        schema: 'beegame-content-v1',
+        id: 'event-definitions-content',
+        kind: 'event-definitions',
+        fulfills: [],
+        resources: [],
+        data: { events: [] },
+      })}\n`,
+    )
     const receiptRun = await runWithReceipt(workspace)
     let request: unknown
     await startResourcePreparation({
@@ -306,11 +399,13 @@ describe('resource production task resolver', () => {
             resourceIds: ['world-resource'],
           },
         ],
-        preservedPaths: [],
+        repairPaths: ['assets/content/world.json'],
       },
     })
     expect(request).not.toHaveProperty('contract.manifestPath')
-    expect(request).not.toHaveProperty('protectedPaths')
+    expect(request).toMatchObject({
+      protectedPaths: ['assets/content/event-definitions.json'],
+    })
   })
 })
 

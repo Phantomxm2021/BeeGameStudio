@@ -3662,7 +3662,7 @@ function getBeeGamePermissionPolicyDecision(
       return {
         behavior: 'auto_deny',
         message:
-          'CommitResourceInventory requires one complete canonical inventory decision set.',
+          'CommitResourceInventory requires one complete canonical inventory decision set, or decisions: [] to resume an existing durable receipt.',
       }
     const allowedPaths = record.workflowAllowedPaths ?? []
     if (
@@ -3803,11 +3803,11 @@ function getBeeGamePermissionPolicyDecision(
           path =>
             !isPathInsideWorkflowScope(record.session.cwd, readOnlyPaths, path),
         )
-      )
+        )
         return {
           behavior: 'auto_deny',
           message:
-            'Resource Content Author may read only its frozen fact-owner documents and protected canonical content files.',
+            'Resource Content Author may read only the projected authority paths and current repair paths. CommitResourceContent reads protected content itself; do not retry this protected path.',
         }
       return {
         behavior: 'auto_allow',

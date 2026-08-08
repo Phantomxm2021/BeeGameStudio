@@ -1,5 +1,5 @@
 import { RESOURCE_USAGE_TAGS, type PackSummary, type ResourceCatalogPack, type ResourceCategory, type ResourceCurationQueue, type ResourceElement, type ResourceFolder, type ResourcePack } from './types'
-import { applyResourceSemanticDecision, type ResourceSemanticCommitResult, type ResourceSemanticModelDecision } from './semantic-curation'
+import { applyResourceSemanticDecision, collectResourceDependencyElementIds, hasConfirmedResourceUsageTags, isResourceDependencyOnlyElement, type ResourceSemanticCommitResult, type ResourceSemanticModelDecision } from './semantic-curation'
 import { validateResourceElement, validateResourcePack } from './validation'
 import { assertResourcePackPublishable } from './publish-readiness'
 import { resolveEffectiveResourceMetadata } from './metadata-policy'
@@ -122,14 +122,15 @@ export function createInMemoryResourceRepository(input: {
       const pack = packs.find(item => item.id === packId)
       const scoped = elements.filter(element => element.packId === packId)
       const resolved = pack ? scoped.map(resolvedElement) : scoped
+      const dependencyElementIds = collectResourceDependencyElementIds(scoped)
       const items = scoped
-        .filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only')
+        .filter(element => element.status === 'ready' && !isResourceDependencyOnlyElement(element, dependencyElementIds) && !hasConfirmedResourceUsageTags(element) && element.usageTagsMode !== 'manual-only')
         .map(element => resolvedElement(element))
       return {
         items,
         counts: {
           pendingItems: items.length,
-          missingSemanticTags: scoped.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only').length,
+          missingSemanticTags: scoped.filter(element => element.status === 'ready' && !isResourceDependencyOnlyElement(element, dependencyElementIds) && !hasConfirmedResourceUsageTags(element) && element.usageTagsMode !== 'manual-only').length,
           technicalIssues: resolved.filter(element => !element.assetKind || !element.specs.contentHash).length,
           dependencyIssues: resolved.filter(element => element.dependencies.some(id => !scoped.some(candidate => candidate.id === id))).length,
         },

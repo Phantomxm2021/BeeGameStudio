@@ -37,7 +37,7 @@ export const resourceContentCommitContractSchema = z
         })
         .strict(),
     ),
-    protectedPaths: z.array(z.string().trim().min(1)),
+    writablePaths: z.array(z.string().trim().min(1)).min(1),
   })
   .strict()
 
@@ -45,9 +45,8 @@ export type ResourceContentCommitContract = z.infer<
   typeof resourceContentCommitContractSchema
 >
 
-const documentSchema = z
+const documentValueSchema = z
   .object({
-    path: z.string().trim().min(1),
     schema: z.literal(BEEGAME_CONTENT_SCHEMA),
     id: z.string().trim().min(1),
     kind: z.enum([
@@ -64,7 +63,16 @@ const inputSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('commit'),
-      documents: z.array(documentSchema).min(1),
+      // A path-keyed object makes duplicate document paths unrepresentable in
+      // the native protocol. The previous array shape let the model submit the
+      // same canonical file twice and only fail after producing the full
+      // payload.
+      documents: z.record(
+        z.string().trim().min(1),
+        documentValueSchema,
+      ).refine(value => Object.keys(value).length > 0, {
+        message: 'documents must contain at least one canonical path',
+      }),
     })
     .strict(),
   z
@@ -104,10 +112,10 @@ export function createNativeResourceContentTool(options: {
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
     async description() {
-      return 'Validate and commit the complete canonical JSON/YAML content set, or report the exact requirements missing verified inventory.'
+      return 'The only canonical content mutation and terminal: validate and commit exactly one path-keyed documents object containing the JSON/YAML documents at the frozen writable paths in one call, or report the exact requirements missing verified inventory. Object keys are canonical paths and are unique by construction. The service preserves every other canonical content file. Do not write files separately.'
     },
     async prompt() {
-      return 'This is the only Resource Content mutation and terminal. Submit the complete canonical set once. Invalid content writes nothing. Use needs_inventory only for the exact required requirement IDs without verified inventory bindings.'
+      return 'This is the only Resource Content mutation and terminal. Build only the frozen writable paths in memory and submit one documents object keyed by each exact writable path; do not use an array and do not repeat a path. Submit that exact object once. Do not call or emulate Write/Edit or emit another tool-call format. Invalid content writes nothing. Use needs_inventory only for the exact required requirement IDs without verified inventory bindings.'
     },
     async checkPermissions(input: ResourceContentInput) {
       return { behavior: 'allow', updatedInput: input }
@@ -190,7 +198,7 @@ async function submitMissingInventory(input: {
 async function commitResourceContent(input: {
   workspacePath: string
   contract: ResourceContentCommitContract
-  documents: z.infer<typeof documentSchema>[]
+  documents: Record<string, z.infer<typeof documentValueSchema>>
   assertMutationAuthority: () => void | Promise<void>
 }) {
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
@@ -199,8 +207,8 @@ async function commitResourceContent(input: {
     input.workspacePath,
     manifest.project_target?.content_root ?? 'assets/content',
   )
-  const submitted = input.documents.map(document => ({
-    path: normalizeContentPath(input.workspacePath, contentRoot, document.path),
+  const submitted = Object.entries(input.documents).map(([path, document]) => ({
+    path: normalizeContentPath(input.workspacePath, contentRoot, path),
     value: {
       schema: document.schema,
       id: document.id,
@@ -211,21 +219,36 @@ async function commitResourceContent(input: {
     },
   }))
   const submittedPaths = new Set(submitted.map(document => document.path))
-  const protectedDocuments = input.contract.protectedPaths.map(path => {
-    const normalized = normalizeContentPath(
-      input.workspacePath,
-      contentRoot,
-      path,
+  const writablePaths = input.contract.writablePaths.map(path =>
+    normalizeContentPath(input.workspacePath, contentRoot, path),
+  )
+  if (submittedPaths.size !== submitted.length)
+    throw new Error(
+      'Resource Content documents must use unique canonical paths after normalization.',
     )
-    if (submittedPaths.has(normalized))
-      throw new Error(
-        `Protected content path cannot be replaced: ${normalized}.`,
-      )
-    return {
-      document: readContentDocument(input.workspacePath, normalized),
-      content: readFileSync(resolve(input.workspacePath, normalized)),
-    }
-  })
+  if (new Set(writablePaths).size !== writablePaths.length)
+    throw new Error(
+      'Resource Content writable paths must use unique canonical paths after normalization.',
+    )
+  if (!sameOrderedSet([...submittedPaths], writablePaths))
+    throw new Error(
+      `Resource Content documents must exactly cover writable paths: ${writablePaths.join(', ') || '<none>'}.`,
+    )
+  const writablePathSet = new Set(writablePaths)
+  const contentAudit = auditAssetContract(input.workspacePath).content
+  const unassignedPaths = contentAudit.invalidPaths.filter(
+    path => !writablePathSet.has(path),
+  )
+  if (unassignedPaths.length)
+    throw new Error(
+      `Resource Content writable paths must include every invalid or replaced canonical path: ${unassignedPaths.join(', ')}.`,
+    )
+  const protectedDocuments = contentAudit.validPaths
+    .filter(path => !writablePathSet.has(path))
+    .map(path => ({
+      document: readContentDocument(input.workspacePath, path),
+      content: readFileSync(resolve(input.workspacePath, path)),
+    }))
   const completeSet = [
     ...protectedDocuments.map(item => item.document),
     ...submitted,

@@ -111,11 +111,18 @@ the write.
 
 ## Per-element decision and commit contract
 
-The batch is only a transport and billing unit. It never defines a shared
-semantic label set. Every model decision is owned by exactly one `elementId`
+The synchronous request group is only a transport and billing unit. It never
+defines a shared semantic label set. Every model decision is owned by exactly one `elementId`
 and carries its own `usageTags`, content hash and curator revision. Two
 elements may happen to receive the same tags, but that is the result of two
 independent decisions.
+
+An accepted visual semantic decision must contain at least one canonical
+usage tag. An empty `usageTags` array is rejected before persistence and the
+item remains failed for the existing durable retry path; it must never be
+committed as `usage_tags_mode = override`. This does not change the ordinary
+unclassified state of library rows that have not received an accepted AI
+decision.
 
 The server validates each decision against the frozen content hash, visual
 evidence, allowed vocabulary and curator revision, then writes the decision's
@@ -142,27 +149,17 @@ of the semantic decision contract and are not accepted by the semantic parser.
 ## Durable processing
 
 Semantic classification uses the existing durable resource-processing job
-boundary with a semantic-curation job kind. One durable semantic job submits
-one native Provider Batch containing independent ordered subrequests of at
-most eight rendered elements each. The Batch envelope is transport and billing
-only; it is not a giant prompt and it never merges the visual context of two
-subrequests. Every subrequest has a stable `custom_id`; result order is never
-used as identity.
-
-The job stores the provider Batch ID before polling. A restart resumes polling
-that exact ID and reconstructs the subrequest item mapping from the durable
-ordered item rows. It never resubmits from chat history, browser state or an
-in-memory promise. If submission outcome is ambiguous, the job records
-`provider_batch_status = unknown` and stops rather than silently creating a
-duplicate native Batch. Provider errors, expiry and malformed subresponses
-are scoped to only their subrequest and become durable retry items; successful
-subrequests remain accepted.
+boundary with a semantic-curation job kind. Each durable item is claimed in a
+deterministic group of at most eight elements and sent through one synchronous
+model request. The group is only a request-size and usage unit; each element
+keeps its own identity, content hash, visual evidence and decision. The
+validated response is committed per element before the group is accepted.
 
 The input content hash and curator revision remain frozen so stale output
-cannot overwrite a changed resource. The accepted batch receipt is recorded
-on each completed item after all provider results are validated. There is one
-semantic route, one durable job ledger and one decision parser; no synchronous
-semantic fallback, compatibility path, feedback queue or second ledger exists.
+cannot overwrite a changed resource. The accepted request receipt is recorded
+on each completed item, and a restart requeues only unfinished items. There is
+one semantic route, one durable job ledger and one decision parser; no
+asynchronous provider submission, feedback queue or second ledger exists.
 
 The job also stores the effective model-config owner and `modelConfigId`.
 Those identities point to the same model configuration managed by Workflow
@@ -192,8 +189,12 @@ changes, the old semantic result is not reused.
 
 ## Persistence rules
 
-Elements without element-owned tags are eligible for the normal AI run. Full
-reanalysis also includes existing AI-owned tags, but never `manual-only`.
+Renderable root elements without element-owned tags are eligible for the
+normal AI run. An element referenced only as a dependency by another element
+is not an independent semantic target; it remains unclassified and is
+delivered through the selected root's dependency closure. Full reanalysis
+also includes existing AI-owned tags, but never `manual-only` or an untagged
+dependency-only element.
 
 For any valid result with content evidence:
 
@@ -205,7 +206,7 @@ Confidence does not select a different persistence path. If evidence or
 schema validation fails, the result is rejected and the item is requeued; no
 temporary semantic record is created.
 
-## Batch and scope policy
+## Scope policy
 
 The first production run processes ready elements in published Packs. Archived
 Packs may be processed by the same job kind afterward but are excluded from
@@ -213,10 +214,11 @@ published catalog selection. The job processes items in deterministic Pack and
 element order and does not load the whole Resource Library into one model
 request.
 
-All renderable untagged elements are handled as independent durable items in
-ordered subrequests of at most eight: published elements first, archived
-elements second. A large Pack therefore creates one native Provider Batch
-containing many independent subrequests, not many synchronous calls and not
+All renderable untagged root elements are handled as independent durable items
+in ordered request groups of at most eight: published elements first,
+archived elements second. Dependency-only elements are excluded from those
+groups and remain available through the root element's dependency closure. A
+large Pack therefore creates multiple bounded synchronous requests rather than
 one oversized prompt. Non-renderable elements remain unclassified until a
 visual renderer is available. No library resource is copied, renamed, or
 replaced by a placeholder during semantic curation; an ephemeral rendered
@@ -227,22 +229,21 @@ individual preview images. For a batch larger than two, it contains one JPEG
 Atlas and its ordered cell map. Both forms are the same `visualInput` contract
 and are validated before the request is sent.
 
-Each accepted semantic batch receipt partitions the claimed durable items into
-completed decisions and explicit `retryItems`. The partition is exact: an
+Each accepted semantic request receipt partitions the claimed durable items
+into completed decisions and explicit `retryItems`. The partition is exact: an
 item cannot be both accepted and retried, and no claimed item may be omitted.
 Retried items are requeued with their current diagnostic and selected after
-older queued work; a batch containing only retries schedules a later batch
-instead of spinning inside the current batch.
+older queued work.
 
 ## Failure handling
 
 | Condition | Result |
 | --- | --- |
 | R2 read failure | Item remains failed with the storage error; retry the item |
-| Model render or Atlas failure | Exclude the item from the current model call, requeue it with the render diagnostic, and retry it in the next batch |
+| Model render or Atlas failure | Exclude the item from the current model call, requeue it with the render diagnostic, and retry it in the next request group |
 | Model response invalid | Item remains failed; do not write partial tags |
 | Unknown tag | Reject the result and record validation error |
-| Missing `content_preview` evidence | Reject the batch result, persist no tag, and requeue the item |
+| Missing `content_preview` evidence | Reject the request result, persist no tag, and requeue the item |
 | Content hash changed | Reject stale result and enqueue the current hash |
 | Process restart | Requeue interrupted items only |
 | Existing AI-owned tags in a missing-only run | Skip; do not overwrite |
@@ -268,9 +269,9 @@ The implementation is ready only when all of the following are true:
 7. A real published catalog match uses the confirmed tags and returns the
    existing candidate/bundle contract.
 8. The frontend renders options from the API rather than a duplicate constant.
-9. A heterogeneous batch cannot cause one resource's tags to be written to
-   another resource; each provider result is committed by its stable element
-   identity.
+9. A heterogeneous request group cannot cause one resource's tags to be
+   written to another resource; each decision is committed by its stable
+   element identity.
 10. No legacy semantic path, feedback path, compatibility path or second
    resource fact source remains.
 11. A new-project end-to-end run confirms that resources are selected from the

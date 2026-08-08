@@ -32,6 +32,28 @@ async function collectEvents(chunks: GeminiStreamChunk[]) {
 }
 
 describe('adaptGeminiStreamToAnthropic', () => {
+  test('rejects an empty stream without finishReason', async () => {
+    await expect(collectEvents([])).rejects.toThrow(
+      'Provider response ended without a completion reason',
+    )
+  })
+
+  test('rejects a stream that ends without finishReason', async () => {
+    await expect(
+      collectEvents([
+        {
+          candidates: [
+            {
+              content: {
+                parts: [{ text: 'Partial response' }],
+              },
+            },
+          ],
+        },
+      ]),
+    ).rejects.toThrow('Provider response ended without a completion reason')
+  })
+
   test('converts text chunks', async () => {
     const events = await collectEvents([
       {

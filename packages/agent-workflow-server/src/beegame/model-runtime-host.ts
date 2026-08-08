@@ -7,20 +7,6 @@ import {
 } from '@bee-game-studio/security-core'
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
 import { getWorkerBaseEnvironment } from './query-engine-process-runner'
-import {
-  assertNativeBatchProvider,
-  type BeeGameModelBatchRequest,
-  type BeeGameModelBatchResult,
-  type BeeGameModelBatchRetrieveContext,
-  type BeeGameModelBatchRuntime,
-} from './model-runtime-batch'
-
-export type {
-  BeeGameModelBatchRequest,
-  BeeGameModelBatchResult,
-  BeeGameModelBatchRetrieveContext,
-  BeeGameModelBatchRuntime,
-} from './model-runtime-batch'
 
 export type BeeGameModelContent =
   | string
@@ -143,8 +129,6 @@ export type BeeGameModelRuntimeHost = {
   generateWithUsage?: (
     input: BeeGameModelGenerateInput,
   ) => Promise<BeeGameModelGeneration>
-  batch?: BeeGameModelBatchRuntime
-  assertBatchProvider?: (modelType: string | undefined) => Promise<void>
 }
 
 type SerializedApprovedTarget = {
@@ -156,16 +140,10 @@ type SerializedApprovedTarget = {
 export type ModelRuntimeWorkerRequest = {
   type: 'model.generate'
   requestId: string
-  input: SerializedModelRuntimeInput
-} | {
-  type: 'model.batch.submit'
-  requestId: string
-  inputs: Array<{ customId: string; input: SerializedModelRuntimeInput }>
-} | {
-  type: 'model.batch.retrieve'
-  requestId: string
-  providerBatchId: string
-  context: SerializedModelRuntimeBatchContext
+  input: Omit<BeeGameModelGenerateInput, 'runtimeEnv'> & {
+    runtimeEnv: Record<string, string>
+    approvedOutboundTargets: Record<string, SerializedApprovedTarget>
+  }
 }
 
 export type ModelRuntimeWorkerResponse =
@@ -176,37 +154,11 @@ export type ModelRuntimeWorkerResponse =
       usage?: BeeGameModelUsage
     }
   | {
-      type: 'model.batch.submitted'
-      requestId: string
-      providerBatchId: string
-    }
-  | {
-      type: 'model.batch.retrieved'
-      requestId: string
-      status: 'processing' | 'ended'
-      results?: BeeGameModelBatchResult[]
-    }
-  | {
       type: 'model.error'
       requestId: string
       message: string
       stage: BeeGameModelRuntimeFailureStage
     }
-
-type SerializedModelRuntimeInput = Omit<BeeGameModelGenerateInput, 'runtimeEnv'> & {
-  runtimeEnv: Record<string, string>
-  approvedOutboundTargets: Record<string, SerializedApprovedTarget>
-}
-
-export type ModelRuntimeWorkerGenerateInput = SerializedModelRuntimeInput
-
-type SerializedModelRuntimeBatchContext = Omit<
-  BeeGameModelBatchRetrieveContext,
-  'runtimeEnv'
-> & {
-  runtimeEnv: Record<string, string>
-  approvedOutboundTargets: Record<string, SerializedApprovedTarget>
-}
 
 const WORKER_PATH = fileURLToPath(
   new URL('./model-runtime-worker.ts', import.meta.url),
@@ -255,18 +207,8 @@ export function createProcessIsolatedModelRuntimeHost(options: {
   outboundTargetPolicyOptions: OutboundTargetPolicyOptions
   resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
   runWorker?: (
-    input: SerializedModelRuntimeInput,
+    input: ModelRuntimeWorkerRequest['input'],
   ) => Promise<string | BeeGameModelGeneration>
-  runBatchWorker?: (
-    requests: readonly BeeGameModelBatchRequest[],
-  ) => Promise<{ providerBatchId: string }>
-  retrieveBatchWorker?: (
-    providerBatchId: string,
-    context: BeeGameModelBatchRetrieveContext,
-  ) => Promise<{
-    status: 'processing' | 'ended'
-    results?: readonly BeeGameModelBatchResult[]
-  }>
 }): BeeGameModelRuntimeHost {
   const resolveOutboundTarget =
     options.resolveOutboundTarget ?? resolveApprovedOutboundTarget
@@ -307,95 +249,14 @@ export function createProcessIsolatedModelRuntimeHost(options: {
     })
     return typeof result === 'string' ? { content: result } : result
   }
-  const assertBatchProvider = async (modelType: string | undefined): Promise<void> => {
-    assertNativeBatchProvider(modelType)
-  }
-  const submitBatch = async (
-    requests: readonly BeeGameModelBatchRequest[],
-  ): Promise<{ providerBatchId: string }> => {
-    if (requests.length === 0) throw new Error('Native provider batch requires at least one request')
-    for (const request of requests) {
-      assertNativeBatchProvider(request.input.modelType)
-    }
-    if (options.runBatchWorker) return options.runBatchWorker(requests)
-    const serialized = await Promise.all(requests.map(async request => ({
-      customId: request.customId,
-      input: await serializeRuntimeInput(request.input, resolveOutboundTarget, options.outboundTargetPolicyOptions),
-    })))
-    return runBatchWorker(serialized)
-  }
-  const retrieveBatch = async (
-    providerBatchId: string,
-    context: BeeGameModelBatchRetrieveContext,
-  ): Promise<{
-    status: 'processing' | 'ended'
-    results?: readonly BeeGameModelBatchResult[]
-  }> => {
-    assertNativeBatchProvider(context.modelType)
-    if (options.retrieveBatchWorker) return options.retrieveBatchWorker(providerBatchId, context)
-    const serializedContext = await serializeBatchContext(
-      context,
-      resolveOutboundTarget,
-      options.outboundTargetPolicyOptions,
-    )
-    return runBatchRetrieveWorker(providerBatchId, serializedContext)
-  }
   return {
     generate: async input => (await generateWithUsage(input)).content,
     generateWithUsage,
-    batch: { submit: submitBatch, retrieve: retrieveBatch },
-    assertBatchProvider,
   }
-}
-
-async function serializeRuntimeInput(
-  input: BeeGameModelGenerateInput,
-  resolveOutboundTarget: typeof resolveApprovedOutboundTarget,
-  policy: OutboundTargetPolicyOptions,
-): Promise<SerializedModelRuntimeInput> {
-  const approvedOutboundTargets = await resolveApprovedOutboundTargets(input.runtimeEnv, resolveOutboundTarget, policy)
-  return {
-    ...input,
-    approvedOutboundTargets,
-  }
-}
-
-async function serializeBatchContext(
-  context: BeeGameModelBatchRetrieveContext,
-  resolveOutboundTarget: typeof resolveApprovedOutboundTarget,
-  policy: OutboundTargetPolicyOptions,
-): Promise<SerializedModelRuntimeBatchContext> {
-  return {
-    ...context,
-    approvedOutboundTargets: await resolveApprovedOutboundTargets(context.runtimeEnv, resolveOutboundTarget, policy),
-  }
-}
-
-async function resolveApprovedOutboundTargets(
-  runtimeEnv: Record<string, string>,
-  resolveOutboundTarget: typeof resolveApprovedOutboundTarget,
-  policy: OutboundTargetPolicyOptions,
-): Promise<Record<string, SerializedApprovedTarget>> {
-  const approvedOutboundTargets: Record<string, SerializedApprovedTarget> = {}
-  for (const key of RUNTIME_PROVIDER_URL_KEYS) {
-    const value = runtimeEnv[key]
-    if (!value) continue
-    const target = await resolveOutboundTarget(value, policy)
-    if (!target) throw new Error('Outbound URL is not permitted')
-    approvedOutboundTargets[key] = {
-      url: target.url.toString(),
-      addresses: [...target.addresses],
-      ...(target.trustedDevelopmentProxy ? { trustedDevelopmentProxy: true as const } : {}),
-    }
-  }
-  if (Object.keys(approvedOutboundTargets).length === 0) {
-    throw new Error('The selected model config has no runtime endpoint')
-  }
-  return approvedOutboundTargets
 }
 
 async function runWorker(
-  input: SerializedModelRuntimeInput,
+  input: ModelRuntimeWorkerRequest['input'],
 ): Promise<BeeGameModelGeneration> {
   const requestId = randomUUID()
   return new Promise<BeeGameModelGeneration>((resolve, reject) => {
@@ -415,10 +276,8 @@ async function runWorker(
             content: message.content,
             ...(message.usage ? { usage: message.usage } : {}),
           })
-        } else if (message.type === 'model.error') {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage))
         } else {
-          reject(new BeeGameModelRuntimeError('Model runtime returned an invalid response', 'model_response'))
+          reject(new BeeGameModelRuntimeError(message.message, message.stage))
         }
       },
     })
@@ -432,74 +291,5 @@ async function runWorker(
       requestId,
       input,
     } satisfies ModelRuntimeWorkerRequest)
-  })
-}
-
-async function runBatchWorker(
-  inputs: Array<{ customId: string; input: SerializedModelRuntimeInput }>,
-): Promise<{ providerBatchId: string }> {
-  const requestId = randomUUID()
-  return new Promise<{ providerBatchId: string }>((resolve, reject) => {
-    let settled = false
-    const child = Bun.spawn([process.execPath, WORKER_PATH], {
-      env: getModelRuntimeWorkerEnvironment(),
-      stdin: 'ignore',
-      stdout: 'inherit',
-      stderr: 'inherit',
-      ipc(raw) {
-        const message = raw as ModelRuntimeWorkerResponse
-        if (message.requestId !== requestId || settled) return
-        settled = true
-        child.kill()
-        if (message.type === 'model.batch.submitted') {
-          resolve({ providerBatchId: message.providerBatchId })
-        } else if (message.type === 'model.error') {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage))
-        } else {
-          reject(new BeeGameModelRuntimeError('Model runtime returned an invalid batch submission response', 'model_response'))
-        }
-      },
-    })
-    child.exited.then(code => {
-      if (settled) return
-      settled = true
-      reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request'))
-    })
-    child.send({ type: 'model.batch.submit', requestId, inputs } satisfies ModelRuntimeWorkerRequest)
-  })
-}
-
-async function runBatchRetrieveWorker(
-  providerBatchId: string,
-  context: SerializedModelRuntimeBatchContext,
-): Promise<{ status: 'processing' | 'ended'; results?: BeeGameModelBatchResult[] }> {
-  const requestId = randomUUID()
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const child = Bun.spawn([process.execPath, WORKER_PATH], {
-      env: getModelRuntimeWorkerEnvironment(),
-      stdin: 'ignore',
-      stdout: 'inherit',
-      stderr: 'inherit',
-      ipc(raw) {
-        const message = raw as ModelRuntimeWorkerResponse
-        if (message.requestId !== requestId || settled) return
-        settled = true
-        child.kill()
-        if (message.type === 'model.batch.retrieved') {
-          resolve({ status: message.status, ...(message.results ? { results: message.results } : {}) })
-        } else if (message.type === 'model.error') {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage))
-        } else {
-          reject(new BeeGameModelRuntimeError('Model runtime returned an invalid batch retrieval response', 'model_response'))
-        }
-      },
-    })
-    child.exited.then(code => {
-      if (settled) return
-      settled = true
-      reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request'))
-    })
-    child.send({ type: 'model.batch.retrieve', requestId, providerBatchId, context } satisfies ModelRuntimeWorkerRequest)
   })
 }

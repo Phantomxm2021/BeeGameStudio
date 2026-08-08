@@ -7,6 +7,18 @@ import {
   type ProvisionalResourceAdapter,
 } from './provisional-resource-adapters'
 
+const AUDIO_ASSET_KINDS = new Set([
+  'audio-clip',
+  'audio-cue',
+  'audio-bank',
+  'music',
+  'ambience',
+  'voice',
+])
+const PROGRAMMATIC_PLACEHOLDER_ASSET_KINDS = RESOURCE_ASSET_KINDS.filter(
+  kind => !AUDIO_ASSET_KINDS.has(kind),
+)
+
 const colorSchema = z
   .enum(['cyan', 'amber', 'green', 'red', 'violet', 'neutral'])
   .default('neutral')
@@ -52,7 +64,7 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
       format: 'png',
       assetKinds: ['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas', 'frame-animation', 'tileset', 'tilemap', 'ui-document'],
       description:
-        'png: self-contained provisional visual; asset_kind must be image, texture, sprite or ui-document; optional parameters.color',
+        'png: self-contained provisional visual; asset_kind must be image, texture, sprite or ui-document; optional parameters.color must be one of cyan, amber, green, red, violet, neutral',
       author(input) {
         if (
           !['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas', 'frame-animation', 'tileset', 'tilemap', 'ui-document'].includes(
@@ -81,7 +93,7 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
       format: 'wav',
       assetKinds: ['audio-clip', 'audio-cue', 'audio-bank', 'music', 'ambience', 'voice'],
       description:
-        'wav: self-contained provisional PCM cue bank; asset_kind must be audio-cue or audio-bank; parameters.cue_ids is required',
+        'wav: self-contained provisional PCM cue bank for every audio asset kind; parameters must contain exactly cue_ids (a non-empty string array) and no other keys',
       author(input) {
         if (!['audio-clip', 'audio-cue', 'audio-bank', 'music', 'ambience', 'voice'].includes(input.assetKind))
           throw new Error(
@@ -104,9 +116,9 @@ export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS: readonly ProvisionalResou
     },
     {
       format: 'json',
-      assetKinds: RESOURCE_ASSET_KINDS,
+      assetKinds: PROGRAMMATIC_PLACEHOLDER_ASSET_KINDS,
       description:
-        'json: engine-neutral programmatic placeholder recipe for any canonical asset_kind; optional JSON object parameters',
+        'json: engine-neutral programmatic placeholder recipe for non-audio canonical asset kinds; optional JSON object parameters',
       author(input) {
         const parameters = input.parameters ?? {}
         const document = {

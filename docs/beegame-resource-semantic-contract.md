@@ -25,9 +25,9 @@ by the administrator, but the only searchable/matchable semantic fact is the
 element's own confirmed tag set (`usageTagsMode: override`). Pack and folder
 semantic defaults are removed; they cannot be created, inherited, or used as a
 fallback. Each validated AI decision is written directly to the element's
-canonical tag set. Batch processing is only a transport unit: each element
-receives its own independent decision and no shared tag set is applied across
-elements.
+canonical tag set. A single synchronous semantic request may contain several
+elements, but each element receives its own independent decision and no shared
+tag set is applied across elements.
 Nothing is inferred from a filename, folder name, extension, title, keyword or
 structured metadata alone.
 
@@ -58,20 +58,15 @@ structured metadata alone.
     to its supplied image or Atlas cell. Category, kind, asset kind, technical
     facts, content profiles, and dependency facts may provide bounded context,
     but they cannot replace the rendered image. A decision without visual
-    evidence is rejected before any tag is persisted.
+    evidence or without at least one canonical usage tag is rejected before
+    any tag is persisted. Ordinary unclassified library rows may remain
+    untagged; this rule applies only to the AI decision and commit boundary.
 14. A render, visual-input, model, or Atlas failure leaves the item without a
     semantic result and requeues it through the existing durable job. No
     fallback classifier, feedback path, compatibility path, or second queue is
     created.
-15. Semantic curation submits one native Provider Batch per durable semantic
-    job. The Provider Batch contains independent requests of at most eight
-    rendered elements each; it is not one giant prompt and does not merge
-    request context. Each request has a stable `custom_id`, and results are
-    matched only by that identity.
-16. The durable job stores the native `provider_batch_id` before polling.
-    Recovery polls that exact ID and never creates a second submission from
-    chat history, browser state, or an in-memory promise. An ambiguous
-    submission is marked `unknown` and is never silently resubmitted.
-17. Native Batch support is a capability requirement for semantic curation.
-    A configured provider without a native multimodal Batch adapter fails
-    closed before semantic work starts; it does not use synchronous fallback.
+15. An element referenced only as a dependency by another element and carrying
+    no confirmed usage tags is not an independent semantic-curation candidate.
+    It remains an unclassified technical resource and is delivered through the
+    selected root element's dependency closure. It must not be forced into an
+    unrelated usage tag merely to satisfy curation counts.

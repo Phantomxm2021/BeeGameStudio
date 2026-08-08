@@ -429,23 +429,6 @@ describe('queryModelOpenAI — stop_reason propagation', () => {
     expect(errorMsg.apiError).toBe('max_output_tokens')
   })
 
-  test('stop_reason is null when no message_delta was received (safety fallback path)', async () => {
-    // Stream ends without message_stop — triggers the safety fallback branch.
-    // stop_reason stays null since no message_delta was ever seen.
-    _nextEvents = [
-      makeMessageStart(),
-      makeContentBlockStart(0, 'text'),
-      makeTextDelta(0, 'partial'),
-      makeContentBlockStop(0),
-      // No message_delta / message_stop
-    ]
-
-    const { assistantMessages } = await runQueryModel(_nextEvents)
-
-    // Safety fallback should yield the partial content
-    expect(assistantMessages).toHaveLength(1)
-    expect(assistantMessages[0]!.message.stop_reason).toBeNull()
-  })
 })
 
 describe('queryModelOpenAI — usage accumulation', () => {
@@ -548,19 +531,6 @@ describe('queryModelOpenAI — no duplicate AssistantMessage (partialMessage res
     expect(assistantMessages).toHaveLength(1)
   })
 
-  test('safety fallback path still yields message when stream ends without message_stop', async () => {
-    // Simulates a stream that cuts off without the normal termination sequence.
-    _nextEvents = [
-      makeMessageStart(),
-      makeContentBlockStart(0, 'text'),
-      makeTextDelta(0, 'abrupt end'),
-      // No content_block_stop, no message_delta, no message_stop
-    ]
-
-    const { assistantMessages } = await runQueryModel(_nextEvents)
-
-    expect(assistantMessages).toHaveLength(1)
-  })
 })
 
 describe('queryModelOpenAI — stream_events forwarded', () => {

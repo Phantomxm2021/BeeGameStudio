@@ -67,3 +67,11 @@ export {
   anthropicToolChoiceToOpenAI,
 } from './shared/openaiConvertTools.js'
 export { adaptOpenAIStreamToAnthropic } from './shared/openaiStreamAdapter.js'
+export {
+  assertProviderCompletionReason,
+  ProviderCompletionError,
+} from './shared/providerTerminal.js'
+export {
+  normalizeOpenAIUsage,
+  type AnthropicUsage,
+} from './shared/openaiUsage.js'

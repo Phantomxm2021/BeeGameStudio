@@ -508,7 +508,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
             }
           : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
-        workflowProtectedPaths: request.protectedPaths ?? [],
+        ...(request.workerType !== 'resource-content-author' &&
+        request.protectedPaths
+          ? { workflowProtectedPaths: [...request.protectedPaths] }
+          : {}),
         ...(request.workerType === 'resource-content-author'
           ? {
               workflowReadOnlyPaths: [
@@ -517,8 +520,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
                       (path): path is string => typeof path === 'string',
                     )
                   : []),
-                ...(Array.isArray(request.contract.preservedPaths)
-                  ? request.contract.preservedPaths.filter(
+                ...(Array.isArray(request.contract.repairPaths)
+                  ? request.contract.repairPaths.filter(
                       (path): path is string => typeof path === 'string',
                     )
                   : []),
@@ -556,7 +559,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                     request.contract.requiredRequirementIds,
                   verifiedResourceIds: request.contract.verifiedResourceIds,
                   inventoryBindings: request.contract.inventoryBindings,
-                  protectedPaths: request.contract.preservedPaths ?? [],
+                  writablePaths: request.contract.repairPaths ?? [],
                 }),
             }
           : {}),
@@ -833,6 +836,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
               event.type === 'turn.empty',
           )
         if (result) {
+          if (result.type === 'result' || result.type === 'turn.empty') {
+            const missingTerminal = request
+              ? missingStructuredTerminalError(request, events)
+              : undefined
+            if (missingTerminal) throw missingTerminal
+          }
           if (result.type !== 'result')
             throw new Error(
               result.text || 'worker turn did not produce a terminal result',
@@ -955,6 +964,27 @@ function hasCompletedStructuredSubmission(
           event.payload?.toolName === toolName,
       ),
   )
+}
+
+function missingStructuredTerminalError(
+  request: WorkerDispatchRequest,
+  events: ReturnType<BeeGameSessionManager['events']>,
+): Error | undefined {
+  const toolName = structuredSubmissionToolName(request)
+  if (!toolName) return undefined
+  if (
+    events.some(
+      event =>
+        event.type === 'tool.failed' &&
+        event.payload?.toolName === toolName,
+    )
+  )
+    return undefined
+  const error = new Error(
+    `missing_required_terminal_submission: ${toolName}`,
+  )
+  error.name = 'WorkerNeedsActionError'
+  return error
 }
 
 async function createDeterministicStructuredTerminal(input: {

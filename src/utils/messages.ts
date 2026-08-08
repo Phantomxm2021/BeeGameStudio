@@ -753,6 +753,7 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
   // and remains true for all subsequent messages in the normalization process.
   let isNewChain = false
   return messages.flatMap(message => {
+    if (!message) return []
     switch (message.type) {
       case 'assistant': {
         const aMsg = message as AssistantMessage
@@ -776,7 +777,7 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
             isVirtual: message.isVirtual,
             requestId: message.requestId,
             uuid,
-            error: message.error,
+            error: message?.error,
             isApiErrorMessage: message.isApiErrorMessage,
             advisorModel: message.advisorModel,
           } as NormalizedAssistantMessage
@@ -1275,8 +1276,11 @@ export function buildMessageLookups(
       }
 
       // Count in-progress hooks
-      const progressData = msg.data as { type: string; hookEvent: HookEvent }
-      if (progressData.type === 'hook_progress') {
+      const progressData = msg.data as
+        | { type: string; hookEvent: HookEvent }
+        | null
+        | undefined
+      if (progressData && progressData.type === 'hook_progress') {
         const hookEvent = progressData.hookEvent
         let byHookEvent = inProgressHookCounts.get(toolUseID)
         if (!byHookEvent) {
@@ -2298,7 +2302,10 @@ export function normalizeMessagesForAPI(
   // First, reorder attachments to bubble up until they hit a tool result or assistant message
   // Then strip virtual messages — they're display-only (e.g. REPL inner tool
   // calls) and must never reach the API.
-  const reorderedMessages = reorderAttachmentsForAPI(messages).filter(
+  const validMessages = messages.filter(
+    (message): message is Message => message != null,
+  )
+  const reorderedMessages = reorderAttachmentsForAPI(validMessages).filter(
     m => !((m.type === 'user' || m.type === 'assistant') && m.isVirtual),
   )
 

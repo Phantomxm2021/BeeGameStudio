@@ -144,7 +144,8 @@ describe('delivery worker session credentials', () => {
         requiredRequirementIds: ['world.visual'],
         verifiedResourceIds: [],
         inventoryBindings: [],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
+        repairPaths: ['assets/content/resource-registry.json'],
       }
       const tool = createNativeResourceContentTool({
         buildTool: definition => definition,
@@ -166,7 +167,6 @@ describe('delivery worker session credentials', () => {
         },
         contract: {
           ...contract,
-          preservedPaths: [],
         },
       })
 
@@ -214,7 +214,8 @@ describe('delivery worker session credentials', () => {
             resourceIds: ['world-resource'],
           },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
+        repairPaths: ['assets/content/resource-registry.json'],
       }
       const tool = createNativeResourceContentTool({
         buildTool: definition => definition,
@@ -226,9 +227,8 @@ describe('delivery worker session credentials', () => {
       }
       await tool.call({
         action: 'commit',
-        documents: [
-          {
-            path: 'assets/content/resource-registry.json',
+        documents: {
+          'assets/content/resource-registry.json': {
             schema: 'beegame-content-v1',
             id: 'resource-registry',
             kind: 'resource-registry',
@@ -243,7 +243,7 @@ describe('delivery worker session credentials', () => {
               ],
             },
           },
-        ],
+        },
       })
       const receiptPath = join(
         workspacePath,
@@ -286,7 +286,6 @@ describe('delivery worker session credentials', () => {
         revision: 'revision-content-receipt',
         contract: {
           ...contract,
-          preservedPaths: [],
         },
       })
 
@@ -373,6 +372,374 @@ describe('delivery worker session credentials', () => {
         ],
       },
     })
+  })
+
+  test('gives Resource Content Author read access to its existing content set', async () => {
+    const starts: Array<Record<string, unknown>> = []
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: 'session-resource-content' }
+      },
+      updateAuthToken() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+
+    await port.start({
+      dispatchId: 'dispatch-resource-content',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'resource-content-author',
+      phase: 'RESOURCE_PREPARATION',
+      taskId: 'RESOURCE_CONTENT',
+      revision: 'revision-1',
+      allowedPaths: ['assets/content/'],
+      contract: {
+        authorityPaths: ['docs/GDD.md'],
+        repairPaths: ['assets/content/entity-definitions.json'],
+        inventoryRevision: 'inventory-revision',
+        baselineResourceRevision: 'resource-revision',
+        requiredRequirementIds: ['world.visual'],
+        verifiedResourceIds: ['world-resource'],
+        inventoryBindings: [
+          { requirementId: 'world.visual', resourceIds: ['world-resource'] },
+        ],
+      },
+    })
+
+    expect(starts[0]).toMatchObject({
+      workflowAllowedPaths: ['assets/content/'],
+      workflowReadOnlyPaths: [
+        'docs/GDD.md',
+        'assets/content/entity-definitions.json',
+      ],
+    })
+    expect(starts[0].workflowProtectedPaths).toBeUndefined()
+  })
+
+  test('classifies an empty Reviewer turn as its missing required terminal', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-empty-review-terminal-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-empty-review-terminal' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'empty-review-turn',
+            type: 'turn.empty',
+            text: 'BeeGame Studio ended the turn without a final response.',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-empty-review-terminal',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: reviewerContract(),
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-empty-review-terminal'),
+      ).rejects.toMatchObject({
+        name: 'WorkerNeedsActionError',
+        message:
+          'missing_required_terminal_submission: SubmitDocumentReviewPacket',
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps an accepted Reviewer packet when the provider closes empty', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-accepted-review-terminal-'),
+    )
+    const contract = reviewerContract()
+    const evidenceReferenceId = buildDocumentReviewReferenceIndex([
+      { path: 'reviewAuthority', content: 'Confirmed brief' },
+      ...contract.reviewArtifacts,
+    ]).references.find(
+      reference => reference.path === 'systemDeliveryContract',
+    )!.referenceId
+    const sessions = {
+      start() {
+        return { id: 'session-accepted-review-terminal' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'accepted-review-packet',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'SubmitDocumentReviewPacket',
+              input: {
+                checks: [
+                  {
+                    conclusion: 'The current authority is consistent.',
+                    evidence: [{ referenceId: evidenceReferenceId }],
+                    assessments: [],
+                    findings: [],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            id: 'empty-provider-result-after-review',
+            type: 'result',
+            text: '',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-accepted-review-terminal',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract,
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-accepted-review-terminal'),
+      ).resolves.toMatchObject({
+        workerType: 'document-reviewer',
+        verdict: 'READY',
+        checks: [{ id: 'cross_document_consistency' }],
+        findings: [],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('classifies an empty repair-planning turn as recoverable action required', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-empty-repair-terminal-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-empty-repair-terminal' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'empty-turn',
+            type: 'turn.empty',
+            text: 'BeeGame Studio ended the turn without a final response.',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-empty-repair-terminal',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode: 'repair-planning',
+          repairPlanTask: {
+            groups: [
+              {
+                subjectPaths: ['docs/GDD.md'],
+                candidatePaths: ['docs/GDD.md'],
+              },
+            ],
+          },
+        },
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-empty-repair-terminal'),
+      ).rejects.toMatchObject({
+        name: 'WorkerNeedsActionError',
+        message:
+          'missing_required_terminal_submission: SubmitDocumentRepairPlan',
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('classifies an empty provider result as recoverable action required', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-empty-provider-result-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-empty-provider-result' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'empty-provider-result',
+            type: 'result',
+            text: '',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-empty-provider-result',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode: 'repair-planning',
+          repairPlanTask: {
+            groups: [
+              {
+                subjectPaths: ['docs/GDD.md'],
+                candidatePaths: ['docs/GDD.md'],
+              },
+            ],
+          },
+        },
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-empty-provider-result'),
+      ).rejects.toMatchObject({
+        name: 'WorkerNeedsActionError',
+        message:
+          'missing_required_terminal_submission: SubmitDocumentRepairPlan',
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps an accepted repair plan when the provider closes with an empty result', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-accepted-repair-terminal-'),
+    )
+    const sessions = {
+      start() {
+        return { id: 'session-accepted-repair-terminal' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'accepted-repair-plan',
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              toolName: 'SubmitDocumentRepairPlan',
+              input: {
+                decisions: [
+                  {
+                    groupDecision: 'Repair the affected document.',
+                    pathDecisions: [
+                      {
+                        path: 'docs/GDD.md',
+                        decision: 'Update the affected rule.',
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            id: 'empty-provider-result-after-acceptance',
+            type: 'result',
+            text: '',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-accepted-repair-terminal',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: [],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode: 'repair-planning',
+          repairPlanTask: {
+            groups: [
+              {
+                subjectPaths: ['docs/GDD.md'],
+                candidatePaths: ['docs/GDD.md'],
+              },
+            ],
+          },
+        },
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-accepted-repair-terminal'),
+      ).resolves.toMatchObject({
+        workerType: 'document-author',
+        status: 'completed',
+        repairPlan: {
+          decisions: [
+            {
+              groupDecision: 'Repair the affected document.',
+            },
+          ],
+        },
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
   })
 
   test('does not expose remediation tools during initial document authoring', async () => {

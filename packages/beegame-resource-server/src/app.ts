@@ -7,6 +7,9 @@ import {
   RESOURCE_PACK_PRIMARY_CATEGORIES,
   RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
+  collectResourceDependencyElementIds,
+  hasConfirmedResourceUsageTags,
+  isResourceDependencyOnlyElement,
   resolveResourceSemanticVisualKind,
   browseResourcePackElements,
   browseResourceCatalogPacks,
@@ -189,8 +192,6 @@ export function createBeeGameResourceServerApp(
         const publishedElements = (await Promise.all(
           publishedPacks.map(pack => options.repository.listElements(pack.id)),
         )).flat()
-        if (await catalogRevision(publishedPacks, publishedElements) !== requested.catalogRevision)
-          throw new ResourceRequestValidationError('Resource Catalog changed after bounded matching; resume requires a new inventory transaction')
         const packById = new Map(publishedPacks.map(pack => [pack.id, pack]))
         const elementsByPack = new Map(publishedPacks.map(pack => [
           pack.id,
@@ -310,8 +311,9 @@ export function createBeeGameResourceServerApp(
         const modelConfigOwnerId = user!.modelConfigOwnerId ?? user!.id
         const modelConfigId = await options.semanticCuration.resolveModelConfigId(modelConfigOwnerId, requestedModelConfigId)
         const elements = await options.repository.listElements(packId)
+        const dependencyElementIds = collectResourceDependencyElementIds(elements)
         const elementIds = elements
-          .filter(element => element.status === 'ready' && resolveResourceSemanticVisualKind(element) !== undefined && element.usageTagsMode !== 'manual-only' && (analysisMode === 'all' || element.usageTagsMode !== 'override'))
+          .filter(element => element.status === 'ready' && resolveResourceSemanticVisualKind(element) !== undefined && element.usageTagsMode !== 'manual-only' && !isResourceDependencyOnlyElement(element, dependencyElementIds) && (analysisMode === 'all' || !hasConfirmedResourceUsageTags(element)))
           .filter(element => isResourceContentHash(element.specs.contentHash))
           .map(element => element.id)
         const job = await options.resourceProcessing.start(packId, elementIds, { kind: 'semantic-curate-elements', analysisMode, curatorRevision: options.semanticCuration.curatorRevision, ownerId: modelConfigOwnerId, modelConfigId })

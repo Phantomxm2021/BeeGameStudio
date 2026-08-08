@@ -7,6 +7,7 @@ import {
   parseResourceSemanticModelDecision,
 } from '../semantic-curation'
 import type { ResourceElement } from '../types'
+import type { ResourceSemanticModelDecision } from '../semantic-curation'
 
 const contentHash = 'a'.repeat(64)
 
@@ -52,6 +53,23 @@ describe('canonical resource semantic decisions', () => {
   test('requires non-empty evidence for every accepted model decision', () => {
     expect(() => parseResourceSemanticModelDecision(decision({ evidence: [] }))).toThrow(
       'evidence must contain at least one item',
+    )
+  })
+
+  test('rejects an empty semantic tag decision before persistence', () => {
+    expect(() => parseResourceSemanticModelDecision(decision({ usageTags: [] }))).toThrow(
+      'usageTags must contain at least one canonical semantic role',
+    )
+
+    expect(() => applyResourceSemanticDecision({
+      id: 'element-1', packId: 'pack-1', name: 'Asset', path: 'asset.png', category: 'textures', kind: 'image',
+      specs: { contentHash }, usageTagsMode: 'inherit', dependencies: [], status: 'ready',
+    }, {
+      elementId: 'element-1', sourceContentHash: contentHash, usageTags: [], confidence: 'high', evidence: [{
+        source: 'content_preview', reference: 'element-1', observation: 'The rendered preview was inspected.',
+      }], curatorRevision: 'semantic-curator-v1',
+    } as ResourceSemanticModelDecision)).toThrow(
+      'usageTags must contain at least one canonical semantic role',
     )
   })
 

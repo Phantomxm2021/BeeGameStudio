@@ -7,7 +7,7 @@ import {
   createProcessIsolatedModelRuntimeHost,
   getModelRuntimeWorkerEnvironment,
   serializeStructuredModelToolResult,
-  type ModelRuntimeWorkerGenerateInput,
+  type ModelRuntimeWorkerRequest,
 } from '../beegame/model-runtime-host'
 
 const providerUrl = 'https://provider.example.test/v1'
@@ -32,7 +32,7 @@ describe('OpenAI-compatible provider pinning', () => {
   })
 
   test('passes only approved, resolved provider targets to the isolated worker', async () => {
-    const workerInputs: ModelRuntimeWorkerGenerateInput[] = []
+    const workerInputs: ModelRuntimeWorkerRequest['input'][] = []
     const host = createProcessIsolatedModelRuntimeHost({
       outboundTargetPolicyOptions: {
         allowedHosts: ['provider.example.test'],

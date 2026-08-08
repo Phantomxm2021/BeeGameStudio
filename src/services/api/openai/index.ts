@@ -13,8 +13,13 @@ import type {
 } from '../../../types/message.js'
 import type { AgentId } from '../../../types/ids.js'
 import type { Tools } from '../../../Tool.js'
+import { getSessionId } from '../../../bootstrap/state.js'
 import { getOpenAIClient } from './client.js'
-import { updateOpenAIUsage } from './openaiShared.js'
+import {
+  formatOpenAIPromptCacheKey,
+  getOfficialOpenAIPromptCacheKey,
+  updateOpenAIUsage,
+} from './openaiShared.js'
 import {
   anthropicMessagesToOpenAI,
   resolveOpenAIModel,
@@ -137,8 +142,7 @@ function isOpenAIConvertibleMessage(
 
 /**
  * Assemble the final AssistantMessage (and optional max_tokens error) from
- * accumulated stream state. Extracted to avoid duplication between the
- * `message_stop` handler and the post-loop safety fallback.
+ * accumulated stream state after the provider adapter emits message_stop.
  */
 function assembleFinalAssistantOutputs(params: {
   partialMessage: BetaMessage | null
@@ -345,14 +349,22 @@ export async function* queryModelOpenAI(
       options.maxOutputTokensOverride,
     )
 
+    const useChatGPTResponses = isChatGPTAuthEnabled()
+    const sessionId = getSessionId()
+    const sessionPromptCacheKey = formatOpenAIPromptCacheKey(sessionId)
+    const promptCacheKey = useChatGPTResponses
+      ? sessionPromptCacheKey
+      : getOfficialOpenAIPromptCacheKey(process.env.OPENAI_BASE_URL, sessionId)
+    const useOfficialOpenAICache = promptCacheKey !== undefined
+
     logForDebugging(
-      `[OpenAI] Calling model=${openaiModel}, messages=${openaiMessages.length}, tools=${openaiTools.length}, thinking=${enableThinking}`,
+      `[OpenAI] Calling model=${openaiModel}, messages=${openaiMessages.length}, tools=${openaiTools.length}, thinking=${enableThinking}${promptCacheKey ? `, prompt_cache_key=${promptCacheKey}` : ''}`,
     )
 
     // 11. Call OpenAI API with streaming. ChatGPT subscription auth uses the
     // Codex Responses backend; API-key/OpenAI-compatible auth keeps the
     // existing Chat Completions adapter.
-    const adaptedStream = isChatGPTAuthEnabled()
+    const adaptedStream = useChatGPTResponses
       ? adaptResponsesStreamToAnthropic(
           await createChatGPTResponsesStream({
             request: buildResponsesRequest({
@@ -361,6 +373,7 @@ export async function* queryModelOpenAI(
               tools: openaiTools,
               toolChoice: openaiToolChoice,
               reasoningEffort,
+              promptCacheKey: sessionPromptCacheKey,
             }),
             signal,
             fetchOverride: options.fetchOverride as unknown as typeof fetch,
@@ -381,10 +394,12 @@ export async function* queryModelOpenAI(
               enableThinking,
               maxTokens,
               temperatureOverride: options.temperatureOverride,
+              promptCacheKey,
             }),
             { signal },
           ),
           openaiModel,
+          { includeCacheWriteTokens: useOfficialOpenAICache },
         )
 
     // 12. Convert OpenAI stream to Anthropic events, then process into
@@ -485,8 +500,8 @@ export async function* queryModelOpenAI(
               }
               yield output
             }
-            // Reset partialMessage so the post-loop safety fallback does not
-            // yield a second identical AssistantMessage.
+            // A provider response becomes an AssistantMessage only at its
+            // validated message_stop boundary.
             partialMessage = null
           }
           // Track cost and token usage
@@ -531,21 +546,6 @@ export async function* queryModelOpenAI(
       tools: convertToolsToLangfuse(toolSchemas as unknown[]),
       ...(enableThinking && { thinking: { type: 'enabled' } }),
     })
-
-    // Safety: if stream ended without message_stop, assemble and yield whatever we have
-    if (partialMessage) {
-      for (const output of assembleFinalAssistantOutputs({
-        partialMessage,
-        contentBlocks,
-        tools,
-        agentId: options.agentId,
-        usage,
-        stopReason,
-        maxTokens,
-      })) {
-        yield output
-      }
-    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })

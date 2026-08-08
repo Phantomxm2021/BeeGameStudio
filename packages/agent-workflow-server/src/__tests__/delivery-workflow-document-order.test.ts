@@ -14,7 +14,10 @@ import {
   startChecklistDraftStage,
   startDocumentStage,
 } from '../beegame/delivery-workflow/document-stage'
-import { validateDocumentReviewSubmission } from '../beegame/delivery-workflow/document-review-input'
+import {
+  documentReviewCheckDependsOnPath,
+  validateDocumentReviewSubmission,
+} from '../beegame/delivery-workflow/document-review-input'
 import { repairPlanMatchesCanonicalGraph } from '../beegame/delivery-workflow/document-repair-graph'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
@@ -593,24 +596,6 @@ describe('single-track document review workflow', () => {
         confirmedBriefDigest: run.confirmedBriefDigest,
       },
     })
-    expect(request.contract.reviewArtifacts).toHaveLength(
-      CANONICAL_FOUNDATION_DOCUMENTS.length + 1,
-    )
-    expect(request.contract.reviewArtifacts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: 'systemDeliveryContract' }),
-      ]),
-    )
-    expect(request.contract.referenceIndex).toMatchObject({
-      artifacts: expect.arrayContaining([
-        expect.objectContaining({ path: 'docs/GDD.md' }),
-      ]),
-      references: expect.arrayContaining([
-        expect.objectContaining({
-          subjectOwner: 'foundation',
-        }),
-      ]),
-    })
     expect(request.contract.artifactPathsByCheck).toMatchObject({
       brief_alignment: expect.not.arrayContaining(['systemDeliveryContract']),
       cross_document_consistency: expect.arrayContaining([
@@ -621,6 +606,46 @@ describe('single-track document review workflow', () => {
         'docs/TECHNICAL_DESIGN.md',
       ]),
     })
+    const firstPacketDependencyPaths = Object.keys(
+      run.documentReviewState.activeCycle!.sourceArtifactDigests,
+    )
+      .filter(path =>
+        (
+          request.contract.currentCheckIds as DocumentReviewCheck['id'][]
+        ).some(checkId => documentReviewCheckDependsOnPath(checkId, path)),
+      )
+      .sort()
+    expect(
+      (request.contract.reviewArtifacts as Array<{ path: string }>)
+        .map(artifact => artifact.path)
+        .sort(),
+    ).toEqual(
+      firstPacketDependencyPaths
+        .filter(path => path !== 'reviewAuthority')
+        .sort(),
+    )
+    const firstPacketReferenceIndex = request.contract.referenceIndex as {
+      artifacts: Array<{ artifactId: string; path: string }>
+      references: Array<{ artifactId: string; subjectOwner?: string }>
+    }
+    expect(
+      firstPacketReferenceIndex.artifacts.map(artifact => artifact.path).sort(),
+    ).toEqual(firstPacketDependencyPaths)
+    const firstPacketArtifactIds = new Set(
+      firstPacketReferenceIndex.artifacts.map(artifact => artifact.artifactId),
+    )
+    expect(
+      firstPacketReferenceIndex.references.every(reference =>
+        firstPacketArtifactIds.has(reference.artifactId),
+      ),
+    ).toBe(true)
+    expect(firstPacketReferenceIndex.references).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subjectOwner: 'foundation',
+        }),
+      ]),
+    )
     expect(
       Object.keys(run.documentReviewState.activeCycle!.sourceArtifactDigests),
     ).toEqual(
@@ -675,6 +700,49 @@ describe('single-track document review workflow', () => {
         'exploit_and_deadlock',
       ],
     })
+    const strategyEconomyDependencyPaths = Object.keys(
+      run.documentReviewState.activeCycle!.sourceArtifactDigests,
+    )
+      .filter(path =>
+        (
+          strategyEconomyDispatch.contract
+            .currentCheckIds as DocumentReviewCheck['id'][]
+        ).some(checkId => documentReviewCheckDependsOnPath(checkId, path)),
+      )
+      .sort()
+    expect(
+      (
+        strategyEconomyDispatch.contract.reviewArtifacts as Array<{
+          path: string
+        }>
+      )
+        .map(artifact => artifact.path)
+        .sort(),
+    ).toEqual(
+      strategyEconomyDependencyPaths
+        .filter(path => path !== 'reviewAuthority')
+        .sort(),
+    )
+    const strategyEconomyReferenceIndex = strategyEconomyDispatch.contract
+      .referenceIndex as {
+      artifacts: Array<{ artifactId: string; path: string }>
+      references: Array<{ artifactId: string }>
+    }
+    expect(
+      strategyEconomyReferenceIndex.artifacts
+        .map(artifact => artifact.path)
+        .sort(),
+    ).toEqual(strategyEconomyDependencyPaths)
+    const strategyEconomyArtifactIds = new Set(
+      strategyEconomyReferenceIndex.artifacts.map(
+        artifact => artifact.artifactId,
+      ),
+    )
+    expect(
+      strategyEconomyReferenceIndex.references.every(reference =>
+        strategyEconomyArtifactIds.has(reference.artifactId),
+      ),
+    ).toBe(true)
     expect(
       documentReviewerDispatchMatchesActivePacket(run, {
         dispatchId: 'old-four-check-packet',

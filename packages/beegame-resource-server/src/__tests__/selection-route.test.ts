@@ -167,7 +167,7 @@ describe('agentic resource exploration routes', () => {
     }))
   })
 
-  test('rejects resolution when the bounded catalog revision is stale', async () => {
+  test('resolves an exact selected element when unrelated catalog facts changed', async () => {
     const app = appFor({ packs: [pack], elements: [element('tower', 'models/tower.glb', ['building'])] })
     const response = await post(app, '/api/resource-library/resolve', {
       catalogRevision: 'stale-revision',
@@ -176,9 +176,9 @@ describe('agentic resource exploration routes', () => {
         elementId: 'tower', selectionReason: ['Selected from the frozen match.'],
       }],
     })
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      error: expect.objectContaining({ message: expect.stringContaining('changed after bounded matching') }),
+      selections: [expect.objectContaining({ resourceId: 'tower', elementId: 'tower' })],
     })
   })
 

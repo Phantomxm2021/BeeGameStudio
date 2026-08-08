@@ -127,3 +127,24 @@ describe('StreamingToolExecutor.discard()', () => {
     expect(internals.turnSpan).toBeNull()
   })
 })
+
+describe('StreamingToolExecutor tool protocol validation', () => {
+  test('rejects a tool use without a provider-assigned identity', () => {
+    const ctx = makeMinimalContext()
+    const executor = new StreamingToolExecutor([], () => true as any, ctx)
+
+    expect(() =>
+      executor.addTool(
+        {
+          type: 'tool_use',
+          id: '',
+          name: '',
+          input: {},
+        } as any,
+        { uuid: 'assistant-1' } as any,
+      ),
+    ).toThrow('Provider returned an invalid tool_use block')
+
+    expect([...executor.getCompletedResults()]).toHaveLength(0)
+  })
+})

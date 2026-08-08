@@ -105,7 +105,11 @@ import { executeStopFailureHooks } from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
 import type { QueuedCommand } from './types/textInputTypes.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
-import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
+import {
+  isValidToolUseBlock,
+  StreamingToolExecutor,
+  assertValidToolUseBlock,
+} from './services/tools/StreamingToolExecutor.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
@@ -162,6 +166,9 @@ function* yieldMissingToolResultBlocks(
 
     // Emit an interruption message for each tool use
     for (const toolUse of toolUseBlocks) {
+      if (!isValidToolUseBlock(toolUse)) {
+        continue
+      }
       yield createUserMessage({
         content: [
           {
@@ -988,6 +995,16 @@ async function* queryLoop(
             let yieldMessage: typeof message = message
             if (message.type === 'assistant') {
               const assistantMsg = message as AssistantMessage
+              const messageToolUseBlocks = (
+                Array.isArray(assistantMsg.message?.content)
+                  ? assistantMsg.message.content
+                  : []
+              ).filter(
+                (content: { type: string }) => content.type === 'tool_use',
+              ) as ToolUseBlock[]
+              for (const toolBlock of messageToolUseBlocks) {
+                assertValidToolUseBlock(toolBlock)
+              }
               const contentArr = Array.isArray(assistantMsg.message?.content)
                 ? (assistantMsg.message.content as unknown as Array<{
                     type: string

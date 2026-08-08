@@ -18,13 +18,51 @@ describe('resource-content worker prompts', () => {
     const prompt = buildWorkerPrompt(request)
     expect(prompt).toContain('JSON')
     expect(prompt).toContain('YAML')
-    expect(prompt).toContain('complete engine-neutral JSON/YAML content')
+    expect(prompt).toContain('engine-neutral JSON/YAML documents')
     expect(prompt).toContain('JSON owns only contract.jsonKinds')
     expect(prompt).toContain('YAML owns only contract.yamlKinds')
     expect(prompt).toContain('contract.requiredRequirementIds')
     expect(prompt).toContain('contract.verifiedResourceIds')
     expect(prompt).toContain('browse the Catalog')
     expect(prompt).toContain('CommitResourceContent exactly once')
+    expect(prompt).toContain(
+      'The only available tools for this worker are Read and CommitResourceContent',
+    )
+    expect(prompt).toContain(
+      'Never call Write, Edit, MultiEdit, NotebookEdit, Bash, or any other generic',
+    )
+    expect(prompt).toContain(
+      'Do not emit DSML/XML/tool-call markup as text',
+    )
+    expect(prompt).toContain('Build the submission in memory')
+    expect(prompt).toContain(
+      'Read only contract.authorityPaths and these exact contract.repairPaths supplied by the workflow boundary',
+    )
+    expect(prompt).toContain(
+      'The CommitResourceContent service reads and preserves protected canonical content',
+    )
+    expect(prompt).toContain('Do not submit any other path')
+  })
+
+  test('projects only readable resource content paths', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'resource-content-author',
+      phase: 'RESOURCE_PREPARATION',
+      revision: 'revision',
+      allowedPaths: ['assets/content/'],
+      contract: {
+        authorityPaths: ['docs/TECHNICAL_DESIGN.md'],
+        repairPaths: ['assets/content/ui-configuration.json'],
+      },
+    })
+    expect(prompt).toContain(
+      'Allowed paths: docs/TECHNICAL_DESIGN.md, assets/content/ui-configuration.json',
+    )
+    expect(prompt).not.toContain('assets/content/resource-registry.json')
   })
 
   test('requires authors and reviewers to keep one resource loading path', () => {
@@ -437,7 +475,7 @@ describe('resource-content worker prompts', () => {
     })
     expect(prompt).toContain('contract.authorityPaths')
     expect(prompt).toContain('browse the Catalog')
-    expect(prompt).toContain('Plan the complete project-required content set')
+    expect(prompt).toContain('Plan only the exact writable paths listed above')
     expect(prompt).toContain(
       'validates the merged set before replacing any file',
     )

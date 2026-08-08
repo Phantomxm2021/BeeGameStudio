@@ -38,6 +38,7 @@ export const RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA = {
           source_content_hash: { type: 'string' },
           usageTags: {
             type: 'array',
+            minItems: 1,
             items: { type: 'string', enum: [...RESOURCE_USAGE_TAGS] },
           },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
@@ -207,6 +208,9 @@ export function parseResourceSemanticModelDecision(value: unknown): ResourceSema
     }
     return tag
   })
+  if (usageTags.length === 0) {
+    throw new ResourceSemanticDecisionError('usageTags must contain at least one canonical semantic role')
+  }
   const evidence = parseEvidence(value.evidence)
   if (!isAllowed(value.confidence, ['high', 'medium', 'low'] as const)) {
     throw new ResourceSemanticDecisionError('confidence is unsupported')
@@ -231,6 +235,28 @@ export function isResourceContentHash(value: unknown): value is string {
   return typeof value === 'string' && value.length === 64 && [...value].every(character => '0123456789abcdef'.includes(character))
 }
 
+export function hasConfirmedResourceUsageTags(
+  element: Pick<ResourceElement, 'usageTags' | 'usageTagsMode'>,
+): boolean {
+  return element.usageTagsMode === 'override' && Boolean(element.usageTags?.length)
+}
+
+export function collectResourceDependencyElementIds(
+  elements: readonly Pick<ResourceElement, 'dependencies' | 'dependencyBindings'>[],
+): ReadonlySet<string> {
+  return new Set(elements.flatMap(element => [
+    ...element.dependencies,
+    ...(element.dependencyBindings ?? []).map(binding => binding.dependencyElementId),
+  ]))
+}
+
+export function isResourceDependencyOnlyElement(
+  element: Pick<ResourceElement, 'id' | 'usageTags'>,
+  dependencyElementIds: ReadonlySet<string>,
+): boolean {
+  return dependencyElementIds.has(element.id) && !(element.usageTags?.length)
+}
+
 export function semanticDecisionReceiptId(decision: ResourceSemanticModelDecision): string {
   return `semantic:${decision.elementId}:${decision.sourceContentHash}:${decision.curatorRevision}`
 }
@@ -242,9 +268,12 @@ export function applyResourceSemanticDecision(
 ): ResourceSemanticCommitResult {
   if (element.id !== decision.elementId) throw new ResourceSemanticDecisionError('semantic decision element identity does not match')
   if (element.specs.contentHash !== decision.sourceContentHash) throw new ResourceSemanticDecisionError('semantic decision content hash is stale')
+  if (decision.usageTags.length === 0) {
+    throw new ResourceSemanticDecisionError('usageTags must contain at least one canonical semantic role')
+  }
   const receiptId = semanticDecisionReceiptId(decision)
   if (element.usageTagsMode === 'manual-only') return { receiptId, outcome: 'skipped', element }
-  const hasElementOwnedUsageTags = element.usageTagsMode === 'override' ||
+  const hasElementOwnedUsageTags = hasConfirmedResourceUsageTags(element) ||
     (element.usageTagsMode === undefined && Boolean(element.usageTags?.length))
   if (!options.replaceExisting && hasElementOwnedUsageTags) return { receiptId, outcome: 'skipped', element }
   return {

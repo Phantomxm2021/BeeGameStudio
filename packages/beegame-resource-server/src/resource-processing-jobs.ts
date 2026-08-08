@@ -29,23 +29,6 @@ export type ResourceProcessingBatchReceipt = {
   retryItems: readonly ResourceProcessingBatchRetry[]
   usage?: ResourceProcessingUsage
 }
-export type ResourceProcessingBatchContext = {
-  elementId: string
-  sourceContentHash?: string
-  curatorRevision?: string
-  ownerId?: string
-  modelConfigId?: string
-  jobId: string
-  attempt: number
-}
-export type ResourceProcessingProviderBatchResult =
-  | { status: 'processing' }
-  | { status: 'ended'; receipt: ResourceProcessingBatchReceipt }
-export type ResourceProcessingProviderBatchSubmission = {
-  providerBatchId?: string
-  retryItems?: readonly ResourceProcessingBatchRetry[]
-}
-export type ResourceProcessingProviderBatchStatus = 'submitting' | 'processing' | 'ended' | 'unknown'
 export type ResourceProcessingJob = {
   id: string
   packId: string
@@ -62,8 +45,6 @@ export type ResourceProcessingJob = {
   analysisMode?: ResourceSemanticAnalysisMode
   retryOfJobId?: string
   usage?: ResourceProcessingUsage
-  providerBatchId?: string
-  providerBatchStatus?: ResourceProcessingProviderBatchStatus
 }
 export type ResourceProcessingFailure = {
   elementId: string
@@ -73,7 +54,7 @@ export type ResourceProcessingFailure = {
 }
 
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-type JobRow = UsageRow & { id: string; pack_id: string; kind: ResourceProcessingJobKind; status: ResourceProcessingJobStatus; total_items: number; completed_items: number; failed_items: number; owner_id?: string | null; model_config_id?: string | null; analysis_mode?: ResourceSemanticAnalysisMode | null; retry_of_job_id?: string | null; provider_batch_id?: string | null; provider_batch_status?: ResourceProcessingProviderBatchStatus | null; created_at: string; updated_at: string }
+type JobRow = UsageRow & { id: string; pack_id: string; kind: ResourceProcessingJobKind; status: ResourceProcessingJobStatus; total_items: number; completed_items: number; failed_items: number; owner_id?: string | null; model_config_id?: string | null; analysis_mode?: ResourceSemanticAnalysisMode | null; retry_of_job_id?: string | null; created_at: string; updated_at: string }
 type ItemRow = UsageRow & { id: string; job_id: string; element_id: string; status: ResourceProcessingJobStatus; attempts: number; source_content_hash?: string | null; curator_revision?: string | null; batch_id?: string | null; batch_receipt_id?: string | null; failure_stage?: ResourceSemanticRuntimeFailureStage | null; failure_trace_id?: string | null; last_error?: string | null }
 
 export type ResourceProcessingHandlers = {
@@ -89,9 +70,7 @@ export function createSupabaseResourceProcessingHandlers(options: {
   baseUrl: string
   serviceRoleKey: string
   inspectElement: (packId: string, elementId: string) => Promise<ResourceElement | undefined>
-  submitProviderBatch?: (kind: ResourceProcessingJobKind, packId: string, batchId: string, items: readonly ResourceProcessingBatchContext[], analysisMode: ResourceSemanticAnalysisMode) => Promise<ResourceProcessingProviderBatchSubmission>
-  retrieveProviderBatch?: (kind: ResourceProcessingJobKind, packId: string, batchId: string, providerBatchId: string, items: readonly ResourceProcessingBatchContext[], analysisMode: ResourceSemanticAnalysisMode) => Promise<ResourceProcessingProviderBatchResult>
-  assertProviderBatchReady?: (ownerId: string, modelConfigId: string) => Promise<void>
+  processBatch?: (kind: ResourceProcessingJobKind, packId: string, batchId: string, items: readonly { elementId: string; sourceContentHash?: string; curatorRevision?: string; ownerId?: string; modelConfigId?: string; jobId: string; attempt: number }[], analysisMode: ResourceSemanticAnalysisMode) => Promise<ResourceProcessingBatchReceipt | undefined>
   canProcessKind?: (kind: ResourceProcessingJobKind) => boolean
   fetchImpl?: FetchImplementation
   concurrency?: number
@@ -160,13 +139,13 @@ export function createSupabaseResourceProcessingHandlers(options: {
         for (;;) {
           const [job] = await request<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(jobId)}&select=*`)
           if (!job || job.status === 'cancelled') return
+          const limit = job.kind === 'semantic-curate-elements' ? Math.max(1, Math.min(8, options.batchSize ?? 8)) : 1
           const running = job.kind === 'semantic-curate-elements'
-            ? await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}&status=eq.running&order=created_at.asc&select=*`)
+            ? await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}&status=eq.running&order=created_at.asc&limit=${limit}&select=*`)
             : []
-          const limit = job.kind === 'semantic-curate-elements' ? undefined : 1
           const candidates = running.length > 0
             ? running
-            : await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}&status=eq.queued&order=updated_at.asc,created_at.asc${limit ? `&limit=${limit}` : ''}&select=*`)
+            : await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}&status=eq.queued&order=updated_at.asc,created_at.asc&limit=${limit}&select=*`)
           if (!candidates.length) return
           const claimed: ItemRow[] = []
           const existingBatchId = running[0]?.batch_id?.trim() || candidates.find(item => item.batch_id?.trim())?.batch_id?.trim() || ''
@@ -185,65 +164,24 @@ export function createSupabaseResourceProcessingHandlers(options: {
             if (item) claimed.push(item)
           }
           if (!claimed.length) continue
-          let activeClaimed = claimed
-          let contexts = claimed.map(item => ({
-            elementId: item.element_id,
-            ...(item.source_content_hash ? { sourceContentHash: item.source_content_hash } : {}),
-            ...(item.curator_revision ? { curatorRevision: item.curator_revision } : {}),
-            ...(job.owner_id ? { ownerId: job.owner_id } : {}),
-            ...(job.model_config_id ? { modelConfigId: job.model_config_id } : {}),
-            jobId: job.id,
-            attempt: item.attempts,
-          })) satisfies ResourceProcessingBatchContext[]
-          let providerBatchId = job.provider_batch_id?.trim() || ''
-          let providerSubmissionStarted = false
           try {
             if (job.kind === 'inspect-elements') {
               const element = await options.inspectElement(job.pack_id, claimed[0]!.element_id)
               if (!element) throw new Error('Resource element not found')
               await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(claimed[0]!.id)}`, 'PATCH', { status: 'completed', updated_at: new Date().toISOString() })
             } else {
-              if (!options.submitProviderBatch || !options.retrieveProviderBatch) throw new Error('Semantic resource provider batch processing is not configured')
-              if (job.provider_batch_status === 'unknown') throw new Error('Resource provider batch submission state is unknown; manual recovery is required')
-              if (job.provider_batch_status === 'submitting' && !providerBatchId) throw new Error('Resource provider batch submission state is unknown; manual recovery is required')
-              let providerResult: ResourceProcessingProviderBatchResult
-              if (!providerBatchId) {
-                if (!job.owner_id?.trim() || !job.model_config_id?.trim()) throw new Error('Resource semantic processing model identity is missing')
-                if (options.assertProviderBatchReady) await options.assertProviderBatchReady(job.owner_id, job.model_config_id)
-                await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}&status=in.(queued,running)`, 'PATCH', { provider_batch_id: null, provider_batch_status: 'submitting', updated_at: new Date().toISOString() })
-                providerSubmissionStarted = true
-                const submission = await options.submitProviderBatch(job.kind, job.pack_id, batchId, contexts, job.analysis_mode ?? 'missing')
-                const submissionRetries = submission.retryItems ?? []
-                const submissionRetryIds = new Set<string>()
-                for (const retry of submissionRetries) {
-                  if (!retry.error.trim() || !claimed.some(item => item.element_id === retry.elementId) || submissionRetryIds.has(retry.elementId)) throw new Error('Resource semantic provider batch submission retry is invalid')
-                  submissionRetryIds.add(retry.elementId)
-                }
-                for (const item of claimed.filter(candidate => submissionRetryIds.has(candidate.element_id))) {
-                  const retry = submissionRetries.find(candidate => candidate.elementId === item.element_id)!
-                  await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(item.id)}&status=eq.running`, 'PATCH', { status: 'queued', batch_id: null, batch_receipt_id: null, last_error: retry.error, ...(retry.stage ? { failure_stage: retry.stage } : { failure_stage: null }), ...(retry.traceId ? { failure_trace_id: retry.traceId } : { failure_trace_id: null }), updated_at: new Date().toISOString() })
-                }
-                activeClaimed = claimed.filter(item => !submissionRetryIds.has(item.element_id))
-                contexts = contexts.filter(context => !submissionRetryIds.has(context.elementId))
-                if (!activeClaimed.length) {
-                  await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}`, 'PATCH', { provider_batch_id: null, provider_batch_status: null, updated_at: new Date().toISOString() })
-                  await updateAggregate(jobId)
-                  scheduleRetry(jobId)
-                  return
-                }
-                providerBatchId = submission.providerBatchId?.trim() || ''
-                if (!providerBatchId) throw new Error('Native provider batch did not return a durable id')
-                await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}&status=in.(queued,running)`, 'PATCH', { provider_batch_id: providerBatchId, provider_batch_status: 'processing', updated_at: new Date().toISOString() })
-              }
-              providerResult = await options.retrieveProviderBatch(job.kind, job.pack_id, batchId, providerBatchId, contexts, job.analysis_mode ?? 'missing')
-              if (providerResult.status === 'processing') {
-                await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}&status=in.(queued,running)`, 'PATCH', { provider_batch_id: providerBatchId, provider_batch_status: 'processing', updated_at: new Date().toISOString() })
-                scheduleRetry(job.id)
-                return
-              }
-              const receipt = providerResult.receipt
+              if (!options.processBatch) throw new Error('Semantic resource processing is not configured')
+              const receipt = await options.processBatch(job.kind, job.pack_id, batchId, claimed.map(item => ({
+                elementId: item.element_id,
+                ...(item.source_content_hash ? { sourceContentHash: item.source_content_hash } : {}),
+                ...(item.curator_revision ? { curatorRevision: item.curator_revision } : {}),
+                ...(job.owner_id ? { ownerId: job.owner_id } : {}),
+                ...(job.model_config_id ? { modelConfigId: job.model_config_id } : {}),
+                jobId: job.id,
+                attempt: item.attempts,
+              })), job.analysis_mode ?? 'missing')
               if (!receipt?.batchId?.trim() || receipt.batchId !== batchId) throw new Error('accepted durable semantic batch receipt is required')
-              const expectedIds = new Set(activeClaimed.map(item => item.element_id))
+              const expectedIds = new Set(claimed.map(item => item.element_id))
               const seenIds = new Set<string>()
               for (const result of receipt.items) {
                 if (!result.receiptId.trim() || !expectedIds.has(result.elementId) || seenIds.has(result.elementId)) throw new Error('accepted durable semantic batch receipt is invalid')
@@ -255,7 +193,7 @@ export function createSupabaseResourceProcessingHandlers(options: {
                 retryIds.add(retry.elementId)
               }
               if (seenIds.size + retryIds.size !== expectedIds.size) throw new Error('accepted durable semantic batch receipt is incomplete')
-              for (const [index, item] of activeClaimed.entries()) {
+              for (const [index, item] of claimed.entries()) {
                 const usage = index === 0 ? addUsage(usageFromRow(item), receipt.usage ?? emptyUsage()) : usageFromRow(item)
                 if (retryIds.has(item.element_id)) {
                   const retry = receipt.retryItems.find(candidate => candidate.elementId === item.element_id)!
@@ -269,39 +207,13 @@ export function createSupabaseResourceProcessingHandlers(options: {
                   await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(item.id)}&status=eq.running`, 'PATCH', { status: 'completed', batch_id: batchId, batch_receipt_id: `${batchId}:accepted`, ...usageToRow(usage), updated_at: new Date().toISOString() })
                 }
               }
-              await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}`, 'PATCH', { provider_batch_id: null, provider_batch_status: null, updated_at: new Date().toISOString() })
               await updateAggregate(jobId)
-              if (retryIds.size === activeClaimed.length) {
+              if (retryIds.size === claimed.length) {
                 scheduleRetry(jobId)
                 return
               }
             }
           } catch (error) {
-            if (job.kind === 'semantic-curate-elements' && (providerBatchId || providerSubmissionStarted || job.provider_batch_status === 'submitting' || job.provider_batch_status === 'unknown')) {
-              const diagnostic = processingFailureDiagnostic(error)
-              const providerStatus = providerBatchId ? 'processing' : 'unknown'
-              try {
-                await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(job.id)}`, 'PATCH', { provider_batch_id: providerBatchId || null, provider_batch_status: providerStatus, status: providerBatchId ? 'running' : 'failed', updated_at: new Date().toISOString() })
-              } catch {
-                // The provider submission identity is not safe to regenerate. Leave the durable row authoritative.
-              }
-              if (!providerBatchId) {
-                for (const item of claimed) {
-                  await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(item.id)}`, 'PATCH', { status: 'failed', batch_id: batchId, last_error: diagnostic.message, ...(diagnostic.stage ? { failure_stage: diagnostic.stage } : {}), ...(diagnostic.traceId ? { failure_trace_id: diagnostic.traceId } : {}), updated_at: new Date().toISOString() })
-                }
-                await updateAggregate(jobId)
-                return
-              }
-              if (isResourceExternalTransportError(error)) {
-                scheduleRetry(job.id)
-                return
-              }
-              for (const item of claimed) {
-                await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(item.id)}&status=eq.running`, 'PATCH', { status: 'failed', batch_id: batchId, last_error: diagnostic.message, ...(diagnostic.stage ? { failure_stage: diagnostic.stage } : {}), ...(diagnostic.traceId ? { failure_trace_id: diagnostic.traceId } : {}), updated_at: new Date().toISOString() })
-              }
-              await updateAggregate(jobId)
-              return
-            }
             if (isResourceExternalTransportError(error)) {
               for (const item of claimed) {
                 await mutate<ItemRow>(`beegame_resource_processing_items?id=eq.${encodeURIComponent(item.id)}&status=eq.running`, 'PATCH', { status: 'queued', last_error: null, updated_at: new Date().toISOString() })
@@ -328,7 +240,7 @@ export function createSupabaseResourceProcessingHandlers(options: {
           await updateAggregate(jobId)
         }
       }
-      const workerCount = options.submitProviderBatch ? 1 : Math.max(1, Math.min(4, options.concurrency ?? 2))
+      const workerCount = options.processBatch ? 1 : Math.max(1, Math.min(4, options.concurrency ?? 2))
       await Promise.all(Array.from({ length: workerCount }, () => worker()))
       const finalJob = await updateAggregate(jobId)
       if (finalJob && finalJob.failed_items > 0 && finalJob.status === 'failed') {
@@ -380,7 +292,6 @@ export function createSupabaseResourceProcessingHandlers(options: {
       if (kind === 'semantic-curate-elements' && !curatorRevision) throw new Error('Semantic resource processing curator revision is required')
       if (kind === 'semantic-curate-elements' && (!startOptions.ownerId?.trim() || !startOptions.modelConfigId?.trim())) throw new Error('Semantic resource processing model identity is required')
       if (options.canProcessKind && !options.canProcessKind(kind)) throw new Error('Semantic resource processing is not configured')
-      if (kind === 'semantic-curate-elements' && options.assertProviderBatchReady) await options.assertProviderBatchReady(startOptions.ownerId!.trim(), startOptions.modelConfigId!.trim())
       const available = await request<{ id: string; content_profile?: unknown; specs?: Record<string, unknown> }>(`beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&select=id,content_profile,specs`)
       const availableIds = new Set(available.map(row => row.id))
       const ids = elementIds?.length
@@ -455,7 +366,7 @@ export function createSupabaseResourceProcessingHandlers(options: {
 
 function toJob(row: JobRow): ResourceProcessingJob {
   const usage = usageFromRow(row)
-  return { id: row.id, packId: row.pack_id, kind: row.kind, status: row.status, totalItems: row.total_items, completedItems: row.completed_items, failedItems: row.failed_items, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.owner_id ? { ownerId: row.owner_id } : {}), ...(row.model_config_id ? { modelConfigId: row.model_config_id } : {}), ...(row.kind === 'semantic-curate-elements' ? { analysisMode: row.analysis_mode ?? 'missing' } : {}), ...(row.retry_of_job_id ? { retryOfJobId: row.retry_of_job_id } : {}), ...(row.provider_batch_id ? { providerBatchId: row.provider_batch_id } : {}), ...(row.provider_batch_status ? { providerBatchStatus: row.provider_batch_status } : {}), ...(hasUsageColumns(row) ? { usage } : {}) }
+  return { id: row.id, packId: row.pack_id, kind: row.kind, status: row.status, totalItems: row.total_items, completedItems: row.completed_items, failedItems: row.failed_items, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.owner_id ? { ownerId: row.owner_id } : {}), ...(row.model_config_id ? { modelConfigId: row.model_config_id } : {}), ...(row.kind === 'semantic-curate-elements' ? { analysisMode: row.analysis_mode ?? 'missing' } : {}), ...(row.retry_of_job_id ? { retryOfJobId: row.retry_of_job_id } : {}), ...(hasUsageColumns(row) ? { usage } : {}) }
 }
 
 const USAGE_ROW_KEYS = ['input_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'output_tokens', 'total_tokens', 'credits_micro'] as const

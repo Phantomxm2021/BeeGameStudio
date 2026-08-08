@@ -995,7 +995,7 @@ describe('BeeGame session runtime resilience', () => {
         requiredRequirementIds: [],
         verifiedResourceIds: [],
         inventoryBindings: [],
-        protectedPaths: [],
+        writablePaths: ['assets/content/resource-registry.json'],
       },
     })
 

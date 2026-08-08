@@ -1,6 +1,9 @@
 import {
   RESOURCE_USAGE_TAGS,
   applyResourceSemanticDecision,
+  collectResourceDependencyElementIds,
+  hasConfirmedResourceUsageTags,
+  isResourceDependencyOnlyElement,
   withResourceExternalTransport,
   type PackSummary,
   type ResourceCategory,
@@ -350,12 +353,13 @@ export function createSupabaseResourceRepository(
     },
     async listCuration(packId): Promise<ResourceCurationQueue> {
       const elements = await this.listElements(packId)
-      const items = elements.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only')
+      const dependencyElementIds = collectResourceDependencyElementIds(elements)
+      const items = elements.filter(element => element.status === 'ready' && !isResourceDependencyOnlyElement(element, dependencyElementIds) && !hasConfirmedResourceUsageTags(element) && element.usageTagsMode !== 'manual-only')
       return {
         items,
         counts: {
           pendingItems: items.length,
-          missingSemanticTags: elements.filter(element => element.status === 'ready' && element.usageTagsMode !== 'override' && element.usageTagsMode !== 'manual-only').length,
+        missingSemanticTags: elements.filter(element => element.status === 'ready' && !isResourceDependencyOnlyElement(element, dependencyElementIds) && !hasConfirmedResourceUsageTags(element) && element.usageTagsMode !== 'manual-only').length,
           technicalIssues: elements.filter(element => !element.assetKind || typeof element.specs.contentHash !== 'string').length,
           dependencyIssues: elements.filter(element => element.dependencies.some(id => !elements.some(candidate => candidate.id === id))).length,
         },

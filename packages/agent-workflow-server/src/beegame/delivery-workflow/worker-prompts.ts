@@ -6,9 +6,25 @@ import {
 } from './types'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
-  const scope = request.allowedPaths?.length
-    ? request.allowedPaths.join(', ')
-    : 'read-only'
+  const resourceContentReadPaths =
+    request.workerType === 'resource-content-author'
+      ? [
+          ...(Array.isArray(request.contract.authorityPaths)
+            ? request.contract.authorityPaths
+            : []),
+          ...(Array.isArray(request.contract.repairPaths)
+            ? request.contract.repairPaths
+            : []),
+        ].filter(
+          (path, index, paths): path is string =>
+            typeof path === 'string' && paths.indexOf(path) === index,
+        )
+      : []
+  const scope = resourceContentReadPaths.length
+    ? resourceContentReadPaths.join(', ')
+    : request.allowedPaths?.length
+      ? request.allowedPaths.join(', ')
+      : 'read-only'
   const canonicalArtifacts =
     (request.workerType === 'document-author' &&
       request.contract.documentSet === 'foundation') ||
@@ -40,8 +56,12 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 }
 
 function formatContract(request: WorkerDispatchRequest): string {
+  if (request.workerType === 'resource-content-author')
+    return JSON.stringify(formatResourceContentContract(request.contract))
   if (request.workerType !== 'document-reviewer')
-    return JSON.stringify(request.contract)
+    return JSON.stringify(
+      request.contract,
+    )
   const {
     reviewArtifacts,
     referenceIndex,
@@ -101,6 +121,76 @@ function formatContract(request: WorkerDispatchRequest): string {
     '--- END REVIEW ACTIVE PACKET ---',
     ...changeBlocks,
   ].join('\n')
+}
+
+function formatResourceContentContract(
+  contract: Record<string, unknown>,
+): Record<string, unknown> {
+  const allowedKeys = [
+    'task',
+    'contentRoot',
+    'schema',
+    'jsonKinds',
+    'yamlKinds',
+    'authorityPaths',
+    'repairPaths',
+    'currentContentIssues',
+    'requiredRequirementIds',
+    'verifiedResourceIds',
+    'inventoryBindings',
+    'inventoryRevision',
+    'baselineResourceRevision',
+  ] as const
+  const projection = Object.fromEntries(
+    allowedKeys.flatMap(key =>
+      Object.prototype.hasOwnProperty.call(contract, key)
+        ? [[key, contract[key]]]
+        : [],
+    ),
+  )
+  const remediation = contract.remediation
+  if (remediation && typeof remediation === 'object' && !Array.isArray(remediation)) {
+    const findings = (remediation as Record<string, unknown>).findings
+    if (Array.isArray(findings)) {
+      const paths = new Set(
+        Array.isArray(contract.repairPaths)
+          ? contract.repairPaths.filter(
+              (path): path is string => typeof path === 'string',
+            )
+          : [],
+      )
+      projection.remediation = {
+        kind: (remediation as Record<string, unknown>).kind,
+        cycleId: (remediation as Record<string, unknown>).cycleId,
+        findings: findings
+          .filter(value => {
+            if (!value || typeof value !== 'object' || Array.isArray(value))
+              return false
+            const subjects = (value as Record<string, unknown>).subjects
+            return (
+              Array.isArray(subjects) &&
+              subjects.some(subject => {
+                if (!subject || typeof subject !== 'object' || Array.isArray(subject))
+                  return false
+                const subjectPath = (subject as Record<string, unknown>).path
+                return typeof subjectPath === 'string' && paths.has(subjectPath)
+              })
+            )
+          })
+          .map(value => {
+            const finding = value as Record<string, unknown>
+            return {
+              findingId: finding.findingId,
+              rootCause: finding.rootCause,
+              impact: finding.impact,
+              requiredOutcome: finding.requiredOutcome,
+              subjects: finding.subjects,
+            }
+          }),
+      }
+    }
+  }
+  return projection
 }
 
 function projectVisiblePriorFindings(input: {
@@ -298,26 +388,38 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       ].join(' ')
     case 'resource-planner':
       return [
-        'Create the canonical Resource Production plan from only contract.authorityPaths and the confirmed brief. ASSET_PLAN owns the complete resource duties, ART_DIRECTION owns presentation constraints, and TECHNICAL_DESIGN owns runtime-consumable output formats. Do not reopen review or read other project documents.',
+        request.contract.remediation
+          ? 'This is one accepted resource-plan repair batch. Apply only the supplied Manifest finding outcomes, preserve all unrelated approved requirements and resource records, and submit the complete corrected plan through AssetManifest. Do not repair inventory or content findings in this dispatch.'
+          : 'Create the canonical Resource Production plan from only contract.authorityPaths and the confirmed brief. ASSET_PLAN owns the complete resource duties, ART_DIRECTION owns presentation constraints, and TECHNICAL_DESIGN owns runtime-consumable output formats. Do not reopen review or read other project documents.',
         'Use AssetManifest submit_resource_plan exactly once. The service owns Manifest version, resource policy and canonical roots. Submit runtime target capabilities and complete stable requirements. Every requirement must include one structured acquisition_profile containing only canonical dimensions, asset kinds, usage tags, source-intrinsic required capabilities and approved style values. Composition, placement, scaling, connection, scene assembly and runtime behavior are content or implementation duties, never source-intrinsic acquisition constraints. Never infer this profile from IDs or filenames.',
         'Never use target output formats as source-format admission rules. Source material may use another format when the current target adapter declares a deterministic direct or conversion delivery capability.',
         'Do not browse the Resource Library, create or download files, write JSON/YAML, or implement gameplay. A successful plan submission ends this dispatch.',
       ].join(' ')
     case 'resource-curator':
       return [
-        'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
-        'Call ResourceLibrary match_requirements once. Choose one returned bundle per requirement and judge only its authored metadata and technical facts, never filename, keywords, regular expressions, project names or requirement IDs.',
+        request.contract.remediation
+          ? 'This is one accepted resource-inventory repair batch. Resolve only the supplied inventory findings against the established Manifest and approved Resource Library facts. Do not modify requirements or content files.'
+          : 'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
+        'Call ResourceLibrary match_requirements once. For a matched requirement, choose one returned bundle and judge only its authored metadata and technical facts, never filename, keywords, regular expressions, project names or requirement IDs. A no-match requirement may use one or more independently replaceable placeholders when its declared duties need separate resources; never mix library and placeholder decisions for one requirement.',
         'A suitable candidate may satisfy its requirement through direct delivery or a declared target conversion adapter. Choose exact candidate identities. Use a placeholder decision for every service-proven no-match group so missing library material never stops delivery.',
-        'Submit one complete decision set through CommitResourceInventory. It is the only mutation and terminal operation, preserves exact dependency closure, resumes durable progress after interruption, and derives bindings from the committed inventory. Do not write content or gameplay code.',
+        'Submit one complete decision set through CommitResourceInventory. If a prior submission created a prepared or applying durable receipt, submit decisions: [] to resume that exact receipt instead of reconstructing decisions. It is the only mutation and terminal operation, preserves exact dependency closure, resumes durable progress after interruption, and derives bindings from the committed inventory. Do not write content or gameplay code.',
       ].join(' ')
-    case 'resource-content-author':
+    case 'resource-content-author': {
+      const writablePaths = Array.isArray(request.contract.repairPaths)
+        ? request.contract.repairPaths.filter(
+            (path): path is string => typeof path === 'string',
+          )
+        : []
       return [
-        'Build the complete engine-neutral JSON/YAML content description from contract.authorityPaths and the frozen canonical identities in contract.requiredRequirementIds, contract.verifiedResourceIds and contract.inventoryBindings. Do not read assets/asset-manifest.json or assets/manifest/**, browse the Catalog, download, create or register resources, change the plan, or write gameplay code.',
+        `Build only the engine-neutral JSON/YAML documents at these exact writable paths from contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths; object keys are unique, so never use an array or repeat a path. Do not submit any other path; the service preserves every other canonical content document. The only available tools for this worker are Read and CommitResourceContent. Read only contract.authorityPaths and these exact contract.repairPaths supplied by the workflow boundary. Build from the frozen identities in contract.requiredRequirementIds, contract.verifiedResourceIds and contract.inventoryBindings. The CommitResourceContent service reads and preserves protected canonical content; do not read protected paths merely to copy them. Never call Write, Edit, MultiEdit, NotebookEdit, Bash, or any other generic, discovery, file-mutation, or extra-tool operation; those calls are protocol errors and are not intermediate steps. Do not emit DSML/XML/tool-call markup as text. Build the submission in memory and make exactly one native CommitResourceContent call. Do not read assets/asset-manifest.json or assets/manifest/**, browse the Catalog, download, create or register resources, change the plan, or write gameplay code.`,
         'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
-        'Plan the complete project-required content set before mutation, then call CommitResourceContent once with every unlocked document. The service serializes JSON/YAML and validates the merged set before replacing any file. Do not use generic file mutation tools.',
-        'contract.preservedPaths are already-valid canonical documents. Read them only when needed as authority and never resubmit or rewrite them. Repair or create only unlocked documents needed to eliminate contract.currentContentIssues and missing coverage.',
+        request.contract.remediation
+          ? 'This is one accepted resource-content repair batch. Resolve only the supplied content findings and preserve the protected canonical content. Do not attempt to repair Manifest, inventory or Resource Library findings.'
+          : 'Plan only the exact writable paths listed above in memory, then call CommitResourceContent once with that complete writable set. The service serializes JSON/YAML and validates the merged set before replacing any file. Do not use generic file mutation tools. There is no intermediate file-writing step and no second submission syntax.',
+        'The service preserves every canonical document outside the exact writable path list during the atomic commit; never read, resubmit or rewrite those documents.',
         'If verified inventory is genuinely missing, call CommitResourceContent needs_inventory with the exact missing requirement IDs. Do not invent a path, identity or embedded substitute.',
       ].join(' ')
+    }
     case 'atomic-task-planner':
       return [
         'Use contract.planningDocuments plus resourceIds and contentIds as the complete authority. Do not read the workspace, edit files or search resources.',
@@ -350,9 +452,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'resource-planner':
       return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
     case 'resource-curator':
-      return 'Call CommitResourceInventory exactly once with the complete bounded-match decision set. The committed receipt is the terminal; do not return terminal JSON.'
+      return 'Call CommitResourceInventory exactly once with the complete bounded-match decision set, or with decisions: [] when resuming an existing prepared/applying receipt. The committed receipt is the terminal; do not return terminal JSON.'
     case 'resource-content-author':
-      return 'Call CommitResourceContent exactly once with either the complete canonical commit or the exact needs_inventory requirement IDs. The accepted call is the terminal; do not return terminal JSON or completion prose.'
+      return 'Call CommitResourceContent exactly once with exactly the frozen writable document paths, or with the exact needs_inventory requirement IDs. The accepted call is the terminal; do not return terminal JSON or completion prose.'
     case 'atomic-task-planner':
       return 'Call SubmitAtomicTaskPlan exactly once. Assign every checklist ID to one task and declare resource/content dependencies directly on tasks.'
     case 'implementation-worker':

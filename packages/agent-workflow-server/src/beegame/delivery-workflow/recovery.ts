@@ -1075,12 +1075,17 @@ export async function stopRun(input: {
     runId: input.runId,
     sessionIsOpen: input.sessionIsOpen,
   })
+  let persisted: DeliveryRun
+  const dispatchId =
+    acquired.run.activeDispatch?.status === 'running'
+      ? acquired.run.activeDispatch.dispatchId
+      : undefined
   try {
     const stopped = transitionDeliveryRun(acquired.run, {
       type: 'stop',
       reason: input.reason,
     })
-    const persisted = {
+    persisted = {
       ...stopped,
       activeDispatch:
         stopped.activeDispatch?.status === 'running'
@@ -1091,12 +1096,7 @@ export async function stopRun(input: {
             }
           : stopped.activeDispatch,
     }
-    if (acquired.run.activeDispatch?.status === 'running')
-      await input.stopDispatch?.(
-        acquired.run.activeDispatch.dispatchId,
-        input.reason,
-      )
-    return input.store.commit(
+    persisted = await input.store.commit(
       persisted,
       {
         runId: persisted.runId,
@@ -1112,4 +1112,6 @@ export async function stopRun(input: {
   } finally {
     await acquired.unlock()
   }
+  if (dispatchId) await input.stopDispatch?.(dispatchId, input.reason)
+  return persisted
 }

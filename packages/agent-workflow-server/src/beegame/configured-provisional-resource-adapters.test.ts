@@ -31,6 +31,8 @@ describe('configured provisional resource adapters', () => {
     expect(result.descriptor).toEqual(expect.objectContaining({
       representation: 'programmatic-recipe',
     }))
+    expect(CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS.find(item => item.format === 'json')?.assetKinds).not.toContain('ambience')
+    expect(CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS.find(item => item.format === 'wav')?.assetKinds).toContain('ambience')
   })
 
   test('projects only active target adapters into the sole commit tool prompt', async () => {
@@ -38,14 +40,28 @@ describe('configured provisional resource adapters', () => {
     await writeBeeGameAssetManifest(workspacePath, {
       version: 8,
       project_target: {
-        asset_format_capabilities: ['png', 'json'],
+        asset_format_capabilities: ['png', 'json', 'wav'],
         resource_library_usage: 'preferred',
         runtime_asset_root: 'assets/runtime',
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements: [],
-      resources: [],
+      resources: [{
+        id: 'route-surface-provisional',
+        source: {
+          type: 'agent-authored',
+          created_at: '2026-01-01T00:00:00.000Z',
+          reason: 'Existing provisional resource.',
+        },
+        root_path: 'assets/runtime/models/route_surface.gltf',
+        file_paths: ['assets/runtime/models/route_surface.gltf'],
+        provisional: true,
+        status: 'verified',
+        selected_at: '2026-01-01T00:00:00.000Z',
+        selection_reason: ['Existing stable resource.'],
+        asset_kind: 'model',
+      }],
     })
     const tool = createNativeResourceInventoryCommitTool({
       buildTool: definition => definition,
@@ -62,9 +78,14 @@ describe('configured provisional resource adapters', () => {
     try {
       const prompt = await tool.prompt()
       expect(prompt).toContain('png:')
+      expect(prompt).toContain('color must be one of cyan, amber, green, red, violet, neutral')
+      expect(prompt).toContain('wav:')
+      expect(prompt).toContain('parameters must contain exactly cue_ids')
       expect(prompt).toContain('json:')
       expect(prompt).not.toContain('gltf:')
-      expect(prompt).not.toContain('wav:')
+      expect(prompt).toContain('route-surface-provisional')
+      expect(prompt).toContain('assets/runtime/models/route_surface.gltf')
+      expect(prompt).toContain('canonical')
       expect(tool.inputSchema.safeParse({
         decisions: [{
           requirement_id: 'visual', kind: 'placeholder', resource_id: 'resource',

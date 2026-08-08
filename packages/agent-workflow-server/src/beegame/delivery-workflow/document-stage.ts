@@ -82,6 +82,13 @@ type FrozenReviewProjection = {
   sourceRevision: string
   artifacts: DocumentReviewArtifact[]
   referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
+  packetProjections: Map<
+    string,
+    {
+      referenceIndex: ReturnType<typeof buildDocumentReviewWireReferenceIndex>
+      reviewArtifacts: DocumentReviewArtifact[]
+    }
+  >
 }
 
 const FROZEN_REVIEW_PROJECTION_CACHE_LIMIT = 16
@@ -141,6 +148,7 @@ function rememberFrozenReviewProjection(input: {
     sourceRevision: input.cycle.sourceRevision,
     artifacts: input.artifacts,
     referenceIndex: buildDocumentReviewWireReferenceIndex(input.artifacts),
+    packetProjections: new Map(),
   }
   frozenReviewProjectionCache.delete(input.cycle.cycleId)
   frozenReviewProjectionCache.set(input.cycle.cycleId, projection)
@@ -235,6 +243,51 @@ function artifactsForReviewChecks(
     ),
   )
   return artifacts.filter(artifact => paths.has(artifact.path))
+}
+
+function projectionForReviewChecks(
+  projection: FrozenReviewProjection,
+  checkIds: DocumentReviewCheckId[],
+) {
+  const packetKey = checkIds.join('|')
+  const cached = projection.packetProjections.get(packetKey)
+  if (cached) return cached
+  const artifacts = artifactsForReviewChecks(projection.artifacts, checkIds)
+  const paths = new Set(artifacts.map(artifact => artifact.path))
+  const packetReferenceIndex = buildDocumentReviewWireReferenceIndex(artifacts, {
+    maxJsonPointerDepth: 1,
+  })
+  const artifactIds = new Set(
+    packetReferenceIndex.artifacts
+      .filter(artifact => paths.has(artifact.path))
+      .map(artifact => artifact.artifactId),
+  )
+  const value = {
+    referenceIndex: {
+      artifacts: packetReferenceIndex.artifacts.filter(artifact =>
+        artifactIds.has(artifact.artifactId),
+      ),
+      references: packetReferenceIndex.references.filter(reference =>
+        artifactIds.has(reference.artifactId),
+      ),
+      requirementIds: paths.has(CANONICAL_ASSET_MANIFEST)
+        ? packetReferenceIndex.requirementIds
+        : [],
+      resourceIds: paths.has(CANONICAL_ASSET_MANIFEST)
+        ? packetReferenceIndex.resourceIds
+        : [],
+      contentIdsByPath: Object.fromEntries(
+        Object.entries(packetReferenceIndex.contentIdsByPath).filter(
+          ([path]) => paths.has(path),
+        ),
+      ),
+    },
+    reviewArtifacts: artifacts.filter(
+      artifact => artifact.path !== 'reviewAuthority',
+    ),
+  }
+  projection.packetProjections.set(packetKey, value)
+  return value
 }
 
 const CLOSURE_CHECK_CANDIDATES: Record<
@@ -749,6 +802,10 @@ export async function buildDocumentReviewDispatch(input: {
   )
     throw new Error('document closure diff changed after the cycle was frozen')
   const currentCheckIds = activeDocumentReviewCheckPacket(cycle)
+  const packetProjection = projectionForReviewChecks(
+    frozenProjection,
+    currentCheckIds,
+  )
   const artifactPathsByCheck = Object.fromEntries(
     currentCheckIds.map(checkId => [
       checkId,
@@ -783,10 +840,8 @@ export async function buildDocumentReviewDispatch(input: {
         ]),
       ),
       artifactPathsByCheck,
-      referenceIndex: frozenProjection.referenceIndex,
-      reviewArtifacts: frozenProjection.artifacts.filter(
-        artifact => artifact.path !== 'reviewAuthority',
-      ),
+      referenceIndex: packetProjection.referenceIndex,
+      reviewArtifacts: packetProjection.reviewArtifacts,
       ...(findingLedger.length
         ? {
             priorFindings: findingLedger,

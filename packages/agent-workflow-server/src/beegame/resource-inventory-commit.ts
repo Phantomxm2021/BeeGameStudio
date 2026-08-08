@@ -7,6 +7,7 @@ import {
   publishBeeGameResourceInventoryFromStaging,
   readBeeGameAssetManifest,
   writeBeeGameAssetManifest,
+  type BeeGameProjectResource,
 } from './asset-contracts'
 import {
   ProjectResourceApplication,
@@ -169,43 +170,65 @@ export async function commitResourceInventory(options: {
     transactionId: transaction.transactionId,
     planRevision,
   })
-  const proposedDecisions = validateDecisionCoverage(
-    manifest.requirements.filter(item => item.required !== false).map(item => item.id),
-    options.input.decisions,
-  )
-  const previousReceipt = await readCurrentCommittedResourceInventoryReceipt(
-    options.workspacePath,
-  )
-  const decisions = preserveProvisionalResourceIds(
-    proposedDecisions,
-    previousReceipt?.decisions ?? [],
-  )
   const receiptPath = join(
     options.workspacePath,
     '.beegame/workflow/resource-inventory-commits',
     `${canonicalResourceInventoryRevision(transaction.transactionId)}.json`,
   )
   let receipt = await readReceipt(receiptPath)
+  let decisions: ResourceInventoryDecision[]
   if (receipt) {
     if (
       receipt.transactionId !== transaction.transactionId ||
       receipt.planRevision !== planRevision ||
-      receipt.catalogRevision !== observation.result.catalogRevision ||
-      canonicalResourceInventoryRevision(receipt.decisions) !==
-        canonicalResourceInventoryRevision(decisions)
+      receipt.catalogRevision !== observation.result.catalogRevision
     ) {
-      throw new Error('Resource inventory commit receipt does not match the current frozen decision set')
+      throw new Error('Resource inventory commit receipt does not match the current frozen transaction')
     }
+    decisions = receipt.decisions
     await options.assertMutationAuthority()
     if (receipt.dispatchId !== options.dispatchId) {
       receipt.dispatchId = options.dispatchId
       await writeReceipt(receiptPath, receipt)
+    }
+    if (receipt.state !== 'committed') {
+      const previousDecisions = receipt.decisions
+      const canonicalDecisions = canonicalizeExistingProvisionalPaths(
+        previousDecisions,
+        manifest.resources,
+      )
+      if (canonicalDecisions.some((decision, index) =>
+        decision.kind === 'placeholder' &&
+        decision.destinationPath !== previousDecisions[index]?.destinationPath,
+      )) {
+        receipt.decisions = canonicalDecisions
+        receipt.bindings = buildBindings(canonicalDecisions)
+        receipt.stagedResourceIds = []
+        receipt.outputHashesByResource = {}
+        receipt.state = 'prepared'
+        await rm(`${receiptPath.slice(0, -'.json'.length)}.staging`, {
+          recursive: true,
+          force: true,
+        })
+        await writeReceipt(receiptPath, receipt)
+      }
     }
     if (receipt.state === 'committed') {
       await finalizeCommittedTransaction(options.workspacePath, transaction.transactionId, planRevision, receipt, receiptPath)
       return { ...receipt, receiptPath }
     }
   } else {
+    const proposedDecisions = validateDecisionCoverage(
+      manifest.requirements.filter(item => item.required !== false).map(item => item.id),
+      canonicalizeExistingProvisionalPaths(options.input.decisions, manifest.resources),
+    )
+    const previousReceipt = await readCurrentCommittedResourceInventoryReceipt(
+      options.workspacePath,
+    )
+    decisions = preserveProvisionalResourceIds(
+      proposedDecisions,
+      previousReceipt?.decisions ?? [],
+    )
     const deliveryByResource: Record<string, ResourceDeliveryCapability> = {}
     const decisionsByRequirement = new Map<string, ResourceInventoryDecision[]>()
     for (const decision of decisions) {
@@ -221,17 +244,18 @@ export async function commitResourceInventory(options: {
         if (group.status !== 'no-match' || placeholders.length !== requirementDecisions.length) {
           throw new Error(`Placeholder is forbidden because ${requirementId} has selectable Resource Library bundles`)
         }
-        const decision = placeholders[0]!
         const requirement = manifest.requirements.find(item => item.id === requirementId)
         if (!requirement)
           throw new Error(`Resource requirement is missing: ${requirementId}`)
-        if (!requirement.acquisition_profile.asset_kinds.some(kind => kind === decision.assetKind))
-          throw new Error(`Resource placeholder asset kind is not declared by ${requirementId}`)
-        const adapter = options.provisionalAdapters.find(item => item.format === decision.format)
-        if (!adapter)
-          throw new Error(`No provisional resource adapter is registered for format: ${decision.format}`)
-        if (!adapter.assetKinds.some(kind => kind === decision.assetKind))
-          throw new Error(`Provisional resource adapter ${decision.format} does not support asset kind: ${decision.assetKind}`)
+        for (const decision of placeholders) {
+          if (!requirement.acquisition_profile.asset_kinds.some(kind => kind === decision.assetKind))
+            throw new Error(`Resource placeholder asset kind is not declared by ${requirementId}`)
+          const adapter = options.provisionalAdapters.find(item => item.format === decision.format)
+          if (!adapter)
+            throw new Error(`No provisional resource adapter is registered for format: ${decision.format}`)
+          if (!adapter.assetKinds.some(kind => kind === decision.assetKind))
+            throw new Error(`Provisional resource adapter ${decision.format} does not support asset kind: ${decision.assetKind}`)
+        }
         continue
       }
       if (group.status !== 'matched')
@@ -430,8 +454,8 @@ function validateDecisionCoverage(
   for (const requirementId of requiredIds) {
     const group = decisions.filter(decision => decision.requirementId === requirementId)
     const placeholders = group.filter(decision => decision.kind === 'placeholder')
-    if (placeholders.length && (placeholders.length !== 1 || group.length !== 1))
-      throw new Error(`Resource inventory requirement must use either library resources or one placeholder: ${requirementId}`)
+    if (placeholders.length && placeholders.length !== group.length)
+      throw new Error(`Resource inventory requirement must use either library resources or one or more placeholders: ${requirementId}`)
   }
   const byResource = new Map<string, string>()
   for (const decision of decisions) {
@@ -479,6 +503,24 @@ function preserveProvisionalResourceIds(
     if (!provisionalId || assigned.has(provisionalId)) return decision
     assigned.add(provisionalId)
     return { ...decision, resourceId: provisionalId }
+  })
+}
+
+function canonicalizeExistingProvisionalPaths(
+  decisions: readonly ResourceInventoryDecision[],
+  resources: readonly BeeGameProjectResource[],
+): ResourceInventoryDecision[] {
+  const provisionalById = new Map(
+    resources
+      .filter(resource => resource.provisional && resource.source.type === 'agent-authored')
+      .map(resource => [resource.id, resource.root_path] as const),
+  )
+  return decisions.map(decision => {
+    if (decision.kind !== 'placeholder') return structuredClone(decision)
+    const canonicalPath = provisionalById.get(decision.resourceId)
+    return canonicalPath
+      ? { ...structuredClone(decision), destinationPath: canonicalPath }
+      : structuredClone(decision)
   })
 }
 

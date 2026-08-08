@@ -42,7 +42,16 @@ describe('native ResourceLibrary tool', () => {
     const tool = createTool(workspace, client)
     try {
       await expect(tool.call({ action: 'match_requirements' })).resolves.toEqual({
-        data: expect.objectContaining({ catalog_revision: 'revision-a' }),
+        data: expect.objectContaining({
+          catalog_revision: 'revision-a',
+          requirements: [{
+            requirement_id: 'visual.tower',
+            status: 'no-match',
+            placeholder_asset_kinds: ['model'],
+            diagnostics: [{ code: 'coverage_gap', count: 1 }],
+            bundles: [],
+          }],
+        }),
       })
       expect(received).toEqual({
         requirements: [{ requirementId: 'visual.tower', profile: {

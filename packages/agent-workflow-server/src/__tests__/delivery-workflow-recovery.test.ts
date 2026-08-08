@@ -19,6 +19,7 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
+import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -35,6 +36,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
+  FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type AcceptedWorkflowUnit,
@@ -137,6 +139,13 @@ function matrixContentDocument() {
       ],
     },
   }
+}
+
+function resourceContentDocumentMap(
+  document: ReturnType<typeof matrixContentDocument>,
+) {
+  const { path, ...value } = document
+  return { [path]: value }
 }
 
 async function writeMatrixContent(workspacePath: string): Promise<void> {
@@ -380,13 +389,13 @@ async function matrixTerminal(input: {
             requirementId: string
             resourceIds: string[]
           }>,
-          protectedPaths: request.protectedPaths ?? [],
+          writablePaths: ['assets/content/matrix.json'],
         },
         assertMutationAuthority: () => undefined,
       }) as { call(value: unknown): Promise<unknown> }
       await tool.call({
         action: 'commit',
-        documents: [matrixContentDocument()],
+        documents: resourceContentDocumentMap(matrixContentDocument()),
       })
     } else await writeMatrixContent(workspacePath)
     return {
@@ -821,15 +830,14 @@ async function createStaleReviewerRecoveryFixture() {
           resourceIds: ['fixture-resource'],
         },
       ],
-      protectedPaths: [],
+      writablePaths: ['assets/content/resource-registry.json'],
     },
     assertMutationAuthority: () => undefined,
   }) as { call(value: unknown): Promise<unknown> }
   await resourceContentTool.call({
     action: 'commit',
-    documents: [
-      {
-        path: 'assets/content/resource-registry.json',
+    documents: {
+      'assets/content/resource-registry.json': {
         schema: 'beegame-content-v1',
         id: 'fixture-resource-registry',
         kind: 'resource-registry',
@@ -844,7 +852,7 @@ async function createStaleReviewerRecoveryFixture() {
           ],
         },
       },
-    ],
+    },
   })
   const workspaceRevision = await computeWorkspaceRevision(workspacePath)
   const contentDigest = await computeResourceContentDigest(workspacePath)
@@ -1626,7 +1634,7 @@ describe('delivery workflow recovery', () => {
       requiredRequirementIds: ['fixture-requirement'],
       verifiedResourceIds: ['fixture-resource'],
       inventoryBindings: inventoryReceipt.bindings,
-      protectedPaths: [],
+      writablePaths: ['assets/content/resource-registry.json'],
     }
     const tool = createNativeResourceContentTool({
       buildTool: definition => definition,
@@ -1636,9 +1644,8 @@ describe('delivery workflow recovery', () => {
     }) as { call(input: unknown): Promise<unknown> }
     await tool.call({
       action: 'commit',
-      documents: [
-        {
-          path: 'assets/content/resource-registry.json',
+      documents: {
+        'assets/content/resource-registry.json': {
           schema: 'beegame-content-v1',
           id: 'resource-registry',
           kind: 'resource-registry',
@@ -1653,7 +1660,7 @@ describe('delivery workflow recovery', () => {
             ],
           },
         },
-      ],
+      },
     })
     const retainedEvents = (await fixture.store.readEvents()).filter(
       event =>
@@ -1679,7 +1686,6 @@ describe('delivery workflow recovery', () => {
       contract: {
         ...commitContract,
         task: 'RESOURCE_CONTENT',
-        preservedPaths: [],
       },
     }
     await writeFile(
@@ -1808,7 +1814,7 @@ describe('delivery workflow recovery', () => {
           resourceIds: ['world-resource'],
         },
       ],
-      protectedPaths: [],
+      writablePaths: ['assets/content/resource-registry.json'],
     }
     const tool = createNativeResourceContentTool({
       buildTool: definition => definition,
@@ -1818,9 +1824,8 @@ describe('delivery workflow recovery', () => {
     }) as { call(input: unknown): Promise<unknown> }
     await tool.call({
       action: 'commit',
-      documents: [
-        {
-          path: 'assets/content/resource-registry.json',
+      documents: {
+        'assets/content/resource-registry.json': {
           schema: 'beegame-content-v1',
           id: 'resource-registry',
           kind: 'resource-registry',
@@ -1835,7 +1840,7 @@ describe('delivery workflow recovery', () => {
             ],
           },
         },
-      ],
+      },
     })
     const request: WorkerDispatchRequest = {
       dispatchId: commitContract.dispatchId,
@@ -1848,7 +1853,6 @@ describe('delivery workflow recovery', () => {
       revision: initial.revision.document,
       contract: {
         ...commitContract,
-        preservedPaths: [],
       },
     }
     await store.save({
@@ -2630,12 +2634,25 @@ describe('delivery workflow recovery', () => {
       },
     })
 
+    let lateUsageResult: DeliveryRun | null | undefined
     const stopped = await stopRun({
       store,
       runId: initial.runId,
       reason: 'user stopped workflow',
       sessionIsOpen: async () => true,
-      stopDispatch: async () => undefined,
+      stopDispatch: async () => {
+        lateUsageResult = await store.addWorkflowUsage(
+          initial.runId,
+          {
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 1,
+          },
+          'dispatch-1',
+        )
+      },
     })
 
     expect(stopped).toMatchObject({
@@ -2644,6 +2661,7 @@ describe('delivery workflow recovery', () => {
       tasks: [{ id: task.id, status: 'pending', attempt: 1 }],
     })
     expect(stopped.activeTaskId).toBeUndefined()
+    expect(lateUsageResult).toBeNull()
 
     const continued = await retryRun({ store, runId: initial.runId })
     expect(continued).toMatchObject({
@@ -3517,6 +3535,231 @@ describe('delivery workflow recovery', () => {
     expect(drained).toBe(true)
   })
 
+  test('keeps the repair-plan task recoverable when the worker closes without a terminal submission', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-empty-repair-dispatch-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-empty-repair-dispatch',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    const repairTaskId = 'cycle-1:repair-plan'
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      currentItemId: repairTaskId,
+    })
+    let terminalHandlerCalls = 0
+    const sessions = {
+      start(input: { workflowDispatchId: string }) {
+        return { id: input.workflowDispatchId }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay() {},
+      events() {
+        return [
+          {
+            id: 'empty-repair-turn',
+            type: 'turn.empty',
+            text: 'BeeGame Studio ended the turn without a final response.',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as Parameters<typeof createBeeGameDeliveryWorkerPort>[0]['sessions']
+    const workerPort = createBeeGameDeliveryWorkerPort({
+      sessions,
+      userId: 'owner-1',
+    })
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort,
+      async onTerminal() {
+        terminalHandlerCalls += 1
+      },
+    })
+
+    await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: repairTaskId,
+      revision: initial.revision.document,
+      allowedPaths: [],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'repair-planning',
+        repairPlanTask: {
+          groups: [
+            {
+              subjectPaths: ['docs/GDD.md'],
+              candidatePaths: ['docs/GDD.md'],
+            },
+          ],
+          authorityReferences: [
+            {
+              path: 'docs/GDD.md',
+              anchor: 'Rules',
+              content: '# Rules\n',
+            },
+          ],
+        },
+      },
+    })
+    await dispatcher.waitForTerminalReconciliation()
+
+    const saved = await store.load()
+    expect(saved?.status).toBe('needs_action')
+    expect(saved?.currentItemId).toBe(repairTaskId)
+    expect(saved?.activeDispatch?.status).toBe('interrupted')
+    expect(saved?.activeDispatch?.failureReason).toBe(
+      'missing_required_terminal_submission: SubmitDocumentRepairPlan',
+    )
+    expect(terminalHandlerCalls).toBe(0)
+  })
+
+  test('retries only the interrupted Reviewer packet without replaying accepted checks', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-packet-retry-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-packet-retry',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefContext: RECOVERY_BRIEF,
+      documentRevision: 'revision-1',
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await Promise.all(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+        writeFile(join(workspace, path), `# ${path}\n`),
+      ),
+    )
+    const reviewArtifacts = await readDocumentReviewArtifacts(
+      workspace,
+      'foundation',
+      {
+        confirmedBriefContext: initial.confirmedBriefContext,
+        confirmedBriefDigest: initial.confirmedBriefDigest,
+      },
+    )
+    const documentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const completedCheckIds = [
+      ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS[0],
+    ]
+    const currentCheckIds = [
+      ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS[1],
+    ]
+    const checks = createAcceptedComprehensiveReview().checks.filter(check =>
+      completedCheckIds.includes(check.id as (typeof completedCheckIds)[number]),
+    )
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'interrupted-review-packet',
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: documentRevision,
+      contract: {
+        cycleId: 'review-cycle-1',
+        reviewScope: 'foundation',
+        reviewMode: 'initial',
+        requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+        currentCheckIds,
+      },
+    }
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      revision: { ...initial.revision, document: documentRevision },
+      blockedReason:
+        'missing_required_terminal_submission: SubmitDocumentReviewPacket',
+      documentReviewState: {
+        ...initial.documentReviewState,
+        activeCycle: {
+          cycleId: 'review-cycle-1',
+          originScope: 'foundation',
+          scope: 'foundation',
+          mode: 'initial',
+          sourceRevision: documentRevision,
+          requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
+          completedCheckIds,
+          checks,
+          checkEvidenceDigests: {},
+          findings: [],
+          acceptedSemanticResult: false,
+          changedPaths: [],
+          sourceArtifactDigests:
+            documentReviewArtifactDigests(reviewArtifacts),
+        },
+      },
+      activeDispatch: {
+        dispatchId: request.dispatchId!,
+        workerType: request.workerType,
+        phase: request.phase,
+        revision: request.revision,
+        status: 'interrupted',
+        failureReason:
+          'missing_required_terminal_submission: SubmitDocumentReviewPacket',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        request,
+      },
+    })
+
+    const retried = await retryRun({ store, runId: initial.runId })
+
+    expect(retried).toMatchObject({
+      status: 'running',
+      phase: 'DOCUMENT_REVIEW',
+      documentReviewState: {
+        activeCycle: {
+          cycleId: 'review-cycle-1',
+          completedCheckIds,
+          checks,
+          acceptedSemanticResult: false,
+        },
+      },
+    })
+    expect(retried.activeDispatch).toBeUndefined()
+    const started: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(nextRequest) {
+          started.push(nextRequest)
+          return {
+            sessionId: nextRequest.dispatchId!,
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await controller.resume(retried)
+
+    expect(started).toHaveLength(1)
+    expect(started[0]?.dispatchId).not.toBe(request.dispatchId)
+    expect(started[0]?.contract.currentCheckIds).toEqual(currentCheckIds)
+  })
+
   test('closes the accepted reviewer packet before dispatching the next packet in the same cycle', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-packet-handoff-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -3824,6 +4067,31 @@ describe('delivery workflow recovery', () => {
     const lease = await store.lock(initial.runId, async () => false)
     expect(lease.processId).toBe(process.pid)
     await store.unlock(lease)
+  })
+
+  test('reclaims a dead recovery lease before a normal workflow read', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-dead-read-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+    })
+    await store.save(initial)
+    await writeFile(
+      store.paths.lock,
+      `${JSON.stringify({
+        ownerId: initial.ownerId,
+        runId: initial.runId,
+        leaseId: 'dead-process-lease',
+        processId: 2_147_483_647,
+        purpose: 'recovery',
+        acquiredAt: initial.createdAt,
+        heartbeatAt: initial.createdAt,
+      })}\n`,
+    )
+
+    await expect(store.load()).resolves.toMatchObject({ runId: initial.runId })
   })
 
   test('reloads the winner after acquiring the mutation lease', async () => {

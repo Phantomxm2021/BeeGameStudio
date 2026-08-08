@@ -352,8 +352,6 @@ create table if not exists public.beegame_resource_processing_jobs (
   model_config_id text,
   analysis_mode text not null default 'missing' check (analysis_mode in ('missing', 'all')),
   retry_of_job_id text references public.beegame_resource_processing_jobs(id) on delete set null,
-  provider_batch_id text,
-  provider_batch_status text check (provider_batch_status is null or provider_batch_status in ('submitting', 'processing', 'ended', 'unknown')),
   kind text not null check (kind in ('inspect-elements', 'semantic-curate-elements')),
   status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
   total_items integer not null default 0 check (total_items >= 0),
@@ -397,9 +395,6 @@ create index if not exists beegame_resource_processing_jobs_pack_status_idx
   on public.beegame_resource_processing_jobs (pack_id, status, created_at desc);
 create index if not exists beegame_resource_processing_jobs_retry_of_idx
   on public.beegame_resource_processing_jobs (retry_of_job_id);
-create index if not exists beegame_resource_processing_jobs_provider_batch_idx
-  on public.beegame_resource_processing_jobs (provider_batch_id)
-  where provider_batch_id is not null and status in ('queued', 'running');
 create index if not exists beegame_resource_processing_items_job_status_idx
   on public.beegame_resource_processing_items (job_id, status, created_at);
 

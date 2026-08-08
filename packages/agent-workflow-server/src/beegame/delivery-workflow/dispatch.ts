@@ -11,6 +11,7 @@ import {
   isWorkflowEvidenceFile,
   persistImplementationEvidence,
 } from './evidence'
+import { resourceRemediationFindingsForTask } from './resource-task-resolver'
 import type {
   DeliveryRun,
   DeliveryWorkerPort,
@@ -216,11 +217,13 @@ function assertSingleResourceWorkAuthority(
   request: WorkerDispatchRequest,
   run: DeliveryRun,
 ): void {
-  if (
-    request.workerType !== 'resource-curator' &&
-    request.workerType !== 'resource-content-author'
-  )
-    return
+  const taskByWorker = {
+    'resource-planner': 'RESOURCE_PLAN',
+    'resource-curator': 'RESOURCE_INVENTORY',
+    'resource-content-author': 'RESOURCE_CONTENT',
+  } as const
+  const task = taskByWorker[request.workerType as keyof typeof taskByWorker]
+  if (!task) return
   const remediation = request.contract.remediation
   const cycle = run.documentReviewState.activeCycle
   const hasAcceptedResourceAuthority = Boolean(
@@ -245,10 +248,14 @@ function assertSingleResourceWorkAuthority(
       )
     return
   }
+  const expectedFindings = resourceRemediationFindingsForTask(
+    cycle,
+    task,
+  )
   const expected = {
     kind: 'document_review',
     cycleId: cycle!.cycleId,
-    findings,
+    findings: expectedFindings,
   }
   if (!isDeepStrictEqual(remediation, expected))
     throw new DispatchError(
@@ -271,6 +278,7 @@ export function createDeliveryDispatcher(options: {
   const requests = new Map<string, WorkerDispatchRequest>()
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
+  const startingDispatches = new Set<string>()
   const terminalReconciliations = new Set<Promise<void>>()
   let dispatchTail: Promise<void> = Promise.resolve()
 
@@ -406,6 +414,7 @@ export function createDeliveryDispatcher(options: {
     })
     byKey.set(key, record)
     requests.set(record.dispatchId, request)
+    startingDispatches.add(dispatchId)
     let startedDispatchId: string | undefined
     try {
       const lease = await acquireDispatchLease(run.runId)
@@ -528,6 +537,8 @@ export function createDeliveryDispatcher(options: {
       if (transportDispatchId !== record.dispatchId)
         forgetDispatch(record.dispatchId)
       throw error
+    } finally {
+      startingDispatches.delete(dispatchId)
     }
     return record
   }
@@ -931,6 +942,7 @@ export function createDeliveryDispatcher(options: {
   }
 
   async function workerIsOpen(dispatchId: string): Promise<boolean> {
+    if (startingDispatches.has(dispatchId)) return true
     const worker = await options.workerPort.status(dispatchId)
     return worker.status === 'running'
   }

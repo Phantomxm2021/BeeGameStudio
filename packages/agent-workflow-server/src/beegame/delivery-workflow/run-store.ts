@@ -405,8 +405,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           if (isMissingFile(readError)) continue
           throw error
         }
-        if (active.purpose === 'recovery') throw error
-        if (!processIsAlive(active.processId)) {
+        const ownerProcessAlive = processIsAlive(active.processId)
+        if (ownerProcessAlive && active.purpose === 'recovery') throw error
+        if (!ownerProcessAlive) {
           try {
             await enqueueMutation(filePaths.lock, async () => {
               const current = parseLock(
@@ -414,8 +415,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
               )
               if (
                 current.leaseId === active.leaseId &&
-                current.processId === active.processId &&
-                current.purpose === 'mutation'
+                current.processId === active.processId
               )
                 await unlink(filePaths.lock)
             })

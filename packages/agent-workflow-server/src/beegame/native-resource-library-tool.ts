@@ -104,7 +104,9 @@ export function createNativeResourceLibraryTool(options: {
         }),
       })
       await options.assertDispatchAuthority()
-      return { data: compactMatchResult(observation.result) }
+      return {
+        data: compactMatchResult(observation.result, manifest.requirements),
+      }
     },
     renderToolUseMessage() {
       return 'Resource Library · match requirements'
@@ -119,13 +121,23 @@ export function createNativeResourceLibraryTool(options: {
   })
 }
 
-function compactMatchResult(result: Awaited<ReturnType<ProjectResourceApplication['matchRequirements']>>) {
+function compactMatchResult(
+  result: Awaited<ReturnType<ProjectResourceApplication['matchRequirements']>>,
+  requirements: Awaited<ReturnType<typeof readBeeGameAssetManifest>>['requirements'],
+) {
+  const requirementsById = new Map(requirements.map(requirement => [requirement.id, requirement]))
   return {
     catalog_revision: result.catalogRevision,
     requirements: result.groups.map(group => ({
       requirement_id: group.requirementId,
       status: group.status,
       diagnostics: group.diagnostics,
+      ...(group.status === 'no-match'
+        ? {
+            placeholder_asset_kinds:
+              requirementsById.get(group.requirementId)?.acquisition_profile.asset_kinds ?? [],
+          }
+        : {}),
       bundles: group.bundles.map(compactBundle),
     })),
   }

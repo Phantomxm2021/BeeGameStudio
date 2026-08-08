@@ -185,8 +185,9 @@ export type DocumentReviewReferenceIndex = {
 
 export function buildDocumentReviewWireReferenceIndex(
   artifacts: DocumentReviewArtifact[],
+  options?: { maxJsonPointerDepth?: number },
 ) {
-  const index = buildDocumentReviewReferenceIndex(artifacts)
+  const index = buildDocumentReviewReferenceIndex(artifacts, options)
   const paths = [...new Set(index.references.map(reference => reference.path))]
   const artifactIdByPath = new Map(
     paths.map((path, position) => [path, `a${position}`] as const),
@@ -376,7 +377,7 @@ function exactMarkdownHeadings(content: string): string[] {
   })
 }
 
-function jsonPointers(content: string): string[] {
+function jsonPointers(content: string, maxDepth?: number): string[] {
   let root: unknown
   try {
     root = JSON.parse(content)
@@ -384,16 +385,17 @@ function jsonPointers(content: string): string[] {
     return []
   }
   const pointers = ['$']
-  const visit = (value: unknown, pointer: string): void => {
+  const visit = (value: unknown, pointer: string, depth: number): void => {
     if (!value || typeof value !== 'object') return
+    if (maxDepth !== undefined && depth >= maxDepth) return
     for (const [key, child] of Object.entries(value)) {
       const token = key.split('~').join('~0').split('/').join('~1')
       const childPointer = `${pointer}/${token}`
       pointers.push(childPointer)
-      visit(child, childPointer)
+      visit(child, childPointer, depth + 1)
     }
   }
-  visit(root, '')
+  visit(root, '', 0)
   return pointers
 }
 
@@ -632,6 +634,7 @@ function idSet(value: unknown): Set<string> {
 
 export function buildDocumentReviewReferenceIndex(
   artifacts: DocumentReviewArtifact[],
+  options?: { maxJsonPointerDepth?: number },
 ): DocumentReviewReferenceIndex {
   const manifest = artifacts.find(
     artifact => artifact.path === CANONICAL_ASSET_MANIFEST,
@@ -663,7 +666,7 @@ export function buildDocumentReviewReferenceIndex(
             ? [structuredContentId(artifact.content, true)].filter(
                 (value): value is string => Boolean(value),
               )
-            : jsonPointers(artifact.content)
+            : jsonPointers(artifact.content, options?.maxJsonPointerDepth)
     const subjectOwner = subjectOwnerForPath(artifact.path)
     return anchors.map(anchor => ({
       referenceId: referenceId(artifact.path, anchor),

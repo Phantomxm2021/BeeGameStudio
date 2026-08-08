@@ -18,7 +18,10 @@ import {
   computeResourceContentDigest,
   computeResourceRevision,
 } from './revision'
-import { resolveResourceProductionTask } from './resource-task-resolver'
+import {
+  resourceRemediationFindingsForTask,
+  resolveResourceProductionTask,
+} from './resource-task-resolver'
 import { transitionDeliveryRun } from './transition'
 import {
   type DeliveryRun,
@@ -30,6 +33,36 @@ import type { WorkerTerminalResult } from './worker-contracts'
 
 type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 type ResourceAudit = ResourceDeliveryReadiness
+
+const RESOURCE_CONTENT_AUTHORITY_PATHS = [
+  'docs/GDD.md',
+  'docs/LEVEL_SCENE_DESIGN.md',
+  'docs/BALANCE_DESIGN.md',
+  'docs/TECHNICAL_DESIGN.md',
+  'docs/UI_UX_SPEC.md',
+  'docs/AUDIO_DESIGN.md',
+] as const
+
+export function resourceContentAuthorityPaths(
+  findings:
+    | Pick<
+        NonNullable<
+          NonNullable<
+            DeliveryRun['documentReviewState']['activeCycle']
+          >['findings']
+        >[number],
+        'evidence'
+      >[]
+    | undefined,
+): string[] {
+  if (!findings) return [...RESOURCE_CONTENT_AUTHORITY_PATHS]
+  const citedPaths = new Set(
+    findings.flatMap(finding =>
+      finding.evidence.map(reference => reference.path),
+    ),
+  )
+  return RESOURCE_CONTENT_AUTHORITY_PATHS.filter(path => citedPaths.has(path))
+}
 
 export async function resourceContentReceiptMatchesWorkspace(
   workspacePath: string,
@@ -87,8 +120,9 @@ export async function startResourcePreparation(input: {
       ? {
           kind: 'document_review',
           cycleId: reviewCycle.cycleId,
-          findings: reviewCycle.findings.filter(
-            finding => finding.owner === 'resource',
+          findings: resourceRemediationFindingsForTask(
+            reviewCycle,
+            resolution.task,
           ),
         }
       : undefined
@@ -116,6 +150,7 @@ export async function startResourcePreparation(input: {
           'docs/ART_DIRECTION.md',
           'docs/TECHNICAL_DESIGN.md',
         ],
+        ...(remediation ? { remediation } : {}),
       },
     })
   if (resolution.task === 'RESOURCE_INVENTORY')
@@ -142,12 +177,16 @@ export async function startResourcePreparation(input: {
       finding.subjects.map(subject => subject.path.replaceAll('\\', '/')),
     ) ?? [],
   )
-  const preservedPaths = contentAudit.hasGlobalIssues
-    ? []
-    : contentAudit.validPaths.filter(path => !repairPaths.has(path))
+  for (const path of contentAudit.invalidPaths) repairPaths.add(path)
+  if (contentAudit.hasGlobalIssues) {
+    for (const file of contentAudit.files) {
+      if (file.kind === 'resource-registry') repairPaths.add(file.path)
+    }
+    if (!contentAudit.files.length && !contentAudit.invalidPaths.length)
+      repairPaths.add(`${BEEGAME_RESOURCE_ROOTS.content}/resource-registry.json`)
+  }
   return input.dispatcher.dispatch({
     ...common,
-    ...(preservedPaths.length ? { protectedPaths: preservedPaths } : {}),
     workerType: 'resource-content-author',
     contract: {
       task: resolution.task,
@@ -169,15 +208,8 @@ export async function startResourcePreparation(input: {
         input.workspacePath,
         '',
       ),
-      authorityPaths: [
-        'docs/GDD.md',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        'docs/BALANCE_DESIGN.md',
-        'docs/TECHNICAL_DESIGN.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-      ],
-      preservedPaths,
+      authorityPaths: [...resourceContentAuthorityPaths(remediation?.findings)],
+      repairPaths: [...repairPaths],
       currentContentIssues: contentAudit.issues,
       ...(remediation ? { remediation } : {}),
     },

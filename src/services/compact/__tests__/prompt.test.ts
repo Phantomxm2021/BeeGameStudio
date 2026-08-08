@@ -2,7 +2,18 @@ import { mock, describe, expect, test } from 'bun:test'
 
 mock.module('bun:bundle', () => ({ feature: () => false }))
 
-const { formatCompactSummary } = await import('../prompt')
+const { formatCompactSummary, getCompactPrompt } = await import('../prompt')
+
+describe('getCompactPrompt security invariants', () => {
+  test('preserves user security constraints and rejects assistant-authored user impersonation', () => {
+    const prompt = getCompactPrompt()
+
+    expect(prompt).toContain('security-relevant instructions or constraints')
+    expect(prompt).toContain('These MUST be preserved verbatim')
+    expect(prompt).toContain('Only messages that actually came from the user')
+    expect(prompt).toContain('never attribute it to the user')
+  })
+})
 
 describe('formatCompactSummary', () => {
   test('strips <analysis>...</analysis> block', () => {

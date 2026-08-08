@@ -94,6 +94,24 @@ function createToolUseAssistantMessage(): AssistantMessage {
   } as unknown as AssistantMessage
 }
 
+function createMalformedToolUseAssistantMessage(): AssistantMessage {
+  const message = createToolUseAssistantMessage()
+  return {
+    ...message,
+    message: {
+      ...message.message,
+      content: [
+        {
+          type: 'tool_use',
+          id: '',
+          name: '',
+          input: {},
+        },
+      ],
+    },
+  } as unknown as AssistantMessage
+}
+
 function createToolUseContext(): any {
   let inProgressToolUseIds = new Set<string>()
   let responseLength = 0
@@ -144,6 +162,68 @@ function createToolUseContext(): any {
 }
 
 describe('query autonomy/provider boundary', () => {
+  test('fails once on a malformed provider tool use without emitting an empty tool result', async () => {
+    const toolUseContext = createToolUseContext()
+    let callCount = 0
+    const deps = {
+      uuid: () => 'query-chain-id',
+      microcompact: async (messages: unknown[]) => ({ messages }),
+      autocompact: async () => ({
+        compactionResult: undefined,
+        consecutiveFailures: 0,
+      }),
+      callModel: async function* () {
+        callCount += 1
+        yield createMalformedToolUseAssistantMessage()
+      },
+    }
+
+    const emitted: any[] = []
+    const generator = query({
+      messages: [
+        createUserMessage({
+          content: 'start malformed tool-use test',
+        }),
+      ],
+      systemPrompt: asSystemPrompt([]),
+      userContext: {},
+      systemContext: {},
+      canUseTool: async (_tool, input) => ({
+        behavior: 'allow',
+        updatedInput: input,
+      }),
+      toolUseContext,
+      querySource: 'sdk',
+      maxTurns: 3,
+      deps: deps as never,
+    })
+    let next = await generator.next()
+    while (!next.done) {
+      emitted.push(next.value)
+      next = await generator.next()
+    }
+
+    expect(next.value.reason).toBe('model_error')
+    expect(callCount).toBe(1)
+    expect(
+      emitted.some(
+        message =>
+          message.type === 'user' &&
+          Array.isArray(message.message?.content) &&
+          message.message.content.some(
+            (content: any) =>
+              content.type === 'tool_result' && content.tool_use_id === '',
+          ),
+      ),
+    ).toBe(false)
+    expect(
+      emitted.some(
+        message =>
+          message.type === 'assistant' && message.isApiErrorMessage === true,
+      ),
+    ).toBe(true)
+  })
+
   test('provider api-error messages fail a consumed autonomy run instead of advancing the flow', async () => {
     const previousDisableAttachments =
       process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS

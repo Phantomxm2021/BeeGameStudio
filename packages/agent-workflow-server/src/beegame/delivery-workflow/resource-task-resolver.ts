@@ -2,6 +2,8 @@ import { auditAssetContract } from '../asset-contract-audit'
 import { readBeeGameAssetManifest } from '../asset-contracts'
 import { computeResourceInventoryRevision } from './revision'
 import type {
+  DocumentReviewCycle,
+  DocumentReviewFinding,
   DeliveryRun,
   ResourceInventoryReceipt,
   ResourceProductionTask,
@@ -60,6 +62,54 @@ export async function resolveResourceProductionTask(input: {
   }
 }
 
+const RESOURCE_TASK_ORDER: readonly ResourceProductionTask[] = [
+  'RESOURCE_PLAN',
+  'RESOURCE_INVENTORY',
+  'RESOURCE_CONTENT',
+  'RESOURCE_GATE',
+]
+
+export function resourceFindingTargetTask(
+  finding: DocumentReviewFinding,
+): Exclude<ResourceProductionTask, 'RESOURCE_GATE'> {
+  let hasContentSubject = false
+  let hasInventorySubject = false
+  let hasPlanSubject = false
+  for (const subject of finding.subjects) {
+    const path = subject.path.replaceAll('\\', '/')
+    if (subject.contentId || path.startsWith('assets/content/')) {
+      hasContentSubject = true
+      continue
+    }
+    if (
+      subject.resourceId ||
+      path.startsWith('assets/runtime/') ||
+      path.startsWith('assets/generated/')
+    ) {
+      hasInventorySubject = true
+      continue
+    }
+    if (path === 'assets/asset-manifest.json') {
+      hasPlanSubject = true
+    }
+  }
+  if (hasInventorySubject) return 'RESOURCE_INVENTORY'
+  if (hasPlanSubject) return 'RESOURCE_PLAN'
+  if (hasContentSubject) return 'RESOURCE_CONTENT'
+  throw new Error(
+    `accepted resource finding ${finding.findingId} does not identify a canonical resource subject`,
+  )
+}
+
+export function resourceRemediationFindingsForTask(
+  cycle: DocumentReviewCycle | undefined,
+  task: Exclude<ResourceProductionTask, 'RESOURCE_GATE'>,
+): DocumentReviewFinding[] {
+  return (cycle?.findings ?? []).filter(
+    finding => finding.owner === 'resource' && resourceFindingTargetTask(finding) === task,
+  )
+}
+
 function resourceRemediationTask(
   run: DeliveryRun,
 ): ResourceProductionTask | undefined {
@@ -70,35 +120,19 @@ function resourceRemediationTask(
     run.resourceProductionState.currentTask === 'RESOURCE_GATE'
   )
     return undefined
-
-  let requiresInventory = false
-  let requiresContent = false
-  for (const finding of cycle.findings) {
-    if (finding.owner !== 'resource') continue
-    for (const subject of finding.subjects) {
-      const path = subject.path.replaceAll('\\', '/')
-      if (subject.contentId || path.startsWith('assets/content/'))
-        requiresContent = true
-      if (
-        subject.requirementId ||
-        subject.resourceId ||
-        path === 'assets/asset-manifest.json' ||
-        path.startsWith('assets/runtime/') ||
-        path.startsWith('assets/generated/')
-      )
-        requiresInventory = true
-    }
-  }
-
   const cursor = run.resourceProductionState.currentTask
-  if (cursor === 'RESOURCE_INVENTORY') return 'RESOURCE_INVENTORY'
-  if (cursor === 'RESOURCE_CONTENT')
-    return requiresContent ? 'RESOURCE_CONTENT' : 'RESOURCE_GATE'
-  if (requiresInventory) return 'RESOURCE_INVENTORY'
-  if (requiresContent) return 'RESOURCE_CONTENT'
-  throw new Error(
-    'accepted resource findings do not identify a canonical resource subject',
+  const targetTasks = new Set(
+    cycle.findings
+      .filter(finding => finding.owner === 'resource')
+      .map(resourceFindingTargetTask),
   )
+  const cursorIndex = RESOURCE_TASK_ORDER.indexOf(cursor)
+  if (cursorIndex < 0) throw new Error(`unknown resource task cursor: ${cursor}`)
+  for (const task of RESOURCE_TASK_ORDER.slice(cursorIndex)) {
+    if (task === 'RESOURCE_GATE') continue
+    if (targetTasks.has(task)) return task
+  }
+  return undefined
 }
 
 async function manifestPlanIsEstablished(

@@ -38,8 +38,9 @@ describe('resource service app', () => {
     const localRepository = createInMemoryResourceRepository({
       packs: [repositoryPack('semantic-pack')],
       elements: [
-        { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: [], status: 'ready' },
+        { id: 'tagged', packId: 'semantic-pack', name: 'Tagged', path: 'a/tagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['building'], dependencies: ['empty-override'], status: 'ready' },
         { id: 'untagged', packId: 'semantic-pack', name: 'Untagged', path: 'b/untagged.glb', category: 'models', kind: 'model', specs: { contentHash: 'b'.repeat(64) }, dependencies: [], status: 'ready' },
+        { id: 'empty-override', packId: 'semantic-pack', name: 'Empty Override', path: 'c/empty-override.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, usageTags: [], usageTagsMode: 'override', dependencies: [], status: 'ready' },
         { id: 'manual-only', packId: 'semantic-pack', name: 'Manual Only', path: 'c/manual-only.glb', category: 'models', kind: 'model', specs: { contentHash: 'c'.repeat(64) }, dependencies: [], usageTagsMode: 'manual-only', status: 'ready' },
       ],
     })

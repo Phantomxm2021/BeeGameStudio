@@ -112,10 +112,10 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'runtime',
-        // Keep the workflow runtime in sync with the frontend during local
-        // product work. Without watch, UI changes can target stale API and
-        // authorization code until a manual stack restart.
-        command: [bunExecutable, '--watch', 'scripts/dashboard-server-dev.ts'],
+        // The runtime writes durable workflow state under the workspace. A
+        // repository-wide watcher would treat those writes as source changes
+        // and restart the runtime during an active workflow dispatch.
+        command: [bunExecutable, 'scripts/dashboard-server-dev.ts'],
         cwd: input.cwd,
         env: buildRuntimeEnv({
           baseEnv: input.env,
@@ -129,7 +129,9 @@ export function buildBeeGameDevPlan(
         // semantic-curation jobs can resume through the shared model bridge.
         // The resource worker still owns the queue; it does not own a second
         // model provider or configuration path.
-        command: [bunExecutable, '--watch', 'packages/beegame-resource-server/src/index.ts'],
+        // Do not use a repository-wide watcher here either: resource job
+        // receipts and previews are durable files written by this process.
+        command: [bunExecutable, 'packages/beegame-resource-server/src/index.ts'],
         cwd: input.cwd,
         env: buildResourceEnv(input.env, ports),
       },

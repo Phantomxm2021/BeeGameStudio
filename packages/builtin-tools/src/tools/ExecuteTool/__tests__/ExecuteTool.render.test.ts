@@ -140,6 +140,29 @@ describe('ExecuteTool.renderToolResultMessage delegation', () => {
     expect(result).toBeNull()
   })
 
+  test('does not delegate null results to an inner renderer', () => {
+    let delegated = false
+    const innerTool = {
+      name: 'artifact',
+      renderToolResultMessage: (): RenderResult => {
+        delegated = true
+        throw new Error('null result reached inner renderer')
+      },
+    }
+
+    const result = ExecuteTool.renderToolResultMessage(
+      { result: null, tool_name: 'artifact' },
+      [],
+      {
+        tools: [innerTool] as never,
+        input: { tool_name: 'artifact', params: {} },
+      } as never,
+    )
+
+    expect(result).toBeNull()
+    expect(delegated).toBe(false)
+  })
+
   test('passes through undefined input safely when input is missing', () => {
     const seen: unknown[] = []
     const innerTool = {

@@ -48,4 +48,5 @@ describe('resource model config resolver', () => {
     })
     await expect(resolver.resolve('owner-1', 'model-other')).rejects.toThrow('Selected model config was not found')
   })
+
 })

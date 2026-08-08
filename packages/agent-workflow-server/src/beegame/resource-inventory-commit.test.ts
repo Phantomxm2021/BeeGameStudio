@@ -425,7 +425,7 @@ describe('durable resource inventory commit', () => {
     })).rejects.toThrow('Resource inventory receipt is invalid')
   })
 
-  test('rejects a changed decision set instead of creating a second prepared receipt', async () => {
+  test('resumes the existing durable receipt instead of recreating a changed decision set', async () => {
     const workspacePath = await workspace(['visual.a'])
     const client = clientFor({ 'visual.a': 'matched' })
     await observe(workspacePath, client)
@@ -446,8 +446,58 @@ describe('durable resource inventory commit', () => {
       fetchImpl: async () => new Response(libraryBytes),
       input: { decisions: [{ ...library('visual.a'), destinationPath: 'assets/runtime/changed' }] },
       assertMutationAuthority: async () => undefined,
-    })).rejects.toThrow('does not match the current frozen decision set')
+    })).resolves.toEqual(expect.objectContaining({ state: 'committed' }))
     expect((await readdir(join(workspacePath, '.beegame/workflow/resource-inventory-commits'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
+    expect((await readBeeGameAssetManifest(workspacePath)).resources).toEqual([
+      expect.objectContaining({ root_path: 'assets/runtime/library/visual.a' }),
+    ])
+  })
+
+  test('keeps the canonical path when a placeholder reuses an existing provisional resource ID', async () => {
+    const workspacePath = await workspace(['visual.tower'])
+    const manifest = await readBeeGameAssetManifest(workspacePath)
+    await writeBeeGameAssetManifest(workspacePath, {
+      ...manifest,
+      resources: [{
+        id: 'placeholder.visual.tower',
+        source: {
+          type: 'agent-authored',
+          created_at: '2026-01-01T00:00:00.000Z',
+          reason: 'Existing provisional resource.',
+        },
+        root_path: 'assets/runtime/placeholders/visual_tower.png',
+        file_paths: ['assets/runtime/placeholders/visual_tower.png'],
+        provisional: true,
+        status: 'verified',
+        selected_at: '2026-01-01T00:00:00.000Z',
+        selection_reason: ['Existing stable resource.'],
+        asset_kind: 'image',
+      }],
+    })
+    const client = clientFor({ 'visual.tower': 'no-match' })
+    await observe(workspacePath, client)
+    await expect(commitResourceInventory({
+      workspacePath,
+      dispatchId: 'dispatch-a',
+      client,
+      provisionalAdapters: CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS,
+      fetchImpl: async () => new Response(),
+      input: {
+        decisions: [{
+          ...placeholder('visual.tower'),
+          destinationPath: 'assets/runtime/placeholders/guessed-name.png',
+        }],
+      },
+      assertMutationAuthority: async () => undefined,
+    })).resolves.toEqual(expect.objectContaining({ state: 'committed' }))
+    const updated = await readBeeGameAssetManifest(workspacePath)
+    expect(updated.resources).toEqual([
+      expect.objectContaining({
+        id: 'placeholder.visual.tower',
+        root_path: 'assets/runtime/placeholders/visual_tower.png',
+        file_paths: ['assets/runtime/placeholders/visual_tower.png'],
+      }),
+    ])
   })
 
   test('commits a multi-kind all-no-match inventory and advances to Resource Content', async () => {
@@ -469,6 +519,11 @@ describe('durable resource inventory commit', () => {
         resourceId: 'placeholder.model', destinationPath: 'assets/runtime/placeholders/model.gltf',
         format: 'gltf', reason: 'No library match.', selectionReason: ['Use a replaceable model placeholder.'],
         assetKind: 'model',
+      }, {
+        requirementId: 'visual.model', kind: 'placeholder',
+        resourceId: 'placeholder.model-motion', destinationPath: 'assets/runtime/placeholders/model-motion.json',
+        format: 'json', reason: 'No library match for the model motion duty.', selectionReason: ['Use a separate replaceable motion placeholder.'],
+        assetKind: 'animation-library', parameters: { clips: ['advancing', 'dying'] },
       }, {
         requirementId: 'visual.font', kind: 'placeholder',
         resourceId: 'placeholder.font', destinationPath: 'assets/runtime/placeholders/font.json',
@@ -593,7 +648,7 @@ async function mixedWorkspace() {
     },
     requirements: [{
       id: 'visual.model', required: true,
-      acquisition_profile: { dimensions: ['3D'], asset_kinds: ['model'], usage_tags: ['prop'], capabilities: [], styles: [] },
+      acquisition_profile: { dimensions: ['3D'], asset_kinds: ['model', 'animation-library'], usage_tags: ['prop'], capabilities: [], styles: [] },
     }, {
       id: 'visual.font', required: true,
       acquisition_profile: { dimensions: ['agnostic'], asset_kinds: ['font'], usage_tags: ['ui'], capabilities: [], styles: [] },

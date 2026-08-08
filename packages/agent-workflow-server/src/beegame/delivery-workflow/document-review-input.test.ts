@@ -78,6 +78,26 @@ describe('document review exact reference index', () => {
       ),
     ).toBe('## Rules\nKeep this.\n### Detail\nKeep detail.')
   })
+
+  test('supports a bounded wire index without changing canonical reference IDs', () => {
+    const artifacts = [{
+      path: 'assets/content/events.json',
+      content: JSON.stringify({
+        id: 'events',
+        data: { waves: [{ id: 'wave-1', events: [{ id: 'spawn-1' }] }] },
+      }),
+    }]
+    const full = buildDocumentReviewReferenceIndex(artifacts).references
+    const wire = buildDocumentReviewWireReferenceIndex(artifacts, {
+      maxJsonPointerDepth: 1,
+    }).references
+    expect(full.some(reference => reference.anchor === '/data/waves/0/events/0/id')).toBe(true)
+    expect(wire.some(reference => reference.anchor === '/data')).toBe(true)
+    expect(wire.some(reference => reference.anchor === '/data/waves/0')).toBe(false)
+    expect(wire.find(reference => reference.anchor === '/data')?.referenceId).toBe(
+      full.find(reference => reference.anchor === '/data')?.referenceId,
+    )
+  })
 })
 
 describe('system delivery contract projection', () => {

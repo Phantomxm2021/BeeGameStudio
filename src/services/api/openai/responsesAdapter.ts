@@ -1,10 +1,20 @@
 import { randomUUID } from 'crypto'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import {
+  assertProviderCompletionReason,
+  normalizeOpenAIUsage,
+  type AnthropicUsage,
+} from '@ant/model-provider'
 import { getValidChatGPTAuth } from './chatgptAuth.js'
 
 type ResponsesInputItem = Record<string, unknown>
 type ResponsesTool = Record<string, unknown>
-export type ResponsesReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh'
+export type ResponsesReasoningEffort =
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
 
 type ResponsesRequest = {
   model: string
@@ -16,13 +26,8 @@ type ResponsesRequest = {
   tool_choice?: unknown
   reasoning?: { effort: ResponsesReasoningEffort }
   parallel_tool_calls?: boolean
-}
-
-type AnthropicUsage = {
-  input_tokens: number
-  output_tokens: number
-  cache_creation_input_tokens: number
-  cache_read_input_tokens: number
+  /** Sticky cache routing key — stable for the CCB session. */
+  prompt_cache_key: string
 }
 
 function textFromContent(content: unknown): string {
@@ -168,6 +173,8 @@ export function buildResponsesRequest(params: {
   tools: unknown[]
   toolChoice: unknown
   reasoningEffort?: ResponsesReasoningEffort
+  /** Session-scoped key supplied only by the ChatGPT OAuth route. */
+  promptCacheKey: string
 }): ResponsesRequest {
   const { input, instructions } = convertMessagesToResponsesInput(
     params.messages,
@@ -187,6 +194,7 @@ export function buildResponsesRequest(params: {
       ? { reasoning: { effort: params.reasoningEffort } }
       : {}),
     parallel_tool_calls: true,
+    prompt_cache_key: params.promptCacheKey,
   }
 }
 
@@ -221,24 +229,27 @@ async function* parseSSE(
   }
 }
 
-function extractUsage(
+export function extractUsage(
   response: Record<string, unknown> | undefined,
 ): AnthropicUsage {
   const usage = response?.usage as Record<string, unknown> | undefined
   const inputDetails = usage?.input_tokens_details as
     | Record<string, unknown>
     | undefined
-  return {
-    input_tokens:
+  return normalizeOpenAIUsage({
+    totalInputTokens:
       typeof usage?.input_tokens === 'number' ? usage.input_tokens : 0,
-    output_tokens:
+    outputTokens:
       typeof usage?.output_tokens === 'number' ? usage.output_tokens : 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens:
+    cacheReadTokens:
       typeof inputDetails?.cached_tokens === 'number'
         ? inputDetails.cached_tokens
         : 0,
-  }
+    cacheWriteTokens:
+      typeof inputDetails?.cache_write_tokens === 'number'
+        ? inputDetails.cache_write_tokens
+        : 0,
+  })
 }
 
 function mapStopReason(response: Record<string, unknown> | undefined): string {
@@ -259,6 +270,7 @@ export async function* adaptResponsesStreamToAnthropic(
   let currentContentIndex = -1
   let textBlockOpen = false
   let thinkingBlockOpen = false
+  let completionReason: string | undefined
 
   const ensureStarted = async function* () {
     if (started) return
@@ -432,14 +444,17 @@ export async function* adaptResponsesStreamToAnthropic(
         thinkingBlockOpen = false
       }
       const response = event.response as Record<string, unknown> | undefined
+      completionReason = mapStopReason(response)
       yield {
         type: 'message_delta',
-        delta: { stop_reason: mapStopReason(response), stop_sequence: null },
+        delta: { stop_reason: completionReason, stop_sequence: null },
         usage: extractUsage(response),
       } as unknown as BetaRawMessageStreamEvent
       yield { type: 'message_stop' } as BetaRawMessageStreamEvent
     }
   }
+
+  assertProviderCompletionReason(completionReason)
 }
 
 export async function createChatGPTResponsesStream(params: {

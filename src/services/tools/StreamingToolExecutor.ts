@@ -33,6 +33,34 @@ type TrackedTool = {
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
 }
 
+export class InvalidToolUseBlockError extends Error {
+  constructor(block: Partial<ToolUseBlock>) {
+    super(
+      `Provider returned an invalid tool_use block: tool id and name must be non-empty (id=${JSON.stringify(block.id)}, name=${JSON.stringify(block.name)})`,
+    )
+    this.name = 'InvalidToolUseBlockError'
+  }
+}
+
+export function isValidToolUseBlock(
+  block: Partial<ToolUseBlock>,
+): block is ToolUseBlock {
+  return (
+    typeof block.id === 'string' &&
+    block.id.trim().length > 0 &&
+    typeof block.name === 'string' &&
+    block.name.trim().length > 0
+  )
+}
+
+export function assertValidToolUseBlock(
+  block: Partial<ToolUseBlock>,
+): asserts block is ToolUseBlock {
+  if (!isValidToolUseBlock(block)) {
+    throw new InvalidToolUseBlockError(block)
+  }
+}
+
 /**
  * Executes tools as they stream in with concurrency control.
  * - Concurrent-safe tools can execute in parallel with other concurrent-safe tools
@@ -88,6 +116,8 @@ export class StreamingToolExecutor {
    * Add a tool to the execution queue. Will start executing immediately if conditions allow.
    */
   addTool(block: ToolUseBlock, assistantMessage: AssistantMessage): void {
+    assertValidToolUseBlock(block)
+
     // Create turn span on first tool — will be ended in getRemainingResults
     if (this.tools.length === 0 && this.turnSpan === null) {
       this.turnSpan = createToolBatchSpan(

@@ -5,8 +5,11 @@ import { GREP_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/GrepTool/pr
 import { SEND_MESSAGE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SendMessageTool/constants.js'
 import { WEB_FETCH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/WebFetchTool/prompt.js'
 import { WEB_SEARCH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/WebSearchTool/prompt.js'
-import { isUsing3PServices } from 'src/utils/auth.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
+import {
+  getAPIProvider,
+  isThirdPartyAPIProvider,
+} from 'src/utils/model/providers.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import type {
@@ -89,7 +92,7 @@ Complete the user's request by providing accurate, documentation-based guidance.
 function getFeedbackGuideline(): string {
   // For 3P services (Bedrock/Vertex/Foundry), /feedback command is disabled
   // Direct users to the appropriate feedback channel instead
-  if (isUsing3PServices()) {
+  if (isThirdPartyAPIProvider(getAPIProvider())) {
     return `- When you cannot find an answer or the feature doesn't exist, direct the user to ${MACRO.ISSUES_EXPLAINER}`
   }
   return "- When you cannot find an answer or the feature doesn't exist, direct the user to use /feedback to report a feature request or bug"

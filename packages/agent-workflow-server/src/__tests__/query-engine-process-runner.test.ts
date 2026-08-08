@@ -214,7 +214,7 @@ describe('process-isolated QueryEngine runner', () => {
         inventoryBindings: [
           { requirementId: 'req-world', resourceIds: ['res-world'] },
         ],
-        protectedPaths: [],
+        writablePaths: ['assets/content/matrix.json'],
       },
     })
 
