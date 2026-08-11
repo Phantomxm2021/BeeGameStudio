@@ -2,13 +2,48 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createAgentWorkflowApp } from '../app'
+import {
+  createAgentWorkflowApp,
+  stopWorkflowDispatchById,
+} from '../app'
 import {
   createRunStore,
 } from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 describe('project stop route', () => {
+  test('waits for the exact session-manager dispatch before returning', async () => {
+    let releaseDisposal!: () => void
+    const disposalGate = new Promise<void>(resolve => {
+      releaseDisposal = resolve
+    })
+    const disposedDispatches: string[] = []
+    const fallbackDispatches: string[] = []
+
+    let settled = false
+    const stopping = stopWorkflowDispatchById({
+      dispatchId: 'dispatch-live',
+      reason: 'user stopped workflow',
+      disposeWorkflowDispatch: async dispatchId => {
+        disposedDispatches.push(dispatchId)
+        await disposalGate
+        return 1
+      },
+      fallbackStop: async dispatchId => {
+        fallbackDispatches.push(dispatchId)
+      },
+    }).then(() => {
+      settled = true
+    })
+
+    await Promise.resolve()
+    expect(disposedDispatches).toEqual(['dispatch-live'])
+    expect(settled).toBe(false)
+    releaseDisposal()
+    await stopping
+    expect(fallbackDispatches).toEqual([])
+  })
+
   test('stops a durable workflow even when no ordinary project session exists', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-project-stop-'))
     const projectsRoot = join(root, 'projects')

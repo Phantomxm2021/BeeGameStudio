@@ -411,6 +411,17 @@ export const ROUTE_PERMISSION = {
   assetIntegration: 'assets.integrate',
 } as const satisfies Record<string, BeeGamePermission>
 
+export async function stopWorkflowDispatchById(input: {
+  dispatchId: string
+  reason: string
+  disposeWorkflowDispatch: (dispatchId: string) => Promise<number>
+  fallbackStop: (dispatchId: string, reason: string) => Promise<unknown>
+}): Promise<void> {
+  const disposed = await input.disposeWorkflowDispatch(input.dispatchId)
+  if (disposed === 0)
+    await input.fallbackStop(input.dispatchId, input.reason)
+}
+
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
@@ -2769,6 +2780,8 @@ export function createAgentWorkflowApp(
           runId: run.runId,
           reason,
           sessionIsOpen: async dispatch => {
+            if (beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId))
+              return true
             try {
               return await controller.dispatcher.workerIsOpen(
                 dispatch.dispatchId,
@@ -2778,7 +2791,14 @@ export function createAgentWorkflowApp(
             }
           },
           stopDispatch: (dispatchId, stopReason) =>
-            controller.dispatcher.stop(dispatchId, stopReason),
+            stopWorkflowDispatchById({
+              dispatchId,
+              reason: stopReason,
+              disposeWorkflowDispatch: activeDispatchId =>
+                beeGameSessions.disposeWorkflowDispatch(activeDispatchId),
+              fallbackStop: (activeDispatchId, fallbackReason) =>
+                controller.dispatcher.stop(activeDispatchId, fallbackReason),
+            }),
         }),
       )
     } catch (err) {

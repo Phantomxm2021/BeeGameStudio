@@ -2635,6 +2635,13 @@ describe('delivery workflow recovery', () => {
     })
 
     let lateUsageResult: DeliveryRun | null | undefined
+    const stoppedTailUsage = {
+      input_tokens: 1,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 1,
+    }
     const stopped = await stopRun({
       store,
       runId: initial.runId,
@@ -2643,13 +2650,7 @@ describe('delivery workflow recovery', () => {
       stopDispatch: async () => {
         lateUsageResult = await store.addWorkflowUsage(
           initial.runId,
-          {
-            input_tokens: 1,
-            cache_read_tokens: 0,
-            cache_creation_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 1,
-          },
+          stoppedTailUsage,
           'dispatch-1',
         )
       },
@@ -2661,7 +2662,17 @@ describe('delivery workflow recovery', () => {
       tasks: [{ id: task.id, status: 'pending', attempt: 1 }],
     })
     expect(stopped.activeTaskId).toBeUndefined()
-    expect(lateUsageResult).toBeNull()
+    expect(lateUsageResult).toMatchObject({
+      status: 'stopped',
+      usage: { total_tokens: 1 },
+    })
+    expect(
+      await store.addWorkflowUsage(
+        initial.runId,
+        stoppedTailUsage,
+        'dispatch-stale',
+      ),
+    ).toBeNull()
 
     const continued = await retryRun({ store, runId: initial.runId })
     expect(continued).toMatchObject({
@@ -3048,7 +3059,7 @@ describe('delivery workflow recovery', () => {
     expect(stopped).toEqual([dispatch.dispatchId])
   })
 
-  test('rejects usage from a stopped or superseded dispatch', async () => {
+  test('accepts matching stopped tail usage and rejects superseded dispatches', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-fence-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3095,7 +3106,7 @@ describe('delivery workflow recovery', () => {
       },
     })
     await store.addWorkflowUsage(initial.runId, delta, 'dispatch-current')
-    expect((await store.load())?.usage?.total_tokens).toBe(35)
+    expect((await store.load())?.usage?.total_tokens).toBe(70)
   })
 
   test('does not let display-only activity refresh durable progress', async () => {
