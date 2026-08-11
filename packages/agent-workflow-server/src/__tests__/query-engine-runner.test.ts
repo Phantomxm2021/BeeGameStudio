@@ -9,6 +9,7 @@ import {
   createNativeSdkEventQueue,
   createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
+  getBeeGameRuntimeEnvironment,
   ensureBeeGameMacroGlobals,
   drainNativeBackgroundNotifications,
   getCompletedNativeTaskOutputTaskId,
@@ -31,6 +32,18 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+  test('enables the native stream watchdog inside every BeeGame runtime', () => {
+    expect(
+      getBeeGameRuntimeEnvironment({
+        CLAUDE_ENABLE_STREAM_WATCHDOG: '0',
+        CLAUDE_STREAM_IDLE_TIMEOUT_MS: '600000',
+      }),
+    ).toMatchObject({
+      CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+      CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
+    })
+  })
+
   test('keeps Author and Reviewer thinking while preserving other worker policy', () => {
     expect(getBeeGameWorkflowThinkingConfig('document-author')).toBeUndefined()
     expect(getBeeGameWorkflowThinkingConfig('atomic-task-planner')).toEqual({

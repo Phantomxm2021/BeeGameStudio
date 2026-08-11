@@ -1604,7 +1604,7 @@ function getFetchRequestProtocol(value: string): string | undefined {
   }
 }
 
-function getBeeGameRuntimeEnvironment(
+export function getBeeGameRuntimeEnvironment(
   env: Record<string, string>,
 ): Record<string, string> {
   const runtimeEnv = { ...env }
@@ -1624,6 +1624,11 @@ function getBeeGameRuntimeEnvironment(
     YARN_PRODUCTION: 'false',
     PNPM_CONFIG_PROD: 'false',
     pnpm_config_prod: 'false',
+    // The native Anthropic stream can remain open after its upstream socket
+    // silently stops producing chunks. BeeGame requires Claude Code's own
+    // non-streaming recovery to fire before the outer worker timeout.
+    CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+    CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
     CLAUDE_CODE_AUTO_COMPACT_WINDOW:
       env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
       process.env.BEEGAME_AUTO_COMPACT_WINDOW ??
