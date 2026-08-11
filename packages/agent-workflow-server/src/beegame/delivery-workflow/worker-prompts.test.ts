@@ -16,6 +16,8 @@ describe('resource-content worker prompts', () => {
       phase: 'DOCUMENT_DRAFTING',
       revision: 'revision',
       contract: {
+        confirmedBriefContext: '{"idea":"authoritative idea"}',
+        confirmedBriefDigest: 'brief-digest',
         documentSet: 'foundation',
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/GDD.md',
@@ -33,6 +35,10 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('compact decision contract')
     expect(prompt).not.toContain('Initial Reviewer owns')
     expect(prompt).not.toContain('complete Markdown body')
+    expect(prompt).not.toContain('authoritative idea')
+    expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
+    expect(prompt).toContain('one contract section per native file operation')
+    expect(prompt).not.toContain('Return one Markdown body')
   })
 
   test('instructs one JSON/YAML resource lane', () => {

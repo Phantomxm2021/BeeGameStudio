@@ -59,10 +59,13 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
-  if (request.workerType !== 'document-reviewer')
-    return JSON.stringify(
-      request.contract,
-    )
+  if (request.workerType !== 'document-reviewer') {
+    const {
+      confirmedBriefContext: _confirmedBriefContext,
+      ...contractWithoutDuplicatedBrief
+    } = request.contract
+    return JSON.stringify(contractWithoutDuplicatedBrief)
+  }
   const {
     reviewArtifacts,
     referenceIndex,
@@ -356,7 +359,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   : 'Apply only the accepted findings and their required outcomes. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
                 ...(request.contract.authoringMode === 'initial'
                   ? [
-                      'Return one Markdown body using the exact contract section order. Begin each section with its exact <!-- beegame-section:SECTION_ID --> marker and exact ## title. Within every section include the exact headings ### Authoritative Decisions, ### Production Details, ### Upstream Authority, ### Risks, and ### Open Decisions, each with non-empty content. Production details must include observable acceptance criteria. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
+                      'Build the assigned Markdown file incrementally in the exact contract section order, using one contract section per native file operation, then verify the complete final file. Do not construct the entire document as one tool-call argument. Begin each section with its exact <!-- beegame-section:SECTION_ID --> marker and exact ## title. Within every section include the exact headings ### Authoritative Decisions, ### Production Details, ### Upstream Authority, ### Risks, and ### Open Decisions, each with non-empty content. Production details must include observable acceptance criteria. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
                       'A downstream owner may specialize only product behavior already authorized by the Confirmed Brief, GDD, or its legitimate projected upstream owner. Do not invent a new player-visible system, settings surface, state machine, economy mechanism, resource duty, or obligation that another owner would have to implement.',
                     ]
                   : []),
