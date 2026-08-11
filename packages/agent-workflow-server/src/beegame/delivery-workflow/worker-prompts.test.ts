@@ -34,10 +34,13 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('smallest decision-level authority')
     expect(prompt).not.toContain('compact decision contract')
     expect(prompt).not.toContain('Initial Reviewer owns')
-    expect(prompt).toContain('one complete native write')
+    expect(prompt).not.toContain('one complete native write')
     expect(prompt).not.toContain('authoritative idea')
     expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
-    expect(prompt).not.toContain('one contract section per native file operation')
+    expect(prompt).toContain('one contract section per native file operation')
+    expect(prompt).toContain(
+      'Do not serialize the complete document into one tool-call argument',
+    )
     expect(prompt).toContain('exactly one # document title')
     expect(prompt).toContain('beegame-executive-summary')
     expect(prompt).toContain('beegame-production-materials')
