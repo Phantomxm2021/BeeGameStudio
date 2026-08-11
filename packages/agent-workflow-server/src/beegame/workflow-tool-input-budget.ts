@@ -1,4 +1,7 @@
-export const DOCUMENT_NATIVE_WRITE_MAX_BYTES = 16 * 1024
+// The authoring contract limits document content to 12 KiB per operation. The
+// streamed value is the serialized JSON tool input, so Edit/Write field names,
+// anchors and JSON escaping need a separate transport allowance.
+export const DOCUMENT_NATIVE_WRITE_MAX_BYTES = 24 * 1024
 
 const DOCUMENT_NATIVE_WRITE_TOOLS = new Set([
   'Write',
@@ -67,4 +70,3 @@ export function observeWorkflowToolInput(
     observedBytes: active.observedBytes,
   }
 }
-

@@ -28,6 +28,15 @@ function inputDelta(index: number, partialJson: string) {
 }
 
 describe('workflow document tool input budget', () => {
+  test('allows the serialized overhead of a bounded document edit', () => {
+    const state = createWorkflowToolInputBudgetState()
+    observeWorkflowToolInput(state, start(0, 'Edit'))
+
+    expect(
+      observeWorkflowToolInput(state, inputDelta(0, 'x'.repeat(16_393))),
+    ).toBeUndefined()
+  })
+
   test('reports the exact write tool stream byte overflow', () => {
     const state = createWorkflowToolInputBudgetState()
     expect(observeWorkflowToolInput(state, start(3, 'Write'))).toBeUndefined()
@@ -83,4 +92,3 @@ describe('workflow document tool input budget', () => {
     })
   })
 })
-
