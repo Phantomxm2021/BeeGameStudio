@@ -49,7 +49,7 @@ describe('delivery worker complete document commit contract', () => {
     }
   })
 
-  test('injects only the exact upstream section projections', async () => {
+  test('projects document authority as paths and section ids without source bodies', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -57,6 +57,10 @@ describe('delivery worker complete document commit contract', () => {
       await writeFile(
         join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
         canonicalSource('docs/LEVEL_SCENE_DESIGN.md'),
+      )
+      await writeFile(
+        join(workspacePath, 'docs/UI_UX_SPEC.md'),
+        '# Stale target\n\nSTALE TARGET BODY',
       )
       const block = await buildDocumentAuthorAuthorityBlock({
         workerType: 'document-author',
@@ -71,12 +75,14 @@ describe('delivery worker complete document commit contract', () => {
       } as never)
       const projection = getGameDocumentContract('docs/UI_UX_SPEC.md').upstreamSections
       for (const source of projection)
-        for (const sectionId of source.sectionIds)
-          expect(block).toContain(
-            `BEGIN CANONICAL AUTHORITY: ${source.path}#${sectionId}`,
-          )
+        for (const sectionId of source.sectionIds) {
+          expect(block).toContain(`upstreamPath=${source.path}`)
+          expect(block).toContain(`sectionId=${sectionId}`)
+        }
+      expect(block).toContain('Read only the listed sections from disk when needed')
+      expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Unprojected production material payload.')
-      expect(block).not.toContain('docs/GDD.md ---')
+      expect(block).not.toContain('STALE TARGET BODY')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
