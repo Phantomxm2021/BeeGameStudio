@@ -34,6 +34,7 @@ import {
   INITIAL_FOUNDATION_UPSTREAM_PATHS,
   repairGroupAffectedPaths,
 } from './document-repair-graph'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   buildSystemDeliveryContract,
   SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
@@ -1099,6 +1100,7 @@ export async function startDocumentStage(input: {
         ? {
             authoringMode: 'initial',
             foundationDocumentPath: initialPath,
+            completeDocumentContract: getGameDocumentContract(initialPath),
             upstreamDocumentPaths: [
               ...INITIAL_FOUNDATION_UPSTREAM_PATHS[initialPath],
             ],

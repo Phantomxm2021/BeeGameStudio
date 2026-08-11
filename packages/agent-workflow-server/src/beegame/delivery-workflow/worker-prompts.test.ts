@@ -1,9 +1,40 @@
 import { describe, expect, test } from 'bun:test'
 import { buildWorkerPrompt } from './worker-prompts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
+import { getGameDocumentContract } from './game-document-contracts'
 import type { WorkerDispatchRequest } from './types'
 
 describe('resource-content worker prompts', () => {
+  test('requires complete structured human-discipline documents', () => {
+    const completeDocumentContract = getGameDocumentContract('docs/GDD.md')
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+        upstreamDocumentPaths: [],
+        completeDocumentContract,
+        systemDeliveryContract: buildSystemDeliveryContract(),
+      },
+    })
+
+    expect(prompt).toContain('complete structured game document')
+    expect(prompt).toContain('human development discipline')
+    for (const section of completeDocumentContract.sections)
+      expect(prompt).toContain(`"sectionId":"${section.sectionId}"`)
+    expect(prompt).not.toContain('smallest decision-level authority')
+    expect(prompt).not.toContain('compact decision contract')
+    expect(prompt).not.toContain('Initial Reviewer owns')
+    expect(prompt).not.toContain('complete Markdown body')
+  })
+
   test('instructs one JSON/YAML resource lane', () => {
     const request: WorkerDispatchRequest = {
       runId: 'run',
@@ -346,20 +377,22 @@ describe('resource-content worker prompts', () => {
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/GDD.md',
         upstreamDocumentPaths: [],
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('attempt to finish the eight-document pass')
-    expect(prompt).toContain('Initial Reviewer owns feasibility assessment')
+    expect(prompt).toContain('complete human development discipline')
+    expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Events, waves and numeric configuration')
     expect(prompt).toContain('world, scene, hierarchy and instance placement')
     expect(prompt).toContain('CommitCanonicalDocument exactly once')
-    expect(prompt).toContain('service owns document_id, version, updated_at')
-    expect(prompt).toContain('compact decision contract')
-    expect(prompt).toContain('Reference upstream IDs instead of restating')
+    expect(prompt).toContain(
+      'owns Markdown rendering, document_id, version, updated_at',
+    )
+    expect(prompt).toContain('productionDetails with acceptanceCriteria')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
     )
@@ -380,18 +413,17 @@ describe('resource-content worker prompts', () => {
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
         upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+        completeDocumentContract: getGameDocumentContract(
+          'docs/BALANCE_DESIGN.md',
+        ),
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(prompt).toContain('smallest decision-level authority')
-    expect(prompt).toContain('Do not perform reviewer work')
-    expect(prompt).toContain('run full wave/build simulations')
-    expect(prompt).toContain('Initial Reviewer owns feasibility assessment')
-    expect(prompt).toContain('Do not simulate builds or waves')
-    expect(prompt).toContain('The Initial Reviewer owns those comparisons')
-    expect(prompt).not.toContain(
-      'Document enough authoritative game-design facts to audit strategy',
-    )
+    expect(prompt).toContain('units, sources, sinks, base values, formulas')
+    expect(prompt).toContain('bounds and tuning evidence')
+    expect(prompt).toContain('implementable and testable')
+    expect(prompt).not.toContain('Initial Reviewer owns')
+    expect(prompt).not.toContain('Do not simulate builds or waves')
   })
 
   test('separates read-only repair planning from one-document owner repair', () => {
