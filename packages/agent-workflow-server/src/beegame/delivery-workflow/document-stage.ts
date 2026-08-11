@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
+import {
+  canonicalizeCompleteGameDocumentMarkdown,
+  validateCompleteGameDocumentMarkdown,
+} from '../complete-game-document'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
@@ -1514,6 +1517,12 @@ async function completeInitialFoundationDocumentDraft(input: {
   const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
     path.split('\\').join('/'),
   )
+  const canonicalizationIssues = canonicalizeFoundationDocumentFile({
+    workspacePath: input.workspacePath,
+    path: expectedPath,
+    version: '1.0.0',
+    updatedAt: new Date().toISOString(),
+  })
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
@@ -1527,6 +1536,7 @@ async function completeInitialFoundationDocumentDraft(input: {
     )
       ? ['initial document author returned an unsafe document path']
       : []),
+    ...canonicalizationIssues,
     ...(!metadata ||
     !version ||
     !Number.isFinite(Date.parse(metadata.updatedAt))
@@ -1598,6 +1608,29 @@ async function completeInitialFoundationDocumentDraft(input: {
     documentStep: 'FOUNDATION_REVIEW',
     currentItemId: undefined,
     blockedReason: undefined,
+  }
+}
+
+function canonicalizeFoundationDocumentFile(input: {
+  workspacePath: string
+  path: FoundationDocumentPath
+  version: string
+  updatedAt: string
+}): string[] {
+  try {
+    const absolutePath = join(input.workspacePath, input.path)
+    const authored = readFileSync(absolutePath, 'utf8')
+    const canonical = canonicalizeCompleteGameDocumentMarkdown(
+      input.path,
+      authored,
+      { version: input.version, updatedAt: input.updatedAt },
+    )
+    writeFileSync(absolutePath, canonical, 'utf8')
+    return []
+  } catch (error) {
+    return [
+      `${input.path}: ${error instanceof Error ? error.message : 'canonical document normalization failed'}`,
+    ]
   }
 }
 

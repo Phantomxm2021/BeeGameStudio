@@ -4,6 +4,7 @@ import {
 } from './delivery-workflow/game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
 
@@ -217,6 +218,34 @@ const REQUIRED_SECTION_SUBHEADINGS = [
   '### Open Decisions',
 ] as const
 
+function substantiveContentBlocks(lines: readonly string[]): string[] {
+  const blocks: string[] = []
+  let current: string[] = []
+  const flush = () => {
+    const normalized = current.map(line => line.trim()).join(' ').trim()
+    current = []
+    if (normalized.length >= 160) blocks.push(normalized)
+  }
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flush()
+      continue
+    }
+    if (
+      trimmed.startsWith('#') ||
+      trimmed.startsWith('<!--') ||
+      trimmed === '---'
+    ) {
+      flush()
+      continue
+    }
+    current.push(trimmed)
+  }
+  flush()
+  return blocks
+}
+
 /**
  * Validate the compact Markdown transport used by real document workers.
  * The exact structural tokens are service-owned; authored prose remains free.
@@ -229,6 +258,10 @@ export function validateCompleteGameDocumentMarkdown(
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')
+
+  const blocks = substantiveContentBlocks(lines)
+  if (new Set(blocks).size !== blocks.length)
+    throw new Error('complete game document repeats a substantive content block')
 
   const contract = getGameDocumentContract(path)
   const expectedMarkers = contract.sections.map(
@@ -283,4 +316,33 @@ export function validateCompleteGameDocumentMarkdown(
     }
   }
   return `${body}\n`
+}
+
+export function canonicalizeCompleteGameDocumentMarkdown(
+  path: FoundationDocumentPath,
+  value: unknown,
+  metadata: { version: string; updatedAt: string },
+): string {
+  const authored = z.string().trim().min(1).parse(value)
+  const lines = authored.split('\n')
+  const bodyStart =
+    lines[0]?.trim() === '---'
+      ? lines.findIndex((line, index) => index > 0 && line.trim() === '---') + 1
+      : 0
+  if (bodyStart === 0 && lines[0]?.trim() === '---')
+    throw new Error('complete game document front matter is incomplete')
+  const body = validateCompleteGameDocumentMarkdown(
+    path,
+    lines.slice(bodyStart).join('\n').trimStart(),
+  )
+  const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
+  return [
+    '---',
+    `document_id: ${documentId}`,
+    `version: ${metadata.version}`,
+    `updated_at: ${metadata.updatedAt}`,
+    '---',
+    body.trimEnd(),
+    '',
+  ].join('\n')
 }

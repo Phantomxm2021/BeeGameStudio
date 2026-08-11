@@ -19,6 +19,7 @@ import {
   validateDocumentReviewSubmission,
 } from '../beegame/delivery-workflow/document-review-input'
 import { repairPlanMatchesCanonicalGraph } from '../beegame/delivery-workflow/document-repair-graph'
+import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import {
@@ -31,6 +32,7 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
@@ -42,6 +44,7 @@ import {
   type DeliveryRun,
   type DocumentReviewCheck,
   type DocumentReviewScope,
+  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import type { WorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
@@ -450,7 +453,7 @@ describe('single-track document review workflow', () => {
       await mkdir(join(workspacePath, path, '..'), { recursive: true })
       await writeFile(
         join(workspacePath, path),
-        documentContent(path, '1.0.0', '2026-08-03T00:00:00.000Z'),
+        completeFoundationContent(path),
       )
       run = await completeDocumentDraft({
         run: withDispatch(run, request!),
@@ -467,6 +470,12 @@ describe('single-track document review workflow', () => {
       expect(run.foundationDraftState.completedPaths).toEqual(
         CANONICAL_FOUNDATION_DOCUMENTS.slice(0, index + 1),
       )
+      const committedDocument = await readFile(join(workspacePath, path), 'utf8')
+      expect(committedDocument).toContain(
+        `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
+      )
+      expect(committedDocument).toContain('version: 1.0.0')
+      expect(committedDocument).not.toContain('2099-01-01')
       if (index < CANONICAL_FOUNDATION_DOCUMENTS.length - 1) {
         expect(run.phase).toBe('DOCUMENT_DRAFTING')
         expect(run.documentStep).toBe('FOUNDATION_DRAFTING')
@@ -2746,6 +2755,39 @@ function documentContent(
   updatedAt: string,
 ): string {
   return `---\nversion: ${version}\nupdated_at: ${updatedAt}\n---\n# ${title}\n\n## Spec\n\nCanonical specification.\n`
+}
+
+function completeFoundationContent(path: FoundationDocumentPath): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    '---',
+    'document_id: MODEL_CONTROLLED',
+    'version: 99.0.0',
+    'updated_at: 2099-01-01T00:00:00.000Z',
+    '---',
+    `# ${contract.discipline}`,
+    '',
+    ...contract.sections.flatMap((section, index) => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      '',
+      '### Authoritative Decisions',
+      `Decision ${index + 1} is owned by this section.`,
+      '',
+      '### Production Details',
+      `Observable acceptance ${index + 1} is complete.`,
+      '',
+      '### Upstream Authority',
+      `Authority reference ${index + 1}.`,
+      '',
+      '### Risks',
+      `Risk ${index + 1} has an owned mitigation.`,
+      '',
+      '### Open Decisions',
+      'No unresolved section decisions.',
+      '',
+    ]),
+  ].join('\n')
 }
 
 async function reviewRun(

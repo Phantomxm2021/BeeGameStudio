@@ -165,6 +165,9 @@ describe('resource-content worker prompts', () => {
     expect(reviewerPrompt).toContain(
       'A subject is current content that violates authority',
     )
+    expect(reviewerPrompt).toContain(
+      'reject repeated authority prose within one document',
+    )
   })
 
   test('requires structured strategy, economy, numeric and pacing derivations', () => {
@@ -383,9 +386,8 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('document_id: GDD')
-    expect(prompt).toContain('version: 1.0.0')
-    expect(prompt).toContain('updated_at')
+    expect(prompt).toContain('Document metadata is service-owned')
+    expect(prompt).not.toContain('updated_at set to')
     expect(prompt).toContain('complete human development discipline')
     expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
@@ -397,6 +399,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
     expect(prompt).toContain('Production details must include observable acceptance criteria')
+    expect(prompt).toContain('Define each authoritative fact in one section only')
+    expect(prompt).toContain('No unresolved section decisions')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
     )

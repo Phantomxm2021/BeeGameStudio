@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  canonicalizeCompleteGameDocumentMarkdown,
   renderCompleteGameDocument,
+  validateCompleteGameDocumentMarkdown,
   validateCompleteGameDocumentSubmission,
   type CompleteGameDocumentSubmission,
 } from './complete-game-document'
@@ -128,5 +130,37 @@ describe('complete game document submission', () => {
         ),
       }),
     ).toThrow(/upstream|authority/i)
+  })
+
+  test('replaces model-authored front matter with service-owned metadata', () => {
+    const path = 'docs/GDD.md'
+    const body = renderCompleteGameDocument(path, completeSubmission(path))
+    const authored = `---\ndocument_id: WRONG\nversion: 99.0.0\nupdated_at: 2099-01-01T00:00:00.000Z\n---\n${body}`
+
+    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
+      version: '1.0.0',
+      updatedAt: '2026-08-11T04:30:00.000Z',
+    })
+
+    expect(canonical.startsWith(
+      '---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-08-11T04:30:00.000Z\n---\n',
+    )).toBe(true)
+    expect(canonical).not.toContain('2099-01-01')
+    expect(canonical).not.toContain('document_id: WRONG')
+  })
+
+  test('rejects repeated substantive blocks across document sections', () => {
+    const path = 'docs/GDD.md'
+    const value = completeSubmission(path)
+    const repeated = 'This production authority paragraph is deliberately long enough to represent a substantive authored block. It must be defined once and referenced elsewhere instead of being copied into another section.'
+    value.sections[0]!.body = repeated
+    value.sections[1]!.body = repeated
+
+    expect(() =>
+      validateCompleteGameDocumentMarkdown(
+        path,
+        renderCompleteGameDocument(path, value),
+      ),
+    ).toThrow('repeats a substantive content block')
   })
 })
