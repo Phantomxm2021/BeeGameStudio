@@ -37,10 +37,16 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('one complete native write')
     expect(prompt).not.toContain('authoritative idea')
     expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
-    expect(prompt).toContain('one contract section per native file operation')
+    expect(prompt).not.toContain('one contract section per native file operation')
     expect(prompt).toContain(
       'Do not serialize the complete document into one tool-call argument',
     )
+    expect(prompt).toContain(
+      'No native write or edit input may exceed 12 KiB of UTF-8 content',
+    )
+    expect(prompt).toContain('three to eight contiguous ordered content writes')
+    expect(prompt).toContain('one final lightweight structural verification')
+    expect(prompt).toContain('do not reread the complete file after each chunk')
     expect(prompt).toContain('exactly one # document title')
     expect(prompt).toContain('beegame-executive-summary')
     expect(prompt).toContain('beegame-production-materials')
