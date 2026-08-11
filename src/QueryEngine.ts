@@ -151,6 +151,10 @@ export type QueryEngineConfig = {
   userSpecifiedModel?: string
   fallbackModel?: string
   thinkingConfig?: ThinkingConfig
+  /** Provider-neutral cache namespace used only by an authorized workflow session. */
+  promptCacheKeyOverride?: string
+  /** Provider-neutral cache namespace used only by an authorized workflow session. */
+  promptCacheKeyOverride?: string
   maxTurns?: number
   maxBudgetUsd?: number
   taskBudget?: { total: number }
@@ -225,6 +229,8 @@ export class QueryEngine {
       mcpClients,
       verbose = false,
       thinkingConfig,
+      promptCacheKeyOverride,
+      promptCacheKeyOverride,
       maxTurns,
       maxBudgetUsd,
       taskBudget,
@@ -363,6 +369,8 @@ export class QueryEngine {
         verbose,
         mainLoopModel: initialMainLoopModel,
         thinkingConfig: initialThinkingConfig,
+        ...(promptCacheKeyOverride ? { promptCacheKeyOverride } : {}),
+        ...(promptCacheKeyOverride ? { promptCacheKeyOverride } : {}),
         mcpClients,
         mcpResources: {},
         ideInstallationStatus: null,
@@ -512,6 +520,8 @@ export class QueryEngine {
         verbose,
         mainLoopModel,
         thinkingConfig: initialThinkingConfig,
+        ...(promptCacheKeyOverride ? { promptCacheKeyOverride } : {}),
+        ...(promptCacheKeyOverride ? { promptCacheKeyOverride } : {}),
         mcpClients,
         mcpResources: {},
         ideInstallationStatus: null,

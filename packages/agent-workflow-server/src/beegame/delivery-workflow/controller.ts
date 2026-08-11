@@ -318,7 +318,7 @@ export function createDeliveryWorkflowController(input: {
           blockedReason: next.blockedReason ?? 'document bundle is incomplete',
         }
       }
-      next = await persist(
+      await persist(
         next,
         next.status === 'running'
           ? 'phase.entered'
@@ -351,7 +351,7 @@ export function createDeliveryWorkflowController(input: {
         currentDocumentRevision: currentReviewRevision,
         scope: reviewScope,
       })
-      await persist(
+      next = await persist(
         next,
         reviewScope === 'foundation'
           ? 'document.foundation.review.reconciled'
