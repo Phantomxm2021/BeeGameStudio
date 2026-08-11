@@ -1,12 +1,11 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
-import { completeGameDocumentSectionMarkers } from './complete-game-document'
+import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 
 export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
 export const MAX_ACCEPTANCE_CHECKLIST_TASKS = 64
@@ -116,25 +115,27 @@ function auditCompleteFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
   content: string,
 ): string[] {
-  const markers = completeGameDocumentSectionMarkers(path)
-  const sections = getGameDocumentContract(path).sections
-  const issues: string[] = []
-  let previousIndex = -1
-  for (const [index, marker] of markers.entries()) {
-    const markerIndex = content.indexOf(marker)
-    if (
-      markerIndex < 0 ||
-      markerIndex <= previousIndex ||
-      content.indexOf(marker, markerIndex + marker.length) >= 0
-    ) {
-      issues.push(
-        `${path}: Complete document section is missing or out of order: ${sections[index]!.sectionId}`,
+  try {
+    const lines = content.split('\n')
+    let bodyStart = 0
+    if (lines[0]?.trim() === '---') {
+      const metadataEnd = lines.findIndex(
+        (line, index) => index > 0 && line.trim() === '---',
       )
-      continue
+      if (metadataEnd < 0)
+        throw new Error('complete game document front matter is incomplete')
+      bodyStart = metadataEnd + 1
     }
-    previousIndex = markerIndex
+    validateCompleteGameDocumentMarkdown(
+      path,
+      lines.slice(bodyStart).join('\n').trimStart(),
+    )
+    return []
+  } catch (error) {
+    return [
+      `${path}: ${error instanceof Error ? error.message : 'complete document contract is invalid'}`,
+    ]
   }
-  return issues
 }
 
 function auditChecklistStructure(content: string, path: string): string[] {

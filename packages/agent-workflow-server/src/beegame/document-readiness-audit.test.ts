@@ -8,6 +8,39 @@ import {
   REQUIRED_PROJECT_DOCUMENTS,
 } from './document-readiness-audit'
 import { writeBeeGameAssetManifest } from './asset-contracts'
+import { renderCompleteGameDocument } from './complete-game-document'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
+
+function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+  const contract = getGameDocumentContract(path)
+  return renderCompleteGameDocument(path, {
+    title: contract.discipline,
+    executiveSummary: `Complete ${contract.discipline} production authority.`,
+    sections: contract.sections.map((section, index) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Implementation-ready authority ${index + 1}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material => ({
+      materialId: material.materialId,
+      title: material.title,
+      format: material.format,
+      body:
+        material.format === 'markdown_table'
+          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+          : material.format === 'mermaid'
+            ? '```mermaid\ngraph TD\n  A --> B\n```'
+            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+    })),
+    auditAppendix: {
+      acceptanceCriteria: ['All owned requirements and materials are complete and inspectable.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  })
+}
 
 async function writeMinimalContent(workspace: string): Promise<void> {
   await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
@@ -59,9 +92,28 @@ describe('document readiness audit', () => {
       requireCompleteFoundation: true,
     })
     expect(audit.valid).toBe(false)
-    expect(audit.issues).toContain(
-      'docs/GDD.md: Complete document section is missing or out of order: vision',
-    )
+    expect(audit.issues.some(issue => issue.startsWith('docs/GDD.md:'))).toBe(true)
+  })
+
+  test('requires every compact production material at the durable readiness gate', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-materials-'))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      const content = completeDocument(path)
+      await writeFile(
+        join(workspace, path),
+        path === 'docs/GDD.md'
+          ? content.replace('<!-- beegame-material:core-loop-diagram -->', '')
+          : content,
+      )
+    }
+    const audit = auditDocumentReadiness(workspace, {
+      includeChecklist: false,
+      includeAssetManifest: false,
+      requireCompleteFoundation: true,
+    })
+    expect(audit.valid).toBe(false)
+    expect(audit.issues.some(issue => issue.includes('production materials'))).toBe(true)
   })
 
   test('rejects a seven-document foundation missing either new fact owner', async () => {
