@@ -35,6 +35,10 @@ import { loadMemoryPrompt } from './memdir/memdir.js'
 import { hasAutoMemPathOverride } from './memdir/paths.js'
 import { query } from './query.js'
 import { categorizeRetryableAPIError } from './services/api/errors.js'
+import {
+  extractConnectionErrorDetails,
+  formatAPIError,
+} from './services/api/errorUtils.js'
 import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
 import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
@@ -995,6 +999,18 @@ export class QueryEngine {
               retry_delay_ms: apiErrorMsg.retryInMs,
               error_status: apiErrorMsg.error.status ?? null,
               error: categorizeRetryableAPIError(apiErrorMsg.error),
+              error_type:
+                apiErrorMsg.error.name ||
+                apiErrorMsg.error.constructor?.name ||
+                'APIError',
+              error_message: formatAPIError(apiErrorMsg.error),
+              error_code:
+                extractConnectionErrorDetails(apiErrorMsg.error)?.code ?? null,
+              error_cause:
+                apiErrorMsg.error.cause instanceof Error
+                  ? apiErrorMsg.error.cause.message
+                  : null,
+              request_id: apiErrorMsg.error.requestID ?? null,
               session_id: getSessionId(),
               uuid: msg.uuid,
             }
