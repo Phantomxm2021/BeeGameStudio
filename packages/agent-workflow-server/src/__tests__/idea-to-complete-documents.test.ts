@@ -75,6 +75,7 @@ describe('idea to complete game documents', () => {
         request!,
         dispatchId,
       )
+      expect(commitContract).toBeDefined()
       let tool: Record<string, unknown> | undefined
       createNativeCanonicalDocumentTool({
         buildTool: definition => {
@@ -82,7 +83,7 @@ describe('idea to complete game documents', () => {
           return definition
         },
         workspacePath,
-        contract: commitContract,
+        contract: commitContract!,
       })
       const call = tool?.call as
         | ((input: unknown) => Promise<unknown>)
@@ -150,7 +151,7 @@ describe('idea to complete game documents', () => {
 
     expect(run.phase).toBe('DOCUMENT_REVIEW')
     expect(run.foundationDraftState.completedPaths).toEqual(
-      CANONICAL_FOUNDATION_DOCUMENTS,
+      [...CANONICAL_FOUNDATION_DOCUMENTS],
     )
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       const content = await readFile(join(workspacePath, path), 'utf8')
