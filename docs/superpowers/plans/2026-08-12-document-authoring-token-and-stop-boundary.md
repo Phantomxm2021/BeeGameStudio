@@ -124,14 +124,14 @@ git commit -m "fix: bound document author write operations"
 
 - [ ] **Step 1: Write failing stream-counter tests**
 
-Feed `content_block_start` for `Write`, followed by `input_json_delta` fragments. Assert 12 KiB is accepted and the next byte produces:
+Feed `content_block_start` for `Write`, followed by `input_json_delta` fragments. The authoring prompt limits document content to 12 KiB; the stream guard allows 16 KiB so JSON keys and escaping do not reject a compliant content chunk. Assert 16 KiB is accepted and the next byte produces:
 
 ```ts
 {
   code: 'document_native_write_input_too_large',
   toolName: 'Write',
-  maxBytes: 12 * 1024,
-  observedBytes: 12 * 1024 + 1,
+  maxBytes: 16 * 1024,
+  observedBytes: 16 * 1024 + 1,
 }
 ```
 
@@ -148,7 +148,7 @@ bun test packages/agent-workflow-server/src/beegame/workflow-tool-input-budget.t
 Use `Buffer.byteLength(partialJson, 'utf8')`, stream block indexes, and only native write tool identities (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`). Export:
 
 ```ts
-export const DOCUMENT_NATIVE_WRITE_MAX_BYTES = 12 * 1024
+export const DOCUMENT_NATIVE_WRITE_MAX_BYTES = 16 * 1024
 export function observeWorkflowToolInput(
   state: WorkflowToolInputBudgetState,
   message: DashboardSDKMessage,
