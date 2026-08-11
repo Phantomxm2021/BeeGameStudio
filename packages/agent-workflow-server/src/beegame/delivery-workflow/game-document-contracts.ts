@@ -38,11 +38,25 @@ export type GameDocumentSectionContract = {
   responsibilityIds: readonly GameDocumentResponsibility[]
 }
 
+export type GameDocumentProductionMaterialContract = {
+  materialId: string
+  title: string
+  purpose: string
+  format: 'markdown_table' | 'mermaid' | 'inline_svg'
+}
+
+export type GameDocumentUpstreamProjection = {
+  path: FoundationDocumentPath
+  sectionIds: readonly string[]
+}
+
 export type GameDocumentContract = {
   path: FoundationDocumentPath
   discipline: string
   purpose: string
   allowedUpstreamPaths: readonly FoundationDocumentPath[]
+  productionMaterials: readonly GameDocumentProductionMaterialContract[]
+  upstreamSections: readonly GameDocumentUpstreamProjection[]
   sections: readonly GameDocumentSectionContract[]
 }
 
@@ -59,6 +73,110 @@ const section = (
     responsibilityIds: Object.freeze(responsibilityIds),
   })
 
+const material = (
+  materialId: string,
+  title: string,
+  format: GameDocumentProductionMaterialContract['format'],
+  purpose: string,
+): GameDocumentProductionMaterialContract =>
+  Object.freeze({ materialId, title, format, purpose })
+
+const upstream = (
+  path: FoundationDocumentPath,
+  ...sectionIds: string[]
+): GameDocumentUpstreamProjection =>
+  Object.freeze({ path, sectionIds: Object.freeze(sectionIds) })
+
+const PRODUCTION_MATERIALS = {
+  'docs/GDD.md': [
+    material('product-gameplay-overview', 'Product and Gameplay Overview', 'markdown_table', 'Summarize the playable promise, audience, scope, loops and completion definition.'),
+    material('core-loop-diagram', 'Core Loop Diagram', 'mermaid', 'Show the moment, session and long-term loop relationships.'),
+    material('game-state-flow', 'Game State Flow', 'mermaid', 'Show playable, menu, completion, failure and recovery transitions.'),
+  ],
+  'docs/LEVEL_SCENE_DESIGN.md': [
+    material('world-structure-diagram', 'World Structure Diagram', 'mermaid', 'Show the spatial hierarchy and traversal boundaries.'),
+    material('route-choice-diagram', 'Route and Choice Diagram', 'mermaid', 'Show objectives, route alternatives and convergence.'),
+    material('pacing-beat-table', 'Pacing Beat Table', 'markdown_table', 'Map authored beats to intensity, recovery and required content.'),
+    material('scene-transition-diagram', 'Scene Transition Diagram', 'mermaid', 'Show scene lifecycle, spawn, checkpoint and recovery transitions.'),
+  ],
+  'docs/BALANCE_DESIGN.md': [
+    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Provide the canonical units, defaults, ranges and owners.'),
+    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Connect formulas to ordering, clamping and worked boundary cases.'),
+    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Show sources, sinks, conversions and progression gates.'),
+    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Define scenarios, sensitivity inputs and acceptance intervals.'),
+  ],
+  'docs/TECHNICAL_DESIGN.md': [
+    material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Show components, responsibilities and dependency direction.'),
+    material('data-flow-diagram', 'Data Flow Diagram', 'mermaid', 'Show content, runtime, persistence and presentation data flow.'),
+    material('runtime-lifecycle-diagram', 'Runtime Lifecycle Diagram', 'mermaid', 'Show state ownership and lifecycle transitions.'),
+    material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Define persistence triggers, corruption handling and recovery evidence.'),
+  ],
+  'docs/ART_DIRECTION.md': [
+    material('visual-pillar-board', 'Visual Pillar Board', 'inline_svg', 'Make the visual hierarchy and prohibited directions inspectable.'),
+    material('palette-board', 'Palette Board', 'inline_svg', 'Show semantic palette roles, contrast and accessibility variants.'),
+    material('silhouette-scale-board', 'Silhouette and Scale Board', 'inline_svg', 'Show entity differentiation, proportions and gameplay scale.'),
+    material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Map authored states and events to motion and effect requirements.'),
+  ],
+  'docs/UI_UX_SPEC.md': [
+    material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Show navigation, layers and entry points.'),
+    material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Show complete player journeys and recovery paths.'),
+    material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Map screens, overlays and empty, loading and error states.'),
+    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Show representative layout, HUD and modal spatial relationships.'),
+    material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Map input, focus, scaling and non-visual alternatives.'),
+  ],
+  'docs/AUDIO_DESIGN.md': [
+    material('event-cue-matrix', 'Event to Cue Matrix', 'markdown_table', 'Map stable gameplay and interface events to cue behavior.'),
+    material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Show music states, transitions and intensity.'),
+    material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Show mix buses, priorities and ducking relationships.'),
+    material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Define loudness, format, streaming and acceptance requirements.'),
+    material('sound-reference-register', 'Sound Reference Register', 'markdown_table', 'Record traceable references, intent and licensing boundaries.'),
+  ],
+  'docs/ASSET_PLAN.md': [
+    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Provide the complete semantic bill of materials.'),
+    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Assign creation, approval, consumption and status authority.'),
+    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Show blocking dependencies and integration order.'),
+    material('license-register', 'License Register', 'markdown_table', 'Record source, evidence, attribution, restrictions and replacement rights.'),
+    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Map deliverables to batches, status and acceptance.'),
+  ],
+} satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>
+
+const UPSTREAM_SECTIONS = {
+  'docs/GDD.md': [],
+  'docs/LEVEL_SCENE_DESIGN.md': [
+    upstream('docs/GDD.md', 'experience_pillars', 'core_loop', 'player_actions', 'rules_systems', 'states_flow', 'progression', 'content_narrative', 'challenge_recovery', 'accessibility_localization', 'scope_risks'),
+  ],
+  'docs/BALANCE_DESIGN.md': [
+    upstream('docs/GDD.md', 'core_loop', 'rules_systems', 'states_flow', 'progression', 'challenge_recovery', 'metrics', 'scope_risks'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'level_sequence', 'objectives_routes', 'pacing_beats', 'encounters', 'spawn_checkpoint', 'content_matrix', 'production_acceptance'),
+  ],
+  'docs/TECHNICAL_DESIGN.md': [
+    upstream('docs/GDD.md', 'player_actions', 'rules_systems', 'states_flow', 'accessibility_localization', 'metrics', 'scope_risks'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'spawn_checkpoint', 'camera_readability', 'scene_states', 'content_matrix', 'production_acceptance'),
+    upstream('docs/BALANCE_DESIGN.md', 'units_variables', 'formulas', 'bounds_exploits', 'tuning_validation', 'risks_dependencies'),
+  ],
+  'docs/ART_DIRECTION.md': [
+    upstream('docs/GDD.md', 'experience_pillars', 'rules_systems', 'content_narrative', 'accessibility_localization', 'scope_risks'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'camera_readability', 'content_matrix', 'production_acceptance'),
+  ],
+  'docs/UI_UX_SPEC.md': [
+    upstream('docs/GDD.md', 'core_loop', 'player_actions', 'rules_systems', 'states_flow', 'challenge_recovery', 'accessibility_localization', 'content_narrative'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'objectives_routes', 'pacing_beats', 'spawn_checkpoint', 'camera_readability', 'scene_states'),
+  ],
+  'docs/AUDIO_DESIGN.md': [
+    upstream('docs/GDD.md', 'experience_pillars', 'core_loop', 'rules_systems', 'states_flow', 'content_narrative', 'accessibility_localization'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'pacing_beats', 'encounters', 'scene_states'),
+    upstream('docs/UI_UX_SPEC.md', 'hud', 'input', 'feedback_errors', 'onboarding', 'accessibility'),
+  ],
+  'docs/ASSET_PLAN.md': [
+    upstream('docs/GDD.md', 'scope_risks'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix', 'production_acceptance'),
+    upstream('docs/TECHNICAL_DESIGN.md', 'data_content', 'performance', 'build_release', 'risks'),
+    upstream('docs/ART_DIRECTION.md', 'asset_specifications', 'pipeline_risks'),
+    upstream('docs/UI_UX_SPEC.md', 'screen_inventory', 'localization', 'prototype_acceptance'),
+    upstream('docs/AUDIO_DESIGN.md', 'implementation', 'production'),
+  ],
+} satisfies Record<FoundationDocumentPath, readonly GameDocumentUpstreamProjection[]>
+
 const contract = (
   path: FoundationDocumentPath,
   discipline: string,
@@ -72,6 +190,8 @@ const contract = (
     allowedUpstreamPaths: Object.freeze([
       ...INITIAL_FOUNDATION_UPSTREAM_PATHS[path],
     ]),
+    productionMaterials: Object.freeze([...PRODUCTION_MATERIALS[path]]),
+    upstreamSections: Object.freeze([...UPSTREAM_SECTIONS[path]]),
     sections: Object.freeze([...sections]),
   })
 

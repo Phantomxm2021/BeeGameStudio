@@ -48,4 +48,33 @@ describe('complete game document contracts', () => {
       ).toBe(true)
     }
   })
+
+  test('binds every document to exact production materials and upstream sections', () => {
+    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
+      expect(contract.productionMaterials.length).toBeGreaterThan(0)
+      expect(
+        new Set(contract.productionMaterials.map(item => item.materialId)).size,
+      ).toBe(contract.productionMaterials.length)
+      expect(
+        contract.productionMaterials.every(item =>
+          ['markdown_table', 'mermaid', 'inline_svg'].includes(item.format),
+        ),
+      ).toBe(true)
+      expect(contract.upstreamSections.map(item => item.path)).toEqual([
+        ...contract.allowedUpstreamPaths,
+      ])
+      for (const projection of contract.upstreamSections) {
+        const upstream = getGameDocumentContract(projection.path)
+        expect(projection.sectionIds.length).toBeGreaterThan(0)
+        expect(new Set(projection.sectionIds).size).toBe(
+          projection.sectionIds.length,
+        )
+        expect(
+          projection.sectionIds.every(id =>
+            upstream.sections.some(section => section.sectionId === id),
+          ),
+        ).toBe(true)
+      }
+    }
+  })
 })
