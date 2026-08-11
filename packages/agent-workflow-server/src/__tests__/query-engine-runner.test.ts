@@ -16,6 +16,7 @@ import {
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
+  initializeBeeGameNativePermissionMode,
   installInheritedBeeGameTools,
   NativeBackgroundTaskLedger,
   NativeSandboxNetworkPermissionBroker,
@@ -79,6 +80,20 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
 
     expect(values).toEqual([false])
+  })
+
+  test('lets Claude Code approve project edits without bypassing other permissions', () => {
+    const permissionContext = {
+      mode: 'default',
+      additionalWorkingDirectories: new Map(),
+    }
+
+    initializeBeeGameNativePermissionMode(permissionContext)
+
+    expect(permissionContext).toEqual({
+      mode: 'acceptEdits',
+      additionalWorkingDirectories: new Map(),
+    })
   })
 
   test('initializes Claude Code native sandbox and forwards only its network decisions', async () => {

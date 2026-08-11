@@ -407,6 +407,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       toolModule,
       'getEmptyToolPermissionContext',
     ) as Record<string, unknown>
+    initializeBeeGameNativePermissionMode(permissionContext)
     const nativeTools = call(toolsModule, 'getTools', permissionContext) as unknown[]
     const assetManifestTool =
       this.input.workflowWorkerType === 'resource-planner'
@@ -793,6 +794,17 @@ export function initializeBeeGameNativeQueryMode(
   bootstrapModule: Record<string, unknown>,
 ): void {
   call(bootstrapModule, 'setIsInteractive', false)
+}
+
+/**
+ * Use Claude Code's native edit-approval mode for workflow workers. This
+ * approves project file edits while leaving shell, network, sandbox, and
+ * other permission decisions on their normal native paths.
+ */
+export function initializeBeeGameNativePermissionMode(
+  permissionContext: Record<string, unknown>,
+): void {
+  permissionContext.mode = 'acceptEdits'
 }
 
 /**
