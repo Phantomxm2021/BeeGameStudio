@@ -59,13 +59,17 @@ Embedding machine records inside Markdown was rejected because it would make hum
 
 ## Authority Sidecar Contract
 
-The sidecar is canonical JSON with this logical shape:
+Claude Code submits only the semantic record array. The stored sidecar is canonical JSON with this logical shape:
 
 ```ts
 type FoundationAuthoritySidecar = Readonly<{
   schemaVersion: 1
   documentPath: FoundationDocumentPath
   documentDigest: string
+  records: readonly FoundationAuthorityRecord[]
+}>
+
+type FoundationAuthoritySubmission = Readonly<{
   records: readonly FoundationAuthorityRecord[]
 }>
 
@@ -90,8 +94,9 @@ type FoundationAuthorityRecord = Readonly<{
 
 Rules:
 
+- BGS injects `schemaVersion`, `documentPath`, and `documentDigest` after it has canonicalized service-owned Markdown metadata. Claude Code does not predict or repeat those fields.
 - `documentDigest` is the SHA-256 digest of the final canonical Markdown bytes.
-- `documentPath` must equal the assigned document path.
+- `documentPath` equals the assigned document path.
 - `sectionId` must exist in that document's `GameDocumentContract`.
 - `responsibilityIds` must be owned by that section contract.
 - `authorityId` values are unique, stable, lowercase identifiers scoped by document and section.
@@ -107,9 +112,9 @@ Structural validation cannot prove semantic completeness. The document-author pr
 ## Authoring and Commit Flow
 
 1. Claude Code authors and verifies the complete assigned Markdown document with its existing native workflow.
-2. Claude Code submits the authority sidecar through the canonical document completion tool.
+2. Claude Code submits the authority records through the canonical document completion tool.
 3. BGS canonicalizes service-owned Markdown syntax, including section-marker whitespace and required front matter.
-4. BGS computes the canonical Markdown digest and validates the sidecar against the final bytes and the assigned `GameDocumentContract`.
+4. BGS computes the canonical Markdown digest, injects non-semantic sidecar identity metadata, and validates the stored sidecar against the final bytes and the assigned `GameDocumentContract`.
 5. BGS stages both files and a prepared receipt.
 6. BGS makes the document pair visible to workflow progression only after both files are durable and their digests match the receipt.
 7. Restart recovery either completes the prepared pair or keeps the document incomplete; it never reports a document complete with a stale or missing sidecar.
