@@ -266,6 +266,7 @@ export type BeeGameSessionRunnerStartInput = {
 }
 
 const CLAUDE_MODEL_ENV_KEYS = new Set([
+  'CLAUDE_CONFIG_DIR',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
