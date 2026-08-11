@@ -538,16 +538,16 @@ export type BeeGameSessionUsageBillingBackend = {
 
 export type BeeGameSessionRuntimeResilienceOptions = {
   /**
-   * Maximum silence after a workflow worker starts streaming a structured
-   * tool submission. This does not limit model thinking or ordinary text.
+   * Maximum silence after a workflow worker has emitted its first runtime
+   * event. This does not limit the wait for the model's first response.
    */
-  workflowToolStreamIdleTimeoutMs?: number
+  workflowStreamIdleTimeoutMs?: number
 }
 
-class WorkflowToolStreamIdleError extends Error {
+class WorkflowStreamIdleError extends Error {
   constructor() {
-    super('Workflow structured tool stream became idle before completion')
-    this.name = 'WorkflowToolStreamIdleError'
+    super('Workflow runtime stream became idle before completion')
+    this.name = 'WorkflowStreamIdleError'
   }
 }
 
@@ -1405,12 +1405,11 @@ export class BeeGameSessionManager {
           })
           break
         } catch (error) {
-          const incompleteToolStream =
-            error instanceof WorkflowToolStreamIdleError
+          const incompleteRuntimeStream = error instanceof WorkflowStreamIdleError
           const canRetry =
             attempt === 0 &&
             !signal.aborted &&
-            (!runtimeMessageObserved || incompleteToolStream) &&
+            (!runtimeMessageObserved || incompleteRuntimeStream) &&
             (record.workflowWorker || isRetryableQueryEngineError(error))
           disposeRunner(runner)
           if (record.runner === runner) record.runner = null
@@ -1553,23 +1552,23 @@ export class BeeGameSessionManager {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
     let acceptsRuntimeMessages = true
-    let toolStreamIdleTimer: ReturnType<typeof setTimeout> | undefined
-    let rejectToolStreamIdle!: (error: Error) => void
-    const toolStreamIdle = new Promise<never>((_resolve, reject) => {
-      rejectToolStreamIdle = reject
+    let runtimeStreamIdleTimer: ReturnType<typeof setTimeout> | undefined
+    let rejectRuntimeStreamIdle!: (error: Error) => void
+    const runtimeStreamIdle = new Promise<never>((_resolve, reject) => {
+      rejectRuntimeStreamIdle = reject
     })
-    const clearToolStreamIdleTimer = () => {
-      if (toolStreamIdleTimer) clearTimeout(toolStreamIdleTimer)
-      toolStreamIdleTimer = undefined
+    const clearRuntimeStreamIdleTimer = () => {
+      if (runtimeStreamIdleTimer) clearTimeout(runtimeStreamIdleTimer)
+      runtimeStreamIdleTimer = undefined
     }
-    const refreshToolStreamIdleTimer = () => {
-      clearToolStreamIdleTimer()
-      if (!record.workflowWorker || record.streamingToolUses.size === 0) return
+    const refreshRuntimeStreamIdleTimer = () => {
+      clearRuntimeStreamIdleTimer()
+      if (!record.workflowWorker) return
       const timeoutMs =
-        this.runtimeResilienceOptions.workflowToolStreamIdleTimeoutMs ?? 45_000
+        this.runtimeResilienceOptions.workflowStreamIdleTimeoutMs ?? 60_000
       if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return
-      toolStreamIdleTimer = setTimeout(
-        () => rejectToolStreamIdle(new WorkflowToolStreamIdleError()),
+      runtimeStreamIdleTimer = setTimeout(
+        () => rejectRuntimeStreamIdle(new WorkflowStreamIdleError()),
         timeoutMs,
       )
     }
@@ -1642,16 +1641,16 @@ export class BeeGameSessionManager {
           }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
-        refreshToolStreamIdleTimer()
+        refreshRuntimeStreamIdleTimer()
         this.queueUsageRecord(record, submittedTurnId, message)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
     try {
-      await Promise.race([submission, toolStreamIdle])
+      await Promise.race([submission, runtimeStreamIdle])
     } finally {
       acceptsRuntimeMessages = false
-      clearToolStreamIdleTimer()
+      clearRuntimeStreamIdleTimer()
     }
     await record.usageWriteTail
     if (executionError && !signal.aborted) throw executionError

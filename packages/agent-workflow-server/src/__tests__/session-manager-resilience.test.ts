@@ -1403,7 +1403,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('restarts a workflow worker when a streamed tool submission becomes idle before completion', async () => {
+  test('restarts a workflow worker when its runtime stream becomes idle before completion', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-workflow-tool-idle-'))
     let starts = 0
     let firstRunnerStopped = 0
@@ -1452,7 +1452,7 @@ describe('BeeGame session runtime resilience', () => {
       undefined,
       undefined,
       undefined,
-      { workflowToolStreamIdleTimeoutMs: 20 },
+      { workflowStreamIdleTimeoutMs: 20 },
     )
     const session = manager.start({
       workspacePath: join(root, 'workspace'),
@@ -1468,6 +1468,60 @@ describe('BeeGame session runtime resilience', () => {
 
     expect(starts).toBe(2)
     expect(firstRunnerStopped).toBe(1)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
+    manager.dispose()
+  })
+
+  test('restarts a workflow worker when a thinking stream becomes idle', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-thinking-idle-'))
+    let starts = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => {
+        starts += 1
+        const current = starts
+        return {
+          submit: async input => {
+            if (current !== 1) return
+            input.onMessage({
+              type: 'stream_event',
+              event: {
+                type: 'content_block_delta',
+                index: 0,
+                delta: { type: 'thinking_delta', thinking: 'planning' },
+              },
+            } as DashboardSDKMessage)
+            await new Promise<void>(() => undefined)
+          },
+          stop: () => undefined,
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(
+      runner,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workflowStreamIdleTimeoutMs: 20 },
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'author the assigned document')
+    await waitForIdle(manager, session.id)
+
+    expect(starts).toBe(2)
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)
