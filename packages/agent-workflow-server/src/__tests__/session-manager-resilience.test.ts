@@ -1403,6 +1403,77 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('restarts a workflow worker when a streamed tool submission becomes idle before completion', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-tool-idle-'))
+    let starts = 0
+    let firstRunnerStopped = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => {
+        starts += 1
+        const current = starts
+        return {
+          submit: async input => {
+            if (current !== 1) return
+            input.onMessage({
+              type: 'stream_event',
+              event: {
+                type: 'content_block_start',
+                index: 0,
+                content_block: {
+                  type: 'tool_use',
+                  id: 'document-terminal-1',
+                  name: 'CommitCanonicalDocument',
+                  input: {},
+                },
+              },
+            } as DashboardSDKMessage)
+            input.onMessage({
+              type: 'stream_event',
+              event: {
+                type: 'content_block_delta',
+                index: 0,
+                delta: { type: 'input_json_delta', partial_json: '{"title":"' },
+              },
+            } as DashboardSDKMessage)
+            await new Promise<void>(() => undefined)
+          },
+          stop: () => {
+            if (current === 1) firstRunnerStopped += 1
+          },
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(
+      runner,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workflowToolStreamIdleTimeoutMs: 20 },
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'author the assigned document')
+    await waitForIdle(manager, session.id)
+
+    expect(starts).toBe(2)
+    expect(firstRunnerStopped).toBe(1)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
+    manager.dispose()
+  })
+
   test('refreshes workflow credentials once when runtime env rejects an expired token', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-runtime-auth-refresh-'))
     const observedTokens: Array<string | undefined> = []

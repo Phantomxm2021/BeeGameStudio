@@ -536,6 +536,21 @@ export type BeeGameSessionUsageBillingBackend = {
   ) => RecordUsageResult | Promise<RecordUsageResult>
 }
 
+export type BeeGameSessionRuntimeResilienceOptions = {
+  /**
+   * Maximum silence after a workflow worker starts streaming a structured
+   * tool submission. This does not limit model thinking or ordinary text.
+   */
+  workflowToolStreamIdleTimeoutMs?: number
+}
+
+class WorkflowToolStreamIdleError extends Error {
+  constructor() {
+    super('Workflow structured tool stream became idle before completion')
+    this.name = 'WorkflowToolStreamIdleError'
+  }
+}
+
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -554,6 +569,7 @@ export class BeeGameSessionManager {
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
     private readonly resourceSelectionConfig?: ResourceSelectionRuntimeConfig,
+    private readonly runtimeResilienceOptions: BeeGameSessionRuntimeResilienceOptions = {},
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -1389,13 +1405,16 @@ export class BeeGameSessionManager {
           })
           break
         } catch (error) {
+          const incompleteToolStream =
+            error instanceof WorkflowToolStreamIdleError
           const canRetry =
             attempt === 0 &&
             !signal.aborted &&
-            !runtimeMessageObserved &&
+            (!runtimeMessageObserved || incompleteToolStream) &&
             (record.workflowWorker || isRetryableQueryEngineError(error))
           disposeRunner(runner)
           if (record.runner === runner) record.runner = null
+          record.streamingToolUses.clear()
           runner = null
           if (!canRetry) throw error
         }
@@ -1533,7 +1552,28 @@ export class BeeGameSessionManager {
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
-    await runner.submit({
+    let acceptsRuntimeMessages = true
+    let toolStreamIdleTimer: ReturnType<typeof setTimeout> | undefined
+    let rejectToolStreamIdle!: (error: Error) => void
+    const toolStreamIdle = new Promise<never>((_resolve, reject) => {
+      rejectToolStreamIdle = reject
+    })
+    const clearToolStreamIdleTimer = () => {
+      if (toolStreamIdleTimer) clearTimeout(toolStreamIdleTimer)
+      toolStreamIdleTimer = undefined
+    }
+    const refreshToolStreamIdleTimer = () => {
+      clearToolStreamIdleTimer()
+      if (!record.workflowWorker || record.streamingToolUses.size === 0) return
+      const timeoutMs =
+        this.runtimeResilienceOptions.workflowToolStreamIdleTimeoutMs ?? 45_000
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return
+      toolStreamIdleTimer = setTimeout(
+        () => rejectToolStreamIdle(new WorkflowToolStreamIdleError()),
+        timeoutMs,
+      )
+    }
+    const submission = runner.submit({
       prompt,
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }
@@ -1546,8 +1586,9 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
-        onRuntimeMessage?.()
         appendProjectAgentRawLog(record, message)
+        if (!acceptsRuntimeMessages) return
+        onRuntimeMessage?.()
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -1601,10 +1642,17 @@ export class BeeGameSessionManager {
           }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
+        refreshToolStreamIdleTimer()
         this.queueUsageRecord(record, submittedTurnId, message)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
+    try {
+      await Promise.race([submission, toolStreamIdle])
+    } finally {
+      acceptsRuntimeMessages = false
+      clearToolStreamIdleTimer()
+    }
     await record.usageWriteTail
     if (executionError && !signal.aborted) throw executionError
   }
