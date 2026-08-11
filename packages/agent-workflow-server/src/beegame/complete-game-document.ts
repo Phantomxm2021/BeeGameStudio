@@ -208,3 +208,79 @@ export function completeGameDocumentSectionMarkers(
     section => `<!-- beegame-section:${section.sectionId} -->`,
   )
 }
+
+const REQUIRED_SECTION_SUBHEADINGS = [
+  '### Authoritative Decisions',
+  '### Production Details',
+  '### Upstream Authority',
+  '### Risks',
+  '### Open Decisions',
+] as const
+
+/**
+ * Validate the compact Markdown transport used by real document workers.
+ * The exact structural tokens are service-owned; authored prose remains free.
+ */
+export function validateCompleteGameDocumentMarkdown(
+  path: FoundationDocumentPath,
+  value: unknown,
+): string {
+  const body = z.string().trim().min(1).parse(value)
+  const lines = body.split('\n').map(line => line.trimEnd())
+  if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
+    throw new Error('complete game document requires one document title')
+
+  const contract = getGameDocumentContract(path)
+  const expectedMarkers = contract.sections.map(
+    section => `<!-- beegame-section:${section.sectionId} -->`,
+  )
+  const actualMarkers = lines.filter(line =>
+    line.startsWith('<!-- beegame-section:'),
+  )
+  if (
+    actualMarkers.length !== expectedMarkers.length ||
+    expectedMarkers.some((marker, index) => actualMarkers[index] !== marker)
+  )
+    throw new Error(
+      `complete game document sections must exactly match the canonical order for ${path}`,
+    )
+
+  for (const [sectionIndex, section] of contract.sections.entries()) {
+    const marker = expectedMarkers[sectionIndex]!
+    const start = lines.indexOf(marker)
+    const end =
+      sectionIndex + 1 < expectedMarkers.length
+        ? lines.indexOf(expectedMarkers[sectionIndex + 1]!)
+        : lines.length
+    if (start < 0 || end <= start)
+      throw new Error(`complete game document section is invalid: ${section.sectionId}`)
+    const sectionLines = lines.slice(start + 1, end)
+    if (!sectionLines.includes(`## ${section.title}`))
+      throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
+
+    let previousIndex = -1
+    for (const heading of REQUIRED_SECTION_SUBHEADINGS) {
+      const headingIndex = sectionLines.indexOf(heading)
+      if (headingIndex <= previousIndex)
+        throw new Error(
+          `complete game document section contract is incomplete: ${section.sectionId}`,
+        )
+      const nextHeadingIndex = REQUIRED_SECTION_SUBHEADINGS.slice(
+        REQUIRED_SECTION_SUBHEADINGS.indexOf(heading) + 1,
+      )
+        .map(candidate => sectionLines.indexOf(candidate))
+        .find(index => index > headingIndex)
+      const contentEnd = nextHeadingIndex ?? sectionLines.length
+      if (
+        !sectionLines
+          .slice(headingIndex + 1, contentEnd)
+          .some(line => line.trim().length > 0)
+      )
+        throw new Error(
+          `complete game document section contract is empty: ${section.sectionId}:${heading}`,
+        )
+      previousIndex = headingIndex
+    }
+  }
+  return `${body}\n`
+}

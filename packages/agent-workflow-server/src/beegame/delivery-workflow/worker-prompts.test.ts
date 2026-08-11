@@ -25,7 +25,7 @@ describe('resource-content worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('complete structured game document')
+    expect(prompt).toContain('complete Markdown game document')
     expect(prompt).toContain('human development discipline')
     for (const section of completeDocumentContract.sections)
       expect(prompt).toContain(`"sectionId":"${section.sectionId}"`)
@@ -390,9 +390,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('world, scene, hierarchy and instance placement')
     expect(prompt).toContain('CommitCanonicalDocument exactly once')
     expect(prompt).toContain(
-      'owns Markdown rendering, document_id, version, updated_at',
+      'owns document_id, version, updated_at',
     )
-    expect(prompt).toContain('productionDetails with acceptanceCriteria')
+    expect(prompt).toContain('Production details must include observable acceptance criteria')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
     )

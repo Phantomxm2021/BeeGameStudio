@@ -308,7 +308,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return [
         request.contract.authoringMode === 'initial'
-          ? 'Use the service-projected upstream authority and target baseline without reloading files. Submit one complete structured game document through CommitCanonicalDocument exactly once. The service validates the full section contract and owns Markdown rendering, document_id, version, updated_at, atomic persistence and the terminal action.'
+          ? 'Use the service-projected upstream authority and target baseline without reloading files. Submit one complete Markdown game document through CommitCanonicalDocument exactly once. The service validates the full section contract and owns document_id, version, updated_at, atomic persistence and the terminal action.'
           : request.contract.authoringMode === 'repair-planning'
             ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
             : 'Use the service-projected current target, apply only the locked repair decision, then submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns PATCH version, updated_at, atomic persistence and recovery.',
@@ -351,7 +351,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   : 'Apply only the accepted findings and their required outcomes. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
                 ...(request.contract.authoringMode === 'initial'
                   ? [
-                      'Return the structured submission defined by contract.completeDocumentContract. Every required section contains a clear body, stable decisions, concrete productionDetails with acceptanceCriteria, allowed upstreamReferences, risks and openDecisions. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
+                      'Return one Markdown body using the exact contract section order. Begin each section with its exact <!-- beegame-section:SECTION_ID --> marker and exact ## title. Within every section include the exact headings ### Authoritative Decisions, ### Production Details, ### Upstream Authority, ### Risks, and ### Open Decisions, each with non-empty content. Production details must include observable acceptance criteria. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
                       'A downstream owner may specialize only product behavior already authorized by the Confirmed Brief, GDD, or its legitimate projected upstream owner. Do not invent a new player-visible system, settings surface, state machine, economy mechanism, resource duty, or obligation that another owner would have to implement.',
                     ]
                   : []),
@@ -447,7 +447,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
       return request.contract.authoringMode === 'repair-planning'
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
         : request.contract.authoringMode === 'initial'
-          ? 'Submit the assigned complete structured game document through CommitCanonicalDocument exactly once. Do not render Markdown, include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
+          ? 'Submit the assigned complete Markdown game document as the body field of CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
           : 'Submit the assigned complete Markdown body through CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
     case 'document-reviewer':
       return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'

@@ -14,6 +14,7 @@ import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
 } from './delivery-workflow/types'
 import { auditDocumentReadiness } from './document-readiness-audit'
+import { renderCompleteGameDocument } from './complete-game-document'
 
 describe('canonical document commit', () => {
   test('produces the complete canonical document set from neutral product authority', async () => {
@@ -40,7 +41,7 @@ describe('canonical document commit', () => {
         const call = tool?.call as
           | ((input: unknown) => Promise<unknown>)
           | undefined
-        await call!({
+        const submission = {
           title: contract.discipline,
           sections: contract.sections.map((section, sectionIndex) => ({
             sectionId: section.sectionId,
@@ -67,7 +68,8 @@ describe('canonical document commit', () => {
             risks: [],
             openDecisions: [],
           })),
-        })
+        }
+        await call!({ body: renderCompleteGameDocument(path, submission) })
       }
 
       expect(
@@ -89,7 +91,7 @@ describe('canonical document commit', () => {
     }
   })
 
-  test('initial authoring accepts only a complete structured game document', async () => {
+  test('initial authoring accepts one complete Markdown document and rejects incomplete bodies', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-complete-'))
     try {
       const path = 'docs/GDD.md'
@@ -125,11 +127,12 @@ describe('canonical document commit', () => {
       }
       const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
       expect(call).toBeDefined()
-      await call!(submission)
+      await call!({ body: renderCompleteGameDocument(path, submission) })
       const content = await readFile(join(workspacePath, path), 'utf8')
       for (const section of contract.sections)
         expect(content).toContain(`<!-- beegame-section:${section.sectionId} -->`)
       await expect(call!({ body: '# bypass' })).rejects.toThrow()
+      await expect(call!(submission)).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

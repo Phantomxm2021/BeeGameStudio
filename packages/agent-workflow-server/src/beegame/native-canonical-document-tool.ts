@@ -3,9 +3,7 @@ import { open, readFile, rename, mkdir, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
-  completeGameDocumentSubmissionSchema,
-  renderCompleteGameDocument,
-  validateCompleteGameDocumentSubmission,
+  validateCompleteGameDocumentMarkdown,
 } from './complete-game-document'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -81,34 +79,30 @@ export function createNativeCanonicalDocumentTool(options: {
   return options.buildTool({
     name: 'CommitCanonicalDocument',
     alwaysLoad: true,
-    inputSchema: completeGameDocument
-      ? completeGameDocumentSubmissionSchema
-      : commitInputSchema,
+    inputSchema: commitInputSchema,
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
     async description() {
       return completeGameDocument
-        ? 'Validate, render and atomically commit the complete structured game-development document. Every canonical section, decision and production detail is required; the workflow service owns Markdown structure, metadata and persistence.'
+        ? 'Validate and atomically commit the complete game-development document as one Markdown body. Every canonical section, decision and production detail is required; the workflow service owns metadata and persistence.'
         : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
       return completeGameDocument
-        ? 'Call exactly once with the complete structured submission for every required section in canonical order. Include authoritative decisions, production details, explicit upstream references, risks and open decisions. Do not submit Markdown or defer missing authority to a reviewer.'
+        ? 'Call exactly once with {body} containing the complete Markdown document. Begin with one # title. For every contract section in canonical order include its exact beegame-section marker, exact ## title, and the exact ### headings Authoritative Decisions, Production Details, Upstream Authority, Risks, Open Decisions with non-empty content. Do not include YAML front matter or defer missing authority to a reviewer.'
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: unknown) {
+      const submittedBody = commitInputSchema.parse(input).body
       const body = completeGameDocument
-        ? renderCompleteGameDocument(
+        ? validateCompleteGameDocumentMarkdown(
             options.contract.targetPath as FoundationDocumentPath,
-            validateCompleteGameDocumentSubmission(
-              options.contract.targetPath as FoundationDocumentPath,
-              input,
-            ),
+            submittedBody,
           )
-        : commitInputSchema.parse(input).body
+        : submittedBody
       return {
         data: await commitCanonicalDocument({
           workspacePath: options.workspacePath,
