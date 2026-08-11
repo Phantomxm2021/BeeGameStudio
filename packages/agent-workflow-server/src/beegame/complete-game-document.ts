@@ -1,29 +1,10 @@
 import { z } from 'zod/v4'
-import {
-  getGameDocumentContract,
-} from './delivery-workflow/game-document-contracts'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
-
-const decisionSchema = z
-  .object({
-    decisionId: z.string().trim().min(1),
-    statement: z.string().trim().min(1),
-    rationale: z.string().trim().min(1),
-  })
-  .strict()
-
-const productionDetailSchema = z
-  .object({
-    detailId: z.string().trim().min(1),
-    statement: z.string().trim().min(1),
-    owner: z.string().trim().min(1),
-    acceptanceCriteria: z.array(z.string().trim().min(1)).min(1),
-  })
-  .strict()
 
 const upstreamReferenceSchema = z
   .object({
@@ -55,18 +36,32 @@ const completeGameDocumentSectionSchema = z
     sectionId: z.string().trim().min(1),
     title: z.string().trim().min(1),
     body: z.string().trim().min(1),
-    decisions: z.array(decisionSchema).min(1),
-    productionDetails: z.array(productionDetailSchema).min(1),
-    upstreamReferences: z.array(upstreamReferenceSchema),
-    risks: z.array(riskSchema),
-    openDecisions: z.array(openDecisionSchema),
+  })
+  .strict()
+
+const productionMaterialSchema = z
+  .object({
+    materialId: z.string().trim().min(1),
+    title: z.string().trim().min(1),
+    format: z.enum(['markdown_table', 'mermaid', 'inline_svg']),
+    body: z.string().trim().min(1),
   })
   .strict()
 
 export const completeGameDocumentSubmissionSchema = z
   .object({
     title: z.string().trim().min(1),
+    executiveSummary: z.string().trim().min(1),
     sections: z.array(completeGameDocumentSectionSchema).min(1),
+    productionMaterials: z.array(productionMaterialSchema).min(1),
+    auditAppendix: z
+      .object({
+        acceptanceCriteria: z.array(z.string().trim().min(1)).min(1),
+        upstreamReferences: z.array(upstreamReferenceSchema),
+        risks: z.array(riskSchema),
+        openDecisions: z.array(openDecisionSchema),
+      })
+      .strict(),
   })
   .strict()
 
@@ -74,13 +69,39 @@ export type CompleteGameDocumentSubmission = z.infer<
   typeof completeGameDocumentSubmissionSchema
 >
 
-function assertUniqueIds(
-  values: readonly string[],
+function assertExactOrder(
+  actual: readonly string[],
+  expected: readonly string[],
   label: string,
-  sectionId: string,
+  path: FoundationDocumentPath,
 ): void {
+  if (
+    actual.length !== expected.length ||
+    expected.some((value, index) => actual[index] !== value)
+  )
+    throw new Error(`${label} must exactly match the canonical order for ${path}`)
+}
+
+function assertUniqueIds(values: readonly string[], label: string): void {
   if (new Set(values).size !== values.length)
-    throw new Error(`${label} IDs are duplicated in section ${sectionId}`)
+    throw new Error(`${label} IDs are duplicated`)
+}
+
+function assertMaterialFormat(
+  format: 'markdown_table' | 'mermaid' | 'inline_svg',
+  body: string,
+  materialId: string,
+): void {
+  const lines = body.split('\n').map(line => line.trim())
+  const valid =
+    format === 'markdown_table'
+      ? lines.filter(line => line.startsWith('|') && line.endsWith('|')).length >= 3 &&
+        lines.some(line => line.includes('---'))
+      : format === 'mermaid'
+        ? lines.includes('```mermaid') && lines.includes('```')
+        : (body.includes('<svg ') || body.includes('<svg>')) && body.includes('</svg>')
+  if (!valid)
+    throw new Error(`production material format is invalid: ${materialId}:${format}`)
 }
 
 export function validateCompleteGameDocumentSubmission(
@@ -89,116 +110,123 @@ export function validateCompleteGameDocumentSubmission(
 ): CompleteGameDocumentSubmission {
   const parsed = completeGameDocumentSubmissionSchema.parse(value)
   const contract = getGameDocumentContract(path)
-  const expectedSectionIds = contract.sections.map(section => section.sectionId)
-  const actualSectionIds = parsed.sections.map(section => section.sectionId)
-  if (
-    expectedSectionIds.length !== actualSectionIds.length ||
-    expectedSectionIds.some(
-      (sectionId, index) => actualSectionIds[index] !== sectionId,
-    )
+  assertExactOrder(
+    parsed.sections.map(section => section.sectionId),
+    contract.sections.map(section => section.sectionId),
+    'complete game document sections',
+    path,
   )
-    throw new Error(
-      `complete game document sections must exactly match the canonical order for ${path}`,
-    )
+  assertExactOrder(
+    parsed.productionMaterials.map(material => material.materialId),
+    contract.productionMaterials.map(material => material.materialId),
+    'complete game document production materials',
+    path,
+  )
+
+  parsed.sections.forEach((section, index) => {
+    if (section.title !== contract.sections[index]?.title)
+      throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
+  })
+  parsed.productionMaterials.forEach((material, index) => {
+    const expected = contract.productionMaterials[index]
+    if (material.title !== expected?.title || material.format !== expected.format)
+      throw new Error(`production material contract is invalid: ${material.materialId}`)
+    assertMaterialFormat(material.format, material.body, material.materialId)
+  })
 
   const allowedUpstreamPaths = new Set(contract.allowedUpstreamPaths)
-  for (const section of parsed.sections) {
-    assertUniqueIds(
-      section.decisions.map(decision => decision.decisionId),
-      'decision',
-      section.sectionId,
+  if (
+    parsed.auditAppendix.upstreamReferences.some(
+      reference => !allowedUpstreamPaths.has(reference.path),
     )
-    assertUniqueIds(
-      section.productionDetails.map(detail => detail.detailId),
-      'production detail',
-      section.sectionId,
-    )
-    assertUniqueIds(
-      section.risks.map(risk => risk.riskId),
-      'risk',
-      section.sectionId,
-    )
-    assertUniqueIds(
-      section.openDecisions.map(decision => decision.decisionId),
-      'open decision',
-      section.sectionId,
-    )
-    if (
-      section.upstreamReferences.some(
-        reference => !allowedUpstreamPaths.has(reference.path),
-      )
-    )
-      throw new Error(
-        `upstream authority reference is not allowed for ${path}:${section.sectionId}`,
-      )
-  }
+  )
+    throw new Error(`upstream authority reference is not allowed for ${path}`)
+  assertUniqueIds(
+    parsed.auditAppendix.risks.map(risk => risk.riskId),
+    'risk',
+  )
+  assertUniqueIds(
+    parsed.auditAppendix.openDecisions.map(decision => decision.decisionId),
+    'open decision',
+  )
   return parsed
 }
-
-const list = (values: readonly string[], empty: string): string[] =>
-  values.length ? values.map(value => `- ${value}`) : [`- ${empty}`]
 
 export function renderCompleteGameDocument(
   path: FoundationDocumentPath,
   value: CompleteGameDocumentSubmission,
 ): string {
   const parsed = validateCompleteGameDocumentSubmission(path, value)
-  const lines: string[] = [`# ${parsed.title}`, '']
-  for (const section of parsed.sections) {
+  const lines: string[] = [
+    `# ${parsed.title}`,
+    '',
+    '<!-- beegame-executive-summary -->',
+    '## Executive Summary',
+    '',
+    parsed.executiveSummary,
+    '',
+  ]
+  for (const section of parsed.sections)
     lines.push(
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
       '',
       section.body,
       '',
-      '### Authoritative Decisions',
+    )
+
+  lines.push(
+    '<!-- beegame-production-materials -->',
+    '## Production Materials',
+    '',
+  )
+  for (const material of parsed.productionMaterials)
+    lines.push(
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
       '',
-      ...section.decisions.flatMap(decision => [
-        `- **${decision.decisionId}** — ${decision.statement}`,
-        `  - Rationale: ${decision.rationale}`,
-      ]),
+      material.body,
       '',
-      '### Production Details',
-      '',
-      ...section.productionDetails.flatMap(detail => [
-        `- **${detail.detailId}** — ${detail.statement}`,
-        `  - Owner: ${detail.owner}`,
-        ...detail.acceptanceCriteria.map(
-          criterion => `  - Acceptance: ${criterion}`,
-        ),
-      ]),
-      '',
+    )
+
+  lines.push(
+    '<!-- beegame-audit-appendix -->',
+    '## Audit Appendix',
+    '',
+    '### Acceptance Criteria',
+    '',
+    ...parsed.auditAppendix.acceptanceCriteria.map(item => `- ${item}`),
+    '',
+  )
+  if (parsed.auditAppendix.upstreamReferences.length)
+    lines.push(
       '### Upstream Authority',
       '',
-      ...list(
-        section.upstreamReferences.map(
-          reference => `${reference.path} — ${reference.authorityId}`,
-        ),
-        'No upstream authority; this section is an original fact owner.',
-      ),
-      '',
-      '### Risks',
-      '',
-      ...list(
-        section.risks.map(
-          risk =>
-            `**${risk.riskId}** — ${risk.statement}; mitigation: ${risk.mitigation}; owner: ${risk.owner}`,
-        ),
-        'No known section-specific risks.',
-      ),
-      '',
-      '### Open Decisions',
-      '',
-      ...list(
-        section.openDecisions.map(
-          decision =>
-            `**${decision.decisionId}** — ${decision.question}; owner: ${decision.owner}; needed by: ${decision.neededBy}`,
-        ),
-        'No unresolved section decisions.',
+      ...parsed.auditAppendix.upstreamReferences.map(
+        reference => `- ${reference.path} — ${reference.authorityId}`,
       ),
       '',
     )
-  }
+  if (parsed.auditAppendix.risks.length)
+    lines.push(
+      '### Risks',
+      '',
+      ...parsed.auditAppendix.risks.map(
+        risk =>
+          `- **${risk.riskId}** — ${risk.statement}; mitigation: ${risk.mitigation}; owner: ${risk.owner}`,
+      ),
+      '',
+    )
+  if (parsed.auditAppendix.openDecisions.length)
+    lines.push(
+      '### Open Decisions',
+      '',
+      ...parsed.auditAppendix.openDecisions.map(
+        decision =>
+          `- **${decision.decisionId}** — ${decision.question}; owner: ${decision.owner}; needed by: ${decision.neededBy}`,
+      ),
+      '',
+    )
   return `${lines.join('\n').trim()}\n`
 }
 
@@ -209,14 +237,6 @@ export function completeGameDocumentSectionMarkers(
     section => `<!-- beegame-section:${section.sectionId} -->`,
   )
 }
-
-const REQUIRED_SECTION_SUBHEADINGS = [
-  '### Authoritative Decisions',
-  '### Production Details',
-  '### Upstream Authority',
-  '### Risks',
-  '### Open Decisions',
-] as const
 
 function substantiveContentBlocks(lines: readonly string[]): string[] {
   const blocks: string[] = []
@@ -232,11 +252,7 @@ function substantiveContentBlocks(lines: readonly string[]): string[] {
       flush()
       continue
     }
-    if (
-      trimmed.startsWith('#') ||
-      trimmed.startsWith('<!--') ||
-      trimmed === '---'
-    ) {
+    if (trimmed.startsWith('#') || trimmed.startsWith('<!--') || trimmed === '---') {
       flush()
       continue
     }
@@ -246,10 +262,27 @@ function substantiveContentBlocks(lines: readonly string[]): string[] {
   return blocks
 }
 
-/**
- * Validate the compact Markdown transport used by real document workers.
- * The exact structural tokens are service-owned; authored prose remains free.
- */
+const EMPTY_TEMPLATE_SENTENCES = [
+  'No upstream authority; this section is an original fact owner.',
+  'No known section-specific risks.',
+  'No unresolved section decisions.',
+] as const
+
+function markerIndex(lines: readonly string[], marker: string): number {
+  return lines.indexOf(marker)
+}
+
+function assertNonEmptyRange(
+  lines: readonly string[],
+  start: number,
+  end: number,
+  label: string,
+): void {
+  if (start < 0 || end <= start || !lines.slice(start + 1, end).some(line => line.trim()))
+    throw new Error(`complete game document ${label} is empty or invalid`)
+}
+
+/** Validate the compact Markdown transport used by real document workers. */
 export function validateCompleteGameDocumentMarkdown(
   path: FoundationDocumentPath,
   value: unknown,
@@ -258,63 +291,65 @@ export function validateCompleteGameDocumentMarkdown(
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')
+  if (EMPTY_TEMPLATE_SENTENCES.some(sentence => body.includes(sentence)))
+    throw new Error('complete game document contains an empty template sentence')
 
   const blocks = substantiveContentBlocks(lines)
   if (new Set(blocks).size !== blocks.length)
     throw new Error('complete game document repeats a substantive content block')
 
   const contract = getGameDocumentContract(path)
-  const expectedMarkers = contract.sections.map(
+  const summaryMarker = '<!-- beegame-executive-summary -->'
+  const productionMarker = '<!-- beegame-production-materials -->'
+  const auditMarker = '<!-- beegame-audit-appendix -->'
+  const sectionMarkers = contract.sections.map(
     section => `<!-- beegame-section:${section.sectionId} -->`,
   )
-  const actualMarkers = lines.filter(line =>
-    line.startsWith('<!-- beegame-section:'),
+  const materialMarkers = contract.productionMaterials.map(
+    material => `<!-- beegame-material:${material.materialId} -->`,
   )
-  if (
-    actualMarkers.length !== expectedMarkers.length ||
-    expectedMarkers.some((marker, index) => actualMarkers[index] !== marker)
-  )
-    throw new Error(
-      `complete game document sections must exactly match the canonical order for ${path}`,
-    )
+  const actualSectionMarkers = lines.filter(line => line.startsWith('<!-- beegame-section:'))
+  const actualMaterialMarkers = lines.filter(line => line.startsWith('<!-- beegame-material:'))
+  assertExactOrder(actualSectionMarkers, sectionMarkers, 'complete game document sections', path)
+  assertExactOrder(actualMaterialMarkers, materialMarkers, 'complete game document production materials', path)
 
-  for (const [sectionIndex, section] of contract.sections.entries()) {
-    const marker = expectedMarkers[sectionIndex]!
-    const start = lines.indexOf(marker)
-    const end =
-      sectionIndex + 1 < expectedMarkers.length
-        ? lines.indexOf(expectedMarkers[sectionIndex + 1]!)
-        : lines.length
-    if (start < 0 || end <= start)
-      throw new Error(`complete game document section is invalid: ${section.sectionId}`)
-    const sectionLines = lines.slice(start + 1, end)
-    if (!sectionLines.includes(`## ${section.title}`))
+  const summaryIndex = markerIndex(lines, summaryMarker)
+  const productionIndex = markerIndex(lines, productionMarker)
+  const auditIndex = markerIndex(lines, auditMarker)
+  const sectionIndexes = sectionMarkers.map(marker => markerIndex(lines, marker))
+  const materialIndexes = materialMarkers.map(marker => markerIndex(lines, marker))
+  const orderedIndexes = [summaryIndex, ...sectionIndexes, productionIndex, ...materialIndexes, auditIndex]
+  if (orderedIndexes.some(index => index < 0) || orderedIndexes.some((index, offset) => offset > 0 && index <= orderedIndexes[offset - 1]!))
+    throw new Error(`complete game document structure must exactly match the canonical order for ${path}`)
+
+  if (lines[summaryIndex + 1] !== '## Executive Summary')
+    throw new Error('complete game document executive summary heading is invalid')
+  assertNonEmptyRange(lines, summaryIndex + 1, sectionIndexes[0]!, 'executive summary')
+
+  contract.sections.forEach((section, index) => {
+    const start = sectionIndexes[index]!
+    const end = sectionIndexes[index + 1] ?? productionIndex
+    if (lines[start + 1] !== `## ${section.title}`)
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
+    assertNonEmptyRange(lines, start + 1, end, `section:${section.sectionId}`)
+  })
 
-    let previousIndex = -1
-    for (const heading of REQUIRED_SECTION_SUBHEADINGS) {
-      const headingIndex = sectionLines.indexOf(heading)
-      if (headingIndex <= previousIndex)
-        throw new Error(
-          `complete game document section contract is incomplete: ${section.sectionId}`,
-        )
-      const nextHeadingIndex = REQUIRED_SECTION_SUBHEADINGS.slice(
-        REQUIRED_SECTION_SUBHEADINGS.indexOf(heading) + 1,
-      )
-        .map(candidate => sectionLines.indexOf(candidate))
-        .find(index => index > headingIndex)
-      const contentEnd = nextHeadingIndex ?? sectionLines.length
-      if (
-        !sectionLines
-          .slice(headingIndex + 1, contentEnd)
-          .some(line => line.trim().length > 0)
-      )
-        throw new Error(
-          `complete game document section contract is empty: ${section.sectionId}:${heading}`,
-        )
-      previousIndex = headingIndex
-    }
-  }
+  if (lines[productionIndex + 1] !== '## Production Materials')
+    throw new Error('complete game document production materials heading is invalid')
+  contract.productionMaterials.forEach((material, index) => {
+    const start = materialIndexes[index]!
+    const end = materialIndexes[index + 1] ?? auditIndex
+    if (lines[start + 1] !== `### ${material.title}`)
+      throw new Error(`production material title is invalid: ${material.materialId}`)
+    const materialBody = lines.slice(start + 2, end).join('\n').trim()
+    assertMaterialFormat(material.format, materialBody, material.materialId)
+  })
+
+  if (lines[auditIndex + 1] !== '## Audit Appendix')
+    throw new Error('complete game document audit appendix heading is invalid')
+  const acceptanceIndex = lines.indexOf('### Acceptance Criteria', auditIndex + 1)
+  if (acceptanceIndex < auditIndex || !lines.slice(acceptanceIndex + 1).some(line => line.trim().startsWith('- ')))
+    throw new Error('complete game document acceptance criteria are empty or invalid')
   return `${body}\n`
 }
 

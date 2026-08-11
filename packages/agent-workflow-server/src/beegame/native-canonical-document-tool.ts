@@ -84,12 +84,12 @@ export function createNativeCanonicalDocumentTool(options: {
     isReadOnly: () => false,
     async description() {
       return completeGameDocument
-        ? 'Validate and atomically commit the complete game-development document as one Markdown body. Every canonical section, decision and production detail is required; the workflow service owns metadata and persistence.'
+        ? 'Validate and atomically commit the complete game-development document as one Markdown body. The executive summary, canonical sections, production materials and audit appendix are required; the workflow service owns metadata and persistence.'
         : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
       return completeGameDocument
-        ? 'Call exactly once with {body} containing the complete Markdown document. Begin with one # title. For every contract section in canonical order include its exact beegame-section marker, exact ## title, and the exact ### headings Authoritative Decisions, Production Details, Upstream Authority, Risks, Open Decisions with non-empty content. Do not include YAML front matter or defer missing authority to a reviewer.'
+        ? 'Call exactly once with {body} containing the complete Markdown document. Begin with one # title, then include the exact executive-summary marker, canonical section markers and titles, required production-material markers and formats, and one audit appendix with observable acceptance criteria. Do not include YAML front matter or defer missing authority to a reviewer.'
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {

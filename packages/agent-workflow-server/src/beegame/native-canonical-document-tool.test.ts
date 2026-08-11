@@ -16,6 +16,36 @@ import {
 import { auditDocumentReadiness } from './document-readiness-audit'
 import { renderCompleteGameDocument } from './complete-game-document'
 
+function completeSubmission(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
+  const contract = getGameDocumentContract(path)
+  return {
+    title: contract.discipline,
+    executiveSummary: `Complete ${contract.discipline} authority and production outcome.`,
+    sections: contract.sections.map((section, index) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Authoritative production content ${index + 1}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material => ({
+      materialId: material.materialId,
+      title: material.title,
+      format: material.format,
+      body:
+        material.format === 'markdown_table'
+          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+          : material.format === 'mermaid'
+            ? '```mermaid\ngraph TD\n  A --> B\n```'
+            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+    })),
+    auditAppendix: {
+      acceptanceCriteria: ['The complete document contract is inspectable and implementation-ready.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  }
+}
+
 describe('canonical document commit', () => {
   test('produces the complete canonical document set from neutral product authority', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
@@ -41,34 +71,7 @@ describe('canonical document commit', () => {
         const call = tool?.call as
           | ((input: unknown) => Promise<unknown>)
           | undefined
-        const submission = {
-          title: contract.discipline,
-          sections: contract.sections.map((section, sectionIndex) => ({
-            sectionId: section.sectionId,
-            title: section.title,
-            body: `Authoritative section ${documentIndex + 1}.${sectionIndex + 1}.`,
-            decisions: [
-              {
-                decisionId: `${section.sectionId}.decision`,
-                statement: `Owned decision ${sectionIndex + 1}.`,
-                rationale: `Authority rationale ${sectionIndex + 1}.`,
-              },
-            ],
-            productionDetails: [
-              {
-                detailId: `${section.sectionId}.production`,
-                statement: `Production requirement ${sectionIndex + 1}.`,
-                owner: contract.discipline,
-                acceptanceCriteria: [
-                  `Observable completion criterion ${sectionIndex + 1}.`,
-                ],
-              },
-            ],
-            upstreamReferences: [],
-            risks: [],
-            openDecisions: [],
-          })),
-        }
+        const submission = completeSubmission(path)
         await call!({ body: renderCompleteGameDocument(path, submission) })
       }
 
@@ -112,19 +115,7 @@ describe('canonical document commit', () => {
           submissionKind: 'complete_game_document',
         },
       })
-      const submission = {
-        title: contract.discipline,
-        sections: contract.sections.map((section, index) => ({
-          sectionId: section.sectionId,
-          title: section.title,
-          body: `Complete body ${index + 1}.`,
-          decisions: [{ decisionId: `${section.sectionId}.decision`, statement: `Decision ${index + 1}.`, rationale: `Rationale ${index + 1}.` }],
-          productionDetails: [{ detailId: `${section.sectionId}.detail`, statement: `Detail ${index + 1}.`, owner: contract.discipline, acceptanceCriteria: [`Acceptance ${index + 1}.`] }],
-          upstreamReferences: [],
-          risks: [],
-          openDecisions: [],
-        })),
-      }
+      const submission = completeSubmission(path)
       const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
       expect(call).toBeDefined()
       await call!({ body: renderCompleteGameDocument(path, submission) })

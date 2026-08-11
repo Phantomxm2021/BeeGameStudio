@@ -17,34 +17,34 @@ function completeSubmission(
   const contract = getGameDocumentContract(path)
   return {
     title: contract.discipline,
+    executiveSummary: `This document owns the ${contract.discipline} production authority, principal decisions, implementation outcome, and completion definition.`,
     sections: contract.sections.map((section, index) => ({
       sectionId: section.sectionId,
       title: section.title,
-      body: `Authoritative section body ${index + 1}.`,
-      decisions: [
-        {
-          decisionId: `${section.sectionId}.decision.1`,
-          statement: `Authoritative decision ${index + 1}.`,
-          rationale: `Decision rationale ${index + 1}.`,
-        },
-      ],
-      productionDetails: [
-        {
-          detailId: `${section.sectionId}.production.1`,
-          statement: `Production detail ${index + 1}.`,
-          owner: contract.discipline,
-          acceptanceCriteria: [`Observable acceptance ${index + 1}.`],
-        },
-      ],
+      body: `Authoritative section body ${index + 1} with stable authority IDs, production requirements, implementation detail, and observable outcomes.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material => ({
+      materialId: material.materialId,
+      title: material.title,
+      format: material.format,
+      body:
+        material.format === 'markdown_table'
+          ? '| Field | Production Value |\n| --- | --- |\n| Owner | Discipline authority |'
+          : material.format === 'mermaid'
+            ? '```mermaid\ngraph TD\n  A[Start] --> B[Complete]\n```'
+            : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#20242b"/><text x="16" y="32" fill="#ffffff">Production board</text></svg>',
+    })),
+    auditAppendix: {
+      acceptanceCriteria: ['Every canonical section and production material is complete and implementation-ready.'],
       upstreamReferences: contract.allowedUpstreamPaths.slice(0, 1).map(
         upstreamPath => ({
           path: upstreamPath,
-          authorityId: `${section.sectionId}.authority.1`,
+          authorityId: `${contract.path}.authority.1`,
         }),
       ),
       risks: [],
       openDecisions: [],
-    })),
+    },
   }
 }
 
@@ -88,25 +88,27 @@ describe('complete game document submission', () => {
     ).toThrow(/section|order/i)
   })
 
-  test('rejects sections without decisions or production details', () => {
+  test('requires the summary, exact production materials, and acceptance criteria', () => {
     const path = 'docs/ART_DIRECTION.md'
     const value = completeSubmission(path)
     expect(() =>
       validateCompleteGameDocumentSubmission(path, {
         ...value,
-        sections: value.sections.map((section, index) =>
-          index === 0 ? { ...section, decisions: [] } : section,
-        ),
+        executiveSummary: '',
       }),
-    ).toThrow(/decision/i)
+    ).toThrow(/summary|small/i)
     expect(() =>
       validateCompleteGameDocumentSubmission(path, {
         ...value,
-        sections: value.sections.map((section, index) =>
-          index === 0 ? { ...section, productionDetails: [] } : section,
-        ),
+        productionMaterials: value.productionMaterials.slice(1),
       }),
-    ).toThrow(/production/i)
+    ).toThrow(/material|order/i)
+    expect(() =>
+      validateCompleteGameDocumentSubmission(path, {
+        ...value,
+        auditAppendix: { ...value.auditAppendix, acceptanceCriteria: [] },
+      }),
+    ).toThrow(/acceptance|small/i)
   })
 
   test('rejects upstream references outside projected authority', () => {
@@ -115,21 +117,49 @@ describe('complete game document submission', () => {
     expect(() =>
       validateCompleteGameDocumentSubmission(path, {
         ...value,
-        sections: value.sections.map((section, index) =>
-          index === 0
-            ? {
-                ...section,
-                upstreamReferences: [
-                  {
-                    path: 'docs/AUDIO_DESIGN.md',
-                    authorityId: 'untrusted.authority',
-                  },
-                ],
-              }
-            : section,
-        ),
+        auditAppendix: {
+          ...value.auditAppendix,
+          upstreamReferences: [
+            {
+              path: 'docs/AUDIO_DESIGN.md',
+              authorityId: 'untrusted.authority',
+            },
+          ],
+        },
       }),
     ).toThrow(/upstream|authority/i)
+  })
+
+  test('renders summary, production materials, and one audit appendix', () => {
+    const path = 'docs/UI_UX_SPEC.md'
+    const rendered = renderCompleteGameDocument(path, completeSubmission(path))
+    expect(rendered).toContain('<!-- beegame-executive-summary -->')
+    expect(rendered).toContain('<!-- beegame-production-materials -->')
+    expect(rendered).toContain('<!-- beegame-audit-appendix -->')
+    expect(rendered.match(/### Acceptance Criteria/g)?.length).toBe(1)
+    expect(rendered).not.toContain('### Authoritative Decisions')
+    expect(rendered).not.toContain('### Production Details')
+    for (const material of getGameDocumentContract(path).productionMaterials)
+      expect(rendered).toContain(`<!-- beegame-material:${material.materialId} -->`)
+  })
+
+  test('rejects a production material with the wrong mechanical format', () => {
+    const path = 'docs/TECHNICAL_DESIGN.md'
+    const value = completeSubmission(path)
+    const rendered = renderCompleteGameDocument(path, value).replace(
+      '```mermaid\ngraph TD\n  A[Start] --> B[Complete]\n```',
+      'This diagram was intentionally omitted.',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, rendered)).toThrow(/format|mermaid/i)
+  })
+
+  test('rejects exact empty-template sentences', () => {
+    const path = 'docs/GDD.md'
+    const rendered = renderCompleteGameDocument(path, completeSubmission(path)).replace(
+      'Every canonical section and production material is complete and implementation-ready.',
+      'No unresolved section decisions.',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, rendered)).toThrow(/template|empty/i)
   })
 
   test('replaces model-authored front matter with service-owned metadata', () => {

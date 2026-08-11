@@ -16,6 +16,38 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 
+function completeSubmission(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+) {
+  const contract = getGameDocumentContract(path)
+  return {
+    title: contract.discipline,
+    executiveSummary: `Complete ${contract.discipline} authority and production outcome.`,
+    sections: contract.sections.map((section, index) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Complete authority and production requirements ${index + 1}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material => ({
+      materialId: material.materialId,
+      title: material.title,
+      format: material.format,
+      body:
+        material.format === 'markdown_table'
+          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+          : material.format === 'mermaid'
+            ? '```mermaid\ngraph TD\n  A --> B\n```'
+            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+    })),
+    auditAppendix: {
+      acceptanceCriteria: ['The document is complete, inspectable, and implementation-ready.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  }
+}
+
 describe('idea to complete game documents', () => {
   const workspaces: string[] = []
 
@@ -69,39 +101,7 @@ describe('idea to complete game documents', () => {
       )
 
       const dispatchId = `complete-document-${documentIndex}`
-      const submission = {
-        title: documentContract.discipline,
-        sections: documentContract.sections.map((section, sectionIndex) => ({
-          sectionId: section.sectionId,
-          title: section.title,
-          body: `Complete authority ${documentIndex + 1}.${sectionIndex + 1}.`,
-          decisions: [
-            {
-              decisionId: `${section.sectionId}.decision`,
-              statement: `Production decision ${sectionIndex + 1}.`,
-              rationale: `Decision rationale ${sectionIndex + 1}.`,
-            },
-          ],
-          productionDetails: [
-            {
-              detailId: `${section.sectionId}.detail`,
-              statement: `Production detail ${sectionIndex + 1}.`,
-              owner: documentContract.discipline,
-              acceptanceCriteria: [
-                `Observable acceptance ${sectionIndex + 1}.`,
-              ],
-            },
-          ],
-          upstreamReferences: documentContract.allowedUpstreamPaths.map(
-            upstreamPath => ({
-              path: upstreamPath,
-              authorityId: `${section.sectionId}.upstream`,
-            }),
-          ),
-          risks: [],
-          openDecisions: [],
-        })),
-      }
+      const submission = completeSubmission(path)
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       await writeFile(
         join(workspacePath, path),
@@ -161,34 +161,7 @@ describe('idea to complete game documents', () => {
     workspaces.push(workspacePath)
     const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
     const contract = getGameDocumentContract(path)
-    const submission = {
-      title: contract.discipline,
-      sections: contract.sections.map(section => ({
-        sectionId: section.sectionId,
-        title: section.title,
-        body: `Complete authority for ${section.sectionId}.`,
-        decisions: [
-          {
-            decisionId: `${section.sectionId}.decision`,
-            statement: `Production decision for ${section.sectionId}.`,
-            rationale: `Decision rationale for ${section.sectionId}.`,
-          },
-        ],
-        productionDetails: [
-          {
-            detailId: `${section.sectionId}.detail`,
-            statement: `Production detail for ${section.sectionId}.`,
-            owner: contract.discipline,
-            acceptanceCriteria: [
-              `Observable acceptance for ${section.sectionId}.`,
-            ],
-          },
-        ],
-        upstreamReferences: [],
-        risks: [],
-        openDecisions: [],
-      })),
-    }
+    const submission = completeSubmission(path)
     const renderedLines = renderCompleteGameDocument(path, submission).split('\n')
     renderedLines.shift()
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
