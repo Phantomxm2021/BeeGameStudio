@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines'
@@ -8,9 +8,7 @@ import {
   type ApprovedOutboundTarget,
   type PinnedUndiciTlsOptions,
 } from '@bee-game-studio/security-core'
-import { getDefaultBeeGameBuiltinSkillsDir } from '@bee-game-studio/beegame-skills-core/store'
 import type {
-  BeeGameApprovedOutboundTargets,
   BeeGamePromptInput,
   BeeGameSessionLanguage,
   BeeGameSessionRunner,
@@ -23,10 +21,6 @@ import {
   parseNativeTerminalTaskNotification,
   type BeeGameNativeTaskNotification,
 } from './native-task-notification'
-import {
-  normalizeResourceLibraryCall,
-  RESOURCE_LIBRARY_ACTIONS,
-} from './native-resource-library-call'
 import { createNativeResourceLibraryTool } from './native-resource-library-tool'
 import { createNativeResourceInventoryCommitTool } from './native-resource-inventory-commit-tool'
 import { configuredResourceDeliveryCapabilities } from './resource-delivery-adapters'
@@ -139,146 +133,11 @@ export function getBeeGameResponseLanguageInstruction(
   return `Respond to the user in ${RESPONSE_LANGUAGE_NAMES[language]}. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.`
 }
 
-const DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW = '120000'
-const COMPACT_DISABLE_ENV_KEYS = [
-  'DISABLE_COMPACT',
-  'DISABLE_AUTO_COMPACT',
-] as const
-const PRODUCTION_INSTALL_ENV_KEYS = [
-  'NPM_CONFIG_PRODUCTION',
-  'npm_config_production',
-  'NPM_CONFIG_OMIT',
-  'npm_config_omit',
-  'YARN_PRODUCTION',
-  'PNPM_CONFIG_PROD',
-  'pnpm_config_prod',
-] as const
-
-const WORKFLOW_FILE_MUTATION_TOOLS = new Set([
-  'Write',
-  'Edit',
-  'MultiEdit',
-  'NotebookEdit',
-])
-
-const WORKFLOW_EXTERNAL_WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
-
-const SINGLE_LANE_WORKFLOW_WORKERS = new Set([
-  'document-author',
-  'document-reviewer',
-  'resource-planner',
-  'resource-curator',
-  'resource-content-author',
-  'implementation-worker',
-  'implementation-auditor',
-  'acceptance-validator',
-  'change-impact-analyzer',
-  'question-answerer',
-])
-
-const MAIN_THREAD_WORKFLOW_TOOLS = new Set([
-  'AssetManifest',
-  'SubmitAtomicTaskPlan',
-  'SubmitImplementationResult',
-  'SubmitValidationResult',
-  'CommitCanonicalDocument',
-  'SubmitDocumentRepairPlan',
-  'SubmitDocumentReviewPacket',
-  'SubmitChangeImpactResult',
-  'SubmitQuestionAnswerResult',
-  'CommitResourceContent',
-])
-
-const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
-  'Agent',
-  'Bash',
-  'Glob',
-  'Grep',
-  'LS',
-  'NotebookRead',
-  'Read',
-  'Task',
-])
-
-export function requiresBeeGameWorkflowBoundaryCheck(
-  input: Pick<
-    BeeGameSessionRunnerStartInput,
-    'workflowWorker' | 'workflowWorkerType'
-  >,
-  toolName: string,
-): boolean {
-  if (input.workflowWorker !== true) return false
-  if (input.workflowWorkerType === 'document-author') return false
-  if (WORKFLOW_FILE_MUTATION_TOOLS.has(toolName)) return true
-  if (WORKFLOW_EXTERNAL_WEB_TOOLS.has(toolName)) return true
-  if (
-    input.workflowWorkerType === 'resource-content-author' &&
-    toolName === 'Read'
-  )
-    return true
-  if (
-    input.workflowWorkerType === 'implementation-worker' &&
-    (toolName === 'Read' || toolName === 'Bash')
-  ) {
-    return true
-  }
-  return (
-    input.workflowWorkerType === 'atomic-task-planner' &&
-    ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS.has(toolName)
-  )
-}
-
-export function getBeeGameWorkflowThinkingConfig(
-  workerType?: BeeGameSessionRunnerStartInput['workflowWorkerType'],
-): { type: 'disabled' } | undefined {
-  return workerType === 'atomic-task-planner' ||
-    workerType === 'implementation-worker'
-    ? { type: 'disabled' }
-    : undefined
-}
-
 export function createQueryEngineRunner(): BeeGameSessionRunner {
   return {
     async start(input) {
       return new QueryEngineSessionRuntime(input)
     },
-  }
-}
-
-export function createBeeGameToolPermissionContext(
-  base: Record<string, unknown>,
-  skillReadRoots: string | string[] = [],
-  _workspaceRoot?: string,
-): Record<string, unknown> {
-  const existingRules = isRecord(base.alwaysAllowRules)
-    ? base.alwaysAllowRules
-    : {}
-  const existingSessionRules = Array.isArray(existingRules.session)
-    ? existingRules.session.filter(
-        (value): value is string => typeof value === 'string',
-      )
-    : []
-  const skillReadRules = (
-    Array.isArray(skillReadRoots) ? skillReadRoots : [skillReadRoots]
-  )
-    .filter(Boolean)
-    .map(root => `Read(${resolve(root)}/**)`)
-  return {
-    ...base,
-    // Use Claude Code's native edit-accepting mode. It auto-allows file
-    // mutations only in the original working directory while Bash, network,
-    // sensitive paths and paths outside the workspace keep their native
-    // permission checks. BeeGame must not maintain a parallel edit allowlist.
-    mode: 'acceptEdits',
-    isBypassPermissionsModeAvailable: false,
-    ...(skillReadRules.length > 0
-      ? {
-          alwaysAllowRules: {
-            ...existingRules,
-            session: [...new Set([...existingSessionRules, ...skillReadRules])],
-          },
-        }
-      : {}),
   }
 }
 
@@ -364,55 +223,6 @@ export class NativeSandboxNetworkPermissionBroker {
 }
 
 /** Validates and allows the sole read-only ResourceLibrary match action. */
-export class NativeResourceLibraryPermissionBroker {
-  authorize(input: {
-    toolName: string
-    toolInput: Record<string, unknown>
-    toolUseID: string
-  }): Promise<PermissionDecision | undefined> {
-    const normalized = normalizeResourceLibraryCall(
-      input.toolName,
-      input.toolInput,
-    )
-    if (!normalized) return Promise.resolve(undefined)
-    if (!normalized.validAction) {
-      const received = normalized.action ? ` "${normalized.action}"` : ''
-      return Promise.resolve({
-        behavior: 'deny',
-        message: `Unsupported ResourceLibrary action${received}. Allowed actions: ${RESOURCE_LIBRARY_ACTIONS.join(', ')}.`,
-        decisionReason: {
-          type: 'other',
-          reason: 'beegame_invalid_resource_library_action',
-        },
-        toolUseID: input.toolUseID,
-      })
-    }
-    return Promise.resolve({
-      behavior: 'allow',
-      updatedInput: input.toolInput,
-      decisionReason: {
-        type: 'other',
-        reason: 'beegame_read_only_resource_library',
-      },
-      toolUseID: input.toolUseID,
-    })
-  }
-}
-
-export async function resolveBeeGameSkillReadRoots(
-  env: Record<string, string>,
-  builtinSkillsRoot = getDefaultBeeGameBuiltinSkillsDir(),
-): Promise<string[]> {
-  const runtimeSkillsRoot = resolve(
-    env.BEEGAME_CONFIG_DIR ?? join(homedir(), '.beegame'),
-    'skills',
-  )
-  const canonicalRoots = await Promise.all(
-    [runtimeSkillsRoot, builtinSkillsRoot].map(root => realpath(root)),
-  )
-  return [...new Set(canonicalRoots)]
-}
-
 class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private engine: QueryEngineLike | null = null
   private appState: MutableAppState | null = null
@@ -430,7 +240,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     await withRuntimeEnvironment(
       this.input.cwd,
       this.input.env,
-      this.input.approvedOutboundTargets,
       async () => {
         this.currentSubmitInput = input
         if (input.confirmedBriefContext?.trim()) {
@@ -579,12 +388,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
     initializeBeeGameNativeQueryMode(bootstrapModule)
     call(configModule, 'enableConfigs')
-    enableBeeGameRuntimeCompaction(configModule)
-    call(
-      bootstrapModule,
-      'setSessionPersistenceDisabled',
-      !(await canWriteBeeGameConfigDir()),
-    )
     this.activateNativeSession = () => {
       call(
         bootstrapModule,
@@ -600,20 +403,11 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.requestPermission,
     )
 
-    const skillReadRoots = await resolveBeeGameSkillReadRoots(this.input.env)
-    const permissionContext = createBeeGameToolPermissionContext(
-      call(toolModule, 'getEmptyToolPermissionContext') as Record<
-        string,
-        unknown
-      >,
-      skillReadRoots,
-      this.input.cwd,
-    )
-    const nativeTools = selectBeeGameWorkerTools(
-      call(toolsModule, 'getTools', permissionContext) as unknown[],
-      this.input.workflowWorkerType,
-      this.input.workflowDocumentAuthorMode,
-    )
+    const permissionContext = call(
+      toolModule,
+      'getEmptyToolPermissionContext',
+    ) as Record<string, unknown>
+    const nativeTools = call(toolsModule, 'getTools', permissionContext) as unknown[]
     const assetManifestTool =
       this.input.workflowWorkerType === 'resource-planner'
         ? createNativeAssetManifestTool({
@@ -795,8 +589,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       workflowTools,
     )
     this.appState = appState
-    const resourceLibraryPermissionBroker =
-      new NativeResourceLibraryPermissionBroker()
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -809,47 +601,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       const requestPermission =
         this.input.requestPermission ??
         this.currentSubmitInput?.requestPermission
-      const requiresWorkflowBoundaryCheck =
-        requiresBeeGameWorkflowBoundaryCheck(this.input, toolName)
-      if (requiresWorkflowBoundaryCheck) {
-        if (!requestPermission) {
-          return {
-            behavior: 'deny',
-            message: 'Workflow permission boundary is unavailable.',
-            decisionReason: {
-              type: 'other',
-              reason: 'workflow_permission_context_missing',
-            },
-            toolUseID,
-          }
-        }
-        const boundaryDecision = await requestPermission({
-          toolUseID,
-          toolName,
-          message: 'Workflow phase scope validation is required.',
-          input: toolInput,
-        })
-        if (boundaryDecision.behavior === 'deny') {
-          return {
-            behavior: 'deny',
-            message:
-              boundaryDecision.message ?? 'Denied by workflow phase scope.',
-            decisionReason: {
-              type: 'other',
-              reason: 'workflow_phase_scope_denied',
-            },
-            toolUseID,
-          }
-        }
-      }
-      const delegatedDecision = await resourceLibraryPermissionBroker.authorize(
-        {
-          toolName,
-          toolInput,
-          toolUseID,
-        },
-      )
-      if (delegatedDecision) return delegatedDecision
       const result = (await callAsync(
         permissionsModule,
         'hasPermissionsToUseTool',
@@ -924,9 +675,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.resumeSessionId,
     )
 
-    const thinkingConfig = getBeeGameWorkflowThinkingConfig(
-      this.input.workflowWorkerType,
-    )
     this.engine = new QueryEngine({
       cwd: this.input.cwd,
       tools,
@@ -953,7 +701,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
-      ...(thinkingConfig ? { thinkingConfig } : {}),
       ...(getBeeGameResponseLanguageInstruction(this.input.language)
         ? {
             appendSystemPrompt: getBeeGameResponseLanguageInstruction(
@@ -1022,14 +769,11 @@ export function installInheritedBeeGameTools(
 ): MutableAppState {
   const currentMcp = getField<Record<string, unknown>>(appState, 'mcp', {})
   const currentTools = getField<unknown[]>(currentMcp, 'tools', [])
-  const operationalTools = inheritedTools.filter(
-    tool => !MAIN_THREAD_WORKFLOW_TOOLS.has(getToolName(tool)),
-  )
   return {
     ...appState,
     mcp: {
       ...currentMcp,
-      tools: [...currentTools, ...operationalTools],
+      tools: [...currentTools, ...inheritedTools],
     },
   }
 }
@@ -1415,62 +1159,15 @@ function getToolName(tool: unknown): string {
  * the event stream records only the wrapper, creating a second and invalid
  * terminal lane. Remove that lane at the worker capability boundary.
  */
-export function selectBeeGameWorkerTools(
-  tools: unknown[],
-  workflowWorkerType?: string,
-  documentAuthorMode?: 'initial' | 'repair-planning' | 'remediation',
-): unknown[] {
-  if (
-    workflowWorkerType === 'atomic-task-planner' ||
-    workflowWorkerType === 'document-reviewer'
-  ) {
-    return []
-  }
-  if (workflowWorkerType === 'document-author') {
-    return tools
-  }
-  if (workflowWorkerType === 'resource-planner') {
-    const resourceToolNames = new Set(['Read'])
-    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
-  }
-  if (workflowWorkerType === 'resource-curator') {
-    return []
-  }
-  if (workflowWorkerType === 'resource-content-author') {
-    const resourceToolNames = new Set(['Read'])
-    return tools.filter(tool => resourceToolNames.has(getToolName(tool)))
-  }
-  if (
-    !workflowWorkerType ||
-    !SINGLE_LANE_WORKFLOW_WORKERS.has(workflowWorkerType)
-  )
-    return tools
-  const redundantToolNames = new Set(['SearchExtraTools', 'ExecuteExtraTool'])
-  return tools.filter(tool => !redundantToolNames.has(getToolName(tool)))
-}
-
 async function withRuntimeEnvironment(
   cwd: string,
   env: Record<string, string>,
-  approvedOutboundTargets: BeeGameApprovedOutboundTargets,
   fn: () => Promise<void>,
 ): Promise<void> {
   const previousCwd = process.cwd()
   const previousEnv = new Map<string, string | undefined>()
-  const previousFetch = globalThis.fetch
-  const pinnedFetch = createBeeGamePinnedFetch(
-    previousFetch,
-    approvedOutboundTargets,
-  )
 
   const runtimeEnv = getBeeGameRuntimeEnvironment(env)
-  for (const key of [
-    ...COMPACT_DISABLE_ENV_KEYS,
-    ...PRODUCTION_INSTALL_ENV_KEYS,
-  ]) {
-    previousEnv.set(key, process.env[key])
-    delete process.env[key]
-  }
   for (const [key, value] of Object.entries(runtimeEnv)) {
     previousEnv.set(key, process.env[key])
     process.env[key] = value
@@ -1478,12 +1175,9 @@ async function withRuntimeEnvironment(
 
   try {
     process.chdir(cwd)
-    globalThis.fetch = pinnedFetch
     await fn()
   } finally {
     process.chdir(previousCwd)
-    globalThis.fetch = previousFetch
-    await pinnedFetch.close()
     for (const [key, value] of previousEnv) {
       if (value === undefined) {
         delete process.env[key]
@@ -1594,41 +1288,7 @@ function getFetchRequestProtocol(value: string): string | undefined {
 export function getBeeGameRuntimeEnvironment(
   env: Record<string, string>,
 ): Record<string, string> {
-  const runtimeEnv = { ...env }
-  for (const key of COMPACT_DISABLE_ENV_KEYS) {
-    delete runtimeEnv[key]
-  }
-  return {
-    ...runtimeEnv,
-    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
-    NODE_ENV:
-      runtimeEnv.NODE_ENV === 'production'
-        ? 'development'
-        : (runtimeEnv.NODE_ENV ?? 'development'),
-    NPM_CONFIG_PRODUCTION: 'false',
-    npm_config_production: 'false',
-    NPM_CONFIG_OMIT: '',
-    npm_config_omit: '',
-    YARN_PRODUCTION: 'false',
-    PNPM_CONFIG_PROD: 'false',
-    pnpm_config_prod: 'false',
-    // The native Anthropic stream can remain open after its upstream socket
-    // silently stops producing chunks. BeeGame requires Claude Code's own
-    // non-streaming recovery to fire before the outer worker timeout.
-    CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
-    CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW:
-      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
-      process.env.BEEGAME_AUTO_COMPACT_WINDOW ??
-      process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
-      DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW,
-  }
-}
-
-function enableBeeGameRuntimeCompaction(configModule: DynamicModule): void {
-  const config = call(configModule, 'getGlobalConfig')
-  if (typeof config !== 'object' || config === null) return
-  ;(config as { autoCompactEnabled?: boolean }).autoCompactEnabled = true
+  return { ...env }
 }
 
 function loadRootModule(path: string): Promise<DynamicModule> {

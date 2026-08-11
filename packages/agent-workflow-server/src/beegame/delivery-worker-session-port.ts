@@ -602,13 +602,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const documentAuthorAuthorityBlock = request
         ? await buildDocumentAuthorAuthorityBlock(request)
         : ''
+      const nativeToolAutonomyInstruction = request
+        ? "Claude Code's native tools, thinking, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
+        : ''
       const atomicTaskEvidenceInstruction =
         request?.workerType === 'atomic-task-planner'
-          ? 'Submit the complete plan through SubmitAtomicTaskPlan exactly once. Do not create, inspect, read, or overwrite an evidence file; the workflow service owns its canonical persistence.'
+          ? 'Submit the complete plan through SubmitAtomicTaskPlan exactly once. The workflow service persists the accepted plan as canonical evidence.'
           : ''
       const implementationResultInstruction =
         request?.workerType === 'implementation-worker'
-          ? 'Submit the final result through SubmitImplementationResult exactly once. Do not return a terminal JSON object and do not inspect workflow logs, transcripts, or historical evidence to infer prior failures. Validate only the active contract and current project files; the workflow service owns task identity, revision, and canonical evidence persistence.'
+          ? 'Submit the final result through SubmitImplementationResult exactly once. Validate the active contract and current project files; the workflow service owns task identity, revision, and canonical evidence persistence.'
           : ''
       const validationResultInstruction =
         request?.workerType === 'implementation-auditor' ||
@@ -640,6 +643,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : confirmedBriefContext,
         documentAuthorAuthorityBlock,
         prompt,
+        nativeToolAutonomyInstruction,
         atomicTaskEvidenceInstruction,
         implementationResultInstruction,
         validationResultInstruction,
@@ -795,21 +799,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
             continue
           }
         }
-        // The accepted structured submission is the workflow terminal event.
-        // Waiting for the SDK turn/result envelope after that point creates a
-        // race where a valid submission can be overwritten by a wall-clock
-        // timeout while the transport is still closing the model turn.
+        // The accepted structured submission is durable workflow evidence, but
+        // Claude Code still owns its normal turn completion. Drain the native
+        // turn before the workflow controller is allowed to close the session.
         if (request && hasCompletedStructuredSubmission(request, events)) {
-          const toolName = structuredSubmissionToolName(request)
-          if (
-            toolName &&
-            typeof input.sessions.finishWorkflowTurnAfterAcceptedTool ===
-              'function'
-          )
-            input.sessions.finishWorkflowTurnAfterAcceptedTool(
-              sessionId,
-              toolName,
-            )
+          if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+            await input.sessions.waitForWorkflowWorkerIdle(sessionId)
           return createDeterministicStructuredTerminal({ request, events })
         }
         const result = [...events]

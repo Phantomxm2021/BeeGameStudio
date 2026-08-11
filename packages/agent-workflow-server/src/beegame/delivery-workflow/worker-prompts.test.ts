@@ -54,25 +54,13 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('YAML owns only contract.yamlKinds')
     expect(prompt).toContain('contract.requiredRequirementIds')
     expect(prompt).toContain('contract.verifiedResourceIds')
-    expect(prompt).toContain('browse the Catalog')
-    expect(prompt).toContain('CommitResourceContent exactly once')
+    expect(prompt).toContain("Claude Code's native tools remain available")
+    expect(prompt).toContain('call CommitResourceContent once')
     expect(prompt).toContain(
-      'The only available tools for this worker are Read and CommitResourceContent',
+      'CommitResourceContent is the atomic delivery interface',
     )
-    expect(prompt).toContain(
-      'Never call Write, Edit, MultiEdit, NotebookEdit, Bash, or any other generic',
-    )
-    expect(prompt).toContain(
-      'Do not emit DSML/XML/tool-call markup as text',
-    )
-    expect(prompt).toContain('Build the submission in memory')
-    expect(prompt).toContain(
-      'Read only contract.authorityPaths and these exact contract.repairPaths supplied by the workflow boundary',
-    )
-    expect(prompt).toContain(
-      'The CommitResourceContent service reads and preserves protected canonical content',
-    )
-    expect(prompt).toContain('Do not submit any other path')
+    expect(prompt).not.toContain('The only available tools')
+    expect(prompt).not.toContain('Never call Write')
   })
 
   test('projects only readable resource content paths', () => {
@@ -513,11 +501,11 @@ describe('resource-content worker prompts', () => {
       contract: {},
     })
     expect(prompt).toContain('contract.authorityPaths')
-    expect(prompt).toContain('browse the Catalog')
-    expect(prompt).toContain('Plan only the exact writable paths listed above')
+    expect(prompt).toContain("Claude Code's native tools remain available")
+    expect(prompt).toContain('When the complete writable set is ready')
     expect(prompt).toContain(
       'validates the merged set before replacing any file',
     )
-    expect(prompt).toContain('Do not use generic file mutation tools')
+    expect(prompt).not.toContain('Do not use generic file mutation tools')
   })
 })

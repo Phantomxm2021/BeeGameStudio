@@ -941,7 +941,7 @@ describe('delivery worker session credentials', () => {
 
       expect(submittedPrompt).toContain('SubmitAtomicTaskPlan exactly once')
       expect(submittedPrompt).toContain(
-        'workflow service owns its canonical persistence',
+        'workflow service persists the accepted plan as canonical evidence',
       )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -1033,7 +1033,7 @@ describe('delivery worker session credentials', () => {
 
     expect(submittedPrompt).toContain('SubmitImplementationResult exactly once')
     expect(submittedPrompt).toContain(
-      'do not inspect workflow logs, transcripts, or historical evidence',
+      "Claude Code's native tools, thinking, permissions, context management, and normal completion behavior remain unchanged",
     )
     const {
       verificationObservations: _verificationObservations,

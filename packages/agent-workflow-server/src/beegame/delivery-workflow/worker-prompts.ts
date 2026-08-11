@@ -50,9 +50,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    request.workerType === 'document-author'
-      ? 'Use Claude Code normally to complete the assigned document. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.'
-      : 'Use only the tools supplied for this worker. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    "Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.",
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -418,26 +416,26 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           )
         : []
       return [
-        `Build only the engine-neutral JSON/YAML documents at these exact writable paths from contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths; object keys are unique, so never use an array or repeat a path. Do not submit any other path; the service preserves every other canonical content document. The only available tools for this worker are Read and CommitResourceContent. Read only contract.authorityPaths and these exact contract.repairPaths supplied by the workflow boundary. Build from the frozen identities in contract.requiredRequirementIds, contract.verifiedResourceIds and contract.inventoryBindings. The CommitResourceContent service reads and preserves protected canonical content; do not read protected paths merely to copy them. Never call Write, Edit, MultiEdit, NotebookEdit, Bash, or any other generic, discovery, file-mutation, or extra-tool operation; those calls are protocol errors and are not intermediate steps. Do not emit DSML/XML/tool-call markup as text. Build the submission in memory and make exactly one native CommitResourceContent call. Do not read assets/asset-manifest.json or assets/manifest/**, browse the Catalog, download, create or register resources, change the plan, or write gameplay code.`,
+        `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Claude Code's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
         'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
         request.contract.remediation
           ? 'This is one accepted resource-content repair batch. Resolve only the supplied content findings and preserve the protected canonical content. Do not attempt to repair Manifest, inventory or Resource Library findings.'
-          : 'Plan only the exact writable paths listed above in memory, then call CommitResourceContent once with that complete writable set. The service serializes JSON/YAML and validates the merged set before replacing any file. Do not use generic file mutation tools. There is no intermediate file-writing step and no second submission syntax.',
+          : 'When the complete writable set is ready, call CommitResourceContent once. The service serializes JSON/YAML and validates the merged set before replacing any file.',
         'The service preserves every canonical document outside the exact writable path list during the atomic commit; never read, resubmit or rewrite those documents.',
         'If verified inventory is genuinely missing, call CommitResourceContent needs_inventory with the exact missing requirement IDs. Do not invent a path, identity or embedded substitute.',
       ].join(' ')
     }
     case 'atomic-task-planner':
       return [
-        'Use contract.planningDocuments plus resourceIds and contentIds as the complete authority. Do not read the workspace, edit files or search resources.',
+        'Use contract.planningDocuments plus resourceIds and contentIds as the acceptance authority. Claude Code may inspect the current workspace and use its native tools as needed to produce a correct plan.',
         'Submit one dependency graph through SubmitAtomicTaskPlan. Each task owns durable implementation artifacts and project-owned verification actions. Checklist items have one owner; resource and content IDs are read-only dependencies.',
         'Resources and content are ready before implementation. Tasks consume declared files; they do not download, generate substitute media or mutate assets/asset-manifest.json.',
         'Do not create trailing cleanup, final verification or acceptance tasks. The workflow owns those phases.',
       ].join(' ')
     case 'implementation-worker':
       return [
-        'Implement the active atomic task completely within allowedPaths. Use only current source, direct dependencies, verified resources and declared JSON/YAML content.',
-        'Do not read canonical design documents, workflow logs or transcripts. Do not search or download resources, generate substitute media or edit assets/asset-manifest.json.',
+        'Implement the active atomic task completely within allowedPaths. Treat current source, direct dependencies, verified resources, declared JSON/YAML content, and canonical design documents as available context.',
+        'Claude Code may inspect the project and use its native tools as needed. Keep changes within the active task deliverables; resource acquisition and manifest changes remain separate workflow deliverables.',
         'Execute every deterministic test, build, file and asset verification with project-owned tooling. Runtime checks are deferred to acceptance.',
       ].join(' ')
     case 'implementation-auditor':

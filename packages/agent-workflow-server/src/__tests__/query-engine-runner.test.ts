@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -7,286 +7,37 @@ import {
   consumeNativeMessageStream,
   createNativeNotificationQueue,
   createNativeSdkEventQueue,
-  createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
   getBeeGameRuntimeEnvironment,
   ensureBeeGameMacroGlobals,
   drainNativeBackgroundNotifications,
   getCompletedNativeTaskOutputTaskId,
   getBeeGameResponseLanguageInstruction,
-  getBeeGameWorkflowThinkingConfig,
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
   installInheritedBeeGameTools,
-  NativeResourceLibraryPermissionBroker,
   NativeBackgroundTaskLedger,
   NativeSandboxNetworkPermissionBroker,
   parseNativeTerminalTaskNotification,
-  resolveBeeGameSkillReadRoots,
-  requiresBeeGameWorkflowBoundaryCheck,
-  selectBeeGameWorkerTools,
   type MutableAppState,
   stopRunningLocalShellTasks,
 } from '../beegame/query-engine-runner'
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
-  test('enables the native stream watchdog inside every BeeGame runtime', () => {
-    expect(
-      getBeeGameRuntimeEnvironment({
-        CLAUDE_ENABLE_STREAM_WATCHDOG: '0',
-        CLAUDE_STREAM_IDLE_TIMEOUT_MS: '600000',
-      }),
-    ).toMatchObject({
-      CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
-      CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
-      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
-    })
-  })
-
-  test('keeps Author and Reviewer thinking while preserving other worker policy', () => {
-    expect(getBeeGameWorkflowThinkingConfig('document-author')).toBeUndefined()
-    expect(getBeeGameWorkflowThinkingConfig('atomic-task-planner')).toEqual({
-      type: 'disabled',
-    })
-    expect(getBeeGameWorkflowThinkingConfig('implementation-worker')).toEqual({
-      type: 'disabled',
-    })
-    expect(
-      getBeeGameWorkflowThinkingConfig('document-reviewer'),
-    ).toBeUndefined()
-    expect(getBeeGameWorkflowThinkingConfig()).toBeUndefined()
-  })
-
-  test('forces atomic task planner exploration through the workflow permission boundary', () => {
-    for (const toolName of [
-      'Agent',
-      'Bash',
-      'Glob',
-      'Grep',
-      'LS',
-      'NotebookRead',
-      'Read',
-      'Task',
-    ]) {
-      expect(
-        requiresBeeGameWorkflowBoundaryCheck(
-          {
-            workflowWorker: true,
-            workflowWorkerType: 'atomic-task-planner',
-          },
-          toolName,
-        ),
-      ).toBe(true)
+  test('passes Claude Code runtime environment through without BeeGame overrides', () => {
+    const runtimeEnv = {
+      CLAUDE_ENABLE_STREAM_WATCHDOG: '0',
+      CLAUDE_STREAM_IDLE_TIMEOUT_MS: '600000',
+      DISABLE_AUTO_COMPACT: '1',
+      NODE_ENV: 'production',
     }
+    expect(getBeeGameRuntimeEnvironment(runtimeEnv)).toEqual(runtimeEnv)
 
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: true,
-          workflowWorkerType: 'implementation-worker',
-        },
-        'Read',
-      ),
-    ).toBe(true)
   })
 
-  test('does not put document authors behind the BeeGame permission boundary', () => {
-    for (const toolName of ['Read', 'Write', 'Edit', 'Bash', 'WebSearch']) {
-      expect(
-        requiresBeeGameWorkflowBoundaryCheck(
-          {
-            workflowWorker: true,
-            workflowWorkerType: 'document-author',
-          },
-          toolName,
-        ),
-      ).toBe(false)
-    }
-  })
-
-  test('preserves workflow mutation boundaries without exposing resource shell access', () => {
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: true,
-          workflowWorkerType: 'implementation-worker',
-        },
-        'Write',
-      ),
-    ).toBe(true)
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: true,
-          workflowWorkerType: 'resource-curator',
-        },
-        'Bash',
-      ),
-    ).toBe(false)
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: false,
-          workflowWorkerType: 'atomic-task-planner',
-        },
-        'Read',
-      ),
-    ).toBe(false)
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: true,
-          workflowWorkerType: 'implementation-worker',
-        },
-        'WebSearch',
-      ),
-    ).toBe(true)
-    expect(
-      requiresBeeGameWorkflowBoundaryCheck(
-        {
-          workflowWorker: false,
-          workflowWorkerType: 'implementation-worker',
-        },
-        'WebSearch',
-      ),
-    ).toBe(false)
-  })
-
-  test('removes deferred tool wrappers from every workflow worker terminal lane', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'SearchExtraTools' },
-      { name: 'ExecuteExtraTool' },
-      { name: 'Task' },
-      { name: 'CommitCanonicalDocument' },
-    ]
-
-    expect(selectBeeGameWorkerTools(tools, 'document-author')).toEqual(tools)
-    expect(
-      selectBeeGameWorkerTools(tools, 'document-author', 'remediation'),
-    ).toEqual(tools)
-    expect(
-      selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
-    ).toEqual(tools)
-    expect(selectBeeGameWorkerTools(tools, 'document-reviewer')).toEqual([])
-
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-curator').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
-
-    for (const workerType of [
-      'implementation-worker',
-      'implementation-auditor',
-      'acceptance-validator',
-      'change-impact-analyzer',
-      'question-answerer',
-    ]) {
-      expect(
-        selectBeeGameWorkerTools(tools, workerType).map(
-          tool => (tool as { name: string }).name,
-        ),
-      ).toEqual(['Read', 'Task', 'CommitCanonicalDocument'])
-    }
-
-    expect(selectBeeGameWorkerTools(tools)).toEqual(tools)
-    expect(selectBeeGameWorkerTools(tools, 'unrelated-agent')).toEqual(tools)
-  })
-
-  test('removes every generic tool from the Curator', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'Write' },
-      { name: 'Edit' },
-      { name: 'MultiEdit' },
-      { name: 'NotebookEdit' },
-      { name: 'Bash' },
-      { name: 'TodoWrite' },
-    ]
-
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-curator').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
-  })
-
-  test('removes generic mutation and exploration from Resource Content Author', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'Write' },
-      { name: 'Edit' },
-      { name: 'MultiEdit' },
-      { name: 'Glob' },
-      { name: 'Grep' },
-      { name: 'Bash' },
-      { name: 'Task' },
-    ]
-
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-content-author').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual(['Read'])
-  })
-
-  test('keeps Curator discovery inside the native bounded match tool', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'Write' },
-      { name: 'Glob' },
-      { name: 'Bash' },
-      { name: 'Agent' },
-      { name: 'Task' },
-      { name: 'WebSearch' },
-    ]
-
-    expect(
-      selectBeeGameWorkerTools(tools, 'resource-curator').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
-  })
-
-  test('keeps the native Claude Code tool inventory for document authors', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'Write' },
-      { name: 'Edit' },
-      { name: 'MultiEdit' },
-      { name: 'Bash' },
-      { name: 'Task' },
-    ]
-
-    expect(selectBeeGameWorkerTools(tools, 'document-author')).toEqual(tools)
-    expect(
-      selectBeeGameWorkerTools(tools, 'document-author', 'remediation'),
-    ).toEqual(tools)
-    expect(
-      selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
-    ).toEqual(tools)
-  })
-
-  test('removes file and exploration lanes from the atomic planner', () => {
-    const tools = [
-      { name: 'Read' },
-      { name: 'Bash' },
-      { name: 'Write' },
-      { name: 'Edit' },
-      { name: 'Agent' },
-    ]
-
-    expect(
-      selectBeeGameWorkerTools(tools, 'atomic-task-planner').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
-  })
-
-  test('inherits operational capabilities but keeps workflow control tools on the main worker', () => {
+  test('does not strip inherited capabilities from Claude Code agents', () => {
     const existing = { name: 'existing-mcp-tool' }
     const resourceLibrary = { name: 'ResourceLibrary' }
     const terminalTools = [
@@ -315,6 +66,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect((state.mcp as { tools: unknown[] }).tools).toEqual([
       existing,
       resourceLibrary,
+      ...terminalTools,
     ])
   })
 
@@ -420,44 +172,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       await separateSession.request({ host: 'registry.example', port: 443 }),
     ).toBe(false)
     expect(requests).toHaveLength(3)
-  })
-
-  test('allows the native read-only ResourceLibrary lane without prompting', async () => {
-    const broker = new NativeResourceLibraryPermissionBroker()
-    const toolInput = { action: 'match_requirements' }
-
-    expect(
-      await broker.authorize({
-        toolName: 'ResourceLibrary',
-        toolInput,
-        toolUseID: 'read-resource',
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        behavior: 'allow',
-        updatedInput: toolInput,
-      }),
-    )
-  })
-
-  test('rejects an invented ResourceLibrary action with the supported contract', async () => {
-    const broker = new NativeResourceLibraryPermissionBroker()
-
-    expect(
-      await broker.authorize({
-        toolName: 'ResourceLibrary',
-        toolInput: {
-          action: 'match',
-        },
-        toolUseID: 'invalid-resource-action',
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message:
-          'Unsupported ResourceLibrary action "match". Allowed actions: match_requirements.',
-      }),
-    )
   })
 
   test('fails at session startup when required native sandbox is unavailable', async () => {
@@ -912,89 +626,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         mode: 'task-notification',
       })?.result,
     ).toBe('{"detail":"literal </result> text"}')
-  })
-
-  test('uses native acceptEdits mode without enabling permission bypass', () => {
-    expect(
-      createBeeGameToolPermissionContext({
-        mode: 'default',
-        customRule: 'preserved',
-        isBypassPermissionsModeAvailable: true,
-      }),
-    ).toEqual({
-      mode: 'acceptEdits',
-      customRule: 'preserved',
-      isBypassPermissionsModeAvailable: false,
-    })
-  })
-
-  test('allows read-only access to runtime and trusted built-in skill roots without granting edit access', () => {
-    const context = createBeeGameToolPermissionContext(
-      {
-        mode: 'default',
-        alwaysAllowRules: { session: ['Read(/existing/reference/**)'] },
-        isBypassPermissionsModeAvailable: true,
-      },
-      ['/runtime/skills', '/platform/builtin-skills'],
-    )
-
-    expect(context).toMatchObject({
-      mode: 'acceptEdits',
-      alwaysAllowRules: {
-        session: [
-          'Read(/existing/reference/**)',
-          'Read(/runtime/skills/**)',
-          'Read(/platform/builtin-skills/**)',
-        ],
-      },
-      isBypassPermissionsModeAvailable: false,
-    })
-    expect(JSON.stringify(context)).not.toContain('Edit(/runtime/skills')
-    expect(JSON.stringify(context)).not.toContain(
-      'Edit(/platform/builtin-skills',
-    )
-  })
-
-  test('delegates workspace file mutation boundaries to native acceptEdits mode', () => {
-    const context = createBeeGameToolPermissionContext(
-      { mode: 'acceptEdits' },
-      [],
-      '/workspace/current-project',
-    )
-
-    expect(context).toMatchObject({
-      mode: 'acceptEdits',
-      isBypassPermissionsModeAvailable: false,
-    })
-    expect(JSON.stringify(context)).not.toContain('Write(')
-    expect(JSON.stringify(context)).not.toContain('Edit(')
-    expect(JSON.stringify(context)).not.toContain('Bash(')
-  })
-
-  test('derives canonical skill roots from the current session environment', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'beegame-skill-read-roots-'))
-    const configDir = join(root, 'user-runtime')
-    const runtimeSkillsDir = join(configDir, 'skills')
-    const builtinSkillsDir = join(root, 'builtin-skills')
-    await Promise.all([
-      mkdir(runtimeSkillsDir, { recursive: true }),
-      mkdir(builtinSkillsDir, { recursive: true }),
-    ])
-    try {
-      expect(
-        await resolveBeeGameSkillReadRoots(
-          {
-            BEEGAME_CONFIG_DIR: configDir,
-          },
-          builtinSkillsDir,
-        ),
-      ).toEqual([
-        await realpath(runtimeSkillsDir),
-        await realpath(builtinSkillsDir),
-      ])
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
   })
 
   test('closes runtime dispatchers across supported Undici lifecycle shapes', async () => {
