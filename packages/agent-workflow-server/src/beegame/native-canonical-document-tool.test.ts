@@ -5,10 +5,58 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   commitCanonicalDocument,
+  createNativeCanonicalDocumentTool,
   reconcileCanonicalDocumentCommitReceipt,
 } from './native-canonical-document-tool'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 
 describe('canonical document commit', () => {
+  test('initial authoring accepts only a complete structured game document', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-complete-'))
+    try {
+      const path = 'docs/GDD.md'
+      const contract = getGameDocumentContract(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-complete-gdd',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = {
+        title: contract.discipline,
+        sections: contract.sections.map((section, index) => ({
+          sectionId: section.sectionId,
+          title: section.title,
+          body: `Complete body ${index + 1}.`,
+          decisions: [{ decisionId: `${section.sectionId}.decision`, statement: `Decision ${index + 1}.`, rationale: `Rationale ${index + 1}.` }],
+          productionDetails: [{ detailId: `${section.sectionId}.detail`, statement: `Detail ${index + 1}.`, owner: contract.discipline, acceptanceCriteria: [`Acceptance ${index + 1}.`] }],
+          upstreamReferences: [],
+          risks: [],
+          openDecisions: [],
+        })),
+      }
+      const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
+      expect(call).toBeDefined()
+      await call!(submission)
+      const content = await readFile(join(workspacePath, path), 'utf8')
+      for (const section of contract.sections)
+        expect(content).toContain(`<!-- beegame-section:${section.sectionId} -->`)
+      await expect(call!({ body: '# bypass' })).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('owns metadata and returns the same durable commit idempotently', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-document-'))
     try {

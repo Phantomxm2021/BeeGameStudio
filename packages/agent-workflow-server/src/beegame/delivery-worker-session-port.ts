@@ -373,7 +373,7 @@ export async function buildDocumentAuthorAuthorityBlock(
   ].join('\n\n')
 }
 
-async function buildCanonicalDocumentCommitContract(
+export async function buildCanonicalDocumentCommitContract(
   request: WorkerDispatchRequest,
   dispatchId: string,
 ): Promise<CanonicalDocumentCommitContract | undefined> {
@@ -439,6 +439,10 @@ async function buildCanonicalDocumentCommitContract(
           baselineVersion: baselineVersion as string,
           baselineUpdatedAt: baselineUpdatedAt as string,
         }
+      : {}),
+    ...(request.contract.authoringMode === 'initial' &&
+    request.contract.documentSet === 'foundation'
+      ? { submissionKind: 'complete_game_document' as const }
       : {}),
   }
 }
