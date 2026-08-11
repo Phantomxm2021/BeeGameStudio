@@ -1563,7 +1563,11 @@ export class BeeGameSessionManager {
     }
     const refreshRuntimeStreamIdleTimer = () => {
       clearRuntimeStreamIdleTimer()
-      if (!record.workflowWorker) return
+      if (
+        !record.workflowWorker ||
+        record.workflowWorkerType === 'document-author'
+      )
+        return
       const timeoutMs =
         this.runtimeResilienceOptions.workflowStreamIdleTimeoutMs ?? 60_000
       if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return

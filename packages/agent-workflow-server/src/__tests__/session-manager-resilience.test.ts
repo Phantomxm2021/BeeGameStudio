@@ -1403,7 +1403,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('restarts a workflow worker when its runtime stream becomes idle before completion', async () => {
+  test('restarts a bounded workflow worker when its runtime stream becomes idle before completion', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-workflow-tool-idle-'))
     let starts = 0
     let firstRunnerStopped = 0
@@ -1460,10 +1460,10 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-author',
+      workflowWorkerType: 'document-reviewer',
     })
 
-    await manager.send(session.id, 'author the assigned document')
+    await manager.send(session.id, 'review the assigned document')
     await waitForIdle(manager, session.id)
 
     expect(starts).toBe(2)
@@ -1474,7 +1474,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('restarts a workflow worker when a thinking stream becomes idle', async () => {
+  test('restarts a bounded workflow worker when a thinking stream becomes idle', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-workflow-thinking-idle-'))
     let starts = 0
     const runner: BeeGameSessionRunner = {
@@ -1515,13 +1515,70 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'review the assigned document')
+    await waitForIdle(manager, session.id)
+
+    expect(starts).toBe(2)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
+    manager.dispose()
+  })
+
+  test('does not interrupt a document author during a quiet native write', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-author-quiet-write-'))
+    let starts = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => {
+        starts += 1
+        return {
+          submit: async input => {
+            input.onMessage({
+              type: 'stream_event',
+              event: {
+                type: 'content_block_start',
+                index: 0,
+                content_block: {
+                  type: 'tool_use',
+                  id: 'native-write-1',
+                  name: 'Write',
+                  input: {},
+                },
+              },
+            } as DashboardSDKMessage)
+            await new Promise(resolve => setTimeout(resolve, 50))
+          },
+          stop: () => undefined,
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(
+      runner,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workflowStreamIdleTimeoutMs: 20 },
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'author the assigned document')
     await waitForIdle(manager, session.id)
 
-    expect(starts).toBe(2)
+    expect(starts).toBe(1)
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)
