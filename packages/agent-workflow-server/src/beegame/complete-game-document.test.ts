@@ -179,6 +179,52 @@ describe('complete game document submission', () => {
     expect(canonical).not.toContain('document_id: WRONG')
   })
 
+  test('normalizes localized service-owned document layer headings', () => {
+    const path = 'docs/GDD.md'
+    const authored = renderCompleteGameDocument(path, completeSubmission(path))
+      .replace('## Executive Summary', '\n## 摘要')
+      .replace('## Production Materials', '\n## 生产资料')
+      .replace('## Audit Appendix', '\n## 审计附录')
+
+    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
+      version: '1.0.0',
+      updatedAt: '2026-08-11T04:30:00.000Z',
+    })
+
+    expect(canonical).toContain(
+      '<!-- beegame-executive-summary -->\n## Executive Summary',
+    )
+    expect(canonical).toContain(
+      '<!-- beegame-production-materials -->\n## Production Materials',
+    )
+    expect(canonical).toContain(
+      '<!-- beegame-audit-appendix -->\n## Audit Appendix',
+    )
+  })
+
+  test('normalizes blank lines between contract markers and exact headings', () => {
+    const path = 'docs/GDD.md'
+    const contract = getGameDocumentContract(path)
+    let authored = renderCompleteGameDocument(path, completeSubmission(path))
+    for (const section of contract.sections) {
+      authored = authored.replace(
+        `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}`,
+        `<!-- beegame-section:${section.sectionId} -->\n\n## ${section.title}`,
+      )
+    }
+    for (const material of contract.productionMaterials) {
+      authored = authored.replace(
+        `<!-- beegame-material:${material.materialId} -->\n### ${material.title}`,
+        `<!-- beegame-material:${material.materialId} -->\n\n### ${material.title}`,
+      )
+    }
+
+    expect(() => canonicalizeCompleteGameDocumentMarkdown(path, authored, {
+      version: '1.0.0',
+      updatedAt: '2026-08-11T04:30:00.000Z',
+    })).not.toThrow()
+  })
+
   test('rejects repeated substantive blocks across document sections', () => {
     const path = 'docs/GDD.md'
     const value = completeSubmission(path)

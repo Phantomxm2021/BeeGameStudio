@@ -366,9 +366,44 @@ export function canonicalizeCompleteGameDocumentMarkdown(
       : 0
   if (bodyStart === 0 && lines[0]?.trim() === '---')
     throw new Error('complete game document front matter is incomplete')
+  const bodyLines = lines.slice(bodyStart)
+  const normalizeMarkerHeading = (
+    marker: string,
+    heading: string,
+    acceptLocalizedHeading = false,
+  ) => {
+    const markerIndex = bodyLines.findIndex(line => line.trim() === marker)
+    if (markerIndex < 0) return
+    const headingIndex = bodyLines.findIndex(
+      (line, index) => index > markerIndex && line.trim().length > 0,
+    )
+    if (headingIndex <= markerIndex) return
+    const authoredHeading = bodyLines[headingIndex]!.trim()
+    if (authoredHeading !== heading && !(acceptLocalizedHeading && authoredHeading.startsWith('## ')))
+      return
+    bodyLines.splice(markerIndex + 1, headingIndex - markerIndex, heading)
+  }
+  for (const [marker, heading] of [
+    ['<!-- beegame-executive-summary -->', '## Executive Summary'],
+    ['<!-- beegame-production-materials -->', '## Production Materials'],
+    ['<!-- beegame-audit-appendix -->', '## Audit Appendix'],
+  ] as const) {
+    normalizeMarkerHeading(marker, heading, true)
+  }
+  const contract = getGameDocumentContract(path)
+  for (const section of contract.sections)
+    normalizeMarkerHeading(
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+    )
+  for (const material of contract.productionMaterials)
+    normalizeMarkerHeading(
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+    )
   const body = validateCompleteGameDocumentMarkdown(
     path,
-    lines.slice(bodyStart).join('\n').trimStart(),
+    bodyLines.join('\n').trimStart(),
   )
   const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
   return [
