@@ -21,6 +21,7 @@ import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
+import { DOCUMENT_NATIVE_WRITE_MAX_BYTES } from '../beegame/workflow-tool-input-budget'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -805,6 +806,58 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)
+    manager.dispose()
+  })
+
+  test('fails a document author with the exact oversized native write error', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-author-large-write-'))
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 0,
+              content_block: {
+                type: 'tool_use',
+                id: 'native-write-large',
+                name: 'Write',
+                input: {},
+              },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              index: 0,
+              delta: {
+                type: 'input_json_delta',
+                partial_json: 'x'.repeat(DOCUMENT_NATIVE_WRITE_MAX_BYTES + 1),
+              },
+            },
+          } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-large-write',
+      workflowDispatchId: 'dispatch-large-write',
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'author the assigned document')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.events(session.id).find(event => event.type === 'turn.failed')?.text,
+    ).toContain('document_native_write_input_too_large')
     manager.dispose()
   })
 

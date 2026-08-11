@@ -54,6 +54,10 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
+import {
+  createWorkflowToolInputBudgetState,
+  observeWorkflowToolInput,
+} from './workflow-tool-input-budget'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -1459,6 +1463,7 @@ export class BeeGameSessionManager {
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
+    const toolInputBudget = createWorkflowToolInputBudgetState()
     await runner.submit({
       prompt,
       ...(record.confirmedBriefContext
@@ -1473,6 +1478,15 @@ export class BeeGameSessionManager {
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
+        if (record.workflowWorkerType === 'document-author') {
+          const overflow = observeWorkflowToolInput(toolInputBudget, message)
+          if (overflow && !executionError) {
+            executionError = new Error(
+              `${overflow.code}: ${overflow.toolName} streamed ${overflow.observedBytes} bytes; maximum ${overflow.maxBytes} bytes`,
+            )
+            record.abortController?.abort(executionError)
+          }
+        }
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -1531,7 +1545,7 @@ export class BeeGameSessionManager {
       requestPermission: request => this.requestPermission(record, request),
     })
     await record.usageWriteTail
-    if (executionError && !signal.aborted) throw executionError
+    if (executionError) throw executionError
   }
 
   private queueUsageRecord(
