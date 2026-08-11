@@ -41,6 +41,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toMatchObject({
       CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
       CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
     })
   })
 
@@ -89,6 +90,20 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         'Read',
       ),
     ).toBe(true)
+  })
+
+  test('does not put document authors behind the BeeGame permission boundary', () => {
+    for (const toolName of ['Read', 'Write', 'Edit', 'Bash', 'WebSearch']) {
+      expect(
+        requiresBeeGameWorkflowBoundaryCheck(
+          {
+            workflowWorker: true,
+            workflowWorkerType: 'document-author',
+          },
+          toolName,
+        ),
+      ).toBe(false)
+    }
   })
 
   test('preserves workflow mutation boundaries without exposing resource shell access', () => {
@@ -148,11 +163,13 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       { name: 'CommitCanonicalDocument' },
     ]
 
+    expect(selectBeeGameWorkerTools(tools, 'document-author')).toEqual(tools)
     expect(
-      selectBeeGameWorkerTools(tools, 'document-author').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
+      selectBeeGameWorkerTools(tools, 'document-author', 'remediation'),
+    ).toEqual(tools)
+    expect(
+      selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
+    ).toEqual(tools)
     expect(selectBeeGameWorkerTools(tools, 'document-reviewer')).toEqual([])
 
     expect(
@@ -234,27 +251,23 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ).toEqual([])
   })
 
-  test('removes generic file tools from the canonical document lane', () => {
+  test('keeps the native Claude Code tool inventory for document authors', () => {
     const tools = [
       { name: 'Read' },
       { name: 'Write' },
       { name: 'Edit' },
       { name: 'MultiEdit' },
+      { name: 'Bash' },
+      { name: 'Task' },
     ]
 
+    expect(selectBeeGameWorkerTools(tools, 'document-author')).toEqual(tools)
     expect(
-      selectBeeGameWorkerTools(tools, 'document-author').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
-    expect(
-      selectBeeGameWorkerTools(tools, 'document-author', 'remediation').map(
-        tool => (tool as { name: string }).name,
-      ),
-    ).toEqual([])
+      selectBeeGameWorkerTools(tools, 'document-author', 'remediation'),
+    ).toEqual(tools)
     expect(
       selectBeeGameWorkerTools(tools, 'document-author', 'repair-planning'),
-    ).toEqual([])
+    ).toEqual(tools)
   })
 
   test('removes file and exploration lanes from the atomic planner', () => {

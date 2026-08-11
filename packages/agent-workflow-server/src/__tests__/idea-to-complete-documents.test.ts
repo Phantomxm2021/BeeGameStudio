@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
@@ -9,14 +9,12 @@ import {
 } from '../beegame/delivery-workflow/document-stage'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   type DeliveryRun,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import {
-  buildCanonicalDocumentCommitContract,
-} from '../beegame/delivery-worker-session-port'
-import { createNativeCanonicalDocumentTool } from '../beegame/native-canonical-document-tool'
+import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 
 describe('idea to complete game documents', () => {
   const workspaces: string[] = []
@@ -71,24 +69,7 @@ describe('idea to complete game documents', () => {
       )
 
       const dispatchId = `complete-document-${documentIndex}`
-      const commitContract = await buildCanonicalDocumentCommitContract(
-        request!,
-        dispatchId,
-      )
-      expect(commitContract).toBeDefined()
-      let tool: Record<string, unknown> | undefined
-      createNativeCanonicalDocumentTool({
-        buildTool: definition => {
-          tool = definition
-          return definition
-        },
-        workspacePath,
-        contract: commitContract!,
-      })
-      const call = tool?.call as
-        | ((input: unknown) => Promise<unknown>)
-        | undefined
-      await call!({
+      const submission = {
         title: documentContract.discipline,
         sections: documentContract.sections.map((section, sectionIndex) => ({
           sectionId: section.sectionId,
@@ -120,7 +101,20 @@ describe('idea to complete game documents', () => {
           risks: [],
           openDecisions: [],
         })),
-      })
+      }
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspacePath, path),
+        [
+          '---',
+          `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
+          'version: 1.0.0',
+          'updated_at: 2026-08-11T00:00:00.000Z',
+          '---',
+          '',
+          renderCompleteGameDocument(path, submission),
+        ].join('\n'),
+      )
 
       const now = new Date().toISOString()
       run = await completeDocumentDraft({

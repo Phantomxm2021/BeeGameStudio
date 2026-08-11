@@ -1,6 +1,7 @@
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_ARTIFACTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
@@ -49,7 +50,9 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    'Use only the tools supplied for this worker. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    request.workerType === 'document-author'
+      ? 'Use Claude Code normally to complete the assigned document. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.'
+      : 'Use only the tools supplied for this worker. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -307,16 +310,18 @@ function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
       return [
-        request.contract.authoringMode === 'initial'
-          ? 'Use the service-projected upstream authority and target baseline without reloading files. Submit one complete Markdown game document through CommitCanonicalDocument exactly once. The service validates the full section contract and owns document_id, version, updated_at, atomic persistence and the terminal action.'
+        request.contract.documentSet === 'checklist'
+          ? 'Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Claude Code\'s normal workflow.'
+          : request.contract.authoringMode === 'initial'
+          ? `Use the service-projected upstream authority and target baseline. Author the complete assigned Markdown game document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`
           : request.contract.authoringMode === 'repair-planning'
             ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
-            : 'Use the service-projected current target, apply only the locked repair decision, then submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns PATCH version, updated_at, atomic persistence and recovery.',
+            : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`,
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
               'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Cover core player paths, critical numeric boundaries, level/scene states, UI/audio feedback, visible resource outcomes and failure/recovery paths from the approved authority.',
-              'Before the only file mutation, group the approved scenarios and count the final checklist. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail. Never write an oversized draft and rely on a second mutation in the same dispatch.',
+              'Group the approved scenarios before authoring. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail.',
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               ...(request.contract.remediation
                 ? [
@@ -338,7 +343,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 request.contract.authoringMode === 'initial'
                   ? `This is one complete human development discipline assignment in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. contract.completeDocumentContract is mandatory: fulfill every section in its declared order with authoritative decisions, production-ready details and acceptance criteria, allowed upstream references, risks and genuinely unresolved decisions. The eight documents together must be sufficient for a human game development team to plan, build, produce content for, test, release and operate the approved game without relying on missing design prose. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Use the projected target baseline and never reload project files. Resolve this discipline's design work now; do not delegate missing decisions, feasibility, production detail or completeness to a later reviewer.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Apply the confirmed change request to the projected controlled baseline when this document owns or consumes an affected fact; preserve unrelated valid content. The service owns metadata revision.' : ''}`
                   : 'This is one accepted foundation-remediation batch. Modify only the assigned canonical foundation documents.',
-                'The workflow service adds canonical YAML front matter after accepting the Markdown body; never include or edit document_id, version or updated_at.',
+                request.contract.authoringMode === 'initial'
+                  ? `Begin the file with YAML front matter containing exactly document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[String(request.contract.foundationDocumentPath) as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS]}, version: 1.0.0, and updated_at set to a valid current ISO-8601 timestamp.`
+                  : 'Preserve document_id, increment the existing semantic version PATCH exactly once, and set updated_at to a later valid ISO-8601 timestamp.',
                 'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, formulas, economy, costs, growth, relative value and pressure/capability curves; LEVEL_SCENE_DESIGN owns level sequence, world/scene relationships, spatial topology, scale, routes, regions, spawn/goal points, camera design constraints, scene states and placement rules. Technical owns data consumption, runtime boundaries, loading, state/save, recovery and budgets; Art owns visual language and spatial readability; UI/UX owns information, input, interaction and interface states; Audio owns event-to-cue behavior; Asset Plan owns semantic resource responsibilities, format capabilities, source strategy and replaceable-file requirements.',
                 'Do not duplicate independently changing facts across documents. Events, waves and numeric configuration will be executable JSON after approval; world, scene, hierarchy and instance placement will be executable YAML after approval. Foundation documents define design intent and stable references only, never engine-specific Prefabs/Scenes/components or final JSON/YAML payloads.',
                 'Treat contract.systemDeliveryContract as the fixed BeeGame delivery boundary. Document the project through that one Manifest, those canonical roots, that content schema and those content kinds. Do not define a second Manifest, content root, schema, loader or runtime/source media substitute, even when such alternatives would be internally consistent across all eight documents.',
@@ -447,8 +454,8 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
       return request.contract.authoringMode === 'repair-planning'
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
         : request.contract.authoringMode === 'initial'
-          ? 'Submit the assigned complete Markdown game document as the body field of CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
-          : 'Submit the assigned complete Markdown body through CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
+          ? `Write the assigned complete Markdown game document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
+          : `Write the assigned complete Markdown document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
     case 'document-reviewer':
       return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'
     case 'resource-planner':
@@ -469,4 +476,10 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'question-answerer':
       return 'Call SubmitQuestionAnswerResult exactly once with only the answer.'
   }
+}
+
+function documentAuthorTargetPath(request: WorkerDispatchRequest): string {
+  return request.contract.documentSet === 'checklist'
+    ? 'docs/acceptance/gameplay-checklist.md'
+    : String(request.contract.foundationDocumentPath)
 }

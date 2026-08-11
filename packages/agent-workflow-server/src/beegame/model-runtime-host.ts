@@ -194,6 +194,7 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
 export function getModelRuntimeWorkerEnvironment(): Record<string, string> {
   return {
     ...getWorkerBaseEnvironment(),
+    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
     ...Object.fromEntries(
       MODEL_RUNTIME_TRANSPORT_ENV_KEYS.flatMap(key => {
         const value = process.env[key]

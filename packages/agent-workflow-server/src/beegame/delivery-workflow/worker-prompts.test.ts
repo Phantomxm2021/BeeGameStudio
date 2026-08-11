@@ -382,16 +382,19 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
+    expect(prompt).toContain('document_id: GDD')
+    expect(prompt).toContain('version: 1.0.0')
+    expect(prompt).toContain('updated_at')
     expect(prompt).toContain('complete human development discipline')
     expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Events, waves and numeric configuration')
     expect(prompt).toContain('world, scene, hierarchy and instance placement')
-    expect(prompt).toContain('CommitCanonicalDocument exactly once')
-    expect(prompt).toContain(
-      'owns document_id, version, updated_at',
-    )
+    expect(prompt).toContain('Author exactly docs/GDD.md')
+    expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('CommitCanonicalDocument')
+    expect(prompt).not.toContain('terminal JSON')
     expect(prompt).toContain('Production details must include observable acceptance criteria')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
@@ -470,8 +473,9 @@ describe('resource-content worker prompts', () => {
     })
     expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
     expect(ownerPrompt).toContain('locked decisions')
-    expect(ownerPrompt).toContain('CommitCanonicalDocument exactly once')
-    expect(ownerPrompt).toContain('service owns metadata')
+    expect(ownerPrompt).toContain('write the complete revised Markdown document directly')
+    expect(ownerPrompt).toContain('end the turn normally')
+    expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
   })
 
   test('keeps the checklist minimal and scenario-level', () => {
@@ -486,12 +490,15 @@ describe('resource-content worker prompts', () => {
       contract: { documentSet: 'checklist' },
     })
     expect(prompt).toContain('Target 24-40 checkbox tasks')
-    expect(prompt).toContain('Before the only file mutation')
     expect(prompt).toContain('never exceed 64 checkbox tasks')
     expect(prompt).toContain(
       'do not create one task per document sentence or variant',
     )
-    expect(prompt).toContain('Never write an oversized draft')
+    expect(prompt).toContain('docs/acceptance/gameplay-checklist.md')
+    expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('undefined')
+    expect(prompt).not.toContain('only file mutation')
+    expect(prompt).not.toContain('CommitCanonicalDocument')
   })
 
   test('gives Content Author the complete approved fact-owner set', () => {

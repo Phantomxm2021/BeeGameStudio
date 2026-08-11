@@ -40,7 +40,6 @@ import { CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS } from './configured-provision
 import { createNativeImplementationResultTool } from './native-implementation-result-tool'
 import { createNativeValidationResultTool } from './native-validation-result-tool'
 import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
-import { createNativeCanonicalDocumentTool } from './native-canonical-document-tool'
 import { createResourceSelectionClient } from './resource-selection-client'
 import { confirmedResourceLibraryUsage } from './resource-delivery-readiness'
 
@@ -209,10 +208,9 @@ export function requiresBeeGameWorkflowBoundaryCheck(
   toolName: string,
 ): boolean {
   if (input.workflowWorker !== true) return false
+  if (input.workflowWorkerType === 'document-author') return false
   if (WORKFLOW_FILE_MUTATION_TOOLS.has(toolName)) return true
   if (WORKFLOW_EXTERNAL_WEB_TOOLS.has(toolName)) return true
-  if (input.workflowWorkerType === 'document-author' && toolName === 'Read')
-    return true
   if (
     input.workflowWorkerType === 'resource-content-author' &&
     toolName === 'Read'
@@ -769,16 +767,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
               : {}),
           })
         : undefined
-    const canonicalDocumentTool =
-      this.input.workflowWorkerType === 'document-author' &&
-      this.input.workflowDocumentAuthorMode !== 'repair-planning' &&
-      this.input.workflowCanonicalDocumentCommitContract
-        ? createNativeCanonicalDocumentTool({
-            buildTool: definition => call(toolModule, 'buildTool', definition),
-            workspacePath: this.input.cwd,
-            contract: this.input.workflowCanonicalDocumentCommitContract,
-          })
-        : undefined
     const workflowTools = [
       assetManifestTool,
       resourceTool,
@@ -788,7 +776,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       implementationResultTool,
       validationResultTool,
       workflowResultTool,
-      canonicalDocumentTool,
     ].filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
     const tools = [...nativeTools, ...workflowTools]
     const [commands, discoveredAgentDefinitions] = await Promise.all([
@@ -1440,7 +1427,7 @@ export function selectBeeGameWorkerTools(
     return []
   }
   if (workflowWorkerType === 'document-author') {
-    return []
+    return tools
   }
   if (workflowWorkerType === 'resource-planner') {
     const resourceToolNames = new Set(['Read'])
@@ -1613,6 +1600,7 @@ export function getBeeGameRuntimeEnvironment(
   }
   return {
     ...runtimeEnv,
+    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
     NODE_ENV:
       runtimeEnv.NODE_ENV === 'production'
         ? 'development'
