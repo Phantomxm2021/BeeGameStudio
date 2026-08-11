@@ -66,6 +66,7 @@ type ReadinessAudit = (
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
+    requireCompleteFoundation?: boolean
   },
 ) => { valid: boolean; issues: string[] }
 
@@ -380,6 +381,7 @@ async function defaultAudit(
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
+    requireCompleteFoundation?: boolean
   },
 ): Promise<ReturnType<ReadinessAudit>> {
   const { auditDocumentReadiness } = await import('../document-readiness-audit')
@@ -1091,6 +1093,7 @@ export async function startDocumentStage(input: {
     allowedPaths,
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
+      confirmedBriefContext: input.run.confirmedBriefContext,
       ...(input.run.changeRequest
         ? { changeRequest: input.run.changeRequest }
         : {}),
@@ -1469,10 +1472,12 @@ async function completeFoundationRepairOwner(
     ? input.audit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
   if (!readiness.valid)
     return { ...updated, blockedReason: readiness.issues.join('; ') }
@@ -1568,10 +1573,12 @@ async function completeInitialFoundationDocumentDraft(input: {
     ? input.audit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
   if (!readiness.valid)
     return {

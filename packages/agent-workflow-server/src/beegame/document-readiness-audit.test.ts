@@ -46,6 +46,24 @@ describe('document readiness audit', () => {
     ).toEqual({ valid: true, issues: [] })
   })
 
+  test('rejects skeleton foundation documents when complete contracts are required', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-complete-'))
+    for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), `# ${path}\n`)
+    }
+
+    const audit = auditDocumentReadiness(workspace, {
+      includeChecklist: false,
+      includeAssetManifest: false,
+      requireCompleteFoundation: true,
+    })
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain(
+      'docs/GDD.md: Complete document section is missing or out of order: vision',
+    )
+  })
+
   test('rejects a seven-document foundation missing either new fact owner', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-eight-'))
     for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {

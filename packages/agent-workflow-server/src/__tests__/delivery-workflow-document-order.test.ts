@@ -441,6 +441,12 @@ describe('single-track document review workflow', () => {
       expect(request?.contract.upstreamDocumentPaths).toEqual(
         expectedUpstreamPaths[index],
       )
+      expect(request?.contract.confirmedBriefContext).toBe(
+        run.confirmedBriefContext,
+      )
+      expect(request?.contract.completeDocumentContract).toMatchObject({
+        path,
+      })
       await mkdir(join(workspacePath, path, '..'), { recursive: true })
       await writeFile(
         join(workspacePath, path),
