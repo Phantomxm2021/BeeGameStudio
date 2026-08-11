@@ -81,6 +81,7 @@ describe('OpenAI-compatible provider pinning', () => {
       process.env.ANTHROPIC_API_KEY = 'must-not-cross-process-boundary'
 
       expect(getModelRuntimeWorkerEnvironment()).toMatchObject({
+        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
         HTTPS_PROXY: 'https://proxy.example.test:8443',
         NO_PROXY: '127.0.0.1,localhost',
         NODE_EXTRA_CA_CERTS: '/tmp/runtime-ca.pem',

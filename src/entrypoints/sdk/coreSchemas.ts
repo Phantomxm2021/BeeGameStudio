@@ -1589,6 +1589,11 @@ export const SDKAPIRetryMessageSchema = lazySchema(() =>
       retry_delay_ms: z.number(),
       error_status: z.number().nullable(),
       error: SDKAssistantMessageErrorSchema(),
+      error_type: z.string(),
+      error_message: z.string(),
+      error_code: z.string().nullable(),
+      error_cause: z.string().nullable(),
+      request_id: z.string().nullable(),
       uuid: UUIDPlaceholder(),
       session_id: z.string(),
     })

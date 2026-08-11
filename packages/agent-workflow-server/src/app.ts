@@ -610,8 +610,6 @@ export function createAgentWorkflowApp(
       ),
     dashboardRepository.createSessionUsageBillingBackend(),
     Boolean(supabaseRuntimeEnvClient),
-    outboundTargetPolicyOptions,
-    resolveOutboundTarget,
     options.resourceSelectionRuntimeConfig,
   )
   const deliveryControllers = new Map<

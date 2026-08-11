@@ -1,7 +1,12 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
-import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
+import { completeGameDocumentSectionMarkers } from './complete-game-document'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENTS,
+} from './delivery-workflow/types'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 
 export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
 export const MAX_ACCEPTANCE_CHECKLIST_TASKS = 64
@@ -14,6 +19,7 @@ export type DocumentReadinessAudit = {
 export type DocumentReadinessAuditOptions = {
   includeChecklist?: boolean
   includeAssetManifest?: boolean
+  requireCompleteFoundation?: boolean
 }
 
 /** Returns stable checklist ids without interpreting any project-specific semantics. */
@@ -66,6 +72,18 @@ export function auditDocumentReadiness(
       if (!content.trim()) {
         issues.push(`Required project document is empty: ${projectPath}`)
       }
+      if (
+        options.requireCompleteFoundation === true &&
+        CANONICAL_FOUNDATION_DOCUMENTS.includes(
+          projectPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+        )
+      )
+        issues.push(
+          ...auditCompleteFoundationDocument(
+            projectPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+            content,
+          ),
+        )
     } catch {
       issues.push(`Required project document is unreadable: ${projectPath}`)
     }
@@ -92,6 +110,31 @@ export function auditDocumentReadiness(
   }
 
   return { valid: issues.length === 0, issues }
+}
+
+function auditCompleteFoundationDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+  content: string,
+): string[] {
+  const markers = completeGameDocumentSectionMarkers(path)
+  const sections = getGameDocumentContract(path).sections
+  const issues: string[] = []
+  let previousIndex = -1
+  for (const [index, marker] of markers.entries()) {
+    const markerIndex = content.indexOf(marker)
+    if (
+      markerIndex < 0 ||
+      markerIndex <= previousIndex ||
+      content.indexOf(marker, markerIndex + marker.length) >= 0
+    ) {
+      issues.push(
+        `${path}: Complete document section is missing or out of order: ${sections[index]!.sectionId}`,
+      )
+      continue
+    }
+    previousIndex = markerIndex
+  }
+  return issues
 }
 
 function auditChecklistStructure(content: string, path: string): string[] {

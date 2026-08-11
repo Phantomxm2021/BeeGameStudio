@@ -2,7 +2,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { open, readFile, rename, mkdir, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
-import { CANONICAL_PROJECT_DOCUMENT_IDS } from './delivery-workflow/types'
+import {
+  validateCompleteGameDocumentMarkdown,
+} from './complete-game-document'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
+  type FoundationDocumentPath,
+} from './delivery-workflow/types'
 
 const commitInputSchema = z
   .object({
@@ -32,6 +39,7 @@ export type CanonicalDocumentCommitContract = {
   baselineDigest: string | null
   baselineVersion?: string
   baselineUpdatedAt?: string
+  submissionKind?: 'complete_game_document'
 }
 
 export type CanonicalDocumentCommitReceipt = {
@@ -57,6 +65,17 @@ export function createNativeCanonicalDocumentTool(options: {
   workspacePath: string
   contract: CanonicalDocumentCommitContract
 }): unknown {
+  const completeGameDocument =
+    options.contract.submissionKind === 'complete_game_document'
+  if (
+    completeGameDocument &&
+    !CANONICAL_FOUNDATION_DOCUMENTS.includes(
+      options.contract.targetPath as FoundationDocumentPath,
+    )
+  )
+    throw new Error(
+      'complete game document submission requires a Foundation target',
+    )
   return options.buildTool({
     name: 'CommitCanonicalDocument',
     alwaysLoad: true,
@@ -64,21 +83,31 @@ export function createNativeCanonicalDocumentTool(options: {
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
     async description() {
-      return 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
+      return completeGameDocument
+        ? 'Validate and atomically commit the complete game-development document as one Markdown body. Every canonical section, decision and production detail is required; the workflow service owns metadata and persistence.'
+        : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
-      return 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
+      return completeGameDocument
+        ? 'Call exactly once with {body} containing the complete Markdown document. Begin with one # title. For every contract section in canonical order include its exact beegame-section marker, exact ## title, and the exact ### headings Authoritative Decisions, Production Details, Upstream Authority, Risks, Open Decisions with non-empty content. Do not include YAML front matter or defer missing authority to a reviewer.'
+        : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: unknown) {
-      const parsed = commitInputSchema.parse(input)
+      const submittedBody = commitInputSchema.parse(input).body
+      const body = completeGameDocument
+        ? validateCompleteGameDocumentMarkdown(
+            options.contract.targetPath as FoundationDocumentPath,
+            submittedBody,
+          )
+        : submittedBody
       return {
         data: await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
-          body: parsed.body,
+          body,
         }),
       }
     },

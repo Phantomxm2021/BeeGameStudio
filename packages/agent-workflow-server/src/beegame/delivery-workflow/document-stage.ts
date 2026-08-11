@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
+import {
+  canonicalizeCompleteGameDocumentMarkdown,
+  validateCompleteGameDocumentMarkdown,
+} from '../complete-game-document'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
@@ -34,6 +38,7 @@ import {
   INITIAL_FOUNDATION_UPSTREAM_PATHS,
   repairGroupAffectedPaths,
 } from './document-repair-graph'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   buildSystemDeliveryContract,
   SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH,
@@ -65,6 +70,7 @@ type ReadinessAudit = (
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
+    requireCompleteFoundation?: boolean
   },
 ) => { valid: boolean; issues: string[] }
 
@@ -379,6 +385,7 @@ async function defaultAudit(
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
+    requireCompleteFoundation?: boolean
   },
 ): Promise<ReturnType<ReadinessAudit>> {
   const { auditDocumentReadiness } = await import('../document-readiness-audit')
@@ -1090,6 +1097,7 @@ export async function startDocumentStage(input: {
     allowedPaths,
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
+      confirmedBriefContext: input.run.confirmedBriefContext,
       ...(input.run.changeRequest
         ? { changeRequest: input.run.changeRequest }
         : {}),
@@ -1099,6 +1107,7 @@ export async function startDocumentStage(input: {
         ? {
             authoringMode: 'initial',
             foundationDocumentPath: initialPath,
+            completeDocumentContract: getGameDocumentContract(initialPath),
             upstreamDocumentPaths: [
               ...INITIAL_FOUNDATION_UPSTREAM_PATHS[initialPath],
             ],
@@ -1467,10 +1476,12 @@ async function completeFoundationRepairOwner(
     ? input.audit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
   if (!readiness.valid)
     return { ...updated, blockedReason: readiness.issues.join('; ') }
@@ -1506,6 +1517,12 @@ async function completeInitialFoundationDocumentDraft(input: {
   const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
     path.split('\\').join('/'),
   )
+  const canonicalizationIssues = canonicalizeFoundationDocumentFile({
+    workspacePath: input.workspacePath,
+    path: expectedPath,
+    version: '1.0.0',
+    updatedAt: new Date().toISOString(),
+  })
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
@@ -1519,6 +1536,7 @@ async function completeInitialFoundationDocumentDraft(input: {
     )
       ? ['initial document author returned an unsafe document path']
       : []),
+    ...canonicalizationIssues,
     ...(!metadata ||
     !version ||
     !Number.isFinite(Date.parse(metadata.updatedAt))
@@ -1530,6 +1548,10 @@ async function completeInitialFoundationDocumentDraft(input: {
       previous:
         input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
     }),
+    ...completeFoundationDocumentIssues(
+      input.workspacePath,
+      expectedPath,
+    ),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['initial document author cannot resolve review findings']
       : []),
@@ -1566,10 +1588,12 @@ async function completeInitialFoundationDocumentDraft(input: {
     ? input.audit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
+        requireCompleteFoundation: true,
       })
   if (!readiness.valid)
     return {
@@ -1584,6 +1608,55 @@ async function completeInitialFoundationDocumentDraft(input: {
     documentStep: 'FOUNDATION_REVIEW',
     currentItemId: undefined,
     blockedReason: undefined,
+  }
+}
+
+function canonicalizeFoundationDocumentFile(input: {
+  workspacePath: string
+  path: FoundationDocumentPath
+  version: string
+  updatedAt: string
+}): string[] {
+  try {
+    const absolutePath = join(input.workspacePath, input.path)
+    const authored = readFileSync(absolutePath, 'utf8')
+    const canonical = canonicalizeCompleteGameDocumentMarkdown(
+      input.path,
+      authored,
+      { version: input.version, updatedAt: input.updatedAt },
+    )
+    writeFileSync(absolutePath, canonical, 'utf8')
+    return []
+  } catch (error) {
+    return [
+      `${input.path}: ${error instanceof Error ? error.message : 'canonical document normalization failed'}`,
+    ]
+  }
+}
+
+function completeFoundationDocumentIssues(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+): string[] {
+  try {
+    const content = readFileSync(join(workspacePath, path), 'utf8')
+    const lines = content.split('\n')
+    if (lines[0]?.trim() !== '---')
+      return [`${path}: canonical front matter is missing`]
+    const closingIndex = lines.findIndex(
+      (line, index) => index > 0 && line.trim() === '---',
+    )
+    if (closingIndex < 0)
+      return [`${path}: canonical front matter is incomplete`]
+    validateCompleteGameDocumentMarkdown(
+      path,
+      lines.slice(closingIndex + 1).join('\n').trimStart(),
+    )
+    return []
+  } catch (error) {
+    return [
+      `${path}: ${error instanceof Error ? error.message : 'complete document validation failed'}`,
+    ]
   }
 }
 

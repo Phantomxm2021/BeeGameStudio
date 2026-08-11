@@ -73,7 +73,7 @@ export function createNativeWorkflowResultTool(options: {
     options.documentAuthorMode !== 'repair-planning'
   )
     throw new Error(
-      'document author completion is owned by CommitCanonicalDocument',
+      'direct document authoring completes through Claude Code normal file delivery',
     )
   if (
     options.workerType === 'document-author' &&

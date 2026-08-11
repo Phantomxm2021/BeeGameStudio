@@ -10,14 +10,8 @@ import type { BeeGameNativeTaskNotification } from './native-task-notification'
 
 export type SerializedQueryEngineStartInput = Omit<
   BeeGameSessionRunnerStartInput,
-  'approvedOutboundTargets' | 'onNativeTaskNotification' | 'requestPermission'
-> & {
-  approvedOutboundTargets: Record<string, {
-    url: string
-    addresses: string[]
-    trustedDevelopmentProxy?: true
-  }>
-}
+  'onNativeTaskNotification' | 'requestPermission'
+>
 
 export type QueryEngineParentMessage =
   | { type: 'runtime.init'; input: SerializedQueryEngineStartInput }

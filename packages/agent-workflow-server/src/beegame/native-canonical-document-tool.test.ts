@@ -5,10 +5,139 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   commitCanonicalDocument,
+  createNativeCanonicalDocumentTool,
   reconcileCanonicalDocumentCommitReceipt,
 } from './native-canonical-document-tool'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
+} from './delivery-workflow/types'
+import { auditDocumentReadiness } from './document-readiness-audit'
+import { renderCompleteGameDocument } from './complete-game-document'
 
 describe('canonical document commit', () => {
+  test('produces the complete canonical document set from neutral product authority', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
+    try {
+      for (const [documentIndex, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
+        const contract = getGameDocumentContract(path)
+        let tool: Record<string, unknown> | undefined
+        createNativeCanonicalDocumentTool({
+          buildTool: definition => {
+            tool = definition
+            return definition
+          },
+          workspacePath,
+          contract: {
+            dispatchId: `dispatch-complete-${documentIndex}`,
+            targetPath: path,
+            documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+            operation: 'create',
+            baselineDigest: null,
+            submissionKind: 'complete_game_document',
+          },
+        })
+        const call = tool?.call as
+          | ((input: unknown) => Promise<unknown>)
+          | undefined
+        const submission = {
+          title: contract.discipline,
+          sections: contract.sections.map((section, sectionIndex) => ({
+            sectionId: section.sectionId,
+            title: section.title,
+            body: `Authoritative section ${documentIndex + 1}.${sectionIndex + 1}.`,
+            decisions: [
+              {
+                decisionId: `${section.sectionId}.decision`,
+                statement: `Owned decision ${sectionIndex + 1}.`,
+                rationale: `Authority rationale ${sectionIndex + 1}.`,
+              },
+            ],
+            productionDetails: [
+              {
+                detailId: `${section.sectionId}.production`,
+                statement: `Production requirement ${sectionIndex + 1}.`,
+                owner: contract.discipline,
+                acceptanceCriteria: [
+                  `Observable completion criterion ${sectionIndex + 1}.`,
+                ],
+              },
+            ],
+            upstreamReferences: [],
+            risks: [],
+            openDecisions: [],
+          })),
+        }
+        await call!({ body: renderCompleteGameDocument(path, submission) })
+      }
+
+      expect(
+        auditDocumentReadiness(workspacePath, {
+          includeChecklist: false,
+          includeAssetManifest: false,
+          requireCompleteFoundation: true,
+        }),
+      ).toEqual({ valid: true, issues: [] })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const content = await readFile(join(workspacePath, path), 'utf8')
+        for (const section of getGameDocumentContract(path).sections)
+          expect(content).toContain(
+            `<!-- beegame-section:${section.sectionId} -->`,
+          )
+      }
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('initial authoring accepts one complete Markdown document and rejects incomplete bodies', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-complete-'))
+    try {
+      const path = 'docs/GDD.md'
+      const contract = getGameDocumentContract(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-complete-gdd',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = {
+        title: contract.discipline,
+        sections: contract.sections.map((section, index) => ({
+          sectionId: section.sectionId,
+          title: section.title,
+          body: `Complete body ${index + 1}.`,
+          decisions: [{ decisionId: `${section.sectionId}.decision`, statement: `Decision ${index + 1}.`, rationale: `Rationale ${index + 1}.` }],
+          productionDetails: [{ detailId: `${section.sectionId}.detail`, statement: `Detail ${index + 1}.`, owner: contract.discipline, acceptanceCriteria: [`Acceptance ${index + 1}.`] }],
+          upstreamReferences: [],
+          risks: [],
+          openDecisions: [],
+        })),
+      }
+      const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
+      expect(call).toBeDefined()
+      await call!({ body: renderCompleteGameDocument(path, submission) })
+      const content = await readFile(join(workspacePath, path), 'utf8')
+      for (const section of contract.sections)
+        expect(content).toContain(`<!-- beegame-section:${section.sectionId} -->`)
+      await expect(call!({ body: '# bypass' })).rejects.toThrow()
+      await expect(call!(submission)).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('owns metadata and returns the same durable commit idempotently', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-document-'))
     try {

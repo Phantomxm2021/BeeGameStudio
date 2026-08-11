@@ -21,7 +21,6 @@ import { homedir } from 'node:os'
 import {
   basename,
   dirname,
-  extname,
   isAbsolute,
   join,
   relative,
@@ -31,16 +30,10 @@ import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
 } from '@bee-game-studio/agent-workflow'
-import {
-  resolveApprovedOutboundTarget,
-  type ApprovedOutboundTarget,
-  type OutboundTargetPolicyOptions,
-} from '@bee-game-studio/security-core'
 import type {
   BeeGameUsageBillingRecordResult as RecordUsageResult,
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
 import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
@@ -52,7 +45,6 @@ import {
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
-import { isRetryableQueryEngineError } from './query-engine-worker-protocol'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
@@ -62,8 +54,6 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
-import { BEEGAME_RESOURCE_ROOTS } from './asset-contracts'
-import { resourceInventoryCommitInputSchema } from './native-resource-inventory-commit-tool'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -253,7 +243,6 @@ export type BeeGameSessionRunnerStartInput = {
   resumeSessionId?: string
   cwd: string
   env: Record<string, string>
-  approvedOutboundTargets: BeeGameApprovedOutboundTargets
   /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
   resourceSelectionConfig?: ResourceSelectionRuntimeConfig
   /** Workflow identity is propagated into the native permission boundary. */
@@ -276,19 +265,46 @@ export type BeeGameSessionRunnerStartInput = {
   ): Promise<DashboardPermissionDecision>
 }
 
-const RUNTIME_PROVIDER_URL_KEYS = [
+const CLAUDE_MODEL_ENV_KEYS = new Set([
+  'CLAUDE_CONFIG_DIR',
   'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_OPENAI',
   'OPENAI_BASE_URL',
+  'OPENAI_API_KEY',
+  'OPENAI_DEFAULT_HAIKU_MODEL',
+  'OPENAI_DEFAULT_SONNET_MODEL',
+  'OPENAI_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_GEMINI',
   'GEMINI_BASE_URL',
+  'GEMINI_API_KEY',
+  'GEMINI_DEFAULT_HAIKU_MODEL',
+  'GEMINI_DEFAULT_SONNET_MODEL',
+  'GEMINI_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_USE_GROK',
   'GROK_BASE_URL',
-] as const
-
-export type BeeGameRuntimeProviderUrlKey =
-  (typeof RUNTIME_PROVIDER_URL_KEYS)[number]
-
-export type BeeGameApprovedOutboundTargets = Partial<
-  Record<BeeGameRuntimeProviderUrlKey, ApprovedOutboundTarget>
->
+  'GROK_API_KEY',
+  'GROK_DEFAULT_HAIKU_MODEL',
+  'GROK_DEFAULT_SONNET_MODEL',
+  'GROK_DEFAULT_OPUS_MODEL',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS',
+  'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'ANTHROPIC_UNIX_SOCKET',
+])
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
@@ -551,8 +567,6 @@ export class BeeGameSessionManager {
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = {},
     private readonly allowExternalRuntimeEnv = false,
-    private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
-    private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
     private readonly resourceSelectionConfig?: ResourceSelectionRuntimeConfig,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
@@ -937,36 +951,6 @@ export class BeeGameSessionManager {
     )
   }
 
-  /**
-   * End a workflow turn once its sole structured result has been accepted.
-   * The session and native runner stay alive so a Reviewer Cycle can reuse its
-   * stable context; only the now-authority-free continuation is interrupted.
-   */
-  finishWorkflowTurnAfterAcceptedTool(
-    sessionId: string,
-    toolName: string,
-  ): boolean {
-    const record = this.sessions.get(sessionId)
-    if (
-      !record?.workflowWorker ||
-      record.session.status !== 'running' ||
-      record.session.turnStatus !== 'running' ||
-      !record.currentTurnId
-    )
-      return false
-    const accepted = record.events.some(
-      event =>
-        event.turnId === record.currentTurnId &&
-        event.type === 'tool.completed' &&
-        event.payload?.toolName === toolName,
-    )
-    if (!accepted) return false
-    this.closeOpenThinkingLifecycle(record, 'structured_terminal_accepted')
-    record.abortController?.abort()
-    record.runner?.stop()
-    return true
-  }
-
   transcript(sessionId: string): Array<{
     id: number
     type: BeeGameEventType
@@ -1315,19 +1299,14 @@ export class BeeGameSessionManager {
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
       )
-      const approvedOutboundTargets =
-        await this.resolveRuntimeOutboundTargets(env)
-      let runner = record.runner
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        let runtimeMessageObserved = false
-        try {
-          runner ??= await this.runner.start({
+      const runner =
+        record.runner ??
+        (await this.runner.start({
             sessionId: record.session.id,
             deliveryEvidenceDataRoot: this.dashboardDataRoot,
             resumeSessionId: record.session.id,
             cwd: record.session.cwd,
             env,
-            approvedOutboundTargets,
             ...(this.resourceSelectionConfig &&
             env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
             (!record.workflowWorker ||
@@ -1382,24 +1361,9 @@ export class BeeGameSessionManager {
               : {}),
             requestPermission: request =>
               this.requestPermission(record, request),
-          })
-          record.runner = runner
-          await this.submitToRunner(record, runner, prompt, signal, () => {
-            runtimeMessageObserved = true
-          })
-          break
-        } catch (error) {
-          const canRetry =
-            attempt === 0 &&
-            !signal.aborted &&
-            !runtimeMessageObserved &&
-            (record.workflowWorker || isRetryableQueryEngineError(error))
-          disposeRunner(runner)
-          if (record.runner === runner) record.runner = null
-          runner = null
-          if (!canRetry) throw error
-        }
-      }
+          }))
+      record.runner = runner
+      await this.submitToRunner(record, runner, prompt, signal)
       try {
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
@@ -1423,22 +1387,7 @@ export class BeeGameSessionManager {
           }
         }
       } finally {
-        const acceptedReviewerTerminal =
-          record.workflowWorkerType === 'document-reviewer' &&
-          Boolean(
-            record.currentTurnId &&
-              record.events.some(
-                event =>
-                  event.turnId === record.currentTurnId &&
-                  event.type === 'tool.completed' &&
-                  event.payload?.toolName === 'SubmitDocumentReviewPacket',
-              ),
-          )
-        if (
-          signal.aborted &&
-          record.runner === runner &&
-          !acceptedReviewerTerminal
-        ) {
+        if (signal.aborted && record.runner === runner) {
           disposeRunner(record.runner)
           record.runner = null
         }
@@ -1458,9 +1407,6 @@ export class BeeGameSessionManager {
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
-      cleanupRuntimeLayout({
-        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-      })
       if (attachmentDirectory) {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
@@ -1505,31 +1451,11 @@ export class BeeGameSessionManager {
     }
   }
 
-  private async resolveRuntimeOutboundTargets(
-    env: Record<string, string>,
-  ): Promise<BeeGameApprovedOutboundTargets> {
-    const targets: BeeGameApprovedOutboundTargets = {}
-    for (const key of RUNTIME_PROVIDER_URL_KEYS) {
-      const value = env[key]
-      if (!value) continue
-      const target = await this.resolveOutboundTarget(
-        value,
-        this.outboundTargetPolicyOptions,
-      )
-      if (!target) {
-        throw new Error('Outbound URL is not permitted')
-      }
-      targets[key] = target
-    }
-    return targets
-  }
-
   private async submitToRunner(
     record: SessionRecord,
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
-    onRuntimeMessage?: () => void,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
@@ -1546,7 +1472,6 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
-        onRuntimeMessage?.()
         appendProjectAgentRawLog(record, message)
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
@@ -1809,81 +1734,28 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
-    if (isUserQuestionTool(request.toolName)) {
-      const message =
-        'This headless BeeGame session cannot collect structured AskUserQuestion answers. Ask the user in the assistant response instead.'
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        autoDenied: true,
-        reason: message,
-        input: request.input,
-      })
-      return Promise.resolve({
-        behavior: 'deny',
-        message,
-      })
-    }
-    const sessionWorkspaceRoot = record.session.cwd
-    const workspaceViolation = getWorkspaceViolation(
-      record.session.cwd,
-      sessionWorkspaceRoot,
-      request,
-    )
-    if (workspaceViolation) {
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        autoDenied: true,
-        reason: workspaceViolation,
-        input: request.input,
-      })
-      return Promise.resolve({
-        behavior: 'deny',
-        message: workspaceViolation,
-      })
-    }
-    const policyDecision = getBeeGamePermissionPolicyDecision(
-      record,
-      sessionWorkspaceRoot,
-      request,
-    )
-    if (policyDecision.behavior === 'auto_deny') {
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        autoDenied: true,
-        reason: policyDecision.message,
-        input: request.input,
-      })
-      return Promise.resolve({
-        behavior: 'deny',
-        message: policyDecision.message,
-      })
-    }
-    if (policyDecision.behavior === 'auto_allow') {
-      if (
-        record.workflowWorkerType === 'atomic-task-planner' &&
-        isFileMutationTool(request.toolName)
+    if (
+      request.toolName === 'CommitResourceInventoryAuthority' ||
+      request.toolName === 'CommitResourceContentAuthority'
+    ) {
+      const authority = authorizeBeeGamePlatformMutation(record, request)
+      this.append(
+        record,
+        'permission.resolved',
+        `${request.toolName}: ${authority.behavior}`,
+        {
+          type: 'permission.resolved',
+          toolUseID: request.toolUseID,
+          toolName: request.toolName,
+          decision: authority.behavior,
+          scope: 'once',
+          autoApproved: authority.behavior === 'allow',
+          autoDenied: authority.behavior === 'deny',
+          reason: 'platform_mutation_authority',
+          input: request.input,
+        },
       )
-        record.atomicTaskPlannerEvidenceWriteGranted = true
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        scope: 'once',
-        autoApproved: true,
-        reason: policyDecision.message ?? 'workflow_phase_scope',
-        input: request.input,
-      })
-      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+      return Promise.resolve({ ...authority, scope: 'once' })
     }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
@@ -3592,339 +3464,33 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-const ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS = new Set([
-  'Agent',
-  'Bash',
-  'Glob',
-  'Grep',
-  'LS',
-  'NotebookRead',
-  'Read',
-  'Task',
-])
-
-const IMPLEMENTATION_READ_DENIED_FILES = new Set([
-  ...CANONICAL_PROJECT_DOCUMENTS,
-  'assets/asset-manifest.json',
-])
-
-const IMPLEMENTATION_READ_DENIED_ROOTS = [
-  '.beegame',
-  'logs',
-  'transcripts',
-] as const
-
-const RESOURCE_TEXT_FILE_EXTENSIONS = new Set([
-  '.gltf',
-  '.json',
-  '.md',
-  '.svg',
-  '.txt',
-  '.yaml',
-  '.yml',
-])
-
-function getBeeGamePermissionPolicyDecision(
+function authorizeBeeGamePlatformMutation(
   record: SessionRecord,
-  _allowedRoot: string,
   request: DashboardPermissionRequest,
-): {
-  behavior: 'auto_allow' | 'auto_deny' | 'ask_user'
-  message?: string
-} {
-  if (
+): { behavior: 'allow' | 'deny'; message?: string } {
+  const dispatchId = request.input.dispatchId
+  const activeInventoryAuthority =
     request.toolName === 'CommitResourceInventoryAuthority' &&
     record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-curator'
-  ) {
-    const dispatchId = request.input.dispatchId
-    const active =
-      typeof dispatchId === 'string' &&
-      dispatchId === record.workflowDispatchId &&
-      record.session.status === 'running'
-    return active
-      ? {
-          behavior: 'auto_allow',
-          message: 'workflow_resource_inventory_authority',
-        }
-      : {
-          behavior: 'auto_deny',
-          message: 'Resource inventory dispatch is no longer active.',
-        }
-  }
-  if (
-    request.toolName === 'CommitResourceInventory' &&
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-curator'
-  ) {
-    const parsed = resourceInventoryCommitInputSchema.safeParse(request.input)
-    if (!parsed.success)
-      return {
-        behavior: 'auto_deny',
-        message:
-          'CommitResourceInventory requires one complete canonical inventory decision set, or decisions: [] to resume an existing durable receipt.',
-      }
-    const allowedPaths = record.workflowAllowedPaths ?? []
-    if (
-      parsed.data.decisions.some(
-        decision =>
-          !isPathInsideWorkflowScope(
-            record.session.cwd,
-            allowedPaths,
-            decision.destination_path,
-          ),
-      )
-    )
-      return {
-        behavior: 'auto_deny',
-        message:
-          'CommitResourceInventory cannot deliver a resource outside the current project workspace and declared resource roots.',
-      }
-    return {
-      behavior: 'auto_allow',
-      message: 'workflow_resource_inventory_commit',
-    }
-  }
-  if (
+    record.workflowWorkerType === 'resource-curator' &&
+    typeof dispatchId === 'string' &&
+    dispatchId === record.workflowDispatchId &&
+    record.session.status === 'running'
+  const activeContentAuthority =
     request.toolName === 'CommitResourceContentAuthority' &&
     record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-content-author'
-  ) {
-    const dispatchId = request.input.dispatchId
-    const active =
-      typeof dispatchId === 'string' &&
-      dispatchId === record.workflowDispatchId &&
-      dispatchId === record.workflowResourceContentCommitContract?.dispatchId &&
-      record.session.status === 'running'
-    return active
-      ? {
-          behavior: 'auto_allow',
-          message: 'workflow_resource_content_active_dispatch',
-        }
-      : {
-          behavior: 'auto_deny',
-          message: 'Resource Content dispatch is no longer active.',
-        }
+    record.workflowWorkerType === 'resource-content-author' &&
+    typeof dispatchId === 'string' &&
+    dispatchId === record.workflowDispatchId &&
+    dispatchId === record.workflowResourceContentCommitContract?.dispatchId &&
+    record.session.status === 'running'
+  if (activeInventoryAuthority || activeContentAuthority) {
+    return { behavior: 'allow' }
   }
-  if (
-    record.workflowWorker === true &&
-    ['WebSearch', 'WebFetch'].includes(request.toolName)
-  ) {
-    return {
-      behavior: 'auto_deny',
-      message:
-        'Delivery workflow workers must resolve their assigned contract from approved project artifacts and cannot pause for interactive external-web permission.',
-    }
+  return {
+    behavior: 'deny',
+    message: 'Platform mutation dispatch is no longer active.',
   }
-  if (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'atomic-task-planner' &&
-    ATOMIC_TASK_PLANNER_EXPLORATION_TOOLS.has(request.toolName)
-  ) {
-    return {
-      behavior: 'auto_deny',
-      message:
-        'Atomic task planning uses the revision-bound planningDocuments contract. Workspace exploration and nested agents are disabled for this worker.',
-    }
-  }
-  if (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'implementation-worker' &&
-    (request.toolName === 'Read' || request.toolName === 'Bash')
-  ) {
-    const paths = extractPermissionPaths(request.input)
-    const denied =
-      (request.toolName === 'Read' && paths.length === 0) ||
-      paths.some(path => {
-        const resolvedPath = isAbsolute(path)
-          ? resolve(path)
-          : resolve(record.session.cwd, path)
-        const projectRelative = relative(record.session.cwd, resolvedPath)
-        if (
-          projectRelative === '' ||
-          projectRelative.startsWith('..') ||
-          isAbsolute(projectRelative)
-        ) {
-          return true
-        }
-        if (IMPLEMENTATION_READ_DENIED_FILES.has(projectRelative)) return true
-        return IMPLEMENTATION_READ_DENIED_ROOTS.some(
-          root =>
-            projectRelative === root || projectRelative.startsWith(`${root}/`),
-        )
-      })
-    if (denied) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Implementation workers use the active task as acceptance authority and may read only current project source, assets, tests, and direct dependencies. Canonical documents, workflow state, logs, transcripts, and paths outside the workspace are unavailable in this phase.',
-      }
-    }
-    return {
-      behavior: 'auto_allow',
-      message: 'workflow_implementation_dependency_scope',
-    }
-  }
-  if (
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'atomic-task-planner' &&
-    record.atomicTaskPlannerEvidenceWriteGranted &&
-    isFileMutationTool(request.toolName)
-  ) {
-    return {
-      behavior: 'auto_deny',
-      message:
-        'Atomic task planning permits exactly one evidence mutation. Canonical validation is performed by the workflow service; do not rewrite the evidence.',
-    }
-  }
-  if (
-    record.workflowWorker === true &&
-    isResourceProductionWorker(record.workflowWorkerType) &&
-    (request.toolName === 'Read' || isFileMutationTool(request.toolName))
-  ) {
-    if (
-      record.workflowWorkerType === 'resource-content-author' &&
-      isFileMutationTool(request.toolName)
-    )
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Resource Content Author mutates canonical content only through CommitResourceContent.',
-      }
-    if (
-      record.workflowWorkerType === 'resource-content-author' &&
-      request.toolName === 'Read'
-    ) {
-      const paths = extractPermissionPaths(request.input)
-      const readOnlyPaths = record.workflowReadOnlyPaths ?? []
-      if (
-        paths.length === 0 ||
-        paths.some(
-          path =>
-            !isPathInsideWorkflowScope(record.session.cwd, readOnlyPaths, path),
-        )
-        )
-        return {
-          behavior: 'auto_deny',
-          message:
-            'Resource Content Author may read only the projected authority paths and current repair paths. CommitResourceContent reads protected content itself; do not retry this protected path.',
-        }
-      return {
-        behavior: 'auto_allow',
-        message: 'workflow_resource_content_read_scope',
-      }
-    }
-    if (
-      (record.workflowWorkerType === 'resource-planner' ||
-        record.workflowWorkerType === 'resource-curator') &&
-      isFileMutationTool(request.toolName)
-    ) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          record.workflowWorkerType === 'resource-planner'
-            ? 'Resource Planner commits the canonical plan only through AssetManifest.'
-            : 'Resource Curator commits delivered files, placeholders, and inventory bindings only through CommitResourceInventory.',
-      }
-    }
-    const binaryPath = request.toolName === 'Read' && extractPermissionPaths(request.input).find(path => {
-      const absolute = isAbsolute(path)
-        ? resolve(path)
-        : resolve(record.session.cwd, path)
-      const projectRelative = relative(record.session.cwd, absolute)
-      const isResourcePath = [
-        BEEGAME_RESOURCE_ROOTS.runtime,
-        BEEGAME_RESOURCE_ROOTS.content,
-        BEEGAME_RESOURCE_ROOTS.generated,
-      ].some(
-        root =>
-          projectRelative === root || projectRelative.startsWith(`${root}/`),
-      )
-      return (
-        isResourcePath &&
-        !RESOURCE_TEXT_FILE_EXTENSIONS.has(extname(path).toLowerCase())
-      )
-    })
-    if (binaryPath) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Resource production cannot read or write binary media through generic file tools. Use CommitResourceInventory for library delivery, conversion, or service-proven placeholders.',
-      }
-    }
-  }
-  if (record.workflowWorker && isFileMutationTool(request.toolName)) {
-    const paths = extractPermissionPaths(request.input)
-    const allowedPaths = record.workflowAllowedPaths ?? []
-    const protectedPaths = record.workflowProtectedPaths ?? []
-    if (
-      paths.some(path =>
-        protectedPaths.some(protectedPath =>
-          isPathInsideWorkflowScope(record.session.cwd, [protectedPath], path),
-        ),
-      )
-    ) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'This canonical content file was already committed successfully; continue with only missing or invalid content artifacts.',
-      }
-    }
-    if (
-      isResourceProductionWorker(record.workflowWorkerType) &&
-      paths.some(path => isCanonicalAssetManifestPath(record.session.cwd, path))
-    ) {
-      return {
-        behavior: 'auto_deny',
-        message: 'The resource manifest is mutated only through AssetManifest.',
-      }
-    }
-    if (
-      record.workflowWorkerType === 'implementation-worker' &&
-      paths.some(path => isResourceArtifactPath(record.session.cwd, path))
-    ) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Implementation workers consume the approved resource manifest; resource files must be changed in RESOURCE_PREPARATION.',
-      }
-    }
-    if (
-      allowedPaths.length === 0 ||
-      paths.length === 0 ||
-      paths.some(
-        path =>
-          !isPathInsideWorkflowScope(record.session.cwd, allowedPaths, path),
-      )
-    ) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'This workflow worker requested a file outside its declared phase scope. The workflow must finish the current phase before that artifact can be written.',
-      }
-    }
-    return {
-      behavior: 'auto_allow',
-      message: 'workflow_phase_scope',
-    }
-  }
-  if (request.toolName === 'Bash') {
-    if (isGlobalProcessControlBashCommand(request.input)) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Global process control is managed by BeeGame preview controls.',
-      }
-    }
-    if (isBackgroundProcessBashCommand(request.input)) {
-      return {
-        behavior: 'auto_deny',
-        message:
-          'Background processes are managed by BeeGame preview controls.',
-      }
-    }
-  }
-  return { behavior: 'ask_user' }
 }
 
 function hasCompletedTool(
@@ -3945,80 +3511,6 @@ function hasCompletedTool(
     if (event.type === 'tool.completed' && started.has(toolUseID)) return true
   }
   return false
-}
-
-function isPathInsideWorkflowScope(
-  cwd: string,
-  allowedPaths: string[],
-  targetPath: string,
-): boolean {
-  const resolvedTarget = isAbsolute(targetPath)
-    ? resolve(targetPath)
-    : resolve(cwd, targetPath)
-  return allowedPaths.some(scope => {
-    const resolvedScope = isAbsolute(scope)
-      ? resolve(scope)
-      : resolve(cwd, scope)
-    const relativePath = relative(resolvedScope, resolvedTarget)
-    return (
-      relativePath === '' ||
-      (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-    )
-  })
-}
-
-function isCanonicalAssetManifestPath(
-  cwd: string,
-  targetPath: string,
-): boolean {
-  const resolvedTarget = isAbsolute(targetPath)
-    ? resolve(targetPath)
-    : resolve(cwd, targetPath)
-  return (
-    relative(resolve(cwd), resolvedTarget).split('\\').join('/') ===
-    'assets/asset-manifest.json'
-  )
-}
-
-function isResourceArtifactPath(cwd: string, targetPath: string): boolean {
-  const resolvedTarget = isAbsolute(targetPath)
-    ? resolve(targetPath)
-    : resolve(cwd, targetPath)
-  const relativePath = relative(resolve(cwd), resolvedTarget)
-    .split('\\')
-    .join('/')
-  return relativePath === 'assets' || relativePath.startsWith('assets/')
-}
-
-function isSensitiveProjectMutationPath(path: string): boolean {
-  const segments = path.split('/').filter(Boolean)
-  const sensitiveFileNames = new Set([
-    '.env',
-    '.env.local',
-    '.env.production',
-    '.npmrc',
-    '.yarnrc',
-    '.pypirc',
-    'id_rsa',
-    'id_ed25519',
-    'credentials',
-    'credentials.json',
-    'service-account.json',
-  ])
-  const sensitiveDirectoryNames = new Set([
-    '.aws',
-    '.azure',
-    '.beegame',
-    '.config',
-    '.git',
-    '.gnupg',
-    '.ssh',
-  ])
-  return segments.some(
-    segment =>
-      sensitiveDirectoryNames.has(segment.toLowerCase()) ||
-      sensitiveFileNames.has(segment.toLowerCase()),
-  )
 }
 
 function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
@@ -4057,304 +3549,6 @@ function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
     }
   }
   return ''
-}
-
-function isGlobalProcessControlBashCommand(
-  input: Record<string, unknown>,
-): boolean {
-  const command = typeof input.command === 'string' ? input.command.trim() : ''
-  if (!command) return false
-  return splitShellCommandSegments(command).some(part => {
-    const tokens = splitShellLike(part)
-      .map(cleanShellToken)
-      .filter(token => token && !isHarmlessShellRedirectionToken(token))
-    return isGlobalProcessControlTokens(tokens)
-  })
-}
-
-function isBackgroundProcessBashCommand(
-  input: Record<string, unknown>,
-): boolean {
-  const command = typeof input.command === 'string' ? input.command.trim() : ''
-  if (!command) return false
-  return hasShellBackgroundOperator(command)
-}
-
-function hasShellBackgroundOperator(command: string): boolean {
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  for (let index = 0; index < command.length; index += 1) {
-    const char = command[index]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (char === '\\') {
-      escaped = true
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = null
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (char !== '&') continue
-    if (command[index - 1] === '>') continue
-    if (command[index + 1] === '&') {
-      index += 1
-      continue
-    }
-    return true
-  }
-  return false
-}
-
-function splitShellCommandSegments(command: string): string[] {
-  const segments: string[] = []
-  let current = ''
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  for (let index = 0; index < command.length; index += 1) {
-    const char = command[index]
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
-    if (char === '\\') {
-      escaped = true
-      current += char
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = null
-      current += char
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      current += char
-      continue
-    }
-    if (char === ';' || char === '|' || char === '\n' || char === '\r') {
-      if (current.trim()) segments.push(current.trim())
-      current = ''
-      if (command[index + 1] === char) index += 1
-      continue
-    }
-    if (char === '&' && command[index + 1] === '&') {
-      if (current.trim()) segments.push(current.trim())
-      current = ''
-      index += 1
-      continue
-    }
-    current += char
-  }
-  if (current.trim()) segments.push(current.trim())
-  return segments
-}
-
-function isGlobalProcessControlTokens(tokens: string[]): boolean {
-  const command = tokens[0]?.toLowerCase()
-  if (!command) return false
-  if (command === 'kill' || command === 'pkill' || command === 'killall')
-    return true
-  if (command === 'fuser' && tokens.some(token => token.toLowerCase() === '-k'))
-    return true
-  if (
-    command === 'xargs' &&
-    tokens.slice(1).some(token => {
-      const normalized = token.toLowerCase()
-      return (
-        normalized === 'kill' ||
-        normalized === 'pkill' ||
-        normalized === 'killall'
-      )
-    })
-  ) {
-    return true
-  }
-  return false
-}
-
-function hasUnsafeShellControlSyntax(command: string): boolean {
-  return (
-    command.includes(';') || command.includes('`') || command.includes('$(')
-  )
-}
-
-function splitShellCommandChain(command: string): string[] {
-  return command
-    .split(/&&|\|\||\|/)
-    .map(part => part.trim())
-    .filter(Boolean)
-}
-
-function isHarmlessShellRedirectionToken(token: string): boolean {
-  return (
-    /^([12])?>&1$/.test(token) ||
-    /^([12])?>\/dev\/null$/.test(token) ||
-    /^([12])?<\/dev\/null$/.test(token)
-  )
-}
-
-function isDangerousShellToken(token: string): boolean {
-  const normalized = token.toLowerCase()
-  if (
-    normalized.startsWith('--prefix=') ||
-    normalized.startsWith('--location=global')
-  ) {
-    return true
-  }
-  return [
-    '-g',
-    '--global',
-    'chmod',
-    'chown',
-    'mv',
-    'rm',
-    'sudo',
-    'curl',
-    'wget',
-    'ssh',
-    'scp',
-    'rsync',
-  ].includes(normalized)
-}
-
-function isSensitiveShellPathToken(
-  cwd: string,
-  allowedRoot: string,
-  token: string,
-): boolean {
-  if (!isPathLikeShellToken(token)) return false
-  const resolvedPath = isAbsolute(token) ? resolve(token) : resolve(cwd, token)
-  const rel = relative(resolve(allowedRoot), resolvedPath).split('\\').join('/')
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return true
-  return isSensitiveProjectMutationPath(rel)
-}
-
-function isPathLikeShellToken(token: string): boolean {
-  if (!token || token.startsWith('-')) return false
-  return (
-    token.startsWith('/') ||
-    token.startsWith('./') ||
-    token.startsWith('../') ||
-    token === '.' ||
-    token === '..' ||
-    token.includes('/')
-  )
-}
-
-function isSafeReadOnlyShellCommand(tokens: string[]): boolean {
-  const [command, firstArg] = tokens
-  if (command === 'pwd') return tokens.length === 1
-  if (command === 'sed') return firstArg === '-n'
-  return ['ls', 'cat', 'find', 'grep', 'rg', 'head', 'tail', 'wc'].includes(
-    command,
-  )
-}
-
-function isSafeChangeDirectoryCommand(
-  tokens: string[],
-  cwd: string,
-  allowedRoot: string,
-): boolean {
-  if (tokens[0] !== 'cd' || tokens.length !== 2) return false
-  return isPathInside(cwd, allowedRoot, tokens[1] || '.')
-}
-
-function resolveCommandDirectory(cwd: string, path: string): string {
-  return isAbsolute(path) ? resolve(path) : resolve(cwd, path)
-}
-
-function isSafeProjectFilesystemMutationCommand(
-  tokens: string[],
-  cwd: string,
-  allowedRoot: string,
-): boolean {
-  const [command] = tokens
-  if (command === 'rm') {
-    const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
-    return (
-      pathArgs.length > 0 &&
-      pathArgs.every(path =>
-        isSafeDependencyCleanupPath(cwd, allowedRoot, path),
-      )
-    )
-  }
-  if (command === 'mv') {
-    const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
-    return (
-      pathArgs.length === 2 &&
-      pathArgs.every(path => isSafeProjectMovePath(cwd, allowedRoot, path))
-    )
-  }
-  return false
-}
-
-function isSafeProjectMovePath(
-  cwd: string,
-  allowedRoot: string,
-  path: string,
-): boolean {
-  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
-  const workspaceRoot = resolve(allowedRoot)
-  const rel = relative(workspaceRoot, resolvedPath).split('\\').join('/')
-  return (
-    rel !== '' &&
-    !rel.startsWith('..') &&
-    !isAbsolute(rel) &&
-    !isSensitiveProjectMutationPath(rel)
-  )
-}
-
-function isSafeDependencyCleanupPath(
-  cwd: string,
-  allowedRoot: string,
-  path: string,
-): boolean {
-  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
-  const workspaceRoot = resolve(allowedRoot)
-  const rel = relative(workspaceRoot, resolvedPath).split('\\').join('/')
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return false
-  if (resolvedPath === resolve(cwd)) return false
-  if (path === '.' || path === './' || path === '..') return false
-  if (isSensitiveProjectMutationPath(rel)) return false
-  const projectRel = relative(resolve(cwd), resolvedPath).split('\\').join('/')
-  if (
-    projectRel === '' ||
-    projectRel.startsWith('..') ||
-    isAbsolute(projectRel)
-  ) {
-    return false
-  }
-  const normalized = projectRel.toLowerCase()
-  return [
-    'node_modules',
-    'package-lock.json',
-    'pnpm-lock.yaml',
-    'yarn.lock',
-    'bun.lock',
-    'bun.lockb',
-  ].includes(normalized)
-}
-
-function isSafeProjectFilesystemSetupCommand(
-  tokens: string[],
-  cwd: string,
-  allowedRoot: string,
-): boolean {
-  const [command] = tokens
-  if (!command || !['mkdir', 'touch'].includes(command)) return false
-  const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
-  return (
-    pathArgs.length > 0 &&
-    pathArgs.every(path => isPathInside(cwd, allowedRoot, path))
-  )
 }
 
 function getMutationArtifactPath(input: Record<string, unknown>): string {
@@ -4410,130 +3604,6 @@ function getDashboardPayloadRecord(
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
-}
-
-function isUserQuestionTool(toolName: string): boolean {
-  return toolName === 'AskUserQuestion'
-}
-
-function getWorkspaceViolation(
-  cwd: string,
-  allowedRoot: string,
-  request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>,
-): string {
-  const paths = extractPermissionPaths(request.input)
-  const outsidePath = paths.find(path => !isPathInside(cwd, allowedRoot, path))
-  if (!outsidePath) return ''
-  return `${request.toolName} requested access outside the current project workspace: ${outsidePath}. This session is restricted to ${allowedRoot}.`
-}
-
-function extractPermissionPaths(input: Record<string, unknown>): string[] {
-  const paths: string[] = [input.file_path, input.path, input.notebook_path]
-    .filter((value): value is string => typeof value === 'string')
-    .map(value => value.trim())
-    .filter(Boolean)
-  if (Array.isArray(input.selections)) {
-    paths.push(
-      ...input.selections
-        .filter(isObject)
-        .map(selection => selection.destination_path)
-        .filter((value): value is string => typeof value === 'string')
-        .map(value => value.trim())
-        .filter(Boolean),
-    )
-  }
-  if (typeof input.command === 'string') {
-    paths.push(...extractShellPathReferences(input.command))
-  }
-  return paths
-}
-
-function extractShellPathReferences(command: string): string[] {
-  return splitShellLike(command)
-    .map(cleanShellToken)
-    .filter(Boolean)
-    .filter(token => isPathReference(token))
-}
-
-function splitShellLike(command: string): string[] {
-  const tokens: string[] = []
-  let current = ''
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  for (const char of command) {
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
-    if (char === '\\') {
-      escaped = true
-      continue
-    }
-    if (quote) {
-      if (char === quote) {
-        quote = null
-      } else {
-        current += char
-      }
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (isShellWhitespace(char)) {
-      if (current) {
-        tokens.push(current)
-        current = ''
-      }
-      continue
-    }
-    current += char
-  }
-  if (current) tokens.push(current)
-  return tokens
-}
-
-function cleanShellToken(token: string): string {
-  let start = 0
-  let end = token.length
-  while (start < end && isShellWrapperPrefix(token[start])) start += 1
-  while (end > start && isShellWrapperSuffix(token[end - 1])) end -= 1
-  return token.slice(start, end).trim()
-}
-
-function isShellWhitespace(char: string): boolean {
-  return char === ' ' || char === '\t' || char === '\n' || char === '\r'
-}
-
-function isShellWrapperPrefix(char: string | undefined): boolean {
-  return char === '(' || char === '[' || char === '{'
-}
-
-function isShellWrapperSuffix(char: string | undefined): boolean {
-  return (
-    char === ')' || char === ']' || char === '}' || char === ',' || char === ';'
-  )
-}
-
-function isPathReference(token: string): boolean {
-  if (!token || token.startsWith('-')) return false
-  return (
-    token.startsWith('/') ||
-    token === '..' ||
-    token.startsWith('../') ||
-    token.includes('/../')
-  )
-}
-
-function isPathInside(cwd: string, allowedRoot: string, path: string): boolean {
-  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
-  const relativePath = relative(resolve(allowedRoot), resolvedPath)
-  return (
-    relativePath === '' ||
-    (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
 }
 
 function appendTranscriptEvent(path: string, event: BeeGameEvent): void {
@@ -5258,14 +4328,11 @@ function buildRuntimeEnv(
   runtime: RuntimeModelConfig | undefined,
   additionalEnv: Record<string, string> = {},
 ): Record<string, string> {
-  const beegameConfigDir =
-    process.env.BEEGAME_CONFIG_DIR ?? resolve(homedir(), '.beegame')
-  return {
-    BEEGAME_CONFIG_DIR: beegameConfigDir,
-    BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
-    ...additionalEnv,
-    ...(runtime?.env ?? {}),
-  }
+  return Object.fromEntries(
+    Object.entries({ ...additionalEnv, ...(runtime?.env ?? {}) }).filter(
+      ([key]) => CLAUDE_MODEL_ENV_KEYS.has(key),
+    ),
+  )
 }
 
 function cloneSession(session: BeeGameSession): BeeGameSession {

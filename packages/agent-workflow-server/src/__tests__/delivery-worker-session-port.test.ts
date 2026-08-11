@@ -23,7 +23,6 @@ import {
   buildDocumentReviewReferenceIndex,
   buildDocumentReviewWireReferenceIndex,
 } from '../beegame/delivery-workflow/document-review-input'
-import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   computeResourceInventoryRevision,
@@ -816,7 +815,9 @@ describe('delivery worker session credentials', () => {
       expect(block).toContain('level authority')
       expect(block).toContain('replacement baseline from an earlier run')
       expect(block).toContain('stale target content')
-      expect(block).toContain('CommitCanonicalDocument')
+      expect(block).toContain('Author the complete Markdown document directly')
+      expect(block).toContain('end the turn normally')
+      expect(block).not.toContain('CommitCanonicalDocument')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -940,7 +941,7 @@ describe('delivery worker session credentials', () => {
 
       expect(submittedPrompt).toContain('SubmitAtomicTaskPlan exactly once')
       expect(submittedPrompt).toContain(
-        'workflow service owns its canonical persistence',
+        'workflow service persists the accepted plan as canonical evidence',
       )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -1032,7 +1033,7 @@ describe('delivery worker session credentials', () => {
 
     expect(submittedPrompt).toContain('SubmitImplementationResult exactly once')
     expect(submittedPrompt).toContain(
-      'do not inspect workflow logs, transcripts, or historical evidence',
+      "Claude Code's native tools, thinking, permissions, context management, and normal completion behavior remain unchanged",
     )
     const {
       verificationObservations: _verificationObservations,
@@ -1581,7 +1582,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('derives the document terminal from one durable canonical commit receipt', async () => {
+  test('derives the document terminal from a normal Claude result and assigned file', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-canonical-author-'),
     )
@@ -1591,7 +1592,14 @@ describe('delivery worker session credentials', () => {
       },
       updateAuthToken() {},
       events() {
-        return []
+        return [
+          {
+            id: 'normal-document-result',
+            type: 'result' as const,
+            text: 'Document complete.',
+            createdAt: new Date(),
+          },
+        ]
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
@@ -1612,17 +1620,11 @@ describe('delivery worker session credentials', () => {
           upstreamDocumentPaths: [],
         },
       })
-      await commitCanonicalDocument({
-        workspacePath,
-        contract: {
-          dispatchId: 'dispatch-canonical-author',
-          targetPath: 'docs/GDD.md',
-          documentId: 'GDD',
-          operation: 'create',
-          baselineDigest: null,
-        },
-        body: '# Game Design\n\nCanonical rules.',
-      })
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspacePath, 'docs/GDD.md'),
+        '# Game Design\n\nCanonical rules.\n',
+      )
       await expect(
         port.waitForTerminal?.('dispatch-canonical-author'),
       ).resolves.toEqual({
@@ -1631,6 +1633,50 @@ describe('delivery worker session credentials', () => {
         writtenPaths: ['docs/GDD.md'],
         resolvedFindingIds: [],
       })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('reports a missing assigned document instead of a missing BeeGame tool', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-missing-author-'))
+    const sessions = {
+      start() {
+        return { id: 'session-missing-author' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'normal-result-without-document',
+            type: 'result' as const,
+            text: 'Document complete.',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-missing-author',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          authoringMode: 'initial',
+          foundationDocumentPath: 'docs/GDD.md',
+          upstreamDocumentPaths: [],
+        },
+      })
+      await expect(
+        port.waitForTerminal?.('dispatch-missing-author'),
+      ).rejects.toThrow('document author output is missing: docs/GDD.md')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

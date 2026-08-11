@@ -47,9 +47,10 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     `Allowed paths: ${scope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
+    'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    'Use only the tools supplied for this worker. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    "Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.",
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -58,10 +59,13 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
-  if (request.workerType !== 'document-reviewer')
-    return JSON.stringify(
-      request.contract,
-    )
+  if (request.workerType !== 'document-reviewer') {
+    const {
+      confirmedBriefContext: _confirmedBriefContext,
+      ...contractWithoutDuplicatedBrief
+    } = request.contract
+    return JSON.stringify(contractWithoutDuplicatedBrief)
+  }
   const {
     reviewArtifacts,
     referenceIndex,
@@ -307,16 +311,18 @@ function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
       return [
-        request.contract.authoringMode === 'initial'
-          ? 'Use the service-projected upstream authority and target baseline without reloading files. Submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns document_id, version, updated_at, atomic persistence and the terminal action.'
+        request.contract.documentSet === 'checklist'
+          ? 'Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Claude Code\'s normal workflow.'
+          : request.contract.authoringMode === 'initial'
+          ? `Use the service-projected upstream authority and target baseline. Author the complete assigned Markdown game document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`
           : request.contract.authoringMode === 'repair-planning'
             ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
-            : 'Use the service-projected current target, apply only the locked repair decision, then submit the complete Markdown body without YAML front matter through CommitCanonicalDocument exactly once. The service owns PATCH version, updated_at, atomic persistence and recovery.',
+            : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`,
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
               'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Cover core player paths, critical numeric boundaries, level/scene states, UI/audio feedback, visible resource outcomes and failure/recovery paths from the approved authority.',
-              'Before the only file mutation, group the approved scenarios and count the final checklist. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail. Never write an oversized draft and rely on a second mutation in the same dispatch.',
+              'Group the approved scenarios before authoring. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail.',
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               ...(request.contract.remediation
                 ? [
@@ -336,9 +342,11 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               ].join(' ')
             : [
                 request.contract.authoringMode === 'initial'
-                  ? `This is one authoring task in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Use the projected target baseline and never reload project files. Write only the smallest decision-level authority needed by downstream documents and later implementation: original design inputs, rules, formulas and directly required boundaries. Do not perform reviewer work, prove complete strategy or numeric feasibility, run full wave/build simulations, enumerate tuning alternatives, optimize for a best solution, create exhaustive derived tables, repair other documents, or attempt to finish the eight-document pass in this session. The Initial Reviewer owns feasibility assessment and an accepted repair cycle owns later corrections.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Apply the confirmed change request to the projected controlled baseline when this document owns or consumes an affected fact; preserve unrelated valid content. The service owns metadata revision.' : ''}`
+                  ? `This is one complete human development discipline assignment in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. contract.completeDocumentContract is mandatory: fulfill every section in its declared order with authoritative decisions, production-ready details and acceptance criteria, allowed upstream references, risks and genuinely unresolved decisions. The eight documents together must be sufficient for a human game development team to plan, build, produce content for, test, release and operate the approved game without relying on missing design prose. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Use the projected target baseline and never reload project files. Resolve this discipline's design work now; do not delegate missing decisions, feasibility, production detail or completeness to a later reviewer.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Apply the confirmed change request to the projected controlled baseline when this document owns or consumes an affected fact; preserve unrelated valid content. The service owns metadata revision.' : ''}`
                   : 'This is one accepted foundation-remediation batch. Modify only the assigned canonical foundation documents.',
-                'The workflow service adds canonical YAML front matter after accepting the Markdown body; never include or edit document_id, version or updated_at.',
+                request.contract.authoringMode === 'initial'
+                  ? 'Document metadata is service-owned. Begin with the single # document title; do not write or infer YAML front matter, document ID, version, or timestamps.'
+                  : 'Preserve document_id, increment the existing semantic version PATCH exactly once, and set updated_at to a later valid ISO-8601 timestamp.',
                 'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, formulas, economy, costs, growth, relative value and pressure/capability curves; LEVEL_SCENE_DESIGN owns level sequence, world/scene relationships, spatial topology, scale, routes, regions, spawn/goal points, camera design constraints, scene states and placement rules. Technical owns data consumption, runtime boundaries, loading, state/save, recovery and budgets; Art owns visual language and spatial readability; UI/UX owns information, input, interaction and interface states; Audio owns event-to-cue behavior; Asset Plan owns semantic resource responsibilities, format capabilities, source strategy and replaceable-file requirements.',
                 'Do not duplicate independently changing facts across documents. Events, waves and numeric configuration will be executable JSON after approval; world, scene, hierarchy and instance placement will be executable YAML after approval. Foundation documents define design intent and stable references only, never engine-specific Prefabs/Scenes/components or final JSON/YAML payloads.',
                 'Treat contract.systemDeliveryContract as the fixed BeeGame delivery boundary. Document the project through that one Manifest, those canonical roots, that content schema and those content kinds. Do not define a second Manifest, content root, schema, loader or runtime/source media substitute, even when such alternatives would be internally consistent across all eight documents.',
@@ -347,11 +355,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 'Define exactly one resource loading path. A placeholder, including a programmatic placeholder, is an independent replaceable file under the normal resource root and is loaded through the same manifest and content reference as final media. Never specify a fallback after the placeholder, runtime-created substitute geometry, silent buffers, source-code media, or a second loader branch.',
                 'Describe observable duties and target technical constraints. Do not preselect Pack identities, element IDs, source filenames or downloaded paths that have not been observed from the Resource Library.',
                 request.contract.authoringMode === 'initial'
-                  ? "For the current fact owner, record only the confirmed brief's minimum authoritative design decisions and directly chosen inputs. GDD states choices, tradeoffs and recovery rules; Balance states sources, sinks, base values and formulas; Level/Scene states the required topology and placements. Do not simulate builds or waves, derive a complete outcome table, tune against every scenario, or judge strategy, economy, numeric, pacing or spatial feasibility. The Initial Reviewer owns those comparisons and may create findings for missing or infeasible authority. Keep the design no more complex than the confirmed brief; when a domain truly does not exist, state that fact instead of inventing one."
+                  ? "For the current fact owner, provide the complete authority a working discipline would hand to production. GDD states concrete choices, tradeoffs and recovery rules; Balance states units, sources, sinks, base values, formulas, bounds and tuning evidence; Level/Scene states topology, placements, pacing and production acceptance. Include enough derivation, examples and measurable criteria to make decisions implementable and testable. When a domain truly does not apply, state why and document the downstream consequence instead of inventing a system."
                   : 'Apply only the accepted findings and their required outcomes. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
                 ...(request.contract.authoringMode === 'initial'
                   ? [
-                      "Write a compact decision contract, not a narrative handbook. Include only this owner's stable IDs, chosen decisions, constraints, formulas, necessary bounds and downstream interface references. Do not repeat the confirmed brief, upstream prose, the fact-owner matrix, the generic system contract, rationale essays, examples, test cases, pseudocode, implementation steps or tuning process. Reference upstream IDs instead of restating their facts. Document completeness is judged across all eight owners by the Initial Reviewer, not by inflating one file.",
+                      'Build the assigned Markdown file incrementally in the exact contract section order, using one contract section per native file operation, then verify the complete final file. Do not construct the entire document as one tool-call argument. Include exactly one # document title before the first section marker. Begin each section with its exact <!-- beegame-section:SECTION_ID --> marker and exact ## title. Within every section include the exact headings ### Authoritative Decisions, ### Production Details, ### Upstream Authority, ### Risks, and ### Open Decisions, each with non-empty content. Production details must include observable acceptance criteria. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
+                      'Define each authoritative fact in one section only. Every other section must cite its stable decision, rule, acceptance, or upstream reference ID instead of restating the fact, scope, rationale, delivery boundary, or requirement prose. Upstream Authority must contain concise stable references and the local derivation only; never copy the Confirmed Brief, another document, or the system delivery contract. Open Decisions contains only genuinely unresolved choices that cannot be decided from current authority; when none remain, write exactly `No unresolved section decisions.` Do not place already-decided choices under Open Decisions.',
                       'A downstream owner may specialize only product behavior already authorized by the Confirmed Brief, GDD, or its legitimate projected upstream owner. Do not invent a new player-visible system, settings surface, state machine, economy mechanism, resource duty, or obligation that another owner would have to implement.',
                     ]
                   : []),
@@ -370,6 +379,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Keep the structured result decision-dense. A criterion derivation contains only the cited facts and the minimum formula, comparison or state-transition chain needed to prove its status; its conclusion is one direct decision. Do not summarize whole documents, repeat evidence prose, narrate the review process, restate another criterion, or add analysis after the accepted tool call. Findings contain only the distinct root defect, impact and required authority outcome.',
         'Produce exactly one accepted SubmitDocumentReviewPacket in this bounded dispatch. Submit one checks array in contract.currentCheckIds order, without check IDs. The packet is transactional: a rejected call accepts nothing, so correct and resubmit the same complete packet without prose or user confirmation.',
         'Report every material defect that blocks an implementable and reviewable game contract: contradictions, missing observable requirements, incomplete strategy, dominated choices, absent counterplay or recovery, broken economy/progression, infeasible numeric bounds, inconsistent formulas, discontinuous difficulty, or invalid resource plans. READY requires no findings.',
+        'For cross-document consistency and content structure, reject repeated authority prose within one document as well as duplicated ownership across documents. A stable reference is sufficient after the first authoritative definition; repeated scope, rationale, Brief prose, delivery-boundary prose, acceptance wording, or resolved decisions are defects when they add no new local derivation.',
         'Apply authority direction before completeness expansion: a lower-authority document cannot authorize a new product-visible system or impose a new obligation on another owner. When it does, subject the overreaching declaration and require deletion or narrowing. Require another consumer to expand only when the Confirmed Brief, GDD, or legitimate upstream fact owner already authorizes that behavior.',
         'Submit one top-level checks array and never submit a check ID. For a design check, submit exactly assessments and findings; the service derives check-level status, evidence and conclusion. For a non-design check, additionally submit conclusion and evidence and use an empty assessments array. Each assessment contains exactly criterion, status, evidence, derivation and conclusion, using the exact criterion IDs in contract.criteriaByCheck for that ordered check. Every evidence or subject entry contains exactly referenceId; result, note, copied paths and copied anchors are invalid. The service derives each check ID, check status and check findingIds. For each item, evidence and subjects may reference only artifacts listed for that check in contract.artifactPathsByCheck and must use stable referenceId values from contract.referenceIndex.references. Every finding submits one stable findingId, its own exact evidence and exact subjects plus observation, blockingImpact and one authority-preserving requiredOutcome. A subject is current content that violates authority and must change to reach requiredOutcome; contextual or already-correct authority remains finding evidence only. requiredOutcome states one result, never alternative repairs or editing steps. Do not submit checkId, owner, severity, a cycle verdict or a check outside the packet.',
         'For each subject, submit its referenceId and only any applicable requirementId, resourceId or contentId; never submit subjectOwner. The service derives ownership from contract.referenceIndex and rejects a reference owned by another repair domain. Foundation documents may be evidence for a resource defect but cannot be resource repair subjects. Foundation and checklist findings cannot carry resource IDs.',
@@ -411,26 +421,26 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           )
         : []
       return [
-        `Build only the engine-neutral JSON/YAML documents at these exact writable paths from contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths; object keys are unique, so never use an array or repeat a path. Do not submit any other path; the service preserves every other canonical content document. The only available tools for this worker are Read and CommitResourceContent. Read only contract.authorityPaths and these exact contract.repairPaths supplied by the workflow boundary. Build from the frozen identities in contract.requiredRequirementIds, contract.verifiedResourceIds and contract.inventoryBindings. The CommitResourceContent service reads and preserves protected canonical content; do not read protected paths merely to copy them. Never call Write, Edit, MultiEdit, NotebookEdit, Bash, or any other generic, discovery, file-mutation, or extra-tool operation; those calls are protocol errors and are not intermediate steps. Do not emit DSML/XML/tool-call markup as text. Build the submission in memory and make exactly one native CommitResourceContent call. Do not read assets/asset-manifest.json or assets/manifest/**, browse the Catalog, download, create or register resources, change the plan, or write gameplay code.`,
+        `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Claude Code's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
         'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
         request.contract.remediation
           ? 'This is one accepted resource-content repair batch. Resolve only the supplied content findings and preserve the protected canonical content. Do not attempt to repair Manifest, inventory or Resource Library findings.'
-          : 'Plan only the exact writable paths listed above in memory, then call CommitResourceContent once with that complete writable set. The service serializes JSON/YAML and validates the merged set before replacing any file. Do not use generic file mutation tools. There is no intermediate file-writing step and no second submission syntax.',
+          : 'When the complete writable set is ready, call CommitResourceContent once. The service serializes JSON/YAML and validates the merged set before replacing any file.',
         'The service preserves every canonical document outside the exact writable path list during the atomic commit; never read, resubmit or rewrite those documents.',
         'If verified inventory is genuinely missing, call CommitResourceContent needs_inventory with the exact missing requirement IDs. Do not invent a path, identity or embedded substitute.',
       ].join(' ')
     }
     case 'atomic-task-planner':
       return [
-        'Use contract.planningDocuments plus resourceIds and contentIds as the complete authority. Do not read the workspace, edit files or search resources.',
+        'Use contract.planningDocuments plus resourceIds and contentIds as the acceptance authority. Claude Code may inspect the current workspace and use its native tools as needed to produce a correct plan.',
         'Submit one dependency graph through SubmitAtomicTaskPlan. Each task owns durable implementation artifacts and project-owned verification actions. Checklist items have one owner; resource and content IDs are read-only dependencies.',
         'Resources and content are ready before implementation. Tasks consume declared files; they do not download, generate substitute media or mutate assets/asset-manifest.json.',
         'Do not create trailing cleanup, final verification or acceptance tasks. The workflow owns those phases.',
       ].join(' ')
     case 'implementation-worker':
       return [
-        'Implement the active atomic task completely within allowedPaths. Use only current source, direct dependencies, verified resources and declared JSON/YAML content.',
-        'Do not read canonical design documents, workflow logs or transcripts. Do not search or download resources, generate substitute media or edit assets/asset-manifest.json.',
+        'Implement the active atomic task completely within allowedPaths. Treat current source, direct dependencies, verified resources, declared JSON/YAML content, and canonical design documents as available context.',
+        'Claude Code may inspect the project and use its native tools as needed. Keep changes within the active task deliverables; resource acquisition and manifest changes remain separate workflow deliverables.',
         'Execute every deterministic test, build, file and asset verification with project-owned tooling. Runtime checks are deferred to acceptance.',
       ].join(' ')
     case 'implementation-auditor':
@@ -446,7 +456,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return request.contract.authoringMode === 'repair-planning'
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
-        : 'Submit the assigned complete Markdown body through CommitCanonicalDocument exactly once. Do not include YAML front matter, call generic file tools, return terminal JSON, or add completion prose.'
+        : request.contract.authoringMode === 'initial'
+          ? `Write the assigned complete Markdown game document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
+          : `Write the assigned complete Markdown document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
     case 'document-reviewer':
       return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'
     case 'resource-planner':
@@ -467,4 +479,10 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'question-answerer':
       return 'Call SubmitQuestionAnswerResult exactly once with only the answer.'
   }
+}
+
+function documentAuthorTargetPath(request: WorkerDispatchRequest): string {
+  return request.contract.documentSet === 'checklist'
+    ? 'docs/acceptance/gameplay-checklist.md'
+    : String(request.contract.foundationDocumentPath)
 }
