@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
+import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
@@ -1537,6 +1538,10 @@ async function completeInitialFoundationDocumentDraft(input: {
       previous:
         input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
     }),
+    ...completeFoundationDocumentIssues(
+      input.workspacePath,
+      expectedPath,
+    ),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['initial document author cannot resolve review findings']
       : []),
@@ -1593,6 +1598,32 @@ async function completeInitialFoundationDocumentDraft(input: {
     documentStep: 'FOUNDATION_REVIEW',
     currentItemId: undefined,
     blockedReason: undefined,
+  }
+}
+
+function completeFoundationDocumentIssues(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+): string[] {
+  try {
+    const content = readFileSync(join(workspacePath, path), 'utf8')
+    const lines = content.split('\n')
+    if (lines[0]?.trim() !== '---')
+      return [`${path}: canonical front matter is missing`]
+    const closingIndex = lines.findIndex(
+      (line, index) => index > 0 && line.trim() === '---',
+    )
+    if (closingIndex < 0)
+      return [`${path}: canonical front matter is incomplete`]
+    validateCompleteGameDocumentMarkdown(
+      path,
+      lines.slice(closingIndex + 1).join('\n').trimStart(),
+    )
+    return []
+  } catch (error) {
+    return [
+      `${path}: ${error instanceof Error ? error.message : 'complete document validation failed'}`,
+    ]
   }
 }
 

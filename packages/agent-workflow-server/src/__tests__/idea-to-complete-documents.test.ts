@@ -155,4 +155,80 @@ describe('idea to complete game documents', () => {
         )
     }
   })
+
+  test('does not advance past an invalid complete foundation document', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'invalid-idea-document-'))
+    workspaces.push(workspacePath)
+    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const contract = getGameDocumentContract(path)
+    const submission = {
+      title: contract.discipline,
+      sections: contract.sections.map(section => ({
+        sectionId: section.sectionId,
+        title: section.title,
+        body: `Complete authority for ${section.sectionId}.`,
+        decisions: [
+          {
+            decisionId: `${section.sectionId}.decision`,
+            statement: `Production decision for ${section.sectionId}.`,
+            rationale: `Decision rationale for ${section.sectionId}.`,
+          },
+        ],
+        productionDetails: [
+          {
+            detailId: `${section.sectionId}.detail`,
+            statement: `Production detail for ${section.sectionId}.`,
+            owner: contract.discipline,
+            acceptanceCriteria: [
+              `Observable acceptance for ${section.sectionId}.`,
+            ],
+          },
+        ],
+        upstreamReferences: [],
+        risks: [],
+        openDecisions: [],
+      })),
+    }
+    const renderedLines = renderCompleteGameDocument(path, submission).split('\n')
+    renderedLines.shift()
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await writeFile(
+      join(workspacePath, path),
+      [
+        '---',
+        `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
+        'version: 1.0.0',
+        'updated_at: 2026-08-11T00:00:00.000Z',
+        '---',
+        '',
+        ...renderedLines,
+      ].join('\n'),
+    )
+
+    const run = await completeDocumentDraft({
+      run: {
+        ...createTestDeliveryRun({
+          projectId: 'project-invalid-document',
+          ownerId: 'owner-invalid-document',
+          confirmedBriefContext: '{"kind":"confirmed_build_brief"}',
+          foundationDraftComplete: false,
+        }),
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+      },
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [path],
+        resolvedFindingIds: [],
+      },
+      documentSet: 'foundation',
+    })
+
+    expect(run.blockedReason).toContain(
+      'complete game document requires one document title',
+    )
+    expect(run.foundationDraftState.completedPaths).toEqual([])
+  })
 })

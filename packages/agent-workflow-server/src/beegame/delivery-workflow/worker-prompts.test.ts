@@ -38,6 +38,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('authoritative idea')
     expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
     expect(prompt).toContain('one contract section per native file operation')
+    expect(prompt).toContain('exactly one # document title')
     expect(prompt).not.toContain('Return one Markdown body')
   })
 
