@@ -48,6 +48,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     `Allowed paths: ${scope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
+    'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
     "Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.",
