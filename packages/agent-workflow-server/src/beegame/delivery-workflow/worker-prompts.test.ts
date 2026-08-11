@@ -47,6 +47,21 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('three to eight contiguous ordered content writes')
     expect(prompt).toContain('one final lightweight structural verification')
     expect(prompt).toContain('do not reread the complete file after each chunk')
+    expect(prompt).toContain(
+      'Read all authorized upstream sections in one batched tool round',
+    )
+    expect(prompt).toContain(
+      'repair only the missing or invalid parts; do not rewrite a complete current-authority document',
+    )
+    expect(prompt).toContain(
+      'do not repeat equivalent verification commands after a successful check',
+    )
+    expect(prompt).toContain(
+      'Prefer production-dense tables and matrices over repeated narrative',
+    )
+    expect(prompt).toContain(
+      'Do not restate the confirmed brief, upstream text or another section',
+    )
     expect(prompt).toContain('exactly one # document title')
     expect(prompt).toContain('beegame-executive-summary')
     expect(prompt).toContain('beegame-production-materials')

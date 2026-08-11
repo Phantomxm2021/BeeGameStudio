@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  createWorkflowDispatchStopBridge,
   createAgentWorkflowApp,
   stopWorkflowDispatchById,
 } from '../app'
@@ -12,6 +13,29 @@ import {
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 describe('project stop route', () => {
+  test('routes project stop through the live session-manager dispatch', async () => {
+    const disposed: string[] = []
+    const fallbackStops: string[] = []
+    const bridge = createWorkflowDispatchStopBridge({
+      isManagedDispatchOpen: dispatchId => dispatchId === 'dispatch-live',
+      disposeManagedDispatch: async dispatchId => {
+        disposed.push(dispatchId)
+        return 1
+      },
+      fallbackIsOpen: async () => false,
+      fallbackStop: async dispatchId => {
+        fallbackStops.push(dispatchId)
+      },
+    })
+
+    expect(
+      await bridge.sessionIsOpen({ dispatchId: 'dispatch-live' }),
+    ).toBe(true)
+    await bridge.stopDispatch('dispatch-live', 'user stopped workflow')
+    expect(disposed).toEqual(['dispatch-live'])
+    expect(fallbackStops).toEqual([])
+  })
+
   test('waits for the exact session-manager dispatch before returning', async () => {
     let releaseDisposal!: () => void
     const disposalGate = new Promise<void>(resolve => {

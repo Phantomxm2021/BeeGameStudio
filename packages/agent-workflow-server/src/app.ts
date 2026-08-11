@@ -422,6 +422,31 @@ export async function stopWorkflowDispatchById(input: {
     await input.fallbackStop(input.dispatchId, input.reason)
 }
 
+export function createWorkflowDispatchStopBridge(input: {
+  isManagedDispatchOpen: (dispatchId: string) => boolean
+  disposeManagedDispatch: (dispatchId: string) => Promise<number>
+  fallbackIsOpen: (dispatchId: string) => Promise<boolean>
+  fallbackStop: (dispatchId: string, reason: string) => Promise<unknown>
+}) {
+  return {
+    sessionIsOpen: async (dispatch: { dispatchId: string }) => {
+      if (input.isManagedDispatchOpen(dispatch.dispatchId)) return true
+      try {
+        return await input.fallbackIsOpen(dispatch.dispatchId)
+      } catch {
+        return false
+      }
+    },
+    stopDispatch: (dispatchId: string, reason: string) =>
+      stopWorkflowDispatchById({
+        dispatchId,
+        reason,
+        disposeWorkflowDispatch: input.disposeManagedDispatch,
+        fallbackStop: input.fallbackStop,
+      }),
+  }
+}
+
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
@@ -2516,21 +2541,21 @@ export function createAgentWorkflowApp(
           projectId: workflowRun.projectId,
           workspacePath: workflowWorkspacePath,
         })
+        const stopBridge = createWorkflowDispatchStopBridge({
+          isManagedDispatchOpen: dispatchId =>
+            beeGameSessions.isWorkflowWorkerOpen(dispatchId),
+          disposeManagedDispatch: dispatchId =>
+            beeGameSessions.disposeWorkflowDispatch(dispatchId),
+          fallbackIsOpen: dispatchId =>
+            controller.dispatcher.workerIsOpen(dispatchId),
+          fallbackStop: (dispatchId, reason) =>
+            controller.dispatcher.stop(dispatchId, reason),
+        })
         await stopRun({
           store: workflowStore,
           runId: workflowRun.runId,
           reason: 'user stopped workflow',
-          sessionIsOpen: async dispatch => {
-            try {
-              return await controller.dispatcher.workerIsOpen(
-                dispatch.dispatchId,
-              )
-            } catch {
-              return false
-            }
-          },
-          stopDispatch: (dispatchId, stopReason) =>
-            controller.dispatcher.stop(dispatchId, stopReason),
+          ...stopBridge,
         })
       }
       const sessionRef = await resolveBeeGameProjectSessionReference({
@@ -2774,31 +2799,22 @@ export function createAgentWorkflowApp(
         projectId: run.projectId,
         workspacePath: project.root_path,
       })
+      const stopBridge = createWorkflowDispatchStopBridge({
+        isManagedDispatchOpen: dispatchId =>
+          beeGameSessions.isWorkflowWorkerOpen(dispatchId),
+        disposeManagedDispatch: dispatchId =>
+          beeGameSessions.disposeWorkflowDispatch(dispatchId),
+        fallbackIsOpen: dispatchId =>
+          controller.dispatcher.workerIsOpen(dispatchId),
+        fallbackStop: (dispatchId, stopReason) =>
+          controller.dispatcher.stop(dispatchId, stopReason),
+      })
       return c.json(
         await stopRun({
           store: createRunStore(project.root_path, user.id),
           runId: run.runId,
           reason,
-          sessionIsOpen: async dispatch => {
-            if (beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId))
-              return true
-            try {
-              return await controller.dispatcher.workerIsOpen(
-                dispatch.dispatchId,
-              )
-            } catch {
-              return false
-            }
-          },
-          stopDispatch: (dispatchId, stopReason) =>
-            stopWorkflowDispatchById({
-              dispatchId,
-              reason: stopReason,
-              disposeWorkflowDispatch: activeDispatchId =>
-                beeGameSessions.disposeWorkflowDispatch(activeDispatchId),
-              fallbackStop: (activeDispatchId, fallbackReason) =>
-                controller.dispatcher.stop(activeDispatchId, fallbackReason),
-            }),
+          ...stopBridge,
         }),
       )
     } catch (err) {
