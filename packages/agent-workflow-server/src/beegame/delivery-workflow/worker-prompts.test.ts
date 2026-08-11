@@ -34,11 +34,20 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('smallest decision-level authority')
     expect(prompt).not.toContain('compact decision contract')
     expect(prompt).not.toContain('Initial Reviewer owns')
-    expect(prompt).not.toContain('complete Markdown body')
+    expect(prompt).toContain('one complete native write')
     expect(prompt).not.toContain('authoritative idea')
     expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
-    expect(prompt).toContain('one contract section per native file operation')
+    expect(prompt).not.toContain('one contract section per native file operation')
     expect(prompt).toContain('exactly one # document title')
+    expect(prompt).toContain('beegame-executive-summary')
+    expect(prompt).toContain('beegame-production-materials')
+    expect(prompt).toContain('beegame-audit-appendix')
+    for (const material of completeDocumentContract.productionMaterials)
+      expect(prompt).toContain(material.materialId)
+    expect(prompt).not.toContain('### Authoritative Decisions')
+    expect(prompt).not.toContain('### Production Details')
+    expect(prompt).not.toContain('No unresolved section decisions.')
+    expect(prompt).not.toContain('never reload project files')
     expect(prompt).toContain(
       'Confirmed Brief settings are higher authority than free-form idea text',
     )
@@ -109,15 +118,19 @@ describe('resource-content worker prompts', () => {
       contract: {
         documentSet: 'foundation',
         authoringMode: 'initial',
-        foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        foundationDocumentPath: 'docs/TECHNICAL_DESIGN.md',
+        upstreamDocumentPaths: [
+          'docs/GDD.md',
+          'docs/LEVEL_SCENE_DESIGN.md',
+          'docs/BALANCE_DESIGN.md',
+        ],
+        completeDocumentContract: getGameDocumentContract(
+          'docs/TECHNICAL_DESIGN.md',
+        ),
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(authorPrompt).toContain('exactly one resource loading path')
-    expect(authorPrompt).toContain(
-      'Never specify a fallback after the placeholder',
-    )
+    expect(authorPrompt).toContain('one resource loading path')
     expect(authorPrompt).toContain('contract.systemDeliveryContract')
     expect(authorPrompt).toContain('assets/asset-manifest.json')
     expect(authorPrompt).toContain('beegame-content-v1')
@@ -392,15 +405,13 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
-    expect(prompt).toContain('Events, waves and numeric configuration')
-    expect(prompt).toContain('world, scene, hierarchy and instance placement')
     expect(prompt).toContain('Author exactly docs/GDD.md')
     expect(prompt).toContain('end the turn normally')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
-    expect(prompt).toContain('Production details must include observable acceptance criteria')
-    expect(prompt).toContain('Define each authoritative fact in one section only')
-    expect(prompt).toContain('No unresolved section decisions')
+    expect(prompt).toContain('one non-empty ### Acceptance Criteria list')
+    expect(prompt).toContain('Define each authoritative fact once')
+    expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',
     )
@@ -477,7 +488,7 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
-    expect(ownerPrompt).toContain('locked decisions')
+    expect(ownerPrompt).toContain('locked repair decision')
     expect(ownerPrompt).toContain('write the complete revised Markdown document directly')
     expect(ownerPrompt).toContain('end the turn normally')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')

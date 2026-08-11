@@ -340,37 +340,38 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 'Authority direction is irreversible: when a lower-authority document invented an unapproved product-visible system or obligation, remove or narrow that declaration; do not expand other consumers to support it unless Confirmed Brief, GDD, or the legitimate upstream owner explicitly requires it.',
                 'Submit the complete ordered plan through SubmitDocumentRepairPlan exactly once.',
               ].join(' ')
-            : [
-                request.contract.authoringMode === 'initial'
-                  ? `This is one complete human development discipline assignment in the durable foundation pass. Author exactly ${String(request.contract.foundationDocumentPath)} and no other document. contract.completeDocumentContract is mandatory: fulfill every section in its declared order with authoritative decisions, production-ready details and acceptance criteria, allowed upstream references, risks and genuinely unresolved decisions. The eight documents together must be sufficient for a human game development team to plan, build, produce content for, test, release and operate the approved game without relying on missing design prose. The workflow service has already projected the complete required canonical upstream authority from these checkpoints: ${Array.isArray(request.contract.upstreamDocumentPaths) && request.contract.upstreamDocumentPaths.length ? request.contract.upstreamDocumentPaths.join(', ') : 'none'}. Use the projected target baseline and never reload project files. Resolve this discipline's design work now; do not delegate missing decisions, feasibility, production detail or completeness to a later reviewer.${typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim() ? ' Apply the confirmed change request to the projected controlled baseline when this document owns or consumes an affected fact; preserve unrelated valid content. The service owns metadata revision.' : ''}`
-                  : 'This is one accepted foundation-remediation batch. Modify only the assigned canonical foundation documents.',
-                request.contract.authoringMode === 'initial'
-                  ? 'Document metadata is service-owned. Begin with the single # document title; do not write or infer YAML front matter, document ID, version, or timestamps.'
-                  : 'Preserve document_id, increment the existing semantic version PATCH exactly once, and set updated_at to a later valid ISO-8601 timestamp.',
-                'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, formulas, economy, costs, growth, relative value and pressure/capability curves; LEVEL_SCENE_DESIGN owns level sequence, world/scene relationships, spatial topology, scale, routes, regions, spawn/goal points, camera design constraints, scene states and placement rules. Technical owns data consumption, runtime boundaries, loading, state/save, recovery and budgets; Art owns visual language and spatial readability; UI/UX owns information, input, interaction and interface states; Audio owns event-to-cue behavior; Asset Plan owns semantic resource responsibilities, format capabilities, source strategy and replaceable-file requirements.',
-                'Do not duplicate independently changing facts across documents. Events, waves and numeric configuration will be executable JSON after approval; world, scene, hierarchy and instance placement will be executable YAML after approval. Foundation documents define design intent and stable references only, never engine-specific Prefabs/Scenes/components or final JSON/YAML payloads.',
-                'Treat contract.systemDeliveryContract as the fixed BeeGame delivery boundary. Document the project through that one Manifest, those canonical roots, that content schema and those content kinds. Do not define a second Manifest, content root, schema, loader or runtime/source media substitute, even when such alternatives would be internally consistent across all eight documents.',
-                'Define the smallest reusable semantic resource responsibility registry in docs/ASSET_PLAN.md and map runtime uses to those IDs separately. Do not create one resource requirement per destination, event, variant, screen or call site.',
-                'Resource records and semantic requirements are many-to-many. One independent atlas, bank, model root or other logical asset file may contain reusable subresources and support several requirements; one requirement may use several resources. Never define independence or replacement as one physical file per requirement.',
-                'Define exactly one resource loading path. A placeholder, including a programmatic placeholder, is an independent replaceable file under the normal resource root and is loaded through the same manifest and content reference as final media. Never specify a fallback after the placeholder, runtime-created substitute geometry, silent buffers, source-code media, or a second loader branch.',
-                'Describe observable duties and target technical constraints. Do not preselect Pack identities, element IDs, source filenames or downloaded paths that have not been observed from the Resource Library.',
-                request.contract.authoringMode === 'initial'
-                  ? "For the current fact owner, provide the complete authority a working discipline would hand to production. GDD states concrete choices, tradeoffs and recovery rules; Balance states units, sources, sinks, base values, formulas, bounds and tuning evidence; Level/Scene states topology, placements, pacing and production acceptance. Include enough derivation, examples and measurable criteria to make decisions implementable and testable. When a domain truly does not apply, state why and document the downstream consequence instead of inventing a system."
-                  : 'Apply only the accepted findings and their required outcomes. Preserve unrelated approved design authority and do not reopen complete strategy, economy, numeric, pacing or spatial analysis; Closure Reviewer owns the result judgment.',
-                ...(request.contract.authoringMode === 'initial'
-                  ? [
-                      'Build the assigned Markdown file incrementally in the exact contract section order, using one contract section per native file operation, then verify the complete final file. Do not construct the entire document as one tool-call argument. Include exactly one # document title before the first section marker. Begin each section with its exact <!-- beegame-section:SECTION_ID --> marker and exact ## title. Within every section include the exact headings ### Authoritative Decisions, ### Production Details, ### Upstream Authority, ### Risks, and ### Open Decisions, each with non-empty content. Production details must include observable acceptance criteria. Keep facts with their legitimate owner and reference upstream authority instead of copying it, while preserving the rationale and operational detail needed by implementers, artists, designers, producers and QA.',
-                      'Define each authoritative fact in one section only. Every other section must cite its stable decision, rule, acceptance, or upstream reference ID instead of restating the fact, scope, rationale, delivery boundary, or requirement prose. Upstream Authority must contain concise stable references and the local derivation only; never copy the Confirmed Brief, another document, or the system delivery contract. Open Decisions contains only genuinely unresolved choices that cannot be decided from current authority; when none remain, write exactly `No unresolved section decisions.` Do not place already-decided choices under Open Decisions.',
-                      'A downstream owner may specialize only product behavior already authorized by the Confirmed Brief, GDD, or its legitimate projected upstream owner. Do not invent a new player-visible system, settings surface, state machine, economy mechanism, resource duty, or obligation that another owner would have to implement.',
-                    ]
-                  : []),
-                ...(request.contract.repairTask
-                  ? [
-                      `Repair exactly ${String(request.contract.foundationDocumentPath)} from contract.repairTask. Treat its groups as locked decisions: do not choose another solution, alter another document, reopen findings, or perform Closure Review. Preserve unrelated content; the service owns metadata and the durable commit.`,
-                    ]
-                  : []),
-                'Do not create the checklist, asset manifest, resources or implementation.',
-              ].join(' '),
+            : request.contract.authoringMode === 'initial'
+              ? [
+                  `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file. The eight documents together must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline's design work now; do not delegate completeness to a reviewer.`,
+                  'Document metadata is service-owned. Begin with exactly one # document title and do not write YAML front matter.',
+                  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
+                  'Write the four document-level layers in order: <!-- beegame-executive-summary -->, every exact contract section marker and title, <!-- beegame-production-materials --> with every contract.productionMaterials marker and required mechanical format, then <!-- beegame-audit-appendix --> with one non-empty ### Acceptance Criteria list. Define each authoritative fact once and reference projected upstream authority instead of copying it.',
+                  'Use one complete native write for the assigned file, then read or validate that final file once and end the turn normally. Keep Claude Code thinking, tools, context management and normal completion behavior unchanged.',
+                  'Provide enough concrete choices, tradeoffs, examples, units, boundaries and observable criteria for the assigned discipline to be implementable and testable. A downstream owner may specialize only behavior already authorized by the Confirmed Brief, GDD or its projected upstream owner.',
+                  ...(request.contract.foundationDocumentPath === 'docs/ASSET_PLAN.md'
+                    ? [
+                        'Define a reusable many-to-many semantic resource responsibility registry, source and license evidence, dependency and milestone ownership. Do not create one physical file per destination or invent Resource Library identities that were not observed.',
+                      ]
+                    : []),
+                  ...(request.contract.foundationDocumentPath === 'docs/TECHNICAL_DESIGN.md'
+                    ? [
+                        'Apply contract.systemDeliveryContract as the fixed delivery boundary and define one Manifest, one content root, one schema and one resource loading path without binding an unapproved engine or platform.',
+                      ]
+                    : []),
+                  ...(typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim()
+                    ? ['Apply the confirmed change request to the controlled baseline and preserve unrelated valid content.']
+                    : []),
+                  'Do not create the checklist, asset manifest, resources or implementation.',
+                ].join(' ')
+              : [
+                  'This is one accepted foundation-remediation batch. Modify only the assigned canonical foundation document.',
+                  'Apply only the locked repair decision, preserve unrelated approved authority, and do not reopen review.',
+                  ...(request.contract.repairTask
+                    ? [
+                        `Repair exactly ${String(request.contract.foundationDocumentPath)} from contract.repairTask.`,
+                      ]
+                    : []),
+                ].join(' '),
       ].join(' ')
     case 'document-reviewer':
       return [
