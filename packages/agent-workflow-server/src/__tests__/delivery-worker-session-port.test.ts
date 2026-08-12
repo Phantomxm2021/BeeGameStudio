@@ -787,16 +787,9 @@ describe('delivery worker session credentials', () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'initial-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(join(workspacePath, 'docs/GDD.md'), 'gdd authority')
-      await writeFile(
-        join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
-        'level authority',
-      )
-      await writeFile(
-        join(workspacePath, 'docs/BALANCE_DESIGN.md'),
-        'stale target content',
-      )
+      await writeFile(join(workspacePath, 'docs/GDD.md'), 'stale target content')
       const block = await buildDocumentAuthorAuthorityBlock({
+        dispatchId: 'dispatch-gdd-baseline',
         runId: 'run-1',
         ownerId: 'user-1',
         projectId: 'project-1',
@@ -804,20 +797,17 @@ describe('delivery worker session credentials', () => {
         workerType: 'document-author',
         phase: 'DOCUMENT_DRAFTING',
         revision: 'revision-1',
-        allowedPaths: ['docs/BALANCE_DESIGN.md'],
+        allowedPaths: ['docs/GDD.md'],
         contract: {
           authoringMode: 'initial',
-          foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-          upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+          foundationDocumentPath: 'docs/GDD.md',
+          upstreamDocumentPaths: [],
         },
       })
-      expect(block).toContain('gdd authority')
-      expect(block).toContain('level authority')
       expect(block).toContain('replacement baseline from an earlier run')
-      expect(block).toContain('stale target content')
-      expect(block).toContain('Author the complete Markdown document directly')
-      expect(block).toContain('end the turn normally')
-      expect(block).not.toContain('CommitCanonicalDocument')
+      expect(block).not.toContain('stale target content')
+      expect(block).toContain('CommitCanonicalDocument')
+      expect(block).toContain('do not write or edit the assigned path directly')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

@@ -118,6 +118,8 @@ describe('delivery worker complete document commit contract', () => {
           expect(block).toContain(`sectionId=${sectionId}`)
         }
       expect(block).toContain('Read the compact authority projection')
+      expect(block).toContain('CommitCanonicalDocument')
+      expect(block).toContain('do not write or edit the assigned path directly')
       expect(block).toContain(
         'Read only the listed source sections from disk when deeper rationale',
       )
