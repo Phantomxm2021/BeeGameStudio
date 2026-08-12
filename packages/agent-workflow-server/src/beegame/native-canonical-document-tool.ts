@@ -9,6 +9,7 @@ import {
   authoritySidecarPath,
   canonicalFoundationAuthoritySidecarBytes,
   createFoundationAuthoritySidecar,
+  foundationAuthoritySubmissionSchema,
   validateFoundationAuthoritySidecar,
 } from './foundation-authority-sidecar'
 import {
@@ -23,18 +24,14 @@ const commitInputSchema = z
   })
   .strict()
 
-const authoritySubmissionSchema = z
-  .object({ records: z.array(z.unknown()).min(1) })
-  .strict()
-
 const completeDocumentCommitInputSchema = z.union([
   z
     .object({
       body: z.string().trim().min(1),
-      authority: authoritySubmissionSchema,
+      authority: foundationAuthoritySubmissionSchema,
     })
     .strict(),
-  z.object({ authority: authoritySubmissionSchema }).strict(),
+  z.object({ authority: foundationAuthoritySubmissionSchema }).strict(),
 ])
 
 const legacyReceiptSchema = z
@@ -150,7 +147,7 @@ export function createNativeCanonicalDocumentTool(options: {
     },
     async prompt() {
       return completeGameDocument
-        ? 'Call with {body, authority:{records}}. Body contains the complete Markdown document; records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision. If the service reports document_prepared with invalid authority, retry with {authority:{records}} only and do not resend or rewrite Markdown.'
+        ? 'Call with {body, authority:{records}}. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. If the service reports document_prepared with invalid authority, retry with {authority:{records}} only and do not resend or rewrite Markdown.'
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {

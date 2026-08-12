@@ -58,7 +58,7 @@ const authorityRecordSchema = z
   })
   .strict()
 
-const authoritySubmissionSchema = z
+export const foundationAuthoritySubmissionSchema = z
   .object({ records: z.array(authorityRecordSchema).min(1) })
   .strict()
 
@@ -212,7 +212,7 @@ export function createFoundationAuthoritySidecar(input: {
   markdown: string
   submission: unknown
 }): FoundationAuthoritySidecar {
-  const submission = authoritySubmissionSchema.parse(input.submission)
+  const submission = foundationAuthoritySubmissionSchema.parse(input.submission)
   return validateFoundationAuthoritySidecar({
     documentPath: input.documentPath,
     markdown: input.markdown,

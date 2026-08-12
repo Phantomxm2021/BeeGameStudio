@@ -74,6 +74,38 @@ function authoritySubmission(
 }
 
 describe('canonical document commit', () => {
+  test('exposes the strict authority record contract to the document author', async () => {
+    let tool: Record<string, unknown> | undefined
+    createNativeCanonicalDocumentTool({
+      buildTool: definition => {
+        tool = definition
+        return definition
+      },
+      workspacePath: '/tmp/authority-schema-contract',
+      contract: {
+        dispatchId: 'dispatch-authority-schema',
+        targetPath: 'docs/GDD.md',
+        documentId: 'GDD',
+        operation: 'create',
+        baselineDigest: null,
+        submissionKind: 'complete_game_document',
+      },
+    })
+
+    const inputSchema = tool?.inputSchema as {
+      safeParse(input: unknown): { success: boolean }
+    }
+    expect(
+      inputSchema.safeParse({
+        body: '# GDD',
+        authority: { records: [{ authorityId: 'gdd.invalid' }] },
+      }).success,
+    ).toBe(false)
+    expect(await (tool?.prompt as () => Promise<string>)()).toContain(
+      'authorityId',
+    )
+  })
+
   test('produces the complete canonical document set from neutral product authority', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
     try {
