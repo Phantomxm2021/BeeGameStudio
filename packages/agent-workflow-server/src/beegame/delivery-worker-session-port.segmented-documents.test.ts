@@ -15,13 +15,18 @@ function materialBody(format: string): string {
   return '| Field | Value |\n| --- | --- |\n| Owner | Production |'
 }
 
-async function advanceDraft(workspacePath: string, turnIndex: number) {
+async function advanceDraft(
+  workspacePath: string,
+  groupIndex: number,
+  partIndex: number,
+) {
   const path = 'docs/GDD.md'
   const contract = getGameDocumentContract(path)
   const groups = foundationDocumentDraftGroups(path)
-  const group = groups[turnIndex]!
+  const group = groups[groupIndex]!
   const target = join(workspacePath, path)
-  if (turnIndex === 0) {
+  if (groupIndex === 0 && partIndex === 0) {
+    const section = group.sections[0]!
     await writeFile(
       target,
       [
@@ -31,42 +36,53 @@ async function advanceDraft(workspacePath: string, turnIndex: number) {
         '## Executive Summary',
         'Production-ready game authority for implementation and acceptance.',
         '',
-        ...group.sections.flatMap(section => [
-          `<!-- beegame-section:${section.sectionId} -->`,
-          `## ${section.title}`,
-          `Production authority for ${section.sectionId}.`,
-          '',
-        ]),
-        '<!-- beegame-draft-cursor:1 -->',
+        `<!-- beegame-section:${section.sectionId} -->`,
+        `## ${section.title}`,
+        `<!-- beegame-part:${section.sectionId}:1 -->`,
+        `Production authority for ${section.sectionId}, chunk one.`,
+        '',
+        '<!-- beegame-draft-cursor:0:1 -->',
         '',
       ].join('\n'),
     )
     return
   }
   const current = await readFile(target, 'utf8')
-  const cursor = `<!-- beegame-draft-cursor:${turnIndex} -->`
-  const replacement =
-    turnIndex === groups.length - 1
-      ? [
-          '<!-- beegame-production-materials -->',
-          '## Production Materials',
-          '',
-          ...contract.productionMaterials.flatMap(material => [
-            `<!-- beegame-material:${material.materialId} -->`,
-            `### ${material.title}`,
-            materialBody(material.format),
-            '',
-          ]),
-        ].join('\n')
-      : [
-          ...group.sections.flatMap(section => [
+  const cursor = `<!-- beegame-draft-cursor:${groupIndex}:${partIndex} -->`
+  let replacement: string
+  if (groupIndex === groups.length - 1) {
+    const material = contract.productionMaterials[partIndex]!
+    replacement = [
+      ...(partIndex === 0
+        ? ['<!-- beegame-production-materials -->', '## Production Materials', '']
+        : []),
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      materialBody(material.format),
+      '',
+      ...(partIndex + 1 < contract.productionMaterials.length
+        ? [`<!-- beegame-draft-cursor:${groupIndex}:${partIndex + 1} -->`]
+        : []),
+    ].join('\n')
+  } else {
+    const section = group.sections[0]!
+    replacement =
+      partIndex === 0
+        ? [
             `<!-- beegame-section:${section.sectionId} -->`,
             `## ${section.title}`,
-            `Production authority for ${section.sectionId}.`,
+            `<!-- beegame-part:${section.sectionId}:1 -->`,
+            `Production authority for ${section.sectionId}, chunk one.`,
             '',
-          ]),
-          `<!-- beegame-draft-cursor:${turnIndex + 1} -->`,
-        ].join('\n')
+            `<!-- beegame-draft-cursor:${groupIndex}:1 -->`,
+          ].join('\n')
+        : [
+            `<!-- beegame-part:${section.sectionId}:2 -->`,
+            `Production authority for ${section.sectionId}, chunk two.`,
+            '',
+            `<!-- beegame-draft-cursor:${groupIndex + 1}:0 -->`,
+          ].join('\n')
+  }
   await writeFile(target, current.replace(cursor, replacement))
 }
 
@@ -95,7 +111,12 @@ describe('segmented initial document authoring', () => {
         sendWithDisplay: async (_sessionId: string, prompt: string) => {
           prompts.push(prompt)
           const groupMatch = /Active bounded document group (\d+)\//.exec(prompt)
-          await advanceDraft(workspacePath, groupMatch ? Number(groupMatch[1]) - 1 : 0)
+          const partMatch = /resume chunk (\d+)\//.exec(prompt)
+          await advanceDraft(
+            workspacePath,
+            groupMatch ? Number(groupMatch[1]) - 1 : 0,
+            partMatch ? Number(partMatch[1]) - 1 : 0,
+          )
           events.push({ type: 'result', text: 'turn complete' })
           return session
         },
@@ -129,8 +150,13 @@ describe('segmented initial document authoring', () => {
       await port.submit('dispatch-segmented', 'original complete document prompt')
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
-      expect(prompts.length).toBe(foundationDocumentDraftGroups('docs/GDD.md').length)
+      expect(prompts.length).toBe(
+        getGameDocumentContract('docs/GDD.md').sections.length * 2 +
+          getGameDocumentContract('docs/GDD.md').productionMaterials.length,
+      )
       expect(prompts[0]).toContain('Active bounded document group 1/13')
+      expect(prompts[0]).toContain('exactly one native')
+      expect(prompts[0]).toContain('2,400 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',

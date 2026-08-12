@@ -3807,7 +3807,6 @@ function appendProjectAgentRawLog(
   message: DashboardSDKMessage,
 ): void {
   try {
-    updateProjectLogIndex(record)
     const path = getProjectAgentRawLogPath(record)
     mkdirSync(dirname(path), { recursive: true })
     appendBoundedDiagnosticRecord(
