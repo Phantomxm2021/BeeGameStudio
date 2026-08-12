@@ -57,8 +57,7 @@ export function authorizeFoundationDocumentDraftMutation(input: {
       return { behavior: 'allow' }
     if (
       after.completedGroupCount === before.completedGroupCount + 1 &&
-      (before.completedPartCount + 1 === currentPartCount ||
-        currentGroup?.sections.length === 1) &&
+      before.completedPartCount + 1 === currentPartCount &&
       after.completedPartCount === 0
     )
       return { behavior: 'allow' }

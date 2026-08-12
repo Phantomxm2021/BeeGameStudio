@@ -27,7 +27,6 @@ async function advanceDraft(
   const group = groups[groupIndex]!
   const target = join(workspacePath, path)
   if (groupIndex === 0 && partIndex === 0) {
-    const section = group.sections[0]!
     await writeFile(
       target,
       [
@@ -37,12 +36,16 @@ async function advanceDraft(
         '## Executive Summary',
         'Production-ready game authority for implementation and acceptance.',
         '',
-        `<!-- beegame-section:${section.sectionId} -->`,
-        `## ${section.title}`,
-        `<!-- beegame-part:${section.sectionId}:1 -->`,
-        `Production authority for ${section.sectionId}, chunk one.`,
-        '',
-        '<!-- beegame-draft-cursor:0:1 -->',
+        ...group.sections.flatMap(section => [
+          `<!-- beegame-section:${section.sectionId} -->`,
+          `## ${section.title}`,
+          `<!-- beegame-part:${section.sectionId}:1 -->`,
+          `Production authority for ${section.sectionId}, part one.`,
+          `<!-- beegame-part:${section.sectionId}:2 -->`,
+          `Production authority for ${section.sectionId}, part two.`,
+          '',
+        ]),
+        '<!-- beegame-draft-cursor:1:0 -->',
         '',
       ].join('\n'),
     )
@@ -66,23 +69,18 @@ async function advanceDraft(
         : []),
     ].join('\n')
   } else {
-    const section = group.sections[0]!
-    replacement =
-      partIndex === 0
-        ? [
+    replacement = [
+      ...group.sections.flatMap(section => [
             `<!-- beegame-section:${section.sectionId} -->`,
             `## ${section.title}`,
             `<!-- beegame-part:${section.sectionId}:1 -->`,
-            `Production authority for ${section.sectionId}, chunk one.`,
-            '',
-            `<!-- beegame-draft-cursor:${groupIndex}:1 -->`,
-          ].join('\n')
-        : [
+            `Production authority for ${section.sectionId}, part one.`,
             `<!-- beegame-part:${section.sectionId}:2 -->`,
-            `Production authority for ${section.sectionId}, chunk two.`,
+            `Production authority for ${section.sectionId}, part two.`,
             '',
-            `<!-- beegame-draft-cursor:${groupIndex + 1}:0 -->`,
-          ].join('\n')
+          ]),
+      `<!-- beegame-draft-cursor:${groupIndex + 1}:0 -->`,
+    ].join('\n')
   }
   await writeFile(target, current.replace(cursor, replacement))
 }
@@ -116,9 +114,7 @@ describe('segmented initial document authoring', () => {
           const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
           const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
           const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
-          const lastPartIndex = group.sections.length
-            ? foundationDocumentDraftPartCount(group) - 1
-            : firstPartIndex
+          const lastPartIndex = group.sections.length ? 0 : firstPartIndex
           for (
             let partIndex = firstPartIndex;
             partIndex <= lastPartIndex;
@@ -159,15 +155,17 @@ describe('segmented initial document authoring', () => {
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
       expect(prompts.length).toBe(
-        getGameDocumentContract('docs/GDD.md').sections.length +
+        Math.ceil(getGameDocumentContract('docs/GDD.md').sections.length / 2) +
           getGameDocumentContract('docs/GDD.md').productionMaterials.length,
       )
-      expect(prompts[0]).toContain('Active bounded document group 1/13')
+      expect(prompts[0]).toContain('Active bounded document group 1/7')
       expect(prompts[0]).toContain('perform exactly one bounded native Write')
       expect(prompts[0]).toContain('<!-- beegame-part:vision:1 -->')
       expect(prompts[0]).toContain('<!-- beegame-part:vision:2 -->')
+      expect(prompts[0]).toContain('<!-- beegame-part:experience_pillars:1 -->')
+      expect(prompts[0]).toContain('<!-- beegame-part:experience_pillars:2 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
-      expect(prompts[0]).toContain('5,200 UTF-8 bytes')
+      expect(prompts[0]).toContain('10,400 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',
