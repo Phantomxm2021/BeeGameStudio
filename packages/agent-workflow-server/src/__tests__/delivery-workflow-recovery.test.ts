@@ -3318,6 +3318,72 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.usage?.total_tokens).toBe(70)
   })
 
+  test('does not let a stale snapshot move cumulative usage below the journal high water mark', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-high-water-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-1',
+      projectId: 'project-1',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+    })
+    const startedAt = new Date().toISOString()
+    const running = await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      activeDispatch: {
+        dispatchId: 'dispatch-current',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt,
+      },
+    })
+    const highWater = {
+      input_tokens: 100,
+      cache_read_tokens: 200,
+      cache_creation_tokens: 0,
+      completion_tokens: 50,
+      total_tokens: 350,
+    }
+    await store.addWorkflowUsage(initial.runId, highWater, 'dispatch-current')
+
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({
+        ...running,
+        usage: {
+          input_tokens: 10,
+          cache_read_tokens: 20,
+          cache_creation_tokens: 0,
+          completion_tokens: 5,
+          total_tokens: 35,
+        },
+      }, null, 2)}\n`,
+    )
+
+    await store.addWorkflowUsage(
+      initial.runId,
+      {
+        input_tokens: 1,
+        cache_read_tokens: 2,
+        cache_creation_tokens: 0,
+        completion_tokens: 3,
+        total_tokens: 6,
+      },
+      'dispatch-current',
+    )
+
+    expect((await store.load())?.usage).toEqual({
+      input_tokens: 101,
+      cache_read_tokens: 202,
+      cache_creation_tokens: 0,
+      completion_tokens: 53,
+      total_tokens: 356,
+    })
+  })
+
   test('does not let display-only activity refresh durable progress', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-durable-progress-'))
     const store = createRunStore(workspace, 'owner-1')

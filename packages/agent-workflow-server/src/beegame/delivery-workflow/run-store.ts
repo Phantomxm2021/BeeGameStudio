@@ -247,6 +247,40 @@ function addUsage(
   }
 }
 
+function journalUsageHighWater(
+  events: readonly WorkflowEvent[],
+): WorkflowUsage | undefined {
+  let usage: WorkflowUsage | undefined
+  for (const event of events) {
+    if (event.type !== 'usage.updated') continue
+    const candidate = event.usage
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+      continue
+    const record = candidate as Record<string, unknown>
+    const keys = [
+      'input_tokens',
+      'cache_read_tokens',
+      'cache_creation_tokens',
+      'completion_tokens',
+      'total_tokens',
+    ] as const
+    if (
+      keys.some(
+        key =>
+          typeof record[key] !== 'number' ||
+          !Number.isFinite(record[key]) ||
+          (record[key] as number) < 0,
+      )
+    )
+      continue
+    usage = mergeUsage(
+      usage,
+      Object.fromEntries(keys.map(key => [key, record[key]])) as WorkflowUsage,
+    )
+  }
+  return usage
+}
+
 function paths(workspacePath: string) {
   const directory = join(resolve(workspacePath), '.beegame', 'workflow')
   return {
@@ -1073,15 +1107,26 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         (!acceptsRunningUsage && !acceptsStoppedTailUsage)
       )
         return null
-      const next = { ...run, usage: addUsage(run.usage, delta) }
-      return commitUnlocked(next, {
-        runId: next.runId,
-        type: 'usage.updated',
-        phase: next.phase,
-        status: next.status,
-        revision: next.revision,
-        usage: next.usage,
-      })
+      const events = await readEventsUnlocked()
+      const journalUsage = journalUsageHighWater(events)
+      const next = {
+        ...run,
+        usage: addUsage(mergeUsage(run.usage, journalUsage), delta),
+      }
+      return persistCommitUnlocked(
+        next,
+        {
+          runId: next.runId,
+          type: 'usage.updated',
+          phase: next.phase,
+          status: next.status,
+          revision: next.revision,
+          usage: next.usage,
+        },
+        [],
+        run,
+        events,
+      )
     })
   }
 

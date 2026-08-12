@@ -661,10 +661,10 @@ describe('DashboardView runtime loading', () => {
     expect(within(hint).getByText('89')).toBeInTheDocument();
     expect(within(hint).getByText('1,386')).toBeInTheDocument();
     expect(within(hint).getByText('2,000')).toBeInTheDocument();
-    expect(within(hint).getByText('Fresh Input')).toBeInTheDocument();
-    expect(within(hint).getByText('Cache Read')).toBeInTheDocument();
-    expect(within(hint).getByText('Raw Processed')).toBeInTheDocument();
-    expect(within(hint).getByText('Weighted Consumption')).toBeInTheDocument();
+    expect(within(hint).getByText('新增输入 Tokens')).toBeInTheDocument();
+    expect(within(hint).getByText('缓存读取 Tokens')).toBeInTheDocument();
+    expect(within(hint).getByText('处理总量（含缓存）')).toBeInTheDocument();
+    expect(within(hint).getByText('计权消耗')).toBeInTheDocument();
   });
 
   it('shows the live durable workflow usage ahead of a trailing billing summary', async () => {
@@ -778,12 +778,12 @@ describe('DashboardView runtime loading', () => {
     expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('left-5');
     expect(screen.getByText('平台')).toBeInTheDocument();
     expect(screen.getByText('Web')).toBeInTheDocument();
-    expect(screen.getByText('Fresh Input')).toBeInTheDocument();
-    expect(screen.getByText('Cache Read')).toBeInTheDocument();
-    expect(screen.getByText('Cache Creation')).toBeInTheDocument();
+    expect(screen.getByText('新增输入 Tokens')).toBeInTheDocument();
+    expect(screen.getByText('缓存读取 Tokens')).toBeInTheDocument();
+    expect(screen.getByText('缓存创建 Tokens')).toBeInTheDocument();
     expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('Raw Processed')).toBeInTheDocument();
-    expect(screen.getByText('Weighted Consumption')).toBeInTheDocument();
+    expect(screen.getByText('处理总量（含缓存）')).toBeInTheDocument();
+    expect(screen.getByText('计权消耗')).toBeInTheDocument();
     expect(screen.getByText('Agent 状态')).toBeInTheDocument();
     expect(screen.queryByText('部署就绪')).not.toBeInTheDocument();
     expect(screen.queryByText('文档审查')).not.toBeInTheDocument();
