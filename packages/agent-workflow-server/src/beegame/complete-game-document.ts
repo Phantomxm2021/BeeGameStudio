@@ -114,6 +114,17 @@ function assertNonEmptyRange(
     throw new Error(`complete game document ${label} is empty or invalid`)
 }
 
+function nextNonBlankLine(
+  lines: readonly string[],
+  index: number,
+): { index: number; value: string } | undefined {
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    if (lines[cursor]!.trim())
+      return { index: cursor, value: lines[cursor]! }
+  }
+  return undefined
+}
+
 /**
  * Validate one complete Markdown file after the native Bee Game Studio worker
  * wrote it. This module has no structured document payload and no renderer;
@@ -179,43 +190,52 @@ export function validateCompleteGameDocumentMarkdown(
       `complete game document structure must exactly match the canonical order for ${path}`,
     )
 
-  if (lines[summaryIndex + 1] !== '## Executive Summary')
+  const summaryHeading = nextNonBlankLine(lines, summaryIndex)
+  if (summaryHeading?.value !== '## Executive Summary')
     throw new Error('complete game document executive summary heading is invalid')
-  assertNonEmptyRange(lines, summaryIndex + 1, sectionIndexes[0]!, 'executive summary')
+  assertNonEmptyRange(
+    lines,
+    summaryHeading.index,
+    sectionIndexes[0]!,
+    'executive summary',
+  )
 
   contract.sections.forEach((section, index) => {
     const start = sectionIndexes[index]!
     const end = sectionIndexes[index + 1] ?? productionIndex
-    if (lines[start + 1] !== `## ${section.title}`)
+    const heading = nextNonBlankLine(lines, start)
+    if (heading?.value !== `## ${section.title}`)
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
-    assertNonEmptyRange(lines, start + 1, end, `section:${section.sectionId}`)
+    assertNonEmptyRange(lines, heading.index, end, `section:${section.sectionId}`)
   })
   validateSectionHeadingStructure(
     contract.sections.map((section, index) => {
       const start = sectionIndexes[index]!
       const end = sectionIndexes[index + 1] ?? productionIndex
+      const heading = nextNonBlankLine(lines, start)
       return {
         sectionId: section.sectionId,
-        body: lines.slice(start + 2, end).join('\n'),
+        body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
       }
     }),
   )
 
-  if (lines[productionIndex + 1] !== '## Production Materials')
+  if (nextNonBlankLine(lines, productionIndex)?.value !== '## Production Materials')
     throw new Error('complete game document production materials heading is invalid')
   contract.productionMaterials.forEach((material, index) => {
     const start = materialIndexes[index]!
     const end = materialIndexes[index + 1] ?? auditIndex
-    if (lines[start + 1] !== `### ${material.title}`)
+    const heading = nextNonBlankLine(lines, start)
+    if (heading?.value !== `### ${material.title}`)
       throw new Error(`production material title is invalid: ${material.materialId}`)
     assertMaterialFormat(
       material.format,
-      lines.slice(start + 2, end).join('\n').trim(),
+      lines.slice(heading.index + 1, end).join('\n').trim(),
       material.materialId,
     )
   })
 
-  if (lines[auditIndex + 1] !== '## Audit Appendix')
+  if (nextNonBlankLine(lines, auditIndex)?.value !== '## Audit Appendix')
     throw new Error('complete game document audit appendix heading is invalid')
   const acceptanceIndex = lines.indexOf('### Acceptance Criteria', auditIndex + 1)
   const acceptanceLines = lines.slice(acceptanceIndex + 1)

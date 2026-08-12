@@ -17,6 +17,16 @@ describe('native complete game document validation', () => {
     }
   })
 
+  test('accepts normal Markdown blank lines between canonical markers and headings', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(
+      path,
+      completeTestSubmission(path),
+    ).replaceAll(/(<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+|audit-appendix) -->)\n/g, '$1\n\n')
+
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
+  })
+
   test('rejects missing, duplicate, and out-of-order canonical sections', () => {
     const path = 'docs/GDD.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
