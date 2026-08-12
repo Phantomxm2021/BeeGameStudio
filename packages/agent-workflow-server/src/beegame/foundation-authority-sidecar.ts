@@ -21,19 +21,59 @@ export const FOUNDATION_AUTHORITY_KINDS = [
   'open_decision',
 ] as const
 
+export const FOUNDATION_AUTHORITY_SOURCES = [
+  'user_setting',
+  'confirmed_brief',
+  'upstream_authority',
+  'model_estimate',
+  'measured_evidence',
+  'external_evidence',
+] as const
+
+export const FOUNDATION_AUTHORITY_STATES = [
+  'confirmed',
+  'assumed',
+  'deferred',
+  'verified',
+] as const
+
+export const AUTHORITY_EVIDENCE_KINDS = [
+  'file',
+  'receipt',
+  'test',
+  'measurement',
+  'license',
+  'url',
+] as const
+
+export type AuthoritySource = (typeof FOUNDATION_AUTHORITY_SOURCES)[number]
+export type AuthorityState = (typeof FOUNDATION_AUTHORITY_STATES)[number]
+
+export type AuthorityEvidenceRef = Readonly<{
+  kind: (typeof AUTHORITY_EVIDENCE_KINDS)[number]
+  locator: string
+  digest?: string
+}>
+
 export type FoundationAuthorityRecord = Readonly<{
   authorityId: string
   sectionId: string
   kind: (typeof FOUNDATION_AUTHORITY_KINDS)[number]
-  state: 'confirmed' | 'assumed' | 'deferred'
+  state: AuthorityState
+  source: AuthoritySource
+  evidenceRefs: readonly AuthorityEvidenceRef[]
   statement: string
   responsibilityIds: readonly GameDocumentResponsibility[]
   value?: string | number | boolean
   unit?: string
+  decision?: Readonly<{
+    owner: string
+    neededBy: string
+  }>
 }>
 
 export type FoundationAuthoritySidecar = Readonly<{
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   documentPath: FoundationDocumentPath
   documentDigest: string
   records: readonly FoundationAuthorityRecord[]
@@ -49,7 +89,7 @@ const optionalAuthorityValue = z.preprocess(
   z.union([z.string().trim().min(1), z.number().finite(), z.boolean()]).optional(),
 )
 
-const authorityRecordSchema = z
+const authorityRecordV1Schema = z
   .object({
     authorityId: z
       .string()
@@ -68,18 +108,64 @@ const authorityRecordSchema = z
   })
   .strict()
 
-export const foundationAuthoritySubmissionSchema = z
-  .object({ records: z.array(authorityRecordSchema).min(1) })
+export const authorityEvidenceRefSchema = z
+  .object({
+    kind: z.enum(AUTHORITY_EVIDENCE_KINDS),
+    locator: z.string().trim().min(1).max(1_024),
+    digest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  })
+  .strict()
+  .superRefine((reference, context) => {
+    if (reference.kind === 'file' && reference.digest === undefined)
+      context.addIssue({
+        code: 'custom',
+        message: 'foundation authority file evidence requires a SHA-256 digest',
+        path: ['digest'],
+      })
+  })
+
+const authorityDecisionSchema = z
+  .object({
+    owner: z.string().trim().min(1).max(160),
+    neededBy: z.string().trim().min(1).max(160),
+  })
   .strict()
 
-const storedAuthoritySidecarSchema = z
+const authorityRecordV2Schema = authorityRecordV1Schema
+  .extend({
+    state: z.enum(FOUNDATION_AUTHORITY_STATES),
+    source: z.enum(FOUNDATION_AUTHORITY_SOURCES),
+    evidenceRefs: z.array(authorityEvidenceRefSchema),
+    decision: authorityDecisionSchema.optional(),
+  })
+  .strict()
+
+export const foundationAuthoritySubmissionSchema = z
+  .object({ records: z.array(authorityRecordV2Schema).min(1) })
+  .strict()
+
+const storedAuthoritySidecarV1Schema = z
   .object({
     schemaVersion: z.literal(1),
     documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
     documentDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    records: z.array(authorityRecordSchema).min(1),
+    records: z.array(authorityRecordV1Schema).min(1),
   })
   .strict()
+
+const storedAuthoritySidecarV2Schema = z
+  .object({
+    schemaVersion: z.literal(2),
+    documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+    documentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    records: z.array(authorityRecordV2Schema).min(1),
+  })
+  .strict()
+
+const readableAuthoritySidecarSchema = z.discriminatedUnion('schemaVersion', [
+  storedAuthoritySidecarV1Schema,
+  storedAuthoritySidecarV2Schema,
+])
 
 const MAX_SIDECAR_BYTES = 96 * 1024
 
@@ -100,7 +186,8 @@ function assertCanonicalIdentifiers(
 
 function assertRecordContract(
   documentPath: FoundationDocumentPath,
-  records: readonly z.infer<typeof authorityRecordSchema>[],
+  records: readonly FoundationAuthorityRecord[],
+  schemaVersion: 1 | 2,
 ): void {
   const contract = getGameDocumentContract(documentPath)
   const sectionById = new Map(
@@ -109,10 +196,8 @@ function assertRecordContract(
   const authorityPrefix = `${CANONICAL_PROJECT_DOCUMENT_IDS[
     documentPath
   ].toLowerCase()}.`
-  assertCanonicalIdentifiers(
-    records.map(record => record.authorityId),
-    'record ID',
-  )
+  assertNoLowerPriorityReplacement(records)
+  assertCanonicalIdentifiers(records.map(record => record.authorityId), 'record ID')
 
   for (const record of records) {
     const section = sectionById.get(record.sectionId)
@@ -143,6 +228,18 @@ function assertRecordContract(
         `foundation authority open decision must be deferred: ${record.authorityId}`,
       )
     if (
+      schemaVersion === 2 &&
+      record.kind === 'open_decision' &&
+      record.decision === undefined
+    )
+      throw new Error(
+        `foundation authority open decision requires owner and needed-by metadata: ${record.authorityId}`,
+      )
+    if (record.kind !== 'open_decision' && record.decision !== undefined)
+      throw new Error(
+        `foundation authority decision metadata is only allowed for open decisions: ${record.authorityId}`,
+      )
+    if (
       record.kind === 'metric' &&
       typeof record.value === 'number' &&
       !record.unit
@@ -150,6 +247,7 @@ function assertRecordContract(
       throw new Error(
         `foundation authority numeric metric requires a unit: ${record.authorityId}`,
       )
+    assertAuthorityTrust(record)
   }
 
   const coveredSections = new Set(records.map(record => record.sectionId))
@@ -164,17 +262,87 @@ function assertRecordContract(
     )
 }
 
-function freezeSidecar(
-  parsed: z.infer<typeof storedAuthoritySidecarSchema>,
-): FoundationAuthoritySidecar {
-  const records = parsed.records.map(record =>
-    Object.freeze({
-      ...record,
-      responsibilityIds: Object.freeze([...record.responsibilityIds]),
-    }),
+function authorityPriority(source: AuthoritySource): number {
+  switch (source) {
+    case 'user_setting':
+      return 6
+    case 'confirmed_brief':
+      return 5
+    case 'measured_evidence':
+    case 'external_evidence':
+      return 4
+    case 'upstream_authority':
+      return 3
+    case 'model_estimate':
+      return 1
+  }
+}
+
+function assertNoLowerPriorityReplacement(
+  records: readonly FoundationAuthorityRecord[],
+): void {
+  const byId = new Map<string, FoundationAuthorityRecord>()
+  for (const record of records) {
+    const prior = byId.get(record.authorityId)
+    if (!prior) {
+      byId.set(record.authorityId, record)
+      continue
+    }
+    if (authorityPriority(prior.source) !== authorityPriority(record.source))
+      throw new Error(
+        `foundation authority lower-priority source cannot replace authority ID: ${record.authorityId}`,
+      )
+  }
+}
+
+function assertAuthorityTrust(record: FoundationAuthorityRecord): void {
+  if (
+    (record.source === 'user_setting' || record.source === 'confirmed_brief') &&
+    record.state !== 'confirmed' &&
+    record.state !== 'deferred'
   )
+    throw new Error(
+      `foundation authority ${record.source} record must be confirmed or deferred: ${record.authorityId}`,
+    )
+  if (
+    record.source === 'model_estimate' &&
+    record.state !== 'assumed' &&
+    record.state !== 'deferred'
+  )
+    throw new Error(
+      `foundation authority model estimate cannot be ${record.state}: ${record.authorityId}`,
+    )
+  if (record.state === 'verified' && record.evidenceRefs.length === 0)
+    throw new Error(
+      `foundation authority verified record requires evidence: ${record.authorityId}`,
+    )
+}
+
+function freezeSidecar(
+  parsed: z.infer<typeof readableAuthoritySidecarSchema>,
+): FoundationAuthoritySidecar {
+  const normalizedRecords: FoundationAuthorityRecord[] =
+    parsed.schemaVersion === 1
+      ? parsed.records.map(record => ({
+          ...record,
+          source: 'upstream_authority' as const,
+          evidenceRefs: [],
+        }))
+      : parsed.records
+  const records = normalizedRecords.map(normalized => {
+    return Object.freeze({
+      ...normalized,
+      responsibilityIds: Object.freeze([...normalized.responsibilityIds]),
+      evidenceRefs: Object.freeze(
+        normalized.evidenceRefs.map(reference => Object.freeze({ ...reference })),
+      ),
+      ...(normalized.decision
+        ? { decision: Object.freeze({ ...normalized.decision }) }
+        : {}),
+    })
+  })
   return Object.freeze({
-    schemaVersion: 1 as const,
+    schemaVersion: parsed.schemaVersion,
     documentPath: parsed.documentPath,
     documentDigest: parsed.documentDigest,
     records: Object.freeze(records),
@@ -202,16 +370,16 @@ export function validateFoundationAuthoritySidecar(input: {
   markdown: string
   value: unknown
 }): FoundationAuthoritySidecar {
-  const parsed = storedAuthoritySidecarSchema.parse(input.value)
+  const parsed = readableAuthoritySidecarSchema.parse(input.value)
   if (parsed.documentPath !== input.documentPath)
     throw new Error('foundation authority sidecar path does not match document')
   if (parsed.documentDigest !== foundationDocumentDigest(input.markdown))
     throw new Error('foundation authority sidecar digest does not match document')
-  assertRecordContract(input.documentPath, parsed.records)
   const frozen = freezeSidecar(parsed)
+  assertRecordContract(input.documentPath, frozen.records, parsed.schemaVersion)
   if (
-    new TextEncoder().encode(canonicalFoundationAuthoritySidecarBytes(frozen))
-      .byteLength > MAX_SIDECAR_BYTES
+    new TextEncoder().encode(`${JSON.stringify(parsed, null, 2)}\n`).byteLength >
+    MAX_SIDECAR_BYTES
   )
     throw new Error('foundation authority sidecar exceeds the 96 KiB size limit')
   return frozen
@@ -227,13 +395,19 @@ export function createFoundationAuthoritySidecar(input: {
     .map(record => ({
       ...record,
       responsibilityIds: [...record.responsibilityIds].sort(bytewise),
+      evidenceRefs: [...record.evidenceRefs].sort((left, right) =>
+        bytewise(
+          `${left.kind}\u0000${left.locator}\u0000${left.digest ?? ''}`,
+          `${right.kind}\u0000${right.locator}\u0000${right.digest ?? ''}`,
+        ),
+      ),
     }))
     .sort((left, right) => bytewise(left.authorityId, right.authorityId))
   return validateFoundationAuthoritySidecar({
     documentPath: input.documentPath,
     markdown: input.markdown,
     value: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       documentPath: input.documentPath,
       documentDigest: foundationDocumentDigest(input.markdown),
       records,

@@ -21,15 +21,32 @@ function records() {
       sectionId: section.sectionId,
       kind: 'fact' as const,
       state: 'confirmed' as const,
+      source: 'confirmed_brief' as const,
+      evidenceRefs: [],
       statement: `Confirmed authority for ${section.sectionId}.`,
       responsibilityIds: [...section.responsibilityIds].sort(bytewise),
     }))
     .sort((left, right) => bytewise(left.authorityId, right.authorityId))
 }
 
-function storedSidecar() {
+function legacyRecords() {
+  return records().map(({ source: _source, evidenceRefs: _evidenceRefs, ...record }) =>
+    record,
+  )
+}
+
+function storedSidecarV1() {
   return {
     schemaVersion: 1 as const,
+    documentPath: 'docs/GDD.md' as const,
+    documentDigest: createHash('sha256').update(markdown).digest('hex'),
+    records: legacyRecords(),
+  }
+}
+
+function storedSidecar() {
+  return {
+    schemaVersion: 2 as const,
     documentPath: 'docs/GDD.md' as const,
     documentDigest: createHash('sha256').update(markdown).digest('hex'),
     records: records(),
@@ -54,6 +71,186 @@ describe('foundation authority sidecar', () => {
     expect(
       canonicalFoundationAuthoritySidecarBytes(sidecar),
     ).toBe(`${JSON.stringify(sidecar, null, 2)}\n`)
+  })
+
+  test('reads v1 sidecars without upgrading legacy trust', () => {
+    const sidecar = validateFoundationAuthoritySidecar({
+      documentPath: 'docs/GDD.md',
+      markdown,
+      value: storedSidecarV1(),
+    })
+
+    expect(sidecar.schemaVersion).toBe(1)
+    expect(sidecar.records[0]).toMatchObject({
+      state: 'confirmed',
+      source: 'upstream_authority',
+      evidenceRefs: [],
+    })
+    expect(sidecar.records.some(record => record.state === 'verified')).toBe(false)
+  })
+
+  test('rejects model estimates that claim confirmed or verified authority', () => {
+    const valid = records()
+    const first = valid[0]!
+    for (const state of ['confirmed', 'verified'] as const) {
+      expect(() =>
+        createFoundationAuthoritySidecar({
+          documentPath: 'docs/GDD.md',
+          markdown,
+          submission: {
+            records: valid.map(record =>
+              record.authorityId === first.authorityId
+                ? { ...record, source: 'model_estimate', state }
+                : record,
+            ),
+          },
+        }),
+      ).toThrow(/model estimate|model_estimate/i)
+    }
+  })
+
+  test('requires evidence for verified authority', () => {
+    const valid = records()
+    const first = valid[0]!
+    expect(() =>
+      createFoundationAuthoritySidecar({
+        documentPath: 'docs/GDD.md',
+        markdown,
+        submission: {
+          records: valid.map(record =>
+            record.authorityId === first.authorityId
+              ? {
+                  ...record,
+                  source: 'measured_evidence',
+                  state: 'verified',
+                  evidenceRefs: [],
+                }
+              : record,
+          ),
+        },
+      }),
+    ).toThrow(/evidence/i)
+
+    const sidecar = createFoundationAuthoritySidecar({
+      documentPath: 'docs/GDD.md',
+      markdown,
+      submission: {
+        records: valid.map(record =>
+          record.authorityId === first.authorityId
+            ? {
+                ...record,
+                source: 'measured_evidence',
+                state: 'verified',
+                evidenceRefs: [
+                  {
+                    kind: 'measurement',
+                    locator: 'measurement:playtest.primary-action-time',
+                  },
+                ],
+              }
+            : record,
+        ),
+      },
+    })
+    expect(sidecar.records.find(record => record.authorityId === first.authorityId)).toMatchObject({
+      state: 'verified',
+      source: 'measured_evidence',
+    })
+  })
+
+  test('requires deferred open decisions with owner and milestone metadata', () => {
+    const valid = records()
+    const first = valid[0]!
+    for (const mutation of [
+      { ...first, kind: 'open_decision', state: 'deferred' },
+      {
+        ...first,
+        kind: 'open_decision',
+        state: 'confirmed',
+        decision: { owner: 'product', neededBy: 'milestone.prototype' },
+      },
+    ]) {
+      expect(() =>
+        createFoundationAuthoritySidecar({
+          documentPath: 'docs/GDD.md',
+          markdown,
+          submission: {
+            records: valid.map(record =>
+              record.authorityId === first.authorityId ? mutation : record,
+            ),
+          },
+        }),
+      ).toThrow(/open decision|decision/i)
+    }
+
+    expect(() =>
+      createFoundationAuthoritySidecar({
+        documentPath: 'docs/GDD.md',
+        markdown,
+        submission: {
+          records: valid.map(record =>
+            record.authorityId === first.authorityId
+              ? {
+                  ...record,
+                  kind: 'open_decision',
+                  state: 'deferred',
+                  source: 'model_estimate',
+                  decision: {
+                    owner: 'product',
+                    neededBy: 'milestone.prototype',
+                  },
+                }
+              : record,
+          ),
+        },
+      }),
+    ).not.toThrow()
+
+    expect(() =>
+      createFoundationAuthoritySidecar({
+        documentPath: 'docs/GDD.md',
+        markdown,
+        submission: {
+          records: valid.map(record =>
+            record.authorityId === first.authorityId
+              ? {
+                  ...record,
+                  kind: 'open_decision',
+                  state: 'deferred',
+                  source: 'confirmed_brief',
+                  decision: {
+                    owner: 'product',
+                    neededBy: 'milestone.prototype',
+                  },
+                }
+              : record,
+          ),
+        },
+      }),
+    ).not.toThrow()
+  })
+
+  test('rejects lower-priority redefinitions of the same authority ID', () => {
+    const valid = records()
+    const first = { ...valid[0]!, source: 'user_setting' as const }
+    const lowerPriority = {
+      ...first,
+      source: 'model_estimate' as const,
+      state: 'assumed' as const,
+    }
+    expect(() =>
+      createFoundationAuthoritySidecar({
+        documentPath: 'docs/GDD.md',
+        markdown,
+        submission: {
+          records: [
+            first,
+            ...valid.slice(1),
+            lowerPriority,
+          ],
+        },
+      }),
+    ).toThrow(/priority|replace/i)
   })
 
   test('canonicalizes submission record and responsibility ordering', () => {

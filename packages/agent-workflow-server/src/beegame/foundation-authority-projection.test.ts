@@ -48,6 +48,8 @@ function sourceSidecar(
           sectionId: section.sectionId,
           kind: 'fact' as const,
           state: 'confirmed' as const,
+          source: 'confirmed_brief' as const,
+          evidenceRefs: [],
           statement: `Confirmed ${section.sectionId} authority.`,
           responsibilityIds: [...section.responsibilityIds].sort(bytewise),
         }))
@@ -105,6 +107,11 @@ describe('foundation authority projection', () => {
     )
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.records.every(Object.isFrozen)).toBe(true)
+    expect(
+      result.records.every(
+        record => record.source === 'confirmed_brief' && record.evidenceRefs.length === 0,
+      ),
+    ).toBe(true)
   })
 
   test('rejects missing and stale sidecars before downstream work starts', () => {

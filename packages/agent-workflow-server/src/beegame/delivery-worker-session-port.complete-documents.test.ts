@@ -50,6 +50,8 @@ async function writeAuthoritySource(
           sectionId: section.sectionId,
           kind: 'fact' as const,
           state: 'confirmed' as const,
+          source: 'confirmed_brief' as const,
+          evidenceRefs: [],
           statement: `Confirmed authority for ${section.sectionId}.`,
           responsibilityIds: [...section.responsibilityIds].sort(bytewise),
         }))

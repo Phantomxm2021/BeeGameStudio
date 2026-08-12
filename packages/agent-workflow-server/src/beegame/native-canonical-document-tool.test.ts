@@ -66,6 +66,8 @@ function authoritySubmission(
         sectionId: section.sectionId,
         kind: 'fact' as const,
         state: 'confirmed' as const,
+        source: 'confirmed_brief' as const,
+        evidenceRefs: [],
         statement: `Confirmed authority for ${section.sectionId}.`,
         responsibilityIds: [...section.responsibilityIds].sort(bytewise),
       }))
@@ -121,6 +123,9 @@ describe('canonical document commit', () => {
     }
     expect(prompt).toContain('service canonicalizes record and responsibility ordering')
     expect(prompt).toContain('open_decision records must use state=deferred')
+    expect(prompt).toContain('source and evidenceRefs')
+    expect(prompt).toContain('model_estimate must use assumed or deferred')
+    expect(prompt).toContain('verified requires evidenceRefs')
   })
 
   test('prepares Markdown before accepting authority without resending the body', async () => {
