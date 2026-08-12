@@ -31,7 +31,8 @@ describe('agent workflow model configs', () => {
     expect(config.apiKeyPreview).toBe('sk-d...cret')
     expect(config.isDefault).toBe(true)
 
-    expect(mapModelConfigToRuntime(config.id)).toEqual({
+    const runtime = mapModelConfigToRuntime(config.id)
+    expect(runtime).toEqual({
       modelType: 'openai',
       env: {
         [`${legacyRuntimeEnvPrefix}OPENAI`]: '1',
@@ -41,6 +42,7 @@ describe('agent workflow model configs', () => {
         OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
       },
     })
+    expect(runtime?.env).not.toHaveProperty('BEEGAME_RUNTIME_MODEL_TYPE')
   })
 
   test('keeps default configs scoped to one owner', () => {

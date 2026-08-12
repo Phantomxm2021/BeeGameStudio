@@ -68,7 +68,7 @@ Expected: RED with missing `upstream-core-alignment` module.
 ]
 ```
 
-Also synchronize shared root/build files and shared scripts that exist upstream. Global substitutions are limited to the internal package namespaces and `Claude Code Best` → `Bee Game Studio`. File-scoped substitutions may change package/update identity, product repository link, and OpenAI `originator`. They must not rewrite service domains, environment variables, config directories, provider identifiers, or transport semantics. Declare `package.json`, `bun.lock`, and `tsconfig.json` as reasoned root integration exceptions.
+Also synchronize shared root/build files and shared scripts that exist upstream. Global substitutions are limited to the internal package namespaces, `Claude Code Best` → `Bee Game Studio`, and the exact configuration key `CLAUDE_CONFIG_DIR` → `BEEGAME_CONFIG_DIR`. File-scoped substitutions may change package/update identity, product repository link, and OpenAI `originator`. They must not rewrite service domains, other environment variables, config-directory behavior, provider identifiers, or transport semantics. Declare `package.json`, `bun.lock`, and `tsconfig.json` as reasoned root integration exceptions.
 
 - [ ] **Step 4: Commit**
 

@@ -35,10 +35,6 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
   let failureStage: BeeGameModelRuntimeFailureStage = 'model_request'
 
   try {
-    if (message.input.modelType) {
-      previousEnv.set('BEEGAME_RUNTIME_MODEL_TYPE', process.env.BEEGAME_RUNTIME_MODEL_TYPE)
-      process.env.BEEGAME_RUNTIME_MODEL_TYPE = message.input.modelType
-    }
     for (const [key, value] of Object.entries(message.input.runtimeEnv)) {
       previousEnv.set(key, process.env[key])
       process.env[key] = value
