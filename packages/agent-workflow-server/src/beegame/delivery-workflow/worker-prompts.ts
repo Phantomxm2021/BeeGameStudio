@@ -79,6 +79,13 @@ function formatContract(request: WorkerDispatchRequest): string {
       confirmedBriefContext: _confirmedBriefContext,
       ...contractWithoutDuplicatedBrief
     } = request.contract
+    if (
+      request.workerType === 'document-author' &&
+      request.contract.documentSet === 'foundation' &&
+      request.contract.authoringMode === 'initial' &&
+      request.contract.foundationDocumentPath !== 'docs/TECHNICAL_DESIGN.md'
+    )
+      delete contractWithoutDuplicatedBrief.systemDeliveryContract
     return JSON.stringify(contractWithoutDuplicatedBrief)
   }
   const {

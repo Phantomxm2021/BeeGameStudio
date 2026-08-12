@@ -102,6 +102,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('Canonical artifacts: docs/GDD.md')
     expect(prompt).not.toContain('docs/TECHNICAL_DESIGN.md')
     expect(prompt).not.toContain('docs/ASSET_PLAN.md')
+    expect(prompt).not.toContain('"systemDeliveryContract"')
+    expect(prompt).not.toContain('assets/asset-manifest.json')
   })
 
   test('instructs one JSON/YAML resource lane', () => {
