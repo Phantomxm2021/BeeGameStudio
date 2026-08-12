@@ -17,6 +17,7 @@ export type FoundationDocumentDraftGroup = Readonly<{
 }>
 
 export type FoundationDocumentDraftProgress = Readonly<{
+  started: boolean
   completedGroupCount: number
   completedPartCount: number
   complete: boolean
@@ -61,6 +62,7 @@ export function inspectFoundationDocumentDraft(
 ): FoundationDocumentDraftProgress {
   if (!markdown?.trim())
     return Object.freeze({
+      started: false,
       completedGroupCount: 0,
       completedPartCount: 0,
       complete: false,
@@ -72,6 +74,7 @@ export function inspectFoundationDocumentDraft(
   if (cursorMatches.length === 0) {
     validateCompleteGameDocumentMarkdown(path, markdown)
     return Object.freeze({
+      started: true,
       completedGroupCount: foundationDocumentDraftGroups(path).length,
       completedPartCount: 0,
       complete: true,
@@ -93,8 +96,7 @@ export function inspectFoundationDocumentDraft(
     completedGroupCount < 0 ||
     completedGroupCount >= groups.length ||
     completedPartCount < 0 ||
-    completedPartCount >= partCount ||
-    (completedGroupCount === 0 && completedPartCount === 0)
+    completedPartCount >= partCount
   )
     throw new Error('foundation document draft cursor group is invalid')
 
@@ -163,7 +165,7 @@ export function inspectFoundationDocumentDraft(
     lines,
     '<!-- beegame-executive-summary -->',
     '## Executive Summary',
-    expectedSectionMarkers[0]!,
+    expectedSectionMarkers[0] ?? cursor,
   )
   expectedSections.forEach((section, index) =>
     assertNonEmptyDraftRange(
@@ -234,6 +236,7 @@ export function inspectFoundationDocumentDraft(
   if (contract.sections.length < expectedSections.length)
     throw new Error('foundation document draft exceeds its contract')
   return Object.freeze({
+    started: true,
     completedGroupCount,
     completedPartCount,
     complete: false,
@@ -272,14 +275,17 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
             : `Checkpoint ${materialIndex + 1}, native Edit: replace ${materialCursor} with <!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body${materialIndex + 1 === partCount ? '; leave no cursor' : `; finish with ${nextMaterialCursor}`}.`
         })
     : [
-        ...(input.progress.completedPartCount === 0
+        ...(isFirst && !input.progress.started
           ? [
-              isFirst
-                ? `Checkpoint 1: native Write creates the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, then <!-- beegame-draft-cursor:0:1 -->.`
-                : `Checkpoint 1, native Edit: replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.`,
+              'Checkpoint 1: native Write creates only the document title, <!-- beegame-executive-summary -->, ## Executive Summary, one concise product summary, then <!-- beegame-draft-cursor:0:0 -->. Do not include the first section in this Write.',
             ]
           : []),
-        `Checkpoint 2, native Edit: replace <!-- beegame-draft-cursor:${group.groupIndex}:1 --> with <!-- beegame-part:${group.sections[0]?.sectionId}:2 --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
+        ...(input.progress.completedPartCount === 0
+          ? [
+              `${isFirst && !input.progress.started ? 'Checkpoint 2' : 'Checkpoint 1'}, native Edit: replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.`,
+            ]
+          : []),
+        `Checkpoint ${isFirst && !input.progress.started ? 3 : 2}, native Edit: replace <!-- beegame-draft-cursor:${group.groupIndex}:1 --> with <!-- beegame-part:${group.sections[0]?.sectionId}:2 --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
       ]
   const groupContract = {
     path: input.path,
@@ -288,6 +294,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
     groupIndex: group.groupIndex,
     groupCount: groups.length,
     currentPart: input.progress.completedPartCount,
+    started: input.progress.started,
     partCount,
     maxNativeReplacementBytes: MAX_NATIVE_REPLACEMENT_BYTES,
     sections: group.sections,

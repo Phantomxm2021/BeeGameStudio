@@ -8,12 +8,19 @@ import { foundationDocumentDraftGroups } from './foundation-document-draft'
 const path = 'docs/GDD.md' as const
 const section = foundationDocumentDraftGroups(path)[0]!.sections[0]!
 
-function firstWrite(cursor = '<!-- beegame-draft-cursor:0:1 -->') {
+function preamble(cursor = '<!-- beegame-draft-cursor:0:0 -->') {
   return [
     '# Game Design Document',
     '<!-- beegame-executive-summary -->',
     '## Executive Summary',
     'Concrete product promise and scope.',
+    cursor,
+  ].join('\n')
+}
+
+function firstWrite(cursor = '<!-- beegame-draft-cursor:0:1 -->') {
+  return [
+    preamble('').trimEnd(),
     `<!-- beegame-section:${section.sectionId} -->`,
     `## ${section.title}`,
     `<!-- beegame-part:${section.sectionId}:1 -->`,
@@ -31,20 +38,29 @@ function authorize(input: {
 }
 
 describe('foundation document native mutation authority', () => {
-  test('allows only one valid durable native write checkpoint', () => {
+  test('allows only the title and summary as the first durable native write checkpoint', () => {
+    expect(
+      authorize({
+        toolName: 'Write',
+        mutation: { content: preamble() },
+      }),
+    ).toEqual({ behavior: 'allow' })
     expect(
       authorize({
         toolName: 'Write',
         mutation: { content: firstWrite() },
       }),
-    ).toEqual({ behavior: 'allow' })
+    ).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringMatching(/title and summary checkpoint/i),
+    })
   })
 
   test('rejects a write that omits the durable cursor', () => {
     expect(
       authorize({
         toolName: 'Write',
-        mutation: { content: firstWrite('').trimEnd() },
+        mutation: { content: preamble('').trimEnd() },
       }),
     ).toMatchObject({
       behavior: 'deny',

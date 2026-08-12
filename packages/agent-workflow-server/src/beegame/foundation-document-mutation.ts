@@ -36,6 +36,17 @@ export function authorizeFoundationDocumentDraftMutation(input: {
     const after = inspectFoundationDocumentDraft(input.path, afterMarkdown)
     if (before.complete)
       throw new Error('foundation document is already complete')
+    if (!before.started) {
+      if (
+        after.started &&
+        after.completedGroupCount === 0 &&
+        after.completedPartCount === 0
+      )
+        return { behavior: 'allow' }
+      return deny(
+        'The first native Write may advance only the title and summary checkpoint.',
+      )
+    }
     const groups = foundationDocumentDraftGroups(input.path)
     const currentGroup = groups[before.completedGroupCount]
     const currentPartCount = currentGroup

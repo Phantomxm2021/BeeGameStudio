@@ -45,6 +45,19 @@ describe('foundation document draft groups', () => {
     expect(groups.at(-1)?.productionMaterials).toEqual(
       contract.productionMaterials,
     )
+    const emptyProgress = inspectFoundationDocumentDraft(path, undefined)
+    const firstPrompt = buildFoundationDocumentDraftTurnPrompt({
+      path,
+      progress: emptyProgress,
+      projectionRelativePath:
+        '.beegame/workflow/document-projections/dispatch.json',
+    })
+    expect(emptyProgress.started).toBe(false)
+    expect(firstPrompt).toContain('Checkpoint 1: native Write creates only')
+    expect(firstPrompt).toContain('<!-- beegame-draft-cursor:0:0 -->')
+    expect(firstPrompt).toContain('Checkpoint 2, native Edit')
+    expect(firstPrompt).toContain('<!-- beegame-part:vision:1 -->')
+    expect(firstPrompt).toContain('Checkpoint 3, native Edit')
   })
 
   test('derives the next bounded turn from a durable on-disk cursor', () => {
@@ -110,6 +123,36 @@ describe('foundation document draft groups', () => {
     expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).not.toContain('native Write')
+  })
+
+  test('resumes after the title and summary landed without a section body', () => {
+    const path = 'docs/GDD.md'
+    const markdown = [
+      '# Game Design Document',
+      '<!-- beegame-executive-summary -->',
+      '## Executive Summary',
+      'Concrete product promise and scope.',
+      '<!-- beegame-draft-cursor:0:0 -->',
+      '',
+    ].join('\n')
+    const progress = inspectFoundationDocumentDraft(path, markdown)
+    const prompt = buildFoundationDocumentDraftTurnPrompt({
+      path,
+      progress,
+      projectionRelativePath:
+        '.beegame/workflow/document-projections/dispatch.json',
+    })
+
+    expect(progress).toMatchObject({
+      started: true,
+      completedGroupCount: 0,
+      completedPartCount: 0,
+      complete: false,
+    })
+    expect(prompt).not.toContain('native Write')
+    expect(prompt).toContain('Checkpoint 1, native Edit')
+    expect(prompt).toContain('<!-- beegame-part:vision:1 -->')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
   })
 
   test('rejects skipped, duplicated, and trailing draft content', () => {

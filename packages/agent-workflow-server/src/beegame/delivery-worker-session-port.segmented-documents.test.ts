@@ -26,28 +26,6 @@ async function advanceDraft(
   const groups = foundationDocumentDraftGroups(path)
   const group = groups[groupIndex]!
   const target = join(workspacePath, path)
-  if (groupIndex === 0 && partIndex === 0) {
-    const section = group.sections[0]!
-    await writeFile(
-      target,
-      [
-        '# Game Design Document',
-        '',
-        '<!-- beegame-executive-summary -->',
-        '## Executive Summary',
-        'Production-ready game authority for implementation and acceptance.',
-        '',
-        `<!-- beegame-section:${section.sectionId} -->`,
-        `## ${section.title}`,
-        `<!-- beegame-part:${section.sectionId}:1 -->`,
-        `Production authority for ${section.sectionId}, chunk one.`,
-        '',
-        '<!-- beegame-draft-cursor:0:1 -->',
-        '',
-      ].join('\n'),
-    )
-    return
-  }
   const current = await readFile(target, 'utf8')
   const cursor = `<!-- beegame-draft-cursor:${groupIndex}:${partIndex} -->`
   let replacement: string
@@ -116,6 +94,19 @@ describe('segmented initial document authoring', () => {
           const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
           const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
           const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
+          if (groupIndex === 0 && firstPartIndex === 0) {
+            await writeFile(
+              join(workspacePath, 'docs/GDD.md'),
+              [
+                '# Game Design Document',
+                '<!-- beegame-executive-summary -->',
+                '## Executive Summary',
+                'Production-ready game authority for implementation and acceptance.',
+                '<!-- beegame-draft-cursor:0:0 -->',
+                '',
+              ].join('\n'),
+            )
+          }
           for (
             let partIndex = firstPartIndex;
             partIndex < foundationDocumentDraftPartCount(group);
@@ -162,6 +153,8 @@ describe('segmented initial document authoring', () => {
       expect(prompts[0]).toContain(
         'continue bounded native file calls until this active group is complete',
       )
+      expect(prompts[0]).toContain('Checkpoint 1: native Write creates only')
+      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:0 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:1 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
       expect(prompts[0]).toContain('2,400 UTF-8 bytes')
