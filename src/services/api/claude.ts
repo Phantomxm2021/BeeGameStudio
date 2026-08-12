@@ -197,12 +197,10 @@ import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@bee-game-studio/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
-import { assertProviderCompletionReason } from '@ant/model-provider'
 import {
-  ProviderStreamIdleError,
-  createProviderStreamTerminality,
-  withProviderStreamIdleTimeout,
-} from './streamTerminality.js'
+  assertProviderCompletionReason,
+  ProviderCompletionError,
+} from '@ant/model-provider'
 import { count } from '../../utils/array.js'
 import { insertBlockAfterToolResults } from '../../utils/contentArray.js'
 import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
@@ -1970,25 +1968,52 @@ async function* queryModel(
     stopReason = null
     isAdvisorInProgress = false
 
-    // Apply the deadline to every iterator read. Cancelling the SDK stream is
-    // best-effort only: some compatible gateways leave next() pending forever.
-    // The read race guarantees that control returns to this generator.
+    // Streaming idle timeout watchdog: abort the stream if no chunks arrive
+    // for STREAM_IDLE_TIMEOUT_MS. Unlike the stall detection below (which only
+    // fires when the *next* chunk arrives), this uses setTimeout to actively
+    // kill hung streams. Without this, a silently dropped connection can hang
+    // the session indefinitely since the SDK's request timeout only covers the
+    // initial fetch(), not the streaming body.
+    const streamWatchdogEnabled = isEnvTruthy(
+      process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
+    )
     const STREAM_IDLE_TIMEOUT_MS =
       parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 90_000
     const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
     let streamIdleAborted = false
-    const providerStream = withProviderStreamIdleTimeout(stream, {
-      timeoutMs: STREAM_IDLE_TIMEOUT_MS,
-      warningMs: STREAM_IDLE_WARNING_MS,
-      onWarning: () => {
-        logForDebugging(
-          `Streaming idle warning: no chunks received for ${STREAM_IDLE_WARNING_MS / 1000}s`,
-          { level: 'warn' },
-        )
-        logForDiagnosticsNoPII('warn', 'cli_streaming_idle_warning')
-      },
-      onTimeout: () => {
+    // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
+    let streamWatchdogFiredAt: number | null = null
+    let streamIdleWarningTimer: ReturnType<typeof setTimeout> | null = null
+    let streamIdleTimer: ReturnType<typeof setTimeout> | null = null
+    function clearStreamIdleTimers(): void {
+      if (streamIdleWarningTimer !== null) {
+        clearTimeout(streamIdleWarningTimer)
+        streamIdleWarningTimer = null
+      }
+      if (streamIdleTimer !== null) {
+        clearTimeout(streamIdleTimer)
+        streamIdleTimer = null
+      }
+    }
+    function resetStreamIdleTimer(): void {
+      clearStreamIdleTimers()
+      if (!streamWatchdogEnabled) {
+        return
+      }
+      streamIdleWarningTimer = setTimeout(
+        warnMs => {
+          logForDebugging(
+            `Streaming idle warning: no chunks received for ${warnMs / 1000}s`,
+            { level: 'warn' },
+          )
+          logForDiagnosticsNoPII('warn', 'cli_streaming_idle_warning')
+        },
+        STREAM_IDLE_WARNING_MS,
+        STREAM_IDLE_WARNING_MS,
+      )
+      streamIdleTimer = setTimeout(() => {
         streamIdleAborted = true
+        streamWatchdogFiredAt = performance.now()
         logForDebugging(
           `Streaming idle timeout: no chunks received for ${STREAM_IDLE_TIMEOUT_MS / 1000}s, aborting stream`,
           { level: 'error' },
@@ -2002,8 +2027,9 @@ async function* queryModel(
           timeout_ms: STREAM_IDLE_TIMEOUT_MS,
         })
         releaseStreamResources()
-      },
-    })
+      }, STREAM_IDLE_TIMEOUT_MS)
+    }
+    resetStreamIdleTimer()
 
     startSessionActivity('api_call')
     try {
@@ -2013,11 +2039,9 @@ async function* queryModel(
       const STALL_THRESHOLD_MS = 30_000 // 30 seconds
       let totalStallTime = 0
       let stallCount = 0
-      const streamTerminality = createProviderStreamTerminality({
-        requestId: streamRequestId ?? clientRequestId ?? 'unknown',
-      })
 
-      for await (const part of providerStream) {
+      for await (const part of stream) {
+        resetStreamIdleTimer()
         const now = Date.now()
 
         // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -2057,7 +2081,6 @@ async function* queryModel(
 
         switch (part.type) {
           case 'message_start': {
-            streamTerminality.observe({ type: 'message_start' })
             partialMessage = part.message
             ttftMs = Date.now() - start
             usage = updateUsage(usage, part.message?.usage)
@@ -2073,11 +2096,6 @@ async function* queryModel(
             break
           }
           case 'content_block_start':
-            streamTerminality.observe({
-              type: 'content_block_start',
-              index: part.index,
-              contentType: part.content_block.type,
-            })
             switch (part.content_block.type) {
               case 'tool_use':
                 contentBlocks[part.index] = {
@@ -2172,13 +2190,6 @@ async function* queryModel(
                   // TODO: handle citations
                   break
                 case 'input_json_delta':
-                  if (typeof delta.partial_json !== 'string')
-                    throw new Error('Tool input delta is not a string')
-                  streamTerminality.observe({
-                    type: 'input_json_delta',
-                    index: part.index,
-                    bytes: Buffer.byteLength(delta.partial_json),
-                  })
                   if (
                     contentBlock.type !== 'tool_use' &&
                     contentBlock.type !== 'server_tool_use'
@@ -2264,10 +2275,6 @@ async function* queryModel(
             break
           }
           case 'content_block_stop': {
-            streamTerminality.observe({
-              type: 'content_block_stop',
-              index: part.index,
-            })
             const contentBlock = contentBlocks[part.index]
             if (!contentBlock) {
               logEvent('tengu_streaming_error', {
@@ -2313,13 +2320,10 @@ async function* queryModel(
               ...(advisorModel && { advisorModel }),
             }
             newMessages.push(m)
+            yield m
             break
           }
           case 'message_delta': {
-            streamTerminality.observe({
-              type: 'message_delta',
-              stopReason: part.delta.stop_reason,
-            })
             usage = updateUsage(usage, part.usage)
             // Capture research from message_delta if available (internal only).
             // Always overwrite with the latest value. Also write back to
@@ -2405,7 +2409,6 @@ async function* queryModel(
             break
           }
           case 'message_stop':
-            streamTerminality.observe({ type: 'message_stop' })
             break
         }
 
@@ -2415,10 +2418,41 @@ async function* queryModel(
           ...(part.type === 'message_start' ? { ttftMs } : undefined),
         }
       }
-      // Do not expose assistant tool blocks until the response itself is
-      // terminal. An incomplete response can then be discarded and retried
-      // without executing a native tool twice.
-      streamTerminality.completeBody()
+      // Clear the idle timeout watchdog now that the stream loop has exited
+      clearStreamIdleTimers()
+
+      // If the stream was aborted by our idle timeout watchdog, fall back to
+      // non-streaming retry rather than treating it as a completed stream.
+      if (streamIdleAborted) {
+        // Instrumentation: proves the for-await exited after the watchdog fired
+        // (vs. hung forever). exit_delay_ms measures abort propagation latency:
+        // 0-10ms = abort worked; >>1000ms = something else woke the loop.
+        const exitDelayMs =
+          streamWatchdogFiredAt !== null
+            ? Math.round(performance.now() - streamWatchdogFiredAt)
+            : -1
+        logForDiagnosticsNoPII(
+          'info',
+          'cli_stream_loop_exited_after_watchdog_clean',
+        )
+        logEvent('tengu_stream_loop_exited_after_watchdog', {
+          request_id: (streamRequestId ??
+            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          exit_delay_ms: exitDelayMs,
+          exit_path:
+            'clean' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          model:
+            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        // Prevent double-emit: this throw lands in the catch block below,
+        // whose exit_path='error' probe guards on streamWatchdogFiredAt.
+        streamWatchdogFiredAt = null
+        throw new Error('Stream idle timeout - no chunks received')
+      }
+
+      // A provider stream is complete only after message_start and a non-empty
+      // stop_reason. Content blocks alone are not terminal evidence: a proxy can
+      // close after thinking/text/tool content while omitting message_delta.
       if (!partialMessage) {
         logForDebugging(
           'Stream completed without receiving message_start event - triggering non-streaming fallback',
@@ -2433,7 +2467,6 @@ async function* queryModel(
         throw new Error('Stream ended without receiving any events')
       }
       assertProviderCompletionReason(stopReason)
-      for (const message of newMessages) yield message
 
       // Log summary if any stalls occurred during streaming
       if (stallCount > 0) {
@@ -2484,7 +2517,16 @@ async function* queryModel(
         responseHeaders = resp.headers
       }
     } catch (streamingError) {
-      if (streamingError instanceof ProviderStreamIdleError) {
+      // Clear the idle timeout watchdog on error path too
+      clearStreamIdleTimers()
+
+      // Instrumentation: if the watchdog had already fired and the for-await
+      // threw (rather than exiting cleanly), record that the loop DID exit and
+      // how long after the watchdog. Distinguishes true hangs from error exits.
+      if (streamIdleAborted && streamWatchdogFiredAt !== null) {
+        const exitDelayMs = Math.round(
+          performance.now() - streamWatchdogFiredAt,
+        )
         logForDiagnosticsNoPII(
           'info',
           'cli_stream_loop_exited_after_watchdog_error',
@@ -2492,7 +2534,7 @@ async function* queryModel(
         logEvent('tengu_stream_loop_exited_after_watchdog', {
           request_id: (streamRequestId ??
             'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          exit_delay_ms: 0,
+          exit_delay_ms: exitDelayMs,
           exit_path:
             'error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           error_name:
@@ -2534,10 +2576,11 @@ async function* queryModel(
         }
       }
 
-      // Assistant blocks are buffered until terminality, so an incomplete
-      // streaming attempt has not executed native tools. Discard the buffered
-      // blocks before the single bounded recovery path runs.
-      newMessages.length = 0
+      if (
+        streamingError instanceof ProviderCompletionError &&
+        newMessages.length > 0
+      )
+        throw streamingError
 
       // When the flag is enabled, skip the non-streaming fallback and let the
       // error propagate to withRetry. The mid-stream fallback causes double tool
@@ -2677,7 +2720,7 @@ async function* queryModel(
       fallbackMessage = m
       yield m
     } finally {
-      await providerStream.return(undefined)
+      clearStreamIdleTimers()
     }
   } catch (errorFromRetry) {
     // FallbackTriggeredError must propagate to query.ts, which performs the

@@ -666,10 +666,9 @@ export const getSkillDirCommands = memoize(
       }
       const additionalSkillsNested = await Promise.all(
         additionalDirs.flatMap(dir =>
-          getProjectConfigDirectoryNames().map(configDirName =>
-            loadSkillsFromSkillsDir(
-              join(dir, configDirName, 'skills'),
-              'projectSettings',
+          getProjectConfigDirectoryNames().flatMap(configDirName =>
+            getSkillsDirsForConfigBase(dir, configDirName).map(skillsDir =>
+              loadSkillsFromSkillsDir(skillsDir, 'projectSettings'),
             ),
           ),
         ),
@@ -703,10 +702,9 @@ export const getSkillDirCommands = memoize(
       projectSettingsEnabled
         ? Promise.all(
             additionalDirs.flatMap(dir =>
-              getProjectConfigDirectoryNames().map(configDirName =>
-                loadSkillsFromSkillsDir(
-                  join(dir, configDirName, 'skills'),
-                  'projectSettings',
+              getProjectConfigDirectoryNames().flatMap(configDirName =>
+                getSkillsDirsForConfigBase(dir, configDirName).map(skillsDir =>
+                  loadSkillsFromSkillsDir(skillsDir, 'projectSettings'),
                 ),
               ),
             ),
@@ -810,6 +808,13 @@ export const getSkillDirCommands = memoize(
   cwd => getRuntimeScopedCacheKey(cwd),
 )
 
+function getSkillsDirsForConfigBase(baseDir: string, configDirName: string): string[] {
+  const skillsDir = join(baseDir, configDirName, 'skills')
+  return configDirName === '.beegame'
+    ? [skillsDir, join(skillsDir, 'builtinskills')]
+    : [skillsDir]
+}
+
 export function clearSkillCaches() {
   getSkillDirCommands.cache?.clear?.()
   loadMarkdownFilesForSubdir.cache?.clear?.()
@@ -817,6 +822,9 @@ export function clearSkillCaches() {
   activatedConditionalSkillNames.clear()
 }
 
+// Backwards-compatible aliases for tests
+export { getSkillDirCommands as getCommandDirCommands }
+export { clearSkillCaches as clearCommandCaches }
 export { transformSkillFiles }
 
 // --- Dynamic skill discovery ---

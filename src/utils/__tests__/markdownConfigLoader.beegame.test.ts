@@ -20,7 +20,7 @@ describe('BeeGame project config discovery', () => {
     }
   })
 
-  test('discovers explicit project skills without auto-loading a built-in catalog', async () => {
+  test('discovers .beegame skills when BeeGame project config dir is enabled', async () => {
     process.env.BEEGAME_PROJECT_CONFIG_DIR_NAME = '.beegame'
     const { getProjectDirsUpToHome } = await import(
       '../markdownConfigLoader.js'
@@ -34,7 +34,7 @@ describe('BeeGame project config discovery', () => {
       await mkdir(builtinSkillsDir, { recursive: true })
 
       expect(getProjectDirsUpToHome('skills', cwd)).toContain(skillsDir)
-      expect(getProjectDirsUpToHome('skills', cwd)).not.toContain(builtinSkillsDir)
+      expect(getProjectDirsUpToHome('skills', cwd)).toContain(builtinSkillsDir)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
