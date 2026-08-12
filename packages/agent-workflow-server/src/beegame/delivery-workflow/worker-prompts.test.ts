@@ -50,6 +50,12 @@ describe('resource-content worker prompts', () => {
       'Never issue multiple CommitCanonicalDocument calls in parallel',
     )
     expect(prompt).toContain('body content only, without any Markdown heading')
+    expect(prompt).toContain(
+      'audit decisionId must equal the full future authorityId',
+    )
+    expect(prompt).toContain(
+      'at least one authority record for every contracted section',
+    )
     expect(prompt).toContain('under 16 KiB')
     expect(prompt).toContain('submit one part when a body is large')
     expect(prompt).toContain('Wait for the exact nextPart')

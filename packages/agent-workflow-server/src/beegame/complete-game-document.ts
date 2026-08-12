@@ -38,7 +38,13 @@ const riskSchema = z
 
 const openDecisionSchema = z
   .object({
-    decisionId: z.string().trim().min(1),
+    decisionId: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(
+        'Exact future authorityId in <document-id>.<sectionId>.<suffix> form; the deferred open_decision record must reuse it unchanged.',
+      ),
     question: z.string().trim().min(1),
     owner: z.string().trim().min(1),
     neededBy: z.string().trim().min(1),
@@ -513,6 +519,18 @@ export function validateCompleteGameDocumentSubmission(
     parsed.auditAppendix.openDecisions.map(decision => decision.decisionId),
     'open decision',
   )
+  const authorityPrefix = `${CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()}.`
+  for (const decision of parsed.auditAppendix.openDecisions) {
+    const ownsCanonicalSection = contract.sections.some(section =>
+      decision.decisionId.startsWith(
+        `${authorityPrefix}${section.sectionId}.`,
+      ),
+    )
+    if (!ownsCanonicalSection)
+      throw new Error(
+        `open decision ID must use ${authorityPrefix}<sectionId>.<suffix>: ${decision.decisionId}`,
+      )
+  }
   return parsed
 }
 

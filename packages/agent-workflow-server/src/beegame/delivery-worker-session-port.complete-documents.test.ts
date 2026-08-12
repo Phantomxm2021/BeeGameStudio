@@ -134,13 +134,17 @@ describe('delivery worker complete document commit contract', () => {
       )
       expect(block).toContain('body content only, without any Markdown heading')
       expect(block).toContain('document_parts_prepared')
+      expect(block).toContain(
+        'Every audit decisionId must be the full future authorityId',
+      )
+      expect(block).toContain('at least one record per contracted section')
       expect(block).toContain('Do not hand-author')
       expect(block).toContain('write or edit the assigned path directly')
       expect(block).not.toContain('document_prepared')
       expect(block).toContain('Read the compact authority projection')
       expect(block).toContain('CommitCanonicalDocument')
       expect(block).toContain('submit two or three consecutive parts')
-      expect(block).toContain('submit compact authority records')
+      expect(block).toContain('make one authority call')
       expect(block).not.toContain('Submit the complete Markdown body first')
       expect(block).toContain(
         'Read only the listed source sections when deeper rationale',

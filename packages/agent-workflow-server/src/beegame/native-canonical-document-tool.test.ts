@@ -155,6 +155,8 @@ describe('canonical document commit', () => {
     expect(prompt).toContain(
       'section body contains content only and must not begin with any Markdown heading',
     )
+    expect(prompt).toContain('decisionId must be the exact future authorityId')
+    expect(prompt).toContain('at least one record for every contracted section')
     expect(prompt).not.toContain('never skip or combine parts')
   })
 
@@ -398,6 +400,51 @@ describe('canonical document commit', () => {
         }),
       ).rejects.toThrow(/open decision.*closure|closure.*decision/i)
       await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects an audit decision ID that cannot become a canonical authority ID', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-audit-id-'))
+    try {
+      const path = 'docs/GDD.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-invalid-audit-id',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = completeSubmission(path)
+
+      await expect(
+        (tool?.call as (value: unknown) => Promise<unknown>)({
+          document: {
+            ...submission,
+            auditAppendix: {
+              ...submission.auditAppendix,
+              openDecisions: [
+                {
+                  decisionId: 'energy_exact_values',
+                  question: 'What are the exact energy values?',
+                  owner: 'BALANCE_DESIGN',
+                  neededBy: 'design stage',
+                },
+              ],
+            },
+          },
+        }),
+      ).rejects.toThrow(/open decision ID.*gdd\.<sectionId>/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
