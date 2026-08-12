@@ -3,8 +3,14 @@ import { open, readFile, rename, mkdir, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
-  validateCompleteGameDocumentMarkdown,
+  canonicalizeCompleteGameDocumentMarkdown,
 } from './complete-game-document'
+import {
+  authoritySidecarPath,
+  canonicalFoundationAuthoritySidecarBytes,
+  createFoundationAuthoritySidecar,
+  validateFoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
@@ -17,7 +23,21 @@ const commitInputSchema = z
   })
   .strict()
 
-const receiptSchema = z
+const authoritySubmissionSchema = z
+  .object({ records: z.array(z.unknown()).min(1) })
+  .strict()
+
+const completeDocumentCommitInputSchema = z.union([
+  z
+    .object({
+      body: z.string().trim().min(1),
+      authority: authoritySubmissionSchema,
+    })
+    .strict(),
+  z.object({ authority: authoritySubmissionSchema }).strict(),
+])
+
+const legacyReceiptSchema = z
   .object({
     schemaVersion: z.literal(1),
     dispatchId: z.string().min(1),
@@ -31,6 +51,27 @@ const receiptSchema = z
   })
   .strict()
 
+const completeDocumentReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    dispatchId: z.string().min(1),
+    targetPath: z.string().min(1),
+    baselineDigest: z.string().length(64).nullable(),
+    finalDigest: z.string().length(64),
+    authorityPath: z.string().min(1),
+    authorityDigest: z.string().length(64).nullable(),
+    documentId: z.string().min(1),
+    version: z.string().min(1),
+    updatedAt: z.string().datetime({ offset: true }),
+    status: z.enum(['document_prepared', 'committed']),
+  })
+  .strict()
+
+const receiptSchema = z.union([
+  legacyReceiptSchema,
+  completeDocumentReceiptSchema,
+])
+
 export type CanonicalDocumentCommitContract = {
   dispatchId: string
   targetPath: string
@@ -42,7 +83,7 @@ export type CanonicalDocumentCommitContract = {
   submissionKind?: 'complete_game_document'
 }
 
-export type CanonicalDocumentCommitReceipt = {
+export type LegacyCanonicalDocumentCommitReceipt = {
   schemaVersion: 1
   dispatchId: string
   targetPath: string
@@ -53,6 +94,24 @@ export type CanonicalDocumentCommitReceipt = {
   updatedAt: string
   status: 'prepared' | 'committed'
 }
+
+export type CompleteGameDocumentCommitReceipt = {
+  schemaVersion: 2
+  dispatchId: string
+  targetPath: string
+  baselineDigest: string | null
+  finalDigest: string
+  authorityPath: string
+  authorityDigest: string | null
+  documentId: string
+  version: string
+  updatedAt: string
+  status: 'document_prepared' | 'committed'
+}
+
+export type CanonicalDocumentCommitReceipt =
+  | LegacyCanonicalDocumentCommitReceipt
+  | CompleteGameDocumentCommitReceipt
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 
@@ -79,35 +138,34 @@ export function createNativeCanonicalDocumentTool(options: {
   return options.buildTool({
     name: 'CommitCanonicalDocument',
     alwaysLoad: true,
-    inputSchema: commitInputSchema,
+    inputSchema: completeGameDocument
+      ? completeDocumentCommitInputSchema
+      : commitInputSchema,
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
     async description() {
       return completeGameDocument
-        ? 'Validate and atomically commit the complete game-development document as one Markdown body. The executive summary, canonical sections, production materials and audit appendix are required; the workflow service owns metadata and persistence.'
+        ? 'Validate and durably commit the complete game-development Markdown together with its compact authority records. The workflow service owns metadata, digest binding, persistence, and recovery.'
         : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
       return completeGameDocument
-        ? 'Call exactly once with {body} containing the complete Markdown document. Begin with one # title, then include the exact executive-summary marker, canonical section markers and titles, required production-material markers and formats, and one audit appendix with observable acceptance criteria. Do not include YAML front matter or defer missing authority to a reviewer.'
+        ? 'Call with {body, authority:{records}}. Body contains the complete Markdown document; records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision. If the service reports document_prepared with invalid authority, retry with {authority:{records}} only and do not resend or rewrite Markdown.'
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: unknown) {
-      const submittedBody = commitInputSchema.parse(input).body
-      const body = completeGameDocument
-        ? validateCompleteGameDocumentMarkdown(
-            options.contract.targetPath as FoundationDocumentPath,
-            submittedBody,
-          )
-        : submittedBody
+      const parsed = completeGameDocument
+        ? completeDocumentCommitInputSchema.parse(input)
+        : commitInputSchema.parse(input)
       return {
         data: await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
-          body,
+          ...('body' in parsed ? { body: parsed.body } : {}),
+          ...('authority' in parsed ? { authority: parsed.authority } : {}),
         }),
       }
     },
@@ -127,10 +185,15 @@ export function createNativeCanonicalDocumentTool(options: {
 export async function commitCanonicalDocument(input: {
   workspacePath: string
   contract: CanonicalDocumentCommitContract
-  body: string
+  body?: string
+  authority?: unknown
 }): Promise<CanonicalDocumentCommitReceipt> {
-  const body = input.body.trim()
-  if (body.startsWith('---'))
+  const body = input.body?.trim()
+  const completeGameDocument =
+    input.contract.submissionKind === 'complete_game_document'
+  if (!body && !completeGameDocument)
+    throw new Error('canonical document body is required')
+  if (body?.startsWith('---') && !completeGameDocument)
     throw new Error(
       'canonical document body must not include YAML front matter; metadata is service-owned',
     )
@@ -163,7 +226,22 @@ export async function commitCanonicalDocument(input: {
     input.workspacePath,
     input.contract.dispatchId,
   )
+  if (completeGameDocument) {
+    return commitCompleteGameDocument({
+      workspacePath,
+      targetPath,
+      receiptPath,
+      currentContent,
+      currentDigest,
+      existingReceipt,
+      contract: input.contract,
+      body,
+      authority: input.authority,
+    })
+  }
   if (existingReceipt) {
+    if (existingReceipt.schemaVersion !== 1)
+      throw new Error('canonical document receipt kind does not match dispatch')
     assertReceiptMatchesContract(existingReceipt, input.contract)
     if (currentDigest === existingReceipt.finalDigest) {
       const committed = { ...existingReceipt, status: 'committed' as const }
@@ -179,7 +257,7 @@ export async function commitCanonicalDocument(input: {
       documentId: existingReceipt.documentId,
       version: existingReceipt.version,
       updatedAt: existingReceipt.updatedAt,
-      body,
+      body: body!,
     })
     if (digest(proposed) !== existingReceipt.finalDigest)
       throw new Error(
@@ -201,7 +279,7 @@ export async function commitCanonicalDocument(input: {
     documentId: input.contract.documentId,
     version,
     updatedAt,
-    body,
+    body: body!,
   })
   const prepared: CanonicalDocumentCommitReceipt = {
     schemaVersion: 1,
@@ -218,6 +296,145 @@ export async function commitCanonicalDocument(input: {
   await durableWrite(targetPath, finalContent)
   const committed = { ...prepared, status: 'committed' as const }
   await durableWrite(receiptPath, `${JSON.stringify(committed, null, 2)}\n`)
+  return committed
+}
+
+async function commitCompleteGameDocument(input: {
+  workspacePath: string
+  targetPath: string
+  receiptPath: string
+  currentContent: string | undefined
+  currentDigest: string | null
+  existingReceipt: CanonicalDocumentCommitReceipt | undefined
+  contract: CanonicalDocumentCommitContract
+  body: string | undefined
+  authority: unknown
+}): Promise<CompleteGameDocumentCommitReceipt> {
+  const documentPath = input.contract.targetPath as FoundationDocumentPath
+  let receipt: CompleteGameDocumentCommitReceipt
+  let markdown: string
+
+  if (input.existingReceipt) {
+    if (input.existingReceipt.schemaVersion !== 2)
+      throw new Error('canonical document receipt kind does not match dispatch')
+    assertReceiptMatchesContract(input.existingReceipt, input.contract)
+    receipt = input.existingReceipt
+    if (input.currentDigest === receipt.finalDigest && input.currentContent) {
+      markdown = input.currentContent
+      if (input.body) {
+        const proposed = canonicalizeCompleteGameDocumentMarkdown(
+          documentPath,
+          input.body,
+          { version: receipt.version, updatedAt: receipt.updatedAt },
+        )
+        if (digest(proposed) !== receipt.finalDigest)
+          throw new Error(
+            'canonical document commit was already prepared with different content',
+          )
+      }
+    } else {
+      if (input.currentDigest !== receipt.baselineDigest)
+        throw new Error(
+          'canonical document changed outside the prepared commit; refusing to overwrite concurrent content',
+        )
+      if (!input.body)
+        throw new Error(
+          'prepared canonical document bytes are missing; resend body before authority repair',
+        )
+      markdown = canonicalizeCompleteGameDocumentMarkdown(
+        documentPath,
+        input.body,
+        { version: receipt.version, updatedAt: receipt.updatedAt },
+      )
+      if (digest(markdown) !== receipt.finalDigest)
+        throw new Error(
+          'canonical document commit was already prepared with different content',
+        )
+      await durableWrite(input.targetPath, markdown)
+    }
+  } else {
+    if (!input.body)
+      throw new Error('complete game document body is required before authority repair')
+    if (input.currentDigest !== input.contract.baselineDigest)
+      throw new Error(
+        'canonical document baseline changed before commit; refusing to overwrite concurrent content',
+      )
+    const version = nextVersion(input.contract)
+    const updatedAt = nextUpdatedAt(input.contract)
+    markdown = canonicalizeCompleteGameDocumentMarkdown(
+      documentPath,
+      input.body,
+      { version, updatedAt },
+    )
+    receipt = {
+      schemaVersion: 2,
+      dispatchId: input.contract.dispatchId,
+      targetPath: input.contract.targetPath,
+      baselineDigest: input.contract.baselineDigest,
+      finalDigest: digest(markdown),
+      authorityPath: authoritySidecarPath(documentPath),
+      authorityDigest: null,
+      documentId: input.contract.documentId,
+      version,
+      updatedAt,
+      status: 'document_prepared',
+    }
+    await durableWrite(
+      input.receiptPath,
+      `${JSON.stringify(receipt, null, 2)}\n`,
+    )
+    await durableWrite(input.targetPath, markdown)
+  }
+
+  const authorityTarget = resolve(input.workspacePath, receipt.authorityPath)
+  if (receipt.status === 'committed') {
+    const raw = await readOptionalFile(authorityTarget)
+    if (
+      raw === undefined ||
+      receipt.authorityDigest === null ||
+      digest(raw) !== receipt.authorityDigest
+    )
+      throw new Error('committed foundation authority sidecar is missing or stale')
+    validateFoundationAuthoritySidecar({
+      documentPath,
+      markdown,
+      value: JSON.parse(raw),
+    })
+    if (input.authority !== undefined) {
+      const submitted = createFoundationAuthoritySidecar({
+        documentPath,
+        markdown,
+        submission: input.authority,
+      })
+      if (
+        digest(canonicalFoundationAuthoritySidecarBytes(submitted)) !==
+        receipt.authorityDigest
+      )
+        throw new Error(
+          'canonical document commit was already prepared with different authority',
+        )
+    }
+    return receipt
+  }
+
+  if (input.authority === undefined)
+    throw new Error('foundation authority records are required')
+  const sidecar = createFoundationAuthoritySidecar({
+    documentPath,
+    markdown,
+    submission: input.authority,
+  })
+  const sidecarBytes = canonicalFoundationAuthoritySidecarBytes(sidecar)
+  await durableWrite(authorityTarget, sidecarBytes)
+  const committed: CompleteGameDocumentCommitReceipt = {
+    ...receipt,
+    authorityDigest: digest(sidecarBytes),
+    status: 'committed',
+  }
+  await durableWrite(
+    input.receiptPath,
+    `${JSON.stringify(committed, null, 2)}\n`,
+  )
   return committed
 }
 
@@ -258,6 +475,44 @@ export async function reconcileCanonicalDocumentCommitReceipt(input: {
   )
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
+  if (receipt.schemaVersion === 2) {
+    const authorityRaw = await readOptionalFile(
+      resolve(input.workspacePath, receipt.authorityPath),
+    )
+    if (authorityRaw === undefined) return undefined
+    let authority: unknown
+    try {
+      authority = JSON.parse(authorityRaw)
+    } catch {
+      return undefined
+    }
+    validateFoundationAuthoritySidecar({
+      documentPath: receipt.targetPath as FoundationDocumentPath,
+      markdown: target,
+      value: authority,
+    })
+    const authorityDigest = digest(authorityRaw)
+    if (
+      receipt.authorityDigest !== null &&
+      receipt.authorityDigest !== authorityDigest
+    )
+      return undefined
+    if (
+      receipt.status === 'committed' &&
+      receipt.authorityDigest === authorityDigest
+    )
+      return receipt
+    const committed: CompleteGameDocumentCommitReceipt = {
+      ...receipt,
+      authorityDigest,
+      status: 'committed',
+    }
+    await durableWrite(
+      canonicalDocumentReceiptPath(input.workspacePath, input.dispatchId),
+      `${JSON.stringify(committed, null, 2)}\n`,
+    )
+    return committed
+  }
   if (receipt.status === 'committed') return receipt
   const committed = { ...receipt, status: 'committed' as const }
   await durableWrite(

@@ -6,8 +6,13 @@ import { join } from 'node:path'
 import {
   commitCanonicalDocument,
   createNativeCanonicalDocumentTool,
+  readCanonicalDocumentCommitReceipt,
   reconcileCanonicalDocumentCommitReceipt,
 } from './native-canonical-document-tool'
+import {
+  authoritySidecarPath,
+  validateFoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -46,6 +51,28 @@ function completeSubmission(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number
   }
 }
 
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
+
+function authoritySubmission(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+) {
+  const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()
+  return {
+    records: getGameDocumentContract(path).sections
+      .map(section => ({
+        authorityId: `${documentId}.${section.sectionId}.primary`,
+        sectionId: section.sectionId,
+        kind: 'fact' as const,
+        state: 'confirmed' as const,
+        statement: `Confirmed authority for ${section.sectionId}.`,
+        responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+      }))
+      .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
+  }
+}
+
 describe('canonical document commit', () => {
   test('produces the complete canonical document set from neutral product authority', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
@@ -72,7 +99,10 @@ describe('canonical document commit', () => {
           | ((input: unknown) => Promise<unknown>)
           | undefined
         const submission = completeSubmission(path)
-        await call!({ body: renderCompleteGameDocument(path, submission) })
+        await call!({
+          body: renderCompleteGameDocument(path, submission),
+          authority: authoritySubmission(path),
+        })
       }
 
       expect(
@@ -84,6 +114,16 @@ describe('canonical document commit', () => {
       ).toEqual({ valid: true, issues: [] })
       for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
         const content = await readFile(join(workspacePath, path), 'utf8')
+        const sidecar = JSON.parse(
+          await readFile(join(workspacePath, authoritySidecarPath(path)), 'utf8'),
+        )
+        expect(
+          validateFoundationAuthoritySidecar({
+            documentPath: path,
+            markdown: content,
+            value: sidecar,
+          }).documentPath,
+        ).toBe(path)
         for (const section of getGameDocumentContract(path).sections)
           expect(content).toContain(
             `<!-- beegame-section:${section.sectionId} -->`,
@@ -118,12 +158,69 @@ describe('canonical document commit', () => {
       const submission = completeSubmission(path)
       const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
       expect(call).toBeDefined()
-      await call!({ body: renderCompleteGameDocument(path, submission) })
+      await call!({
+        body: renderCompleteGameDocument(path, submission),
+        authority: authoritySubmission(path),
+      })
       const content = await readFile(join(workspacePath, path), 'utf8')
       for (const section of contract.sections)
         expect(content).toContain(`<!-- beegame-section:${section.sectionId} -->`)
       await expect(call!({ body: '# bypass' })).rejects.toThrow()
       await expect(call!(submission)).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('retains valid Markdown and repairs only an invalid authority sidecar', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-sidecar-repair-'))
+    try {
+      const path = 'docs/GDD.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-sidecar-repair',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      const authority = authoritySubmission(path)
+      await expect(
+        call({
+          body: renderCompleteGameDocument(path, completeSubmission(path)),
+          authority: { records: authority.records.slice(1) },
+        }),
+      ).rejects.toThrow(/coverage/i)
+
+      const preparedMarkdown = await readFile(join(workspacePath, path), 'utf8')
+      expect(preparedMarkdown).toContain('document_id: GDD')
+      expect(
+        await readCanonicalDocumentCommitReceipt(
+          workspacePath,
+          'dispatch-sidecar-repair',
+        ),
+      ).toMatchObject({ status: 'document_prepared', authorityDigest: null })
+      await expect(
+        readFile(join(workspacePath, authoritySidecarPath(path)), 'utf8'),
+      ).rejects.toThrow()
+
+      const result = (await call({ authority })) as {
+        data: { status: string; authorityDigest: string }
+      }
+      expect(result.data.status).toBe('committed')
+      expect(result.data.authorityDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(await readFile(join(workspacePath, path), 'utf8')).toBe(
+        preparedMarkdown,
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
