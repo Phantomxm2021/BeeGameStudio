@@ -8,7 +8,7 @@ import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 const SECTIONS_PER_TURN = 1
 const SECTION_PART_COUNT = 2
-const MAX_NATIVE_REPLACEMENT_BYTES = 2_400
+const MAX_NATIVE_REPLACEMENT_BYTES = 3_600
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number

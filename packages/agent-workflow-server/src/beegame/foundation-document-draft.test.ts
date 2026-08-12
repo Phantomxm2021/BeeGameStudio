@@ -80,7 +80,7 @@ describe('foundation document draft groups', () => {
     )
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:1 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
-    expect(prompt).toContain('2,400 UTF-8 bytes')
+    expect(prompt).toContain('3,600 UTF-8 bytes')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
@@ -162,11 +162,11 @@ describe('foundation document draft groups', () => {
       '# Game Design Document',
       '<!-- beegame-executive-summary -->',
       '## Executive Summary',
-      's'.repeat(2_000),
+      's'.repeat(3_000),
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
       `<!-- beegame-part:${section.sectionId}:1 -->`,
-      'p'.repeat(2_000),
+      'p'.repeat(3_000),
       '<!-- beegame-draft-cursor:0:1 -->',
     ].join('\n')
     expect(inspectFoundationDocumentDraft(path, valid)).toMatchObject({
@@ -177,9 +177,9 @@ describe('foundation document draft groups', () => {
     expect(() =>
       inspectFoundationDocumentDraft(
         path,
-        valid.replace('s'.repeat(2_000), 's'.repeat(2_401)),
+        valid.replace('s'.repeat(3_000), 's'.repeat(3_601)),
       ),
-    ).toThrow(/exceeds 2400 bytes/i)
+    ).toThrow(/exceeds 3600 bytes/i)
   })
 
   test('rejects skipped, duplicated, and trailing draft content', () => {
@@ -213,12 +213,12 @@ describe('foundation document draft groups', () => {
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
       `<!-- beegame-part:${section.sectionId}:1 -->`,
-      'x'.repeat(2_401),
+      'x'.repeat(3_601),
       '<!-- beegame-draft-cursor:0:1 -->',
     ].join('\n')
 
     expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
-      /exceeds 2400 bytes/i,
+      /exceeds 3600 bytes/i,
     )
   })
 })

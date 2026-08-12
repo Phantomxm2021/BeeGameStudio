@@ -157,7 +157,7 @@ describe('segmented initial document authoring', () => {
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:0 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:1 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
-      expect(prompts[0]).toContain('2,400 UTF-8 bytes')
+      expect(prompts[0]).toContain('3,600 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',
