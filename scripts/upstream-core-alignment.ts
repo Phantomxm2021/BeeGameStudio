@@ -219,7 +219,6 @@ async function enumerateConfiguredPaths(
 }
 
 function decodeText(bytes: Uint8Array): string | undefined {
-  if (bytes.includes(0)) return undefined
   try {
     return textDecoder.decode(bytes)
   } catch {

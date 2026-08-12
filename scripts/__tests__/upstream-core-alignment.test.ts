@@ -165,6 +165,28 @@ describe('upstream core audit', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('applies branding substitutions to valid UTF-8 source containing NUL', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'core-alignment-utf8-nul-'))
+    const upstreamRoot = join(root, 'upstream')
+    const localRoot = join(root, 'local')
+    const upstreamSource =
+      "process.env.CLAUDE_CONFIG_DIR\nconst control = '\0'\n"
+    await writeFixture(upstreamRoot, 'src/runtime.ts', upstreamSource)
+    await mkdir(localRoot, { recursive: true })
+
+    await syncCoreAlignment({
+      manifest: fixtureManifest,
+      upstreamRoot,
+      localRoot,
+      verifyCommit: false,
+    })
+
+    expect(await Bun.file(join(localRoot, 'src/runtime.ts')).text()).toBe(
+      "process.env.BEEGAME_CONFIG_DIR\nconst control = '\0'\n",
+    )
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('rejects manifest traversal and source symlinks', async () => {
     const root = await mkdtemp(join(tmpdir(), 'core-alignment-safety-'))
     const upstreamRoot = join(root, 'upstream')
