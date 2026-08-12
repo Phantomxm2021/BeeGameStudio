@@ -95,12 +95,16 @@ describe('foundation authority projection', () => {
     expect(
       result.sources.every(source =>
         source.sections.every(section =>
-          section.content.includes(
+          section.contentLines.includes(
             `<!-- beegame-section:${section.sectionId} -->`,
           ),
         ),
       ),
     ).toBe(true)
+    expect(serialized).not.toContain('"content":')
+    expect(
+      Math.max(...serialized.split('\n').map(line => Buffer.byteLength(line))),
+    ).toBeLessThan(4096)
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.sources.every(Object.isFrozen)).toBe(true)
     expect(result.sources.every(source => Object.isFrozen(source.sections))).toBe(true)

@@ -105,13 +105,14 @@ describe('delivery worker complete document boundary', () => {
       ).toBe(true)
       expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
-      expect(projected.sources[0].sections[0].content).toContain(
+      expect(projected.sources[0].sections[0].contentLines.join('\n')).toContain(
         'Authority content for',
       )
       expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')
       expect(block).not.toContain('STALE TARGET BODY')
+      expect(block).toContain('do not perform a separate target read')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

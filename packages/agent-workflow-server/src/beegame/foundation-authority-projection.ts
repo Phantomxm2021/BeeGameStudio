@@ -8,7 +8,7 @@ export type FoundationAuthoritySource = Readonly<{
     sectionId: string
     startLine: number
     lineCount: number
-    content: string
+    contentLines: readonly string[]
   }>[]
   digest: string
 }>
@@ -58,7 +58,7 @@ export function projectFoundationAuthority(input: {
       sectionId: string
       startLine: number
       lineCount: number
-      content: string
+      contentLines: readonly string[]
     }> = []
     for (const sectionId of source.sectionIds) {
       const section = sourceContract.sections.find(
@@ -79,7 +79,7 @@ export function projectFoundationAuthority(input: {
           sectionId,
           startLine: markerLine + 1,
           lineCount: endLine - markerLine,
-          content: lines.slice(markerLine, endLine).join('\n').trimEnd(),
+          contentLines: Object.freeze(lines.slice(markerLine, endLine)),
         }),
       )
     }
