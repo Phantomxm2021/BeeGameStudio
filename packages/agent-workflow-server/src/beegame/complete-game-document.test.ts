@@ -225,6 +225,46 @@ describe('complete game document submission', () => {
     })).not.toThrow()
   })
 
+  test('normalizes whitespace in known service-owned section and material markers', () => {
+    const path = 'docs/GDD.md'
+    const authored = renderCompleteGameDocument(path, completeSubmission(path))
+      .replace(
+        '<!-- beegame-section:vision -->',
+        '<!-- beegame-section: vision -->',
+      )
+      .replace(
+        '<!-- beegame-material:core-loop-diagram -->',
+        '<!-- beegame-material: core-loop-diagram -->',
+      )
+
+    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
+      version: '1.0.0',
+      updatedAt: '2026-08-11T04:30:00.000Z',
+    })
+    expect(canonical).toContain('<!-- beegame-section:vision -->')
+    expect(canonical).toContain(
+      '<!-- beegame-material:core-loop-diagram -->',
+    )
+    expect(canonical).not.toContain('<!-- beegame-section: vision -->')
+    expect(canonical).not.toContain(
+      '<!-- beegame-material: core-loop-diagram -->',
+    )
+
+    expect(() =>
+      canonicalizeCompleteGameDocumentMarkdown(
+        path,
+        authored.replace(
+          '<!-- beegame-section: vision -->',
+          '<!-- beegame-section:not-contracted -->',
+        ),
+        {
+          version: '1.0.0',
+          updatedAt: '2026-08-11T04:30:00.000Z',
+        },
+      ),
+    ).toThrow(/section|order/i)
+  })
+
   test('rejects repeated substantive blocks across document sections', () => {
     const path = 'docs/GDD.md'
     const value = completeSubmission(path)

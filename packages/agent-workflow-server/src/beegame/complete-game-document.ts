@@ -367,6 +367,35 @@ export function canonicalizeCompleteGameDocumentMarkdown(
   if (bodyStart === 0 && lines[0]?.trim() === '---')
     throw new Error('complete game document front matter is incomplete')
   const bodyLines = lines.slice(bodyStart)
+  const contract = getGameDocumentContract(path)
+  const canonicalMarkers = new Map<string, string>([
+    ...contract.sections.map(
+      section =>
+        [
+          `beegame-section:${section.sectionId}`,
+          `<!-- beegame-section:${section.sectionId} -->`,
+        ] as const,
+    ),
+    ...contract.productionMaterials.map(
+      material =>
+        [
+          `beegame-material:${material.materialId}`,
+          `<!-- beegame-material:${material.materialId} -->`,
+        ] as const,
+    ),
+  ])
+  for (let index = 0; index < bodyLines.length; index += 1) {
+    const line = bodyLines[index]!.trim()
+    if (!line.startsWith('<!--') || !line.endsWith('-->')) continue
+    const inner = line.slice('<!--'.length, -'-->'.length).trim()
+    const separator = inner.indexOf(':')
+    if (separator < 0) continue
+    const key = `${inner.slice(0, separator).trim()}:${inner
+      .slice(separator + 1)
+      .trim()}`
+    const canonical = canonicalMarkers.get(key)
+    if (canonical) bodyLines[index] = canonical
+  }
   const normalizeMarkerHeading = (
     marker: string,
     heading: string,
@@ -390,7 +419,6 @@ export function canonicalizeCompleteGameDocumentMarkdown(
   ] as const) {
     normalizeMarkerHeading(marker, heading, true)
   }
-  const contract = getGameDocumentContract(path)
   for (const section of contract.sections)
     normalizeMarkerHeading(
       `<!-- beegame-section:${section.sectionId} -->`,
