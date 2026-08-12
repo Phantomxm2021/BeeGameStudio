@@ -31,17 +31,35 @@ function completeSubmission(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number
       title: section.title,
       body: `Authoritative production content ${index + 1}.`,
     })),
-    productionMaterials: contract.productionMaterials.map(material => ({
-      materialId: material.materialId,
-      title: material.title,
-      format: material.format,
-      body:
-        material.format === 'markdown_table'
-          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
-          : material.format === 'mermaid'
-            ? '```mermaid\ngraph TD\n  A --> B\n```'
-            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
-    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
     auditAppendix: {
       acceptanceCriteria: ['The complete document contract is inspectable and implementation-ready.'],
       upstreamReferences: [],
@@ -200,6 +218,67 @@ describe('canonical document commit', () => {
       const markdown = await readFile(join(workspacePath, path), 'utf8')
       expect(markdown).toContain('<!-- beegame-section:visual_pillars -->')
       expect(markdown).toContain('<!-- beegame-material:visual-pillar-board -->')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects verified license evidence that does not exist on disk', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-evidence-'))
+    try {
+      const path = 'docs/ASSET_PLAN.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-missing-license-evidence',
+          targetPath: path,
+          documentId: 'ASSET_PLAN',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = completeSubmission(path)
+      const document = {
+        ...submission,
+        productionMaterials: submission.productionMaterials.map(material =>
+          material.materialId === 'license-register'
+            ? {
+                ...material,
+                entries: [
+                  {
+                    evidenceId: 'asset.external.primary',
+                    category: 'production_asset',
+                    displayName: 'External production asset',
+                    purpose: 'Bind an external source to production use.',
+                    state: 'verified',
+                    sourceLocator: 'https://example.com/assets/primary',
+                    licenseType: 'Commercial license',
+                    commercialUse: true,
+                    attribution: 'Attribution required.',
+                    evidenceRefs: [
+                      {
+                        kind: 'file',
+                        locator: 'assets/_licenses/missing.txt',
+                        digest: '0'.repeat(64),
+                      },
+                    ],
+                  },
+                ],
+              }
+            : material,
+        ),
+      }
+
+      await expect(
+        (tool?.call as (value: unknown) => Promise<unknown>)({ document }),
+      ).rejects.toThrow(/evidence.*missing|missing.*evidence/i)
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

@@ -9,6 +9,7 @@ import {
   completeGameDocumentSubmissionSchema,
   productionMaterialSchema,
   renderCompleteGameDocument,
+  validateCompleteGameDocumentEvidence,
   validateCompleteGameDocumentSubmission,
 } from './complete-game-document'
 import {
@@ -24,6 +25,7 @@ import {
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { validateDocumentEvidenceEntries } from './document-evidence'
 
 const commitInputSchema = z
   .object({
@@ -246,16 +248,20 @@ export function createNativeCanonicalDocumentTool(options: {
             part: parsed.part,
           }),
         }
-      const structuredBody =
+      const structuredDocument =
         completeGameDocument && 'document' in parsed
-          ? renderCompleteGameDocument(
+          ? await validateCompleteGameDocumentEvidence(
+              options.workspacePath,
               options.contract.targetPath as FoundationDocumentPath,
-              validateCompleteGameDocumentSubmission(
-                options.contract.targetPath as FoundationDocumentPath,
-                parsed.document,
-              ),
+              parsed.document,
             )
           : undefined
+      const structuredBody = structuredDocument
+        ? renderCompleteGameDocument(
+            options.contract.targetPath as FoundationDocumentPath,
+            structuredDocument,
+          )
+        : undefined
       const result = await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
@@ -364,6 +370,11 @@ async function prepareCompleteDocumentPart(input: {
       draft.sections.push(submittedSection)
     } else if (input.part.kind === 'material') {
       const submittedMaterial = input.part.material
+      if (submittedMaterial.format === 'evidence_register')
+        await validateDocumentEvidenceEntries({
+          workspacePath: input.workspacePath,
+          entries: submittedMaterial.entries,
+        })
       const prior = draft.productionMaterials.find(
         material => material.materialId === submittedMaterial.materialId,
       )

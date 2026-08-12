@@ -5,6 +5,12 @@ import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
+import {
+  canonicalDocumentEvidenceEntries,
+  documentEvidenceEntrySchema,
+  renderDocumentEvidenceRegister,
+  validateDocumentEvidenceEntries,
+} from './document-evidence'
 
 const upstreamReferenceSchema = z
   .object({
@@ -39,7 +45,7 @@ export const completeGameDocumentSectionSchema = z
   })
   .strict()
 
-export const productionMaterialSchema = z
+const authoredProductionMaterialSchema = z
   .object({
     materialId: z.string().trim().min(1),
     title: z.string().trim().min(1),
@@ -47,6 +53,20 @@ export const productionMaterialSchema = z
     body: z.string().trim().min(1),
   })
   .strict()
+
+const evidenceRegisterMaterialSchema = z
+  .object({
+    materialId: z.string().trim().min(1),
+    title: z.string().trim().min(1),
+    format: z.literal('evidence_register'),
+    entries: z.array(documentEvidenceEntrySchema).min(1),
+  })
+  .strict()
+
+export const productionMaterialSchema = z.discriminatedUnion('format', [
+  authoredProductionMaterialSchema,
+  evidenceRegisterMaterialSchema,
+])
 
 export const completeGameDocumentSubmissionSchema = z
   .object({
@@ -91,13 +111,13 @@ function assertUniqueIds(values: readonly string[], label: string): void {
 }
 
 function assertMaterialFormat(
-  format: 'markdown_table' | 'mermaid' | 'inline_svg',
+  format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register',
   body: string,
   materialId: string,
 ): void {
   const lines = body.split('\n').map(line => line.trim())
   const valid =
-    format === 'markdown_table'
+    format === 'markdown_table' || format === 'evidence_register'
       ? lines.filter(line => line.startsWith('|') && line.endsWith('|')).length >= 3 &&
         lines.some(line => line.includes('---'))
       : format === 'mermaid'
@@ -114,14 +134,30 @@ export function validateCompleteGameDocumentSubmission(
   const submitted = completeGameDocumentSubmissionSchema.parse(value)
   const parsed: CompleteGameDocumentSubmission = {
     ...submitted,
-    productionMaterials: submitted.productionMaterials.map(material => ({
-      ...material,
-      body:
-        material.format === 'mermaid' &&
-        !material.body.split('\n').some(line => line.trim() === '```mermaid')
-          ? `\`\`\`mermaid\n${material.body.trim()}\n\`\`\``
-          : material.body,
-    })),
+    productionMaterials: submitted.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            ...material,
+            entries: canonicalDocumentEvidenceEntries(material.entries).map(
+              entry => ({
+                ...entry,
+                evidenceRefs: entry.evidenceRefs.map(reference => ({
+                  ...reference,
+                })),
+              }),
+            ),
+          }
+        : {
+            ...material,
+            body:
+              material.format === 'mermaid' &&
+              !material.body
+                .split('\n')
+                .some(line => line.trim() === '```mermaid')
+                ? `\`\`\`mermaid\n${material.body.trim()}\n\`\`\``
+                : material.body,
+          },
+    ),
   }
   const contract = getGameDocumentContract(path)
   assertExactOrder(
@@ -145,7 +181,8 @@ export function validateCompleteGameDocumentSubmission(
     const expected = contract.productionMaterials[index]
     if (material.title !== expected?.title || material.format !== expected.format)
       throw new Error(`production material contract is invalid: ${material.materialId}`)
-    assertMaterialFormat(material.format, material.body, material.materialId)
+    if (material.format !== 'evidence_register')
+      assertMaterialFormat(material.format, material.body, material.materialId)
   })
 
   const allowedUpstreamPaths = new Set(contract.allowedUpstreamPaths)
@@ -163,6 +200,22 @@ export function validateCompleteGameDocumentSubmission(
     parsed.auditAppendix.openDecisions.map(decision => decision.decisionId),
     'open decision',
   )
+  return parsed
+}
+
+export async function validateCompleteGameDocumentEvidence(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+  value: unknown,
+): Promise<CompleteGameDocumentSubmission> {
+  const parsed = validateCompleteGameDocumentSubmission(path, value)
+  for (const material of parsed.productionMaterials) {
+    if (material.format !== 'evidence_register') continue
+    await validateDocumentEvidenceEntries({
+      workspacePath,
+      entries: material.entries,
+    })
+  }
   return parsed
 }
 
@@ -199,7 +252,9 @@ export function renderCompleteGameDocument(
       `<!-- beegame-material:${material.materialId} -->`,
       `### ${material.title}`,
       '',
-      material.body,
+      material.format === 'evidence_register'
+        ? renderDocumentEvidenceRegister(material.entries)
+        : material.body,
       '',
     )
 

@@ -22,17 +22,35 @@ function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number])
       title: section.title,
       body: `Implementation-ready authority ${index + 1}.`,
     })),
-    productionMaterials: contract.productionMaterials.map(material => ({
-      materialId: material.materialId,
-      title: material.title,
-      format: material.format,
-      body:
-        material.format === 'markdown_table'
-          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
-          : material.format === 'mermaid'
-            ? '```mermaid\ngraph TD\n  A --> B\n```'
-            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
-    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
     auditAppendix: {
       acceptanceCriteria: ['All owned requirements and materials are complete and inspectable.'],
       upstreamReferences: [],

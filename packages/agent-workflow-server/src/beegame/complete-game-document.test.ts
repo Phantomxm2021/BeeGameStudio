@@ -23,17 +23,35 @@ function completeSubmission(
       title: section.title,
       body: `Authoritative section body ${index + 1} with stable authority IDs, production requirements, implementation detail, and observable outcomes.`,
     })),
-    productionMaterials: contract.productionMaterials.map(material => ({
-      materialId: material.materialId,
-      title: material.title,
-      format: material.format,
-      body:
-        material.format === 'markdown_table'
-          ? '| Field | Production Value |\n| --- | --- |\n| Owner | Discipline authority |'
-          : material.format === 'mermaid'
-            ? '```mermaid\ngraph TD\n  A[Start] --> B[Complete]\n```'
-            : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#20242b"/><text x="16" y="32" fill="#ffffff">Production board</text></svg>',
-    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Production Value |\n| --- | --- |\n| Owner | Discipline authority |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A[Start] --> B[Complete]\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#20242b"/><text x="16" y="32" fill="#ffffff">Production board</text></svg>',
+          },
+    ),
     auditAppendix: {
       acceptanceCriteria: ['Every canonical section and production material is complete and implementation-ready.'],
       upstreamReferences: contract.allowedUpstreamPaths.slice(0, 1).map(
@@ -164,6 +182,40 @@ describe('complete game document submission', () => {
       'This diagram was intentionally omitted.',
     )
     expect(() => validateCompleteGameDocumentMarkdown(path, rendered)).toThrow(/format|mermaid/i)
+  })
+
+  test('renders evidence registers from structured unverified entries', () => {
+    const path = 'docs/ASSET_PLAN.md'
+    const value = completeSubmission(path)
+    const structured = {
+      ...value,
+      productionMaterials: value.productionMaterials.map(material =>
+        material.materialId === 'license-register'
+          ? {
+              materialId: material.materialId,
+              title: material.title,
+              format: 'evidence_register',
+              entries: [
+                {
+                  evidenceId: 'asset.source.pending',
+                  category: 'production_asset',
+                  displayName: 'Pending production source',
+                  purpose: 'Record the intended production need before selection.',
+                  state: 'source_not_selected',
+                  evidenceRefs: [],
+                },
+              ],
+            }
+          : material,
+      ),
+    }
+
+    const rendered = renderCompleteGameDocument(
+      path,
+      validateCompleteGameDocumentSubmission(path, structured),
+    )
+    expect(rendered).toContain('source not selected')
+    expect(rendered).not.toContain('commercial use verified')
   })
 
   test('wraps raw Mermaid source with canonical fences', () => {

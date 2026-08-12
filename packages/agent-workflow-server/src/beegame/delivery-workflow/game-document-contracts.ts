@@ -42,7 +42,7 @@ export type GameDocumentProductionMaterialContract = {
   materialId: string
   title: string
   purpose: string
-  format: 'markdown_table' | 'mermaid' | 'inline_svg'
+  format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register'
 }
 
 export type GameDocumentUpstreamProjection = {
@@ -129,13 +129,13 @@ const PRODUCTION_MATERIALS = {
     material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Show music states, transitions and intensity.'),
     material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Show mix buses, priorities and ducking relationships.'),
     material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Define loudness, format, streaming and acceptance requirements.'),
-    material('sound-reference-register', 'Sound Reference Register', 'markdown_table', 'Record traceable references, intent and licensing boundaries.'),
+    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Record traceable references, intent and licensing boundaries.'),
   ],
   'docs/ASSET_PLAN.md': [
     material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Provide the complete semantic bill of materials.'),
     material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Assign creation, approval, consumption and status authority.'),
     material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Show blocking dependencies and integration order.'),
-    material('license-register', 'License Register', 'markdown_table', 'Record source, evidence, attribution, restrictions and replacement rights.'),
+    material('license-register', 'License Register', 'evidence_register', 'Record source, evidence, attribution, restrictions and replacement rights.'),
     material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Map deliverables to batches, status and acceptance.'),
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>

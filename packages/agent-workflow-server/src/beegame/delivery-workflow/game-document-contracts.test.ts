@@ -57,7 +57,9 @@ describe('complete game document contracts', () => {
       ).toBe(contract.productionMaterials.length)
       expect(
         contract.productionMaterials.every(item =>
-          ['markdown_table', 'mermaid', 'inline_svg'].includes(item.format),
+          ['markdown_table', 'mermaid', 'inline_svg', 'evidence_register'].includes(
+            item.format,
+          ),
         ),
       ).toBe(true)
       expect(contract.upstreamSections.map(item => item.path)).toEqual([
@@ -76,5 +78,15 @@ describe('complete game document contracts', () => {
         ).toBe(true)
       }
     }
+    expect(
+      getGameDocumentContract('docs/AUDIO_DESIGN.md').productionMaterials.find(
+        item => item.materialId === 'sound-reference-register',
+      )?.format,
+    ).toBe('evidence_register')
+    expect(
+      getGameDocumentContract('docs/ASSET_PLAN.md').productionMaterials.find(
+        item => item.materialId === 'license-register',
+      )?.format,
+    ).toBe('evidence_register')
   })
 })

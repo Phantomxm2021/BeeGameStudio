@@ -15,6 +15,11 @@ import {
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
 
 function completeSubmission(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -28,17 +33,35 @@ function completeSubmission(
       title: section.title,
       body: `Complete authority and production requirements ${index + 1}.`,
     })),
-    productionMaterials: contract.productionMaterials.map(material => ({
-      materialId: material.materialId,
-      title: material.title,
-      format: material.format,
-      body:
-        material.format === 'markdown_table'
-          ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
-          : material.format === 'mermaid'
-            ? '```mermaid\ngraph TD\n  A --> B\n```'
-            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
-    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
     auditAppendix: {
       acceptanceCriteria: ['The document is complete, inspectable, and implementation-ready.'],
       upstreamReferences: [],
@@ -103,18 +126,34 @@ describe('idea to complete game documents', () => {
       const dispatchId = `complete-document-${documentIndex}`
       const submission = completeSubmission(path)
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(
-        join(workspacePath, path),
-        [
-          '---',
-          `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
-          'version: 1.0.0',
-          'updated_at: 2026-08-11T00:00:00.000Z',
-          '---',
-          '',
-          renderCompleteGameDocument(path, submission),
-        ].join('\n'),
-      )
+      await commitCanonicalDocument({
+        workspacePath,
+        contract: {
+          dispatchId,
+          targetPath: path,
+          documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+        body: renderCompleteGameDocument(path, submission),
+        authority: {
+          records: documentContract.sections
+            .map(section => ({
+              authorityId: `${CANONICAL_PROJECT_DOCUMENT_IDS[
+                path
+              ].toLowerCase()}.${section.sectionId}.primary`,
+              sectionId: section.sectionId,
+              kind: 'fact' as const,
+              state: 'confirmed' as const,
+              source: 'confirmed_brief' as const,
+              evidenceRefs: [],
+              statement: `Confirmed authority for ${section.sectionId}.`,
+              responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+            }))
+            .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
+        },
+      })
 
       const now = new Date().toISOString()
       run = await completeDocumentDraft({
