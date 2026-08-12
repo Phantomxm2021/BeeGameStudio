@@ -260,6 +260,27 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   const isFirst = group.groupIndex === 0
   const isFinal = group.groupIndex === groups.length - 1
   const currentCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${input.progress.completedPartCount} -->`
+  const checkpointInstructions = isFinal
+    ? group.productionMaterials
+        .slice(input.progress.completedPartCount)
+        .map((material, offset) => {
+          const materialIndex = input.progress.completedPartCount + offset
+          const materialCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${materialIndex} -->`
+          const nextMaterialCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${materialIndex + 1} -->`
+          return materialIndex === 0
+            ? `Checkpoint ${materialIndex + 1}, native Edit: replace ${materialCursor} with <!-- beegame-production-materials -->, ## Production Materials, <!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body${materialIndex + 1 === partCount ? '; leave no cursor' : `; finish with ${nextMaterialCursor}`}.`
+            : `Checkpoint ${materialIndex + 1}, native Edit: replace ${materialCursor} with <!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body${materialIndex + 1 === partCount ? '; leave no cursor' : `; finish with ${nextMaterialCursor}`}.`
+        })
+    : [
+        ...(input.progress.completedPartCount === 0
+          ? [
+              isFirst
+                ? `Checkpoint 1: native Write creates the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, then <!-- beegame-draft-cursor:0:1 -->.`
+                : `Checkpoint 1, native Edit: replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.`,
+            ]
+          : []),
+        `Checkpoint 2, native Edit: replace <!-- beegame-draft-cursor:${group.groupIndex}:1 --> with <!-- beegame-part:${group.sections[0]?.sectionId}:2 --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
+      ]
   const groupContract = {
     path: input.path,
     discipline: contract.discipline,
@@ -285,19 +306,15 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   }
   return [
     `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume chunk ${nextPart}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
-    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}perform exactly one native ${isFirst && input.progress.completedPartCount === 0 ? 'Write' : 'Edit'} call in this turn. Its content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes. Never wait to generate the whole section before this bounded write.`,
-    isFirst && input.progress.completedPartCount === 0
-      ? `The native Write creates the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, then <!-- beegame-draft-cursor:0:1 -->.`
-      : isFinal
-        ? `${input.progress.completedPartCount === 0 ? `Replace ${currentCursor} with <!-- beegame-production-materials -->, ## Production Materials, the first exact material, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.` : `Replace ${currentCursor} with the next exact material.`} One material is one bounded Edit. ${nextPart === partCount ? 'This last material leaves no cursor.' : `Finish with <!-- beegame-draft-cursor:${group.groupIndex}:${nextPart} -->.`}`
-        : `${input.progress.completedPartCount === 0 ? `Replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.` : `Replace ${currentCursor} with <!-- beegame-part:${group.sections[0]?.sectionId}:${nextPart} --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`}`,
+    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}continue bounded native file calls until this active group is complete. Perform one native file call for each checkpoint below, in order, and start the next checkpoint immediately after the prior tool succeeds. Every content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes; never generate the whole section as one tool input.`,
+    ...checkpointInstructions,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'
       : 'Do not rewrite or reread the completed prefix. The cursor is the only edit target.',
     'The confirmed brief and projected upstream authority are binding. Define only this discipline\'s owned facts; reference upstream facts instead of copying them and do not invent behavior delegated to a downstream owner.',
     'Write production-ready human development authority, not a skeleton: make concrete choices, state boundaries and tradeoffs, use units and dense tables where useful, and include observable acceptance criteria. Do not repeat the brief, upstream prose, or another section.',
     'Do not write YAML front matter, an Audit Appendix, workflow metadata, or another project file. Do not claim verified license status without concrete evidence.',
-    'After the single native tool call succeeds, end the turn normally. BGS mechanically validates the new on-disk chunk before requesting the next one; if interrupted, the durable cursor resumes at the next missing chunk.',
+    'BGS mechanically validates every proposed checkpoint before the native tool writes it. After this group\'s final checkpoint succeeds, end the turn normally. If interrupted, the durable cursor resumes at the next missing checkpoint.',
     JSON.stringify(groupContract),
   ].join('\n\n')
 }

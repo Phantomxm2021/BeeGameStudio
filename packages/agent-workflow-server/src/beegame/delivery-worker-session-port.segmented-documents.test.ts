@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
+  foundationDocumentDraftPartCount,
   foundationDocumentDraftGroups,
   inspectFoundationDocumentDraft,
 } from './foundation-document-draft'
@@ -112,11 +113,15 @@ describe('segmented initial document authoring', () => {
           prompts.push(prompt)
           const groupMatch = /Active bounded document group (\d+)\//.exec(prompt)
           const partMatch = /resume chunk (\d+)\//.exec(prompt)
-          await advanceDraft(
-            workspacePath,
-            groupMatch ? Number(groupMatch[1]) - 1 : 0,
-            partMatch ? Number(partMatch[1]) - 1 : 0,
+          const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
+          const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
+          const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
+          for (
+            let partIndex = firstPartIndex;
+            partIndex < foundationDocumentDraftPartCount(group);
+            partIndex += 1
           )
+            await advanceDraft(workspacePath, groupIndex, partIndex)
           events.push({ type: 'result', text: 'turn complete' })
           return session
         },
@@ -151,11 +156,14 @@ describe('segmented initial document authoring', () => {
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
       expect(prompts.length).toBe(
-        getGameDocumentContract('docs/GDD.md').sections.length * 2 +
-          getGameDocumentContract('docs/GDD.md').productionMaterials.length,
+        foundationDocumentDraftGroups('docs/GDD.md').length,
       )
       expect(prompts[0]).toContain('Active bounded document group 1/13')
-      expect(prompts[0]).toContain('exactly one native')
+      expect(prompts[0]).toContain(
+        'continue bounded native file calls until this active group is complete',
+      )
+      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:1 -->')
+      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
       expect(prompts[0]).toContain('2,400 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({

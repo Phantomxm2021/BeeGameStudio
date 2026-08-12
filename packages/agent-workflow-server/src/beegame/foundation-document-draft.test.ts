@@ -62,7 +62,11 @@ describe('foundation document draft groups', () => {
     expect(progress.complete).toBe(false)
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
-    expect(prompt).toContain('exactly one native Edit call')
+    expect(prompt).toContain(
+      'continue bounded native file calls until this active group is complete',
+    )
+    expect(prompt).toContain('<!-- beegame-draft-cursor:1:1 -->')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
     expect(prompt).toContain('2,400 UTF-8 bytes')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
@@ -104,6 +108,7 @@ describe('foundation document draft groups', () => {
     })
     expect(prompt).toContain('resume chunk 2/2')
     expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).not.toContain('native Write')
   })
 
