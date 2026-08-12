@@ -532,6 +532,8 @@ export function transitionDeliveryRun(
       next = {
         ...run,
         status: 'stopped',
+        currentMessage: undefined,
+        thinking: 'idle',
         ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
           ? {
               activeTaskId: undefined,

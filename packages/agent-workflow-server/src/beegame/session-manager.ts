@@ -501,16 +501,25 @@ function documentAuthorActivityMessage(
   record: SessionRecord,
   event: BeeGameEvent,
 ): string | undefined {
+  if (record.workflowWorkerType !== 'document-author') return undefined
+  const traditional = record.language === 'zh-TW'
+  const chinese = record.language === 'zh' || traditional
   if (
-    record.workflowWorkerType !== 'document-author' ||
+    event.type === 'assistant.thinking' &&
+    event.payload?.status === 'started'
+  )
+    return chinese
+      ? traditional
+        ? '正在推理目前文件…'
+        : '正在推理当前文档…'
+      : 'Reasoning about the current document…'
+  if (
     event.type !== 'tool.progress' ||
     event.payload?.phase !== 'input_streaming'
   )
     return undefined
   const toolName = getDashboardPayloadString(event.payload, 'toolName')
   if (toolName !== 'Write' && toolName !== 'Edit') return undefined
-  const traditional = record.language === 'zh-TW'
-  const chinese = record.language === 'zh' || traditional
   if (toolName === 'Write')
     return chinese
       ? traditional

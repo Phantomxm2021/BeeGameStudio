@@ -578,7 +578,7 @@ export function projectCurrentStageCard(input: {
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
       : atomicTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
-  const message = run.currentMessage
+  const message = run.status === 'running' && run.currentMessage
     ? sanitizeWorkflowDisplayMessage(run.currentMessage)
     : ''
   const blockedReason = stringValue(

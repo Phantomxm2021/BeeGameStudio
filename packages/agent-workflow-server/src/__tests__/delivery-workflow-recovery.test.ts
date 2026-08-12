@@ -2830,6 +2830,7 @@ describe('delivery workflow recovery', () => {
     await store.save({
       ...initial,
       phase: 'IMPLEMENTATION',
+      currentMessage: 'Preparing a file edit…',
       activeTaskId: task.id,
       tasks: [task],
       activeDispatch: {
@@ -2870,6 +2871,7 @@ describe('delivery workflow recovery', () => {
       activeDispatch: { status: 'interrupted' },
       tasks: [{ id: task.id, status: 'pending', attempt: 1 }],
     })
+    expect(stopped.currentMessage).toBeUndefined()
     expect(stopped.activeTaskId).toBeUndefined()
     expect(lateUsageResult).toMatchObject({
       status: 'stopped',

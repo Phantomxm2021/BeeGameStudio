@@ -992,6 +992,101 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('replaces stale document edit activity when native reasoning resumes', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-reasoning-progress-'))
+    const workspacePath = join(root, 'workspace')
+    const store = createRunStore(workspacePath, 'user-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-document-reasoning',
+      projectId: 'project-document-reasoning',
+      ownerId: 'user-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'running',
+      documentStep: 'FOUNDATION_DRAFTING',
+      activeDispatch: {
+        dispatchId: 'dispatch-document-reasoning',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/GDD.md',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+    let release!: () => void
+    const hold = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 0,
+              content_block: {
+                type: 'tool_use',
+                id: 'native-edit-progress',
+                name: 'Edit',
+                input: {},
+              },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 1,
+              content_block: { type: 'thinking', thinking: '' },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              index: 1,
+              delta: { type: 'thinking_delta', thinking: 'continuing' },
+            },
+          } as DashboardSDKMessage)
+          await hold
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-document-reasoning',
+      workflowDispatchId: 'dispatch-document-reasoning',
+      workflowWorkerType: 'document-author',
+      language: 'zh',
+    })
+
+    const turn = manager.send(session.id, 'author the document')
+    let active = await store.load()
+    for (
+      let attempt = 0;
+      attempt < 400 && active?.currentMessage !== '正在推理当前文档…';
+      attempt += 1
+    ) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      active = await store.load()
+    }
+
+    expect(active?.thinking).toBe('working')
+    expect(active?.currentMessage).toBe('正在推理当前文档…')
+    release()
+    await turn
+    manager.dispose()
+  })
+
   test('does not interrupt a workflow worker during quiet native thinking', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-workflow-thinking-idle-'))
     let starts = 0

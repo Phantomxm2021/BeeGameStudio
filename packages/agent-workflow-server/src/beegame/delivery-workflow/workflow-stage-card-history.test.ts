@@ -141,6 +141,29 @@ describe('workflow stage card history', () => {
     expect(card?.tasks?.some(task => task.operation === 'write')).toBe(true)
   })
 
+  test('does not project stale runtime activity after a workflow is stopped', () => {
+    const run = createTestDeliveryRun({
+      projectId: 'project-stopped-activity',
+      ownerId: 'owner-stopped-activity',
+      foundationDraftComplete: false,
+    })
+    const card = projectCurrentStageCard({
+      run: {
+        ...run,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'stopped',
+        currentMessage: '正在准备文档修改…',
+        thinking: 'idle',
+        blockedReason: 'user stopped workflow',
+      },
+      workspacePath,
+    })
+
+    expect(card?.message).toBeUndefined()
+    expect(card?.block?.message).toBe('user stopped workflow')
+  })
+
   test('includes an open running interval in the live elapsed time', () => {
     const run = createTestDeliveryRun({
       projectId: 'project-open-interval',
