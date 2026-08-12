@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test'
+import {
+  createFoundationAuthoritySidecar,
+  type FoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
-import { projectFoundationAuthority } from './foundation-authority-projection'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  projectFoundationAuthority,
+} from './foundation-authority-projection'
+
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
 
 function sourceDocument(path: FoundationDocumentPath): string {
   const contract = getGameDocumentContract(path)
@@ -16,46 +27,105 @@ function sourceDocument(path: FoundationDocumentPath): string {
     ]),
     '<!-- beegame-production-materials -->',
     '## Production Materials',
-    'Source materials are intentionally outside the section projection.',
+    'Source materials are intentionally outside the authority projection.',
   ].join('\n')
 }
 
+function sourceSidecar(
+  path: FoundationDocumentPath,
+  markdown: string,
+): FoundationAuthoritySidecar {
+  const prefix = path
+    .slice('docs/'.length, -'.md'.length)
+    .toLowerCase()
+  return createFoundationAuthoritySidecar({
+    documentPath: path,
+    markdown,
+    submission: {
+      records: getGameDocumentContract(path).sections
+        .map(section => ({
+          authorityId: `${prefix}.${section.sectionId}.primary`,
+          sectionId: section.sectionId,
+          kind: 'fact' as const,
+          state: 'confirmed' as const,
+          statement: `Confirmed ${section.sectionId} authority.`,
+          responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+        }))
+        .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
+    },
+  })
+}
+
+function sources(paths: readonly FoundationDocumentPath[]) {
+  const documents = new Map<FoundationDocumentPath, string>()
+  const sidecars = new Map<FoundationDocumentPath, FoundationAuthoritySidecar>()
+  for (const path of paths) {
+    const markdown = sourceDocument(path)
+    documents.set(path, markdown)
+    sidecars.set(path, sourceSidecar(path, markdown))
+  }
+  return { documents, sidecars }
+}
+
 describe('foundation authority projection', () => {
-  test('projects only explicitly contracted upstream sections in stable order', () => {
+  test('projects only contracted records in source and bytewise record order', () => {
     const targetPath = 'docs/UI_UX_SPEC.md'
-    const documents = new Map<FoundationDocumentPath, string>([
-      ['docs/GDD.md', sourceDocument('docs/GDD.md')],
-      ['docs/LEVEL_SCENE_DESIGN.md', sourceDocument('docs/LEVEL_SCENE_DESIGN.md')],
-    ])
-    const result = projectFoundationAuthority({ targetPath, documents })
-    const expected = getGameDocumentContract(targetPath).upstreamSections.flatMap(
-      source => source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
+    const input = sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'])
+    const result = projectFoundationAuthority({ targetPath, ...input })
+    const selectedSections = new Set(
+      getGameDocumentContract(targetPath).upstreamSections.flatMap(source =>
+        source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
+      ),
     )
-    expect(result.map(item => `${item.path}#${item.sectionId}`)).toEqual(expected)
-    expect(result.every(item => item.content.includes(`## `))).toBe(true)
-    expect(result.some(item => item.content.includes('Source materials are intentionally'))).toBe(false)
+
+    expect(result.targetPath).toBe(targetPath)
+    expect(result.records.length).toBe(selectedSections.size)
+    expect(
+      result.records.every(record => {
+        const sourcePath = record.authorityId.startsWith('gdd.')
+          ? 'docs/GDD.md'
+          : 'docs/LEVEL_SCENE_DESIGN.md'
+        return selectedSections.has(`${sourcePath}#${record.sectionId}`)
+      }),
+    ).toBe(true)
+    expect(result.records.some(record => record.sectionId === 'vision')).toBe(
+      false,
+    )
+    expect(Object.keys(result.sourceDigests)).toEqual([
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+    ])
+    expect(result.byteLength).toBe(
+      new TextEncoder().encode(
+        canonicalFoundationAuthorityProjectionBytes(result),
+      ).byteLength,
+    )
+    expect(canonicalFoundationAuthorityProjectionBytes(result)).not.toContain(
+      'Source materials are intentionally',
+    )
     expect(Object.isFrozen(result)).toBe(true)
-    expect(result.every(Object.isFrozen)).toBe(true)
+    expect(result.records.every(Object.isFrozen)).toBe(true)
   })
 
-  test('rejects missing, duplicate, and out-of-order source markers', () => {
+  test('rejects missing and stale sidecars before downstream work starts', () => {
     const targetPath = 'docs/LEVEL_SCENE_DESIGN.md'
-    const valid = sourceDocument('docs/GDD.md')
-    const marker = '<!-- beegame-section:experience_pillars -->'
-    expect(() =>
-      projectFoundationAuthority({ targetPath, documents: new Map() }),
-    ).toThrow(/missing/i)
+    const input = sources(['docs/GDD.md'])
     expect(() =>
       projectFoundationAuthority({
         targetPath,
-        documents: new Map([['docs/GDD.md', `${valid}\n${marker}`]]),
+        documents: input.documents,
+        sidecars: new Map(),
       }),
-    ).toThrow(/duplicate|order/i)
+    ).toThrow(/sidecar.*missing/i)
+
+    const staleDocuments = new Map(input.documents)
+    staleDocuments.set('docs/GDD.md', `${staleDocuments.get('docs/GDD.md')}\nchanged`)
     expect(() =>
       projectFoundationAuthority({
         targetPath,
-        documents: new Map([['docs/GDD.md', valid.replace(marker, '').concat(`\n${marker}`)]]),
+        documents: staleDocuments,
+        sidecars: input.sidecars,
       }),
-    ).toThrow(/order/i)
+    ).toThrow(/digest/i)
   })
 })

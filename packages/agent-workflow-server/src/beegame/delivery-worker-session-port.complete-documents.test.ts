@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -7,6 +7,12 @@ import {
   buildDocumentAuthorAuthorityBlock,
 } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import {
+  authoritySidecarPath,
+  canonicalFoundationAuthoritySidecarBytes,
+  createFoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
+import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 function canonicalSource(path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md'): string {
   const contract = getGameDocumentContract(path)
@@ -21,6 +27,39 @@ function canonicalSource(path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md'): st
     '## Production Materials',
     'Unprojected production material payload.',
   ].join('\n')
+}
+
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
+
+async function writeAuthoritySource(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+): Promise<void> {
+  const markdown = canonicalSource(path as 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md')
+  await writeFile(join(workspacePath, path), markdown)
+  const prefix = path.slice('docs/'.length, -'.md'.length).toLowerCase()
+  const sidecar = createFoundationAuthoritySidecar({
+    documentPath: path,
+    markdown,
+    submission: {
+      records: getGameDocumentContract(path).sections
+        .map(section => ({
+          authorityId: `${prefix}.${section.sectionId}.primary`,
+          sectionId: section.sectionId,
+          kind: 'fact' as const,
+          state: 'confirmed' as const,
+          statement: `Confirmed authority for ${section.sectionId}.`,
+          responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+        }))
+        .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
+    },
+  })
+  await writeFile(
+    join(workspacePath, authoritySidecarPath(path)),
+    canonicalFoundationAuthoritySidecarBytes(sidecar),
+  )
 }
 
 describe('delivery worker complete document commit contract', () => {
@@ -53,16 +92,15 @@ describe('delivery worker complete document commit contract', () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(join(workspacePath, 'docs/GDD.md'), canonicalSource('docs/GDD.md'))
-      await writeFile(
-        join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
-        canonicalSource('docs/LEVEL_SCENE_DESIGN.md'),
-      )
+      await writeAuthoritySource(workspacePath, 'docs/GDD.md')
+      await writeAuthoritySource(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md')
       await writeFile(
         join(workspacePath, 'docs/UI_UX_SPEC.md'),
         '# Stale target\n\nSTALE TARGET BODY',
       )
       const block = await buildDocumentAuthorAuthorityBlock({
+        dispatchId: 'dispatch-ui-authority',
+        runId: 'run-ui-authority',
         workerType: 'document-author',
         workspacePath,
         allowedPaths: ['docs/UI_UX_SPEC.md'],
@@ -79,8 +117,26 @@ describe('delivery worker complete document commit contract', () => {
           expect(block).toContain(`upstreamPath=${source.path}`)
           expect(block).toContain(`sectionId=${sectionId}`)
         }
-      expect(block).toContain('Read only the listed sections from disk when needed')
+      expect(block).toContain('Read the compact authority projection')
+      expect(block).toContain(
+        'Read only the listed source sections from disk when deeper rationale',
+      )
+      expect(block).toContain(
+        '.beegame/workflow/authority-projections/dispatch-ui-authority.json',
+      )
+      const projected = JSON.parse(
+        await readFile(
+          join(
+            workspacePath,
+            '.beegame/workflow/authority-projections/dispatch-ui-authority.json',
+          ),
+          'utf8',
+        ),
+      )
+      expect(projected.targetPath).toBe('docs/UI_UX_SPEC.md')
+      expect(projected.records.length).toBeGreaterThan(0)
       expect(block).not.toContain('Authority content for')
+      expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')
       expect(block).not.toContain('STALE TARGET BODY')
     } finally {
