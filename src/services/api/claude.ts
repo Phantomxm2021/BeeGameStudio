@@ -197,10 +197,8 @@ import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@bee-game-studio/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
-import {
-  assertProviderCompletionReason,
-  ProviderCompletionError,
-} from '@ant/model-provider'
+import { assertProviderCompletionReason } from '@ant/model-provider'
+import { createProviderStreamTerminality } from './streamTerminality.js'
 import { count } from '../../utils/array.js'
 import { insertBlockAfterToolResults } from '../../utils/contentArray.js'
 import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
@@ -1974,9 +1972,6 @@ async function* queryModel(
     // kill hung streams. Without this, a silently dropped connection can hang
     // the session indefinitely since the SDK's request timeout only covers the
     // initial fetch(), not the streaming body.
-    const streamWatchdogEnabled = isEnvTruthy(
-      process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
-    )
     const STREAM_IDLE_TIMEOUT_MS =
       parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 90_000
     const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
@@ -1997,9 +1992,6 @@ async function* queryModel(
     }
     function resetStreamIdleTimer(): void {
       clearStreamIdleTimers()
-      if (!streamWatchdogEnabled) {
-        return
-      }
       streamIdleWarningTimer = setTimeout(
         warnMs => {
           logForDebugging(
@@ -2039,6 +2031,9 @@ async function* queryModel(
       const STALL_THRESHOLD_MS = 30_000 // 30 seconds
       let totalStallTime = 0
       let stallCount = 0
+      const streamTerminality = createProviderStreamTerminality({
+        requestId: streamRequestId ?? clientRequestId ?? 'unknown',
+      })
 
       for await (const part of stream) {
         resetStreamIdleTimer()
@@ -2081,6 +2076,7 @@ async function* queryModel(
 
         switch (part.type) {
           case 'message_start': {
+            streamTerminality.observe({ type: 'message_start' })
             partialMessage = part.message
             ttftMs = Date.now() - start
             usage = updateUsage(usage, part.message?.usage)
@@ -2096,6 +2092,11 @@ async function* queryModel(
             break
           }
           case 'content_block_start':
+            streamTerminality.observe({
+              type: 'content_block_start',
+              index: part.index,
+              contentType: part.content_block.type,
+            })
             switch (part.content_block.type) {
               case 'tool_use':
                 contentBlocks[part.index] = {
@@ -2190,6 +2191,13 @@ async function* queryModel(
                   // TODO: handle citations
                   break
                 case 'input_json_delta':
+                  if (typeof delta.partial_json !== 'string')
+                    throw new Error('Tool input delta is not a string')
+                  streamTerminality.observe({
+                    type: 'input_json_delta',
+                    index: part.index,
+                    bytes: Buffer.byteLength(delta.partial_json),
+                  })
                   if (
                     contentBlock.type !== 'tool_use' &&
                     contentBlock.type !== 'server_tool_use'
@@ -2275,6 +2283,10 @@ async function* queryModel(
             break
           }
           case 'content_block_stop': {
+            streamTerminality.observe({
+              type: 'content_block_stop',
+              index: part.index,
+            })
             const contentBlock = contentBlocks[part.index]
             if (!contentBlock) {
               logEvent('tengu_streaming_error', {
@@ -2320,10 +2332,13 @@ async function* queryModel(
               ...(advisorModel && { advisorModel }),
             }
             newMessages.push(m)
-            yield m
             break
           }
           case 'message_delta': {
+            streamTerminality.observe({
+              type: 'message_delta',
+              stopReason: part.delta.stop_reason,
+            })
             usage = updateUsage(usage, part.usage)
             // Capture research from message_delta if available (internal only).
             // Always overwrite with the latest value. Also write back to
@@ -2409,6 +2424,7 @@ async function* queryModel(
             break
           }
           case 'message_stop':
+            streamTerminality.observe({ type: 'message_stop' })
             break
         }
 
@@ -2450,9 +2466,10 @@ async function* queryModel(
         throw new Error('Stream idle timeout - no chunks received')
       }
 
-      // A provider stream is complete only after message_start and a non-empty
-      // stop_reason. Content blocks alone are not terminal evidence: a proxy can
-      // close after thinking/text/tool content while omitting message_delta.
+      // Do not expose assistant tool blocks until the response itself is
+      // terminal. An incomplete response can then be discarded and retried
+      // without executing a native tool twice.
+      streamTerminality.completeBody()
       if (!partialMessage) {
         logForDebugging(
           'Stream completed without receiving message_start event - triggering non-streaming fallback',
@@ -2467,6 +2484,7 @@ async function* queryModel(
         throw new Error('Stream ended without receiving any events')
       }
       assertProviderCompletionReason(stopReason)
+      for (const message of newMessages) yield message
 
       // Log summary if any stalls occurred during streaming
       if (stallCount > 0) {
@@ -2576,11 +2594,10 @@ async function* queryModel(
         }
       }
 
-      if (
-        streamingError instanceof ProviderCompletionError &&
-        newMessages.length > 0
-      )
-        throw streamingError
+      // Assistant blocks are buffered until terminality, so an incomplete
+      // streaming attempt has not executed native tools. Discard the buffered
+      // blocks before the single bounded recovery path runs.
+      newMessages.length = 0
 
       // When the flag is enabled, skip the non-streaming fallback and let the
       // error propagate to withRetry. The mid-stream fallback causes double tool
