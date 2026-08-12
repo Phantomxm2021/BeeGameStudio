@@ -116,9 +116,12 @@ describe('segmented initial document authoring', () => {
           const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
           const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
           const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
+          const lastPartIndex = group.sections.length
+            ? foundationDocumentDraftPartCount(group) - 1
+            : firstPartIndex
           for (
             let partIndex = firstPartIndex;
-            partIndex < foundationDocumentDraftPartCount(group);
+            partIndex <= lastPartIndex;
             partIndex += 1
           )
             await advanceDraft(workspacePath, groupIndex, partIndex)
@@ -156,15 +159,15 @@ describe('segmented initial document authoring', () => {
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
       expect(prompts.length).toBe(
-        foundationDocumentDraftGroups('docs/GDD.md').length,
+        getGameDocumentContract('docs/GDD.md').sections.length +
+          getGameDocumentContract('docs/GDD.md').productionMaterials.length,
       )
       expect(prompts[0]).toContain('Active bounded document group 1/13')
-      expect(prompts[0]).toContain(
-        'continue bounded native file calls until this active group is complete',
-      )
-      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:1 -->')
+      expect(prompts[0]).toContain('perform exactly one bounded native Write')
+      expect(prompts[0]).toContain('<!-- beegame-part:vision:1 -->')
+      expect(prompts[0]).toContain('<!-- beegame-part:vision:2 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
-      expect(prompts[0]).toContain('2,400 UTF-8 bytes')
+      expect(prompts[0]).toContain('5,200 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',

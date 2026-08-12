@@ -22,6 +22,17 @@ function firstWrite(cursor = '<!-- beegame-draft-cursor:0:1 -->') {
   ].join('\n')
 }
 
+function completeFirstGroupWrite() {
+  return firstWrite().replace(
+    '<!-- beegame-draft-cursor:0:1 -->',
+    [
+      `<!-- beegame-part:${section.sectionId}:2 -->`,
+      'The second bounded part completes this section without authoring another section.',
+      '<!-- beegame-draft-cursor:1:0 -->',
+    ].join('\n'),
+  )
+}
+
 function authorize(input: {
   currentMarkdown?: string
   toolName: 'Write' | 'Edit'
@@ -36,6 +47,15 @@ describe('foundation document native mutation authority', () => {
       authorize({
         toolName: 'Write',
         mutation: { content: firstWrite() },
+      }),
+    ).toEqual({ behavior: 'allow' })
+  })
+
+  test('allows one bounded native write to complete exactly one section group', () => {
+    expect(
+      authorize({
+        toolName: 'Write',
+        mutation: { content: completeFirstGroupWrite() },
       }),
     ).toEqual({ behavior: 'allow' })
   })
