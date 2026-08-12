@@ -43,7 +43,7 @@ import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
-import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
+import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
@@ -553,7 +553,7 @@ export class BeeGameSessionManager {
   private readonly dashboardDataRoot: string
 
   constructor(
-    private readonly runner: BeeGameSessionRunner = createProcessIsolatedQueryEngineRunner(),
+    private readonly runner: BeeGameSessionRunner = createNativeCliProcessRunner(),
     dashboardDataRoot?: string,
     private readonly getAdditionalRuntimeEnv: (
       userDataRoot?: string,

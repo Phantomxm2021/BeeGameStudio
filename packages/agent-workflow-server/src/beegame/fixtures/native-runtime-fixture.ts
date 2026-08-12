@@ -1,0 +1,61 @@
+export {}
+
+const decoder = new TextDecoder()
+let buffer = ''
+
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += decoder.decode(chunk, { stream: true })
+  for (;;) {
+    const newline = buffer.indexOf('\n')
+    if (newline < 0) break
+    const line = buffer.slice(0, newline).trim()
+    buffer = buffer.slice(newline + 1)
+    if (!line) continue
+    const message = JSON.parse(line) as Record<string, unknown>
+    if (message.type === 'control_response') {
+      process.stdout.write(
+        `${JSON.stringify({ type: 'result', subtype: 'success', permissionResponse: message })}\n`,
+      )
+      continue
+    }
+    if (message.type !== 'user') continue
+    const rawContent = (message.message as { content?: unknown } | undefined)
+      ?.content
+    const content = Array.isArray(rawContent)
+      ? (rawContent.find(
+          block =>
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: string }).type === 'text',
+        ) as { text?: unknown } | undefined)?.text
+      : rawContent
+    if (content === 'error') {
+      process.stdout.write(
+        `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['provider exploded'] })}\n`,
+      )
+      continue
+    }
+    if (content === 'eof') process.exit(0)
+    if (content === 'permission') {
+      process.stdout.write(
+        `${JSON.stringify({
+          type: 'control_request',
+          request_id: 'permission-1',
+          request: {
+            subtype: 'can_use_tool',
+            tool_name: 'Write',
+            tool_use_id: 'tool-1',
+            input: { file_path: 'docs/GDD.md', content: 'test' },
+          },
+        })}\n`,
+      )
+      continue
+    }
+    process.stdout.write(
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } })}\n`,
+    )
+    process.stdout.write(
+      `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false })}\n`,
+    )
+  }
+}
