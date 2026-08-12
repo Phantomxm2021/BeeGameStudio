@@ -154,12 +154,12 @@ export function createNativeCanonicalDocumentTool(options: {
           ).productionMaterials
             .map(
               material =>
-                `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\nformat=${material.format}`,
+                `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\nrequired mechanical format: ${material.format}`,
             )
             .join('\n')
         : ''
       return completeGameDocument
-        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. The Production Materials block must contain these exact marker, heading, and format triples in this exact order:\n${productionMaterialContract}`
+        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. The Production Materials block must contain these exact markers and headings in this exact order, with content using the stated mechanical format; the format descriptions are instructions and must not be copied into the Markdown:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {

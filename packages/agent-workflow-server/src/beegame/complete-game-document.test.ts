@@ -111,6 +111,19 @@ describe('complete game document submission', () => {
     ).toThrow(/acceptance|small/i)
   })
 
+  test('accepts a non-empty acceptance criteria matrix', () => {
+    const path = 'docs/GDD.md'
+    const authored = renderCompleteGameDocument(path, completeSubmission(path))
+      .replace(
+        '- Every canonical section and production material is complete and implementation-ready.',
+        '| Acceptance ID | Condition | Evidence |\n| --- | --- | --- |\n| AC-01 | Core loop is complete | Playthrough log |',
+      )
+
+    expect(validateCompleteGameDocumentMarkdown(path, authored)).toBe(
+      `${authored.trim()}\n`,
+    )
+  })
+
   test('rejects upstream references outside projected authority', () => {
     const path = 'docs/UI_UX_SPEC.md'
     const value = completeSubmission(path)

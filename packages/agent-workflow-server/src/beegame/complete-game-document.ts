@@ -348,7 +348,21 @@ export function validateCompleteGameDocumentMarkdown(
   if (lines[auditIndex + 1] !== '## Audit Appendix')
     throw new Error('complete game document audit appendix heading is invalid')
   const acceptanceIndex = lines.indexOf('### Acceptance Criteria', auditIndex + 1)
-  if (acceptanceIndex < auditIndex || !lines.slice(acceptanceIndex + 1).some(line => line.trim().startsWith('- ')))
+  const acceptanceLines = lines.slice(acceptanceIndex + 1)
+  const hasAcceptanceList = acceptanceLines.some(line =>
+    line.trim().startsWith('- '),
+  )
+  const acceptanceTableLines = acceptanceLines.filter(line => {
+    const trimmed = line.trim()
+    return trimmed.startsWith('|') && trimmed.endsWith('|')
+  })
+  const hasAcceptanceTable =
+    acceptanceTableLines.length >= 3 &&
+    acceptanceTableLines.some(line => line.includes('---'))
+  if (
+    acceptanceIndex < auditIndex ||
+    (!hasAcceptanceList && !hasAcceptanceTable)
+  )
     throw new Error('complete game document acceptance criteria are empty or invalid')
   return `${body}\n`
 }

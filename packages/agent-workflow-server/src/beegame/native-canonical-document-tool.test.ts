@@ -108,8 +108,9 @@ describe('canonical document commit', () => {
     for (const material of getGameDocumentContract('docs/GDD.md').productionMaterials) {
       expect(prompt).toContain(`<!-- beegame-material:${material.materialId} -->`)
       expect(prompt).toContain(`### ${material.title}`)
-      expect(prompt).toContain(`format=${material.format}`)
+      expect(prompt).toContain(`required mechanical format: ${material.format}`)
     }
+    expect(prompt).not.toContain('format=')
   })
 
   test('prepares Markdown before accepting authority without resending the body', async () => {
