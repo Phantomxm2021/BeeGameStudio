@@ -84,7 +84,9 @@ export function inspectFoundationDocumentDraft(
   const completedPartCount = Number(cursorMatches[0]![2])
   const groups = foundationDocumentDraftGroups(path)
   const activeGroup = groups[completedGroupCount]
-  const partCount = activeGroup ? groupPartCount(activeGroup) : 0
+  const partCount = activeGroup
+    ? foundationDocumentDraftPartCount(activeGroup)
+    : 0
   if (
     !Number.isInteger(completedGroupCount) ||
     !Number.isInteger(completedPartCount) ||
@@ -253,7 +255,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   const group = groups[input.progress.completedGroupCount]
   if (!group)
     throw new Error('foundation document draft group is unavailable')
-  const partCount = groupPartCount(group)
+  const partCount = foundationDocumentDraftPartCount(group)
   const nextPart = input.progress.completedPartCount + 1
   const isFirst = group.groupIndex === 0
   const isFinal = group.groupIndex === groups.length - 1
@@ -300,7 +302,9 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   ].join('\n\n')
 }
 
-function groupPartCount(group: FoundationDocumentDraftGroup): number {
+export function foundationDocumentDraftPartCount(
+  group: FoundationDocumentDraftGroup,
+): number {
   return group.productionMaterials.length || SECTION_PART_COUNT
 }
 

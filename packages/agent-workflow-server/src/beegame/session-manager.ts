@@ -39,6 +39,7 @@ import type { DocumentReviewSubmissionContract } from './delivery-workflow/docum
 import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
 import type { ResourceContentCommitContract } from './native-resource-content-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
+import { authorizeFoundationDocumentDraftMutation } from './foundation-document-mutation'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
@@ -50,6 +51,7 @@ import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
 import {
   CANONICAL_ASSET_MANIFEST,
+  CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
@@ -1826,6 +1828,26 @@ export class BeeGameSessionManager {
       )
       return Promise.resolve({ ...authority, scope: 'once' })
     }
+    const foundationDraftAuthority =
+      await authorizeFoundationDraftFileMutation(record, request)
+    if (foundationDraftAuthority) {
+      this.append(
+        record,
+        'permission.resolved',
+        `${request.toolName}: ${foundationDraftAuthority.behavior}`,
+        {
+          type: 'permission.resolved',
+          toolUseID: request.toolUseID,
+          toolName: request.toolName,
+          decision: foundationDraftAuthority.behavior,
+          scope: 'once',
+          autoApproved: foundationDraftAuthority.behavior === 'allow',
+          autoDenied: foundationDraftAuthority.behavior === 'deny',
+          reason: 'foundation_document_draft_checkpoint',
+        },
+      )
+      return Promise.resolve({ ...foundationDraftAuthority, scope: 'once' })
+    }
     if (authorizeProjectWorkspaceFileMutation(record, request)) {
       this.append(
         record,
@@ -2082,6 +2104,55 @@ export class BeeGameSessionManager {
       return undefined
     }
   }
+}
+
+async function authorizeFoundationDraftFileMutation(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): Promise<DashboardPermissionDecision | undefined> {
+  if (
+    record.workflowWorker !== true ||
+    record.workflowWorkerType !== 'document-author' ||
+    record.workflowDocumentAuthorMode !== 'initial' ||
+    !isFileMutationTool(request.toolName)
+  )
+    return undefined
+  if (request.toolName !== 'Write' && request.toolName !== 'Edit')
+    return {
+      behavior: 'deny',
+      message:
+        'Initial document authoring permits exactly one bounded native Write or Edit checkpoint per turn.',
+    }
+  const artifactPath = getMutationArtifactPath(request.input)
+  const relativePath = getWorkspaceRelativeMutationPath(
+    record.session.cwd,
+    record.session.cwd,
+    artifactPath,
+  )
+  if (
+    !CANONICAL_FOUNDATION_DOCUMENTS.includes(relativePath as never) ||
+    !record.workflowAllowedPaths?.includes(relativePath)
+  )
+    return {
+      behavior: 'deny',
+      message:
+        'Initial document authoring may mutate only its assigned canonical foundation document.',
+    }
+  let currentMarkdown: string | undefined
+  try {
+    currentMarkdown = await readFile(
+      resolve(record.session.cwd, relativePath),
+      'utf8',
+    )
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  return authorizeFoundationDocumentDraftMutation({
+    path: relativePath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+    currentMarkdown,
+    toolName: request.toolName,
+    mutation: request.input,
+  })
 }
 
 export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
