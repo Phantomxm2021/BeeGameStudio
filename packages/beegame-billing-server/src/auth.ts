@@ -1,7 +1,7 @@
 import type {
   BeeGameBillingUserContext,
 } from '@bee-game-studio/beegame-billing-core/billing-route-types'
-import type { TLSAwareFetch } from '../../../src/utils/mtls.js'
+import type { TLSAwareFetch } from '@bee-game-studio/security-core'
 
 type BillingUserResolver = (
   request: Request,

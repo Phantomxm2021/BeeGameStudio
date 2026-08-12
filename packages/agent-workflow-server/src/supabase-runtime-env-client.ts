@@ -2,7 +2,10 @@ import {
   decryptSecret,
   isSecretEnvelope,
 } from './security/secret-crypto'
-import { createTLSAwareFetch, type TLSAwareFetch } from '../../../src/utils/mtls.js'
+import {
+  createTLSAwareFetch,
+  type TLSAwareFetch,
+} from '@bee-game-studio/security-core'
 
 type BeeGameFetch = TLSAwareFetch
 

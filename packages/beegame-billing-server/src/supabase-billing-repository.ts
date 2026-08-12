@@ -13,7 +13,7 @@ import type {
   BeeGameUsageBillingRecordInput,
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
+import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 
 type JsonObject = Record<string, unknown>
 

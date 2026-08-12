@@ -3,7 +3,7 @@ import {
   createPinnedRuntimeFetch,
   ensureBeeGameMacroGlobals,
 } from './model-runtime-network'
-import { getTLSFetchOptions } from '../../../../src/utils/mtls.js'
+import { getTLSFetchOptions } from '@bee-game-studio/security-core'
 import type {
   BeeGameModelRuntimeFailureStage,
   BeeGameModelUsage,

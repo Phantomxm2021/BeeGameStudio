@@ -1,5 +1,5 @@
-import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
+import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 
-export type { TLSAwareFetch as ResourceServerFetch } from '../../../src/utils/mtls.js'
+export type { TLSAwareFetch as ResourceServerFetch } from '@bee-game-studio/security-core'
 
 export const createResourceServerFetch = createTLSAwareFetch

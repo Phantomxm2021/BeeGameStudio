@@ -132,7 +132,7 @@ import {
   resolveSessionWorkspacePath,
 } from './local-runtime-service'
 import { createSupabaseDashboardStoreFromEnv } from './supabase-dashboard-store'
-import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
+import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 import { createSupabaseRuntimeEnvClientFromEnv } from './supabase-runtime-env-client'
 import {
   createInvitationServiceFromEnv,

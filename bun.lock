@@ -34,7 +34,6 @@
         "@bee-game-studio/agent-tools": "workspace:*",
         "@bee-game-studio/builtin-tools": "workspace:*",
         "@bee-game-studio/mcp-client": "workspace:*",
-        "@bee-game-studio/security-core": "workspace:*",
         "@bee-game-studio/weixin": "workspace:*",
         "@biomejs/biome": "^2.4.12",
         "@commander-js/extra-typings": "^14.0.0",
@@ -355,6 +354,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@bee-game-studio/beegame-billing-core": "workspace:*",
+        "@bee-game-studio/security-core": "workspace:*",
       },
     },
     "packages/beegame-resource-core": {
@@ -369,6 +369,7 @@
         "@bee-game-studio/agent-workflow-server": "workspace:*",
         "@bee-game-studio/beegame-resource-core": "workspace:*",
         "@bee-game-studio/beegame-storage-core": "workspace:*",
+        "@bee-game-studio/security-core": "workspace:*",
         "assimpjs": "^0.0.10",
         "image-processor-napi": "workspace:*",
       },
@@ -409,7 +410,7 @@
       "version": "1.0.0",
       "dependencies": {
         "@bee-game-studio/agent-tools": "workspace:*",
-        "@bee-game-studio/security-core": "workspace:*",
+        "marked": "^17.0.6",
       },
     },
     "packages/cloud-artifacts": {
@@ -525,6 +526,7 @@
       },
       "devDependencies": {
         "@anthropic-ai/sdk": "^0.81.0",
+        "bun-types": "latest",
       },
     },
   },
@@ -2087,7 +2089,7 @@
 
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "https://registry.npmmirror.com/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
-    "bun-types": ["bun-types@1.3.12", "https://registry.npmmirror.com/bun-types/-/bun-types-1.3.12.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
+    "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
 
     "bundle-name": ["bundle-name@4.1.0", "https://registry.npmmirror.com/bundle-name/-/bundle-name-4.1.0.tgz", { "dependencies": { "run-applescript": "^7.0.0" } }, "sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q=="],
 
@@ -4404,6 +4406,8 @@
     "@types/babel__core/@babel/parser": ["@babel/parser@7.29.2", "https://registry.npmmirror.com/@babel/parser/-/parser-7.29.2.tgz", { "dependencies": { "@babel/types": "^7.29.0" }, "bin": "./bin/babel-parser.js" }, "sha512-4GgRzy/+fsBa72/RZVJmGKPmZu9Byn8o4MoLpmNe1m8ZfYnz5emHLQz3U4gLud6Zwl0RZIcgiLD7Uq7ySFuDLA=="],
 
     "@types/babel__template/@babel/parser": ["@babel/parser@7.29.2", "https://registry.npmmirror.com/@babel/parser/-/parser-7.29.2.tgz", { "dependencies": { "@babel/types": "^7.29.0" }, "bin": "./bin/babel-parser.js" }, "sha512-4GgRzy/+fsBa72/RZVJmGKPmZu9Byn8o4MoLpmNe1m8ZfYnz5emHLQz3U4gLud6Zwl0RZIcgiLD7Uq7ySFuDLA=="],
+
+    "@types/bun/bun-types": ["bun-types@1.3.12", "https://registry.npmmirror.com/bun-types/-/bun-types-1.3.12.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
     "@typescript-eslint/typescript-estree/minimatch": ["minimatch@10.2.5", "https://registry.npmmirror.com/minimatch/-/minimatch-10.2.5.tgz", { "dependencies": { "brace-expansion": "^5.0.5" } }, "sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg=="],
 

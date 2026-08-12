@@ -10,3 +10,9 @@ export {
   type OutboundTargetRejectionCode,
   type PinnedUndiciTlsOptions,
 } from './outbound-target-policy'
+export {
+  createTLSAwareFetch,
+  getTLSFetchOptions,
+  type TLSAwareFetch,
+  type TLSAwareFetchOptions,
+} from './tls-aware-fetch'

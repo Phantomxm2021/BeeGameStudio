@@ -1,6 +1,6 @@
 {
   "name": "bee-game-studio",
-  "version": "2.8.0",
+  "version": "2.8.4",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
   "author": "bee-game-studio <bee-game-studio@proton.me>",
@@ -120,7 +120,6 @@
     "@bee-game-studio/agent-tools": "workspace:*",
     "@bee-game-studio/builtin-tools": "workspace:*",
     "@bee-game-studio/mcp-client": "workspace:*",
-    "@bee-game-studio/security-core": "workspace:*",
     "@bee-game-studio/weixin": "workspace:*",
     "@commander-js/extra-typings": "^14.0.0",
     "@growthbook/growthbook": "^1.6.5",

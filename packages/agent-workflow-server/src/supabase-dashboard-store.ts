@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
+import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 import {
   decryptSecret,
   encryptSecret,

@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@bee-game-studio/beegame-billing-core": "workspace:*"
+    "@bee-game-studio/beegame-billing-core": "workspace:*",
+    "@bee-game-studio/security-core": "workspace:*"
   }
 }

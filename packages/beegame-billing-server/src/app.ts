@@ -17,7 +17,7 @@ import {
   createBeeGameSupabaseBillingRepositoryFromEnv,
   type BeeGameBillingServerRepository,
 } from './supabase-billing-repository'
-import { createTLSAwareFetch } from '../../../src/utils/mtls.js'
+import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 
 export type BeeGameBillingServerAppOptions = {
   billingConfig?: BeeGameBillingConfig
