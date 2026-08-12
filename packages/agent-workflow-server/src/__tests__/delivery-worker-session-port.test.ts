@@ -781,6 +781,14 @@ describe('delivery worker session credentials', () => {
 
     expect(starts[0]?.workflowDocumentAuthorMode).toBe('initial')
     expect(starts[1]?.workflowDocumentAuthorMode).toBe('initial')
+    expect(starts[0]?.workflowCanonicalDocumentCommitContract).toMatchObject({
+      dispatchId: 'dispatch-gdd',
+      targetPath: 'docs/GDD.md',
+    })
+    expect(starts[1]?.workflowCanonicalDocumentCommitContract).toMatchObject({
+      dispatchId: 'dispatch-level',
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+    })
   })
 
   test('projects upstream authority and the controlled target baseline without file tools', async () => {

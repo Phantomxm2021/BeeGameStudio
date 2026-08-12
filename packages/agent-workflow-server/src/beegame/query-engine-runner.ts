@@ -34,6 +34,7 @@ import { CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS } from './configured-provision
 import { createNativeImplementationResultTool } from './native-implementation-result-tool'
 import { createNativeValidationResultTool } from './native-validation-result-tool'
 import { createNativeWorkflowResultTool } from './native-workflow-result-tools'
+import { createNativeCanonicalDocumentTool } from './native-canonical-document-tool'
 import { createResourceSelectionClient } from './resource-selection-client'
 import { confirmedResourceLibraryUsage } from './resource-delivery-readiness'
 
@@ -509,6 +510,15 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
             },
           })
         : undefined
+    const canonicalDocumentCommitTool =
+      this.input.workflowWorkerType === 'document-author' &&
+      this.input.workflowCanonicalDocumentCommitContract
+        ? createNativeCanonicalDocumentTool({
+            buildTool: definition => call(toolModule, 'buildTool', definition),
+            workspacePath: this.input.cwd,
+            contract: this.input.workflowCanonicalDocumentCommitContract,
+          })
+        : undefined
     const atomicTaskPlanTool =
       this.input.workflowWorkerType === 'atomic-task-planner'
         ? createNativeAtomicTaskPlanTool({
@@ -567,6 +577,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       resourceTool,
       resourceInventoryCommitTool,
       resourceContentTool,
+      canonicalDocumentCommitTool,
       atomicTaskPlanTool,
       implementationResultTool,
       validationResultTool,

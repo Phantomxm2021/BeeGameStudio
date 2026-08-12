@@ -575,7 +575,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
   return {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
-      await buildCanonicalDocumentCommitContract(request, dispatchId)
+      const canonicalDocumentCommitContract =
+        await buildCanonicalDocumentCommitContract(request, dispatchId)
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -602,6 +603,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
+        ...(canonicalDocumentCommitContract
+          ? {
+              workflowCanonicalDocumentCommitContract:
+                canonicalDocumentCommitContract,
+            }
+          : {}),
         ...(request.workerType === 'document-reviewer'
           ? {
               workflowDocumentReviewContract:
