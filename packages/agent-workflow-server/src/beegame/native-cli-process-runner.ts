@@ -32,6 +32,7 @@ export function createNativeCliProcessRunner(options: {
     sessionId: string
     provider: string
     model: string
+    launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
   }) => RuntimeObservability
 } = {}): BeeGameSessionRunner {
   return {
@@ -92,6 +93,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       sessionId: string
       provider: string
       model: string
+      launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
     }) => RuntimeObservability,
   ): Promise<NativeCliProcessRuntime> {
     if (command.length === 0)
@@ -110,6 +112,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         workspacePath: input.cwd,
         sessionId: input.sessionId,
         ...runtimeIdentity(input.env),
+        ...(input.runtimeLaunchContract
+          ? { launchContract: input.runtimeLaunchContract }
+          : {}),
       }),
     )
     void runtime.consumeStdout()
@@ -311,12 +316,12 @@ function runtimeIdentity(env: Record<string, string>): {
   if (env.ANTHROPIC_BASE_URL || env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY)
     return {
       provider: 'anthropic',
-      model: env.ANTHROPIC_MODEL || env.BEEGAME_MODEL || 'configured',
+      model: selectedRuntimeModel(env, 'ANTHROPIC'),
     }
   if (env.OPENAI_BASE_URL || env.OPENAI_API_KEY)
     return {
       provider: 'openai-compatible',
-      model: env.OPENAI_MODEL || env.BEEGAME_MODEL || 'configured',
+      model: selectedRuntimeModel(env, 'OPENAI'),
     }
   if (env.AWS_REGION || env.AWS_BEDROCK_MODEL)
     return {
@@ -324,6 +329,20 @@ function runtimeIdentity(env: Record<string, string>): {
       model: env.AWS_BEDROCK_MODEL || 'configured',
     }
   return { provider: 'configured', model: env.BEEGAME_MODEL || 'configured' }
+}
+
+function selectedRuntimeModel(
+  env: Record<string, string>,
+  provider: 'ANTHROPIC' | 'OPENAI',
+): string {
+  return (
+    env[`${provider}_MODEL`] ||
+    env[`${provider}_DEFAULT_SONNET_MODEL`] ||
+    env[`${provider}_DEFAULT_OPUS_MODEL`] ||
+    env[`${provider}_DEFAULT_HAIKU_MODEL`] ||
+    env.BEEGAME_MODEL ||
+    'configured'
+  )
 }
 
 function permissionResponse(

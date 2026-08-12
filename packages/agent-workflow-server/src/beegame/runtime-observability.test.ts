@@ -17,6 +17,22 @@ describe('passive native runtime observability', () => {
         sessionId: 'session-1',
         provider: 'anthropic',
         model: 'model-1',
+        launchContract: {
+          selectedEnvironmentKeys: [
+            'ANTHROPIC_AUTH_TOKEN',
+            'ANTHROPIC_BASE_URL',
+            'BEEGAME_CONFIG_DIR',
+            'FEATURE_BASH_CLASSIFIER',
+          ],
+          forwardedEnvironmentKeys: [
+            'ANTHROPIC_AUTH_TOKEN',
+            'ANTHROPIC_BASE_URL',
+            'BEEGAME_CONFIG_DIR',
+          ],
+          endpointClass: 'custom',
+          configDirectoryConfigured: true,
+          credentialConfigured: true,
+        },
         errorSink: message => errors.push(message),
       })
       expect(observer.beginTurn({ requestId: 'request-1' })).toBeUndefined()
@@ -58,6 +74,22 @@ describe('passive native runtime observability', () => {
           requestId: 'request-1',
           provider: 'anthropic',
           model: 'model-1',
+          launchContract: {
+            selectedEnvironmentKeys: [
+              'ANTHROPIC_AUTH_TOKEN',
+              'ANTHROPIC_BASE_URL',
+              'BEEGAME_CONFIG_DIR',
+              'FEATURE_BASH_CLASSIFIER',
+            ],
+            forwardedEnvironmentKeys: [
+              'ANTHROPIC_AUTH_TOKEN',
+              'ANTHROPIC_BASE_URL',
+              'BEEGAME_CONFIG_DIR',
+            ],
+            endpointClass: 'custom',
+            configDirectoryConfigured: true,
+            credentialConfigured: true,
+          },
         }),
         expect.objectContaining({
           type: 'tool_started',
@@ -81,6 +113,8 @@ describe('passive native runtime observability', () => {
       ])
       expect(raw).not.toContain('SECRET PROMPT BODY')
       expect(raw).not.toContain('input')
+      expect(raw).not.toContain('provider-token')
+      expect(raw).not.toContain('https://provider.example')
       expect(errors).toEqual(['api exploded request=req-provider'])
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

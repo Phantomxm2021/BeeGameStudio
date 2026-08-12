@@ -6,6 +6,13 @@ type RuntimeObservationInput = {
   sessionId: string
   provider: string
   model: string
+  launchContract?: {
+    selectedEnvironmentKeys: string[]
+    forwardedEnvironmentKeys: string[]
+    endpointClass: 'default' | 'first_party' | 'custom'
+    configDirectoryConfigured: boolean
+    credentialConfigured: boolean
+  }
   errorSink?: (message: string) => void
 }
 
@@ -48,6 +55,9 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         requestId,
         provider: input.provider,
         model: input.model,
+        ...(input.launchContract
+          ? { launchContract: input.launchContract }
+          : {}),
       })
     },
     observeLine(line: string): void {

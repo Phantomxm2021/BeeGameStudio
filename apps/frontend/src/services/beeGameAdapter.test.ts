@@ -2597,6 +2597,45 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages[3].artifact_path).toBe('sample-game/src/main.ts');
   });
 
+  it('renders sanitized native tool input preparation as an active tool card', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/beegame-sessions/beegame_tool_input/events?after=0') {
+        return jsonResponse([{
+          id: 46,
+          sessionId: 'beegame_tool_input',
+          turnId: 'turn-1',
+          type: 'tool.progress',
+          text: 'Write input streaming',
+          payload: {
+            type: 'tool_progress',
+            toolUseID: 'native-write-preparing',
+            toolName: 'Write',
+            phase: 'input_streaming',
+          },
+          createdAt: '2026-06-21T00:00:46.000Z',
+        }]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    }));
+    const result = seedBoundProject(
+      'beegame_tool_input',
+      '/tmp/beegame-projects/tool-input',
+    );
+
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages).toEqual([
+      expect.objectContaining({
+        type: 'tool_start',
+        tool_use_id: 'native-write-preparing',
+        tool: 'Write',
+        tool_status: 'running',
+        content: expect.stringContaining('Write input streaming'),
+      }),
+    ]);
+    expect(JSON.stringify(polled.messages)).not.toContain('PRIVATE DOCUMENT BODY');
+  });
+
   it('formats Agent tool events as subagent cards', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

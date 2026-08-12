@@ -27,6 +27,58 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  test('reports the selected model and sanitized launch contract to passive observability', async () => {
+    let observed: Record<string, unknown> | undefined
+    const launchContract = {
+      selectedEnvironmentKeys: [
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BEEGAME_CONFIG_DIR',
+      ],
+      forwardedEnvironmentKeys: [
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BEEGAME_CONFIG_DIR',
+      ],
+      endpointClass: 'default' as const,
+      configDirectoryConfigured: true,
+      credentialConfigured: true,
+    }
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, fixturePath],
+      observabilityFactory: input => {
+        observed = input
+        return {
+          beginTurn: () => undefined,
+          observeLine: () => undefined,
+          observeMessage: () => undefined,
+          finishTurn: () => undefined,
+          flush: async () => undefined,
+        }
+      },
+    }).start({
+      sessionId: 'session-observed',
+      cwd: process.cwd(),
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'secret-provider-token',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-sonnet-model',
+        BEEGAME_CONFIG_DIR: '/private/config',
+      },
+      runtimeLaunchContract: launchContract,
+    })
+
+    expect(observed).toEqual({
+      workspacePath: process.cwd(),
+      sessionId: 'session-observed',
+      provider: 'anthropic',
+      model: 'selected-sonnet-model',
+      launchContract,
+    })
+    expect(JSON.stringify(observed)).not.toContain('secret-provider-token')
+    expect(JSON.stringify(observed)).not.toContain('/private/config')
+    runtime.dispose?.()
+  })
+
   test('never resumes a first native process with the BGS routing identity', () => {
     const input = {
       sessionId: 'beegame_route_only',

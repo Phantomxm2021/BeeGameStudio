@@ -246,6 +246,8 @@ export type BeeGameSessionRunnerStartInput = {
   onNativeSessionId?(sessionId: string): void
   cwd: string
   env: Record<string, string>
+  /** Sanitized evidence of the selected versus forwarded launch settings. */
+  runtimeLaunchContract?: RuntimeLaunchContract
   /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
   resourceSelectionConfig?: ResourceSelectionRuntimeConfig
   /** Workflow identity is propagated into the native permission boundary. */
@@ -265,6 +267,14 @@ export type BeeGameSessionRunnerStartInput = {
   requestPermission?(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
+}
+
+export type RuntimeLaunchContract = {
+  selectedEnvironmentKeys: string[]
+  forwardedEnvironmentKeys: string[]
+  endpointClass: 'default' | 'first_party' | 'custom'
+  configDirectoryConfigured: boolean
+  credentialConfigured: boolean
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
@@ -1304,10 +1314,11 @@ export class BeeGameSessionManager {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
-      const env = buildRuntimeEnv(
+      const selectedEnvironment = mergeRuntimeEnv(
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
       )
+      const env = buildRuntimeEnv(selectedEnvironment)
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1322,6 +1333,10 @@ export class BeeGameSessionManager {
           },
           cwd: record.session.cwd,
           env,
+          runtimeLaunchContract: buildRuntimeLaunchContract(
+            selectedEnvironment,
+            env,
+          ),
             ...(this.resourceSelectionConfig &&
             env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
             (!record.workflowWorker ||
@@ -1502,6 +1517,15 @@ export class BeeGameSessionManager {
           getUsageFromEventPayload(message).total_tokens > 0
         ) {
           this.append(record, 'usage', '', message)
+        }
+        const toolInputActivity = mapStreamingToolInputActivity(message)
+        if (toolInputActivity) {
+          this.append(
+            record,
+            toolInputActivity.type,
+            toolInputActivity.text,
+            toolInputActivity.payload,
+          )
         }
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
@@ -1882,7 +1906,10 @@ export class BeeGameSessionManager {
         event.type === 'assistant.thinking' && event.payload?.status === 'ended'
       const thinking = thinkingEnded
         ? 'idle'
-        : event.type === 'assistant.thinking' || event.type === 'tool.started'
+        : event.type === 'assistant.thinking' ||
+            event.type === 'tool.started' ||
+            (event.type === 'tool.progress' &&
+              event.payload?.phase === 'input_streaming')
           ? 'working'
           : event.type === 'turn.completed' ||
               event.type === 'turn.empty' ||
@@ -4288,6 +4315,33 @@ function trackStreamingToolUse(
   if (toolUseId && toolName) record.streamingToolUses.set(toolUseId, toolName)
 }
 
+function mapStreamingToolInputActivity(
+  message: DashboardSDKMessage,
+): {
+  type: 'tool.progress'
+  text: string
+  payload: DashboardSDKMessage
+} | null {
+  if (message.type !== 'stream_event') return null
+  const event = getObjectField(message, 'event') ?? message
+  if (getStringField(event, 'type') !== 'content_block_start') return null
+  const block = getObjectField(event, 'content_block')
+  if (getStringField(block, 'type') !== 'tool_use') return null
+  const toolUseId = getStringField(block, 'id')
+  const toolName = getStringField(block, 'name')
+  if (!toolUseId || !toolName) return null
+  return {
+    type: 'tool.progress',
+    text: `${toolName} input streaming`,
+    payload: {
+      type: 'tool_progress',
+      toolUseID: toolUseId,
+      toolName,
+      phase: 'input_streaming',
+    },
+  }
+}
+
 function extractStreamThinkingStatus(
   record: SessionRecord,
   message: DashboardSDKMessage,
@@ -4387,14 +4441,65 @@ function getObjectField(
 }
 
 function buildRuntimeEnv(
-  runtime: RuntimeModelConfig | undefined,
-  additionalEnv: Record<string, string> = {},
+  selectedEnvironment: Record<string, string>,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries({ ...additionalEnv, ...(runtime?.env ?? {}) }).filter(
+    Object.entries(selectedEnvironment).filter(
       ([key]) => RUNTIME_MODEL_ENV_KEYS.has(key),
     ),
   )
+}
+
+function mergeRuntimeEnv(
+  runtime: RuntimeModelConfig | undefined,
+  additionalEnv: Record<string, string>,
+): Record<string, string> {
+  return { ...additionalEnv, ...(runtime?.env ?? {}) }
+}
+
+function buildRuntimeLaunchContract(
+  selectedEnvironment: Record<string, string>,
+  forwardedEnvironment: Record<string, string>,
+): RuntimeLaunchContract {
+  const endpoint =
+    forwardedEnvironment.ANTHROPIC_BASE_URL ||
+    forwardedEnvironment.OPENAI_BASE_URL ||
+    forwardedEnvironment.GEMINI_BASE_URL ||
+    forwardedEnvironment.GROK_BASE_URL ||
+    ''
+  return {
+    selectedEnvironmentKeys: Object.keys(selectedEnvironment).sort(),
+    forwardedEnvironmentKeys: Object.keys(forwardedEnvironment).sort(),
+    endpointClass: classifyRuntimeEndpoint(endpoint),
+    configDirectoryConfigured: Boolean(
+      forwardedEnvironment.BEEGAME_CONFIG_DIR,
+    ),
+    credentialConfigured: Boolean(
+      forwardedEnvironment.ANTHROPIC_AUTH_TOKEN ||
+        forwardedEnvironment.OPENAI_API_KEY ||
+        forwardedEnvironment.GEMINI_API_KEY ||
+        forwardedEnvironment.GROK_API_KEY,
+    ),
+  }
+}
+
+function classifyRuntimeEndpoint(
+  endpoint: string,
+): RuntimeLaunchContract['endpointClass'] {
+  if (!endpoint) return 'default'
+  try {
+    const hostname = new URL(endpoint).hostname.toLowerCase()
+    return [
+      'api.anthropic.com',
+      'api.openai.com',
+      'generativelanguage.googleapis.com',
+      'api.x.ai',
+    ].includes(hostname)
+      ? 'first_party'
+      : 'custom'
+  } catch {
+    return 'custom'
+  }
 }
 
 function cloneSession(session: BeeGameSession): BeeGameSession {

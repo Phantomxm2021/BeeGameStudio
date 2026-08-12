@@ -649,9 +649,11 @@ describe('BeeGame session runtime resilience', () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-transparent-model-env-'))
     const workspacePath = join(root, 'workspace')
     let runtimeEnv: Record<string, string> | undefined
+    let launchContract: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
     const runner: BeeGameSessionRunner = {
       start: async input => {
         runtimeEnv = input.env
+        launchContract = input.runtimeLaunchContract
         return {
           submit: async () => {},
           stop: () => undefined,
@@ -681,6 +683,26 @@ describe('BeeGame session runtime resilience', () => {
       ANTHROPIC_AUTH_TOKEN: 'provider-token',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
       BEEGAME_CONFIG_DIR: '/bgs/config',
+    })
+    expect(launchContract).toEqual({
+      selectedEnvironmentKeys: [
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_BASE_URL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BEEGAME_CONFIG_DIR',
+        'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
+        'FEATURE_BASH_CLASSIFIER',
+        'NPM_CONFIG_USERCONFIG',
+      ],
+      forwardedEnvironmentKeys: [
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_BASE_URL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BEEGAME_CONFIG_DIR',
+      ],
+      endpointClass: 'custom',
+      configDirectoryConfigured: true,
+      credentialConfigured: true,
     })
     manager.dispose()
   })
@@ -816,6 +838,155 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)
+    manager.dispose()
+  })
+
+  test('exposes native tool input preparation without persisting streamed input', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-tool-input-activity-'))
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 3,
+              content_block: {
+                type: 'tool_use',
+                id: 'native-write-preparing',
+                name: 'Write',
+                input: {},
+              },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              index: 3,
+              delta: {
+                type: 'input_json_delta',
+                partial_json: '{"content":"PRIVATE DOCUMENT BODY',
+              },
+            },
+          } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-tool-input',
+      workflowDispatchId: 'dispatch-tool-input',
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'author the assigned document')
+    await waitForIdle(manager, session.id)
+
+    const activity = manager
+      .events(session.id)
+      .filter(event => event.type === 'tool.progress')
+    expect(activity).toEqual([
+      expect.objectContaining({
+        text: 'Write input streaming',
+        payload: {
+          type: 'tool_progress',
+          toolUseID: 'native-write-preparing',
+          toolName: 'Write',
+          phase: 'input_streaming',
+        },
+      }),
+    ])
+    expect(JSON.stringify(activity)).not.toContain('PRIVATE DOCUMENT BODY')
+    manager.dispose()
+  })
+
+  test('keeps a document worker visibly active while native tool input is prepared', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-input-progress-'))
+    const workspacePath = join(root, 'workspace')
+    const store = createRunStore(workspacePath, 'user-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-document-input',
+      projectId: 'project-document-input',
+      ownerId: 'user-1',
+      foundationDraftComplete: false,
+    })
+    const startedAt = new Date().toISOString()
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'running',
+      documentStep: 'FOUNDATION_DRAFTING',
+      lastProgressAt: startedAt,
+      activeDispatch: {
+        dispatchId: 'dispatch-document-input',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/GDD.md',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt,
+      },
+    })
+    let release!: () => void
+    const hold = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 0,
+              content_block: {
+                type: 'tool_use',
+                id: 'native-write-progress',
+                name: 'Write',
+                input: {},
+              },
+            },
+          } as DashboardSDKMessage)
+          await hold
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-document-input',
+      workflowDispatchId: 'dispatch-document-input',
+      workflowWorkerType: 'document-author',
+    })
+
+    const turn = manager.send(session.id, 'author the document')
+    let active = await store.load()
+    for (let attempt = 0; attempt < 400 && active?.thinking !== 'working'; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      active = await store.load()
+    }
+
+    expect(
+      manager
+        .events(session.id)
+        .some(event => event.type === 'tool.progress'),
+    ).toBe(true)
+    expect(active?.activeDispatch).toEqual(expect.objectContaining({
+      dispatchId: 'dispatch-document-input',
+      status: 'running',
+    }))
+    expect(active?.thinking).toBe('working')
+    expect(active?.lastProgressAt).toBe(startedAt)
+    release()
+    await turn
     manager.dispose()
   })
 
