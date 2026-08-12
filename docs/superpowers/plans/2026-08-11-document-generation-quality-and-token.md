@@ -10,6 +10,25 @@
 
 ---
 
+## Mandatory Chrome Acceptance Gate
+
+This work is not accepted from code review, API calls, fixtures, or unit tests alone. After implementation, run the real Idea → document-authoring flow through the user's Chrome session and preserve one evidence packet for the complete writing stage.
+
+The Chrome run must:
+
+- create a disposable project from a neutral, project-independent idea entered through the visible UI; never hard-code the acceptance idea into product code or test fixtures;
+- use the model and permissions selected in BeeGame Studio settings without BGS rewriting Claude Code's reasoning, tools, prompts, or native configuration;
+- observe the workflow from document authoring start until all eight required documents are durably written, or until the first real failure;
+- record wall-clock start/end time, per-document duration, total duration, model request count, tool-call count, input tokens, cache-read tokens, cache-creation tokens, output tokens, total tokens, retries, and corrections from persisted workflow evidence;
+- retain the eight on-disk documents and audit each document for its owned responsibility, professional completeness, production usability, readability for humans and agents, required production materials, excessive repetition, template residue, and unsupported metadata;
+- report token and time concentration by document so unusually expensive or slow stages are visible rather than hidden in an aggregate;
+- verify through the UI that completion state, usage, errors, and written paths agree with persisted server evidence;
+- delete only the disposable acceptance project after evidence has been captured, leaving all existing user projects untouched.
+
+Acceptance requires all eight documents to exist at the configured external project root, pass their canonical structural contracts, and be usable as implementation authority. The final report must state observed quality, speed, and consumption with raw measurements. Do not invent a pass threshold before measuring the run, and do not mark the work complete if Chrome, persisted usage evidence, or on-disk outputs disagree.
+
+---
+
 ### Task 1: Restore a compilable baseline
 
 **Files:**
