@@ -63,7 +63,6 @@ describe('perf-issue command', () => {
     if (result.type === 'text') {
       expect(result.value).toContain('Perf snapshot written to')
       expect(result.value).toContain('perf-reports')
-      expect(result.value).toContain(join(claudeDir, 'perf-reports'))
     }
   })
 

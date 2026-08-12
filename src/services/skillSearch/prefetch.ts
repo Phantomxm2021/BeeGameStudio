@@ -10,7 +10,6 @@ import {
 } from './localSearch.js'
 import { normalizeQueryIntent } from './intentNormalize.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { getRuntimeScopedCacheKey } from '../../utils/runtimeScopeCacheKey.js'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
@@ -42,10 +41,6 @@ function addBoundedSessionEntry(set: Set<string>, value: string): void {
       set.delete(next.value)
     }
   }
-}
-
-function getSessionScopedSkillKey(cwd: string, name: string): string {
-  return getRuntimeScopedCacheKey(cwd, name)
 }
 
 const AUTO_LOAD_MIN_SCORE = Number(
@@ -214,13 +209,7 @@ async function maybeRecordSkillGap(
   if (trigger !== 'user_input') return undefined
   if (!queryText.trim()) return undefined
 
-  const cwd =
-    ((context as Record<string, unknown>).cwd as string) ?? process.cwd()
-  const gapSignalKey = getRuntimeScopedCacheKey(
-    cwd,
-    trigger,
-    queryText.trim().toLowerCase(),
-  )
+  const gapSignalKey = `${trigger}:${queryText.trim().toLowerCase()}`
   if (recordedGapSignals.has(gapSignalKey)) return undefined
   addBoundedSessionEntry(recordedGapSignals, gapSignalKey)
 
@@ -232,7 +221,8 @@ async function maybeRecordSkillGap(
     if (!isSkillLearningEnabled()) return undefined
     const gap = await recordSkillGap({
       prompt: queryText,
-      cwd,
+      cwd:
+        ((context as Record<string, unknown>).cwd as string) ?? process.cwd(),
       sessionId:
         ((context as Record<string, unknown>).sessionId as string) ??
         'unknown-session',
@@ -274,16 +264,11 @@ export async function startSkillDiscoveryPrefetch(
     const index = await getSkillIndex(cwd)
     const results = searchSkills(queryText, index)
 
-    const newResults = results.filter(
-      r => !discoveredThisSession.has(getSessionScopedSkillKey(cwd, r.name)),
-    )
+    const newResults = results.filter(r => !discoveredThisSession.has(r.name))
     if (newResults.length === 0) return []
 
     for (const r of newResults)
-      addBoundedSessionEntry(
-        discoveredThisSession,
-        getSessionScopedSkillKey(cwd, r.name),
-      )
+      addBoundedSessionEntry(discoveredThisSession, r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'assistant_turn',
@@ -348,10 +333,7 @@ export async function getTurnZeroSkillDiscovery(
     if (results.length === 0 && !gap) return null
 
     for (const r of results)
-      addBoundedSessionEntry(
-        discoveredThisSession,
-        getSessionScopedSkillKey(cwd, r.name),
-      )
+      addBoundedSessionEntry(discoveredThisSession, r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'user_input',

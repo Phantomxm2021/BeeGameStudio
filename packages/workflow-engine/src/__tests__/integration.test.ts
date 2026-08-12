@@ -12,7 +12,6 @@ import { createFileJournalStore } from '../engine/journal.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import { createBufferingEmitter } from '../progress/events.js'
 import type { AgentRunParams, AgentRunResult, ProgressEvent } from '../types.js'
-import { createTestRegistry } from './testRegistry.js'
 
 function canonicalPorts(runsDir: string): {
   ports: WorkflowPorts
@@ -22,8 +21,10 @@ function canonicalPorts(runsDir: string): {
   const { emitter, events } = createBufferingEmitter()
   const agentCalls: AgentRunParams[] = []
   const ports: WorkflowPorts = {
-    agentAdapterRegistry: createTestRegistry(
-      async (params: AgentRunParams): Promise<AgentRunResult> => {
+    agentRunner: {
+      runAgentToResult: async (
+        params: AgentRunParams,
+      ): Promise<AgentRunResult> => {
         agentCalls.push(params)
         const p = params.prompt
         if (p.startsWith('review-')) {
@@ -40,9 +41,9 @@ function canonicalPorts(runsDir: string): {
             usage: { outputTokens: 2 },
           }
         }
-        return { kind: 'dead', reason: 'runagent-threw' }
+        return { kind: 'dead' }
       },
-    ),
+    },
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -53,7 +54,7 @@ function canonicalPorts(runsDir: string): {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: runsDir,
@@ -145,8 +146,10 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
     let round = 0
     const { emitter, events } = createBufferingEmitter()
     const ports: WorkflowPorts = {
-      agentAdapterRegistry: createTestRegistry(
-        async (p: AgentRunParams): Promise<AgentRunResult> => {
+      agentRunner: {
+        runAgentToResult: async (
+          p: AgentRunParams,
+        ): Promise<AgentRunResult> => {
           round++
           // rounds 1-2 return findings, round 3+ returns empty → converges
           const found = round <= 2 ? [{ b: round }] : []
@@ -156,7 +159,7 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
             usage: { outputTokens: 1 },
           }
         },
-      ),
+      },
       progressEmitter: emitter,
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -167,7 +170,7 @@ test('loop-until-dry pattern: two consecutive rounds with no new findings conver
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -217,10 +220,12 @@ test('resume compatibility: second run hits journal, agents do not re-run', asyn
   try {
     let calls = 0
     const makePorts = (): WorkflowPorts => ({
-      agentAdapterRegistry: createTestRegistry(async () => {
-        calls++
-        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-      }),
+      agentRunner: {
+        runAgentToResult: async () => {
+          calls++
+          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+        },
+      },
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -231,7 +236,7 @@ test('resume compatibility: second run hits journal, agents do not re-run', asyn
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,

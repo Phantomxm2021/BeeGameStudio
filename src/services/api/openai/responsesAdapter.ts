@@ -1,10 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import {
-  assertProviderCompletionReason,
-  normalizeOpenAIUsage,
-  type AnthropicUsage,
-} from '@ant/model-provider'
+import { normalizeOpenAIUsage, type AnthropicUsage } from '@ant/model-provider'
 import { getValidChatGPTAuth } from './chatgptAuth.js'
 
 type ResponsesInputItem = Record<string, unknown>
@@ -194,6 +190,8 @@ export function buildResponsesRequest(params: {
       ? { reasoning: { effort: params.reasoningEffort } }
       : {}),
     parallel_tool_calls: true,
+    // Same OAuth session → same key so OpenAI can sticky-route to a cache node.
+    // Must not hash the full message list (would change every turn).
     prompt_cache_key: params.promptCacheKey,
   }
 }
@@ -229,6 +227,16 @@ async function* parseSSE(
   }
 }
 
+/**
+ * Map OpenAI Responses usage → Anthropic-style mutually exclusive fields.
+ *
+ * OpenAI:  input_tokens is TOTAL input; cached_tokens ⊆ input_tokens;
+ *          cache_write_tokens (GPT-5.6+) reports tokens written this turn.
+ * Anthropic: input + cache_creation + cache_read are disjoint and sum to total.
+ *
+ * Without subtracting cached from input, cacheWarning hit-rate becomes
+ * cached/(total+cached) with a hard ceiling of 50%.
+ */
 export function extractUsage(
   response: Record<string, unknown> | undefined,
 ): AnthropicUsage {
@@ -236,19 +244,26 @@ export function extractUsage(
   const inputDetails = usage?.input_tokens_details as
     | Record<string, unknown>
     | undefined
+
+  const totalInput =
+    typeof usage?.input_tokens === 'number' ? usage.input_tokens : 0
+  const outputTokens =
+    typeof usage?.output_tokens === 'number' ? usage.output_tokens : 0
+
+  const cachedRaw =
+    typeof inputDetails?.cached_tokens === 'number'
+      ? inputDetails.cached_tokens
+      : 0
+  const writeRaw =
+    typeof inputDetails?.cache_write_tokens === 'number'
+      ? inputDetails.cache_write_tokens
+      : 0
+
   return normalizeOpenAIUsage({
-    totalInputTokens:
-      typeof usage?.input_tokens === 'number' ? usage.input_tokens : 0,
-    outputTokens:
-      typeof usage?.output_tokens === 'number' ? usage.output_tokens : 0,
-    cacheReadTokens:
-      typeof inputDetails?.cached_tokens === 'number'
-        ? inputDetails.cached_tokens
-        : 0,
-    cacheWriteTokens:
-      typeof inputDetails?.cache_write_tokens === 'number'
-        ? inputDetails.cache_write_tokens
-        : 0,
+    totalInputTokens: totalInput,
+    outputTokens,
+    cacheReadTokens: cachedRaw,
+    cacheWriteTokens: writeRaw,
   })
 }
 
@@ -270,7 +285,6 @@ export async function* adaptResponsesStreamToAnthropic(
   let currentContentIndex = -1
   let textBlockOpen = false
   let thinkingBlockOpen = false
-  let completionReason: string | undefined
 
   const ensureStarted = async function* () {
     if (started) return
@@ -444,17 +458,14 @@ export async function* adaptResponsesStreamToAnthropic(
         thinkingBlockOpen = false
       }
       const response = event.response as Record<string, unknown> | undefined
-      completionReason = mapStopReason(response)
       yield {
         type: 'message_delta',
-        delta: { stop_reason: completionReason, stop_sequence: null },
+        delta: { stop_reason: mapStopReason(response), stop_sequence: null },
         usage: extractUsage(response),
       } as unknown as BetaRawMessageStreamEvent
       yield { type: 'message_stop' } as BetaRawMessageStreamEvent
     }
   }
-
-  assertProviderCompletionReason(completionReason)
 }
 
 export async function createChatGPTResponsesStream(params: {

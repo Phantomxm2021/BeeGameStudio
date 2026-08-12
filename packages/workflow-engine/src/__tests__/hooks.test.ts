@@ -4,11 +4,7 @@ import { createEngineContext } from '../engine/context.js'
 import { maxConcurrency, Semaphore } from '../engine/concurrency.js'
 import { agentCallKey } from '../engine/journal.js'
 import { makeHooks, type SubWorkflowRunner } from '../engine/hooks.js'
-import {
-  WorkflowError,
-  WorkflowAbortedError,
-  WorkflowJournalError,
-} from '../engine/errors.js'
+import { WorkflowError, WorkflowAbortedError } from '../engine/errors.js'
 import { createBufferingEmitter } from '../progress/events.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import type {
@@ -31,7 +27,6 @@ type CtxOverrides = Partial<{
   pending: { kind: 'skip' | 'retry' } | null
   journal: JournalEntry[]
   appended: JournalEntry[]
-  appendError: Error | null
   budgetTotal: number | null
   signal: AbortSignal
   truncated: string[]
@@ -54,24 +49,16 @@ function buildCtx(overrides: CtxOverrides = {}): {
 } {
   const { emitter, events } = createBufferingEmitter()
   const results = overrides.agentResults ?? new Map<string, AgentRunResult>()
-  const runner =
-    overrides.runner ??
-    (async (params: AgentRunParams): Promise<AgentRunResult> =>
-      results.get(params.prompt) ?? {
-        kind: 'dead',
-        reason: 'runagent-threw',
-      })
-  const agentAdapterRegistry =
-    overrides.agentAdapterRegistry ??
-    new AgentAdapterRegistry()
-      .register({
-        id: 'test',
-        capabilities: { structuredOutput: true },
-        run: runner,
-      })
-      .default('test')
   const ports: WorkflowPorts = {
-    agentAdapterRegistry,
+    agentRunner: {
+      runAgentToResult: overrides.runner
+        ? overrides.runner
+        : async (params: AgentRunParams) =>
+            results.get(params.prompt) ?? { kind: 'dead' },
+    },
+    ...(overrides.agentAdapterRegistry
+      ? { agentAdapterRegistry: overrides.agentAdapterRegistry }
+      : {}),
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -89,7 +76,6 @@ function buildCtx(overrides: CtxOverrides = {}): {
     journalStore: {
       read: async () => [],
       append: async (_id: string, entry: JournalEntry) => {
-        if (overrides.appendError) throw overrides.appendError
         overrides.appended?.push(entry)
       },
       truncate: async (id: string) => {
@@ -100,7 +86,7 @@ function buildCtx(overrides: CtxOverrides = {}): {
     logger: {
       debug: () => {},
       event: () => {},
-      warn: overrides.loggerWarn ?? (() => {}),
+      ...(overrides.loggerWarn ? { warn: overrides.loggerWarn } : {}),
     },
     hostFactory: () => ({
       handle: createHostHandle(null),
@@ -142,7 +128,7 @@ test('agent skipped → null and not counted', async () => {
 
 test('agent dead → null', async () => {
   const { hooks } = buildCtx({
-    agentResults: new Map([['hi', { kind: 'dead', reason: 'runagent-threw' }]]),
+    agentResults: new Map([['hi', { kind: 'dead' }]]),
   })
   expect(await hooks.agent('hi')).toBeNull()
 })
@@ -155,7 +141,7 @@ test('agent dead → retry once succeeds → ok', async () => {
     runner: async () => {
       calls++
       return calls === 1
-        ? { kind: 'dead' as const, reason: 'runagent-threw' as const }
+        ? { kind: 'dead' as const }
         : {
             kind: 'ok' as const,
             output: 'recovered',
@@ -172,7 +158,7 @@ test('agent dead → retry still dead → final null (dead stays dead)', async (
   const { hooks } = buildCtx({
     runner: async () => {
       calls++
-      return { kind: 'dead' as const, reason: 'runagent-threw' as const }
+      return { kind: 'dead' as const }
     },
     loggerWarn: () => {},
   })
@@ -185,9 +171,7 @@ test('agent dead → retry throws without schema → exactly two attempts and fi
   const { ctx, hooks } = buildCtx({
     runner: async () => {
       calls++
-      if (calls === 1) {
-        return { kind: 'dead' as const, reason: 'runagent-threw' as const }
-      }
+      if (calls === 1) return { kind: 'dead' as const }
       throw new Error('retry failed')
     },
     loggerWarn: () => {},
@@ -433,16 +417,12 @@ test('agent journal hit does not call runner', async () => {
   let called = 0
   const { emitter } = createBufferingEmitter()
   const ports: WorkflowPorts = {
-    agentAdapterRegistry: new AgentAdapterRegistry()
-      .register({
-        id: 'test',
-        capabilities: { structuredOutput: true },
-        run: async () => {
-          called++
-          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-        },
-      })
-      .default('test'),
+    agentRunner: {
+      runAgentToResult: async () => {
+        called++
+        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+      },
+    },
     progressEmitter: emitter,
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -457,7 +437,7 @@ test('agent journal hit does not call runner', async () => {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: '/tmp',
@@ -484,24 +464,6 @@ test('agent journal hit does not call runner', async () => {
   const hooks = makeHooks(ctx, async () => null)
   expect(await hooks.agent('hi')).toBe('cached')
   expect(called).toBe(0)
-})
-
-test('parallel durable journal failure aborts instead of becoming a null item', async () => {
-  const error = new WorkflowJournalError('journal append failed')
-  const { hooks } = buildCtx({ appendError: error })
-
-  await expect(hooks.parallel([() => hooks.agent('persist-me')])).rejects.toBe(
-    error,
-  )
-})
-
-test('pipeline durable journal failure aborts instead of becoming a null item', async () => {
-  const error = new WorkflowJournalError('journal append failed')
-  const { hooks } = buildCtx({ appendError: error })
-
-  await expect(
-    hooks.pipeline(['persist-me'], prev => hooks.agent(String(prev))),
-  ).rejects.toBe(error)
 })
 
 test('valid structured output journal hit is revalidated and skips runner', async () => {
@@ -711,7 +673,7 @@ test('phase switch emits phase_started/done; log emits log', () => {
 
 test('agent dead also counts in agentCountBox', async () => {
   const { hooks, ctx } = buildCtx({
-    agentResults: new Map([['x', { kind: 'dead', reason: 'runagent-threw' }]]),
+    agentResults: new Map([['x', { kind: 'dead' }]]),
   })
   await hooks.agent('x')
   expect(ctx.resources.agentCountBox.value).toBe(1)
@@ -846,7 +808,7 @@ test('agent concurrency bounded by semaphore (does not exceed maxConcurrency)', 
   expect(peak).toBeLessThanOrEqual(maxConcurrency())
 })
 
-test('agentAdapterRegistry dispatches the selected adapter', async () => {
+test('agentAdapterRegistry takes priority over agentRunner (dispatched to adapter by route)', async () => {
   const called: string[] = []
   const registry = new AgentAdapterRegistry()
     .register({
@@ -864,6 +826,10 @@ test('agentAdapterRegistry dispatches the selected adapter', async () => {
     .default('ad')
   const { hooks } = buildCtx({
     agentAdapterRegistry: registry,
+    runner: async () => {
+      called.push('runner')
+      return { kind: 'ok', output: 'from-runner', usage: { outputTokens: 1 } }
+    },
   })
   expect(await hooks.agent('x')).toBe('from-adapter')
   expect(called).toEqual(['adapter'])
@@ -871,6 +837,7 @@ test('agentAdapterRegistry dispatches the selected adapter', async () => {
 
 test('agentAdapterRegistry result is validated at the same engine boundary', async () => {
   let adapterCalls = 0
+  let runnerCalls = 0
   const registry = new AgentAdapterRegistry()
     .register({
       id: 'ad',
@@ -887,11 +854,20 @@ test('agentAdapterRegistry result is validated at the same engine boundary', asy
     .default('ad')
   const { ctx, hooks } = buildCtx({
     agentAdapterRegistry: registry,
+    runner: async () => {
+      runnerCalls++
+      return {
+        kind: 'ok',
+        output: { count: 1 },
+        usage: { outputTokens: 1 },
+      }
+    },
     loggerWarn: () => {},
   })
 
   expect(await hooks.agent('p', { schema: STRUCTURED_SCHEMA })).toBeNull()
   expect(adapterCalls).toBe(2)
+  expect(runnerCalls).toBe(0)
   const final = ctx.journal[0]!.result
   expect(final.kind === 'dead' ? final.reason : undefined).toBe(
     'invalid-structured-output',

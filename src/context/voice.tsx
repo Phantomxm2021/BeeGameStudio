@@ -17,9 +17,9 @@ const DEFAULT_STATE: VoiceState = {
   voiceWarmingUp: false,
 };
 
-export type VoiceStore = Store<VoiceState>;
+type VoiceStore = Store<VoiceState>;
 
-export const VoiceContext = createContext<VoiceStore | null>(null);
+const VoiceContext = createContext<VoiceStore | null>(null);
 
 type Props = {
   children: React.ReactNode;

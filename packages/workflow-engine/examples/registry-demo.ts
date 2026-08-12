@@ -60,6 +60,8 @@ return { research, quick }
 
 function makePorts(runsDir: string): WorkflowPorts {
   return {
+    // registry 优先，agentRunner 仅作形状占位（不会被调到）
+    agentRunner: { runAgentToResult: async () => ({ kind: 'dead' }) },
     agentAdapterRegistry: registry,
     progressEmitter: {
       emit: e => {
@@ -85,7 +87,7 @@ function makePorts(runsDir: string): WorkflowPorts {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

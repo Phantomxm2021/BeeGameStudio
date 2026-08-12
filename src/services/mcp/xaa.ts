@@ -25,7 +25,6 @@ import { z } from 'zod/v4'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { logMCPDebug } from '../../utils/log.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
-import { createPolicyResolvingPinnedFetch } from './pinnedOutboundFetch.js'
 
 const XAA_REQUEST_TIMEOUT_MS = 30000
 
@@ -48,7 +47,7 @@ function makeXaaFetch(abortSignal?: AbortSignal): FetchLike {
         AbortSignal.any([timeout, abortSignal])
       : timeout
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-    return createPolicyResolvingPinnedFetch()(url, { ...init, signal })
+    return fetch(url, { ...init, signal })
   }
 }
 

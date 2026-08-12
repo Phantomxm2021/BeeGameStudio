@@ -84,7 +84,8 @@ function convertToResponsesReasoningEffort(
   if (effortValue === 'low') return 'low'
   if (effortValue === 'medium') return 'medium'
   if (effortValue === 'high') return 'high'
-  if (effortValue === 'xhigh' || effortValue === 'max') return 'xhigh'
+  if (effortValue === 'xhigh') return 'xhigh'
+  if (effortValue === 'max') return 'max'
   if (typeof effortValue === 'number') return 'high'
   return undefined
 }
@@ -142,7 +143,8 @@ function isOpenAIConvertibleMessage(
 
 /**
  * Assemble the final AssistantMessage (and optional max_tokens error) from
- * accumulated stream state after the provider adapter emits message_stop.
+ * accumulated stream state. Extracted to avoid duplication between the
+ * `message_stop` handler and the post-loop safety fallback.
  */
 function assembleFinalAssistantOutputs(params: {
   partialMessage: BetaMessage | null
@@ -350,6 +352,10 @@ export async function* queryModelOpenAI(
     )
 
     const useChatGPTResponses = isChatGPTAuthEnabled()
+    // OpenAI's official OAuth and API-key routes share the same prompt-cache
+    // contract. Scope the key to the real conversation so resumed turns stay
+    // sticky while unrelated sessions do not share a routing bucket. Generic
+    // compatible endpoints intentionally receive no OpenAI-specific fields.
     const sessionId = getSessionId()
     const sessionPromptCacheKey = formatOpenAIPromptCacheKey(sessionId)
     const promptCacheKey = useChatGPTResponses
@@ -500,8 +506,8 @@ export async function* queryModelOpenAI(
               }
               yield output
             }
-            // A provider response becomes an AssistantMessage only at its
-            // validated message_stop boundary.
+            // Reset partialMessage so the post-loop safety fallback does not
+            // yield a second identical AssistantMessage.
             partialMessage = null
           }
           // Track cost and token usage
@@ -546,6 +552,21 @@ export async function* queryModelOpenAI(
       tools: convertToolsToLangfuse(toolSchemas as unknown[]),
       ...(enableThinking && { thinking: { type: 'enabled' } }),
     })
+
+    // Safety: if stream ended without message_stop, assemble and yield whatever we have
+    if (partialMessage) {
+      for (const output of assembleFinalAssistantOutputs({
+        partialMessage,
+        contentBlocks,
+        tools,
+        agentId: options.agentId,
+        usage,
+        stopReason,
+        maxTokens,
+      })) {
+        yield output
+      }
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })

@@ -1,21 +1,15 @@
 /**
  * Tavily-based search adapter — calls the Tavily Search API
- * (https://tavily.bee-game-studio.win) and maps results to
+ * (https://tavily.claude-code-best.win) and maps results to
  * the unified SearchResult format.
  */
 
 import axios from 'axios'
-import {
-  createPinnedHttpAgent,
-  createPinnedHttpsAgent,
-  resolveApprovedOutboundTarget,
-  type OutboundTargetPolicyOptions,
-} from '@bee-game-studio/security-core'
 import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
-const DEFAULT_TAVILY_SEARCH_URL = 'https://tavily.bee-game-studio.win/search'
+const DEFAULT_TAVILY_SEARCH_URL = 'https://tavily.claude-code-best.win/search'
 const FETCH_TIMEOUT_MS = 30_000
 
 interface TavilySearchHit {
@@ -29,14 +23,7 @@ interface TavilySearchResponse {
   results: TavilySearchHit[]
 }
 
-export type TavilySearchAdapterOptions = {
-  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
-  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
-}
-
 export class TavilySearchAdapter implements WebSearchAdapter {
-  constructor(private readonly outboundOptions: TavilySearchAdapterOptions = {}) {}
-
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
     const { signal, onProgress, allowedDomains, blockedDomains } = options
 
@@ -61,13 +48,6 @@ export class TavilySearchAdapter implements WebSearchAdapter {
     const searchUrl = baseUrl.endsWith('/search')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/search`
-    const target = await (this.outboundOptions.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
-      searchUrl,
-      this.outboundOptions.outboundTargetPolicyOptions,
-    )
-    if (!target) throw new Error('Outbound URL is not permitted')
-    const httpAgent = createPinnedHttpAgent(target)
-    const httpsAgent = createPinnedHttpsAgent(target)
 
     try {
       const response = await axios.post<{
@@ -85,9 +65,6 @@ export class TavilySearchAdapter implements WebSearchAdapter {
         {
           signal: abortController.signal,
           timeout: FETCH_TIMEOUT_MS,
-          maxRedirects: 0,
-          httpAgent,
-          httpsAgent,
           headers: { 'Content-Type': 'application/json' },
         },
       )
@@ -116,9 +93,6 @@ export class TavilySearchAdapter implements WebSearchAdapter {
         throw new AbortError()
       }
       throw e
-    } finally {
-      httpAgent.destroy()
-      httpsAgent.destroy()
     }
   }
 }

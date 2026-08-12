@@ -22,19 +22,19 @@ describe('uploadArtifact', () => {
   test('returns id/url/expiresAt on successful upload', async () => {
     globalThis.fetch = mockFetch({
       id: 'V1StGXR8_Z5jdHi6B',
-      url: 'https://cloud-artifacts.bee-game-studio.win/7d/V1StGXR8_Z5jdHi6B.html',
+      url: 'https://cloud-artifacts.claude-code-best.win/7d/V1StGXR8_Z5jdHi6B.html',
       expiresAt: '2026-06-27T10:00:00.000Z',
     })
 
     const result = await uploadArtifact({
       html: '<h1>hello</h1>',
       token: 'test-token',
-      uploadUrl: 'https://93.184.216.34/upload',
+      uploadUrl: 'https://example.test/upload',
     })
 
     expect(result).toEqual({
       id: 'V1StGXR8_Z5jdHi6B',
-      url: 'https://cloud-artifacts.bee-game-studio.win/7d/V1StGXR8_Z5jdHi6B.html',
+      url: 'https://cloud-artifacts.claude-code-best.win/7d/V1StGXR8_Z5jdHi6B.html',
       expiresAt: '2026-06-27T10:00:00.000Z',
     })
   })
@@ -50,7 +50,7 @@ describe('uploadArtifact', () => {
     await uploadArtifact({
       html: '<p>x</p>',
       token: 't',
-      uploadUrl: 'https://93.184.216.34/upload',
+      uploadUrl: 'https://example.test/upload',
       hash: 'my-id',
     })
 
@@ -71,7 +71,7 @@ describe('uploadArtifact', () => {
     await uploadArtifact({
       html: '<p>x</p>',
       token: 't',
-      uploadUrl: 'https://93.184.216.34/upload',
+      uploadUrl: 'https://example.test/upload',
       ttl: 30,
     })
 
@@ -88,7 +88,7 @@ describe('uploadArtifact', () => {
       uploadArtifact({
         html: 'x'.repeat(100),
         token: 't',
-        uploadUrl: 'https://93.184.216.34/upload',
+        uploadUrl: 'https://example.test/upload',
       }),
     ).rejects.toThrow(/payload_too_large/)
   })
@@ -102,29 +102,8 @@ describe('uploadArtifact', () => {
       uploadArtifact({
         html: '<p/>',
         token: 't',
-        uploadUrl: 'https://93.184.216.34/upload',
+        uploadUrl: 'https://example.test/upload',
       }),
     ).rejects.toThrow()
-  })
-
-  test('cancels the response body when parsing fails', async () => {
-    const cancel = mock(async () => {})
-    globalThis.fetch = mock((_u: string | URL | Request) =>
-      Promise.resolve({
-        status: 500,
-        text: async () => 'Internal Server Error',
-        body: { cancel },
-      }),
-    ) as unknown as typeof fetch
-
-    await expect(
-      uploadArtifact({
-        html: '<p/>',
-        token: 't',
-        uploadUrl: 'https://93.184.216.34/upload',
-      }),
-    ).rejects.toThrow()
-
-    expect(cancel).toHaveBeenCalledTimes(1)
   })
 })

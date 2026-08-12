@@ -46,6 +46,9 @@ export const CHATGPT_OAUTH_CONTEXT_WINDOW = 272_000
  */
 export const CHATGPT_API_CONTEXT_WINDOW = 1_050_000
 
+/** @deprecated Use CHATGPT_OAUTH_CONTEXT_WINDOW or CHATGPT_API_CONTEXT_WINDOW. */
+export const CHATGPT_CODEX_CONTEXT_WINDOW = CHATGPT_OAUTH_CONTEXT_WINDOW
+
 /** Official GPT-5.6 family max output tokens (OpenAI model card). */
 export const CHATGPT_CODEX_MAX_OUTPUT_TOKENS = 128_000
 

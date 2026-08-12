@@ -1,25 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  adaptResponsesStreamToAnthropic,
-  buildResponsesRequest,
-  extractUsage,
-} from '../responsesAdapter.js'
+import { buildResponsesRequest, extractUsage } from '../responsesAdapter.js'
 import { formatOpenAIPromptCacheKey } from '../openaiShared.js'
 import { calculateCacheHitRate } from '../../../../utils/cacheWarning.js'
-
-async function* streamEvents(events: Record<string, unknown>[]) {
-  yield* events
-}
-
-async function collectResponsesEvents(events: Record<string, unknown>[]) {
-  const collected = []
-  for await (const event of adaptResponsesStreamToAnthropic(
-    streamEvents(events),
-    'responses-model',
-  ))
-    collected.push(event)
-  return collected
-}
 
 describe('buildResponsesRequest', () => {
   const promptCacheKey = formatOpenAIPromptCacheKey('session-abc-123')
@@ -74,7 +56,7 @@ describe('buildResponsesRequest', () => {
     expect(request.prompt_cache_key).toBe('ccb:session-abc-123')
   })
 
-  test('prompt_cache_key is stable across turns', () => {
+  test('prompt_cache_key is stable across turns (not derived from messages)', () => {
     const key = formatOpenAIPromptCacheKey('same-session')
     const turn1 = buildResponsesRequest({
       model: 'gpt-5.5',
@@ -100,8 +82,8 @@ describe('buildResponsesRequest', () => {
   })
 })
 
-describe('extractUsage', () => {
-  test('keeps ordinary input and cache reads disjoint', () => {
+describe('extractUsage (OpenAI Responses → Anthropic usage)', () => {
+  test('subtracts cached_tokens so hit rate uses OpenAI total as denominator', () => {
     const usage = extractUsage({
       usage: {
         input_tokens: 30_000,
@@ -116,10 +98,13 @@ describe('extractUsage', () => {
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 20_000,
     })
-    expect(calculateCacheHitRate(usage)).toBeCloseTo((20_000 / 30_000) * 100, 5)
+
+    // Was 40% under the double-count bug; correct is 66.7%.
+    const hitRate = calculateCacheHitRate(usage)
+    expect(hitRate).toBeCloseTo((20_000 / 30_000) * 100, 5)
   })
 
-  test('reports a full cache hit as 100 percent', () => {
+  test('full cache hit can report 100% (not capped at 50%)', () => {
     const usage = extractUsage({
       usage: {
         input_tokens: 30_000,
@@ -133,7 +118,7 @@ describe('extractUsage', () => {
     expect(calculateCacheHitRate(usage)).toBe(100)
   })
 
-  test('maps cache writes without double-counting total input', () => {
+  test('maps cache_write_tokens to cache_creation without double-counting total', () => {
     const usage = extractUsage({
       usage: {
         input_tokens: 10_000,
@@ -151,9 +136,16 @@ describe('extractUsage', () => {
       cache_creation_input_tokens: 2_000,
       cache_read_input_tokens: 6_000,
     })
+    // segments sum to OpenAI total
+    expect(
+      usage.input_tokens +
+        usage.cache_creation_input_tokens +
+        usage.cache_read_input_tokens,
+    ).toBe(10_000)
+    expect(calculateCacheHitRate(usage)).toBeCloseTo(60, 5)
   })
 
-  test('clamps overlapping cache segments to total input', () => {
+  test('clamps overlapping write/read that exceed total input', () => {
     const usage = extractUsage({
       usage: {
         input_tokens: 5_000,
@@ -172,32 +164,6 @@ describe('extractUsage', () => {
     ).toBe(5_000)
     expect(usage.cache_read_input_tokens).toBe(4_000)
     expect(usage.cache_creation_input_tokens).toBe(1_000)
-  })
-})
-
-describe('adaptResponsesStreamToAnthropic', () => {
-  test('rejects an empty stream without a terminal response event', async () => {
-    await expect(collectResponsesEvents([])).rejects.toThrow(
-      'Provider response ended without a completion reason',
-    )
-  })
-
-  test('rejects partial reasoning without a terminal response event', async () => {
-    await expect(
-      collectResponsesEvents([
-        { type: 'response.reasoning_text.delta', delta: 'Still reasoning' },
-      ]),
-    ).rejects.toThrow('Provider response ended without a completion reason')
-  })
-
-  test('accepts a completed response event', async () => {
-    const events = await collectResponsesEvents([
-      {
-        type: 'response.completed',
-        response: { status: 'completed', usage: {} },
-      },
-    ])
-
-    expect(events.at(-1)).toEqual({ type: 'message_stop' })
+    expect(usage.input_tokens).toBe(0)
   })
 })

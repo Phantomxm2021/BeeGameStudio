@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 import * as wf from '../index.js'
-import { createTestRegistry } from './testRegistry.js'
 
 test('engine core API fully exported', () => {
   expect(typeof wf.runWorkflow).toBe('function')
@@ -57,10 +56,7 @@ test('engine constant values are stable', () => {
 
 test('createWorkflowTool returns complete descriptor shape', () => {
   const tool = wf.createWorkflowTool({
-    agentAdapterRegistry: createTestRegistry(async () => ({
-      kind: 'dead',
-      reason: 'runagent-threw',
-    })),
+    agentRunner: { runAgentToResult: async () => ({ kind: 'dead' }) },
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -75,7 +71,7 @@ test('createWorkflowTool returns complete descriptor shape', () => {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: wf.createHostHandle(null),
       cwd: '/tmp',

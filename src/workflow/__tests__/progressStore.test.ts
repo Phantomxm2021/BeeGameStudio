@@ -113,19 +113,6 @@ test('run_done failed terminal state records error', () => {
   expect(r.error).toBe('boom')
 })
 
-test('run_done remains visible when startup failed before run_started', () => {
-  const { bus, store } = newStore()
-  bus.emit({
-    type: 'run_done',
-    runId: 'startup-failed',
-    status: 'failed',
-    error: 'workflow journal read failed',
-  })
-  const r = store.get('startup-failed')!
-  expect(r.status).toBe('failed')
-  expect(r.error).toBe('workflow journal read failed')
-})
-
 test('log event does not trigger notify', () => {
   const { bus, store } = newStore()
   let calls = 0
@@ -182,7 +169,7 @@ test('agent_done persists outputShape (ok·object / ok·text / dead none)', () =
     runId: 'r1',
     agentId: 2,
     phase: 'A',
-    result: { kind: 'dead', reason: 'runagent-threw' },
+    result: { kind: 'dead' },
   })
   const agents = store.get('r1')!.agents
   expect(agents.find(a => a.id === 0)?.outputShape).toBe('object')
@@ -220,47 +207,6 @@ test('agent_progress real-time updates token/tool (correlated by agentId)', () =
   a = store.get('r1')!.agents.find(x => x.id === 0)!
   expect(a.tokenCount).toBe(2400)
   expect(a.toolCount).toBe(3)
-})
-
-test('agent_thinking is the only user-facing progress text and raw result payloads never enter it', () => {
-  const { bus, store } = newStore()
-  bus.emit({ type: 'run_started', runId: 'r-thinking', workflowName: 'w', meta: null })
-  bus.emit({ type: 'agent_started', runId: 'r-thinking', agentId: 0, phase: 'Review' })
-  bus.emit({
-    type: 'agent_thinking',
-    runId: 'r-thinking',
-    agentId: 0,
-    phase: 'Review',
-    thinking: '正在检查当前 revision。',
-  })
-  bus.emit({
-    type: 'agent_done',
-    runId: 'r-thinking',
-    agentId: 0,
-    result: {
-      kind: 'ok',
-      output: { verdict: 'READY', revision: 'internal-only' },
-      usage: { outputTokens: 1 },
-    },
-  })
-  const run = store.get('r-thinking')!
-  expect(run.thinking).toBe('正在检查当前 revision。')
-  expect(run.thinking).not.toContain('READY')
-  expect(run.agents[0]?.thinking).toBe('正在检查当前 revision。')
-})
-
-test('terminal state is authoritative: late progress and run_started events cannot overwrite it', () => {
-  const { bus, store } = newStore()
-  bus.emit({ type: 'run_started', runId: 'r-terminal', workflowName: 'w', meta: null })
-  bus.emit({ type: 'run_done', runId: 'r-terminal', status: 'failed', error: 'blocked' })
-  bus.emit({ type: 'run_started', runId: 'r-terminal', workflowName: 'STALE', meta: null })
-  bus.emit({ type: 'phase_started', runId: 'r-terminal', phase: 'STALE_PHASE' })
-  bus.emit({ type: 'run_done', runId: 'r-terminal', status: 'completed', returnValue: 'stale' })
-  const run = store.get('r-terminal')!
-  expect(run.status).toBe('failed')
-  expect(run.workflowName).toBe('w')
-  expect(run.error).toBe('blocked')
-  expect(run.phases).toEqual([])
 })
 
 test('agent_done persists model/tokenCount/toolCount (ok variant)', () => {

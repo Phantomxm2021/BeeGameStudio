@@ -16,7 +16,6 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AgentAdapterRegistry,
   createFileJournalStore,
   createHostHandle,
   runWorkflow,
@@ -88,13 +87,13 @@ function errSummary(e: unknown): string {
 }
 
 /**
- * 真实 LLM adapter：一次 messages.create（经 API 并发信号量 + 重试）。
+ * 真实 LLM agentRunner：一次 messages.create（经 API 并发信号量 + 重试）。
  * schema 模式：prompt 追加 JSON 指令 → 取文本 → 提取 JSON → Ajv 校验 → 失败返回 dead。
  * 非 schema：返回纯文本。
  */
 async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
   const client = clientRef.client
-  if (client === null) return { kind: 'dead', reason: 'runagent-threw' }
+  if (client === null) return { kind: 'dead' }
 
   const schemaInstruction = params.schema
     ? '\n\n你必须以一个【单独的 JSON 对象】作为整段回答（不要 Markdown 代码围栏、不要任何解释），该对象须匹配如下 JSON Schema：\n' +
@@ -117,21 +116,15 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
 
     if (params.schema) {
       // 截断的 JSON 几乎必然不完整 → 直接判 dead（而非让解析模糊失败）
-      if (truncated) {
-        return { kind: 'dead', reason: 'no-structured-output' }
-      }
+      if (truncated) return { kind: 'dead' }
       const text = resp.content
         .map(block => (block.type === 'text' ? block.text : ''))
         .join('')
         .trim()
       const parsed = extractJsonObject(text)
-      if (parsed === null) {
-        return { kind: 'dead', reason: 'no-structured-output' }
-      }
+      if (parsed === null) return { kind: 'dead' }
       const { valid } = validateAgainstSchema(parsed, params.schema)
-      if (!valid) {
-        return { kind: 'dead', reason: 'invalid-structured-output' }
-      }
+      if (!valid) return { kind: 'dead' }
       return { kind: 'ok', output: parsed as object, usage: { outputTokens } }
     }
     const text = resp.content
@@ -146,7 +139,7 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
     return { kind: 'ok', output: text, usage: { outputTokens } }
   } catch (e) {
     console.error(paint.red(`  ✗ ${errSummary(e)}`))
-    return { kind: 'dead', reason: 'runagent-threw' }
+    return { kind: 'dead' }
   } finally {
     release()
   }
@@ -251,18 +244,12 @@ function printProgress(e: ProgressEvent): void {
 /** 组装端口：agent 后端直连 SDK，其余为自包含实现，不触达核心层。 */
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    agentAdapterRegistry: new AgentAdapterRegistry()
-      .register({
-        id: 'anthropic',
-        capabilities: { structuredOutput: true },
-        run: llmAgent,
-      })
-      .default('anthropic'),
+    agentRunner: { runAgentToResult: llmAgent },
     progressEmitter: { emit: printProgress },
     taskRegistrar: makeTaskRegistrar(),
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

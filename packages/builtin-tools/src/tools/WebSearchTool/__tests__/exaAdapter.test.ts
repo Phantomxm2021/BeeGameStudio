@@ -24,12 +24,7 @@ mock.module('src/utils/errors', _abortMock)
 describe('ExaSearchAdapter.search', () => {
   const createAdapter = async () => {
     const { ExaSearchAdapter } = await import('../adapters/exaAdapter')
-    return new ExaSearchAdapter({
-      outboundTargetPolicyOptions: {
-        resolve4: async () => ['93.184.216.34'],
-        resolve6: async () => [],
-      },
-    })
+    return new ExaSearchAdapter()
   }
 
   // Exa MCP returns SSE lines like: data: {"result":{"content":[{"type":"text","text":"..."}]}}
@@ -315,9 +310,6 @@ describe('ExaSearchAdapter.search', () => {
     expect(body.params.arguments.livecrawl).toBe('fallback')
     expect(body.params.arguments.contextMaxCharacters).toBe(10000)
     expect(config.headers.Accept).toBe('application/json, text/event-stream')
-    expect(config.maxRedirects).toBe(0)
-    expect(config.httpAgent).toBeDefined()
-    expect(config.httpsAgent).toBeDefined()
   })
 
   test('passes custom search options to MCP request', async () => {

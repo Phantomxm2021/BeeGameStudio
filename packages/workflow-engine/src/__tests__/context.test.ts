@@ -6,14 +6,10 @@ import {
 } from '../engine/context.js'
 import { WorkflowError } from '../engine/errors.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
-import { createTestRegistry } from './testRegistry.js'
 
 function mockPorts(): WorkflowPorts {
   return {
-    agentAdapterRegistry: createTestRegistry(async () => ({
-      kind: 'dead',
-      reason: 'runagent-threw',
-    })),
+    agentRunner: { runAgentToResult: async () => ({ kind: 'dead' }) },
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -28,7 +24,7 @@ function mockPorts(): WorkflowPorts {
       truncate: async () => {},
     },
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: '/tmp',

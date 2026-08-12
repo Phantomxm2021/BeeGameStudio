@@ -73,7 +73,9 @@ mock.module('src/utils/secureStorage/index.ts', () => ({
 const { authStatus } = await import('../../../cli/handlers/auth.js')
 const { clearCommandsCache, getCommands, meetsAvailabilityRequirement } =
   await import('../../../commands.js')
-const { isAnthropicAuthEnabled } = await import('../../auth.js')
+const { isAnthropicAuthEnabled, isUsing3PServices } = await import(
+  '../../auth.js'
+)
 const { default: fast } = await import('../../../commands/fast/index.js')
 const { default: installGitHubApp } = await import(
   '../../../commands/install-github-app/index.js'
@@ -153,6 +155,16 @@ describe('Anthropic auth provider gate', () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'provider-gates-test-token'
     expect(isAnthropicAuthEnabled()).toBe(true)
   })
+})
+
+describe('environment-only third-party compatibility gate', () => {
+  for (const modelType of ['openai', 'gemini', 'grok'] as const) {
+    test(`ignores settings modelType=${modelType}`, () => {
+      setModelType(modelType)
+
+      expect(isUsing3PServices()).toBe(false)
+    })
+  }
 })
 
 class ExitSignal extends Error {
@@ -236,7 +248,7 @@ describe('auth status provider reporting', () => {
 
 describe('login and logout visibility', () => {
   for (const modelType of ['openai', 'gemini', 'grok'] as const) {
-    test(`hides both commands for settings modelType=${modelType}`, async () => {
+    test(`keeps both commands visible for settings modelType=${modelType}`, async () => {
       setModelType(modelType)
       process.env.CLAUDE_CODE_OAUTH_TOKEN = 'provider-gates-test-token'
       clearCommandsCache()
@@ -245,22 +257,8 @@ describe('login and logout visibility', () => {
         (await getCommands(testRoot)).map(command => command.name),
       )
 
-      expect(commandNames.has('login')).toBe(false)
-      expect(commandNames.has('logout')).toBe(false)
-    })
-  }
-
-  for (const [envKey] of envProviderCases) {
-    test(`hides both commands for ${envKey}`, async () => {
-      process.env[envKey] = '1'
-      clearCommandsCache()
-
-      const commandNames = new Set(
-        (await getCommands(testRoot)).map(command => command.name),
-      )
-
-      expect(commandNames.has('login')).toBe(false)
-      expect(commandNames.has('logout')).toBe(false)
+      expect(commandNames.has('login')).toBe(true)
+      expect(commandNames.has('logout')).toBe(true)
     })
   }
 })

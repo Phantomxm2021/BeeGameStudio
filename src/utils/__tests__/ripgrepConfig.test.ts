@@ -5,12 +5,7 @@ import { join } from 'path'
 // Test the pure fallback function directly — no mock.module needed,
 // so this test cannot pollute other tests in the same Bun process.
 // See CLAUDE.md "Mock 使用规范" for why we avoid business-module mocking.
-const {
-  getBuiltinRipgrepCandidates,
-  resolveRipgrepConfigAfterSpawnError,
-  resolveBuiltinWithFallback,
-  resolveRipgrepConfigAtRuntime,
-} = await import('../ripgrep.js')
+const { resolveBuiltinWithFallback } = await import('../ripgrep.js')
 
 // Real temp dir with a real (or removed) fake rg binary to control existsSync.
 const tmpDir = join(
@@ -75,54 +70,6 @@ describe('resolveBuiltinWithFallback', () => {
     rmSync(rgPath)
     const result = resolveBuiltinWithFallback(rgPath, null)
     expect(result.note).toContain(process.platform)
-    writeFileSync(rgPath, '')
-  })
-
-  test('runtime fallback recovers a cached missing builtin config when system rg is available', () => {
-    rmSync(rgPath)
-    const result = resolveRipgrepConfigAtRuntime(
-      {
-        mode: 'builtin',
-        command: rgPath,
-        args: [],
-      },
-      '/usr/local/bin/rg',
-      'testplatform',
-    )
-    expect(result.mode).toBe('system')
-    expect(result.command).toBe('rg')
-    expect(result.note).toContain('fallback')
-    writeFileSync(rgPath, '')
-  })
-
-  test('source root candidates prefer src/utils vendor before root vendor', () => {
-    const projectRoot = join(tmpDir, 'project-root')
-    const candidates = getBuiltinRipgrepCandidates(projectRoot)
-    expect(candidates[0]).toContain(join('src', 'utils', 'vendor', 'ripgrep'))
-    expect(candidates[1]).toContain(join('vendor', 'ripgrep'))
-  })
-
-  test('dist root candidates prefer dist vendor before source vendor', () => {
-    const distRoot = join(tmpDir, 'project-root', 'dist')
-    const candidates = getBuiltinRipgrepCandidates(distRoot)
-    expect(candidates[0]).toContain(join('dist', 'vendor', 'ripgrep'))
-  })
-
-  test('spawn ENOENT recovers missing builtin config when system rg becomes available', () => {
-    rmSync(rgPath)
-    const result = resolveRipgrepConfigAfterSpawnError(
-      {
-        mode: 'builtin',
-        command: rgPath,
-        args: [],
-      },
-      Object.assign(new Error('spawn failed'), { code: 'ENOENT' }),
-      '/usr/local/bin/rg',
-      'testplatform',
-    )
-    expect(result?.mode).toBe('system')
-    expect(result?.command).toBe('rg')
-    expect(result?.note).toContain('fallback')
     writeFileSync(rgPath, '')
   })
 })

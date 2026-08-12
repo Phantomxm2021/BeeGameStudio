@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "@bee-game-studio/agent-tools": "workspace:*",
-    "@bee-game-studio/security-core": "workspace:*"
+    "marked": "^17.0.6"
   }
 }

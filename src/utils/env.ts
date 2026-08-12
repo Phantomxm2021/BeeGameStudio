@@ -12,10 +12,6 @@ type Platform = 'win32' | 'darwin' | 'linux'
 
 // Config and data paths
 export const getGlobalClaudeFile = memoize((): string => {
-  if (process.env.BEEGAME_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR) {
-    return join(process.env.CLAUDE_CONFIG_DIR, '.config.json')
-  }
-
   // Legacy fallback for backwards compatibility
   if (
     getFsImplementation().existsSync(

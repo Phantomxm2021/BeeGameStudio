@@ -59,17 +59,17 @@ describe('WebBrowserTool', () => {
   test('navigate fetches URL', async () => {
     const { WebBrowserTool } = await import('../WebBrowserTool.js')
     const result = await WebBrowserTool.call({
-      url: 'https://93.184.216.34',
+      url: 'https://example.com',
     } as any)
     expect(result.data.title).toBe('Example Domain')
-    expect(result.data.url).toContain('93.184.216.34')
+    expect(result.data.url).toContain('example.com')
     expect(result.data.content).toContain('Example Domain')
   }, 15000)
 
   test('screenshot returns text snapshot', async () => {
     const { WebBrowserTool } = await import('../WebBrowserTool.js')
     const result = await WebBrowserTool.call({
-      url: 'https://93.184.216.34',
+      url: 'https://example.com',
       action: 'screenshot',
     } as any)
     expect(result.data.content).toContain('Text snapshot')

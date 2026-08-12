@@ -197,10 +197,6 @@ import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@bee-game-studio/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
-import {
-  assertProviderCompletionReason,
-  ProviderCompletionError,
-} from '@ant/model-provider'
 import { count } from '../../utils/array.js'
 import { insertBlockAfterToolResults } from '../../utils/contentArray.js'
 import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
@@ -886,19 +882,16 @@ export async function* executeNonStreamingRequest(
       )
 
       try {
-        const result = await anthropic.beta.messages.create(
+        return await anthropic.beta.messages.create(
           {
             ...adjustedParams,
             model: normalizeModelStringForAPI(adjustedParams.model),
-            stream: false as const,
           },
           {
             signal: retryOptions.signal,
             timeout: fallbackTimeoutMs,
           },
         )
-        assertProviderCompletionReason(result.stop_reason)
-        return result
       } catch (err) {
         // User aborts are not errors — re-throw immediately without logging
         if (err instanceof APIUserAbortError) throw err
@@ -1286,7 +1279,7 @@ async function* queryModel(
 
   queryCheckpoint('query_tool_schema_build_end')
 
-  // Normalize messages before building the system prompt.
+  // Normalize messages before building system prompt (needed for fingerprinting)
   // Instrumentation: Track message count before normalization
   logEvent('tengu_api_before_normalize', {
     preNormalizedMessageCount: messages.length,
@@ -2450,12 +2443,24 @@ async function* queryModel(
         throw new Error('Stream idle timeout - no chunks received')
       }
 
-      // A provider stream is complete only after message_start and a non-empty
-      // stop_reason. Content blocks alone are not terminal evidence: a proxy can
-      // close after thinking/text/tool content while omitting message_delta.
-      if (!partialMessage) {
+      // Detect when the stream completed without producing any assistant messages.
+      // This covers two proxy failure modes:
+      // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
+      // 2. Partial events (partialMessage set but no content blocks completed AND
+      //    no stop_reason received): proxy returned message_start but stream ended
+      //    before content_block_stop and before message_delta with stop_reason
+      // BetaMessageStream had the first check in _endRequest() but the raw Stream
+      // does not - without it the generator silently returns no assistant messages,
+      // causing "Execution error" in -p mode.
+      // Note: We must check stopReason to avoid false positives. For example, with
+      // structured output (--json-schema), the model calls a StructuredOutput tool
+      // on turn 1, then on turn 2 responds with end_turn and no content blocks.
+      // That's a legitimate empty response, not an incomplete stream.
+      if (!partialMessage || (newMessages.length === 0 && !stopReason)) {
         logForDebugging(
-          'Stream completed without receiving message_start event - triggering non-streaming fallback',
+          !partialMessage
+            ? 'Stream completed without receiving message_start event - triggering non-streaming fallback'
+            : 'Stream completed with message_start but no content blocks completed - triggering non-streaming fallback',
           { level: 'error' },
         )
         logEvent('tengu_stream_no_events', {
@@ -2466,7 +2471,6 @@ async function* queryModel(
         })
         throw new Error('Stream ended without receiving any events')
       }
-      assertProviderCompletionReason(stopReason)
 
       // Log summary if any stalls occurred during streaming
       if (stallCount > 0) {
@@ -2575,12 +2579,6 @@ async function* queryModel(
           throw new APIConnectionTimeoutError({ message: 'Request timed out' })
         }
       }
-
-      if (
-        streamingError instanceof ProviderCompletionError &&
-        newMessages.length > 0
-      )
-        throw streamingError
 
       // When the flag is enabled, skip the non-streaming fallback and let the
       // error propagate to withRetry. The mid-stream fallback causes double tool

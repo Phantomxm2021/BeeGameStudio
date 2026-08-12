@@ -6,14 +6,16 @@ import { runWorkflow } from '../engine/runWorkflow.js'
 import { agentCallKey, createFileJournalStore } from '../engine/journal.js'
 import { createHostHandle, type WorkflowPorts } from '../ports.js'
 import type { AgentRunParams, AgentRunResult, ProgressEvent } from '../types.js'
-import { createResultRegistry, createTestRegistry } from './testRegistry.js'
 
 function portsWith(
   runsDir: string,
   results: Map<string, AgentRunResult>,
 ): WorkflowPorts {
   return {
-    agentAdapterRegistry: createResultRegistry(results),
+    agentRunner: {
+      runAgentToResult: async (p: AgentRunParams) =>
+        results.get(p.prompt) ?? { kind: 'dead' },
+    },
     progressEmitter: { emit: () => {} },
     taskRegistrar: {
       register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -24,7 +26,7 @@ function portsWith(
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: runsDir,
@@ -41,7 +43,10 @@ function portsWithEvents(
   return {
     events,
     ports: {
-      agentAdapterRegistry: createResultRegistry(results),
+      agentRunner: {
+        runAgentToResult: async (p: AgentRunParams) =>
+          results.get(p.prompt) ?? { kind: 'dead' },
+      },
       progressEmitter: { emit: e => void events.push(e) },
       taskRegistrar: {
         register: () => ({
@@ -55,7 +60,7 @@ function portsWithEvents(
       },
       journalStore: createFileJournalStore(runsDir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: runsDir,
@@ -115,10 +120,12 @@ test('resume: journal hit skips runner call', async () => {
   try {
     let called = 0
     const ports: WorkflowPorts = {
-      agentAdapterRegistry: createTestRegistry(async () => {
-        called++
-        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-      }),
+      agentRunner: {
+        runAgentToResult: async () => {
+          called++
+          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+        },
+      },
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -129,7 +136,7 @@ test('resume: journal hit skips runner call', async () => {
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -156,40 +163,6 @@ test('resume: journal hit skips runner call', async () => {
     expect(result.status).toBe('completed')
     expect(result.returnValue).toBe('cached')
     expect(called).toBe(0)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('resume: journal read failure fails closed before dispatch', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wf-run-journal-error-'))
-  try {
-    const { ports, events } = portsWithEvents(dir, new Map())
-    let truncated = 0
-    ports.journalStore = {
-      read: async () => {
-        throw new Error('journal is corrupt')
-      },
-      append: async () => {},
-      truncate: async () => {
-        truncated++
-      },
-    }
-    const result = await runWorkflow({
-      script: `return agent('never-dispatch')`,
-      runId: 'run-journal-error',
-      ports,
-      host: createHostHandle(null),
-      signal: new AbortController().signal,
-      cwd: dir,
-      budgetTotal: null,
-      resume: true,
-    })
-    expect(result.status).toBe('failed')
-    expect(result.error).toContain('journal')
-    expect(events.filter(e => e.type === 'run_started')).toHaveLength(0)
-    expect(events.filter(e => e.type === 'run_done')).toHaveLength(1)
-    expect(truncated).toBe(0)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -259,10 +232,12 @@ test('scriptChanged=true → truncate journal and run all live', async () => {
   try {
     let called = 0
     const ports: WorkflowPorts = {
-      agentAdapterRegistry: createTestRegistry(async () => {
-        called++
-        return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
-      }),
+      agentRunner: {
+        runAgentToResult: async () => {
+          called++
+          return { kind: 'ok', output: 'live', usage: { outputTokens: 1 } }
+        },
+      },
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -273,7 +248,7 @@ test('scriptChanged=true → truncate journal and run all live', async () => {
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,
@@ -304,37 +279,6 @@ test('scriptChanged=true → truncate journal and run all live', async () => {
     const final = await ports.journalStore.read('run-chg')
     expect(final).toHaveLength(1)
     expect((final[0]!.result as { output: string }).output).toBe('live')
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('scriptChanged journal reset failure emits a visible terminal event', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wf-run-journal-reset-error-'))
-  try {
-    const { ports, events } = portsWithEvents(dir, new Map())
-    ports.journalStore = {
-      read: async () => [],
-      append: async () => {},
-      truncate: async () => {
-        throw new Error('journal reset failed')
-      },
-    }
-    const result = await runWorkflow({
-      script: `return agent('never-dispatch')`,
-      runId: 'run-journal-reset-error',
-      ports,
-      host: createHostHandle(null),
-      signal: new AbortController().signal,
-      cwd: dir,
-      budgetTotal: null,
-      resume: true,
-      scriptChanged: true,
-    })
-    expect(result.status).toBe('failed')
-    expect(result.error).toContain('journal reset failed')
-    expect(events.filter(e => e.type === 'run_started')).toHaveLength(0)
-    expect(events.filter(e => e.type === 'run_done')).toHaveLength(1)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -536,15 +480,17 @@ test('maxConcurrency passthrough: parallel agents bounded by run-level concurren
     let active = 0
     let peak = 0
     const ports: WorkflowPorts = {
-      agentAdapterRegistry: createTestRegistry(async () => {
-        active++
-        peak = Math.max(peak, active)
-        await new Promise(r => {
-          setTimeout(r, 8)
-        })
-        active--
-        return { kind: 'ok', output: 'x', usage: { outputTokens: 1 } }
-      }),
+      agentRunner: {
+        runAgentToResult: async () => {
+          active++
+          peak = Math.max(peak, active)
+          await new Promise(r => {
+            setTimeout(r, 8)
+          })
+          active--
+          return { kind: 'ok', output: 'x', usage: { outputTokens: 1 } }
+        },
+      },
       progressEmitter: { emit: () => {} },
       taskRegistrar: {
         register: () => ({ runId: 'r', signal: new AbortController().signal }),
@@ -555,7 +501,7 @@ test('maxConcurrency passthrough: parallel agents bounded by run-level concurren
       },
       journalStore: createFileJournalStore(dir),
       permissionGate: { isAborted: () => false },
-      logger: { debug: () => {}, event: () => {}, warn: () => {} },
+      logger: { debug: () => {}, event: () => {} },
       hostFactory: () => ({
         handle: createHostHandle(null),
         cwd: dir,

@@ -40,13 +40,7 @@ const originalBraveApiKey = process.env.BRAVE_API_KEY
 describe('BraveSearchAdapter.search', () => {
   const createAdapter = async () => {
     const { BraveSearchAdapter } = await import('../adapters/braveAdapter')
-    return new BraveSearchAdapter({
-      resolveOutboundTarget: async () => ({
-        url: new URL('https://api.search.brave.com/res/v1/llm/context'),
-        addresses: ['93.184.216.34'],
-        lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
-      }),
-    })
+    return new BraveSearchAdapter()
   }
 
   const SAMPLE_RESPONSE = {
@@ -105,26 +99,6 @@ describe('BraveSearchAdapter.search', () => {
       snippet: 'Snippet one',
     })
     expect(results[1].title).toBe('Result Two')
-  })
-
-  test('uses a resolved pinned agent and rejects redirects', async () => {
-    const get = mock(() => Promise.resolve({ data: SAMPLE_RESPONSE }))
-    mock.module('axios', () => ({ default: { get, isCancel: () => false } }))
-    const { BraveSearchAdapter } = await import('../adapters/braveAdapter')
-    const adapter = new BraveSearchAdapter({
-      resolveOutboundTarget: async () => ({
-        url: new URL('https://api.search.brave.com/res/v1/llm/context'),
-        addresses: ['93.184.216.34'],
-        lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
-      }),
-    })
-
-    await adapter.search('test query', {})
-
-    expect(get).toHaveBeenCalledWith(
-      'https://api.search.brave.com/res/v1/llm/context',
-      expect.objectContaining({ maxRedirects: 0, httpAgent: expect.anything(), httpsAgent: expect.anything() }),
-    )
   })
 
   test('calls onProgress with query_update and search_results_received', async () => {

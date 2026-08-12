@@ -1,11 +1,4 @@
 import axios, { type AxiosResponse } from 'axios'
-import {
-  createPinnedHttpAgent,
-  createPinnedHttpsAgent,
-  resolveApprovedOutboundTarget,
-  type ApprovedOutboundTarget,
-  type OutboundTargetPolicyOptions,
-} from '@bee-game-studio/security-core'
 import { LRUCache } from 'lru-cache'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -24,40 +17,7 @@ import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
 
-const DEFAULT_TAVILY_EXTRACT_URL = 'https://tavily.bee-game-studio.win/extract'
-
-export type OutboundRequestOptions = {
-  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
-  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
-}
-
-type PinnedRequestOptions = OutboundRequestOptions & {
-  approvedTarget?: ApprovedOutboundTarget
-}
-
-async function resolveOutboundTargetOrThrow(
-  url: string,
-  options: OutboundRequestOptions,
-): Promise<ApprovedOutboundTarget> {
-  const target = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
-    url,
-    options.outboundTargetPolicyOptions,
-  )
-  if (!target) throw new Error('Outbound URL is not permitted')
-  return target
-}
-
-function createPinnedAgents(target: ApprovedOutboundTarget) {
-  return {
-    httpAgent: createPinnedHttpAgent(target),
-    httpsAgent: createPinnedHttpsAgent(target),
-  }
-}
-
-function destroyPinnedAgents(agents: ReturnType<typeof createPinnedAgents>): void {
-  agents.httpAgent.destroy()
-  agents.httpsAgent.destroy()
-}
+const DEFAULT_TAVILY_EXTRACT_URL = 'https://tavily.claude-code-best.win/extract'
 
 // Custom error class for egress proxy blocks
 class EgressBlockedError extends Error {
@@ -280,19 +240,15 @@ export async function getWithPermittedRedirects(
   signal: AbortSignal,
   redirectChecker: (originalUrl: string, redirectUrl: string) => boolean,
   depth = 0,
-  requestOptions: PinnedRequestOptions = {},
 ): Promise<AxiosResponse<ArrayBuffer> | RedirectInfo> {
   if (depth > MAX_REDIRECTS) {
     throw new Error(`Too many redirects (exceeded ${MAX_REDIRECTS})`)
   }
-  const target = requestOptions.approvedTarget ?? await resolveOutboundTargetOrThrow(url, requestOptions)
-  const agents = createPinnedAgents(target)
   try {
     return await axios.get(url, {
       signal,
       timeout: getFetchTimeoutMs(),
       maxRedirects: 0,
-      ...agents,
       responseType: 'arraybuffer',
       maxContentLength: MAX_HTTP_CONTENT_LENGTH,
       headers: {
@@ -319,13 +275,11 @@ export async function getWithPermittedRedirects(
 
       if (redirectChecker(url, redirectUrl)) {
         // Recursively follow the permitted redirect
-        const { approvedTarget: _approvedTarget, ...redirectRequestOptions } = requestOptions
         return getWithPermittedRedirects(
           redirectUrl,
           signal,
           redirectChecker,
           depth + 1,
-          redirectRequestOptions,
         )
       } else {
         // Return redirect information to the caller
@@ -351,8 +305,6 @@ export async function getWithPermittedRedirects(
     }
 
     throw error
-  } finally {
-    destroyPinnedAgents(agents)
   }
 }
 
@@ -375,10 +327,23 @@ export type FetchedContent = {
 export async function getURLMarkdownContent(
   url: string,
   abortController: AbortController,
-  requestOptions: OutboundRequestOptions = {},
 ): Promise<FetchedContent | RedirectInfo> {
   if (!validateURL(url)) {
     throw new Error('Invalid URL')
+  }
+
+  // Check cache (LRUCache handles TTL automatically)
+  const cachedEntry = URL_CACHE.get(url)
+  if (cachedEntry) {
+    return {
+      bytes: cachedEntry.bytes,
+      code: cachedEntry.code,
+      codeText: cachedEntry.codeText,
+      content: cachedEntry.content,
+      contentType: cachedEntry.contentType,
+      persistedPath: cachedEntry.persistedPath,
+      persistedSize: cachedEntry.persistedSize,
+    }
   }
 
   let parsedUrl: URL
@@ -405,34 +370,10 @@ export async function getURLMarkdownContent(
     logError(e)
   }
 
-  // Resolve and pin the endpoint after normalizing its scheme. Resolving the
-  // original HTTP URL would approve a different scheme/port than the request.
-  const approvedTarget = await resolveOutboundTargetOrThrow(
-    upgradedUrl,
-    requestOptions,
-  )
-
-  // Validate before serving a cached entry; otherwise a cached response could
-  // bypass the current outbound policy.
-  const cachedEntry = URL_CACHE.get(url)
-  if (cachedEntry) {
-    return {
-      bytes: cachedEntry.bytes,
-      code: cachedEntry.code,
-      codeText: cachedEntry.codeText,
-      content: cachedEntry.content,
-      contentType: cachedEntry.contentType,
-      persistedPath: cachedEntry.persistedPath,
-      persistedSize: cachedEntry.persistedSize,
-    }
-  }
-
   const response = await getWithPermittedRedirects(
     upgradedUrl,
     abortController.signal,
     isPermittedRedirect,
-    0,
-    { ...requestOptions, approvedTarget },
   )
 
   // Check if we got a redirect response
@@ -504,7 +445,6 @@ export async function getURLMarkdownContent(
 export async function fetchContentWithTavily(
   url: string,
   abortController: AbortController,
-  requestOptions: OutboundRequestOptions = {},
 ): Promise<FetchedContent | RedirectInfo> {
   if (!validateURL(url)) {
     throw new Error('Invalid URL')
@@ -549,26 +489,18 @@ export async function fetchContentWithTavily(
     : baseUrl.endsWith('/extract')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/extract`
-  const target = await resolveOutboundTargetOrThrow(extractUrl, requestOptions)
-  const agents = createPinnedAgents(target)
-  let response: AxiosResponse<{ url: string; raw_content: string }>
-  try {
-    response = await axios.post<{ url: string; raw_content: string }>(
-      extractUrl,
-      {
-        urls: [url],
-      },
-      {
-        signal: abortSignal,
-        timeout: getFetchTimeoutMs(),
-        maxRedirects: 0,
-        ...agents,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    )
-  } finally {
-    destroyPinnedAgents(agents)
-  }
+
+  const response = await axios.post<{ url: string; raw_content: string }>(
+    extractUrl,
+    {
+      urls: [url],
+    },
+    {
+      signal: abortSignal,
+      timeout: getFetchTimeoutMs(),
+      headers: { 'Content-Type': 'application/json' },
+    },
+  )
 
   if (abortSignal.aborted) {
     throw new AbortError()

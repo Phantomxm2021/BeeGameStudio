@@ -9,7 +9,7 @@ export type WorkflowMeta = {
   phases?: Array<{ title: string; detail?: string }>
 }
 
-/** Parameters passed by agent() to the selected AgentAdapter. */
+/** Parameters passed by agent() to the AgentRunner. */
 export type AgentRunParams = {
   prompt: string
   /** JSON Schema; when provided, agent returns a validated object instead of text. */
@@ -34,9 +34,11 @@ export type AgentProgressUpdate = {
 }
 
 /**
- * Returned by the selected AgentAdapter. The ok variant carries model/toolCount for panel display (optional; standalone backends may leave them blank).
+ * Returned by AgentRunner. The ok variant carries model/toolCount for panel display (optional; standalone backends may leave them blank).
  *
- * dead carries an explicit reason/detail so the journal and post-hoc audit can identify the terminal boundary.
+ * dead carries optional reason/detail: the journal history only records `{kind:"dead"}` with no info,
+ * so during debugging you cannot distinguish "agent finished but produced no StructuredOutput" from "runAgent threw".
+ * reason lets the hooks retry log, the panel, and post-hoc auditing see the cause of death immediately.
  */
 export type AgentRunResult =
   | {
@@ -54,17 +56,19 @@ export type AgentRunResult =
   | {
       kind: 'dead'
       /**
-       * Cause-of-death classification for log aggregation / post-hoc auditing.
+       * Cause-of-death classification for log aggregation / post-hoc auditing. Optional for backward compatibility with old journals.
        * - no-structured-output: agent finished but finalize content has no StructuredOutput (neither called tools nor produced JSON in text)
        * - invalid-structured-output: adapter returned structured output that did not match the caller-provided JSON Schema
        * - runagent-threw: runAgent threw a non-abort error (API failure / context overflow / runtime error)
        * - worktree-failed: isolation:'worktree' creation failed (fail-closed degradation)
+       * - unknown: unclassified (compatible with old backends / third-party adapters)
        */
-      reason:
+      reason?:
         | 'no-structured-output'
         | 'invalid-structured-output'
         | 'runagent-threw'
         | 'worktree-failed'
+        | 'unknown'
       /** Detail (error message / text preview) for logs; not shown to end users. */
       detail?: string
     }
@@ -110,14 +114,6 @@ export type ProgressEvent =
       phase?: string
       tokenCount: number
       toolCount: number
-    }
-  | {
-      type: 'agent_thinking'
-      runId: string
-      agentId: number
-      label?: string
-      phase?: string
-      thinking: string
     }
   | { type: 'log'; runId: string; message: string }
   | {

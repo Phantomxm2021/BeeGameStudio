@@ -2302,10 +2302,7 @@ export function normalizeMessagesForAPI(
   // First, reorder attachments to bubble up until they hit a tool result or assistant message
   // Then strip virtual messages — they're display-only (e.g. REPL inner tool
   // calls) and must never reach the API.
-  const validMessages = messages.filter(
-    (message): message is Message => message != null,
-  )
-  const reorderedMessages = reorderAttachmentsForAPI(validMessages).filter(
+  const reorderedMessages = reorderAttachmentsForAPI(messages).filter(
     m => !((m.type === 'user' || m.type === 'assistant') && m.isVirtual),
   )
 
@@ -2383,6 +2380,7 @@ export function normalizeMessagesForAPI(
       },
     )
     .forEach(message => {
+      if (!message) return []
       switch (message.type) {
         case 'system': {
           // local_command system messages need to be included as user messages

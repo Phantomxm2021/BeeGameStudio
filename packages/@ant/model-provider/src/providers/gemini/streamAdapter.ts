@@ -1,6 +1,5 @@
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { randomUUID } from 'crypto'
-import { assertProviderCompletionReason } from '../../shared/providerTerminal.js'
 import type { GeminiPart, GeminiStreamChunk } from './types.js'
 
 export async function* adaptGeminiStreamToAnthropic(
@@ -188,7 +187,9 @@ export async function* adaptGeminiStreamToAnthropic(
     }
   }
 
-  assertProviderCompletionReason(finishReason)
+  if (!started) {
+    return
+  }
 
   if (openTextLikeBlock) {
     yield {

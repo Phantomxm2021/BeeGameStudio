@@ -24,7 +24,6 @@ import {
 } from './settings/constants.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import { isRestrictedToPluginOnly } from './settings/pluginOnlyPolicy.js'
-import { getRuntimeScopedCacheKey } from './runtimeScopeCacheKey.js'
 
 // Claude configuration directory names
 export const CLAUDE_CONFIG_DIRECTORIES = [
@@ -44,11 +43,6 @@ export type MarkdownFile = {
   frontmatter: FrontmatterData
   content: string
   source: SettingSource
-}
-
-export function getProjectConfigDirectoryNames(): string[] {
-  const configured = process.env.BEEGAME_PROJECT_CONFIG_DIR_NAME?.trim()
-  return configured ? [configured, '.claude'] : ['.claude']
 }
 
 /**
@@ -256,29 +250,18 @@ export function getProjectDirsUpToHome(
       break
     }
 
-    for (const configDirName of getProjectConfigDirectoryNames()) {
-      const configSubdir = join(current, configDirName, subdir)
-      // Filter to existing dirs. This is a perf filter (avoids spawning
-      // ripgrep on non-existent dirs downstream) and the worktree fallback
-      // in loadMarkdownFilesForSubdir relies on it. statSync + explicit error
-      // handling instead of existsSync — re-throws unexpected errors rather
-      // than silently swallowing them. Downstream loadMarkdownFiles handles
-      // the TOCTOU window (dir disappearing before read) gracefully.
-      try {
-        statSync(configSubdir)
-        dirs.push(configSubdir)
-      } catch (e: unknown) {
-        if (!isFsInaccessible(e)) throw e
-      }
-      if (subdir === 'skills' && configDirName === '.beegame') {
-        const builtinSkillsSubdir = join(configSubdir, 'builtinskills')
-        try {
-          statSync(builtinSkillsSubdir)
-          dirs.push(builtinSkillsSubdir)
-        } catch (e: unknown) {
-          if (!isFsInaccessible(e)) throw e
-        }
-      }
+    const claudeSubdir = join(current, '.claude', subdir)
+    // Filter to existing dirs. This is a perf filter (avoids spawning
+    // ripgrep on non-existent dirs downstream) and the worktree fallback
+    // in loadMarkdownFilesForSubdir relies on it. statSync + explicit error
+    // handling instead of existsSync — re-throws unexpected errors rather
+    // than silently swallowing them. Downstream loadMarkdownFiles handles
+    // the TOCTOU window (dir disappearing before read) gracefully.
+    try {
+      statSync(claudeSubdir)
+      dirs.push(claudeSubdir)
+    } catch (e: unknown) {
+      if (!isFsInaccessible(e)) throw e
     }
 
     // Stop after processing the git root directory - this prevents commands from parent
@@ -337,18 +320,16 @@ export const loadMarkdownFilesForSubdir = memoize(
     const gitRoot = findGitRoot(cwd)
     const canonicalRoot = findCanonicalGitRoot(cwd)
     if (gitRoot && canonicalRoot && canonicalRoot !== gitRoot) {
-      for (const configDirName of getProjectConfigDirectoryNames()) {
-        const worktreeSubdir = normalizePathForComparison(
-          join(gitRoot, configDirName, subdir),
-        )
-        const worktreeHasSubdir = projectDirs.some(
-          dir => normalizePathForComparison(dir) === worktreeSubdir,
-        )
-        if (!worktreeHasSubdir) {
-          const mainConfigSubdir = join(canonicalRoot, configDirName, subdir)
-          if (!projectDirs.includes(mainConfigSubdir)) {
-            projectDirs.push(mainConfigSubdir)
-          }
+      const worktreeSubdir = normalizePathForComparison(
+        join(gitRoot, '.claude', subdir),
+      )
+      const worktreeHasSubdir = projectDirs.some(
+        dir => normalizePathForComparison(dir) === worktreeSubdir,
+      )
+      if (!worktreeHasSubdir) {
+        const mainClaudeSubdir = join(canonicalRoot, '.claude', subdir)
+        if (!projectDirs.includes(mainClaudeSubdir)) {
+          projectDirs.push(mainClaudeSubdir)
         }
       }
     }
@@ -444,9 +425,8 @@ export const loadMarkdownFilesForSubdir = memoize(
 
     return deduplicatedFiles
   },
-  // Custom resolver creates cache key from both path scope and runtime config scope.
-  (subdir: ClaudeConfigDirectory, cwd: string) =>
-    getRuntimeScopedCacheKey(subdir, cwd),
+  // Custom resolver creates cache key from both subdir and cwd parameters
+  (subdir: ClaudeConfigDirectory, cwd: string) => `${subdir}:${cwd}`,
 )
 
 /**

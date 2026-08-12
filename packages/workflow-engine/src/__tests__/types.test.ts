@@ -14,16 +14,13 @@ test('AgentRunResult ok branch can JSON round-trip', () => {
 })
 
 test('AgentRunResult skipped/dead branch can JSON round-trip', () => {
-  const results: AgentRunResult[] = [
-    { kind: 'skipped' },
-    { kind: 'dead', reason: 'runagent-threw' },
-  ]
-  for (const result of results) {
-    const round = JSON.parse(JSON.stringify(result))
-    expect(round.kind).toBe(result.kind)
+  for (const kind of ['skipped', 'dead'] as const) {
+    const round = JSON.parse(JSON.stringify({ kind }))
+    expect(round.kind).toBe(kind)
   }
 })
 
+// dead carries optional reason/detail: journal persistence preserves cause of death for post-hoc audit / panel display.
 test('AgentRunResult dead with reason/detail can JSON round-trip', () => {
   const dead = {
     kind: 'dead' as const,
@@ -47,16 +44,14 @@ test('AgentRunResult invalid-structured-output reason can JSON round-trip', () =
   expect(round.reason).toBe('invalid-structured-output')
 })
 
-// @ts-expect-error dead results require an explicit current-protocol reason
-const deadWithoutReason: AgentRunResult = { kind: 'dead' }
-void deadWithoutReason
-
-const deadWithUnknownReason: AgentRunResult = {
-  kind: 'dead',
-  // @ts-expect-error unclassified terminal state is not a durable protocol value
-  reason: 'unknown',
-}
-void deadWithUnknownReason
+// Backward compatible with old journals: reason/detail both optional, missing is still valid dead.
+test('AgentRunResult dead without reason is still valid (backward compatible with old journal)', () => {
+  const legacy = { kind: 'dead' as const }
+  const round = JSON.parse(JSON.stringify(legacy))
+  expect(round.kind).toBe('dead')
+  expect(round.reason).toBeUndefined()
+  expect(round.detail).toBeUndefined()
+})
 
 test('JournalEntry shape is stable', () => {
   const entry = {

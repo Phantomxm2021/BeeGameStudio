@@ -7,11 +7,7 @@ import type {
   ProgressEvent,
 } from '../types.js'
 import type { EngineContext } from './context.js'
-import {
-  WorkflowAbortedError,
-  WorkflowError,
-  WorkflowJournalError,
-} from './errors.js'
+import { WorkflowAbortedError, WorkflowError } from './errors.js'
 import { agentCallKey } from './journal.js'
 import type { WorkflowHooks } from './script.js'
 import {
@@ -96,7 +92,7 @@ export function makeHooks(
           params.schema,
         )
         if (entry.result.kind === 'ok' && cachedResult.kind === 'dead') {
-          ctx.ports.logger.warn(
+          ctx.ports.logger.warn?.(
             `cached agent result for "${label ?? `#${agentId}`}" does not match its structured output schema; rerunning`,
           )
           await invalidateJournal()
@@ -147,33 +143,48 @@ export function makeHooks(
       }
       // Inject agent-level AbortController register/unregister: the backend creates the controller then calls
       // registerAgentAbort to inject ports-layer bindings; service.kill(runId, agentId) uses this to
-      // precisely abort a single agent.
-      const adapterCtx = {
-        host: ctx.host,
-        signal: ctx.signal,
-        runId: ctx.runId,
-        agentId,
-        onProgress,
-        ...(ctx.ports.taskRegistrar.registerAgentAbort
-          ? {
-              registerAgentAbort: (id: number, ac: AbortController): void => {
-                ctx.ports.taskRegistrar.registerAgentAbort?.(ctx.runId, id, ac)
-              },
-            }
-          : {}),
-        ...(ctx.ports.taskRegistrar.unregisterAgentAbort
-          ? {
-              unregisterAgentAbort: (id: number): void => {
-                ctx.ports.taskRegistrar.unregisterAgentAbort?.(ctx.runId, id)
-              },
-            }
-          : {}),
-      }
+      // precisely abort a single agent. When the registry is absent (agentRunner fallback path), there is no backend middle layer,
+      // and agentAbortControllers at the ports layer is always empty — single-agent kill degrades to a no-op on this path.
+      const adapterCtx = registry
+        ? {
+            host: ctx.host,
+            signal: ctx.signal,
+            runId: ctx.runId,
+            agentId,
+            onProgress,
+            ...(ctx.ports.taskRegistrar.registerAgentAbort
+              ? {
+                  registerAgentAbort: (
+                    id: number,
+                    ac: AbortController,
+                  ): void => {
+                    ctx.ports.taskRegistrar.registerAgentAbort?.(
+                      ctx.runId,
+                      id,
+                      ac,
+                    )
+                  },
+                }
+              : {}),
+            ...(ctx.ports.taskRegistrar.unregisterAgentAbort
+              ? {
+                  unregisterAgentAbort: (id: number): void => {
+                    ctx.ports.taskRegistrar.unregisterAgentAbort?.(
+                      ctx.runId,
+                      id,
+                    )
+                  },
+                }
+              : {}),
+          }
+        : null
       // resolve is outside the try: configuration errors (e.g. AdapterNotFoundError) propagate directly without retry —
       // this is a workflow configuration problem, not a transient backend failure; retrying is meaningless and would mask the bug.
-      const adapter = registry.resolve(params)
+      const adapter = registry ? registry.resolve(params) : null
       const invokeBackend = async (): Promise<AgentRunResult> => {
-        const rawResult = adapter.run(params, adapterCtx)
+        const rawResult = adapter
+          ? adapter.run(params, adapterCtx!)
+          : ctx.ports.agentRunner.runAgentToResult(params, ctx.host)
         return validateStructuredResult(await rawResult, params.schema)
       }
 
@@ -183,7 +194,8 @@ export function makeHooks(
       // budget is not double-charged: dead does not call addOutputTokens; retry-ok charges once (at the final ok).
       // dead.reason is passed through to the log: no-structured-output and invalid-structured-output
       // are high-frequency causes of death; logging detail makes the failed boundary visible immediately.
-      // detail is wrapped with String() defensively so malformed adapter diagnostics cannot pierce the logging path.
+      // detail is wrapped with String() defensively: old journals or third-party adapters may write non-strings (corrupted data),
+      // and calling .slice directly would throw a TypeError that pierces the logging path.
       type BackendAttempt =
         | { kind: 'result'; value: AgentRunResult }
         | { kind: 'error'; error: unknown }
@@ -206,13 +218,13 @@ export function makeHooks(
             first.error instanceof Error
               ? first.error.message
               : String(first.error)
-          ctx.ports.logger.warn(
+          ctx.ports.logger.warn?.(
             `agent "${label ?? `#${agentId}`}" threw (${errorMessage}); retrying once`,
           )
         } else if (first.value.kind === 'dead') {
           const detail =
             typeof first.value.detail === 'string' ? first.value.detail : ''
-          ctx.ports.logger.warn(
+          ctx.ports.logger.warn?.(
             `agent "${label ?? `#${agentId}`}" returned dead` +
               (first.value.reason ? ` (${first.value.reason})` : '') +
               (detail ? `: ${detail.slice(0, 150)}` : '') +
@@ -236,22 +248,14 @@ export function makeHooks(
       if (result.kind === 'ok') {
         ctx.resources.budget.addOutputTokens(result.usage.outputTokens)
       }
+      emit({ type: 'agent_done', agentId, label, phase, result })
 
       const entry: JournalEntry = { key, seq: agentId, result }
-      try {
-        await ctx.ports.journalStore.append(ctx.runId, entry)
-      } catch (error) {
-        if (error instanceof WorkflowJournalError) throw error
-        throw new WorkflowJournalError(
-          `failed to append workflow journal for ${ctx.runId}`,
-          { cause: error },
-        )
-      }
       // Key point: push order = completion order (not call order); read() already re-sorts by seq,
       // so during resume the call order aligns with the journal order and the key index stays stable.
       ctx.journal.push(entry)
       ctx.journalIndex++
-      emit({ type: 'agent_done', agentId, label, phase, result })
+      await ctx.ports.journalStore.append(ctx.runId, entry)
       return resultToOutput(result)
     } finally {
       release()
@@ -269,9 +273,8 @@ export function makeHooks(
         try {
           return await t()
         } catch (e) {
-          if (e instanceof WorkflowJournalError) throw e
           // The "null on error" contract is unchanged, but it should log — otherwise the workflow author cannot locate why an agent failed
-          ctx.ports.logger.warn(
+          ctx.ports.logger.warn?.(
             `parallel thunk #${i} failed: ${(e as Error).message}`,
           )
           return null
@@ -300,8 +303,7 @@ export function makeHooks(
           }
           return prev as R
         } catch (e) {
-          if (e instanceof WorkflowJournalError) throw e
-          ctx.ports.logger.warn(
+          ctx.ports.logger.warn?.(
             `pipeline item #${index} failed: ${(e as Error).message}`,
           )
           return null

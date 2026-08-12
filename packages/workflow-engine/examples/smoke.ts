@@ -13,7 +13,6 @@ import Anthropic from '@anthropic-ai/sdk'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AgentAdapterRegistry,
   createFileJournalStore,
   createHostHandle,
   runWorkflow,
@@ -100,7 +99,7 @@ function errSummary(e: unknown): string {
 
 async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
   const client = clientRef.client
-  if (client === null) return { kind: 'dead', reason: 'runagent-threw' }
+  if (client === null) return { kind: 'dead' }
   const schemaInstruction = params.schema
     ? '\n\n以单独 JSON 对象回答（无围栏无解释），匹配 schema：\n' +
       JSON.stringify(params.schema)
@@ -117,27 +116,23 @@ async function llmAgent(params: AgentRunParams): Promise<AgentRunResult> {
       }),
     )
     const outputTokens = resp.usage.output_tokens
-    if (resp.stop_reason === 'max_tokens') {
-      return { kind: 'dead', reason: 'no-structured-output' }
-    }
+    if (resp.stop_reason === 'max_tokens') return { kind: 'dead' }
     const text = resp.content
       .map(block => (block.type === 'text' ? block.text : ''))
       .join('')
       .trim()
     if (params.schema) {
       const parsed = extractJsonObject(text)
-      if (parsed === null) {
-        return { kind: 'dead', reason: 'no-structured-output' }
-      }
+      if (parsed === null) return { kind: 'dead' }
       if (!validateAgainstSchema(parsed, params.schema).valid) {
-        return { kind: 'dead', reason: 'invalid-structured-output' }
+        return { kind: 'dead' }
       }
       return { kind: 'ok', output: parsed as object, usage: { outputTokens } }
     }
     return { kind: 'ok', output: text, usage: { outputTokens } }
   } catch (e) {
     console.error(`  ✗ ${errSummary(e)}`)
-    return { kind: 'dead', reason: 'runagent-threw' }
+    return { kind: 'dead' }
   } finally {
     release()
   }
@@ -180,13 +175,7 @@ function extractJsonObject(text: string): unknown | null {
 
 function makePorts(runsDir: string): WorkflowPorts {
   return {
-    agentAdapterRegistry: new AgentAdapterRegistry()
-      .register({
-        id: 'anthropic',
-        capabilities: { structuredOutput: true },
-        run: llmAgent,
-      })
-      .default('anthropic'),
+    agentRunner: { runAgentToResult: llmAgent },
     progressEmitter: {
       emit: (e: ProgressEvent) => {
         if (e.type === 'phase_started') console.log(`\n━ phase: ${e.phase}`)
@@ -211,7 +200,7 @@ function makePorts(runsDir: string): WorkflowPorts {
     },
     journalStore: createFileJournalStore(runsDir),
     permissionGate: { isAborted: () => false },
-    logger: { debug: () => {}, event: () => {}, warn: () => {} },
+    logger: { debug: () => {}, event: () => {} },
     hostFactory: () => ({
       handle: createHostHandle(null),
       cwd: process.cwd(),

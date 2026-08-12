@@ -313,13 +313,7 @@ describe('BingSearchAdapter.search', () => {
   // Dynamic import so mock.module() takes effect
   const createAdapter = async () => {
     const { BingSearchAdapter } = await import('../adapters/bingAdapter')
-    return new BingSearchAdapter({
-      resolveOutboundTarget: async () => ({
-        url: new URL('https://www.bing.com/search'),
-        addresses: ['93.184.216.34'],
-        lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
-      }),
-    })
+    return new BingSearchAdapter()
   }
 
   const SAMPLE_HTML = `
@@ -351,26 +345,6 @@ describe('BingSearchAdapter.search', () => {
     expect(results).toHaveLength(2)
     expect(results[0].title).toBe('Result One')
     expect(results[1].title).toBe('Result Two')
-  })
-
-  test('uses a resolved pinned agent and rejects redirects', async () => {
-    const get = mock(() => Promise.resolve({ data: SAMPLE_HTML }))
-    mock.module('axios', () => ({ default: { get, isCancel: () => false } }))
-    const { BingSearchAdapter } = await import('../adapters/bingAdapter')
-    const adapter = new BingSearchAdapter({
-      resolveOutboundTarget: async () => ({
-        url: new URL('https://www.bing.com/search'),
-        addresses: ['93.184.216.34'],
-        lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
-      }),
-    })
-
-    await adapter.search('test query', {})
-
-    expect(get).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ maxRedirects: 0, httpAgent: expect.anything(), httpsAgent: expect.anything() }),
-    )
   })
 
   test('calls onProgress with query_update and search_results_received', async () => {

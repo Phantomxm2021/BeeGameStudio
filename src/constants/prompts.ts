@@ -20,6 +20,7 @@ import { TASK_CREATE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/Task
 import type { Tools } from '../Tool.js'
 import type { Command } from '../types/command.js'
 import { BASH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/PowerShellTool/toolName.js'
 import {
   getCanonicalName,
   getMarketingNameForModel,
@@ -67,12 +68,6 @@ import { getCurrentMode } from 'src/modes/store.js'
 
 // Dead code elimination: conditional imports for feature-gated modules
 /* eslint-disable @typescript-eslint/no-require-imports */
-const getCachedMCConfigForFRC = feature('CACHED_MICROCOMPACT')
-  ? (
-      require('../services/compact/cachedMCConfig.js') as typeof import('../services/compact/cachedMCConfig.js')
-    ).getCachedMCConfig
-  : null
-
 const proactiveModule =
   feature('PROACTIVE') || feature('KAIROS')
     ? require('../proactive/index.js')
@@ -279,8 +274,20 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
     return [`# Using your tools`, ...prependBullets(items)].join(`\n`)
   }
 
+  const hasPowerShell = enabledTools.has(POWERSHELL_TOOL_NAME)
+  const hasBash = enabledTools.has(BASH_TOOL_NAME)
+  const shellToolGuidance = hasPowerShell
+    ? hasBash
+      ? `On Windows, prefer the ${POWERSHELL_TOOL_NAME} tool for terminal operations (git, npm, docker, builds, tests, system commands). Use ${BASH_TOOL_NAME} only when the user asks for bash/Git Bash or a command is clearly bash-only. Prefer dedicated tools over shell equivalents (e.g., ${FILE_READ_TOOL_NAME} over Get-Content/cat, ${FILE_EDIT_TOOL_NAME} over sed, ${GLOB_TOOL_NAME} over find, ${GREP_TOOL_NAME} over grep/Select-String).`
+      : `Prefer dedicated tools over ${POWERSHELL_TOOL_NAME} equivalents (e.g., ${FILE_READ_TOOL_NAME} over Get-Content, ${FILE_EDIT_TOOL_NAME} over (Get-Content) -replace, ${GLOB_TOOL_NAME} over Get-ChildItem -Recurse, ${GREP_TOOL_NAME} over Select-String). Reserve ${POWERSHELL_TOOL_NAME} for shell operations: package installs, test runners, build commands, git operations.`
+    : `Prefer dedicated tools over ${BASH_TOOL_NAME} equivalents (e.g., ${FILE_READ_TOOL_NAME} over cat, ${FILE_EDIT_TOOL_NAME} over sed, ${GLOB_TOOL_NAME} over find, ${GREP_TOOL_NAME} over grep). Reserve ${BASH_TOOL_NAME} for shell operations: package installs, test runners, build commands, git operations.`
+
+  const coreToolsList = hasPowerShell
+    ? `Core tools (Read, Edit, Write, Glob, Grep, ${POWERSHELL_TOOL_NAME}${hasBash ? `, ${BASH_TOOL_NAME}` : ''}, Agent, WebFetch, WebSearch, AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, TaskList, TaskGet, TodoWrite, Skill, CronCreate, CronDelete, CronList, Config, LSP, MCPTool) can be called directly as needed. ${shellToolGuidance}`
+    : `Core tools (Read, Edit, Write, Glob, Grep, Bash, Agent, WebFetch, WebSearch, AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, TaskList, TaskGet, TodoWrite, Skill, CronCreate, CronDelete, CronList, Config, LSP, MCPTool) can be called directly as needed. ${shellToolGuidance}`
+
   const items = [
-    `Core tools (Read, Edit, Write, Glob, Grep, Bash, Agent, WebFetch, WebSearch, AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, TaskList, TaskGet, TodoWrite, Skill, CronCreate, CronDelete, CronList, Config, LSP, MCPTool) can be called directly as needed. Prefer dedicated tools over ${BASH_TOOL_NAME} equivalents (e.g., ${FILE_READ_TOOL_NAME} over cat, ${FILE_EDIT_TOOL_NAME} over sed, ${GLOB_TOOL_NAME} over find, ${GREP_TOOL_NAME} over grep). Reserve ${BASH_TOOL_NAME} for shell operations: package installs, test runners, build commands, git operations.`,
+    coreToolsList,
     `Search before saying unknown — when the user references a file, function, or module you have not seen, search with ${GREP_TOOL_NAME}/${GLOB_TOOL_NAME} first.`,
     taskToolName
       ? `Break down and manage your work with the ${taskToolName} tool. Mark each task as completed as soon as you are done.`
@@ -454,7 +461,6 @@ ${CYBER_RISK_INSTRUCTION}`,
         ? null
         : getMcpInstructionsSection(mcpClients),
       getScratchpadInstructions(),
-      getFunctionResultClearingSection(model),
       SUMMARIZE_TOOL_RESULTS_SECTION,
       getProactiveSection(),
     ].filter(s => s !== null)
@@ -492,7 +498,6 @@ ${CYBER_RISK_INSTRUCTION}`,
       'MCP servers connect/disconnect between turns',
     ),
     systemPromptSection('scratchpad', () => getScratchpadInstructions()),
-    systemPromptSection('frc', () => getFunctionResultClearingSection(model)),
     systemPromptSection(
       'summarize_tool_results',
       () => SUMMARIZE_TOOL_RESULTS_SECTION,
@@ -779,26 +784,6 @@ Use this directory for ALL temporary file needs:
 Only use \`/tmp\` if the user explicitly requests it.
 
 The scratchpad directory is session-specific, isolated from the user's project, and can be used freely without permission prompts.`
-}
-
-function getFunctionResultClearingSection(model: string): string | null {
-  if (!feature('CACHED_MICROCOMPACT') || !getCachedMCConfigForFRC) {
-    return null
-  }
-  const config = getCachedMCConfigForFRC()
-  const isModelSupported = config.supportedModels?.some(pattern =>
-    model.includes(pattern),
-  )
-  if (
-    !config.enabled ||
-    !config.systemPromptSuggestSummaries ||
-    !isModelSupported
-  ) {
-    return null
-  }
-  return `# Function Result Clearing
-
-Old tool results will be automatically cleared from context to free up space. The ${config.keepRecent} most recent results are always kept.`
 }
 
 const SUMMARIZE_TOOL_RESULTS_SECTION = `When working with tool results, write down any important information you might need later in your response, as the original tool result may be cleared later.`

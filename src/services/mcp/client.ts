@@ -57,13 +57,6 @@ import {
 } from '@bee-game-studio/builtin-tools/tools/MCPTool/MCPTool.js'
 import { createMcpAuthTool } from '@bee-game-studio/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@bee-game-studio/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
-import {
-  createPinnedHttpAgent,
-  createPinnedHttpsAgent,
-  createPinnedUndiciDispatcher,
-  resolveApprovedOutboundTarget,
-  type ApprovedOutboundTarget,
-} from '@bee-game-studio/security-core'
 import { createAbortController } from '../../utils/abortController.js'
 import { count } from '../../utils/array.js'
 import {
@@ -101,7 +94,11 @@ import {
 import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.js'
 import { memoizeWithLRU } from '../../utils/memoize.js'
 import { getWebSocketTLSOptions } from '../../utils/mtls.js'
-import { getProxyFetchOptions } from '../../utils/proxy.js'
+import {
+  getProxyFetchOptions,
+  getWebSocketProxyAgent,
+  getWebSocketProxyUrl,
+} from '../../utils/proxy.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
 import { subprocessEnv } from '../../utils/subprocessEnv.js'
 import {
@@ -474,193 +471,6 @@ const MCP_REQUEST_TIMEOUT_MS = 60000
  */
 const MCP_STREAMABLE_HTTP_ACCEPT = 'application/json, text/event-stream'
 
-type DispatcherRequestInit = RequestInit & { dispatcher?: unknown }
-
-export type RemoteMcpConnectionDependencies = {
-  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
-  createPinnedUndiciDispatcher: typeof createPinnedUndiciDispatcher
-}
-
-type PinnedWebSocketAgent = { destroy(): void }
-
-export type RemoteMcpWebSocketDependencies = {
-  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
-  createPinnedHttpAgent: typeof createPinnedHttpAgent
-  createPinnedHttpsAgent: typeof createPinnedHttpsAgent
-}
-
-type PinnedRemoteMcpConnection = {
-  url: URL
-  requestInit: DispatcherRequestInit
-  fetch: (baseFetch: FetchLike) => FetchLike
-  eventSourceFetch: (baseFetch: FetchLike) => FetchLike
-  close: () => Promise<void>
-}
-
-const remoteMcpConnectionDependencies: RemoteMcpConnectionDependencies = {
-  resolveApprovedOutboundTarget,
-  createPinnedUndiciDispatcher,
-}
-
-const remoteMcpWebSocketDependencies: RemoteMcpWebSocketDependencies = {
-  resolveApprovedOutboundTarget,
-  createPinnedHttpAgent,
-  createPinnedHttpsAgent,
-}
-
-type PinnedWebSocketConnection = {
-  url: URL
-  agent: PinnedWebSocketAgent
-  close: () => void
-}
-
-function outboundPolicyUrlForWebSocket(url: URL): URL | undefined {
-  const policyUrl = new URL(url)
-  if (url.protocol === 'wss:') {
-    policyUrl.protocol = 'https:'
-    return policyUrl
-  }
-  if (url.protocol === 'ws:') {
-    policyUrl.protocol = 'http:'
-    return policyUrl
-  }
-  return undefined
-}
-
-/**
- * Resolves a public WebSocket endpoint through the common outbound policy and
- * supplies ws with an agent whose handshake lookup can only use that result.
- */
-export async function createPinnedWebSocketConnection(
-  value: string,
-  dependencies: RemoteMcpWebSocketDependencies = remoteMcpWebSocketDependencies,
-): Promise<PinnedWebSocketConnection> {
-  let websocketUrl: URL
-  try {
-    websocketUrl = new URL(value)
-  } catch {
-    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-      'Outbound URL is not permitted',
-      'Outbound URL is not permitted',
-    )
-  }
-
-  const policyUrl = outboundPolicyUrlForWebSocket(websocketUrl)
-  if (!policyUrl) {
-    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-      'Outbound URL is not permitted',
-      'Outbound URL is not permitted',
-    )
-  }
-
-  const target = await dependencies.resolveApprovedOutboundTarget(
-    policyUrl.toString(),
-  )
-  if (!target) {
-    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-      'Outbound URL is not permitted',
-      'Outbound URL is not permitted',
-    )
-  }
-
-  const finalUrl = new URL(target.url)
-  finalUrl.protocol = websocketUrl.protocol
-  if (finalUrl.origin !== websocketUrl.origin) {
-    throw new Error('Pinned WebSocket connection origin mismatch')
-  }
-
-  const agent = (
-    websocketUrl.protocol === 'wss:'
-      ? dependencies.createPinnedHttpsAgent(target)
-      : dependencies.createPinnedHttpAgent(target)
-  ) as PinnedWebSocketAgent
-  return { url: finalUrl, agent, close: () => agent.destroy() }
-}
-
-/** IDE integrations are local IPC-over-HTTP/WebSocket endpoints, never remote hosts. */
-export function validateLocalIdeMcpUrl(
-  value: string,
-  allowedProtocols: readonly string[],
-): URL {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error(
-      'IDE MCP endpoint must use a loopback host and explicit port',
-    )
-  }
-
-  const isLoopback = url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-  if (!allowedProtocols.includes(url.protocol) || !isLoopback || !url.port) {
-    throw new Error(
-      'IDE MCP endpoint must use a loopback host and explicit port',
-    )
-  }
-  return url
-}
-
-function createLocalIdeFetch(endpoint: URL, baseFetch: FetchLike): FetchLike {
-  return async (url, init) => {
-    if (new URL(url.toString()).origin !== endpoint.origin) {
-      throw new Error('IDE MCP connection origin mismatch')
-    }
-    return baseFetch(url, { ...init, redirect: 'error' })
-  }
-}
-
-/**
- * Resolves an MCP URL once immediately before connecting and ensures every
- * transport request uses the resulting pinned dispatcher. The original URL is
- * retained so HTTP Host and TLS SNI continue to identify the configured host.
- */
-export async function createPinnedRemoteMcpConnection(
-  value: string,
-  dependencies: RemoteMcpConnectionDependencies = remoteMcpConnectionDependencies,
-): Promise<PinnedRemoteMcpConnection> {
-  const target = await dependencies.resolveApprovedOutboundTarget(value)
-  if (!target) {
-    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-      'Outbound URL is not permitted',
-      'Outbound URL is not permitted',
-    )
-  }
-
-  return createPinnedRemoteMcpConnectionForTarget(target, dependencies)
-}
-
-function createPinnedRemoteMcpConnectionForTarget(
-  target: ApprovedOutboundTarget,
-  dependencies: RemoteMcpConnectionDependencies,
-): PinnedRemoteMcpConnection {
-  const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
-  const requestInit: DispatcherRequestInit = { dispatcher, redirect: 'error' }
-  let isClosed = false
-  const withDispatcher = (
-    url: string | URL,
-    init?: RequestInit,
-  ): DispatcherRequestInit => {
-    if (new URL(url.toString()).origin !== target.url.origin) {
-      throw new Error('Pinned MCP connection origin mismatch')
-    }
-    return { ...init, redirect: 'error', dispatcher }
-  }
-
-  return {
-    url: target.url,
-    requestInit,
-    fetch: baseFetch => async (url, init) =>
-      baseFetch(url, withDispatcher(url, init)),
-    eventSourceFetch: baseFetch => async (url, init) =>
-      baseFetch(url, withDispatcher(url, init)),
-    close: async () => {
-      if (isClosed) return
-      isClosed = true
-      await dispatcher.close()
-    },
-  }
-}
-
 /**
  * Wraps a fetch function to apply a fresh timeout signal to each request.
  * This avoids the bug where a single AbortSignal.timeout() created at connection
@@ -800,7 +610,6 @@ export const connectToServer = memoize(
     let inProcessServer:
       | { connect(t: Transport): Promise<void>; close(): Promise<void> }
       | undefined
-    let closePinnedRemoteMcpConnection: (() => Promise<void>) | undefined
     try {
       let transport
 
@@ -809,11 +618,6 @@ export const connectToServer = memoize(
       const sessionIngressToken = getSessionIngressAuthToken()
 
       if (serverRef.type === 'sse') {
-        const remoteConnection = await createPinnedRemoteMcpConnection(
-          serverRef.url,
-        )
-        closePinnedRemoteMcpConnection = remoteConnection.close
-
         // Create an auth provider for this server
         const authProvider = new ClaudeAuthProvider(name, serverRef)
 
@@ -827,13 +631,9 @@ export const connectToServer = memoize(
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
           fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(
-              remoteConnection.fetch(createFetchWithInit()),
-              authProvider,
-            ),
+            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
           ),
           requestInit: {
-            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...combinedHeaders,
@@ -846,7 +646,6 @@ export const connectToServer = memoize(
         // to receive server-sent events), so applying a 60-second timeout would kill it.
         // The timeout is only meant for individual API requests (POST, auth refresh), not
         // the persistent SSE stream.
-        const eventSourceFetch = remoteConnection.eventSourceFetch(fetch)
         transportOptions.eventSourceInit = {
           fetch: async (url: string | URL, init?: RequestInit) => {
             // Get auth headers from the auth provider
@@ -858,7 +657,7 @@ export const connectToServer = memoize(
 
             const proxyOptions = getProxyFetchOptions()
             // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-            return eventSourceFetch(url, {
+            return fetch(url, {
               ...init,
               ...proxyOptions,
               headers: {
@@ -873,7 +672,7 @@ export const connectToServer = memoize(
         }
 
         transport = new SSEClientTransport(
-          remoteConnection.url,
+          new URL(serverRef.url),
           transportOptions,
         )
         logMCPDebug(name, `SSE transport initialized, awaiting connection`)
@@ -881,24 +680,33 @@ export const connectToServer = memoize(
         logMCPDebug(name, `Setting up SSE-IDE transport to ${serverRef.url}`)
         // IDE servers don't need authentication
         // TODO: Use the auth token provided in the lockfile
-        const ideUrl = validateLocalIdeMcpUrl(serverRef.url, [
-          'http:',
-          'https:',
-        ])
-        const transportOptions: SSEClientTransportOptions = {
-          fetch: createLocalIdeFetch(ideUrl, createFetchWithInit()),
-          requestInit: {
-            redirect: 'error',
-            headers: { 'User-Agent': getMCPUserAgent() },
-          },
-          eventSourceInit: {
-            fetch: createLocalIdeFetch(ideUrl, fetch),
-          },
-        }
+        const proxyOptions = getProxyFetchOptions()
+        const transportOptions: SSEClientTransportOptions =
+          proxyOptions.dispatcher
+            ? {
+                eventSourceInit: {
+                  fetch: async (url: string | URL, init?: RequestInit) => {
+                    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+                    return fetch(url, {
+                      ...init,
+                      ...proxyOptions,
+                      headers: {
+                        'User-Agent': getMCPUserAgent(),
+                        ...init?.headers,
+                      },
+                    })
+                  },
+                },
+              }
+            : {}
 
-        transport = new SSEClientTransport(ideUrl, transportOptions)
+        transport = new SSEClientTransport(
+          new URL(serverRef.url),
+          Object.keys(transportOptions).length > 0
+            ? transportOptions
+            : undefined,
+        )
       } else if (serverRef.type === 'ws-ide') {
-        const ideUrl = validateLocalIdeMcpUrl(serverRef.url, ['ws:', 'wss:'])
         const tlsOptions = getWebSocketTLSOptions()
         const wsHeaders = {
           'User-Agent': getMCPUserAgent(),
@@ -911,15 +719,16 @@ export const connectToServer = memoize(
         if (typeof Bun !== 'undefined') {
           // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
           // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          wsClient = new globalThis.WebSocket(ideUrl.toString(), {
+          wsClient = new globalThis.WebSocket(serverRef.url, {
             protocols: ['mcp'],
             headers: wsHeaders,
+            proxy: getWebSocketProxyUrl(serverRef.url),
             tls: tlsOptions || undefined,
           } as unknown as string[])
         } else {
-          wsClient = await createNodeWsClient(ideUrl.toString(), {
+          wsClient = await createNodeWsClient(serverRef.url, {
             headers: wsHeaders,
-            followRedirects: false,
+            agent: getWebSocketProxyAgent(serverRef.url),
             ...(tlsOptions || {}),
           })
         }
@@ -955,19 +764,23 @@ export const connectToServer = memoize(
           })}`,
         )
 
-        const remoteConnection = await createPinnedWebSocketConnection(
-          serverRef.url,
-        )
-        closePinnedRemoteMcpConnection = async () => remoteConnection.close()
-        const wsClient = await createNodeWsClient(
-          remoteConnection.url.toString(),
-          {
+        let wsClient: WsClientLike
+        if (typeof Bun !== 'undefined') {
+          // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
+          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+          wsClient = new globalThis.WebSocket(serverRef.url, {
+            protocols: ['mcp'],
             headers: wsHeaders,
-            agent: remoteConnection.agent,
-            followRedirects: false,
+            proxy: getWebSocketProxyUrl(serverRef.url),
+            tls: tlsOptions || undefined,
+          } as unknown as string[])
+        } else {
+          wsClient = await createNodeWsClient(serverRef.url, {
+            headers: wsHeaders,
+            agent: getWebSocketProxyAgent(serverRef.url),
             ...(tlsOptions || {}),
-          },
-        )
+          })
+        }
         transport = new WebSocketTransport(wsClient)
       } else if (serverRef.type === 'http') {
         logMCPDebug(name, `Initializing HTTP transport to ${serverRef.url}`)
@@ -987,10 +800,6 @@ export const connectToServer = memoize(
         )
 
         // Create an auth provider for this server
-        const remoteConnection = await createPinnedRemoteMcpConnection(
-          serverRef.url,
-        )
-        closePinnedRemoteMcpConnection = remoteConnection.close
         const authProvider = new ClaudeAuthProvider(name, serverRef)
 
         // Get combined headers (static + dynamic)
@@ -1016,16 +825,10 @@ export const connectToServer = memoize(
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
           fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(
-              remoteConnection.fetch(
-                createFetchWithInit(undefined, proxyOptions),
-              ),
-              authProvider,
-            ),
+            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
           ),
           requestInit: {
             ...proxyOptions,
-            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...(sessionIngressToken &&
@@ -1057,7 +860,7 @@ export const connectToServer = memoize(
         )
 
         transport = new StreamableHTTPClientTransport(
-          remoteConnection.url,
+          new URL(serverRef.url),
           transportOptions,
         )
         logMCPDebug(name, `HTTP transport created successfully`)
@@ -1079,13 +882,8 @@ export const connectToServer = memoize(
 
         logMCPDebug(name, `Using claude.ai proxy at ${proxyUrl}`)
 
-        const remoteConnection = await createPinnedRemoteMcpConnection(proxyUrl)
-        closePinnedRemoteMcpConnection = remoteConnection.close
-
         // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-        const fetchWithAuth = createClaudeAiProxyFetch(
-          remoteConnection.fetch(globalThis.fetch),
-        )
+        const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
 
         const proxyOptions = getProxyFetchOptions()
         const transportOptions: StreamableHTTPClientTransportOptions = {
@@ -1093,7 +891,6 @@ export const connectToServer = memoize(
           fetch: wrapFetchWithTimeout(fetchWithAuth),
           requestInit: {
             ...proxyOptions,
-            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               'X-Mcp-Client-Session-Id': getSessionId(),
@@ -1102,7 +899,7 @@ export const connectToServer = memoize(
         }
 
         transport = new StreamableHTTPClientTransport(
-          remoteConnection.url,
+          new URL(proxyUrl),
           transportOptions,
         )
         logMCPDebug(name, `claude.ai proxy transport created successfully`)
@@ -1271,7 +1068,6 @@ export const connectToServer = memoize(
             inProcessServer.close().catch(() => {})
           }
           transport.close().catch(() => {})
-          void closePinnedRemoteMcpConnection?.()
           reject(
             new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
               `MCP server "${name}" connection timed out after ${getConnectionTimeoutMs()}ms`,
@@ -1363,7 +1159,6 @@ export const connectToServer = memoize(
           inProcessServer.close().catch(() => {})
         }
         transport.close().catch(() => {})
-        await closePinnedRemoteMcpConnection?.()
         if (stderrOutput) {
           logMCPError(name, `Server stderr: ${stderrOutput}`)
         }
@@ -1588,7 +1383,6 @@ export const connectToServer = memoize(
 
       // Enhanced close handler with connection drop context
       client.onclose = () => {
-        void closePinnedRemoteMcpConnection?.()
         const uptime = Date.now() - connectionStartTime
         const transportType = serverRef.type ?? 'unknown'
 
@@ -1784,8 +1578,6 @@ export const connectToServer = memoize(
           await client.close()
         } catch (error) {
           logMCPDebug(name, `Error closing client: ${error}`)
-        } finally {
-          await closePinnedRemoteMcpConnection?.()
         }
       }
 
@@ -1849,7 +1641,6 @@ export const connectToServer = memoize(
       if (inProcessServer) {
         inProcessServer.close().catch(() => {})
       }
-      await closePinnedRemoteMcpConnection?.()
       return {
         name,
         type: 'failed' as const,

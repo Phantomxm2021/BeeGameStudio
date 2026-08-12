@@ -85,7 +85,6 @@ import { sanitizePath } from './path.js'
 import {
   extractJsonStringField,
   extractLastJsonStringField,
-  getProjectStorageKey,
   LITE_READ_BUF_SIZE,
   readHeadAndTail,
   readTranscriptForLoad,
@@ -436,7 +435,7 @@ export function isCustomTitleEnabled(): boolean {
 // stable for a given input. Worktree switches just change the key — no
 // cache clear needed.
 export const getProjectDir = memoize((projectDir: string): string => {
-  return join(getProjectsDir(), getProjectStorageKey(projectDir))
+  return join(getProjectsDir(), sanitizePath(projectDir))
 })
 
 let project: Project | null = null
@@ -3951,20 +3950,6 @@ async function loadSessionFile(sessionId: UUID): Promise<{
  */
 const sessionMessagesCache = new Map<UUID, Promise<Set<UUID>>>()
 
-function cacheSessionMessages(
-  sessionId: UUID,
-  messages: Promise<Set<UUID>>,
-): Promise<Set<UUID>> {
-  if (sessionMessagesCache.size >= MAX_CACHED_SESSION_FILES) {
-    const oldestKey = sessionMessagesCache.keys().next().value
-    if (oldestKey !== undefined) {
-      sessionMessagesCache.delete(oldestKey)
-    }
-  }
-  sessionMessagesCache.set(sessionId, messages)
-  return messages
-}
-
 /**
  * Gets message UUIDs for a specific session without loading all sessions.
  * Cached (bounded) to avoid re-reading the same session file multiple
@@ -3979,11 +3964,19 @@ export async function getSessionMessages(sessionId: UUID): Promise<Set<UUID>> {
   if (existing !== undefined) {
     return existing
   }
+  // Evict oldest entry when at capacity so the Map stays bounded.
+  if (sessionMessagesCache.size >= MAX_CACHED_SESSION_FILES) {
+    const oldestKey = sessionMessagesCache.keys().next().value
+    if (oldestKey !== undefined) {
+      sessionMessagesCache.delete(oldestKey)
+    }
+  }
   const promise = (async () => {
     const { messages } = await loadSessionFile(sessionId)
     return new Set(messages.keys())
   })()
-  return cacheSessionMessages(sessionId, promise)
+  sessionMessagesCache.set(sessionId, promise)
+  return promise
 }
 
 /** Underlying cache for direct manipulation (priming, clearing, tests). */
@@ -4036,7 +4029,7 @@ export async function getLastSessionLog(
   // with a stale disk snapshot would lose unflushed UUIDs and break dedup.
   const messagesCache = getSessionMessagesCache()
   if (!messagesCache.has(sessionId)) {
-    cacheSessionMessages(sessionId, Promise.resolve(new Set(messages.keys())))
+    messagesCache.set(sessionId, Promise.resolve(new Set(messages.keys())))
   }
 
   // Find the most recent non-sidechain message

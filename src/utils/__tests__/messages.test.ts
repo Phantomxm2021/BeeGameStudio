@@ -38,7 +38,6 @@ import type {
   AssistantMessage,
   UserMessage,
 } from '../../types/message'
-import { toInternalMessages, toSDKMessages } from '../messages/mappers'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -500,28 +499,9 @@ describe('normalizeMessages', () => {
     const normalized = normalizeMessages([msg])
     expect(normalized.length).toBe(1)
   })
-
-  test('drops null transcript entries instead of crashing render normalization', () => {
-    const msg = makeAssistantMsg([{ type: 'text', text: 'hello' }])
-    const normalized = normalizeMessages([null, msg] as unknown as Message[])
-
-    expect(normalized).toHaveLength(1)
-    expect(normalized[0]?.type).toBe('assistant')
-  })
 })
 
 describe('normalizeMessagesForAPI', () => {
-  test('drops null transcript entries instead of crashing API normalization', () => {
-    const user = makeUserMsg('hello')
-    const normalized = normalizeMessagesForAPI([
-      null,
-      user,
-    ] as unknown as Message[])
-
-    expect(normalized).toHaveLength(1)
-    expect(normalized[0]?.type).toBe('user')
-  })
-
   test('preserves Gemini thought signature metadata on tool_use blocks', () => {
     const assistant = makeAssistantMsg([
       {
@@ -539,13 +519,6 @@ describe('normalizeMessagesForAPI', () => {
 
     expect(block.type).toBe('tool_use')
     expect(block._geminiThoughtSignature).toBe('sig-123')
-  })
-})
-
-describe('message transport mappers', () => {
-  test('drop null transcript entries at SDK boundaries', () => {
-    expect(toInternalMessages([null] as never)).toEqual([])
-    expect(toSDKMessages([null] as unknown as Message[])).toEqual([])
   })
 })
 
