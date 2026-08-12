@@ -23,6 +23,7 @@ const fixtureManifest: AlignmentManifest = {
   ],
   fileSubstitutions: {},
   rootExceptions: {},
+  generatedPaths: [],
 }
 
 async function writeFixture(root: string, path: string, value: string | Uint8Array) {
@@ -202,6 +203,31 @@ describe('upstream core audit', () => {
         })
       ).differences,
     ).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('ignores only exact manifest-declared generated files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'core-alignment-generated-'))
+    const upstreamRoot = join(root, 'upstream')
+    const localRoot = join(root, 'local')
+    await writeFixture(upstreamRoot, 'src/runtime.ts', 'export {}\n')
+    await writeFixture(localRoot, 'src/runtime.ts', 'export {}\n')
+    await writeFixture(localRoot, 'src/vendor/rg', new Uint8Array([1, 2, 3]))
+    await writeFixture(localRoot, 'src/vendor/unapproved', 'unexpected\n')
+
+    expect(
+      (
+        await auditCoreAlignment({
+          manifest: {
+            ...fixtureManifest,
+            generatedPaths: ['src/vendor/rg'],
+          },
+          upstreamRoot,
+          localRoot,
+          verifyCommit: false,
+        })
+      ).differences,
+    ).toEqual([{ kind: 'local-only', path: 'src/vendor/unapproved' }])
     await rm(root, { recursive: true, force: true })
   })
 })

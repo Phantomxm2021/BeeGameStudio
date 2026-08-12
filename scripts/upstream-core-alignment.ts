@@ -23,6 +23,7 @@ export type AlignmentManifest = {
   literalSubstitutions: LiteralSubstitution[]
   fileSubstitutions: Record<string, LiteralSubstitution[]>
   rootExceptions: Record<string, string>
+  generatedPaths: string[]
 }
 
 export type AlignmentDifference = {
@@ -85,7 +86,8 @@ function assertManifest(value: unknown): asserts value is AlignmentManifest {
     !manifest.fileSubstitutions ||
     typeof manifest.fileSubstitutions !== 'object' ||
     !manifest.rootExceptions ||
-    typeof manifest.rootExceptions !== 'object'
+    typeof manifest.rootExceptions !== 'object' ||
+    !Array.isArray(manifest.generatedPaths)
   ) {
     throw new Error('Alignment manifest collections are invalid')
   }
@@ -94,6 +96,7 @@ function assertManifest(value: unknown): asserts value is AlignmentManifest {
     ...manifest.synchronizedFiles,
     ...Object.keys(manifest.fileSubstitutions),
     ...Object.keys(manifest.rootExceptions),
+    ...manifest.generatedPaths,
   ]) {
     if (typeof path !== 'string') {
       throw new Error('Alignment manifest paths must be strings')
@@ -288,11 +291,13 @@ export async function auditCoreAlignment(
   const localPaths = await enumerateConfiguredPaths(localRoot, input.manifest)
   const upstreamSet = new Set(upstreamPaths)
   const localSet = new Set(localPaths)
+  const generatedSet = new Set(input.manifest.generatedPaths)
   const paths = [...new Set([...upstreamPaths, ...localPaths])].sort(comparePaths)
   const differences: AlignmentDifference[] = []
 
   for (const path of paths) {
     if (!upstreamSet.has(path)) {
+      if (generatedSet.has(path)) continue
       differences.push({ kind: 'local-only', path })
       continue
     }
@@ -325,9 +330,10 @@ export async function syncCoreAlignment(input: AlignmentInput): Promise<void> {
   )
   const localPaths = await enumerateConfiguredPaths(localRoot, input.manifest)
   const upstreamSet = new Set(upstreamPaths)
+  const generatedSet = new Set(input.manifest.generatedPaths)
 
   for (const path of localPaths) {
-    if (!upstreamSet.has(path)) {
+    if (!upstreamSet.has(path) && !generatedSet.has(path)) {
       await rm(resolveInside(localRoot, path), { force: true })
     }
   }

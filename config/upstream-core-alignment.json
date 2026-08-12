@@ -93,5 +93,8 @@
     "package.json": "Bee Game Studio workspace and product scripts",
     "bun.lock": "Combined upstream and Bee Game Studio dependency graph",
     "tsconfig.json": "Combined upstream and Bee Game Studio project graph"
-  }
+  },
+  "generatedPaths": [
+    "src/utils/vendor/ripgrep/arm64-darwin/rg"
+  ]
 }
