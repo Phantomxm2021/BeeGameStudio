@@ -167,6 +167,12 @@ export function inspectFoundationDocumentDraft(
     '## Executive Summary',
     expectedSectionMarkers[0] ?? cursor,
   )
+  assertBoundedDraftPart(
+    markdown,
+    undefined,
+    '<!-- beegame-executive-summary -->',
+    expectedSectionMarkers[0] ?? cursor,
+  )
   expectedSections.forEach((section, index) =>
     assertNonEmptyDraftRange(
       lines,
@@ -208,9 +214,7 @@ export function inspectFoundationDocumentDraft(
       assertBoundedDraftPart(
         markdown,
         partIndex === 0
-          ? sectionIndex === 0
-            ? undefined
-            : expectedSectionMarkers[sectionIndex]!
+          ? expectedSectionMarkers[sectionIndex]!
           : marker,
         marker,
         nextBoundary,

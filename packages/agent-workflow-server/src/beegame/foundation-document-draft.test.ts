@@ -155,6 +155,33 @@ describe('foundation document draft groups', () => {
     expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
   })
 
+  test('bounds the preamble and first section chunk as independent checkpoints', () => {
+    const path = 'docs/GDD.md'
+    const section = foundationDocumentDraftGroups(path)[0]!.sections[0]!
+    const valid = [
+      '# Game Design Document',
+      '<!-- beegame-executive-summary -->',
+      '## Executive Summary',
+      's'.repeat(2_000),
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `<!-- beegame-part:${section.sectionId}:1 -->`,
+      'p'.repeat(2_000),
+      '<!-- beegame-draft-cursor:0:1 -->',
+    ].join('\n')
+    expect(inspectFoundationDocumentDraft(path, valid)).toMatchObject({
+      started: true,
+      completedGroupCount: 0,
+      completedPartCount: 1,
+    })
+    expect(() =>
+      inspectFoundationDocumentDraft(
+        path,
+        valid.replace('s'.repeat(2_000), 's'.repeat(2_401)),
+      ),
+    ).toThrow(/exceeds 2400 bytes/i)
+  })
+
   test('rejects skipped, duplicated, and trailing draft content', () => {
     const path = 'docs/GDD.md'
     const first = firstGroupMarkdown(path)
