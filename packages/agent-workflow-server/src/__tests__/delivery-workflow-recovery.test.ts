@@ -50,7 +50,7 @@ import {
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   registerBeeGameAuthoredResources,
@@ -127,7 +127,7 @@ function matrixAtomicTask(): AtomicTask {
 
 function matrixCompleteDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
   const contract = getGameDocumentContract(path)
-  return withTestDocumentMetadata(path, renderCompleteGameDocument(path, {
+  return withTestDocumentMetadata(path, renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Synthetic complete recovery authority.',
     sections: contract.sections.map(section => ({

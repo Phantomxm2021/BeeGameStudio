@@ -20,7 +20,7 @@ import {
   writeBeeGameAssetManifest,
 } from '../asset-contracts'
 import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
-import { renderCompleteGameDocument } from '../complete-game-document'
+import { renderTestCompleteGameDocument } from '../../__tests__/complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../native-resource-content-tool'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { getGameDocumentContract } from './game-document-contracts'
@@ -70,7 +70,7 @@ function completeFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ): string {
   const contract = getGameDocumentContract(path)
-  return renderCompleteGameDocument(path, {
+  return renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Synthetic recovery authority.',
     sections: contract.sections.map(section => ({

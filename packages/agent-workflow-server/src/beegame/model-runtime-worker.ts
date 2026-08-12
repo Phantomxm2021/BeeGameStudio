@@ -162,7 +162,7 @@ function getFunction(
 ): (...args: unknown[]) => unknown {
   const value = module[name]
   if (typeof value !== 'function') {
-    throw new Error(`Claude runtime module is missing ${name}`)
+    throw new Error(`Bee Game Studio runtime module is missing ${name}`)
   }
   return value as (...args: unknown[]) => unknown
 }

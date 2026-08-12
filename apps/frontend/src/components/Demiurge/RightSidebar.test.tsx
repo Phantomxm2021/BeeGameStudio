@@ -99,7 +99,7 @@ describe('RightSidebar tabs', () => {
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
-    it('does not expose Claude runtime thinking controls in the project chat', async () => {
+    it('does not expose runtime thinking controls in the project chat', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
 

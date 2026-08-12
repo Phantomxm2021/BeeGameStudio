@@ -9,9 +9,9 @@ import {
 } from './document-readiness-audit'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import {
-  renderCompleteGameDocument,
+  renderTestCompleteGameDocument,
   type CompleteGameDocumentSubmission,
-} from './complete-game-document'
+} from '../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 
@@ -66,7 +66,7 @@ function completeSubmission(
 }
 
 function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
-  return renderCompleteGameDocument(path, completeSubmission(path))
+  return renderTestCompleteGameDocument(path, completeSubmission(path))
 }
 
 async function writeMinimalContent(workspace: string): Promise<void> {

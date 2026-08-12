@@ -9,9 +9,9 @@ import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
 import { transitionDeliveryRun } from './transition'
 import {
-  renderCompleteGameDocument,
+  renderTestCompleteGameDocument,
   type CompleteGameDocumentSubmission,
-} from '../complete-game-document'
+} from '../../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -457,7 +457,7 @@ describe('accepted workflow unit journal', () => {
             join(workspace, path),
             withTestDocumentMetadata(
               path,
-              renderCompleteGameDocument(
+              renderTestCompleteGameDocument(
                 path,
                 document as unknown as CompleteGameDocumentSubmission,
               ),

@@ -21,7 +21,7 @@ import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import {
   computeDocumentRevision,
@@ -49,7 +49,7 @@ function completeTestFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ): string {
   const contract = getGameDocumentContract(path)
-  return renderCompleteGameDocument(path, {
+  return renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Complete test foundation authority.',
     sections: contract.sections.map(section => ({

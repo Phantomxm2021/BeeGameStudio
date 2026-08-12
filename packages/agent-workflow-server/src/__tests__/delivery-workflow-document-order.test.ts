@@ -28,7 +28,7 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
   CANONICAL_ASSET_MANIFEST,
@@ -464,7 +464,7 @@ describe('single-track document review workflow', () => {
         join(workspacePath, path),
         withTestDocumentMetadata(
           path,
-          renderCompleteGameDocument(path, submission),
+          renderTestCompleteGameDocument(path, submission),
         ),
       )
       await commitAuthoredFoundationDocument({

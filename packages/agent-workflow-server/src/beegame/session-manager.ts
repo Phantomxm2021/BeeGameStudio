@@ -1474,7 +1474,7 @@ export class BeeGameSessionManager {
           hasTurnEnded(record.events, submittedTurnId)
         )
           return
-        // Claude-compatible streaming transports report authoritative usage on
+        // Compatible streaming transports report authoritative usage on
         // message_delta, which has no visible text. Preserve it as a
         // first-class event so runtime snapshots advance during the turn.
         if (

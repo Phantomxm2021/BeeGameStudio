@@ -17,7 +17,7 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 
 function completeSubmission(
@@ -129,7 +129,7 @@ describe('idea to complete game documents', () => {
         join(workspacePath, path),
         withTestDocumentMetadata(
           path,
-          renderCompleteGameDocument(path, submission),
+          renderTestCompleteGameDocument(path, submission),
         ),
       )
       await commitAuthoredFoundationDocument({
@@ -184,7 +184,7 @@ describe('idea to complete game documents', () => {
     const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
     const contract = getGameDocumentContract(path)
     const submission = completeSubmission(path)
-    const renderedLines = renderCompleteGameDocument(path, submission).split('\n')
+    const renderedLines = renderTestCompleteGameDocument(path, submission).split('\n')
     renderedLines.shift()
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
     await writeFile(

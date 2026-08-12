@@ -8,12 +8,12 @@ import {
   readAuthoredDocumentReceipt,
   reconcileAuthoredDocumentReceipt,
 } from './authored-document-receipt'
-import { renderCompleteGameDocument } from './complete-game-document'
+import { renderTestCompleteGameDocument } from '../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 
 function completeDocument(path: 'docs/GDD.md'): string {
   const contract = getGameDocumentContract(path)
-  const body = renderCompleteGameDocument(path, {
+  const body = renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Complete game design production authority.',
     sections: contract.sections.map((section, index) => ({
