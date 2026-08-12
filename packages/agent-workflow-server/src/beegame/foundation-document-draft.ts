@@ -6,10 +6,9 @@ import type {
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
-const SECTIONS_PER_TURN = 2
+const SECTIONS_PER_TURN = 1
 const SECTION_PART_COUNT = 2
-const SECTION_GROUP_CHECKPOINT_COUNT = 1
-export const MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES = 10_400
+export const MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES = 5_200
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number
@@ -216,25 +215,6 @@ export function inspectFoundationDocumentDraft(
       )
     })
   })
-  groups.slice(0, completedGroupCount).forEach((group, groupIndex) => {
-    if (group.sections.length === 0) return
-    const firstSection = group.sections[0]!
-    const nextGroup = groups[groupIndex + 1]
-    const nextBoundary =
-      groupIndex + 1 < completedGroupCount && nextGroup?.sections[0]
-      ? `<!-- beegame-section:${nextGroup.sections[0].sectionId} -->`
-      : expectedMaterials.length > 0
-        ? '<!-- beegame-production-materials -->'
-        : cursor
-    assertBoundedDraftGroup(
-      markdown,
-      groupIndex === 0
-        ? undefined
-        : `<!-- beegame-section:${firstSection.sectionId} -->`,
-      `<!-- beegame-section:${firstSection.sectionId} -->`,
-      nextBoundary,
-    )
-  })
   expectedMaterials.forEach((material, index) => {
     assertNonEmptyDraftRange(
       lines,
@@ -282,18 +262,15 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   const currentCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${input.progress.completedPartCount} -->`
   const nativeTool =
     isFirst && input.progress.completedPartCount === 0 ? 'Write' : 'Edit'
-  const sectionBlocks = group.sections
-    .map(
-      section =>
-        `<!-- beegame-section:${section.sectionId} -->, ## ${section.title}, <!-- beegame-part:${section.sectionId}:1 --> and its first half, then <!-- beegame-part:${section.sectionId}:2 --> and its second half`,
-    )
-    .join('; then ')
+  const section = group.sections[0]
   const replacementInstruction = isFinal
     ? (() => {
         const material = group.productionMaterials[nextPart - 1]!
         return `${nextPart === 1 ? `Replace ${currentCursor} with <!-- beegame-production-materials -->, ## Production Materials, ` : `Replace ${currentCursor} with `}<!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body. ${nextPart === partCount ? 'This last material leaves no cursor.' : `Finish with <!-- beegame-draft-cursor:${group.groupIndex}:${nextPart} -->.`}`
       })()
-    : `${isFirst ? 'Create the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, then ' : `Replace ${currentCursor} with `}${sectionBlocks}. Finish with <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`
+    : input.progress.completedPartCount === 0
+      ? `${isFirst ? 'Create the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, ' : `Replace ${currentCursor} with `}<!-- beegame-section:${section?.sectionId} -->, ## ${section?.title}, <!-- beegame-part:${section?.sectionId}:1 --> and the first half, then <!-- beegame-part:${section?.sectionId}:2 --> and the second half. Finish with <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`
+      : `Replace ${currentCursor} with <!-- beegame-part:${section?.sectionId}:2 --> and the missing second half. Finish with <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`
   const groupContract = {
     path: input.path,
     discipline: contract.discipline,
@@ -319,7 +296,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   }
   return [
     `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume chunk ${nextPart}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
-    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active group and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}perform exactly one bounded native ${nativeTool} for this active ${isFinal ? 'production material' : 'section group'}. Its content or new_string value must be at most ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes. Do not wait to generate the whole document.`,
+    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}perform exactly one bounded native ${nativeTool} for this active ${isFinal ? 'production material' : 'section'}. Its content or new_string value must be at most ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes. Do not wait to generate the whole document.`,
     replacementInstruction,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'
@@ -335,7 +312,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
 export function foundationDocumentDraftPartCount(
   group: FoundationDocumentDraftGroup,
 ): number {
-  return group.productionMaterials.length || SECTION_GROUP_CHECKPOINT_COUNT
+  return group.productionMaterials.length || SECTION_PART_COUNT
 }
 
 function assertNonEmptyDraftRange(
@@ -390,27 +367,5 @@ function assertBoundedDraftPart(
   )
     throw new Error(
       `foundation document draft part exceeds ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES} bytes: ${contentMarker}`,
-    )
-}
-
-function assertBoundedDraftGroup(
-  markdown: string,
-  replacementStartMarker: string | undefined,
-  contentMarker: string,
-  nextBoundary: string,
-): void {
-  const contentStart = markdown.indexOf(contentMarker)
-  const replacementStart = replacementStartMarker
-    ? markdown.indexOf(replacementStartMarker)
-    : 0
-  const end = markdown.indexOf(nextBoundary, contentStart + contentMarker.length)
-  if (replacementStart < 0 || contentStart < replacementStart || end <= contentStart)
-    throw new Error(`foundation document draft group is incomplete: ${contentMarker}`)
-  if (
-    Buffer.byteLength(markdown.slice(replacementStart, end), 'utf8') >
-    MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES
-  )
-    throw new Error(
-      `foundation document draft group exceeds ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES} bytes: ${contentMarker}`,
     )
 }

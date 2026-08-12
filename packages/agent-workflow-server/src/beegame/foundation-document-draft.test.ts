@@ -35,11 +35,10 @@ describe('foundation document draft groups', () => {
     const contract = getGameDocumentContract(path)
     const groups = foundationDocumentDraftGroups(path)
 
-    expect(groups.length).toBe(Math.ceil(contract.sections.length / 2) + 1)
-    expect(groups.slice(0, -1).every(group => group.sections.length <= 2)).toBe(
+    expect(groups.length).toBe(contract.sections.length + 1)
+    expect(groups.slice(0, -1).every(group => group.sections.length === 1)).toBe(
       true,
     )
-    expect(groups[0]?.sections.length).toBe(2)
     expect(groups.flatMap(group => group.sections.map(section => section.sectionId))).toEqual(
       contract.sections.map(section => section.sectionId),
     )
@@ -64,19 +63,17 @@ describe('foundation document draft groups', () => {
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
     expect(prompt).toContain('perform exactly one bounded native Edit')
-    expect(prompt).toContain('<!-- beegame-part:core_loop:1 -->')
-    expect(prompt).toContain('<!-- beegame-part:core_loop:2 -->')
-    expect(prompt).toContain('<!-- beegame-part:player_actions:1 -->')
-    expect(prompt).toContain('<!-- beegame-part:player_actions:2 -->')
+    expect(prompt).toContain('<!-- beegame-part:experience_pillars:1 -->')
+    expect(prompt).toContain('<!-- beegame-part:experience_pillars:2 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
-    expect(prompt).toContain('10,400 UTF-8 bytes')
+    expect(prompt).toContain('5,200 UTF-8 bytes')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
     )
   })
 
-  test('rejects a partial group because one native mutation is atomic', () => {
+  test('resumes a partially streamed section from its durable chunk cursor', () => {
     const path = 'docs/GDD.md'
     const firstSection = foundationDocumentDraftGroups(path)[0]!.sections[0]!
     const markdown = [
@@ -95,9 +92,23 @@ describe('foundation document draft groups', () => {
       '',
     ].join('\n')
 
-    expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
-      /cursor group is invalid/i,
-    )
+    const progress = inspectFoundationDocumentDraft(path, markdown)
+    const prompt = buildFoundationDocumentDraftTurnPrompt({
+      path,
+      progress,
+      projectionRelativePath:
+        '.beegame/workflow/document-projections/dispatch.json',
+    })
+
+    expect(progress).toMatchObject({
+      completedGroupCount: 0,
+      completedPartCount: 1,
+      complete: false,
+    })
+    expect(prompt).toContain('resume chunk 2/2')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
+    expect(prompt).not.toContain('native Write')
   })
 
   test('rejects skipped, duplicated, and trailing draft content', () => {
@@ -122,13 +133,21 @@ describe('foundation document draft groups', () => {
 
   test('rejects a native replacement that exceeds the durable byte limit', () => {
     const path = 'docs/GDD.md'
-    const markdown = firstGroupMarkdown(path).replace(
-      'Production authority for vision with implementation and acceptance detail.',
-      'x'.repeat(10_401),
-    )
+    const section = foundationDocumentDraftGroups(path)[0]!.sections[0]!
+    const markdown = [
+      '# Game Design Document',
+      '<!-- beegame-executive-summary -->',
+      '## Executive Summary',
+      'Summary.',
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `<!-- beegame-part:${section.sectionId}:1 -->`,
+      'x'.repeat(5_201),
+      '<!-- beegame-draft-cursor:0:1 -->',
+    ].join('\n')
 
     expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
-      /exceeds 10400 bytes/i,
+      /exceeds 5200 bytes/i,
     )
   })
 })
