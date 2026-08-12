@@ -27,7 +27,9 @@ describe('resource-content worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('complete Markdown game document')
+    expect(prompt).toContain(
+      'The assigned Markdown file must be complete when the turn ends',
+    )
     expect(prompt).toContain('human development discipline')
     for (const section of completeDocumentContract.sections)
       expect(prompt).toContain(`"sectionId":"${section.sectionId}"`)
@@ -40,7 +42,16 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain(
       'one contract section per native file operation',
     )
-    expect(prompt).toContain('Write the complete assigned Markdown document directly')
+    expect(prompt).not.toContain(
+      'Write the complete assigned Markdown document directly',
+    )
+    expect(prompt).not.toContain('Write one complete Markdown file')
+    expect(prompt).toContain(
+      'The assigned Markdown file must be complete when the turn ends',
+    )
+    expect(prompt).toContain(
+      'The native runtime owns the file-operation sequence',
+    )
     expect(prompt).toContain("Bee Game Studio's normal workflow")
     expect(prompt).toContain('BGS validates the completed file after the turn')
     expect(prompt).not.toContain('CommitCanonicalDocument')
@@ -519,8 +530,14 @@ describe('resource-content worker prompts', () => {
     })
     expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
     expect(ownerPrompt).toContain('locked repair decision')
-    expect(ownerPrompt).toContain(
+    expect(ownerPrompt).not.toContain(
       'write the complete revised Markdown document directly',
+    )
+    expect(ownerPrompt).toContain(
+      'The assigned Markdown file must be complete when the turn ends',
+    )
+    expect(ownerPrompt).toContain(
+      'The native runtime owns the file-operation sequence',
     )
     expect(ownerPrompt).toContain('end the turn normally')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')

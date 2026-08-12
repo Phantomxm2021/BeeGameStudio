@@ -809,7 +809,15 @@ describe('delivery worker session credentials', () => {
       expect(block).toContain('replacement baseline from an earlier run')
       expect(block).not.toContain('stale target content')
       expect(block).not.toContain('CommitCanonicalDocument')
-      expect(block).toContain('Write the complete assigned Markdown document directly')
+      expect(block).not.toContain(
+        'Write the complete assigned Markdown document directly',
+      )
+      expect(block).toContain(
+        'The assigned Markdown file must be complete when the turn ends',
+      )
+      expect(block).toContain(
+        'The native runtime owns the file-operation sequence',
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

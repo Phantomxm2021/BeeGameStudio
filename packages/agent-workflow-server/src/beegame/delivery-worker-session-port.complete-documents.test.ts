@@ -66,7 +66,15 @@ describe('delivery worker complete document boundary', () => {
           expect(block).toContain(`upstreamPath=${source.path}`)
           expect(block).toContain(`sectionId=${sectionId}`)
         }
-      expect(block).toContain('Write the complete assigned Markdown document directly')
+      expect(block).not.toContain(
+        'Write the complete assigned Markdown document directly',
+      )
+      expect(block).toContain(
+        'The assigned Markdown file must be complete when the turn ends',
+      )
+      expect(block).toContain(
+        'The native runtime owns the file-operation sequence',
+      )
       expect(block).toContain('Bee Game Studio')
       expect(block).toContain('workflow service only validates')
       expect(block).toContain('Read the compact document projection')
