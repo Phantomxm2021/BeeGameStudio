@@ -166,6 +166,25 @@ describe('complete game document submission', () => {
     expect(() => validateCompleteGameDocumentMarkdown(path, rendered)).toThrow(/format|mermaid/i)
   })
 
+  test('wraps raw Mermaid source with canonical fences', () => {
+    const path = 'docs/UI_UX_SPEC.md'
+    const value = completeSubmission(path)
+    const raw = {
+      ...value,
+      productionMaterials: value.productionMaterials.map(material =>
+        material.format === 'mermaid'
+          ? { ...material, body: 'graph TD\n  A --> B' }
+          : material,
+      ),
+    }
+    const rendered = renderCompleteGameDocument(
+      path,
+      validateCompleteGameDocumentSubmission(path, raw),
+    )
+
+    expect(rendered).toContain('```mermaid\ngraph TD\n  A --> B\n```')
+  })
+
   test('rejects exact empty-template sentences', () => {
     const path = 'docs/GDD.md'
     const rendered = renderCompleteGameDocument(path, completeSubmission(path)).replace(

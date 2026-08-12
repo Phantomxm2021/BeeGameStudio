@@ -108,7 +108,18 @@ export function validateCompleteGameDocumentSubmission(
   path: FoundationDocumentPath,
   value: unknown,
 ): CompleteGameDocumentSubmission {
-  const parsed = completeGameDocumentSubmissionSchema.parse(value)
+  const submitted = completeGameDocumentSubmissionSchema.parse(value)
+  const parsed: CompleteGameDocumentSubmission = {
+    ...submitted,
+    productionMaterials: submitted.productionMaterials.map(material => ({
+      ...material,
+      body:
+        material.format === 'mermaid' &&
+        !material.body.split('\n').some(line => line.trim() === '```mermaid')
+          ? `\`\`\`mermaid\n${material.body.trim()}\n\`\`\``
+          : material.body,
+    })),
+  }
   const contract = getGameDocumentContract(path)
   assertExactOrder(
     parsed.sections.map(section => section.sectionId),
