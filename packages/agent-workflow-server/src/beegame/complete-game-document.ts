@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
@@ -104,6 +105,14 @@ export type CompleteGameDocumentSubmission = z.infer<
   typeof completeGameDocumentSubmissionSchema
 >
 
+type AuthoredProductionMaterial = Extract<
+  CompleteGameDocumentSubmission['productionMaterials'][number],
+  { body: string }
+>
+type InlineSvgProductionMaterial = AuthoredProductionMaterial & {
+  format: 'inline_svg'
+}
+
 export type CompleteGameDocumentAuditAppendix = z.infer<
   typeof completeGameDocumentAuditAppendixSchema
 >
@@ -112,8 +121,145 @@ export type UpstreamAuthorityReference = z.infer<
   typeof upstreamReferenceSchema
 >
 
+export type CompleteGameDocumentArtifact = Readonly<{
+  artifactId: string
+  path: string
+  mediaType: 'image/svg+xml'
+  digest: string
+  content: string
+}>
+
 function bytewise(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
+
+function normalizedHeading(text: string): string {
+  return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
+}
+
+function authoredHeadings(markdown: string): Array<{ level: number; text: string }> {
+  const headings: Array<{ level: number; text: string }> = []
+  let fence: string | undefined
+  for (const rawLine of markdown.split('\n')) {
+    const line = rawLine.trimStart()
+    if (line.startsWith('```') || line.startsWith('~~~')) {
+      const marker = line.slice(0, 3)
+      fence = fence === undefined ? marker : fence === marker ? undefined : fence
+      continue
+    }
+    if (fence) continue
+    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
+    if (match) headings.push({ level: match[1]!.length, text: match[2]! })
+  }
+  return headings
+}
+
+export function validateSectionHeadingStructure(
+  sections: readonly { sectionId: string; body: string }[],
+): void {
+  const seen = new Set<string>()
+  for (const section of sections) {
+    let priorLevel = 2
+    for (const heading of authoredHeadings(section.body)) {
+      if (heading.level < 3 || heading.level > 4)
+        throw new Error(
+          `section heading level is invalid: ${section.sectionId}:H${heading.level}`,
+        )
+      if (heading.level > priorLevel + 1)
+        throw new Error(
+          `section heading level is skipped: ${section.sectionId}:H${heading.level}`,
+        )
+      const normalized = normalizedHeading(heading.text)
+      if (seen.has(normalized))
+        throw new Error(`section heading is duplicated: ${heading.text}`)
+      seen.add(normalized)
+      priorLevel = heading.level
+    }
+  }
+}
+
+function headingAnchor(title: string): string {
+  return title
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^\p{Letter}\p{Number}\s-]/gu, '')
+    .replaceAll(/\s+/g, '-')
+    .replaceAll(/-+/g, '-')
+}
+
+function renderCanonicalTableOfContents(
+  path: FoundationDocumentPath,
+): readonly string[] {
+  const contract = getGameDocumentContract(path)
+  const headings = [
+    'Executive Summary',
+    ...contract.sections.map(section => section.title),
+    'Production Materials',
+    'Audit Appendix',
+  ]
+  return [
+    '## Table of Contents',
+    '',
+    ...headings.map(title => `- [${title}](#${headingAnchor(title)})`),
+    '',
+  ]
+}
+
+function documentArtifactSlug(path: FoundationDocumentPath): string {
+  return CANONICAL_PROJECT_DOCUMENT_IDS[path]
+    .toLowerCase()
+    .replaceAll('_', '-')
+}
+
+export function completeGameDocumentArtifactPath(
+  path: FoundationDocumentPath,
+  materialId: string,
+): string {
+  return `docs/artifacts/${documentArtifactSlug(path)}/${materialId}.svg`
+}
+
+export function prepareCompleteGameDocumentArtifacts(
+  path: FoundationDocumentPath,
+  value: CompleteGameDocumentSubmission,
+): readonly CompleteGameDocumentArtifact[] {
+  const parsed = validateCompleteGameDocumentSubmission(path, value)
+  return Object.freeze(
+    parsed.productionMaterials
+      .filter(
+        (material): material is InlineSvgProductionMaterial =>
+          material.format === 'inline_svg',
+      )
+      .map(material => {
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(material.materialId))
+          throw new Error(`production material artifact ID is unsafe: ${material.materialId}`)
+        const content = `${material.body.trim()}\n`
+        return Object.freeze({
+          artifactId: material.materialId,
+          path: completeGameDocumentArtifactPath(path, material.materialId),
+          mediaType: 'image/svg+xml' as const,
+          digest: createHash('sha256').update(content).digest('hex'),
+          content,
+        })
+      }),
+  )
+}
+
+function externalArtifactReference(
+  path: FoundationDocumentPath,
+  material: AuthoredProductionMaterial,
+): string {
+  if (material.format !== 'inline_svg')
+    throw new Error(`production material is not an SVG artifact: ${material.materialId}`)
+  const contract = getGameDocumentContract(path).productionMaterials.find(
+    candidate => candidate.materialId === material.materialId,
+  )!
+  return [
+    `![${material.title}](artifacts/${documentArtifactSlug(path)}/${material.materialId}.svg)`,
+    '',
+    `- Artifact ID: \`${material.materialId}\``,
+    `- Contract purpose: ${contract.purpose}`,
+  ].join('\n')
 }
 
 export async function resolveUpstreamAuthorityReferences(input: {
@@ -259,6 +405,7 @@ function assertMaterialFormat(
   format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register',
   body: string,
   materialId: string,
+  allowExternalSvg = false,
 ): void {
   const lines = body.split('\n').map(line => line.trim())
   const valid =
@@ -267,7 +414,11 @@ function assertMaterialFormat(
         lines.some(line => line.includes('---'))
       : format === 'mermaid'
         ? lines.includes('```mermaid') && lines.includes('```')
-        : (body.includes('<svg ') || body.includes('<svg>')) && body.includes('</svg>')
+        : ((body.includes('<svg ') || body.includes('<svg>')) &&
+            body.includes('</svg>')) ||
+          (allowExternalSvg &&
+            body.includes(`/${materialId}.svg)`) &&
+            !body.includes('<svg'))
   if (!valid)
     throw new Error(`production material format is invalid: ${materialId}:${format}`)
 }
@@ -332,6 +483,7 @@ export function validateCompleteGameDocumentSubmission(
     if (section.title !== contract.sections[index]?.title)
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
   })
+  validateSectionHeadingStructure(parsed.sections)
   parsed.productionMaterials.forEach((material, index) => {
     const expected = contract.productionMaterials[index]
     if (material.title !== expected?.title || material.format !== expected.format)
@@ -401,6 +553,7 @@ export function renderCompleteGameDocument(
   const lines: string[] = [
     `# ${parsed.title}`,
     '',
+    ...renderCanonicalTableOfContents(path),
     '<!-- beegame-executive-summary -->',
     '## Executive Summary',
     '',
@@ -428,7 +581,9 @@ export function renderCompleteGameDocument(
       '',
       material.format === 'evidence_register'
         ? renderDocumentEvidenceRegister(material.entries)
-        : material.body,
+        : material.format === 'inline_svg'
+          ? externalArtifactReference(path, material)
+          : material.body,
       '',
     )
 
@@ -576,6 +731,16 @@ export function validateCompleteGameDocumentMarkdown(
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
     assertNonEmptyRange(lines, start + 1, end, `section:${section.sectionId}`)
   })
+  validateSectionHeadingStructure(
+    contract.sections.map((section, index) => {
+      const start = sectionIndexes[index]!
+      const end = sectionIndexes[index + 1] ?? productionIndex
+      return {
+        sectionId: section.sectionId,
+        body: lines.slice(start + 2, end).join('\n'),
+      }
+    }),
+  )
 
   if (lines[productionIndex + 1] !== '## Production Materials')
     throw new Error('complete game document production materials heading is invalid')
@@ -585,7 +750,12 @@ export function validateCompleteGameDocumentMarkdown(
     if (lines[start + 1] !== `### ${material.title}`)
       throw new Error(`production material title is invalid: ${material.materialId}`)
     const materialBody = lines.slice(start + 2, end).join('\n').trim()
-    assertMaterialFormat(material.format, materialBody, material.materialId)
+    assertMaterialFormat(
+      material.format,
+      materialBody,
+      material.materialId,
+      true,
+    )
   })
 
   if (lines[auditIndex + 1] !== '## Audit Appendix')

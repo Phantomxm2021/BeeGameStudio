@@ -8,9 +8,11 @@ import {
   completeGameDocumentAuditAppendixSchema,
   completeGameDocumentSectionSchema,
   completeGameDocumentSubmissionSchema,
+  prepareCompleteGameDocumentArtifacts,
   productionMaterialSchema,
   renderCompleteGameDocument,
   validateCompleteGameDocumentEvidence,
+  type CompleteGameDocumentArtifact,
 } from './complete-game-document'
 import {
   authoritySidecarPath,
@@ -114,6 +116,18 @@ const completeDocumentReceiptSchema = z
     finalDigest: z.string().length(64),
     authorityPath: z.string().min(1),
     authorityDigest: z.string().length(64).nullable(),
+    artifacts: z
+      .array(
+        z
+          .object({
+            artifactId: z.string().min(1),
+            path: z.string().min(1),
+            mediaType: z.literal('image/svg+xml'),
+            digest: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .strict(),
+      )
+      .default([]),
     documentId: z.string().min(1),
     version: z.string().min(1),
     updatedAt: z.string().datetime({ offset: true }),
@@ -157,6 +171,7 @@ export type CompleteGameDocumentCommitReceipt = {
   finalDigest: string
   authorityPath: string
   authorityDigest: string | null
+  artifacts: readonly Omit<CompleteGameDocumentArtifact, 'content'>[]
   documentId: string
   version: string
   updatedAt: string
@@ -262,6 +277,12 @@ export function createNativeCanonicalDocumentTool(options: {
             options.contract.targetPath as FoundationDocumentPath,
             structuredDocument,
           )
+          : undefined
+      const structuredArtifacts = structuredDocument
+        ? prepareCompleteGameDocumentArtifacts(
+            options.contract.targetPath as FoundationDocumentPath,
+            structuredDocument,
+          )
         : undefined
       if (structuredDocument)
         await persistCompleteDocumentDraftSnapshot({
@@ -278,6 +299,9 @@ export function createNativeCanonicalDocumentTool(options: {
               ? { body: parsed.body }
               : {}),
           ...('authority' in parsed ? { authority: parsed.authority } : {}),
+          ...(structuredArtifacts !== undefined
+            ? { artifacts: structuredArtifacts }
+            : {}),
         })
       if (
         completeGameDocument &&
@@ -420,6 +444,7 @@ async function prepareCompleteDocumentPart(input: {
         workspacePath: input.workspacePath,
         contract: input.contract,
         body: renderCompleteGameDocument(targetPath, document),
+        artifacts: prepareCompleteGameDocumentArtifacts(targetPath, document),
       })
       return receipt as CompleteGameDocumentCommitReceipt
     }
@@ -485,6 +510,7 @@ export async function commitCanonicalDocument(input: {
   contract: CanonicalDocumentCommitContract
   body?: string
   authority?: unknown
+  artifacts?: readonly CompleteGameDocumentArtifact[]
 }): Promise<CanonicalDocumentCommitReceipt> {
   const body = input.body?.trim()
   const completeGameDocument =
@@ -535,6 +561,7 @@ export async function commitCanonicalDocument(input: {
       contract: input.contract,
       body,
       authority: input.authority,
+      artifacts: input.artifacts,
     })
   }
   if (existingReceipt) {
@@ -607,16 +634,48 @@ async function commitCompleteGameDocument(input: {
   contract: CanonicalDocumentCommitContract
   body: string | undefined
   authority: unknown
+  artifacts: readonly CompleteGameDocumentArtifact[] | undefined
 }): Promise<CompleteGameDocumentCommitReceipt> {
   const documentPath = input.contract.targetPath as FoundationDocumentPath
   let receipt: CompleteGameDocumentCommitReceipt
   let markdown: string
+
+  const expectedArtifactIds = getGameDocumentContract(documentPath).productionMaterials
+    .filter(material => material.format === 'inline_svg')
+    .map(material => material.materialId)
+  if (!input.existingReceipt) {
+    const suppliedArtifactIds = (input.artifacts ?? []).map(
+      artifact => artifact.artifactId,
+    )
+    if (
+      suppliedArtifactIds.length !== expectedArtifactIds.length ||
+      expectedArtifactIds.some(
+        (artifactId, index) => suppliedArtifactIds[index] !== artifactId,
+      )
+    )
+      throw new Error(
+        'complete game document requires its exact external artifact set',
+      )
+  }
 
   if (input.existingReceipt) {
     if (input.existingReceipt.schemaVersion !== 2)
       throw new Error('canonical document receipt kind does not match dispatch')
     assertReceiptMatchesContract(input.existingReceipt, input.contract)
     receipt = input.existingReceipt
+    if (input.artifacts) {
+      const submittedDescriptors = input.artifacts.map(({ content: _, ...artifact }) => artifact)
+      if (JSON.stringify(submittedDescriptors) !== JSON.stringify(receipt.artifacts))
+        throw new Error(
+          'canonical document commit was already prepared with different artifacts',
+        )
+      await prepareCompleteDocumentArtifactFiles(
+        input.workspacePath,
+        input.artifacts,
+      )
+    } else if (!(await completeDocumentArtifactsMatch(input.workspacePath, receipt.artifacts))) {
+      throw new Error('prepared canonical document artifacts are missing or stale')
+    }
     if (input.currentDigest === receipt.finalDigest && input.currentContent) {
       markdown = input.currentContent
       if (input.body) {
@@ -664,6 +723,10 @@ async function commitCompleteGameDocument(input: {
       input.body,
       { version, updatedAt },
     )
+    await prepareCompleteDocumentArtifactFiles(
+      input.workspacePath,
+      input.artifacts ?? [],
+    )
     receipt = {
       schemaVersion: 2,
       dispatchId: input.contract.dispatchId,
@@ -672,6 +735,7 @@ async function commitCompleteGameDocument(input: {
       finalDigest: digest(markdown),
       authorityPath: authoritySidecarPath(documentPath),
       authorityDigest: null,
+      artifacts: (input.artifacts ?? []).map(({ content: _, ...artifact }) => artifact),
       documentId: input.contract.documentId,
       version,
       updatedAt,
@@ -686,6 +750,8 @@ async function commitCompleteGameDocument(input: {
 
   const authorityTarget = resolve(input.workspacePath, receipt.authorityPath)
   if (receipt.status === 'committed') {
+    if (!(await completeDocumentArtifactsMatch(input.workspacePath, receipt.artifacts)))
+      throw new Error('committed canonical document artifact is missing or stale')
     const raw = await readOptionalFile(authorityTarget)
     if (
       raw === undefined ||
@@ -802,6 +868,8 @@ export async function reconcileCanonicalDocumentCommitReceipt(input: {
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
   if (receipt.schemaVersion === 2) {
+    if (!(await completeDocumentArtifactsMatch(input.workspacePath, receipt.artifacts)))
+      return undefined
     const authorityRaw = await readOptionalFile(
       resolve(input.workspacePath, receipt.authorityPath),
     )
@@ -846,6 +914,37 @@ export async function reconcileCanonicalDocumentCommitReceipt(input: {
     `${JSON.stringify(committed, null, 2)}\n`,
   )
   return committed
+}
+
+async function prepareCompleteDocumentArtifactFiles(
+  workspacePath: string,
+  artifacts: readonly CompleteGameDocumentArtifact[],
+): Promise<void> {
+  const workspace = resolve(workspacePath)
+  for (const artifact of artifacts) {
+    const target = resolve(workspace, artifact.path)
+    const projectRelative = relative(workspace, target)
+    if (
+      !projectRelative ||
+      projectRelative.startsWith('..') ||
+      isAbsolute(projectRelative) ||
+      artifact.mediaType !== 'image/svg+xml' ||
+      digest(artifact.content) !== artifact.digest
+    )
+      throw new Error(`canonical document artifact is invalid: ${artifact.artifactId}`)
+    await durableWrite(target, artifact.content)
+  }
+}
+
+async function completeDocumentArtifactsMatch(
+  workspacePath: string,
+  artifacts: readonly Omit<CompleteGameDocumentArtifact, 'content'>[],
+): Promise<boolean> {
+  for (const artifact of artifacts) {
+    const content = await readOptionalFile(resolve(workspacePath, artifact.path))
+    if (content === undefined || digest(content) !== artifact.digest) return false
+  }
+  return true
 }
 
 function canonicalDocumentReceiptPath(

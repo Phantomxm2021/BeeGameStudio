@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -520,10 +520,8 @@ describe('canonical document commit', () => {
           | ((input: unknown) => Promise<unknown>)
           | undefined
         const submission = completeSubmission(path)
-        await call!({
-          body: renderCompleteGameDocument(path, submission),
-          authority: authoritySubmission(path),
-        })
+        await call!({ document: submission })
+        await call!({ authority: authoritySubmission(path) })
       }
 
       expect(
@@ -642,6 +640,96 @@ describe('canonical document commit', () => {
       expect(await readFile(join(workspacePath, path), 'utf8')).toBe(
         preparedMarkdown,
       )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('writes external SVG artifacts and binds them to the durable receipt', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-artifacts-'))
+    try {
+      const path = 'docs/ART_DIRECTION.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-artifacts',
+          targetPath: path,
+          documentId: 'ART_DIRECTION',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      await call({ document: completeSubmission(path) })
+      const committed = (await call({ authority: authoritySubmission(path) })) as {
+        data: { artifacts: Array<{ artifactId: string; path: string; mediaType: string; digest: string }> }
+      }
+      expect(committed.data.artifacts).toHaveLength(3)
+      for (const artifact of committed.data.artifacts) {
+        const bytes = await readFile(join(workspacePath, artifact.path), 'utf8')
+        expect(artifact.mediaType).toBe('image/svg+xml')
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+          artifact.digest,
+        )
+      }
+      const markdown = await readFile(join(workspacePath, path), 'utf8')
+      expect(markdown).not.toContain('<svg')
+
+      await unlink(join(workspacePath, committed.data.artifacts[0]!.path))
+      await expect(
+        reconcileCanonicalDocumentCommitReceipt({
+          workspacePath,
+          dispatchId: 'dispatch-artifacts',
+        }),
+      ).resolves.toBeUndefined()
+      await writeFile(
+        join(workspacePath, committed.data.artifacts[0]!.path),
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>tampered</text></svg>\n',
+      )
+      await expect(
+        reconcileCanonicalDocumentCommitReceipt({
+          workspacePath,
+          dispatchId: 'dispatch-artifacts',
+        }),
+      ).resolves.toBeUndefined()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('does not expose Markdown when an SVG artifact cannot be written', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-artifact-failure-'))
+    try {
+      const path = 'docs/UI_UX_SPEC.md'
+      await mkdir(
+        join(workspacePath, 'docs/artifacts/ui-ux-spec/wireframe-board.svg'),
+        { recursive: true },
+      )
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-artifact-failure',
+          targetPath: path,
+          documentId: 'UI_UX_SPEC',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      await expect(call({ document: completeSubmission(path) })).rejects.toThrow()
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

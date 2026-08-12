@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,13 +9,19 @@ import {
   REQUIRED_PROJECT_DOCUMENTS,
 } from './document-readiness-audit'
 import { writeBeeGameAssetManifest } from './asset-contracts'
-import { renderCompleteGameDocument } from './complete-game-document'
+import {
+  prepareCompleteGameDocumentArtifacts,
+  renderCompleteGameDocument,
+  type CompleteGameDocumentSubmission,
+} from './complete-game-document'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 
-function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+function completeSubmission(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): CompleteGameDocumentSubmission {
   const contract = getGameDocumentContract(path)
-  return renderCompleteGameDocument(path, {
+  return {
     title: contract.discipline,
     executiveSummary: `Complete ${contract.discipline} production authority.`,
     sections: contract.sections.map((section, index) => ({
@@ -57,7 +64,11 @@ function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number])
       risks: [],
       openDecisions: [],
     },
-  })
+  }
+}
+
+function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+  return renderCompleteGameDocument(path, completeSubmission(path))
 }
 
 async function writeMinimalContent(workspace: string): Promise<void> {
@@ -118,6 +129,13 @@ describe('document readiness audit', () => {
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
       const content = completeDocument(path)
+      for (const artifact of prepareCompleteGameDocumentArtifacts(
+        path,
+        completeSubmission(path),
+      )) {
+        await mkdir(join(workspace, artifact.path, '..'), { recursive: true })
+        await writeFile(join(workspace, artifact.path), artifact.content)
+      }
       await writeFile(
         join(workspace, path),
         path === 'docs/GDD.md'
@@ -132,6 +150,53 @@ describe('document readiness audit', () => {
     })
     expect(audit.valid).toBe(false)
     expect(audit.issues.some(issue => issue.includes('production materials'))).toBe(true)
+  })
+
+  test('rejects an external SVG whose bytes no longer match its commit receipt', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-artifact-audit-'))
+    let artContent = ''
+    let artArtifacts: ReturnType<typeof prepareCompleteGameDocumentArtifacts> = []
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      const submission = completeSubmission(path)
+      const content = renderCompleteGameDocument(path, submission)
+      await mkdir(join(workspace, path, '..'), { recursive: true })
+      await writeFile(join(workspace, path), content)
+      const artifacts = prepareCompleteGameDocumentArtifacts(path, submission)
+      for (const artifact of artifacts) {
+        await mkdir(join(workspace, artifact.path, '..'), { recursive: true })
+        await writeFile(join(workspace, artifact.path), artifact.content)
+      }
+      if (path === 'docs/ART_DIRECTION.md') {
+        artContent = content
+        artArtifacts = artifacts
+      }
+    }
+    await mkdir(
+      join(workspace, '.beegame/workflow/document-commits'),
+      { recursive: true },
+    )
+    await writeFile(
+      join(workspace, '.beegame/workflow/document-commits/art.json'),
+      JSON.stringify({
+        targetPath: 'docs/ART_DIRECTION.md',
+        finalDigest: createHash('sha256').update(artContent).digest('hex'),
+        artifacts: artArtifacts.map(({ content: _, ...artifact }) => artifact),
+      }),
+    )
+    await writeFile(
+      join(workspace, artArtifacts[0]!.path),
+      '<svg xmlns="http://www.w3.org/2000/svg"><text>changed</text></svg>\n',
+    )
+
+    const audit = auditDocumentReadiness(workspace, {
+      includeChecklist: false,
+      includeAssetManifest: false,
+      requireCompleteFoundation: true,
+    })
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain(
+      `docs/ART_DIRECTION.md: external artifact digest is stale: ${artArtifacts[0]!.path}`,
+    )
   })
 
   test('rejects a seven-document foundation missing either new fact owner', async () => {

@@ -6,6 +6,7 @@ import {
   assertOpenDecisionClosure,
   canonicalizeCompleteGameDocumentMarkdown,
   renderCompleteGameDocument,
+  prepareCompleteGameDocumentArtifacts,
   resolveUpstreamAuthorityReferences,
   validateCompleteGameDocumentMarkdown,
   validateCompleteGameDocumentSubmission,
@@ -130,6 +131,72 @@ describe('complete game document submission', () => {
       expect(first).toContain(`<!-- beegame-section:${section.sectionId} -->`)
       expect(first).toContain(`## ${section.title}`)
     }
+  })
+
+  test('rejects section-owned H1/H2, skipped levels, and normalized duplicate headings', () => {
+    const path = 'docs/GDD.md'
+    const base = completeSubmission(path)
+    for (const body of [
+      '# Model title',
+      '## Model section',
+      '### Allowed\n##### Skipped',
+    ])
+      expect(() =>
+        validateCompleteGameDocumentSubmission(path, {
+          ...base,
+          sections: base.sections.map((section, index) =>
+            index === 0 ? { ...section, body } : section,
+          ),
+        }),
+      ).toThrow(/heading|level/i)
+
+    expect(() =>
+      validateCompleteGameDocumentSubmission(path, {
+        ...base,
+        sections: base.sections.map((section, index) => ({
+          ...section,
+          body:
+            index === 0
+              ? '###  Production   Rule '
+              : index === 1
+                ? '#### production rule'
+                : section.body,
+        })),
+      }),
+    ).toThrow(/duplicate|heading/i)
+  })
+
+  test('renders one compact canonical table of contents', () => {
+    const path = 'docs/GDD.md'
+    const rendered = renderCompleteGameDocument(path, completeSubmission(path))
+    expect(rendered.match(/## Table of Contents/g)).toHaveLength(1)
+    expect(rendered).toContain('- [Executive Summary](#executive-summary)')
+    for (const section of getGameDocumentContract(path).sections)
+      expect(rendered).toContain(
+        `- [${section.title}](#${section.title
+          .toLowerCase()
+          .replaceAll(/[^a-z0-9\s-]/g, '')
+          .replaceAll(/\s+/g, '-')})`,
+      )
+  })
+
+  test('externalizes inline SVG materials into deterministic artifact descriptors', () => {
+    const path = 'docs/ART_DIRECTION.md'
+    const submission = completeSubmission(path)
+    const artifacts = prepareCompleteGameDocumentArtifacts(path, submission)
+    const rendered = renderCompleteGameDocument(path, submission)
+
+    expect(artifacts).toHaveLength(3)
+    expect(artifacts[0]).toMatchObject({
+      artifactId: 'visual-pillar-board',
+      mediaType: 'image/svg+xml',
+      path: 'docs/artifacts/art-direction/visual-pillar-board.svg',
+    })
+    expect(artifacts[0]!.digest).toMatch(/^[a-f0-9]{64}$/)
+    expect(rendered).not.toContain('<svg')
+    expect(rendered).toContain(
+      '![Palette Board](artifacts/art-direction/palette-board.svg)',
+    )
   })
 
   test('rejects missing, duplicate, or out-of-order sections', () => {
