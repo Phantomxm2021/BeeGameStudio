@@ -267,8 +267,8 @@ export type BeeGameSessionRunnerStartInput = {
   ): Promise<DashboardPermissionDecision>
 }
 
-const CLAUDE_MODEL_ENV_KEYS = new Set([
-  'CLAUDE_CONFIG_DIR',
+const RUNTIME_MODEL_ENV_KEYS = new Set([
+  'BEEGAME_CONFIG_DIR',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
@@ -4347,7 +4347,7 @@ function buildRuntimeEnv(
 ): Record<string, string> {
   return Object.fromEntries(
     Object.entries({ ...additionalEnv, ...(runtime?.env ?? {}) }).filter(
-      ([key]) => CLAUDE_MODEL_ENV_KEYS.has(key),
+      ([key]) => RUNTIME_MODEL_ENV_KEYS.has(key),
     ),
   )
 }

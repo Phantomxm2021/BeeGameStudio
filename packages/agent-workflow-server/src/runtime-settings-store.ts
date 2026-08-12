@@ -108,8 +108,6 @@ export function mapRuntimeSettingsToEnv(
   mkdirSync(npmCacheDir, { recursive: true })
   const env: Record<string, string> = {
     BEEGAME_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
-    CLAUDE_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
-    BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
     NPM_CONFIG_CACHE: npmCacheDir,
     npm_config_cache: npmCacheDir,
     NPM_CONFIG_USERCONFIG: npmUserConfig,

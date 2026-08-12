@@ -68,11 +68,15 @@ The branding transform is intentionally narrow and deterministic. It may change 
 - copyright owner text;
 - product repository or documentation links whose only purpose is product identity;
 - CLI executable/product identifiers where required to publish Bee Game Studio.
+- the upstream configuration-directory environment key, mechanically renamed from
+  `CLAUDE_CONFIG_DIR` to the single product key `BEEGAME_CONFIG_DIR`.
 
 The following are behavioral differences and are therefore forbidden inside synchronized core, even if their names contain `BEEGAME`:
 
 - provider or model selection environment overrides;
-- configuration-directory discovery or `.beegame` loading;
+- configuration-directory discovery behavior, fallback behavior, or an additional
+  compatibility key beyond the exact `CLAUDE_CONFIG_DIR` to `BEEGAME_CONFIG_DIR`
+  lexical substitution;
 - injected skills, prompts, system context, or native tool changes;
 - context-collapse or token-management policy;
 - session identity, cache-key, storage, retry, watchdog, stream, or terminal semantics;
@@ -136,6 +140,9 @@ No commit may mix unreviewed Bee Game Studio feature work into the snapshot sync
 - all local-only files under synchronized paths are absent;
 - the alignment manifest contains no broad or behavior-based exception;
 - no Bee Game Studio environment variable or project-config loader remains in synchronized core, except a mechanically renamed upstream product identifier explicitly listed in the manifest.
+- synchronized core and Bee Game Studio launch code use only
+  `BEEGAME_CONFIG_DIR`; `CLAUDE_CONFIG_DIR` is neither emitted nor accepted as a
+  fallback.
 
 ### Offline build and tests
 
@@ -169,4 +176,3 @@ Only after offline verification is green:
 - A CI guard prevents future silent core modifications.
 - Fixed-port Chrome acceptance completes the Idea-to-document workflow and verifies that documents are persisted and usable.
 - Any remaining limitation is outside the shared core and is identified with direct runtime versus Bee Game Studio evidence.
-

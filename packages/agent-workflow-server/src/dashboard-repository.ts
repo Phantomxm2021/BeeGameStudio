@@ -778,15 +778,12 @@ export class DashboardRepository {
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
-      // not allow an RPC payload to select another user's Claude config root.
+      // not allow an RPC payload to select another user's runtime config root.
       const hostIsolationEnv = mapRuntimeSettingsToEnv({}, { dataDir })
       return {
         ...env,
         ...modelEnv,
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
-        CLAUDE_CONFIG_DIR: hostIsolationEnv.CLAUDE_CONFIG_DIR,
-        BEEGAME_PROJECT_CONFIG_DIR_NAME:
-          hostIsolationEnv.BEEGAME_PROJECT_CONFIG_DIR_NAME,
         NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
         npm_config_cache: hostIsolationEnv.npm_config_cache,
         NPM_CONFIG_USERCONFIG: hostIsolationEnv.NPM_CONFIG_USERCONFIG,

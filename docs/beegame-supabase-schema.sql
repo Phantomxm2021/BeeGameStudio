@@ -1348,12 +1348,7 @@ begin
   if base_config_dir <> '' then
     runtime_root_dir := base_config_dir || '/.runtime';
     runtime_env := runtime_env || jsonb_build_object(
-      'BEEGAME_CONFIG_DIR', runtime_root_dir || '/app',
-      'BEEGAME_PROJECT_CONFIG_DIR_NAME', '.beegame'
-    );
-  else
-    runtime_env := runtime_env || jsonb_build_object(
-      'BEEGAME_PROJECT_CONFIG_DIR_NAME', '.beegame'
+      'BEEGAME_CONFIG_DIR', runtime_root_dir || '/app'
     );
   end if;
 
@@ -1452,18 +1447,6 @@ begin
       settings_env := settings_env || jsonb_build_object(
         'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
         case when (platform_settings->>'autoMemoryEnabled')::boolean then '0' else '1' end
-      );
-      if base_config_dir <> '' then
-        settings_env := settings_env || jsonb_build_object(
-          'CLAUDE_CONFIG_DIR',
-          runtime_root_dir || '/core'
-        );
-      end if;
-    end if;
-    if platform_settings ? 'autoDreamEnabled' and base_config_dir <> '' then
-      settings_env := settings_env || jsonb_build_object(
-        'CLAUDE_CONFIG_DIR',
-        runtime_root_dir || '/core'
       );
     end if;
     if (platform_settings->>'treeSitterBashEnabled')::boolean is true then

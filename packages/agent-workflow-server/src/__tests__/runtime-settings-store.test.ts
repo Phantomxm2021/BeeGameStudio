@@ -44,7 +44,8 @@ describe('runtime settings store', () => {
       )
 
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
-      expect(env.CLAUDE_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
+      expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
+      expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')
       expect(env.NPM_CONFIG_CACHE).toBe(join(dataDir, '.runtime', 'tooling', 'npm-cache'))
       expect(env.npm_config_cache).toBe(env.NPM_CONFIG_CACHE)
       expect(env.NPM_CONFIG_USERCONFIG).toBe(join(dataDir, '.runtime', 'tooling', 'npmrc'))

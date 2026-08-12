@@ -77,20 +77,20 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(ownerBEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
-      expect(ownerAEnv.CLAUDE_CONFIG_DIR).not.toBe(ownerBEnv.CLAUDE_CONFIG_DIR)
+      expect(ownerAEnv.BEEGAME_CONFIG_DIR).not.toBe(ownerBEnv.BEEGAME_CONFIG_DIR)
       expect(existsSync(join(
-        ownerBEnv.CLAUDE_CONFIG_DIR,
+        ownerBEnv.BEEGAME_CONFIG_DIR,
         'skills',
         'game-art-director-expert',
       ))).toBe(false)
       await expect(
-        readFile(join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+        readFile(join(ownerAEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"skillSearchEnabled": true')
       await expect(
-        readFile(join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+        readFile(join(ownerBEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"skillSearchEnabled": true')
       await expect(
-        readFile(join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+        readFile(join(ownerBEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"mcpSkillsEnabled": false')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
@@ -128,7 +128,6 @@ describe('DashboardRepository Supabase boundaries', () => {
             env: {
               OPENAI_BASE_URL: 'https://provider.test/v1',
               FEATURE_MCP_SKILLS: '0',
-              CLAUDE_CONFIG_DIR: '/forged/other-user',
               BEEGAME_CONFIG_DIR: '/forged/other-user',
               NPM_CONFIG_CACHE: '/forged/other-user/npm-cache',
               NPM_CONFIG_USERCONFIG: '/forged/other-user/npmrc',
@@ -152,8 +151,9 @@ describe('DashboardRepository Supabase boundaries', () => {
       })
       expect(env.OPENAI_BASE_URL).toBe('https://provider.test/v1')
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
-      expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
-      expect(env.BEEGAME_CONFIG_DIR).toBe(env.CLAUDE_CONFIG_DIR)
+      expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
+      expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
+      expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')
       expect(env.NPM_CONFIG_CACHE).toBe(
         join(userRoot, '.runtime', 'tooling', 'npm-cache'),
       )
@@ -161,7 +161,7 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(userRoot, '.runtime', 'tooling', 'npmrc'),
       )
       await expect(
-        readFile(join(env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+        readFile(join(env.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"autoAllowBashIfSandboxed": true')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
@@ -227,12 +227,13 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(calls).toEqual([
         'http://skills.test/api/internal/user-skills/enabled?userId=owner-user',
       ])
-      expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
-      expect(env.CLAUDE_CONFIG_DIR).toBe(env.BEEGAME_CONFIG_DIR)
+      expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
+      expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
+      expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')
       await expect(
         readFile(
           join(
-            env.CLAUDE_CONFIG_DIR,
+            env.BEEGAME_CONFIG_DIR,
             'skills',
             'user-runtime-skill',
             'SKILL.md',
@@ -241,7 +242,7 @@ describe('DashboardRepository Supabase boundaries', () => {
         ),
       ).resolves.toContain('Runtime Skill')
       expect(existsSync(join(
-        env.CLAUDE_CONFIG_DIR,
+        env.BEEGAME_CONFIG_DIR,
         'skills',
         '.beegame-builtins.json',
       ))).toBe(false)

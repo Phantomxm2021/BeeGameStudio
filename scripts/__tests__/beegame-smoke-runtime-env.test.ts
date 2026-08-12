@@ -10,7 +10,6 @@ describe('BeeGame Supabase smoke runtime env', () => {
     expect(() =>
       assertSmokeRuntimeEnv({
         BEEGAME_CONFIG_DIR: '/tmp/beegame',
-        BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
       }, {
         modelConfigOwnerId: 'platform-owner',
       }),

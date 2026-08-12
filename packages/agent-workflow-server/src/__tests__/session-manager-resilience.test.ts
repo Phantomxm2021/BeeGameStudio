@@ -593,7 +593,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('passes selected model and native Claude config without BeeGame behavior overrides', async () => {
+  test('passes selected model and the single Bee Game Studio config directory without behavior overrides', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-transparent-model-env-'))
     const workspacePath = join(root, 'workspace')
     let runtimeEnv: Record<string, string> | undefined
@@ -613,7 +613,6 @@ describe('BeeGame session runtime resilience', () => {
         ANTHROPIC_BASE_URL: 'https://provider.example',
         ANTHROPIC_AUTH_TOKEN: 'provider-token',
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
-        CLAUDE_CONFIG_DIR: '/bgs/managed/config',
         BEEGAME_CONFIG_DIR: '/bgs/config',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         FEATURE_BASH_CLASSIFIER: '0',
@@ -629,7 +628,7 @@ describe('BeeGame session runtime resilience', () => {
       ANTHROPIC_BASE_URL: 'https://provider.example',
       ANTHROPIC_AUTH_TOKEN: 'provider-token',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
-      CLAUDE_CONFIG_DIR: '/bgs/managed/config',
+      BEEGAME_CONFIG_DIR: '/bgs/config',
     })
     manager.dispose()
   })

@@ -67,6 +67,10 @@
     {
       "from": "Claude Code Best",
       "to": "Bee Game Studio"
+    },
+    {
+      "from": "CLAUDE_CONFIG_DIR",
+      "to": "BEEGAME_CONFIG_DIR"
     }
   ],
   "fileSubstitutions": {

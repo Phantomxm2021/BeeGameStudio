@@ -226,7 +226,7 @@ bun test packages/agent-workflow-server/src
 
 - [ ] **Step 2: Remove BGS launch dependence on removed core hooks**
 
-Remove `BEEGAME_RUNTIME_MODEL_TYPE`, `BEEGAME_PROJECT_CONFIG_DIR_NAME`, `BEEGAME_CONFIG_DIR` as a core config/session override, core-loaded `.beegame` skills, and product security imports inside shared native tools. Pass user-selected provider/model settings through upstream-supported settings/environment fields. Keep project state, workflow state, security checks, and skills in BGS-owned services.
+Remove `BEEGAME_RUNTIME_MODEL_TYPE`, `BEEGAME_PROJECT_CONFIG_DIR_NAME`, core-loaded `.beegame` skills, and product security imports inside shared native tools. Keep the upstream configuration-directory behavior but mechanically rename its one environment key from `CLAUDE_CONFIG_DIR` to `BEEGAME_CONFIG_DIR`; do not emit, read, or fall back to both keys. Pass user-selected provider/model settings through upstream-supported settings/environment fields. Keep project state, workflow state, security checks, and skills in BGS-owned services.
 
 - [ ] **Step 3: Adapt each changed API at the BGS caller**
 
@@ -237,7 +237,8 @@ Do not add core overloads, compatibility parsers, fallback tracks, or feature fl
 ```ts
 expect(runtimeEnv.BEEGAME_RUNTIME_MODEL_TYPE).toBeUndefined()
 expect(runtimeEnv.BEEGAME_PROJECT_CONFIG_DIR_NAME).toBeUndefined()
-expect(runtimeEnv.CLAUDE_CONFIG_DIR).toBe(userSelectedConfigDir)
+expect(runtimeEnv.BEEGAME_CONFIG_DIR).toBe(userSelectedConfigDir)
+expect(runtimeEnv.CLAUDE_CONFIG_DIR).toBeUndefined()
 expect(runtimeEnv.ANTHROPIC_MODEL).toBe(userSelectedModel)
 ```
 
@@ -307,7 +308,7 @@ bun test packages/agent-workflow packages/agent-workflow-server packages/beegame
 
 ```bash
 bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
-rg -n 'BEEGAME_RUNTIME_MODEL_TYPE|BEEGAME_PROJECT_CONFIG_DIR_NAME|@bee-game-studio/security-core' src packages/@ant packages/acp-link packages/agent-tools packages/builtin-tools packages/mcp-client packages/workflow-engine
+rg -n 'BEEGAME_RUNTIME_MODEL_TYPE|BEEGAME_PROJECT_CONFIG_DIR_NAME|CLAUDE_CONFIG_DIR|@bee-game-studio/security-core' src packages/@ant packages/acp-link packages/agent-tools packages/builtin-tools packages/mcp-client packages/workflow-engine
 git diff --check
 git status --short
 ```
@@ -345,4 +346,3 @@ git status --short
 ```
 
 Commit only repository-owned evidence allowed by policy; never commit secrets, credentials, or generated user project data.
-

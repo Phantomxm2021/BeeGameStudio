@@ -247,7 +247,7 @@ async function main() {
   // ── Probe 8: end-to-end LocalMemoryRecall fetch with adversarial entry ──
   console.log('\n-- LocalMemoryRecall e2e with adversarial content --')
   const tmp = mkdtempSync(join(tmpdir(), 'probe-lwiring-'))
-  process.env['CLAUDE_CONFIG_DIR'] = tmp
+  process.env['BEEGAME_CONFIG_DIR'] = tmp
   try {
     const baseDir = join(tmp, 'local-memory', 'attack-store')
     mkdirSync(baseDir, { recursive: true })
@@ -365,7 +365,7 @@ async function main() {
     )
   } finally {
     rmSync(tmp, { recursive: true, force: true })
-    delete process.env['CLAUDE_CONFIG_DIR']
+    delete process.env['BEEGAME_CONFIG_DIR']
   }
 
   // ── Probe 11: VaultHttpFetch URL/scheme validation ──────────────────────

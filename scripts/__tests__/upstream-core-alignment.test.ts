@@ -20,6 +20,10 @@ const fixtureManifest: AlignmentManifest = {
       from: '@claude-code-best/builtin-tools',
       to: '@bee-game-studio/builtin-tools',
     },
+    {
+      from: 'CLAUDE_CONFIG_DIR',
+      to: 'BEEGAME_CONFIG_DIR',
+    },
   ],
   fileSubstitutions: {},
   rootExceptions: {},
@@ -52,6 +56,10 @@ describe('upstream core manifest', () => {
       from: '@claude-code-best/builtin-tools',
       to: '@bee-game-studio/builtin-tools',
     })
+    expect(value.literalSubstitutions).toContainEqual({
+      from: 'CLAUDE_CONFIG_DIR',
+      to: 'BEEGAME_CONFIG_DIR',
+    })
   })
 })
 
@@ -64,12 +72,12 @@ describe('upstream core audit', () => {
     await writeFixture(
       upstreamRoot,
       'src/runtime.ts',
-      `import '@claude-code-best/builtin-tools'\nexport const url = '${url}'\n`,
+      `import '@claude-code-best/builtin-tools'\nexport const configDir = process.env.CLAUDE_CONFIG_DIR\nexport const url = '${url}'\n`,
     )
     await writeFixture(
       localRoot,
       'src/runtime.ts',
-      `import '@bee-game-studio/builtin-tools'\nexport const url = '${url}'\n`,
+      `import '@bee-game-studio/builtin-tools'\nexport const configDir = process.env.BEEGAME_CONFIG_DIR\nexport const url = '${url}'\n`,
     )
 
     expect(
@@ -118,7 +126,7 @@ describe('upstream core audit', () => {
     await writeFixture(
       upstreamRoot,
       'src/runtime.ts',
-      "import '@claude-code-best/builtin-tools'\n",
+      "import '@claude-code-best/builtin-tools'\nexport const configDir = process.env.CLAUDE_CONFIG_DIR\n",
     )
     await writeFixture(
       upstreamRoot,
@@ -135,7 +143,7 @@ describe('upstream core audit', () => {
     })
 
     expect(await Bun.file(join(localRoot, 'src/runtime.ts')).text()).toBe(
-      "import '@bee-game-studio/builtin-tools'\n",
+      "import '@bee-game-studio/builtin-tools'\nexport const configDir = process.env.BEEGAME_CONFIG_DIR\n",
     )
     expect(
       new Uint8Array(await readFile(join(localRoot, 'src/runtime.bin'))),

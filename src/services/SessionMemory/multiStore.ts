@@ -29,11 +29,11 @@ import { validateKey } from '../../utils/localValidate.js'
 
 // L8 fix: cache the result so repeated tool calls don't re-do homedir() +
 // join() on every list/fetch. Cache is keyed on the env var so a test that
-// changes CLAUDE_CONFIG_DIR mid-process still picks up the new dir.
+// changes BEEGAME_CONFIG_DIR mid-process still picks up the new dir.
 let _baseDirCache: { configDir: string; baseDir: string } | undefined
 function getBaseDir(): string {
   const configDir =
-    process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude')
+    process.env['BEEGAME_CONFIG_DIR'] ?? join(homedir(), '.claude')
   if (_baseDirCache && _baseDirCache.configDir === configDir) {
     return _baseDirCache.baseDir
   }

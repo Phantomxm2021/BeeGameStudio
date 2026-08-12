@@ -49,16 +49,16 @@ import {
   type Task,
 } from '../tasks'
 
-// Use a temp dir as CLAUDE_CONFIG_DIR for isolation
+// Use a temp dir as BEEGAME_CONFIG_DIR for isolation
 let configDir: string
-const ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
+const ORIGINAL_CONFIG_DIR = process.env.BEEGAME_CONFIG_DIR
 
 beforeEach(async () => {
   configDir = join(
     tmpdir(),
     `claude-test-tasks-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   )
-  process.env.CLAUDE_CONFIG_DIR = configDir
+  process.env.BEEGAME_CONFIG_DIR = configDir
   // Reset memoize cache by changing env
   const { getClaudeConfigHomeDir } = await import('src/utils/envUtils')
   getClaudeConfigHomeDir.cache.clear?.()
@@ -66,9 +66,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (ORIGINAL_CONFIG_DIR !== undefined) {
-    process.env.CLAUDE_CONFIG_DIR = ORIGINAL_CONFIG_DIR
+    process.env.BEEGAME_CONFIG_DIR = ORIGINAL_CONFIG_DIR
   } else {
-    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.BEEGAME_CONFIG_DIR
   }
   const { getClaudeConfigHomeDir } = await import('src/utils/envUtils')
   getClaudeConfigHomeDir.cache.clear?.()
