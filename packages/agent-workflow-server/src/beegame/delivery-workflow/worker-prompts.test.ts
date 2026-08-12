@@ -99,6 +99,9 @@ describe('resource-content worker prompts', () => {
       'do not preserve both sides as simultaneous requirements',
     )
     expect(prompt).not.toContain('Return one Markdown body')
+    expect(prompt).toContain('Canonical artifacts: docs/GDD.md')
+    expect(prompt).not.toContain('docs/TECHNICAL_DESIGN.md')
+    expect(prompt).not.toContain('docs/ASSET_PLAN.md')
   })
 
   test('instructs one JSON/YAML resource lane', () => {
@@ -178,6 +181,10 @@ describe('resource-content worker prompts', () => {
     expect(authorPrompt).toContain('contract.systemDeliveryContract')
     expect(authorPrompt).toContain('assets/asset-manifest.json')
     expect(authorPrompt).toContain('beegame-content-v1')
+    expect(authorPrompt).toContain(
+      'Canonical artifacts: docs/GDD.md, docs/LEVEL_SCENE_DESIGN.md, docs/BALANCE_DESIGN.md, docs/TECHNICAL_DESIGN.md',
+    )
+    expect(authorPrompt).not.toContain('docs/ART_DIRECTION.md')
 
     const reviewerPrompt = buildWorkerPrompt({
       runId: 'run',

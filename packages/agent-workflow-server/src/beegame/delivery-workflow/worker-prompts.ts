@@ -26,11 +26,25 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     : request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
       : 'read-only'
+  const initialFoundationAuthorArtifacts =
+    request.workerType === 'document-author' &&
+    request.contract.documentSet === 'foundation' &&
+    request.contract.authoringMode === 'initial' &&
+    typeof request.contract.foundationDocumentPath === 'string'
+      ? [
+          ...(Array.isArray(request.contract.upstreamDocumentPaths)
+            ? request.contract.upstreamDocumentPaths
+            : []),
+          request.contract.foundationDocumentPath,
+        ].filter(
+          (path, index, paths): path is string =>
+            typeof path === 'string' && paths.indexOf(path) === index,
+        )
+      : undefined
   const canonicalArtifacts =
-    (request.workerType === 'document-author' &&
-      request.contract.documentSet === 'foundation') ||
+    initialFoundationAuthorArtifacts ??
     (request.workerType === 'document-reviewer' &&
-      request.contract.reviewScope === 'foundation')
+    request.contract.reviewScope === 'foundation'
       ? CANONICAL_FOUNDATION_DOCUMENTS
       : request.workerType === 'document-reviewer' &&
           request.contract.reviewScope === 'checklist'
@@ -38,7 +52,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
         : request.workerType === 'document-author' &&
             request.contract.documentSet === 'checklist'
           ? CANONICAL_PROJECT_DOCUMENTS
-          : CANONICAL_PROJECT_ARTIFACTS
+          : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
     `Phase: ${request.phase}`,
