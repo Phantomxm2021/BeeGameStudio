@@ -390,6 +390,12 @@ export function nativeRuntimeEnvironment(
   return {
     ...getSafeRuntimeProcessEnvironment(),
     ...selectedModelEnvironment,
+    // The provider can silently stop mid-SSE while leaving its socket open.
+    // Enable the native runtime's existing recovery path for every BGS child;
+    // BGS observes process I/O but does not parse, synthesize, or repair model
+    // content itself.
+    CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+    CLAUDE_STREAM_IDLE_TIMEOUT_MS: '45000',
   }
 }
 
