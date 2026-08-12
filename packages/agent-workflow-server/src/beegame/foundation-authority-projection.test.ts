@@ -47,27 +47,40 @@ describe('foundation authority projection', () => {
     expect(
       result.sources.map(source => ({
         path: source.path,
-        sectionIds: source.sectionIds,
+        sections: source.sections.map(section => ({
+          sectionId: section.sectionId,
+          startLine: section.startLine,
+          lineCount: section.lineCount,
+        })),
       })),
     ).toEqual(
       getGameDocumentContract(targetPath).upstreamSections.map(source => ({
         path: source.path,
-        sectionIds: source.sectionIds,
+        sections: source.sectionIds.map(sectionId => {
+          const sourceIndex = getGameDocumentContract(
+            source.path,
+          ).sections.findIndex(section => section.sectionId === sectionId)
+          return {
+            sectionId,
+            startLine: 3 + sourceIndex * 4,
+            lineCount: 4,
+          }
+        }),
       })),
     )
     expect(result.sources.every(source => /^[a-f0-9]{64}$/.test(source.digest)))
       .toBe(true)
     expect(
       result.sources.flatMap(source =>
-        source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
+        source.sections.map(section => `${source.path}#${section.sectionId}`),
       ),
     ).toEqual(
       [...selectedSections],
     )
     expect(
       result.sources.every(source =>
-        source.sectionIds.every(sectionId =>
-          selectedSections.has(`${source.path}#${sectionId}`),
+        source.sections.every(section =>
+          selectedSections.has(`${source.path}#${section.sectionId}`),
         ),
       ),
     ).toBe(true)
@@ -81,7 +94,10 @@ describe('foundation authority projection', () => {
     )
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.sources.every(Object.isFrozen)).toBe(true)
-    expect(result.sources.every(source => Object.isFrozen(source.sectionIds))).toBe(true)
+    expect(result.sources.every(source => Object.isFrozen(source.sections))).toBe(true)
+    expect(
+      result.sources.every(source => source.sections.every(Object.isFrozen)),
+    ).toBe(true)
   })
 
   test('rejects missing documents or missing contracted sections', () => {

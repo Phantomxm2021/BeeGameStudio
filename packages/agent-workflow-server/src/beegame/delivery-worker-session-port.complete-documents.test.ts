@@ -99,6 +99,25 @@ describe('delivery worker complete document boundary', () => {
       )
       expect(projected.targetPath).toBe('docs/UI_UX_SPEC.md')
       expect(projected.sources.length).toBeGreaterThan(0)
+      expect(
+        projected.sources.every((source: {
+          sections?: Array<{
+            sectionId?: unknown
+            startLine?: unknown
+            lineCount?: unknown
+          }>
+        }) =>
+          source.sections?.every(
+            section =>
+              typeof section.sectionId === 'string' &&
+              Number.isInteger(section.startLine) &&
+              Number(section.startLine) > 0 &&
+              Number.isInteger(section.lineCount) &&
+              Number(section.lineCount) > 0,
+          ),
+        ),
+      ).toBe(true)
+      expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
       expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')

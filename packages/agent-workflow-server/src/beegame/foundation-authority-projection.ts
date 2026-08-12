@@ -4,7 +4,11 @@ import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 export type FoundationAuthoritySource = Readonly<{
   path: FoundationDocumentPath
-  sectionIds: readonly string[]
+  sections: readonly Readonly<{
+    sectionId: string
+    startLine: number
+    lineCount: number
+  }>[]
   digest: string
 }>
 
@@ -42,20 +46,44 @@ export function projectFoundationAuthority(input: {
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
     const sourceContract = getGameDocumentContract(source.path)
+    const lines = markdown.split('\n')
+    const sectionMarkerLines = lines.flatMap((line, index) =>
+      line.trim().startsWith('<!-- beegame-section:') ? [index] : [],
+    )
+    const productionMarkerLine = lines.findIndex(
+      line => line.trim() === '<!-- beegame-production-materials -->',
+    )
+    const sections: Array<{
+      sectionId: string
+      startLine: number
+      lineCount: number
+    }> = []
     for (const sectionId of source.sectionIds) {
       const section = sourceContract.sections.find(
         candidate => candidate.sectionId === sectionId,
       )
       const marker = `<!-- beegame-section:${sectionId} -->`
-      if (!section || !markdown.split('\n').some(line => line.trim() === marker))
+      const markerLine = lines.findIndex(line => line.trim() === marker)
+      if (!section || markerLine < 0)
         throw new Error(
           `canonical upstream section is missing: ${source.path}#${sectionId}`,
         )
+      const nextBoundary = [...sectionMarkerLines, productionMarkerLine]
+        .filter(line => line > markerLine)
+        .sort((left, right) => left - right)[0]
+      const endLine = nextBoundary ?? lines.length
+      sections.push(
+        Object.freeze({
+          sectionId,
+          startLine: markerLine + 1,
+          lineCount: endLine - markerLine,
+        }),
+      )
     }
     sources.push(
       Object.freeze({
         path: source.path,
-        sectionIds: Object.freeze([...source.sectionIds]),
+        sections: Object.freeze(sections),
         digest: createHash('sha256').update(markdown).digest('hex'),
       }),
     )
