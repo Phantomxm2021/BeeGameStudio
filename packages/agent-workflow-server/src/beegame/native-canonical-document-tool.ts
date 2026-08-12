@@ -4,6 +4,9 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
   canonicalizeCompleteGameDocumentMarkdown,
+  completeGameDocumentSubmissionSchema,
+  renderCompleteGameDocument,
+  validateCompleteGameDocumentSubmission,
 } from './complete-game-document'
 import {
   authoritySidecarPath,
@@ -26,6 +29,7 @@ const commitInputSchema = z
   .strict()
 
 const completeDocumentCommitInputSchema = z.union([
+  z.object({ document: completeGameDocumentSubmissionSchema }).strict(),
   z.object({ body: z.string().trim().min(1) }).strict(),
   z
     .object({
@@ -176,7 +180,7 @@ export function createNativeCanonicalDocumentTool(options: {
             .join('\n')
         : ''
       return completeGameDocument
-        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nThe Production Materials block must contain these exact markers and headings in this exact order, with content using the stated mechanical format; the format descriptions are instructions and must not be copied into the Markdown:\n${productionMaterialContract}`
+        ? `Use two bounded phases. First call with {document} only, using the strict structured schema; the service renders every protocol marker, heading, and canonical order. Never handwrite protocol markers in section or material body content. After the service returns document_prepared, call with {authority:{records}} only and never resend the document. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nProduction material content must use the stated mechanical format for these exact contracts:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
@@ -186,11 +190,25 @@ export function createNativeCanonicalDocumentTool(options: {
       const parsed = completeGameDocument
         ? completeDocumentCommitInputSchema.parse(input)
         : commitInputSchema.parse(input)
+      const structuredBody =
+        completeGameDocument && 'document' in parsed
+          ? renderCompleteGameDocument(
+              options.contract.targetPath as FoundationDocumentPath,
+              validateCompleteGameDocumentSubmission(
+                options.contract.targetPath as FoundationDocumentPath,
+                parsed.document,
+              ),
+            )
+          : undefined
       return {
         data: await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
-          ...('body' in parsed ? { body: parsed.body } : {}),
+          ...(structuredBody !== undefined
+            ? { body: structuredBody }
+            : 'body' in parsed
+              ? { body: parsed.body }
+              : {}),
           ...('authority' in parsed ? { authority: parsed.authority } : {}),
         }),
       }

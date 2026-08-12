@@ -166,6 +166,40 @@ describe('canonical document commit', () => {
     }
   })
 
+  test('renders protocol markers from a structured document submission', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-structured-'))
+    try {
+      const path = 'docs/ART_DIRECTION.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-structured-art',
+          targetPath: path,
+          documentId: 'ART_DIRECTION',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<{
+        data: { status: string }
+      }>
+      await expect(
+        call({ document: completeSubmission(path) }),
+      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+      const markdown = await readFile(join(workspacePath, path), 'utf8')
+      expect(markdown).toContain('<!-- beegame-section:visual_pillars -->')
+      expect(markdown).toContain('<!-- beegame-material:visual-pillar-board -->')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('produces the complete canonical document set from neutral product authority', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
     try {
