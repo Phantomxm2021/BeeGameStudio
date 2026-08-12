@@ -17,6 +17,7 @@ import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 
 const commitInputSchema = z
   .object({
@@ -25,6 +26,7 @@ const commitInputSchema = z
   .strict()
 
 const completeDocumentCommitInputSchema = z.union([
+  z.object({ body: z.string().trim().min(1) }).strict(),
   z
     .object({
       body: z.string().trim().min(1),
@@ -146,8 +148,18 @@ export function createNativeCanonicalDocumentTool(options: {
         : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
+      const productionMaterialContract = completeGameDocument
+        ? getGameDocumentContract(
+            options.contract.targetPath as FoundationDocumentPath,
+          ).productionMaterials
+            .map(
+              material =>
+                `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\nformat=${material.format}`,
+            )
+            .join('\n')
+        : ''
       return completeGameDocument
-        ? 'Call with {body, authority:{records}}. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. If the service reports document_prepared with invalid authority, retry with {authority:{records}} only and do not resend or rewrite Markdown.'
+        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. The Production Materials block must contain these exact marker, heading, and format triples in this exact order:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
@@ -415,7 +427,7 @@ async function commitCompleteGameDocument(input: {
   }
 
   if (input.authority === undefined)
-    throw new Error('foundation authority records are required')
+    return receipt
   const sidecar = createFoundationAuthoritySidecar({
     documentPath,
     markdown,

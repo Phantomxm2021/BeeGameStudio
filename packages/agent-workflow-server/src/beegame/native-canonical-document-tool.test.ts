@@ -104,6 +104,55 @@ describe('canonical document commit', () => {
     expect(await (tool?.prompt as () => Promise<string>)()).toContain(
       'authorityId',
     )
+    const prompt = await (tool?.prompt as () => Promise<string>)()
+    for (const material of getGameDocumentContract('docs/GDD.md').productionMaterials) {
+      expect(prompt).toContain(`<!-- beegame-material:${material.materialId} -->`)
+      expect(prompt).toContain(`### ${material.title}`)
+      expect(prompt).toContain(`format=${material.format}`)
+    }
+  })
+
+  test('prepares Markdown before accepting authority without resending the body', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-two-phase-'))
+    try {
+      const path = 'docs/GDD.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-two-phase-gdd',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<{
+        data: { status: string }
+      }>
+      const body = renderCompleteGameDocument(path, completeSubmission(path))
+      await expect(call({ body })).resolves.toMatchObject({
+        data: { status: 'document_prepared' },
+      })
+      await expect(
+        call({
+          authority: {
+            records: authoritySubmission(path).records.map(record => ({
+              ...record,
+              value: '',
+              unit: '',
+            })),
+          },
+        }),
+      ).resolves.toMatchObject({ data: { status: 'committed' } })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
   })
 
   test('produces the complete canonical document set from neutral product authority', async () => {

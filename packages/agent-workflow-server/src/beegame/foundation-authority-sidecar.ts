@@ -39,6 +39,16 @@ export type FoundationAuthoritySidecar = Readonly<{
   records: readonly FoundationAuthorityRecord[]
 }>
 
+const optionalNonEmptyString = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().min(1).optional(),
+)
+
+const optionalAuthorityValue = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.union([z.string().trim().min(1), z.number().finite(), z.boolean()]).optional(),
+)
+
 const authorityRecordSchema = z
   .object({
     authorityId: z
@@ -53,8 +63,8 @@ const authorityRecordSchema = z
     responsibilityIds: z
       .array(z.enum(GAME_DOCUMENT_RESPONSIBILITIES))
       .min(1),
-    value: z.union([z.string().trim().min(1), z.number().finite(), z.boolean()]).optional(),
-    unit: z.string().trim().min(1).optional(),
+    value: optionalAuthorityValue,
+    unit: optionalNonEmptyString,
   })
   .strict()
 
