@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  assertOpenDecisionClosure,
   canonicalizeCompleteGameDocumentMarkdown,
   renderCompleteGameDocument,
+  resolveUpstreamAuthorityReferences,
   validateCompleteGameDocumentMarkdown,
   validateCompleteGameDocumentSubmission,
   type CompleteGameDocumentSubmission,
@@ -10,6 +15,50 @@ import {
   getGameDocumentContract,
 } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
+import {
+  authoritySidecarPath,
+  canonicalFoundationAuthoritySidecarBytes,
+  createFoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
+
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
+
+function authorityRecords(path: FoundationDocumentPath) {
+  const documentId = path.slice('docs/'.length, -'.md'.length).toLowerCase()
+  return getGameDocumentContract(path).sections
+    .map(section => ({
+      authorityId: `${documentId}.${section.sectionId}.primary`,
+      sectionId: section.sectionId,
+      kind: 'fact' as const,
+      state: 'confirmed' as const,
+      source: 'confirmed_brief' as const,
+      evidenceRefs: [],
+      statement: `Confirmed authority for ${section.sectionId}.`,
+      responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+    }))
+    .sort((left, right) => bytewise(left.authorityId, right.authorityId))
+}
+
+async function writeAuthoritySource(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+): Promise<ReturnType<typeof createFoundationAuthoritySidecar>> {
+  const markdown = `# ${path}\n\nDigest-bound authority source.\n`
+  await mkdir(join(workspacePath, 'docs'), { recursive: true })
+  await writeFile(join(workspacePath, path), markdown)
+  const sidecar = createFoundationAuthoritySidecar({
+    documentPath: path,
+    markdown,
+    submission: { records: authorityRecords(path) },
+  })
+  await writeFile(
+    join(workspacePath, authoritySidecarPath(path)),
+    canonicalFoundationAuthoritySidecarBytes(sidecar),
+  )
+  return sidecar
+}
 
 function completeSubmission(
   path: FoundationDocumentPath,
@@ -161,6 +210,152 @@ describe('complete game document submission', () => {
     ).toThrow(/upstream|authority/i)
   })
 
+  test('resolves exact upstream authority IDs from digest-valid sidecars', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'upstream-authority-'))
+    try {
+      const sidecar = await writeAuthoritySource(workspacePath, 'docs/GDD.md')
+      const authorityId = sidecar.records.find(
+        record => record.sectionId === 'core_loop',
+      )!.authorityId
+      await expect(
+        resolveUpstreamAuthorityReferences({
+          workspacePath,
+          targetPath: 'docs/UI_UX_SPEC.md',
+          references: [{ path: 'docs/GDD.md', authorityId }],
+        }),
+      ).resolves.toEqual([{ path: 'docs/GDD.md', authorityId }])
+
+      for (const invalidId of [
+        'core_loop.primary',
+        'gdd.core_loop',
+        'gdd.core-loop.primary',
+        'gdd.core_loop.not-present',
+      ])
+        await expect(
+          resolveUpstreamAuthorityReferences({
+            workspacePath,
+            targetPath: 'docs/UI_UX_SPEC.md',
+            references: [{ path: 'docs/GDD.md', authorityId: invalidId }],
+          }),
+        ).rejects.toThrow(new RegExp(`${invalidId.replaceAll('.', '\\.')}`, 'i'))
+
+      await expect(
+        resolveUpstreamAuthorityReferences({
+          workspacePath,
+          targetPath: 'docs/UI_UX_SPEC.md',
+          references: [
+            { path: 'docs/GDD.md', authorityId },
+            { path: 'docs/GDD.md', authorityId },
+          ],
+        }),
+      ).rejects.toThrow(/duplicate/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects upstream authority when the source document changed after its sidecar', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'upstream-authority-'))
+    try {
+      const sidecar = await writeAuthoritySource(workspacePath, 'docs/GDD.md')
+      await writeFile(
+        join(workspacePath, 'docs/GDD.md'),
+        '# Changed source\n\nThe sidecar is now stale.\n',
+      )
+      await expect(
+        resolveUpstreamAuthorityReferences({
+          workspacePath,
+          targetPath: 'docs/UI_UX_SPEC.md',
+          references: [
+            {
+              path: 'docs/GDD.md',
+              authorityId: sidecar.records[0]!.authorityId,
+            },
+          ],
+        }),
+      ).rejects.toThrow(/digest|stale/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('requires exact audit and authority open-decision closure', () => {
+    const path = 'docs/GDD.md'
+    const markdown = '# GDD\n\nDecision authority.\n'
+    const records = authorityRecords(path)
+    const decisionId = 'gdd.scope_risks.platform-target'
+    const sidecar = createFoundationAuthoritySidecar({
+      documentPath: path,
+      markdown,
+      submission: {
+        records: records.map(record =>
+          record.sectionId === 'scope_risks'
+            ? {
+                ...record,
+                authorityId: decisionId,
+                kind: 'open_decision' as const,
+                state: 'deferred' as const,
+                decision: {
+                  owner: 'product',
+                  neededBy: 'milestone.prototype',
+                },
+              }
+            : record,
+        ),
+      },
+    })
+    const audit = {
+      acceptanceCriteria: ['All contracted authority is inspectable.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [
+        {
+          decisionId,
+          question: 'Which platform target is authoritative?',
+          owner: 'product',
+          neededBy: 'milestone.prototype',
+        },
+      ],
+    }
+
+    expect(() =>
+      assertOpenDecisionClosure({
+        audit,
+        authority: sidecar,
+        trustedScheduleAuthorityIds: new Set(),
+      }),
+    ).not.toThrow()
+    expect(() =>
+      assertOpenDecisionClosure({
+        audit: { ...audit, openDecisions: [] },
+        authority: sidecar,
+        trustedScheduleAuthorityIds: new Set(),
+      }),
+    ).toThrow(/closure|missing|decision/i)
+    expect(() =>
+      assertOpenDecisionClosure({
+        audit: {
+          ...audit,
+          openDecisions: [{ ...audit.openDecisions[0]!, owner: 'engineering' }],
+        },
+        authority: sidecar,
+        trustedScheduleAuthorityIds: new Set(),
+      }),
+    ).toThrow(/owner|match/i)
+    expect(() =>
+      assertOpenDecisionClosure({
+        audit: {
+          ...audit,
+          openDecisions: [
+            { ...audit.openDecisions[0]!, neededBy: '2026-12-01' },
+          ],
+        },
+        authority: sidecar,
+        trustedScheduleAuthorityIds: new Set(),
+      }),
+    ).toThrow(/date|schedule|needed/i)
+  })
+
   test('renders summary, production materials, and one audit appendix', () => {
     const path = 'docs/UI_UX_SPEC.md'
     const rendered = renderCompleteGameDocument(path, completeSubmission(path))
@@ -172,6 +367,32 @@ describe('complete game document submission', () => {
     expect(rendered).not.toContain('### Production Details')
     for (const material of getGameDocumentContract(path).productionMaterials)
       expect(rendered).toContain(`<!-- beegame-material:${material.materialId} -->`)
+  })
+
+  test('renders upstream authority in canonical bytewise order', () => {
+    const path = 'docs/UI_UX_SPEC.md'
+    const value = completeSubmission(path)
+    const rendered = renderCompleteGameDocument(path, {
+      ...value,
+      auditAppendix: {
+        ...value.auditAppendix,
+        upstreamReferences: [
+          {
+            path: 'docs/LEVEL_SCENE_DESIGN.md',
+            authorityId: 'level_scene_design.camera_readability.primary',
+          },
+          {
+            path: 'docs/GDD.md',
+            authorityId: 'gdd.core_loop.primary',
+          },
+        ],
+      },
+    })
+
+    expect(rendered).toContain('- `docs/GDD.md` — `gdd.core_loop.primary`')
+    expect(rendered.indexOf('`docs/GDD.md`')).toBeLessThan(
+      rendered.indexOf('`docs/LEVEL_SCENE_DESIGN.md`'),
+    )
   })
 
   test('rejects a production material with the wrong mechanical format', () => {

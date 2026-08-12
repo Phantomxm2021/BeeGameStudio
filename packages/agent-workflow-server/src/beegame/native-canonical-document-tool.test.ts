@@ -284,6 +284,98 @@ describe('canonical document commit', () => {
     }
   })
 
+  test('rejects unresolved upstream authority before preparing a document', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-upstream-'))
+    try {
+      const path = 'docs/UI_UX_SPEC.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-unresolved-upstream',
+          targetPath: path,
+          documentId: 'UI_UX_SPEC',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = completeSubmission(path)
+      const document = {
+        ...submission,
+        auditAppendix: {
+          ...submission.auditAppendix,
+          upstreamReferences: [
+            {
+              path: 'docs/GDD.md',
+              authorityId: 'gdd.core_loop.not-present',
+            },
+          ],
+        },
+      }
+
+      await expect(
+        (tool?.call as (value: unknown) => Promise<unknown>)({ document }),
+      ).rejects.toThrow(/upstream.*gdd\.core_loop\.not-present|missing/i)
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects authority that does not close the prepared audit decisions', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-decisions-'))
+    try {
+      const path = 'docs/GDD.md'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-open-decision-closure',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const submission = completeSubmission(path)
+      const document = {
+        ...submission,
+        auditAppendix: {
+          ...submission.auditAppendix,
+          openDecisions: [
+            {
+              decisionId: 'gdd.scope_risks.platform-target',
+              question: 'Which platform target is authoritative?',
+              owner: 'product',
+              neededBy: 'milestone.prototype',
+            },
+          ],
+        },
+      }
+      await expect(
+        (tool?.call as (value: unknown) => Promise<unknown>)({ document }),
+      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+
+      await expect(
+        (tool?.call as (value: unknown) => Promise<unknown>)({
+          authority: authoritySubmission(path),
+        }),
+      ).rejects.toThrow(/open decision.*closure|closure.*decision/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('prepares bounded structured parts before rendering the complete document', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-parts-'))
     try {

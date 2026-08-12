@@ -3,6 +3,7 @@ import { open, readFile, rename, mkdir, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
+  assertOpenDecisionClosure,
   canonicalizeCompleteGameDocumentMarkdown,
   completeGameDocumentAuditAppendixSchema,
   completeGameDocumentSectionSchema,
@@ -10,7 +11,6 @@ import {
   productionMaterialSchema,
   renderCompleteGameDocument,
   validateCompleteGameDocumentEvidence,
-  validateCompleteGameDocumentSubmission,
 } from './complete-game-document'
 import {
   authoritySidecarPath,
@@ -85,6 +85,7 @@ const completeDocumentDraftSchema = z
     executiveSummary: z.string().min(1),
     sections: z.array(completeGameDocumentSectionSchema),
     productionMaterials: z.array(productionMaterialSchema),
+    auditAppendix: completeGameDocumentAuditAppendixSchema.optional(),
   })
   .strict()
 
@@ -262,6 +263,12 @@ export function createNativeCanonicalDocumentTool(options: {
             structuredDocument,
           )
         : undefined
+      if (structuredDocument)
+        await persistCompleteDocumentDraftSnapshot({
+          workspacePath: options.workspacePath,
+          contract: options.contract,
+          document: structuredDocument,
+        })
       const result = await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
@@ -396,13 +403,19 @@ async function prepareCompleteDocumentPart(input: {
     } else {
       if (expected !== 'audit')
         throw new Error(`next document part is ${expected}`)
-      const document = validateCompleteGameDocumentSubmission(targetPath, {
+      const document = await validateCompleteGameDocumentEvidence(
+        input.workspacePath,
+        targetPath,
+        {
         title: draft.title,
         executiveSummary: draft.executiveSummary,
         sections: draft.sections,
         productionMaterials: draft.productionMaterials,
         auditAppendix: input.part.auditAppendix,
-      })
+        },
+      )
+      draft.auditAppendix = document.auditAppendix
+      await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
       const receipt = await commitCanonicalDocument({
         workspacePath: input.workspacePath,
         contract: input.contract,
@@ -413,6 +426,35 @@ async function prepareCompleteDocumentPart(input: {
   }
   await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
   return { status: 'part_prepared', nextPart: nextDraftPart(contract, draft) }
+}
+
+async function persistCompleteDocumentDraftSnapshot(input: {
+  workspacePath: string
+  contract: CanonicalDocumentCommitContract
+  document: z.infer<typeof completeGameDocumentSubmissionSchema>
+}): Promise<void> {
+  const draftPath = completeDocumentDraftPath(
+    input.workspacePath,
+    input.contract.dispatchId,
+  )
+  const snapshot: CompleteDocumentDraft = {
+    schemaVersion: 1,
+    dispatchId: input.contract.dispatchId,
+    targetPath: input.contract.targetPath,
+    title: input.document.title,
+    executiveSummary: input.document.executiveSummary,
+    sections: input.document.sections,
+    productionMaterials: input.document.productionMaterials,
+    auditAppendix: input.document.auditAppendix,
+  }
+  const existingRaw = await readOptionalFile(draftPath)
+  if (existingRaw) {
+    const existing = completeDocumentDraftSchema.parse(JSON.parse(existingRaw))
+    if (JSON.stringify(existing) !== JSON.stringify(snapshot))
+      throw new Error('prepared document draft has different content')
+    return
+  }
+  await durableWrite(draftPath, `${JSON.stringify(snapshot, null, 2)}\n`)
 }
 
 function nextDraftPart(
@@ -680,6 +722,34 @@ async function commitCompleteGameDocument(input: {
     markdown,
     submission: input.authority,
   })
+  const draftRaw = await readOptionalFile(
+    completeDocumentDraftPath(input.workspacePath, input.contract.dispatchId),
+  )
+  const draft = draftRaw
+    ? completeDocumentDraftSchema.parse(JSON.parse(draftRaw))
+    : undefined
+  if (draft?.auditAppendix) {
+    const trustedScheduleAuthorityIds = new Set(
+      sidecar.records
+        .filter(
+          record =>
+            record.state === 'verified' ||
+            ((record.source === 'user_setting' ||
+              record.source === 'confirmed_brief') &&
+              record.state === 'confirmed'),
+        )
+        .map(record => record.authorityId),
+    )
+    assertOpenDecisionClosure({
+      audit: draft.auditAppendix,
+      authority: sidecar,
+      trustedScheduleAuthorityIds,
+    })
+  } else if (sidecar.records.some(record => record.kind === 'open_decision')) {
+    throw new Error(
+      'open decision closure cannot be validated without a prepared audit appendix',
+    )
+  }
   const sidecarBytes = canonicalFoundationAuthoritySidecarBytes(sidecar)
   await durableWrite(authorityTarget, sidecarBytes)
   const committed: CompleteGameDocumentCommitReceipt = {

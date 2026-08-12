@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
@@ -11,6 +13,11 @@ import {
   renderDocumentEvidenceRegister,
   validateDocumentEvidenceEntries,
 } from './document-evidence'
+import {
+  authoritySidecarPath,
+  validateFoundationAuthoritySidecar,
+  type FoundationAuthoritySidecar,
+} from './foundation-authority-sidecar'
 
 const upstreamReferenceSchema = z
   .object({
@@ -34,6 +41,11 @@ const openDecisionSchema = z
     question: z.string().trim().min(1),
     owner: z.string().trim().min(1),
     neededBy: z.string().trim().min(1),
+    scheduleAuthorityId: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/)
+      .optional(),
   })
   .strict()
 
@@ -92,6 +104,139 @@ export type CompleteGameDocumentSubmission = z.infer<
   typeof completeGameDocumentSubmissionSchema
 >
 
+export type CompleteGameDocumentAuditAppendix = z.infer<
+  typeof completeGameDocumentAuditAppendixSchema
+>
+
+export type UpstreamAuthorityReference = z.infer<
+  typeof upstreamReferenceSchema
+>
+
+function bytewise(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right))
+}
+
+export async function resolveUpstreamAuthorityReferences(input: {
+  workspacePath: string
+  targetPath: FoundationDocumentPath
+  references: readonly unknown[]
+}): Promise<readonly UpstreamAuthorityReference[]> {
+  const references = z.array(upstreamReferenceSchema).parse(input.references)
+  const contract = getGameDocumentContract(input.targetPath)
+  const allowedPaths = new Set(contract.allowedUpstreamPaths)
+  const keys = references.map(
+    reference => `${reference.path}\u0000${reference.authorityId}`,
+  )
+  if (new Set(keys).size !== keys.length)
+    throw new Error('upstream authority references are duplicated')
+
+  for (const reference of references) {
+    if (!allowedPaths.has(reference.path))
+      throw new Error(
+        `upstream authority path is not allowed for ${input.targetPath}: ${reference.path}`,
+      )
+    let markdown: string
+    let rawSidecar: string
+    try {
+      ;[markdown, rawSidecar] = await Promise.all([
+        readFile(resolve(input.workspacePath, reference.path), 'utf8'),
+        readFile(
+          resolve(input.workspacePath, authoritySidecarPath(reference.path)),
+          'utf8',
+        ),
+      ])
+    } catch {
+      throw new Error(
+        `upstream authority source is missing: ${reference.path} — ${reference.authorityId}`,
+      )
+    }
+    let storedSidecar: unknown
+    try {
+      storedSidecar = JSON.parse(rawSidecar)
+    } catch {
+      throw new Error(
+        `upstream authority sidecar is invalid: ${reference.path} — ${reference.authorityId}`,
+      )
+    }
+    const sidecar = validateFoundationAuthoritySidecar({
+      documentPath: reference.path,
+      markdown,
+      value: storedSidecar,
+    })
+    if (
+      !sidecar.records.some(record => record.authorityId === reference.authorityId)
+    )
+      throw new Error(
+        `upstream authority ID does not exist: ${reference.path} — ${reference.authorityId}`,
+      )
+  }
+
+  return Object.freeze(
+    [...references]
+      .sort((left, right) =>
+        bytewise(
+          `${left.path}\u0000${left.authorityId}`,
+          `${right.path}\u0000${right.authorityId}`,
+        ),
+      )
+      .map(reference => Object.freeze({ ...reference })),
+  )
+}
+
+export function assertOpenDecisionClosure(input: {
+  audit: CompleteGameDocumentAuditAppendix
+  authority: FoundationAuthoritySidecar
+  trustedScheduleAuthorityIds: ReadonlySet<string>
+}): void {
+  const auditById = new Map(
+    input.audit.openDecisions.map(decision => [decision.decisionId, decision]),
+  )
+  const authorityDecisions = input.authority.records.filter(
+    record => record.kind === 'open_decision',
+  )
+  const authorityById = new Map(
+    authorityDecisions.map(record => [record.authorityId, record]),
+  )
+  if (
+    auditById.size !== input.audit.openDecisions.length ||
+    authorityById.size !== authorityDecisions.length
+  )
+    throw new Error('open decision closure contains duplicate IDs')
+  const auditIds = [...auditById.keys()].sort(bytewise)
+  const authorityIds = [...authorityById.keys()].sort(bytewise)
+  if (
+    auditIds.length !== authorityIds.length ||
+    auditIds.some((authorityId, index) => authorityIds[index] !== authorityId)
+  )
+    throw new Error('audit and authority open decision closure does not match')
+
+  for (const decisionId of auditIds) {
+    const auditDecision = auditById.get(decisionId)!
+    const authorityRecord = authorityById.get(decisionId)!
+    if (authorityRecord.state !== 'deferred' || !authorityRecord.decision)
+      throw new Error(`open decision authority is not deferred: ${decisionId}`)
+    if (auditDecision.owner !== authorityRecord.decision.owner)
+      throw new Error(`open decision owner does not match authority: ${decisionId}`)
+    if (auditDecision.neededBy !== authorityRecord.decision.neededBy)
+      throw new Error(
+        `open decision needed-by does not match authority: ${decisionId}`,
+      )
+    const concreteDate = /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(
+      auditDecision.neededBy,
+    )
+    if (
+      concreteDate &&
+      (!auditDecision.scheduleAuthorityId ||
+        !input.trustedScheduleAuthorityIds.has(
+          auditDecision.scheduleAuthorityId,
+        ))
+    )
+      throw new Error(
+        `open decision concrete date requires trusted schedule authority: ${decisionId}`,
+      )
+  }
+}
+
 function assertExactOrder(
   actual: readonly string[],
   expected: readonly string[],
@@ -134,6 +279,16 @@ export function validateCompleteGameDocumentSubmission(
   const submitted = completeGameDocumentSubmissionSchema.parse(value)
   const parsed: CompleteGameDocumentSubmission = {
     ...submitted,
+    auditAppendix: {
+      ...submitted.auditAppendix,
+      upstreamReferences: [...submitted.auditAppendix.upstreamReferences].sort(
+        (left, right) =>
+          bytewise(
+            `${left.path}\u0000${left.authorityId}`,
+            `${right.path}\u0000${right.authorityId}`,
+          ),
+      ),
+    },
     productionMaterials: submitted.productionMaterials.map(material =>
       material.format === 'evidence_register'
         ? {
@@ -186,6 +341,12 @@ export function validateCompleteGameDocumentSubmission(
   })
 
   const allowedUpstreamPaths = new Set(contract.allowedUpstreamPaths)
+  assertUniqueIds(
+    parsed.auditAppendix.upstreamReferences.map(
+      reference => `${reference.path}\u0000${reference.authorityId}`,
+    ),
+    'upstream authority reference',
+  )
   if (
     parsed.auditAppendix.upstreamReferences.some(
       reference => !allowedUpstreamPaths.has(reference.path),
@@ -216,7 +377,20 @@ export async function validateCompleteGameDocumentEvidence(
       entries: material.entries,
     })
   }
-  return parsed
+  const upstreamReferences = await resolveUpstreamAuthorityReferences({
+    workspacePath,
+    targetPath: path,
+    references: parsed.auditAppendix.upstreamReferences,
+  })
+  return {
+    ...parsed,
+    auditAppendix: {
+      ...parsed.auditAppendix,
+      upstreamReferences: upstreamReferences.map(reference => ({
+        ...reference,
+      })),
+    },
+  }
 }
 
 export function renderCompleteGameDocument(
@@ -272,7 +446,7 @@ export function renderCompleteGameDocument(
       '### Upstream Authority',
       '',
       ...parsed.auditAppendix.upstreamReferences.map(
-        reference => `- ${reference.path} — ${reference.authorityId}`,
+        reference => `- \`${reference.path}\` — \`${reference.authorityId}\``,
       ),
       '',
     )
