@@ -48,6 +48,8 @@ import {
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
+import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   registerBeeGameAuthoredResources,
@@ -119,6 +121,55 @@ function matrixAtomicTask(): AtomicTask {
     status: 'pending',
     attempt: 0,
     evidenceRefs: [],
+  }
+}
+
+function matrixCompleteDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
+  const contract = getGameDocumentContract(path)
+  return renderCompleteGameDocument(path, {
+    title: contract.discipline,
+    executiveSummary: 'Synthetic complete recovery authority.',
+    sections: contract.sections.map(section => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Synthetic production authority for ${section.sectionId}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material => ({
+      materialId: material.materialId,
+      title: material.title,
+      format: material.format,
+      body:
+        material.format === 'markdown_table'
+          ? '| Field | Value |\n| --- | --- |\n| Owner | Synthetic |'
+          : material.format === 'mermaid'
+            ? '```mermaid\ngraph TD\n  A --> B\n```'
+            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+    })),
+    auditAppendix: {
+      acceptanceCriteria: ['Synthetic recovery authority is inspectable.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  })
+}
+
+function matrixAuthority(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
+  const contract = getGameDocumentContract(path)
+  const prefix = CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()
+  const bytewise = (left: string, right: string) =>
+    Buffer.compare(Buffer.from(left), Buffer.from(right))
+  return {
+    records: contract.sections
+      .map(section => ({
+        authorityId: `${prefix}.${section.sectionId}.primary`,
+        sectionId: section.sectionId,
+        kind: 'fact' as const,
+        state: 'confirmed' as const,
+        statement: `Confirmed authority for ${section.sectionId}.`,
+        responsibilityIds: [...section.responsibilityIds].sort(bytewise),
+      }))
+      .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
   }
 }
 
@@ -277,7 +328,7 @@ async function matrixTerminal(input: {
     canonicalMutationCount: 1,
   }
   if (request.workerType === 'document-author') {
-    const targetPath = request.taskId!
+    const targetPath = request.taskId! as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
     const baseline = await readFile(join(workspacePath, targetPath), 'utf8')
     const baselineVersion = matrixFrontmatterValue(baseline, 'version')
     const baselineUpdatedAt = matrixFrontmatterValue(baseline, 'updated_at')
@@ -294,8 +345,10 @@ async function matrixTerminal(input: {
         baselineDigest: sha256(baseline),
         baselineVersion,
         baselineUpdatedAt,
+        submissionKind: 'complete_game_document',
       },
-      body: '# Spec\nSynthetic revision.',
+      body: matrixCompleteDocument(targetPath),
+      authority: matrixAuthority(targetPath),
     })
     return {
       workerType: request.workerType,
@@ -775,8 +828,17 @@ async function createStaleReviewerRecoveryFixture() {
         documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
         operation: 'create',
         baselineDigest: null,
+        ...(path === 'docs/GDD.md'
+          ? { submissionKind: 'complete_game_document' as const }
+          : {}),
       },
-      body: path === 'docs/GDD.md' ? '# Recovery authority' : '# Fixture',
+      body:
+        path === 'docs/GDD.md'
+          ? matrixCompleteDocument(path)
+          : '# Fixture',
+      ...(path === 'docs/GDD.md'
+        ? { authority: matrixAuthority(path) }
+        : {}),
     })
   await writeBeeGameAssetManifest(workspacePath, {
     version: 8,
@@ -1208,8 +1270,10 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
       documentId: CANONICAL_PROJECT_DOCUMENT_IDS[firstPath],
       operation: 'create',
       baselineDigest: null,
+      submissionKind: 'complete_game_document',
     },
-    body: '# Synthetic authority',
+    body: matrixCompleteDocument(firstPath),
+    authority: matrixAuthority(firstPath),
   })
   const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
   const revision = {

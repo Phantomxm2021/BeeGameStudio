@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
+import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 import {
   canonicalizeCompleteGameDocumentMarkdown,
   validateCompleteGameDocumentMarkdown,
@@ -1517,15 +1518,29 @@ async function completeInitialFoundationDocumentDraft(input: {
   const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
     path.split('\\').join('/'),
   )
-  const canonicalizationIssues = canonicalizeFoundationDocumentFile({
-    workspacePath: input.workspacePath,
-    path: expectedPath,
-    version: '1.0.0',
-    updatedAt: new Date().toISOString(),
-  })
+  const dispatchId = input.run.activeDispatch?.dispatchId
+  const commitReceipt = dispatchId
+    ? await readCanonicalDocumentCommitReceipt(input.workspacePath, dispatchId)
+    : undefined
+  const hasCommittedAuthority =
+    commitReceipt?.schemaVersion === 2 &&
+    commitReceipt.status === 'committed' &&
+    commitReceipt.targetPath === expectedPath &&
+    commitReceipt.authorityDigest !== null
+  const canonicalizationIssues = hasCommittedAuthority
+    ? []
+    : canonicalizeFoundationDocumentFile({
+        workspacePath: input.workspacePath,
+        path: expectedPath,
+        version: '1.0.0',
+        updatedAt: new Date().toISOString(),
+      })
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
+    ...(!hasCommittedAuthority
+      ? [`${expectedPath}: committed Foundation authority sidecar is missing`]
+      : []),
     ...(!exactStringSet(normalizedWrittenPaths, [expectedPath])
       ? [
           `initial document author must write exactly the active canonical document: ${expectedPath}`,

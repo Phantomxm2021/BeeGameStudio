@@ -263,6 +263,10 @@ async function reconcileActiveCanonicalReceipt(input: {
         events: input.events,
         acceptedUnits: [],
       }
+    if (receipt.schemaVersion !== 2 || receipt.status !== 'committed')
+      recoveryConflict(
+        'canonical Foundation document receipt is missing committed authority',
+      )
     if (
       receipt.dispatchId !== identity.dispatchId ||
       receipt.targetPath !== targetPath ||
@@ -296,7 +300,10 @@ async function reconcileActiveCanonicalReceipt(input: {
           ? []
           : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[targetIndex - 1]}`],
       inputRevision: documentRevision,
-      dependencyDigests: { [targetPath]: receipt.finalDigest },
+      dependencyDigests: {
+        [targetPath]: receipt.finalDigest,
+        [receipt.authorityPath]: receipt.authorityDigest!,
+      },
       dispatchId: identity.dispatchId,
       receiptRef: `.beegame/workflow/document-commits/${identity.dispatchId}.json`,
       acceptedAt,
