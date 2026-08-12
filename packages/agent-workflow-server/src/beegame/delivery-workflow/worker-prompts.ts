@@ -21,7 +21,10 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
             typeof path === 'string' && paths.indexOf(path) === index,
         )
       : []
-  const scope = resourceContentReadPaths.length
+  const pathScopeLabel = resourceContentReadPaths.length
+    ? 'Readable task paths'
+    : 'Writable paths'
+  const pathScope = resourceContentReadPaths.length
     ? resourceContentReadPaths.join(', ')
     : request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
@@ -59,7 +62,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     `Run: ${request.runId}`,
     `Revision: ${request.revision}`,
     `Workspace root: ${request.workspacePath}`,
-    `Allowed paths: ${scope}`,
+    `${pathScopeLabel}: ${pathScope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',

@@ -100,6 +100,8 @@ describe('resource-content worker prompts', () => {
     )
     expect(prompt).not.toContain('Return one Markdown body')
     expect(prompt).toContain('Canonical artifacts: docs/GDD.md')
+    expect(prompt).toContain('Writable paths: read-only')
+    expect(prompt).not.toContain('Allowed paths:')
     expect(prompt).not.toContain('docs/TECHNICAL_DESIGN.md')
     expect(prompt).not.toContain('docs/ASSET_PLAN.md')
     expect(prompt).not.toContain('"systemDeliveryContract"')
@@ -150,8 +152,9 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain(
-      'Allowed paths: docs/TECHNICAL_DESIGN.md, assets/content/ui-configuration.json',
+      'Readable task paths: docs/TECHNICAL_DESIGN.md, assets/content/ui-configuration.json',
     )
+    expect(prompt).not.toContain('Allowed paths:')
     expect(prompt).not.toContain('assets/content/resource-registry.json')
   })
 
