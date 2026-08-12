@@ -111,35 +111,20 @@ describe('segmented initial document authoring', () => {
         waitForWorkflowWorkerIdle: async () => undefined,
         sendWithDisplay: async (_sessionId: string, prompt: string) => {
           prompts.push(prompt)
-          for (let checkpoint = 0; checkpoint < 2; checkpoint += 1) {
-            let markdown: string | undefined
-            try {
-              markdown = await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')
-            } catch {}
-            const progress = inspectFoundationDocumentDraft('docs/GDD.md', markdown)
-            if (progress.complete) break
-            const group = foundationDocumentDraftGroups('docs/GDD.md')[
-              progress.completedGroupCount
-            ]!
-            if (group.sections.length) {
-              for (
-                let partIndex = progress.completedPartCount;
-                partIndex < foundationDocumentDraftPartCount(group);
-                partIndex += 1
-              )
-                await advanceDraft(
-                  workspacePath,
-                  progress.completedGroupCount,
-                  partIndex,
-                )
-            } else {
-              await advanceDraft(
-                workspacePath,
-                progress.completedGroupCount,
-                progress.completedPartCount,
-              )
-            }
-          }
+          const groupMatch = /Active bounded document group (\d+)\//.exec(prompt)
+          const partMatch = /resume chunk (\d+)\//.exec(prompt)
+          const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
+          const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
+          const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
+          const lastPartIndex = group.sections.length
+            ? foundationDocumentDraftPartCount(group) - 1
+            : firstPartIndex
+          for (
+            let partIndex = firstPartIndex;
+            partIndex <= lastPartIndex;
+            partIndex += 1
+          )
+            await advanceDraft(workspacePath, groupIndex, partIndex)
           events.push({ type: 'result', text: 'turn complete' })
           return session
         },
@@ -174,20 +159,14 @@ describe('segmented initial document authoring', () => {
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
       expect(prompts.length).toBe(
-        Math.ceil(
-          (getGameDocumentContract('docs/GDD.md').sections.length +
-            getGameDocumentContract('docs/GDD.md').productionMaterials.length) /
-            2,
-        ),
+        getGameDocumentContract('docs/GDD.md').sections.length +
+          getGameDocumentContract('docs/GDD.md').productionMaterials.length,
       )
       expect(prompts[0]).toContain('Active bounded document group 1/13')
-      expect(prompts[0]).toContain('perform up to two sequential bounded native mutations')
-      expect(prompts[0]).toContain('Checkpoint 1/2: perform one bounded native Write')
-      expect(prompts[0]).toContain('Checkpoint 2/2: perform one bounded native Edit')
+      expect(prompts[0]).toContain('perform exactly one bounded native Write')
       expect(prompts[0]).toContain('<!-- beegame-part:vision:1 -->')
       expect(prompts[0]).toContain('<!-- beegame-part:vision:2 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
-      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:2:0 -->')
       expect(prompts[0]).toContain('5,200 UTF-8 bytes')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
