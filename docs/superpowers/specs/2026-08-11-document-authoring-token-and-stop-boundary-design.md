@@ -36,19 +36,20 @@ Claude Code owns:
 
 BGS must not inline complete previous documents or complete projected upstream section bodies into the authoring prompt. It must not compose, summarize, or rewrite game-design content on Claude Code's behalf.
 
-## Safe Write Strategy
+## Native File-Operation Boundary
 
-Neither a whole-document write nor one-operation-per-section is allowed.
+Later Chrome and native-stream evidence supersedes the earlier BGS-managed write strategy. BGS must not prescribe the native file-operation count, argument size, chunk boundaries, or sequence.
 
-Claude Code writes the document as a small number of contiguous, ordered chunks:
+Across 25 completed native Write/Edit calls, argument bytes and the longest stdout-byte gap had a Pearson correlation of 0.981. Calls below 1 KiB averaged a 0.98-second maximum gap; calls above 6 KiB averaged 64.45 seconds and reached 95.47 seconds. The BGS instruction requiring three to eight writes capped at 12 KiB caused the native runtime to prepare large tool JSON arguments whose content was buffered upstream, making the UI appear disconnected even though the process later resumed.
 
-- each native write/edit argument remains within a transport-safe byte ceiling;
-- the expected normal range is three to eight content writes per document, depending on the complete document's actual size;
-- chunk boundaries are transport boundaries, not document or game-design boundaries;
-- Claude Code may group adjacent contract sections in one chunk and must not reread the full file after every chunk;
-- after the final chunk, Claude Code performs one lightweight structural/file verification and ends the turn.
+The same run exposed a separate prompt-layer conflict. BGS produced an 858-byte authority projection containing exact source paths, section markers and digests, but another instruction required all authorized upstream sections to be read in one batched round. The native runtime consequently loaded a 21.8 KB target plus 62.3 KB and 72.5 KB upstream files before a four-minute reasoning interval. BGS therefore supplies the compact projection and allowed paths but does not prescribe whether, when, or how much upstream content the native runtime reads.
 
-The exact ceiling will be selected from a focused boundary test below the observed failure size. The implementation must test the ceiling and must not encode a game idea, document text, or project name.
+The corrected boundary is:
+
+- BGS supplies product authority, target path, filesystem scope, permissions, cancellation and completed-file validation;
+- the native runtime owns whether it uses Read, search, Write, Edit or another native capability, including the operation count, size, range and order;
+- BGS passively records tool identity, byte counts and timing but never terminates, resizes, replays or rewrites a native tool call;
+- after the native turn, BGS validates the completed file and reports the actual provider or validation error.
 
 ## Prompt and Context Flow
 
@@ -57,7 +58,7 @@ The initial authoring request contains:
 1. the confirmed brief;
 2. target path, language, discipline, ownership, required section IDs, and required production materials;
 3. upstream document paths and allowed section IDs;
-4. the bounded-write and single-final-verification rules.
+4. the single-final-verification rule and the explicit statement that BGS does not control native file operations.
 
 Claude Code reads only the upstream ranges it needs using native tools. A replacement or semantic repair request contains the target path and structured findings, not the old target body. Claude Code may read the affected ranges from disk.
 
@@ -76,7 +77,7 @@ The UI and API expose the underlying API/transport error, dispatch ID, last acti
 The guard observes rather than controls Claude Code reasoning:
 
 - record prompt characters, model rounds, native tool-call input bytes, and token deltas per dispatch;
-- observe streamed native tool-input growth and terminate an oversized unfinished tool call with an explicit transport-safety error instead of waiting for a generic timeout;
+- observe streamed native tool-input growth and byte-gap timing without interrupting or changing the native call;
 - stop a dispatch when cumulative rounds or usage crosses an explicitly configured abnormal ceiling;
 - surface the reason and preserve the partial file and complete usage record.
 
@@ -98,7 +99,7 @@ Implementation begins with failing tests for:
 
 - prompt projection excludes complete target and upstream bodies;
 - authoring instructions reject both whole-document payloads and per-section operation loops;
-- native write payloads are bounded without splitting by hardcoded headings or keywords;
+- BGS does not prescribe, resize or interrupt native write payloads;
 - protocol-only normalization avoids model redispatch;
 - Stop terminates the exact live dispatch and waits for closure;
 - matching stopped-tail usage is persisted while stale-dispatch usage is rejected;
@@ -117,7 +118,7 @@ After focused and regression tests pass, validation must use Chrome against the 
 
 - All eight complete documents are generated through Claude Code and accepted by the existing workflow.
 - No full previous document or full upstream body is injected into the initial prompt.
-- No native write argument exceeds the tested safe ceiling.
+- BGS does not impose a native write ceiling or operation-count policy.
 - A normal document does not degrade into one model round per contract section.
 - Stop closes the exact worker before reporting completion.
 - Usage includes cancellation-tail tokens and matches dispatch logs.

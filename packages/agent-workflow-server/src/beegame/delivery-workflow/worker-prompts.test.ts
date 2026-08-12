@@ -42,17 +42,13 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain(
       'one contract section per native file operation',
     )
+    expect(prompt).not.toContain('12 KiB')
+    expect(prompt).not.toContain('three to eight')
+    expect(prompt).not.toContain('content writes')
+    expect(prompt).not.toContain('tool-call argument')
+    expect(prompt).not.toContain('chunk boundaries')
     expect(prompt).toContain(
-      'Do not serialize the complete document into one tool-call argument',
-    )
-    expect(prompt).toContain(
-      'No native write or edit input may exceed 12 KiB of UTF-8 content',
-    )
-    expect(prompt).toContain(
-      'three to eight contiguous ordered content writes',
-    )
-    expect(prompt).toContain(
-      'do not reread the complete file after each chunk',
+      'BGS does not prescribe native file-operation count, size, or sequence',
     )
     expect(prompt).not.toContain(
       'Write the complete assigned Markdown document directly',
@@ -71,9 +67,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Do not write or edit the assigned path directly')
     expect(prompt).toContain('Do not claim verified license')
     expect(prompt).toContain('one final lightweight structural verification')
-    expect(prompt).toContain(
-      'Read all authorized upstream sections in one batched tool round',
-    )
+    expect(prompt).not.toContain('Read all authorized upstream sections')
+    expect(prompt).not.toContain('one batched tool round')
     expect(prompt).toContain(
       'repair only the missing or invalid parts; do not rewrite a complete current-authority document',
     )

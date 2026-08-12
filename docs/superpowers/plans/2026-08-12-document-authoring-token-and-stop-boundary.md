@@ -1,5 +1,7 @@
 # Document Authoring Token and Stop Boundary Implementation Plan
 
+> **Superseded write-control tasks:** Chrome/native-stream evidence gathered on 2026-08-12 showed that BGS-managed write counts, 12 KiB prompt limits, and streamed-input termination violate the native-runtime boundary and cause the apparent disconnect they were meant to prevent. Do not implement or restore Task 2 or Task 3 below. The current contract is documented in `docs/superpowers/specs/2026-08-11-document-authoring-token-and-stop-boundary-design.md`: BGS observes byte timing and validates completed files but never prescribes, resizes, interrupts, replays, or rewrites native file operations. The remaining projection, Stop, usage, and error-evidence tasks are unaffected.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the existing Idea → eight-document workflow complete reliably through Claude Code with bounded write calls, compact authority prompts, exact cancellation, and complete usage/error evidence.
