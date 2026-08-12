@@ -14,7 +14,9 @@ import {
 } from './foundation-authority-sidecar'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 
-function canonicalSource(path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md'): string {
+function canonicalSource(
+  path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
+): string {
   const contract = getGameDocumentContract(path)
   return [
     `# ${contract.discipline}`,
@@ -37,15 +39,17 @@ async function writeAuthoritySource(
   workspacePath: string,
   path: FoundationDocumentPath,
 ): Promise<void> {
-  const markdown = canonicalSource(path as 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md')
+  const markdown = canonicalSource(
+    path as 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
+  )
   await writeFile(join(workspacePath, path), markdown)
   const prefix = path.slice('docs/'.length, -'.md'.length).toLowerCase()
   const sidecar = createFoundationAuthoritySidecar({
     documentPath: path,
     markdown,
     submission: {
-      records: getGameDocumentContract(path).sections
-        .map(section => ({
+      records: getGameDocumentContract(path)
+        .sections.map(section => ({
           authorityId: `${prefix}.${section.sectionId}.primary`,
           sectionId: section.sectionId,
           kind: 'fact' as const,
@@ -66,7 +70,9 @@ async function writeAuthoritySource(
 
 describe('delivery worker complete document commit contract', () => {
   test('requires structured complete submissions for initial Foundation authors', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'complete-doc-contract-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'complete-doc-contract-'),
+    )
     try {
       const contract = await buildCanonicalDocumentCommitContract(
         {
@@ -113,20 +119,25 @@ describe('delivery worker complete document commit contract', () => {
           upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
         },
       } as never)
-      const projection = getGameDocumentContract('docs/UI_UX_SPEC.md').upstreamSections
+      const projection =
+        getGameDocumentContract('docs/UI_UX_SPEC.md').upstreamSections
       for (const source of projection)
         for (const sectionId of source.sectionIds) {
           expect(block).toContain(`upstreamPath=${source.path}`)
           expect(block).toContain(`sectionId=${sectionId}`)
         }
+      expect(block).toContain('two or three consecutive parts')
+      expect(block).toContain('document_parts_prepared')
+      expect(block).toContain('Do not hand-author')
+      expect(block).toContain('write or edit the assigned path directly')
+      expect(block).not.toContain('document_prepared')
       expect(block).toContain('Read the compact authority projection')
       expect(block).toContain('CommitCanonicalDocument')
-      expect(block).toContain('Submit bounded structured document parts')
-      expect(block).toContain('then submit compact authority records')
+      expect(block).toContain('submit two or three consecutive parts')
+      expect(block).toContain('submit compact authority records')
       expect(block).not.toContain('Submit the complete Markdown body first')
-      expect(block).toContain('do not write or edit the assigned path directly')
       expect(block).toContain(
-        'Read only the listed source sections from disk when deeper rationale',
+        'Read only the listed source sections when deeper rationale',
       )
       expect(block).toContain(
         '.beegame/workflow/authority-projections/dispatch-ui-authority.json',

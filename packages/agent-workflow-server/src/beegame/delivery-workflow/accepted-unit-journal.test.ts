@@ -8,12 +8,14 @@ import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
 import { transitionDeliveryRun } from './transition'
-import { commitCanonicalDocument } from '../native-canonical-document-tool'
+import { createNativeCanonicalDocumentTool } from '../native-canonical-document-tool'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
   FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type DeliveryRun,
+  type FoundationDocumentPath,
   type WorkflowEvent,
   type WorkerDispatchRequest,
 } from './types'
@@ -396,18 +398,90 @@ describe('accepted workflow unit journal', () => {
         async waitForTerminal(dispatchId) {
           const request = requests.get(dispatchId)!
           if (requests.size > 1) return new Promise(() => undefined)
-          const path =
-            request.taskId as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
-          await commitCanonicalDocument({
-            workspacePath: workspace,
-            contract: {
-              dispatchId,
-              targetPath: path,
-              documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-              operation: 'create',
-              baselineDigest: null,
+          const path = request.taskId as FoundationDocumentPath
+          const documentContract = getGameDocumentContract(path)
+          const contract = {
+            dispatchId,
+            targetPath: path,
+            documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
+            operation: 'create',
+            baselineDigest: null,
+            submissionKind: 'complete_game_document',
+          } as const
+          let tool: Record<string, unknown> | undefined
+          createNativeCanonicalDocumentTool({
+            buildTool: definition => {
+              tool = definition
+              return definition
             },
-            body: '# Synthetic accepted document',
+            workspacePath: workspace,
+            contract,
+          })
+          const call = tool?.call as (input: unknown) => Promise<unknown>
+          await call({
+            document: {
+              title: documentContract.discipline,
+              executiveSummary:
+                'Synthetic complete document used to verify the accepted-unit handoff.',
+              sections: documentContract.sections.map(section => ({
+                sectionId: section.sectionId,
+                title: section.title,
+                body: `Production authority, measurable outcome, and downstream handoff for ${section.title}.`,
+              })),
+              productionMaterials: documentContract.productionMaterials.map(
+                material => ({
+                  materialId: material.materialId,
+                  title: material.title,
+                  format: material.format,
+                  ...(material.format === 'evidence_register'
+                    ? {
+                        entries: [
+                          {
+                            evidenceId: `${material.materialId}.pending`,
+                            category: 'search_direction',
+                            displayName: 'Pending production evidence',
+                            purpose: material.purpose,
+                            state: 'source_not_selected',
+                            evidenceRefs: [],
+                          },
+                        ],
+                      }
+                    : {
+                        body:
+                          material.format === 'markdown_table'
+                            ? '| Field | Authority |\n| --- | --- |\n| Scope | Confirmed |'
+                            : material.format === 'mermaid'
+                              ? '```mermaid\ngraph TD\n  A[Authority] --> B[Outcome]\n```'
+                              : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64"/></svg>',
+                      }),
+                }),
+              ),
+              auditAppendix: {
+                acceptanceCriteria: [
+                  'The synthetic document is structurally complete.',
+                ],
+                upstreamReferences: [],
+                risks: [],
+                openDecisions: [],
+              },
+            },
+          })
+          await call({
+            authority: {
+              records: documentContract.sections.map(section => ({
+                authorityId: `${CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()}.${section.sectionId}.primary`,
+                sectionId: section.sectionId,
+                kind: 'fact',
+                state: 'confirmed',
+                source: 'confirmed_brief',
+                evidenceRefs: [],
+                statement: `Confirmed authority for ${section.title}.`,
+                responsibilityIds: [...section.responsibilityIds].sort(
+                  (left, right) =>
+                    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+                ),
+              })),
+            },
           })
           return {
             workerType: 'document-author' as const,

@@ -261,9 +261,12 @@ function projectionForReviewChecks(
   if (cached) return cached
   const artifacts = artifactsForReviewChecks(projection.artifacts, checkIds)
   const paths = new Set(artifacts.map(artifact => artifact.path))
-  const packetReferenceIndex = buildDocumentReviewWireReferenceIndex(artifacts, {
-    maxJsonPointerDepth: 1,
-  })
+  const packetReferenceIndex = buildDocumentReviewWireReferenceIndex(
+    artifacts,
+    {
+      maxJsonPointerDepth: 1,
+    },
+  )
   const artifactIds = new Set(
     packetReferenceIndex.artifacts
       .filter(artifact => paths.has(artifact.path))
@@ -284,8 +287,8 @@ function projectionForReviewChecks(
         ? packetReferenceIndex.resourceIds
         : [],
       contentIdsByPath: Object.fromEntries(
-        Object.entries(packetReferenceIndex.contentIdsByPath).filter(
-          ([path]) => paths.has(path),
+        Object.entries(packetReferenceIndex.contentIdsByPath).filter(([path]) =>
+          paths.has(path),
         ),
       ),
     },
@@ -1523,7 +1526,8 @@ async function completeInitialFoundationDocumentDraft(input: {
     ? await readCanonicalDocumentCommitReceipt(input.workspacePath, dispatchId)
     : undefined
   const hasCommittedAuthority =
-    commitReceipt?.schemaVersion === 2 &&
+    commitReceipt !== undefined &&
+    commitReceipt.schemaVersion !== 1 &&
     commitReceipt.status === 'committed' &&
     commitReceipt.targetPath === expectedPath &&
     commitReceipt.authorityDigest !== null
@@ -1563,10 +1567,7 @@ async function completeInitialFoundationDocumentDraft(input: {
       previous:
         input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
     }),
-    ...completeFoundationDocumentIssues(
-      input.workspacePath,
-      expectedPath,
-    ),
+    ...completeFoundationDocumentIssues(input.workspacePath, expectedPath),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['initial document author cannot resolve review findings']
       : []),
@@ -1665,7 +1666,10 @@ function completeFoundationDocumentIssues(
       return [`${path}: canonical front matter is incomplete`]
     validateCompleteGameDocumentMarkdown(
       path,
-      lines.slice(closingIndex + 1).join('\n').trimStart(),
+      lines
+        .slice(closingIndex + 1)
+        .join('\n')
+        .trimStart(),
     )
     return []
   } catch (error) {

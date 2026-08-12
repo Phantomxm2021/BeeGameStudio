@@ -24,7 +24,13 @@ import { resolveResourceProductionTask } from './resource-task-resolver'
 import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
 
 const roots: string[] = []
-const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+const TEST_ACQUISITION_PROFILE = {
+  dimensions: ['agnostic'] as const,
+  asset_kinds: ['data'] as const,
+  usage_tags: [],
+  capabilities: [],
+  styles: [],
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -266,15 +272,17 @@ describe('resource production task resolver', () => {
     const audit = {
       valid: true,
       requirements: [{ id: 'world.visual', required: true, issues: [] }],
-      resources: [{
-        id: 'world-resource',
-        status: 'verified',
-        sourceType: 'agent-authored',
-        rootPath: 'assets/runtime/world.dat',
-        filePaths: ['assets/runtime/world.dat'],
-        provisional: true,
-        issues: [],
-      }],
+      resources: [
+        {
+          id: 'world-resource',
+          status: 'verified',
+          sourceType: 'agent-authored',
+          rootPath: 'assets/runtime/world.dat',
+          filePaths: ['assets/runtime/world.dat'],
+          provisional: true,
+          issues: [],
+        },
+      ],
     }
     expect(shouldRefreshProvisionalResourceInventory(run, audit)).toBe(true)
 
@@ -404,8 +412,9 @@ describe('resource production task resolver', () => {
     })
     expect(request).not.toHaveProperty('contract.manifestPath')
     expect(request).toMatchObject({
-      protectedPaths: ['assets/content/event-definitions.json'],
+      allowedPaths: ['assets/content/'],
     })
+    expect(request).not.toHaveProperty('protectedPaths')
   })
 })
 
@@ -434,7 +443,13 @@ async function writePlan(workspace: string): Promise<void> {
       content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
-    requirements: [{ id: 'world.visual', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
+    requirements: [
+      {
+        id: 'world.visual',
+        required: true,
+        acquisition_profile: TEST_ACQUISITION_PROFILE,
+      },
+    ],
     resources: [],
   })
 }

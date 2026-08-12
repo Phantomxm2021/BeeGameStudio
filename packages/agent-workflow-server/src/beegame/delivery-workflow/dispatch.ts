@@ -238,7 +238,7 @@ async function documentPerformance(input: {
         : 0,
     markdownBytes: await fileBytes(receipt?.targetPath ?? targetPath),
     sidecarBytes:
-      receipt?.schemaVersion === 2
+      receipt !== undefined && receipt.schemaVersion !== 1
         ? await fileBytes(receipt.authorityPath)
         : 0,
     projectionBytes: await fileBytes(projectionPath),
@@ -305,10 +305,7 @@ function assertSingleResourceWorkAuthority(
       )
     return
   }
-  const expectedFindings = resourceRemediationFindingsForTask(
-    cycle,
-    task,
-  )
+  const expectedFindings = resourceRemediationFindingsForTask(cycle, task)
   const expected = {
     kind: 'document_review',
     cycleId: cycle!.cycleId,

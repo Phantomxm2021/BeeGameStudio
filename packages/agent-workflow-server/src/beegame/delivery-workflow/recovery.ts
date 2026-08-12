@@ -8,7 +8,10 @@ import {
   computeWorkspaceRevision,
 } from './revision'
 import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
-import { auditAssetContract, type AssetContractAudit } from '../asset-contract-audit'
+import {
+  auditAssetContract,
+  type AssetContractAudit,
+} from '../asset-contract-audit'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -57,7 +60,9 @@ export function shouldRefreshProvisionalResourceInventory(
     return false
 
   const requiredRequirementIds = new Set(
-    audit.requirements.filter(requirement => requirement.required).map(requirement => requirement.id),
+    audit.requirements
+      .filter(requirement => requirement.required)
+      .map(requirement => requirement.id),
   )
   const boundResourceIds = new Set(
     run.resourceProductionState.inventoryReceipt?.bindings
@@ -263,7 +268,7 @@ async function reconcileActiveCanonicalReceipt(input: {
         events: input.events,
         acceptedUnits: [],
       }
-    if (receipt.schemaVersion !== 2 || receipt.status !== 'committed')
+    if (receipt.schemaVersion === 1 || receipt.status !== 'committed')
       recoveryConflict(
         'canonical Foundation document receipt is missing committed authority',
       )

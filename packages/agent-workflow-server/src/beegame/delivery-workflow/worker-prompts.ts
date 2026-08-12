@@ -50,7 +50,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    "Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.",
+    'Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -153,7 +153,11 @@ function formatResourceContentContract(
     ),
   )
   const remediation = contract.remediation
-  if (remediation && typeof remediation === 'object' && !Array.isArray(remediation)) {
+  if (
+    remediation &&
+    typeof remediation === 'object' &&
+    !Array.isArray(remediation)
+  ) {
     const findings = (remediation as Record<string, unknown>).findings
     if (Array.isArray(findings)) {
       const paths = new Set(
@@ -174,7 +178,11 @@ function formatResourceContentContract(
             return (
               Array.isArray(subjects) &&
               subjects.some(subject => {
-                if (!subject || typeof subject !== 'object' || Array.isArray(subject))
+                if (
+                  !subject ||
+                  typeof subject !== 'object' ||
+                  Array.isArray(subject)
+                )
                   return false
                 const subjectPath = (subject as Record<string, unknown>).path
                 return typeof subjectPath === 'string' && paths.has(subjectPath)
@@ -312,12 +320,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
-          ? 'Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Claude Code\'s normal workflow.'
+          ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Claude Code's normal workflow."
           : request.contract.authoringMode === 'initial'
-          ? `Use the service-projected upstream authority and target baseline. Author the complete assigned Markdown game document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`
-          : request.contract.authoringMode === 'repair-planning'
-            ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
-            : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`,
+            ? `Use the service-projected upstream authority and target baseline to author the complete Markdown game document ${String(request.contract.foundationDocumentPath)} through CommitCanonicalDocument; the service owns rendering and persistence.`
+            : request.contract.authoringMode === 'repair-planning'
+              ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
+              : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`,
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
@@ -343,25 +351,30 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : request.contract.authoringMode === 'initial'
               ? [
                   `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file. The eight documents together must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline's design work now; do not delegate completeness to a reviewer.`,
-                  'Document metadata is service-owned. Begin with exactly one # document title and do not write YAML front matter.',
+                  'Document metadata is service-owned; the service renders exactly one # document title, canonical headings, table of contents, authority display lists and final Markdown. Submit only the structured fields requested by CommitCanonicalDocument.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
-                  'Write the four document-level layers in order: <!-- beegame-executive-summary --> followed by exactly ## Executive Summary; every exact contract section marker and title; <!-- beegame-production-materials --> followed by exactly ## Production Materials and every contract.productionMaterials marker with its required mechanical format; then <!-- beegame-audit-appendix --> followed by exactly ## Audit Appendix and one non-empty ### Acceptance Criteria list. These three document-layer headings are protocol labels and remain in English even when the document body uses another language. Define each authoritative fact once and reference projected upstream authority instead of copying it.',
+                  'Submit the header, every exact contract section, every production material, then the audit appendix in nextPart order. Do not hand-author rendered upstream or open-decision lists; submit their stable IDs and structured fields. Define each authoritative fact once and reference projected upstream authority instead of copying it.',
                   'Read all authorized upstream sections in one batched tool round before authoring; do not spend one model round per section. If the target already exists, first make one lightweight structural and authority check. When it is structurally complete and still agrees with the current brief and upstream authority, repair only the missing or invalid parts; do not rewrite a complete current-authority document.',
                   'Prefer production-dense tables and matrices over repeated narrative. Every section must add new implementation authority. Do not restate the confirmed brief, upstream text or another section; reference its stable authority instead. Keep rationale to the shortest explanation needed for a production decision, and make Acceptance Criteria verify the contract without paraphrasing the document.',
-                  'Write the complete document using three to eight contiguous ordered content writes as needed for its actual size. No native write or edit input may exceed 12 KiB of UTF-8 content. Chunk boundaries are transport boundaries, not one-operation-per-section rules; if completeness requires more chunks, continue bounded writes instead of omitting content. Do not serialize the complete document into one tool-call argument, and do not reread the complete file after each chunk. After the final chunk, perform one final lightweight structural verification and end the turn normally; do not repeat equivalent verification commands after a successful check. Keep Claude Code thinking, tools, context management and normal completion behavior unchanged.',
+                  'Use CommitCanonicalDocument batches for two or three consecutive parts when the serialized batch stays under 16 KiB; submit one part when a body is large. Wait for the exact nextPart and never skip. Submit compact authority records only after document_parts_prepared, with explicit source, state, and evidenceRefs. Do not use TodoWrite for this fixed sequence. Do not write or edit the assigned path directly. Do not perform a full-document Read after a committed digest receipt. Do not claim verified license status without concrete evidence. Do not serialize the complete document into one tool-call argument. After commit, perform one final lightweight structural verification; do not repeat equivalent checks. Keep Claude Code thinking, tools, context management and normal completion behavior unchanged.',
                   'Provide enough concrete choices, tradeoffs, examples, units, boundaries and observable criteria for the assigned discipline to be implementable and testable. A downstream owner may specialize only behavior already authorized by the Confirmed Brief, GDD or its projected upstream owner.',
-                  ...(request.contract.foundationDocumentPath === 'docs/ASSET_PLAN.md'
+                  ...(request.contract.foundationDocumentPath ===
+                  'docs/ASSET_PLAN.md'
                     ? [
                         'Define a reusable many-to-many semantic resource responsibility registry, source and license evidence, dependency and milestone ownership. Do not create one physical file per destination or invent Resource Library identities that were not observed.',
                       ]
                     : []),
-                  ...(request.contract.foundationDocumentPath === 'docs/TECHNICAL_DESIGN.md'
+                  ...(request.contract.foundationDocumentPath ===
+                  'docs/TECHNICAL_DESIGN.md'
                     ? [
                         'Apply contract.systemDeliveryContract as the fixed delivery boundary and define one Manifest, one content root, one schema and one resource loading path without binding an unapproved engine or platform.',
                       ]
                     : []),
-                  ...(typeof request.contract.changeRequest === 'string' && request.contract.changeRequest.trim()
-                    ? ['Apply the confirmed change request to the controlled baseline and preserve unrelated valid content.']
+                  ...(typeof request.contract.changeRequest === 'string' &&
+                  request.contract.changeRequest.trim()
+                    ? [
+                        'Apply the confirmed change request to the controlled baseline and preserve unrelated valid content.',
+                      ]
                     : []),
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
@@ -459,9 +472,12 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return request.contract.authoringMode === 'repair-planning'
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
-        : request.contract.authoringMode === 'initial'
-          ? `Write the assigned complete Markdown game document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
-          : `Write the assigned complete Markdown document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
+        : request.contract.authoringMode === 'initial' &&
+            request.contract.documentSet === 'foundation'
+          ? 'Submit ordered structured parts and authority through CommitCanonicalDocument. The committed digest receipt is terminal; do not write the assigned path or return completion prose.'
+          : request.contract.authoringMode === 'initial'
+            ? `Write the assigned complete Markdown game document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
+            : `Write the assigned complete Markdown document at ${documentAuthorTargetPath(request)}, verify it, and end the turn normally.`
     case 'document-reviewer':
       return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'
     case 'resource-planner':

@@ -37,25 +37,38 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('one complete native write')
     expect(prompt).not.toContain('authoritative idea')
     expect(prompt).toContain('"confirmedBriefDigest":"brief-digest"')
-    expect(prompt).not.toContain('one contract section per native file operation')
+    expect(prompt).not.toContain(
+      'one contract section per native file operation',
+    )
     expect(prompt).toContain(
       'Do not serialize the complete document into one tool-call argument',
     )
+    expect(prompt).toContain('two or three consecutive parts')
+    expect(prompt).toContain('under 16 KiB')
+    expect(prompt).toContain('submit one part when a body is large')
+    expect(prompt).toContain('Wait for the exact nextPart')
+    expect(prompt).toContain('document_parts_prepared')
+    expect(prompt).toContain('source, state, and evidenceRefs')
+    expect(prompt).toContain('Do not use TodoWrite')
     expect(prompt).toContain(
-      'No native write or edit input may exceed 12 KiB of UTF-8 content',
+      'Do not perform a full-document Read after a committed digest receipt',
     )
-    expect(prompt).toContain('three to eight contiguous ordered content writes')
+    expect(prompt).toContain('Do not write or edit the assigned path directly')
+    expect(prompt).toContain('Do not claim verified license')
+    expect(prompt).toContain(
+      'Do not hand-author rendered upstream or open-decision lists',
+    )
     expect(prompt).toContain('one final lightweight structural verification')
-    expect(prompt).toContain('do not reread the complete file after each chunk')
+    expect(prompt).toContain(
+      'Do not perform a full-document Read after a committed digest receipt',
+    )
     expect(prompt).toContain(
       'Read all authorized upstream sections in one batched tool round',
     )
     expect(prompt).toContain(
       'repair only the missing or invalid parts; do not rewrite a complete current-authority document',
     )
-    expect(prompt).toContain(
-      'do not repeat equivalent verification commands after a successful check',
-    )
+    expect(prompt).toContain('do not repeat equivalent checks')
     expect(prompt).toContain(
       'Prefer production-dense tables and matrices over repeated narrative',
     )
@@ -63,18 +76,18 @@ describe('resource-content worker prompts', () => {
       'Do not restate the confirmed brief, upstream text or another section',
     )
     expect(prompt).toContain('exactly one # document title')
-    expect(prompt).toContain('beegame-executive-summary')
-    expect(prompt).toContain('beegame-production-materials')
-    expect(prompt).toContain('beegame-audit-appendix')
-    expect(prompt).toContain('followed by exactly ## Executive Summary')
-    expect(prompt).toContain('followed by exactly ## Production Materials')
-    expect(prompt).toContain('followed by exactly ## Audit Appendix')
+    expect(prompt).toContain('service renders exactly one # document title')
+    expect(prompt).toContain('canonical headings, table of contents')
+    expect(prompt).not.toContain('handwrite protocol markers')
     for (const material of completeDocumentContract.productionMaterials)
       expect(prompt).toContain(material.materialId)
     expect(prompt).not.toContain('### Authoritative Decisions')
     expect(prompt).not.toContain('### Production Details')
     expect(prompt).not.toContain('No unresolved section decisions.')
     expect(prompt).not.toContain('never reload project files')
+    expect(prompt).not.toContain('disable thinking')
+    expect(prompt).not.toContain('disable reasoning')
+    expect(prompt).not.toContain('disable tools')
     expect(prompt).toContain(
       'Confirmed Brief settings are higher authority than free-form idea text',
     )
@@ -402,7 +415,9 @@ describe('resource-content worker prompts', () => {
 
     expect(prompt).toContain('structured acquisition_profile')
     expect(prompt).toContain('source-intrinsic')
-    expect(prompt).toContain('Composition, placement, scaling, connection, scene assembly and runtime behavior')
+    expect(prompt).toContain(
+      'Composition, placement, scaling, connection, scene assembly and runtime behavior',
+    )
     expect(prompt).toContain('runtime-consumable output formats')
     expect(prompt).toContain('Never use target output formats as source-format')
   })
@@ -433,10 +448,10 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('end the turn normally')
-    expect(prompt).not.toContain('CommitCanonicalDocument')
+    expect(prompt).toContain('committed digest receipt is terminal')
+    expect(prompt).toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
-    expect(prompt).toContain('one non-empty ### Acceptance Criteria list')
+    expect(prompt).toContain('then the audit appendix in nextPart order')
     expect(prompt).toContain('Define each authoritative fact once')
     expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(
@@ -516,7 +531,9 @@ describe('resource-content worker prompts', () => {
     })
     expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
     expect(ownerPrompt).toContain('locked repair decision')
-    expect(ownerPrompt).toContain('write the complete revised Markdown document directly')
+    expect(ownerPrompt).toContain(
+      'write the complete revised Markdown document directly',
+    )
     expect(ownerPrompt).toContain('end the turn normally')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
   })
