@@ -17,6 +17,7 @@ import {
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
+import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
@@ -48,7 +49,10 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
-import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import {
+  commitAuthoredFoundationDocument,
+  readAuthoredDocumentReceipt,
+} from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
@@ -1608,6 +1612,142 @@ describe('delivery workflow recovery', () => {
         workerType: 'document-author',
         writtenPaths: ['docs/GDD.md'],
       },
+    })
+  })
+
+  test('replays local document validation after a completed author handoff without redispatching that document', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-local-retry-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const initial = {
+      ...createTestDeliveryRun({
+        runId: 'run-local-document-retry',
+        projectId: 'project-local-document-retry',
+        ownerId: 'owner-1',
+        foundationDraftComplete: false,
+      }),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+    }
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'completed-gdd-author',
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: initial.revision.document,
+      allowedPaths: [path],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: path,
+      },
+    }
+    const terminal = {
+      workerType: 'document-author' as const,
+      status: 'completed' as const,
+      writtenPaths: [path],
+      resolvedFindingIds: [],
+    }
+    const completedDispatch = {
+      dispatchId: request.dispatchId!,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: path,
+      revision: initial.revision.document,
+      status: 'completed' as const,
+      request,
+      terminalResult: terminal,
+      startedAt: '2026-08-12T00:00:00.000Z',
+      finishedAt: '2026-08-12T00:01:00.000Z',
+    }
+    await writeFile(
+      join(workspace, path),
+      matrixCompleteDocument(path).replace(
+        '## Executive Summary',
+        '## Invalid Executive Summary',
+      ),
+    )
+
+    const rejected = await completeDocumentDraft({
+      run: { ...initial, activeDispatch: completedDispatch },
+      workspacePath: workspace,
+      terminal,
+      documentSet: 'foundation',
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    expect(rejected.blockedReason).toContain(
+      'complete game document executive summary heading is invalid',
+    )
+    expect(rejected.activeDispatch).toMatchObject({
+      dispatchId: request.dispatchId,
+      status: 'completed',
+      terminalResult: terminal,
+    })
+
+    const started: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(nextRequest) {
+          started.push(nextRequest)
+          return {
+            sessionId: `session-${nextRequest.taskId}`,
+            dispatchId: nextRequest.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.store.save({
+      ...rejected,
+      status: 'needs_action',
+    })
+    const stillInvalid = await retryRun({
+      store: controller.store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+    await controller.resume(stillInvalid)
+
+    expect(started).toHaveLength(0)
+    expect(await controller.store.load()).toMatchObject({
+      status: 'needs_action',
+      activeDispatch: {
+        dispatchId: request.dispatchId,
+        status: 'completed',
+        terminalResult: terminal,
+      },
+    })
+
+    await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const retried = await retryRun({
+      store: controller.store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+    await controller.resume(retried)
+
+    const resumed = await controller.store.load()
+    expect(resumed?.foundationDraftState.completedPaths).toEqual([path])
+    expect(started.map(candidate => candidate.taskId)).toEqual([
+      CANONICAL_FOUNDATION_DOCUMENTS[1],
+    ])
+    await expect(
+      readAuthoredDocumentReceipt(workspace, request.dispatchId!),
+    ).resolves.toMatchObject({
+      dispatchId: request.dispatchId,
+      targetPath: path,
+      status: 'committed',
     })
   })
 

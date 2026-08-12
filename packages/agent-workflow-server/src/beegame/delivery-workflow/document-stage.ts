@@ -1593,7 +1593,11 @@ async function completeInitialFoundationDocumentDraft(input: {
       document: documentRevision,
       workspace: workspaceRevision,
     },
-    activeDispatch: undefined,
+    // Keep the completed author handoff when only Studio-side validation or
+    // receipt creation failed. A retry can then replay the exact terminal
+    // result and re-run the local commit boundary without starting another
+    // model turn. Successful validation clears it through the same branch.
+    activeDispatch: issues.length ? input.run.activeDispatch : undefined,
     currentItemId: expectedPath,
     blockedReason: issues.length ? issues.join('; ') : undefined,
     updatedAt: new Date().toISOString(),
