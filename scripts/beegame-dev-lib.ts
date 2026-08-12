@@ -1,10 +1,14 @@
 import { isAbsolute, resolve } from 'node:path'
+import {
+  BEEGAME_FIXED_SERVICE_PORTS,
+  assertFixedServicePortConfiguration,
+} from '../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 
-export const DEFAULT_BEEGAME_RUNTIME_PORT = 62174
-export const DEFAULT_BEEGAME_FRONTEND_PORT = 62173
-export const DEFAULT_BEEGAME_BILLING_PORT = 62175
-export const DEFAULT_BEEGAME_SKILLS_PORT = 62176
-export const DEFAULT_BEEGAME_RESOURCE_PORT = 62177
+export const DEFAULT_BEEGAME_RUNTIME_PORT = BEEGAME_FIXED_SERVICE_PORTS.runtime
+export const DEFAULT_BEEGAME_FRONTEND_PORT = BEEGAME_FIXED_SERVICE_PORTS.frontend
+export const DEFAULT_BEEGAME_BILLING_PORT = BEEGAME_FIXED_SERVICE_PORTS.billing
+export const DEFAULT_BEEGAME_SKILLS_PORT = BEEGAME_FIXED_SERVICE_PORTS.skills
+export const DEFAULT_BEEGAME_RESOURCE_PORT = BEEGAME_FIXED_SERVICE_PORTS.resources
 
 // This value is intentionally limited to the loopback-only `beegame:dev`
 // process group. Production must provide a distinct service credential.
@@ -53,32 +57,13 @@ export function buildBeeGameDevPlan(
   input: BeeGameDevPlanInput,
 ): BeeGameDevPlan {
   const values = parseArgs(argv)
+  assertFixedServicePortConfiguration({ argv, env: input.env })
   if (values.workspace !== undefined)
     throw new Error(
       'BeeGame workspace root is server-managed; remove the --workspace override',
     )
-  const ports = {
-    runtime: parsePort(
-      values['runtime-port'] || values['api-port'] || input.env.AGENT_WORKFLOW_PORT,
-      input.ports.runtime,
-    ),
-    frontend: parsePort(
-      values['frontend-port'] || input.env.VITE_PORT || input.env.PORT,
-      input.ports.frontend,
-    ),
-    billing: parsePort(
-      values['billing-port'] || input.env.BEEGAME_BILLING_PORT,
-      input.ports.billing,
-    ),
-    skills: parsePort(
-      values['skills-port'] || input.env.BEEGAME_SKILLS_PORT,
-      input.ports.skills,
-    ),
-    resources: parsePort(
-      values['resources-port'] || input.env.BEEGAME_RESOURCE_PORT,
-      input.ports.resources,
-    ),
-  }
+  assertProgrammaticPorts(input.ports)
+  const ports: BeeGameDevPorts = { ...BEEGAME_FIXED_SERVICE_PORTS }
   const configuredWorkspace = String(
     input.env.AGENT_WORKFLOW_WORKSPACE_PATH || '',
   ).trim()
@@ -317,12 +302,12 @@ function parseArgs(argv: string[]): Record<string, string> {
   return values
 }
 
-function parsePort(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || ''), 10)
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
-    return fallback
+function assertProgrammaticPorts(ports: BeeGameDevPorts): void {
+  for (const service of Object.keys(BEEGAME_FIXED_SERVICE_PORTS) as Array<keyof BeeGameDevPorts>) {
+    const expected = BEEGAME_FIXED_SERVICE_PORTS[service]
+    if (ports[service] !== expected)
+      throw new Error(`${service} must use fixed port ${expected}`)
   }
-  return parsed
 }
 
 function compactEnv(

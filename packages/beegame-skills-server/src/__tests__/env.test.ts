@@ -17,7 +17,7 @@ describe('BeeGame skills env', () => {
       BEEGAME_SKILLS_SERVICE_TOKEN: 'process-token',
     }
     await writeFile(envPath, [
-      'BEEGAME_SKILLS_PORT=62200',
+      'BEEGAME_SKILLS_PORT=62176',
       'BEEGAME_SKILLS_SERVICE_TOKEN=file-token',
       'BEEGAME_SUPABASE_URL=https://project.supabase.co',
     ].join('\n'))
@@ -31,7 +31,7 @@ describe('BeeGame skills env', () => {
       expect(env.BEEGAME_SKILLS_SERVICE_TOKEN).toBe('process-token')
       expect(resolveBeeGameSkillsListenOptions(env)).toEqual({
         host: '127.0.0.1',
-        port: 62200,
+        port: 62176,
       })
       expect(getBeeGameSkillsEnvDiagnostics(result, env)).toContainEqual({
         key: 'BEEGAME_SKILLS_SERVICE_TOKEN',

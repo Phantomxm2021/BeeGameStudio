@@ -114,13 +114,8 @@ describe('BeeGame billing env', () => {
       host: '127.0.0.1',
       port: 62175,
     })
-    expect(resolveBeeGameBillingListenOptions({
-      BEEGAME_BILLING_HOST: '0.0.0.0',
+    expect(() => resolveBeeGameBillingListenOptions({
       BEEGAME_BILLING_PORT: '62176',
-      AGENT_WORKFLOW_PORT: '62174',
-    })).toEqual({
-      host: '0.0.0.0',
-      port: 62176,
-    })
+    })).toThrow('fixed billing port 62175')
   })
 })

@@ -1,10 +1,11 @@
 import { createAgentWorkflowApp } from './app'
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
 import { resolveResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
+import { resolveFixedServicePort } from './beegame/fixed-service-ports'
 
 export { createAgentWorkflowApp }
 
-const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
+const port = resolveFixedServicePort('runtime', process.env.AGENT_WORKFLOW_PORT)
 const host = process.env.AGENT_WORKFLOW_HOST || '127.0.0.1'
 let activeServer: ReturnType<typeof Bun.serve> | null = null
 

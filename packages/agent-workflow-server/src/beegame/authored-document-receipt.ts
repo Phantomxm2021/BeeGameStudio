@@ -9,6 +9,7 @@ import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
+import { appendDocumentReceiptObservation } from './runtime-observability'
 
 const authoredDocumentReceiptSchema = z
   .object({
@@ -89,6 +90,13 @@ export async function commitAuthoredFoundationDocument(input: {
     authoredDocumentReceiptPath(input.workspacePath, input.dispatchId),
     `${JSON.stringify(committed, null, 2)}\n`,
   )
+  await appendDocumentReceiptObservation({
+    workspacePath: input.workspacePath,
+    sessionId: input.dispatchId,
+    dispatchId: input.dispatchId,
+    targetPath: committed.targetPath,
+    digest: committed.finalDigest,
+  })
   return committed
 }
 

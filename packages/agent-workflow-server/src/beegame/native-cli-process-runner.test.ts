@@ -9,6 +9,13 @@ const fixturePath = fileURLToPath(
 function startRuntime() {
   return createNativeCliProcessRunner({
     command: [process.execPath, fixturePath],
+    observabilityFactory: () => ({
+      beginTurn: () => undefined,
+      observeLine: () => undefined,
+      observeMessage: () => undefined,
+      finishTurn: () => undefined,
+      flush: async () => undefined,
+    }),
   }).start({
     sessionId: 'session-1',
     cwd: process.cwd(),

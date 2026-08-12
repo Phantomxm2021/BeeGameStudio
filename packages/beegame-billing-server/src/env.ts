@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { resolveFixedServicePort } from '../../agent-workflow-server/src/beegame/fixed-service-ports'
 
 export type BillingEnv = Record<string, string | undefined>
 
@@ -132,12 +133,9 @@ export function getBeeGameBillingEnvDiagnostics(
 export function resolveBeeGameBillingListenOptions(
   env: BillingEnv = process.env,
 ): BillingListenOptions {
-  const configuredPort = Number.parseInt(env.BEEGAME_BILLING_PORT ?? '', 10)
   return {
     host: normalizeOptional(env.BEEGAME_BILLING_HOST) ?? '127.0.0.1',
-    port: Number.isFinite(configuredPort) && configuredPort >= 0
-      ? configuredPort
-      : 62175,
+    port: resolveFixedServicePort('billing', env.BEEGAME_BILLING_PORT),
   }
 }
 

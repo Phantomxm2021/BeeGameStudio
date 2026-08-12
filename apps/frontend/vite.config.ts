@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { BEEGAME_FIXED_SERVICE_PORTS } from '../../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 
 const frontendReactPath = fileURLToPath(new URL('./node_modules/react/index.js', import.meta.url))
 const frontendReactJsxRuntimePath = fileURLToPath(new URL('./node_modules/react/jsx-runtime.js', import.meta.url))
@@ -15,6 +16,10 @@ export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
   // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
   const env = loadEnv(mode, process.cwd(), '')
+  for (const name of ['VITE_PORT', 'PORT']) {
+    if (env[name] && env[name] !== String(BEEGAME_FIXED_SERVICE_PORTS.frontend))
+      throw new Error(`${name} must use fixed frontend port ${BEEGAME_FIXED_SERVICE_PORTS.frontend}`)
+  }
 
   return {
     plugins: [react()],
@@ -40,22 +45,23 @@ export default defineConfig(({ mode }) => {
 
     // Server configuration for development
     server: {
-      port: Number.parseInt(env.VITE_PORT || env.PORT || '62173', 10),
+      port: BEEGAME_FIXED_SERVICE_PORTS.frontend,
+      strictPort: true,
       host: true, // Listen on all addresses
       proxy: {
         // Proxy API requests to backend during development
         '/api': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:62174',
+          target: env.VITE_API_BASE_URL || `http://127.0.0.1:${BEEGAME_FIXED_SERVICE_PORTS.runtime}`,
           changeOrigin: true,
           secure: false,
         },
         '/deployments': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:62174',
+          target: env.VITE_API_BASE_URL || `http://127.0.0.1:${BEEGAME_FIXED_SERVICE_PORTS.runtime}`,
           changeOrigin: true,
           secure: false,
         },
         '/previews': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:62174',
+          target: env.VITE_API_BASE_URL || `http://127.0.0.1:${BEEGAME_FIXED_SERVICE_PORTS.runtime}`,
           changeOrigin: true,
           secure: false,
         },

@@ -8,6 +8,7 @@ import {
   DEFAULT_BEEGAME_SKILLS_PORT,
   type BeeGameDevPorts,
 } from './beegame-dev-lib'
+import { assertFixedServicePortsAvailable } from '../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 import { loadEnvFile } from './beegame-migration-cli'
 
 // Local service credentials live outside version control. Explicit shell
@@ -15,19 +16,13 @@ import { loadEnvFile } from './beegame-migration-cli'
 loadEnvFile('.env.local')
 
 const argv = process.argv.slice(2)
-const preferredPlan = buildBeeGameDevPlan(argv, {
-  cwd: process.cwd(),
-  env: process.env,
-  ports: {
-    runtime: DEFAULT_BEEGAME_RUNTIME_PORT,
-    frontend: DEFAULT_BEEGAME_FRONTEND_PORT,
-    billing: DEFAULT_BEEGAME_BILLING_PORT,
-    skills: DEFAULT_BEEGAME_SKILLS_PORT,
-    resources: DEFAULT_BEEGAME_RESOURCE_PORT,
-  },
-  bunExecutable: process.execPath,
-})
-const ports: BeeGameDevPorts = preferredPlan.ports
+const ports: BeeGameDevPorts = {
+  runtime: DEFAULT_BEEGAME_RUNTIME_PORT,
+  frontend: DEFAULT_BEEGAME_FRONTEND_PORT,
+  billing: DEFAULT_BEEGAME_BILLING_PORT,
+  skills: DEFAULT_BEEGAME_SKILLS_PORT,
+  resources: DEFAULT_BEEGAME_RESOURCE_PORT,
+}
 const plan = buildBeeGameDevPlan(argv, {
   cwd: process.cwd(),
   env: process.env,
@@ -36,6 +31,7 @@ const plan = buildBeeGameDevPlan(argv, {
 })
 const children: Array<ReturnType<typeof Bun.spawn>> = []
 
+await assertFixedServicePortsAvailable()
 console.log('Starting BeeGame local dev stack...')
 console.log(`Workspace: ${plan.workspacePath}`)
 for (const processPlan of plan.processes) {

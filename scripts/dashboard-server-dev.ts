@@ -2,6 +2,7 @@
 import { resolve } from 'node:path'
 import { getMacroDefines } from './defines.ts'
 import { loadEnvFile } from './beegame-migration-cli.ts'
+import { resolveFixedServicePort } from '../packages/agent-workflow-server/src/beegame/fixed-service-ports.ts'
 
 type MacroGlobals = {
   VERSION: string
@@ -43,7 +44,7 @@ const { resolveResourceSelectionRuntimeConfig } = await import(
   '../packages/agent-workflow-server/src/beegame/resource-selection-config.ts'
 )
 
-const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
+const port = resolveFixedServicePort('runtime', process.env.AGENT_WORKFLOW_PORT)
 const configuredWorkspacePath = process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim()
 if (!configuredWorkspacePath) {
   throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH is required')

@@ -1,7 +1,11 @@
 import { isAbsolute, resolve } from 'node:path'
+import {
+  BEEGAME_FIXED_SERVICE_PORTS,
+  assertFixedServicePortConfiguration,
+} from '../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 
-export const DEFAULT_DASHBOARD_API_PORT = 62174
-export const DEFAULT_DASHBOARD_FRONTEND_PORT = 62173
+export const DEFAULT_DASHBOARD_API_PORT = BEEGAME_FIXED_SERVICE_PORTS.runtime
+export const DEFAULT_DASHBOARD_FRONTEND_PORT = BEEGAME_FIXED_SERVICE_PORTS.frontend
 
 export type DashboardDevOptions = {
   preferredApiPort: number
@@ -30,18 +34,13 @@ export function resolveDashboardDevOptions(
   input: ResolveOptionsInput,
 ): DashboardDevOptions {
   const values = parseArgs(argv)
+  assertFixedServicePortConfiguration({ argv, env: input.env })
   if (values.workspace !== undefined)
     throw new Error(
       'BeeGame workspace root is server-managed; remove the --workspace override',
     )
-  const preferredApiPort = parsePort(
-    values['api-port'] || input.env.AGENT_WORKFLOW_PORT,
-    DEFAULT_DASHBOARD_API_PORT,
-  )
-  const preferredFrontendPort = parsePort(
-    values['frontend-port'] || input.env.VITE_PORT || input.env.PORT,
-    DEFAULT_DASHBOARD_FRONTEND_PORT,
-  )
+  const preferredApiPort = DEFAULT_DASHBOARD_API_PORT
+  const preferredFrontendPort = DEFAULT_DASHBOARD_FRONTEND_PORT
   const configuredWorkspace = String(
     input.env.AGENT_WORKFLOW_WORKSPACE_PATH || '',
   ).trim()
@@ -120,14 +119,6 @@ function parseArgs(argv: string[]): Record<string, string> {
     }
   }
   return values
-}
-
-function parsePort(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || ''), 10)
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
-    return fallback
-  }
-  return parsed
 }
 
 function compactEnv(

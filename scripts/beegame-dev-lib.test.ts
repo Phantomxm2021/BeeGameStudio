@@ -56,11 +56,11 @@ describe('BeeGame local dev launcher helpers', () => {
         no_proxy: 'localhost',
       },
       ports: {
-        runtime: 41174,
-        frontend: 41173,
-        billing: 41175,
-      skills: 41176,
-      resources: 41177,
+        runtime: 62174,
+        frontend: 62173,
+        billing: 62175,
+        skills: 62176,
+        resources: 62177,
       },
     })
 
@@ -73,11 +73,11 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(runtime?.env).toMatchObject({
       NODE_ENV: 'development',
       BEEGAME_BILLING_MODE: 'remote',
-      BEEGAME_BILLING_API_BASE_URL: 'http://127.0.0.1:41175',
-      BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:41176',
-      BEEGAME_RESOURCE_SERVER_URL: 'http://127.0.0.1:41177',
+      BEEGAME_BILLING_API_BASE_URL: 'http://127.0.0.1:62175',
+      BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:62176',
+      BEEGAME_RESOURCE_SERVER_URL: 'http://127.0.0.1:62177',
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
-      BEEGAME_API_CORS_ORIGINS: 'http://127.0.0.1:41173',
+      BEEGAME_API_CORS_ORIGINS: 'http://127.0.0.1:62173',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
       NO_PROXY: '127.0.0.1,project.supabase.co',
@@ -88,29 +88,29 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(frontend?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env).toMatchObject({
-      PORT: '41173',
-      VITE_API_BASE_URL: 'http://127.0.0.1:41174',
-      VITE_WS_BASE_URL: 'ws://127.0.0.1:41174',
+      PORT: '62173',
+      VITE_API_BASE_URL: 'http://127.0.0.1:62174',
+      VITE_WS_BASE_URL: 'ws://127.0.0.1:62174',
     })
     expect(frontend?.env.VITE_RESOURCE_API_BASE_URL).toBeUndefined()
     expect(billing?.env).toMatchObject({
       BEEGAME_BILLING_MODE: 'server',
       BEEGAME_BILLING_HOST: '127.0.0.1',
-      BEEGAME_BILLING_PORT: '41175',
+      BEEGAME_BILLING_PORT: '62175',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       NO_PROXY: '127.0.0.1,project.supabase.co',
       no_proxy: 'localhost,project.supabase.co',
     })
     expect(skills?.env).toMatchObject({
       BEEGAME_SKILLS_HOST: '127.0.0.1',
-      BEEGAME_SKILLS_PORT: '41176',
+      BEEGAME_SKILLS_PORT: '62176',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
       NO_PROXY: '127.0.0.1,project.supabase.co',
       no_proxy: 'localhost,project.supabase.co',
     })
     expect(resources?.env).toMatchObject({
       BEEGAME_RESOURCE_HOST: '127.0.0.1',
-      BEEGAME_RESOURCE_PORT: '41177',
+      BEEGAME_RESOURCE_PORT: '62177',
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
       NO_PROXY: '127.0.0.1,project.supabase.co',
       no_proxy: 'localhost,project.supabase.co',
@@ -118,34 +118,24 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(frontend?.env.BEEGAME_RESOURCE_SERVICE_TOKEN).toBeUndefined()
   })
 
-  test('supports cli port overrides without allowing a second workspace root', () => {
-    const plan = buildBeeGameDevPlan([
-      '--runtime-port',
-      '50174',
-      '--frontend-port=50173',
-      '--billing-port',
-      '50175',
-      '--skills-port',
-      '50176',
-      '--frontend',
-      'custom/frontend',
-    ], {
+  test('rejects command-line and programmatic port overrides', () => {
+    const base = {
       cwd: '/repo',
       env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
       ports: {
-        runtime: 50174,
-        frontend: 50173,
-        billing: 50175,
-        skills: 50176,
+        runtime: 62174,
+        frontend: 62173,
+        billing: 62175,
+        skills: 62176,
+        resources: 62177,
       },
-    })
-
-    expect(plan.workspacePath).toBe('/srv/beegame/projects')
-    expect(plan.frontendDir).toBe(resolve('/repo', 'custom/frontend'))
-    expect(plan.urls.frontend).toBe('http://127.0.0.1:50173')
-    expect(plan.urls.runtime).toBe('http://127.0.0.1:50174')
-    expect(plan.urls.billing).toBe('http://127.0.0.1:50175')
-    expect(plan.urls.skills).toBe('http://127.0.0.1:50176')
+    }
+    expect(() => buildBeeGameDevPlan(['--runtime-port', '50174'], base))
+      .toThrow('fixed runtime port is 62174')
+    expect(() => buildBeeGameDevPlan([], {
+      ...base,
+      ports: { ...base.ports, runtime: 50174 },
+    })).toThrow('runtime must use fixed port 62174')
   })
 
   test('fails closed when the server-managed workspace root is missing', () => {

@@ -10,6 +10,10 @@ import type {
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
+import {
+  createRuntimeObservability,
+  type RuntimeObservability,
+} from './runtime-observability'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -23,12 +27,19 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
+  observabilityFactory?: (input: {
+    workspacePath: string
+    sessionId: string
+    provider: string
+    model: string
+  }) => RuntimeObservability
 } = {}): BeeGameSessionRunner {
   return {
     async start(input) {
       return NativeCliProcessRuntime.start(
         input,
         options.command ?? nativeRuntimeCommand(input),
+        options.observabilityFactory ?? createRuntimeObservability,
       )
     },
   }
@@ -51,6 +62,7 @@ function nativeRuntimeCommand(input: BeeGameSessionRunnerStartInput): string[] {
 class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private activeTurn: {
     input: BeeGameSessionSubmitInput
+    requestId: string
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -61,11 +73,18 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private constructor(
     private readonly child: RuntimeProcess,
     private readonly sessionInput: BeeGameSessionRunnerStartInput,
+    private readonly observability: RuntimeObservability,
   ) {}
 
   static async start(
     input: BeeGameSessionRunnerStartInput,
     command: string[],
+    observabilityFactory: (input: {
+      workspacePath: string
+      sessionId: string
+      provider: string
+      model: string
+    }) => RuntimeObservability,
   ): Promise<NativeCliProcessRuntime> {
     if (command.length === 0)
       throw new Error('Bee Game Studio native runtime command is required')
@@ -76,7 +95,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       stdout: 'pipe',
       stderr: 'pipe',
     }) as RuntimeProcess
-    const runtime = new NativeCliProcessRuntime(child, input)
+    const runtime = new NativeCliProcessRuntime(
+      child,
+      input,
+      observabilityFactory({
+        workspacePath: input.cwd,
+        sessionId: input.sessionId,
+        ...runtimeIdentity(input.env),
+      }),
+    )
     void runtime.consumeStdout()
     void runtime.consumeStderr()
     void child.exited.then(code => runtime.onExit(code))
@@ -90,6 +117,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (input.signal.aborted) return
 
     await new Promise<void>((resolve, reject) => {
+      const requestId = crypto.randomUUID()
       const abort = () => {
         this.child.kill('SIGTERM')
         this.failActiveTurn(new Error('Bee Game Studio native turn was aborted'))
@@ -97,6 +125,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       input.signal.addEventListener('abort', abort, { once: true })
       this.activeTurn = {
         input,
+        requestId,
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -107,9 +136,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         },
         abort,
       }
+      this.observability.beginTurn({ requestId })
       this.write({
         type: 'user',
-        uuid: crypto.randomUUID(),
+        uuid: requestId,
         session_id: this.sessionInput.sessionId,
         parent_tool_use_id: null,
         message: {
@@ -135,11 +165,14 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private async consumeStdout(): Promise<void> {
     try {
       for await (const line of ndjsonLines(this.child.stdout)) {
+        this.observability.observeLine(line)
         let message: Record<string, unknown>
         try {
           message = JSON.parse(line) as Record<string, unknown>
         } catch {
-          throw new Error(`Bee Game Studio native runtime emitted invalid JSON: ${line}`)
+          throw new Error(
+            `Bee Game Studio native runtime emitted invalid JSON (${Buffer.byteLength(line)} bytes)`,
+          )
         }
         await this.onMessage(message)
       }
@@ -164,6 +197,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     }
     const turn = this.activeTurn
     if (!turn) return
+    this.observability.observeMessage(message)
     turn.input.onMessage(message as DashboardSDKMessage)
     if (
       message.type === 'system' &&
@@ -177,9 +211,14 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (message.type !== 'result') return
     this.activeTurn = null
     if (isErrorResult(message)) {
-      turn.reject(new Error(nativeErrorDetail(message)))
+      const error = new Error(nativeErrorDetail(message))
+      this.observability.finishTurn({ outcome: 'error', error })
+      await this.observability.flush()
+      turn.reject(error)
       return
     }
+    this.observability.finishTurn({ outcome: 'success' })
+    await this.observability.flush()
     turn.resolve()
   }
 
@@ -222,6 +261,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private failActiveTurn(error: Error): void {
     const turn = this.activeTurn
     this.activeTurn = null
+    if (turn) {
+      this.observability.finishTurn({
+        outcome: error.message.includes('aborted') ? 'aborted' : 'error',
+        error,
+      })
+      void this.observability.flush()
+    }
     turn?.reject(error)
   }
 
@@ -231,6 +277,28 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.child.stdin.write(`${JSON.stringify(message)}\n`)
     this.child.stdin.flush()
   }
+}
+
+function runtimeIdentity(env: Record<string, string>): {
+  provider: string
+  model: string
+} {
+  if (env.ANTHROPIC_BASE_URL || env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY)
+    return {
+      provider: 'anthropic',
+      model: env.ANTHROPIC_MODEL || env.BEEGAME_MODEL || 'configured',
+    }
+  if (env.OPENAI_BASE_URL || env.OPENAI_API_KEY)
+    return {
+      provider: 'openai-compatible',
+      model: env.OPENAI_MODEL || env.BEEGAME_MODEL || 'configured',
+    }
+  if (env.AWS_REGION || env.AWS_BEDROCK_MODEL)
+    return {
+      provider: 'bedrock',
+      model: env.AWS_BEDROCK_MODEL || 'configured',
+    }
+  return { provider: 'configured', model: env.BEEGAME_MODEL || 'configured' }
 }
 
 function permissionResponse(

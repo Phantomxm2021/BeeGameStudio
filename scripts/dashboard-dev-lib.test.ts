@@ -34,17 +34,17 @@ describe('dashboard dev launcher helpers', () => {
     })).toThrow('workspace root is server-managed')
   })
 
-  test('injects the selected api port into the frontend dev server', () => {
+  test('injects the fixed api port into the frontend dev server', () => {
     const env = buildFrontendEnv({
-      apiPort: 4123,
-      frontendPort: 5188,
+      apiPort: 62174,
+      frontendPort: 62173,
       baseEnv: { EXISTING: '1' },
     })
 
     expect(env.EXISTING).toBe('1')
-    expect(env.PORT).toBe('5188')
-    expect(env.VITE_API_BASE_URL).toBe('http://127.0.0.1:4123')
-    expect(env.VITE_WS_BASE_URL).toBe('ws://127.0.0.1:4123')
+    expect(env.PORT).toBe('62173')
+    expect(env.VITE_API_BASE_URL).toBe('http://127.0.0.1:62174')
+    expect(env.VITE_WS_BASE_URL).toBe('ws://127.0.0.1:62174')
   })
 
   test('does not pass Supabase service-role secrets to the runtime host', () => {
