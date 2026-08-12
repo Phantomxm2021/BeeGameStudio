@@ -119,7 +119,8 @@ describe('canonical document commit', () => {
         ].sort(bytewise).join(',')}`,
       )
     }
-    expect(prompt).toContain('sort responsibilityIds bytewise within each record')
+    expect(prompt).toContain('service canonicalizes record and responsibility ordering')
+    expect(prompt).toContain('open_decision records must use state=deferred')
   })
 
   test('prepares Markdown before accepting authority without resending the body', async () => {

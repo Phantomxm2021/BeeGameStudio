@@ -56,6 +56,22 @@ describe('foundation authority sidecar', () => {
     ).toBe(`${JSON.stringify(sidecar, null, 2)}\n`)
   })
 
+  test('canonicalizes submission record and responsibility ordering', () => {
+    const unordered = records()
+      .map(record => ({
+        ...record,
+        responsibilityIds: [...record.responsibilityIds].reverse(),
+      }))
+      .reverse()
+    const sidecar = createFoundationAuthoritySidecar({
+      documentPath: 'docs/GDD.md',
+      markdown,
+      submission: { records: unordered },
+    })
+
+    expect(sidecar.records).toEqual(records())
+  })
+
   test('rejects stale identity, noncanonical ordering, and duplicate records', () => {
     const valid = storedSidecar()
     expect(() =>

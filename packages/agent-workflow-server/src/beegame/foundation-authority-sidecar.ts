@@ -223,6 +223,12 @@ export function createFoundationAuthoritySidecar(input: {
   submission: unknown
 }): FoundationAuthoritySidecar {
   const submission = foundationAuthoritySubmissionSchema.parse(input.submission)
+  const records = submission.records
+    .map(record => ({
+      ...record,
+      responsibilityIds: [...record.responsibilityIds].sort(bytewise),
+    }))
+    .sort((left, right) => bytewise(left.authorityId, right.authorityId))
   return validateFoundationAuthoritySidecar({
     documentPath: input.documentPath,
     markdown: input.markdown,
@@ -230,7 +236,7 @@ export function createFoundationAuthoritySidecar(input: {
       schemaVersion: 1,
       documentPath: input.documentPath,
       documentDigest: foundationDocumentDigest(input.markdown),
-      records: submission.records,
+      records,
     },
   })
 }
