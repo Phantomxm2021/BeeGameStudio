@@ -178,6 +178,7 @@ async function enumeratePath(
     const entries = await readdir(directory, { withFileTypes: true })
     entries.sort((left, right) => comparePaths(left.name, right.name))
     for (const entry of entries) {
+      if (entry.name === 'node_modules') continue
       const relativePath = `${relativeDirectory}/${entry.name}`
       if (entry.isSymbolicLink()) {
         throw new Error(

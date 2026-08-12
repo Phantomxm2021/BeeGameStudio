@@ -175,4 +175,33 @@ describe('upstream core audit', () => {
     ).rejects.toThrow('symbolic links are not allowed')
     await rm(root, { recursive: true, force: true })
   })
+
+  test('ignores dependency installation links inside source packages', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'core-alignment-dependencies-'))
+    const upstreamRoot = join(root, 'upstream')
+    const localRoot = join(root, 'local')
+    await writeFixture(upstreamRoot, 'src/runtime.ts', 'export {}\n')
+    await writeFixture(localRoot, 'src/runtime.ts', 'export {}\n')
+    await mkdir(join(root, 'dependencies'), { recursive: true })
+    await symlink(
+      join(root, 'dependencies'),
+      join(upstreamRoot, 'src/node_modules'),
+    )
+    await symlink(
+      join(root, 'dependencies'),
+      join(localRoot, 'src/node_modules'),
+    )
+
+    expect(
+      (
+        await auditCoreAlignment({
+          manifest: fixtureManifest,
+          upstreamRoot,
+          localRoot,
+          verifyCommit: false,
+        })
+      ).differences,
+    ).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  })
 })
