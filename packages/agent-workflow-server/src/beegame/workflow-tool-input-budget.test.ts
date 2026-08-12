@@ -91,4 +91,16 @@ describe('workflow document tool input budget', () => {
       toolName: 'MultiEdit',
     })
   })
+
+  test('leaves structured document batches to their exact native 16 KiB gate', () => {
+    const state = createWorkflowToolInputBudgetState()
+    observeWorkflowToolInput(state, start(0, 'CommitCanonicalDocument'))
+
+    expect(
+      observeWorkflowToolInput(
+        state,
+        inputDelta(0, '界'.repeat(DOCUMENT_NATIVE_WRITE_MAX_BYTES)),
+      ),
+    ).toBeUndefined()
+  })
 })

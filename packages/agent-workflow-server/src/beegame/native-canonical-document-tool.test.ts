@@ -475,6 +475,231 @@ describe('canonical document commit', () => {
     }
   })
 
+  test('batches two or three consecutive parts with durable partial success', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-part-batch-'))
+    try {
+      const path = 'docs/GDD.md'
+      const submission = completeSubmission(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-part-batch',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      const firstBatch = {
+        parts: [
+          {
+            kind: 'header',
+            title: submission.title,
+            executiveSummary: submission.executiveSummary,
+          },
+          { kind: 'section', section: submission.sections[0] },
+        ],
+      }
+      await expect(call(firstBatch)).resolves.toMatchObject({
+        data: {
+          status: 'parts_prepared',
+          acceptedParts: ['header', `section:${submission.sections[0]!.sectionId}`],
+          nextPart: `section:${submission.sections[1]!.sectionId}`,
+        },
+      })
+      await expect(call(firstBatch)).resolves.toMatchObject({
+        data: {
+          status: 'parts_prepared',
+          nextPart: `section:${submission.sections[1]!.sectionId}`,
+        },
+      })
+      await expect(
+        call({
+          parts: [
+            firstBatch.parts[0],
+            {
+              kind: 'section',
+              section: { ...submission.sections[0]!, body: 'Changed retry.' },
+            },
+          ],
+        }),
+      ).rejects.toThrow(/different|next document part/i)
+
+      await expect(
+        call({
+          parts: [
+            { kind: 'section', section: submission.sections[2] },
+            { kind: 'section', section: submission.sections[3] },
+          ],
+        }),
+      ).rejects.toThrow(
+        new RegExp(`next document part is section:${submission.sections[1]!.sectionId}`, 'i'),
+      )
+
+      await expect(
+        call({
+          parts: submission.sections.slice(1, 4).map(section => ({
+            kind: 'section',
+            section,
+          })),
+        }),
+      ).resolves.toMatchObject({
+        data: {
+          status: 'parts_prepared',
+          acceptedParts: submission.sections
+            .slice(1, 4)
+            .map(section => `section:${section.sectionId}`),
+          nextPart: `section:${submission.sections[4]!.sectionId}`,
+        },
+      })
+
+      await expect(
+        call({
+          parts: [
+            { kind: 'section', section: submission.sections[4] },
+            {
+              kind: 'section',
+              section: { ...submission.sections[5]!, body: '' },
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        new RegExp(`section:${submission.sections[5]!.sectionId}.*nextPart=section:${submission.sections[5]!.sectionId}`, 'i'),
+      )
+      await expect(
+        call({ part: { kind: 'section', section: submission.sections[5] } }),
+      ).resolves.toMatchObject({ data: { status: 'part_prepared' } })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects oversized or overlong batches before mutating the draft', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-batch-budget-'))
+    try {
+      const path = 'docs/GDD.md'
+      const submission = completeSubmission(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-batch-budget',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      await expect(
+        call({
+          parts: Array.from({ length: 4 }, () => ({
+            kind: 'header',
+            title: submission.title,
+            executiveSummary: submission.executiveSummary,
+          })),
+        }),
+      ).rejects.toThrow(/3|too_big|small/i)
+      await expect(
+        call({
+          parts: [
+            {
+              kind: 'header',
+              title: submission.title,
+              executiveSummary: 'x'.repeat(17_000),
+            },
+          ],
+        }),
+      ).rejects.toThrow(/16|bytes|16384/i)
+      await expect(
+        call({
+          part: {
+            kind: 'header',
+            title: submission.title,
+            executiveSummary: submission.executiveSummary,
+          },
+        }),
+      ).resolves.toMatchObject({
+        data: {
+          status: 'part_prepared',
+          nextPart: `section:${submission.sections[0]!.sectionId}`,
+        },
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('resumes a legacy v1 draft through the bounded batch protocol', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-v1-batch-'))
+    try {
+      const path = 'docs/GDD.md'
+      const dispatchId = 'dispatch-v1-batch'
+      const submission = completeSubmission(path)
+      const draftPath = join(
+        workspacePath,
+        '.beegame/workflow/canonical-document-drafts',
+        `${dispatchId}.json`,
+      )
+      await mkdir(join(draftPath, '..'), { recursive: true })
+      await writeFile(
+        draftPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          dispatchId,
+          targetPath: path,
+          title: submission.title,
+          executiveSummary: submission.executiveSummary,
+          sections: [submission.sections[0]],
+          productionMaterials: [],
+        }),
+      )
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId,
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      await expect(
+        (tool?.call as (input: unknown) => Promise<unknown>)({
+          parts: submission.sections.slice(1, 3).map(section => ({
+            kind: 'section',
+            section,
+          })),
+        }),
+      ).resolves.toMatchObject({
+        data: {
+          status: 'parts_prepared',
+          nextPart: `section:${submission.sections[3]!.sectionId}`,
+        },
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('rejects skipped document parts without losing the prepared draft', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-part-order-'))
     try {

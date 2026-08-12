@@ -35,38 +35,45 @@ const commitInputSchema = z
   })
   .strict()
 
+const completeDocumentPartSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('header'),
+      title: z.string().trim().min(1),
+      executiveSummary: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('section'),
+      section: completeGameDocumentSectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('material'),
+      material: productionMaterialSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('audit'),
+      auditAppendix: completeGameDocumentAuditAppendixSchema,
+    })
+    .strict(),
+])
+
+const documentPartBatchEnvelopeSchema = z
+  .object({ parts: z.array(z.unknown()).min(1).max(3) })
+  .strict()
+
 const completeDocumentCommitInputSchema = z.union([
   z
     .object({
-      part: z.discriminatedUnion('kind', [
-        z
-          .object({
-            kind: z.literal('header'),
-            title: z.string().trim().min(1),
-            executiveSummary: z.string().trim().min(1),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal('section'),
-            section: completeGameDocumentSectionSchema,
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal('material'),
-            material: productionMaterialSchema,
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal('audit'),
-            auditAppendix: completeGameDocumentAuditAppendixSchema,
-          })
-          .strict(),
-      ]),
+      part: completeDocumentPartSchema,
     })
     .strict(),
+  documentPartBatchEnvelopeSchema,
   z.object({ document: completeGameDocumentSubmissionSchema }).strict(),
   z.object({ body: z.string().trim().min(1) }).strict(),
   z
@@ -284,9 +291,29 @@ export function createNativeCanonicalDocumentTool(options: {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: unknown) {
+      if (
+        completeGameDocument &&
+        input !== null &&
+        typeof input === 'object' &&
+        'parts' in input
+      ) {
+        const actualBytes = Buffer.byteLength(JSON.stringify(input), 'utf8')
+        if (actualBytes > 16 * 1024)
+          throw new Error(
+            `canonical document part batch is ${actualBytes} bytes; maximum is 16384 bytes`,
+          )
+      }
       const parsed = completeGameDocument
         ? completeDocumentCommitInputSchema.parse(input)
         : commitInputSchema.parse(input)
+      if (completeGameDocument && 'parts' in parsed)
+        return {
+          data: await prepareCompleteDocumentPartBatch({
+            workspacePath: options.workspacePath,
+            contract: options.contract,
+            parts: parsed.parts,
+          }),
+        }
       if (completeGameDocument && 'part' in parsed)
         return {
           data: await prepareCompleteDocumentPart({
@@ -352,6 +379,176 @@ export function createNativeCanonicalDocumentTool(options: {
       }
     },
   })
+}
+
+type CompleteDocumentPart = z.infer<typeof completeDocumentPartSchema>
+
+function minimalDocumentPartIdentity(value: unknown): string {
+  if (!value || typeof value !== 'object')
+    throw new Error('canonical document part identity is invalid')
+  const candidate = value as Record<string, unknown>
+  if (candidate.kind === 'header') return 'header'
+  if (candidate.kind === 'audit') return 'audit'
+  if (candidate.kind === 'section') {
+    const section = candidate.section as Record<string, unknown> | undefined
+    if (typeof section?.sectionId === 'string' && section.sectionId.trim())
+      return `section:${section.sectionId.trim()}`
+  }
+  if (candidate.kind === 'material') {
+    const material = candidate.material as Record<string, unknown> | undefined
+    if (typeof material?.materialId === 'string' && material.materialId.trim())
+      return `material:${material.materialId.trim()}`
+  }
+  throw new Error('canonical document part identity is invalid')
+}
+
+function canonicalPartIdentities(
+  contract: ReturnType<typeof getGameDocumentContract>,
+): readonly string[] {
+  return [
+    'header',
+    ...contract.sections.map(section => `section:${section.sectionId}`),
+    ...contract.productionMaterials.map(
+      material => `material:${material.materialId}`,
+    ),
+    'audit',
+  ]
+}
+
+function preparedPartCount(draft: CompleteDocumentDraft | undefined): number {
+  if (!draft) return 0
+  return (
+    1 +
+    draft.sections.length +
+    draft.productionMaterials.length +
+    (draft.auditAppendix ? 1 : 0)
+  )
+}
+
+function preparedPartMatches(
+  draft: CompleteDocumentDraft,
+  part: CompleteDocumentPart,
+): boolean {
+  if (part.kind === 'header')
+    return (
+      draft.title === part.title &&
+      draft.executiveSummary === part.executiveSummary
+    )
+  if (part.kind === 'section')
+    return draft.sections.some(
+      section =>
+        section.sectionId === part.section.sectionId &&
+        JSON.stringify(section) === JSON.stringify(part.section),
+    )
+  if (part.kind === 'material')
+    return draft.productionMaterials.some(
+      material =>
+        material.materialId === part.material.materialId &&
+        JSON.stringify(material) === JSON.stringify(part.material),
+    )
+  return (
+    draft.auditAppendix !== undefined &&
+    JSON.stringify(draft.auditAppendix) === JSON.stringify(part.auditAppendix)
+  )
+}
+
+async function currentCompleteDocumentDraft(input: {
+  workspacePath: string
+  contract: CanonicalDocumentCommitContract
+}): Promise<CompleteDocumentDraft | undefined> {
+  const raw = await readOptionalFile(
+    completeDocumentDraftPath(
+      input.workspacePath,
+      input.contract.dispatchId,
+    ),
+  )
+  if (!raw) return undefined
+  const draft = completeDocumentDraftSchema.parse(JSON.parse(raw))
+  if (
+    draft.dispatchId !== input.contract.dispatchId ||
+    draft.targetPath !== input.contract.targetPath
+  )
+    throw new Error('prepared document draft identity is invalid')
+  return draft
+}
+
+async function prepareCompleteDocumentPartBatch(input: {
+  workspacePath: string
+  contract: CanonicalDocumentCommitContract
+  parts: readonly unknown[]
+}): Promise<{
+  status: 'parts_prepared'
+  acceptedParts: readonly string[]
+  nextPart: string
+}> {
+  const contract = getGameDocumentContract(
+    input.contract.targetPath as FoundationDocumentPath,
+  )
+  const canonicalIds = canonicalPartIdentities(contract)
+  const identities = input.parts.map(minimalDocumentPartIdentity)
+  const draft = await currentCompleteDocumentDraft(input)
+  const progress = preparedPartCount(draft)
+  const expected = canonicalIds.slice(progress, progress + identities.length)
+  const inExpectedOrder =
+    expected.length === identities.length &&
+    identities.every((identity, index) => identity === expected[index])
+
+  if (!inExpectedOrder) {
+    const retryStart = canonicalIds.indexOf(identities[0]!)
+    const contiguousRetry =
+      retryStart >= 0 &&
+      identities.every(
+        (identity, index) => canonicalIds[retryStart + index] === identity,
+      )
+    if (draft && contiguousRetry && retryStart + identities.length <= progress) {
+      const parsed = input.parts.map(part => completeDocumentPartSchema.parse(part))
+      if (parsed.every(part => preparedPartMatches(draft, part)))
+        return {
+          status: 'parts_prepared',
+          acceptedParts: identities,
+          nextPart: draft.auditAppendix
+            ? 'authority'
+            : nextDraftPart(contract, draft),
+        }
+      throw new Error('prepared document batch retry has different content')
+    }
+    const nextPart = draft?.auditAppendix
+      ? 'authority'
+      : draft
+        ? nextDraftPart(contract, draft)
+        : 'header'
+    throw new Error(`next document part is ${nextPart}`)
+  }
+
+  const acceptedParts: string[] = []
+  let nextPart = expected[0] ?? 'authority'
+  for (let index = 0; index < input.parts.length; index += 1) {
+    const identity = identities[index]!
+    try {
+      const part = completeDocumentPartSchema.parse(input.parts[index])
+      const result = await prepareCompleteDocumentPart({
+        workspacePath: input.workspacePath,
+        contract: input.contract,
+        part,
+      })
+      acceptedParts.push(identity)
+      nextPart = result.nextPart
+    } catch (error) {
+      const current = await currentCompleteDocumentDraft(input)
+      const currentNext = current?.auditAppendix
+        ? 'authority'
+        : current
+          ? nextDraftPart(contract, current)
+          : 'header'
+      const cause =
+        error instanceof Error ? error.message.slice(0, 512) : 'invalid part'
+      throw new Error(
+        `document part ${identity} failed; nextPart=${currentNext}; ${cause}`,
+        { cause: error },
+      )
+    }
+  }
+  return { status: 'parts_prepared', acceptedParts, nextPart }
 }
 
 async function prepareCompleteDocumentPart(input: {
