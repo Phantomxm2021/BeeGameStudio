@@ -6,7 +6,7 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
-import { getWorkerBaseEnvironment } from './query-engine-process-runner'
+import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 
 export type BeeGameModelContent =
   | string
@@ -193,7 +193,7 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
 // not cross the isolation boundary.
 export function getModelRuntimeWorkerEnvironment(): Record<string, string> {
   return {
-    ...getWorkerBaseEnvironment(),
+    ...getSafeRuntimeProcessEnvironment(),
     CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
     ...Object.fromEntries(
       MODEL_RUNTIME_TRANSPORT_ENV_KEYS.flatMap(key => {

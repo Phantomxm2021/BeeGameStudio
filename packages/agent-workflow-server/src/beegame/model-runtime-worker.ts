@@ -1,8 +1,8 @@
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import {
-  createBeeGamePinnedFetch,
+  createPinnedRuntimeFetch,
   ensureBeeGameMacroGlobals,
-} from './query-engine-runner'
+} from './model-runtime-network'
 import { getTLSFetchOptions } from '../../../../src/utils/mtls.js'
 import type {
   BeeGameModelRuntimeFailureStage,
@@ -31,7 +31,7 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       ),
     ]),
   )
-  let pinnedFetch: ReturnType<typeof createBeeGamePinnedFetch> | undefined
+  let pinnedFetch: ReturnType<typeof createPinnedRuntimeFetch> | undefined
   let failureStage: BeeGameModelRuntimeFailureStage = 'model_request'
 
   try {
@@ -43,7 +43,7 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
       previousEnv.set(key, process.env[key])
       process.env[key] = value
     }
-    pinnedFetch = createBeeGamePinnedFetch(previousFetch, targets, {
+    pinnedFetch = createPinnedRuntimeFetch(previousFetch, targets, {
       tls: getTLSFetchOptions().tls,
     })
     process.chdir(message.input.cwd)

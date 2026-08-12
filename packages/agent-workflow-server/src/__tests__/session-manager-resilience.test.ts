@@ -10,9 +10,9 @@ import {
   type DashboardPermissionDecision,
 } from '../beegame/session-manager'
 import {
-  QueryEngineWorkerError,
-  serializeQueryEngineError,
-} from '../beegame/query-engine-worker-protocol'
+  RuntimeWorkerError,
+  serializeRuntimeWorkerError,
+} from '../beegame/runtime-worker-error'
 import type {
   BeeGameUsageBillingRecordResult as RecordUsageResult,
   BeeGameUsageBillingUsage as Usage,
@@ -250,8 +250,8 @@ describe('BeeGame session runtime resilience', () => {
     const nativeError = Object.assign(new Error('transport failed'), {
       cause: { code: 'CERTIFICATE_VERIFY_FAILED' },
     })
-    const serialized = serializeQueryEngineError(nativeError, 'fallback')
-    const reconstructed = new QueryEngineWorkerError(serialized)
+    const serialized = serializeRuntimeWorkerError(nativeError, 'fallback')
+    const reconstructed = new RuntimeWorkerError(serialized)
 
     expect(serialized).toMatchObject({
       causeCode: 'CERTIFICATE_VERIFY_FAILED',
@@ -593,7 +593,7 @@ describe('BeeGame session runtime resilience', () => {
         return {
           submit: async () => {
             if (current === 1) {
-              throw new QueryEngineWorkerError({
+              throw new RuntimeWorkerError({
                 message: 'temporary transport failure',
                 name: 'Error',
                 code: 'ECONNRESET',
@@ -915,7 +915,7 @@ describe('BeeGame session runtime resilience', () => {
               type: 'stream_event',
               event: { type: 'message_start' },
             } as DashboardSDKMessage)
-            throw new QueryEngineWorkerError({
+            throw new RuntimeWorkerError({
               message: 'temporary transport failure',
               name: 'Error',
               code: 'ECONNRESET',

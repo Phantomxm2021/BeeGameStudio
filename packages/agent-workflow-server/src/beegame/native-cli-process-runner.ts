@@ -9,6 +9,7 @@ import type {
 } from './session-manager'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand } from './native-runtime-process-path'
+import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -19,18 +20,6 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdout: ReadableStream<Uint8Array>
   stderr: ReadableStream<Uint8Array>
 }
-
-const SAFE_INHERITED_ENV = [
-  'HOME',
-  'LANG',
-  'LC_ALL',
-  'LOGNAME',
-  'NODE_ENV',
-  'PATH',
-  'SHELL',
-  'TMPDIR',
-  'USER',
-] as const
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
@@ -285,12 +274,7 @@ export function nativeRuntimeEnvironment(
   selectedModelEnvironment: Record<string, string>,
 ): Record<string, string> {
   return {
-    ...Object.fromEntries(
-      SAFE_INHERITED_ENV.flatMap(key => {
-        const value = process.env[key]
-        return value === undefined ? [] : [[key, value]]
-      }),
-    ),
+    ...getSafeRuntimeProcessEnvironment(),
     ...selectedModelEnvironment,
   }
 }

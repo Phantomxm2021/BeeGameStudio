@@ -4,7 +4,7 @@ import type {
   ResourceRequirementMatchRequest,
   ResourceRequirementMatchResult,
 } from '@bee-game-studio/beegame-resource-core'
-import { serializeQueryEngineError } from './query-engine-worker-protocol'
+import { serializeRuntimeWorkerError } from './runtime-worker-error'
 
 export type ResourceSelectionElementRelation = {
   kind: string
@@ -129,7 +129,7 @@ export function createResourceSelectionClient(options: {
       try {
         return await fetchImpl(input, init)
       } catch (error) {
-        const classified = serializeQueryEngineError(
+        const classified = serializeRuntimeWorkerError(
           error,
           'Resource service transport failed',
         )
