@@ -181,7 +181,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
 
   private async consumeStdout(): Promise<void> {
     try {
-      for await (const line of ndjsonLines(this.child.stdout)) {
+      for await (const line of ndjsonLines(this.child.stdout, chunk => {
+        this.observability.observeStdoutChunk(chunk)
+      })) {
         this.observability.observeLine(line)
         let message: Record<string, unknown>
         try {
@@ -393,10 +395,12 @@ export function nativeRuntimeEnvironment(
 
 async function* ndjsonLines(
   stream: ReadableStream<Uint8Array>,
+  observeChunk: (chunk: Uint8Array) => void = () => undefined,
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder()
   let buffer = ''
   for await (const chunk of stream) {
+    observeChunk(chunk)
     buffer += decoder.decode(chunk, { stream: true })
     for (;;) {
       const newline = buffer.indexOf('\n')

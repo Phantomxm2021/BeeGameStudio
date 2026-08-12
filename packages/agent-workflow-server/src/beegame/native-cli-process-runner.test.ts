@@ -14,6 +14,7 @@ function startRuntime() {
     command: [process.execPath, fixturePath],
     observabilityFactory: () => ({
       beginTurn: () => undefined,
+      observeStdoutChunk: () => undefined,
       observeLine: () => undefined,
       observeMessage: () => undefined,
       finishTurn: () => undefined,
@@ -50,6 +51,7 @@ describe('native CLI process runner', () => {
         observed = input
         return {
           beginTurn: () => undefined,
+          observeStdoutChunk: () => undefined,
           observeLine: () => undefined,
           observeMessage: () => undefined,
           finishTurn: () => undefined,
@@ -129,6 +131,7 @@ describe('native CLI process runner', () => {
       command: [process.execPath, fixturePath],
       observabilityFactory: () => ({
         beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
         observeLine: () => undefined,
         observeMessage: () => undefined,
         finishTurn: () => undefined,

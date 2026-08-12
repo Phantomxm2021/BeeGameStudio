@@ -8,6 +8,54 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
+  test('records stdout byte gaps without persisting streamed content', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-byte-gap-'))
+    let nowMs = Date.parse('2026-08-12T10:00:00.000Z')
+    try {
+      const observer = createRuntimeObservability({
+        workspacePath,
+        sessionId: 'session-byte-gap',
+        provider: 'anthropic',
+        model: 'model-1',
+        clock: () => new Date(nowMs),
+        streamGapObservationMs: 1_000,
+      })
+      observer.beginTurn({ requestId: 'request-byte-gap' })
+      observer.observeStdoutChunk(
+        Buffer.from('PRIVATE PARTIAL TOOL JSON'),
+      )
+      nowMs += 3_500
+      observer.observeStdoutChunk(Buffer.from('PRIVATE DOCUMENT BODY'))
+      nowMs += 250
+      observer.finishTurn({ outcome: 'success' })
+      await observer.flush()
+
+      const raw = await readFile(
+        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
+        'utf8',
+      )
+      const records = raw.trim().split('\n').map(line => JSON.parse(line))
+      expect(records).toContainEqual(expect.objectContaining({
+        type: 'stdout_resumed',
+        gapMs: 3_500,
+        chunkBytes: Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+      }))
+      expect(records.at(-1)).toEqual(expect.objectContaining({
+        type: 'turn_terminal',
+        stdoutChunkCount: 2,
+        stdoutByteCount:
+          Buffer.byteLength('PRIVATE PARTIAL TOOL JSON') +
+          Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+        maxStdoutChunkGapMs: 3_500,
+        stdoutSilenceAtTerminalMs: 250,
+      }))
+      expect(raw).not.toContain('PRIVATE PARTIAL TOOL JSON')
+      expect(raw).not.toContain('PRIVATE DOCUMENT BODY')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('records terminal evidence without prompt bodies, tool inputs, or secrets', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-observation-'))
     try {

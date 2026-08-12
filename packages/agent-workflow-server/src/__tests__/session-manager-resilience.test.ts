@@ -965,6 +965,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-document-input',
       workflowDispatchId: 'dispatch-document-input',
       workflowWorkerType: 'document-author',
+      language: 'zh',
     })
 
     const turn = manager.send(session.id, 'author the document')
@@ -984,6 +985,7 @@ describe('BeeGame session runtime resilience', () => {
       status: 'running',
     }))
     expect(active?.thinking).toBe('working')
+    expect(active?.currentMessage).toBe('正在准备文档写入…')
     expect(active?.lastProgressAt).toBe(startedAt)
     release()
     await turn

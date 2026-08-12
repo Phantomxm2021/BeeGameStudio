@@ -497,6 +497,33 @@ function resourceWorkerActivityMessage(
   return undefined
 }
 
+function documentAuthorActivityMessage(
+  record: SessionRecord,
+  event: BeeGameEvent,
+): string | undefined {
+  if (
+    record.workflowWorkerType !== 'document-author' ||
+    event.type !== 'tool.progress' ||
+    event.payload?.phase !== 'input_streaming'
+  )
+    return undefined
+  const toolName = getDashboardPayloadString(event.payload, 'toolName')
+  if (toolName !== 'Write' && toolName !== 'Edit') return undefined
+  const traditional = record.language === 'zh-TW'
+  const chinese = record.language === 'zh' || traditional
+  if (toolName === 'Write')
+    return chinese
+      ? traditional
+        ? '正在準備文件寫入…'
+        : '正在准备文档写入…'
+      : 'Preparing the document write…'
+  return chinese
+    ? traditional
+      ? '正在準備文件修改…'
+      : '正在准备文档修改…'
+    : 'Preparing the document edit…'
+}
+
 function isResourceProductionWorker(workerType?: string): boolean {
   return (
     workerType === 'resource-planner' ||
@@ -1878,10 +1905,19 @@ export class BeeGameSessionManager {
         record,
         event,
       )
+      const documentActivityMessage = documentAuthorActivityMessage(
+        record,
+        event,
+      )
       const progressMessage = isResourceProductionWorker(
         record.workflowWorkerType,
       )
         ? (resourceActivityMessage ?? '')
+        : record.workflowWorkerType === 'document-author'
+          ? documentActivityMessage ??
+            (event.type === 'assistant.message'
+              ? sanitizeWorkflowDisplayMessage(event.text)
+              : '')
         : event.type === 'assistant.message'
           ? sanitizeWorkflowDisplayMessage(event.text)
           : ''

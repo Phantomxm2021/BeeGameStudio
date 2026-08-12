@@ -14,6 +14,8 @@ type RuntimeObservationInput = {
     credentialConfigured: boolean
   }
   errorSink?: (message: string) => void
+  clock?: () => Date
+  streamGapObservationMs?: number
 }
 
 export type RuntimeObservability = ReturnType<typeof createRuntimeObservability>
@@ -21,10 +23,17 @@ export type RuntimeObservability = ReturnType<typeof createRuntimeObservability>
 export function createRuntimeObservability(input: RuntimeObservationInput) {
   const path = runtimeObservationPath(input.workspacePath)
   const errorSink = input.errorSink ?? (message => console.error(`[Bee Game Studio API error] ${message}`))
+  const clock = input.clock ?? (() => new Date())
+  const streamGapObservationMs = input.streamGapObservationMs ?? 30_000
   let requestId = ''
   let eventCount = 0
   let byteCount = 0
   let lastEventType = ''
+  let turnActive = false
+  let stdoutChunkCount = 0
+  let stdoutByteCount = 0
+  let lastStdoutChunkAtMs: number | undefined
+  let maxStdoutChunkGapMs = 0
   let queue = Promise.resolve()
 
   const enqueue = (record: Record<string, unknown>): void => {
@@ -48,9 +57,14 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       eventCount = 0
       byteCount = 0
       lastEventType = ''
+      turnActive = true
+      stdoutChunkCount = 0
+      stdoutByteCount = 0
+      lastStdoutChunkAtMs = undefined
+      maxStdoutChunkGapMs = 0
       enqueue({
         type: 'turn_started',
-        timestamp: new Date().toISOString(),
+        timestamp: clock().toISOString(),
         sessionId: input.sessionId,
         requestId,
         provider: input.provider,
@@ -59,6 +73,29 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
           ? { launchContract: input.launchContract }
           : {}),
       })
+    },
+    observeStdoutChunk(chunk: Uint8Array): void {
+      if (!turnActive) return
+      const now = clock()
+      const nowMs = now.getTime()
+      const chunkBytes = chunk.byteLength
+      stdoutChunkCount += 1
+      stdoutByteCount += chunkBytes
+      if (lastStdoutChunkAtMs !== undefined) {
+        const gapMs = Math.max(0, nowMs - lastStdoutChunkAtMs)
+        maxStdoutChunkGapMs = Math.max(maxStdoutChunkGapMs, gapMs)
+        if (gapMs >= streamGapObservationMs) {
+          enqueue({
+            type: 'stdout_resumed',
+            timestamp: now.toISOString(),
+            sessionId: input.sessionId,
+            requestId,
+            gapMs,
+            chunkBytes,
+          })
+        }
+      }
+      lastStdoutChunkAtMs = nowMs
     },
     observeLine(line: string): void {
       byteCount += Buffer.byteLength(line)
@@ -75,7 +112,7 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         if (candidate.type !== 'tool_use') continue
         enqueue({
           type: 'tool_started',
-          timestamp: new Date().toISOString(),
+          timestamp: clock().toISOString(),
           sessionId: input.sessionId,
           requestId,
           toolUseId: stringField(candidate, 'id'),
@@ -84,11 +121,12 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       }
     },
     finishTurn(result: { outcome: 'success' | 'error' | 'aborted'; error?: unknown }): void {
+      const finishedAt = clock()
       const error = result.error === undefined ? undefined : errorMessage(result.error)
       if (error) safeErrorSink(errorSink, error)
       enqueue({
         type: 'turn_terminal',
-        timestamp: new Date().toISOString(),
+        timestamp: finishedAt.toISOString(),
         sessionId: input.sessionId,
         requestId,
         provider: input.provider,
@@ -97,8 +135,16 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         eventCount,
         byteCount,
         lastEventType,
+        stdoutChunkCount,
+        stdoutByteCount,
+        maxStdoutChunkGapMs,
+        stdoutSilenceAtTerminalMs:
+          lastStdoutChunkAtMs === undefined
+            ? 0
+            : Math.max(0, finishedAt.getTime() - lastStdoutChunkAtMs),
         ...(error ? { error } : {}),
       })
+      turnActive = false
     },
     async flush(): Promise<void> {
       await queue
