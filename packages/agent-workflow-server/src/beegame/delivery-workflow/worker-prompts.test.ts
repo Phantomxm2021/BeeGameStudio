@@ -106,6 +106,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('docs/ASSET_PLAN.md')
     expect(prompt).not.toContain('"systemDeliveryContract"')
     expect(prompt).not.toContain('assets/asset-manifest.json')
+    expect(prompt).not.toContain('"upstreamDocumentPaths"')
+    expect(prompt).not.toContain('"allowedUpstreamPaths"')
+    expect(prompt).not.toContain('"upstreamSections"')
   })
 
   test('instructs one JSON/YAML resource lane', () => {
@@ -190,6 +193,9 @@ describe('resource-content worker prompts', () => {
       'Canonical artifacts: docs/GDD.md, docs/LEVEL_SCENE_DESIGN.md, docs/BALANCE_DESIGN.md, docs/TECHNICAL_DESIGN.md',
     )
     expect(authorPrompt).not.toContain('docs/ART_DIRECTION.md')
+    expect(authorPrompt).not.toContain('"upstreamDocumentPaths"')
+    expect(authorPrompt).not.toContain('"allowedUpstreamPaths"')
+    expect(authorPrompt).not.toContain('"upstreamSections"')
 
     const reviewerPrompt = buildWorkerPrompt({
       runId: 'run',

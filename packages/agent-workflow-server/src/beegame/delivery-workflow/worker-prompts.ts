@@ -82,13 +82,33 @@ function formatContract(request: WorkerDispatchRequest): string {
       confirmedBriefContext: _confirmedBriefContext,
       ...contractWithoutDuplicatedBrief
     } = request.contract
-    if (
+    const initialFoundationAuthor =
       request.workerType === 'document-author' &&
       request.contract.documentSet === 'foundation' &&
-      request.contract.authoringMode === 'initial' &&
-      request.contract.foundationDocumentPath !== 'docs/TECHNICAL_DESIGN.md'
-    )
-      delete contractWithoutDuplicatedBrief.systemDeliveryContract
+      request.contract.authoringMode === 'initial'
+    if (initialFoundationAuthor) {
+      delete contractWithoutDuplicatedBrief.upstreamDocumentPaths
+      const completeDocumentContract =
+        contractWithoutDuplicatedBrief.completeDocumentContract
+      if (
+        completeDocumentContract &&
+        typeof completeDocumentContract === 'object' &&
+        !Array.isArray(completeDocumentContract)
+      ) {
+        const {
+          allowedUpstreamPaths: _allowedUpstreamPaths,
+          upstreamSections: _upstreamSections,
+          ...authorDocumentContract
+        } = completeDocumentContract as Record<string, unknown>
+        contractWithoutDuplicatedBrief.completeDocumentContract =
+          authorDocumentContract
+      }
+      if (
+        request.contract.foundationDocumentPath !==
+        'docs/TECHNICAL_DESIGN.md'
+      )
+        delete contractWithoutDuplicatedBrief.systemDeliveryContract
+    }
     return JSON.stringify(contractWithoutDuplicatedBrief)
   }
   const {
