@@ -31,7 +31,7 @@ const openDecisionSchema = z
   })
   .strict()
 
-const completeGameDocumentSectionSchema = z
+export const completeGameDocumentSectionSchema = z
   .object({
     sectionId: z.string().trim().min(1),
     title: z.string().trim().min(1),
@@ -39,7 +39,7 @@ const completeGameDocumentSectionSchema = z
   })
   .strict()
 
-const productionMaterialSchema = z
+export const productionMaterialSchema = z
   .object({
     materialId: z.string().trim().min(1),
     title: z.string().trim().min(1),
@@ -64,6 +64,9 @@ export const completeGameDocumentSubmissionSchema = z
       .strict(),
   })
   .strict()
+
+export const completeGameDocumentAuditAppendixSchema =
+  completeGameDocumentSubmissionSchema.shape.auditAppendix
 
 export type CompleteGameDocumentSubmission = z.infer<
   typeof completeGameDocumentSubmissionSchema

@@ -200,6 +200,125 @@ describe('canonical document commit', () => {
     }
   })
 
+  test('prepares bounded structured parts before rendering the complete document', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-parts-'))
+    try {
+      const path = 'docs/UI_UX_SPEC.md'
+      const submission = completeSubmission(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-parts-ui',
+          targetPath: path,
+          documentId: 'UI_UX_SPEC',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<{
+        data: { status: string; nextPart?: string }
+      }>
+
+      await expect(
+        call({
+          part: {
+            kind: 'header',
+            title: submission.title,
+            executiveSummary: submission.executiveSummary,
+          },
+        }),
+      ).resolves.toMatchObject({
+        data: {
+          status: 'part_prepared',
+          nextPart: `section:${submission.sections[0]!.sectionId}`,
+        },
+      })
+      await expect(
+        call({
+          part: {
+            kind: 'header',
+            title: submission.title,
+            executiveSummary: submission.executiveSummary,
+          },
+        }),
+      ).resolves.toMatchObject({
+        data: {
+          status: 'part_prepared',
+          nextPart: `section:${submission.sections[0]!.sectionId}`,
+        },
+      })
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+
+      for (const section of submission.sections)
+        await call({ part: { kind: 'section', section } })
+      for (const material of submission.productionMaterials)
+        await call({ part: { kind: 'material', material } })
+      await expect(
+        call({
+          part: { kind: 'audit', auditAppendix: submission.auditAppendix },
+        }),
+      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+      await expect(
+        call({
+          part: { kind: 'audit', auditAppendix: submission.auditAppendix },
+        }),
+      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+
+      const markdown = await readFile(join(workspacePath, path), 'utf8')
+      expect(markdown).toContain('<!-- beegame-section:experience_architecture -->')
+      expect(markdown).toContain('<!-- beegame-production-materials -->')
+      expect(markdown).toContain('<!-- beegame-audit-appendix -->')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects skipped document parts without losing the prepared draft', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-part-order-'))
+    try {
+      const path = 'docs/UI_UX_SPEC.md'
+      const submission = completeSubmission(path)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-part-order-ui',
+          targetPath: path,
+          documentId: 'UI_UX_SPEC',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      await call({
+        part: {
+          kind: 'header',
+          title: submission.title,
+          executiveSummary: submission.executiveSummary,
+        },
+      })
+      await expect(
+        call({ part: { kind: 'section', section: submission.sections[1] } }),
+      ).rejects.toThrow(/next document part|order/i)
+      await expect(
+        call({ part: { kind: 'section', section: submission.sections[0] } }),
+      ).resolves.toMatchObject({ data: { status: 'part_prepared' } })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('produces the complete canonical document set from neutral product authority', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-full-set-'))
     try {

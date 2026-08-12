@@ -119,8 +119,9 @@ describe('delivery worker complete document commit contract', () => {
         }
       expect(block).toContain('Read the compact authority projection')
       expect(block).toContain('CommitCanonicalDocument')
-      expect(block).toContain('Submit the complete Markdown body first')
-      expect(block).toContain('then submit compact authority records without resending the body')
+      expect(block).toContain('Submit bounded structured document parts')
+      expect(block).toContain('then submit compact authority records')
+      expect(block).not.toContain('Submit the complete Markdown body first')
       expect(block).toContain('do not write or edit the assigned path directly')
       expect(block).toContain(
         'Read only the listed source sections from disk when deeper rationale',

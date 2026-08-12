@@ -4,7 +4,10 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
   canonicalizeCompleteGameDocumentMarkdown,
+  completeGameDocumentAuditAppendixSchema,
+  completeGameDocumentSectionSchema,
   completeGameDocumentSubmissionSchema,
+  productionMaterialSchema,
   renderCompleteGameDocument,
   validateCompleteGameDocumentSubmission,
 } from './complete-game-document'
@@ -29,6 +32,37 @@ const commitInputSchema = z
   .strict()
 
 const completeDocumentCommitInputSchema = z.union([
+  z
+    .object({
+      part: z.discriminatedUnion('kind', [
+        z
+          .object({
+            kind: z.literal('header'),
+            title: z.string().trim().min(1),
+            executiveSummary: z.string().trim().min(1),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal('section'),
+            section: completeGameDocumentSectionSchema,
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal('material'),
+            material: productionMaterialSchema,
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal('audit'),
+            auditAppendix: completeGameDocumentAuditAppendixSchema,
+          })
+          .strict(),
+      ]),
+    })
+    .strict(),
   z.object({ document: completeGameDocumentSubmissionSchema }).strict(),
   z.object({ body: z.string().trim().min(1) }).strict(),
   z
@@ -39,6 +73,20 @@ const completeDocumentCommitInputSchema = z.union([
     .strict(),
   z.object({ authority: foundationAuthoritySubmissionSchema }).strict(),
 ])
+
+const completeDocumentDraftSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    dispatchId: z.string().min(1),
+    targetPath: z.string().min(1),
+    title: z.string().min(1),
+    executiveSummary: z.string().min(1),
+    sections: z.array(completeGameDocumentSectionSchema),
+    productionMaterials: z.array(productionMaterialSchema),
+  })
+  .strict()
+
+type CompleteDocumentDraft = z.infer<typeof completeDocumentDraftSchema>
 
 const legacyReceiptSchema = z
   .object({
@@ -180,7 +228,7 @@ export function createNativeCanonicalDocumentTool(options: {
             .join('\n')
         : ''
       return completeGameDocument
-        ? `Use two bounded phases. First call with {document} only, using the strict structured schema; the service renders every protocol marker, heading, and canonical order. Never handwrite protocol markers in section or material body content. After the service returns document_prepared, call with {authority:{records}} only and never resend the document. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nProduction material content must use the stated mechanical format for these exact contracts:\n${productionMaterialContract}`
+        ? `Submit bounded structured document parts through separate calls so no call contains the complete document. Call {part:{kind:"header",title,executiveSummary}} first. Then submit each section in the listed contract order as {part:{kind:"section",section:{sectionId,title,body}}}. Then submit each production material in contract order as {part:{kind:"material",material:{materialId,title,format,body}}}. Finally call {part:{kind:"audit",auditAppendix}}. The service persists each part and returns the exact nextPart; never skip or combine parts. It renders every protocol marker, heading, and canonical order and returns document_prepared only after the audit part completes the full document. Never handwrite protocol markers in section or material body content. After document_prepared, call with {authority:{records}} only. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nProduction material content must use the stated mechanical format for these exact contracts:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
@@ -190,6 +238,14 @@ export function createNativeCanonicalDocumentTool(options: {
       const parsed = completeGameDocument
         ? completeDocumentCommitInputSchema.parse(input)
         : commitInputSchema.parse(input)
+      if (completeGameDocument && 'part' in parsed)
+        return {
+          data: await prepareCompleteDocumentPart({
+            workspacePath: options.workspacePath,
+            contract: options.contract,
+            part: parsed.part,
+          }),
+        }
       const structuredBody =
         completeGameDocument && 'document' in parsed
           ? renderCompleteGameDocument(
@@ -200,8 +256,7 @@ export function createNativeCanonicalDocumentTool(options: {
               ),
             )
           : undefined
-      return {
-        data: await commitCanonicalDocument({
+      const result = await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
           ...(structuredBody !== undefined
@@ -210,8 +265,20 @@ export function createNativeCanonicalDocumentTool(options: {
               ? { body: parsed.body }
               : {}),
           ...('authority' in parsed ? { authority: parsed.authority } : {}),
-        }),
-      }
+        })
+      if (
+        completeGameDocument &&
+        'authority' in parsed &&
+        result.schemaVersion === 2 &&
+        result.status === 'committed'
+      )
+        await unlink(
+          completeDocumentDraftPath(
+            options.workspacePath,
+            options.contract.dispatchId,
+          ),
+        ).catch(() => undefined)
+      return { data: result }
     },
     renderToolUseMessage() {
       return '提交权威文档'
@@ -224,6 +291,140 @@ export function createNativeCanonicalDocumentTool(options: {
       }
     },
   })
+}
+
+async function prepareCompleteDocumentPart(input: {
+  workspacePath: string
+  contract: CanonicalDocumentCommitContract
+  part:
+    | { kind: 'header'; title: string; executiveSummary: string }
+    | { kind: 'section'; section: z.infer<typeof completeGameDocumentSectionSchema> }
+    | { kind: 'material'; material: z.infer<typeof productionMaterialSchema> }
+    | { kind: 'audit'; auditAppendix: z.infer<typeof completeGameDocumentAuditAppendixSchema> }
+}): Promise<
+  | { status: 'part_prepared'; nextPart: string }
+  | CompleteGameDocumentCommitReceipt
+> {
+  const targetPath = input.contract.targetPath as FoundationDocumentPath
+  const contract = getGameDocumentContract(targetPath)
+  const draftPath = completeDocumentDraftPath(
+    input.workspacePath,
+    input.contract.dispatchId,
+  )
+  const existingRaw = await readOptionalFile(draftPath)
+  let draft: CompleteDocumentDraft | undefined = existingRaw
+    ? completeDocumentDraftSchema.parse(JSON.parse(existingRaw))
+    : undefined
+  if (
+    draft &&
+    (draft.dispatchId !== input.contract.dispatchId ||
+      draft.targetPath !== input.contract.targetPath)
+  )
+    throw new Error('prepared document draft identity is invalid')
+
+  if (input.part.kind === 'header') {
+    if (draft) {
+      if (
+        draft.title === input.part.title &&
+        draft.executiveSummary === input.part.executiveSummary
+      )
+        return {
+          status: 'part_prepared',
+          nextPart: nextDraftPart(contract, draft),
+        }
+      throw new Error(`next document part is ${nextDraftPart(contract, draft)}`)
+    }
+    draft = {
+      schemaVersion: 1,
+      dispatchId: input.contract.dispatchId,
+      targetPath: input.contract.targetPath,
+      title: input.part.title,
+      executiveSummary: input.part.executiveSummary,
+      sections: [],
+      productionMaterials: [],
+    }
+  } else {
+    if (!draft) throw new Error('next document part is header')
+    const expected = nextDraftPart(contract, draft)
+    if (input.part.kind === 'section') {
+      const submittedSection = input.part.section
+      const prior = draft.sections.find(
+        section => section.sectionId === submittedSection.sectionId,
+      )
+      if (prior) {
+        if (JSON.stringify(prior) !== JSON.stringify(submittedSection))
+          throw new Error('prepared document part has different content')
+        return { status: 'part_prepared', nextPart: expected }
+      }
+      if (expected !== `section:${submittedSection.sectionId}`)
+        throw new Error(`next document part is ${expected}`)
+      const expectedContract = contract.sections[draft.sections.length]
+      if (submittedSection.title !== expectedContract?.title)
+        throw new Error(`complete game document section title is invalid: ${submittedSection.sectionId}`)
+      draft.sections.push(submittedSection)
+    } else if (input.part.kind === 'material') {
+      const submittedMaterial = input.part.material
+      const prior = draft.productionMaterials.find(
+        material => material.materialId === submittedMaterial.materialId,
+      )
+      if (prior) {
+        if (JSON.stringify(prior) !== JSON.stringify(submittedMaterial))
+          throw new Error('prepared document part has different content')
+        return { status: 'part_prepared', nextPart: expected }
+      }
+      if (expected !== `material:${submittedMaterial.materialId}`)
+        throw new Error(`next document part is ${expected}`)
+      const expectedContract =
+        contract.productionMaterials[draft.productionMaterials.length]
+      if (
+        submittedMaterial.title !== expectedContract?.title ||
+        submittedMaterial.format !== expectedContract.format
+      )
+        throw new Error(`production material contract is invalid: ${submittedMaterial.materialId}`)
+      draft.productionMaterials.push(submittedMaterial)
+    } else {
+      if (expected !== 'audit')
+        throw new Error(`next document part is ${expected}`)
+      const document = validateCompleteGameDocumentSubmission(targetPath, {
+        title: draft.title,
+        executiveSummary: draft.executiveSummary,
+        sections: draft.sections,
+        productionMaterials: draft.productionMaterials,
+        auditAppendix: input.part.auditAppendix,
+      })
+      const receipt = await commitCanonicalDocument({
+        workspacePath: input.workspacePath,
+        contract: input.contract,
+        body: renderCompleteGameDocument(targetPath, document),
+      })
+      return receipt as CompleteGameDocumentCommitReceipt
+    }
+  }
+  await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
+  return { status: 'part_prepared', nextPart: nextDraftPart(contract, draft) }
+}
+
+function nextDraftPart(
+  contract: ReturnType<typeof getGameDocumentContract>,
+  draft: CompleteDocumentDraft,
+): string {
+  const section = contract.sections[draft.sections.length]
+  if (section) return `section:${section.sectionId}`
+  const material = contract.productionMaterials[draft.productionMaterials.length]
+  return material ? `material:${material.materialId}` : 'audit'
+}
+
+function completeDocumentDraftPath(
+  workspacePath: string,
+  dispatchId: string,
+): string {
+  return resolve(
+    workspacePath,
+    '.beegame',
+    'workflow',
+    'canonical-document-drafts',
+    `${dispatchId}.json`,
+  )
 }
 
 export async function commitCanonicalDocument(input: {
