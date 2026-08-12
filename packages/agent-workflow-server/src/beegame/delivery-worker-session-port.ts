@@ -986,8 +986,10 @@ async function persistActiveFoundationAuthorityIndex(
   if (!isInitialFoundationDocumentAuthor(request) || progress.complete) return
   const targetPath = request.contract.foundationDocumentPath as never
   const contract = getGameDocumentContract(targetPath)
-  const targetSectionId = contract.sections[progress.completedGroupCount]?.sectionId
-  if (!targetSectionId) return
+  const targetSectionIds = contract.sections
+    .slice(progress.completedGroupCount, progress.completedGroupCount + 2)
+    .map(section => section.sectionId)
+  if (!targetSectionIds.length) return
   const documents = new Map<
     (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
     string
@@ -1002,7 +1004,7 @@ async function persistActiveFoundationAuthorityIndex(
   )
   const projection = projectFoundationAuthority({
     targetPath,
-    targetSectionIds: [targetSectionId],
+    targetSectionIds,
     documents,
   })
   await durableWriteProjection(

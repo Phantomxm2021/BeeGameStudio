@@ -62,11 +62,16 @@ describe('foundation document draft groups', () => {
     expect(progress.complete).toBe(false)
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
-    expect(prompt).toContain('perform exactly one bounded native Edit')
+    expect(prompt).toContain('perform up to two sequential bounded native mutations')
+    expect(prompt).toContain('Checkpoint 1/2: perform one bounded native Edit')
+    expect(prompt).toContain('Checkpoint 2/2: perform one bounded native Edit')
     expect(prompt).toContain('<!-- beegame-part:experience_pillars:1 -->')
     expect(prompt).toContain('<!-- beegame-part:experience_pillars:2 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
+    expect(prompt).toContain('<!-- beegame-part:core_loop:1 -->')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:3:0 -->')
     expect(prompt).toContain('5,200 UTF-8 bytes')
+    expect(prompt).toContain('Never combine two checkpoints into one tool call')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
@@ -108,6 +113,8 @@ describe('foundation document draft groups', () => {
     expect(prompt).toContain('resume chunk 2/2')
     expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
+    expect(prompt).toContain('Checkpoint 2/2')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
     expect(prompt).not.toContain('native Write')
   })
 
