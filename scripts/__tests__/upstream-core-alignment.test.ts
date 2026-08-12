@@ -61,6 +61,17 @@ describe('upstream core manifest', () => {
       to: 'BEEGAME_CONFIG_DIR',
     })
   })
+
+  test('CI audits the exact pinned upstream commit', async () => {
+    const workflow = await Bun.file(
+      resolve(import.meta.dir, '../../.github/workflows/core-alignment.yml'),
+    ).text()
+
+    expect(workflow).toContain(
+      '3bb6b5746238c418138eb96d57765d79012edd96',
+    )
+    expect(workflow).toContain('bun run core:audit')
+  })
 })
 
 describe('upstream core audit', () => {

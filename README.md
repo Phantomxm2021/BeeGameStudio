@@ -184,6 +184,28 @@ npm run billing:dev
 npm run skills:dev
 ```
 
+### Shared runtime authority
+
+The shared runtime under `src/` and the upstream-shared packages is generated
+from the pinned snapshot recorded in
+[`config/upstream-core-alignment.json`](config/upstream-core-alignment.json).
+Bee Game Studio business behavior belongs in `apps/`,
+`packages/agent-workflow*`, or `packages/beegame-*`; do not patch the
+synchronized runtime to add product workflow, watchdog, prompt, permission, or
+storage policy.
+
+Before merging a core-related change, run:
+
+```bash
+bun run core:audit -- --upstream /absolute/path/to/the-pinned-checkout
+```
+
+The expected result is `0 differences`. Deliberate upstream upgrades require a
+reviewed pin change in the manifest. Product-identity substitutions must also be
+declared there. The runtime configuration directory uses the single key
+`BEEGAME_CONFIG_DIR`; do not add a legacy fallback or a second configuration
+root.
+
 ### 🐝 BeeGame SaaS 首次部署
 
 BeeGame Web Dashboard 的 SaaS 部署使用 Supabase Auth/RLS。首次部署时不要求数据库里已经有用户账号；推荐流程是先预置平台 owner 邮箱，再让 owner 用同一个邮箱正常注册或登录。
