@@ -538,7 +538,59 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('relays native Bee Game Studio permission requests without BeeGame policy decisions', async () => {
+  test('auto-approves project-local file mutations without creating a permission gate', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-project-file-permission-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'project-write-request',
+            toolName: 'Write',
+            message: 'Write the assigned document',
+            input: { file_path: join(workspacePath, 'docs', 'GDD.md') },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+      workflowAllowedPaths: ['docs/GDD.md'],
+    })
+
+    await manager.send(session.id, 'author the document')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
+    expect(await decisionPromise).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({
+      autoApproved: true,
+      reason: 'project_workspace_file_mutation',
+    })
+    manager.dispose()
+  })
+
+  test('keeps out-of-project native file mutations behind explicit permission', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-native-permission-relay-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined

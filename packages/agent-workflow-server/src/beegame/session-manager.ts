@@ -1766,6 +1766,23 @@ export class BeeGameSessionManager {
       )
       return Promise.resolve({ ...authority, scope: 'once' })
     }
+    if (authorizeProjectWorkspaceFileMutation(record, request)) {
+      this.append(
+        record,
+        'permission.resolved',
+        `${request.toolName}: allow`,
+        {
+          type: 'permission.resolved',
+          toolUseID: request.toolUseID,
+          toolName: request.toolName,
+          decision: 'allow',
+          scope: 'once',
+          autoApproved: true,
+          reason: 'project_workspace_file_mutation',
+        },
+      )
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
@@ -3508,6 +3525,34 @@ function authorizeBeeGamePlatformMutation(
     behavior: 'deny',
     message: 'Platform mutation dispatch is no longer active.',
   }
+}
+
+function authorizeProjectWorkspaceFileMutation(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): boolean {
+  if (!record.projectId || !isFileMutationTool(request.toolName)) return false
+  const artifactPath = getMutationArtifactPath(request.input)
+  if (!artifactPath) return false
+  const workspaceRoot = resolveExistingPath(record.session.cwd)
+  const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
+  const rel = relative(workspaceRoot, targetPath)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+function resolveProspectivePath(cwd: string, artifactPath: string): string {
+  const targetPath = isAbsolute(artifactPath)
+    ? resolve(artifactPath)
+    : resolve(cwd, artifactPath)
+  const missingSegments: string[] = []
+  let existingAncestor = targetPath
+  while (!existsSync(existingAncestor)) {
+    const parent = dirname(existingAncestor)
+    if (parent === existingAncestor) break
+    missingSegments.unshift(basename(existingAncestor))
+    existingAncestor = parent
+  }
+  return resolve(resolveExistingPath(existingAncestor), ...missingSegments)
 }
 
 function hasCompletedTool(
