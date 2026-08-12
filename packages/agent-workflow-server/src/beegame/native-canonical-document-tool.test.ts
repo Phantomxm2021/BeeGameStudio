@@ -146,6 +146,16 @@ describe('canonical document commit', () => {
     expect(prompt).toContain('verified requires evidenceRefs')
     expect(prompt).toContain('returns document_parts_prepared')
     expect(prompt).toContain('without publishing Markdown')
+    expect(prompt).toContain(
+      'one CommitCanonicalDocument call with the top-level parts array',
+    )
+    expect(prompt).toContain(
+      'Never issue multiple CommitCanonicalDocument calls in parallel',
+    )
+    expect(prompt).toContain(
+      'section body contains content only and must not begin with any Markdown heading',
+    )
+    expect(prompt).not.toContain('never skip or combine parts')
   })
 
   test('keeps prepared document parts invisible until authority succeeds', async () => {

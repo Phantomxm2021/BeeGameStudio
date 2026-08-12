@@ -127,6 +127,12 @@ describe('delivery worker complete document commit contract', () => {
           expect(block).toContain(`sectionId=${sectionId}`)
         }
       expect(block).toContain('two or three consecutive parts')
+      expect(block).toContain('one CommitCanonicalDocument call')
+      expect(block).toContain('top-level parts array')
+      expect(block).toContain(
+        'Never issue multiple CommitCanonicalDocument calls in parallel',
+      )
+      expect(block).toContain('body content only, without any Markdown heading')
       expect(block).toContain('document_parts_prepared')
       expect(block).toContain('Do not hand-author')
       expect(block).toContain('write or edit the assigned path directly')

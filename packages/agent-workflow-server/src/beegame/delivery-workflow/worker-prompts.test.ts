@@ -44,6 +44,12 @@ describe('resource-content worker prompts', () => {
       'Do not serialize the complete document into one tool-call argument',
     )
     expect(prompt).toContain('two or three consecutive parts')
+    expect(prompt).toContain('one CommitCanonicalDocument call')
+    expect(prompt).toContain('top-level parts array')
+    expect(prompt).toContain(
+      'Never issue multiple CommitCanonicalDocument calls in parallel',
+    )
+    expect(prompt).toContain('body content only, without any Markdown heading')
     expect(prompt).toContain('under 16 KiB')
     expect(prompt).toContain('submit one part when a body is large')
     expect(prompt).toContain('Wait for the exact nextPart')
