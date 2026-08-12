@@ -183,6 +183,8 @@ export type BeeGameSession = {
 
 export type BeeGameRuntimeSnapshot = {
   sessionId: string
+  /** UUID owned and emitted by the native runtime; never a BGS routing ID. */
+  nativeSessionId?: string
   workspacePath: string
   modelConfigId?: string
   phaseName: string
@@ -240,6 +242,8 @@ export type BeeGameSessionRunnerStartInput = {
   /** Platform evidence root exposed only through read-only contract facts. */
   deliveryEvidenceDataRoot?: string
   resumeSessionId?: string
+  /** Records the UUID emitted by the native runtime for durable resume. */
+  onNativeSessionId?(sessionId: string): void
   cwd: string
   env: Record<string, string>
   /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
@@ -363,6 +367,8 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
 
 type SessionRecord = {
   session: BeeGameSession
+  /** Native runtime UUID, distinct from session.id (the BGS routing key). */
+  nativeSessionId?: string
   /** Workflow workers have isolated transcripts and may share a workspace lease with the chat surface. */
   workflowWorker?: boolean
   workflowRunId?: string
@@ -625,11 +631,19 @@ export class BeeGameSessionManager {
     const recoveredTranscript = input.transcriptSessionId
       ? readExistingTranscriptForResume(input.transcriptSessionId, cwd)
       : undefined
+    const persistedRuntime = input.transcriptSessionId
+      ? this.readPersistedRuntimeSnapshot(input.transcriptSessionId)
+      : undefined
     const confirmedBriefContext = recoverConfirmedBriefContext(
       recoveredTranscript?.events ?? [],
     )
     const record: SessionRecord = {
       session,
+      ...(persistedRuntime?.nativeSessionId &&
+      resolveExistingPath(persistedRuntime.workspacePath) ===
+        resolveExistingPath(cwd)
+        ? { nativeSessionId: persistedRuntime.nativeSessionId }
+        : {}),
       ...(input.workflowWorker ? { workflowWorker: true } : {}),
       ...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
       ...(input.workflowDispatchId
@@ -1297,11 +1311,17 @@ export class BeeGameSessionManager {
       const runner =
         record.runner ??
         (await this.runner.start({
-            sessionId: record.session.id,
-            deliveryEvidenceDataRoot: this.dashboardDataRoot,
-            resumeSessionId: record.session.id,
-            cwd: record.session.cwd,
-            env,
+          sessionId: record.session.id,
+          deliveryEvidenceDataRoot: this.dashboardDataRoot,
+          ...(record.nativeSessionId
+            ? { resumeSessionId: record.nativeSessionId }
+            : {}),
+          onNativeSessionId: nativeSessionId => {
+            record.nativeSessionId = nativeSessionId
+            this.persistRuntimeSnapshot(record)
+          },
+          cwd: record.session.cwd,
+          env,
             ...(this.resourceSelectionConfig &&
             env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
             (!record.workflowWorker ||
@@ -1953,6 +1973,7 @@ export class BeeGameSessionManager {
       record.session.cwd,
       record.events,
       record.session.modelConfigId,
+      { nativeSessionId: record.nativeSessionId },
     )
   }
 
@@ -2707,13 +2728,19 @@ function deriveRuntimeSnapshotFromEvents(
   workspacePath: string,
   events: BeeGameEvent[],
   modelConfigId: string | undefined,
-  options: { recoveredFromTranscript?: boolean } = {},
+  options: {
+    recoveredFromTranscript?: boolean
+    nativeSessionId?: string
+  } = {},
 ): BeeGameRuntimeSnapshot {
   const usage = getLatestRuntimeUsage(events)
   const latest = events.at(-1)
   const turnDiagnostics = deriveLatestTurnDiagnostics(events)
   return {
     sessionId,
+    ...(options.nativeSessionId
+      ? { nativeSessionId: options.nativeSessionId }
+      : {}),
     workspacePath,
     ...(modelConfigId ? { modelConfigId } : {}),
     phaseName: deriveSnapshotPhaseName(events, options),
@@ -3245,6 +3272,9 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       : {}
   return {
     sessionId: String(record.sessionId || ''),
+    ...(typeof record.nativeSessionId === 'string' && record.nativeSessionId
+      ? { nativeSessionId: record.nativeSessionId }
+      : {}),
     workspacePath: String(record.workspacePath || ''),
     ...(typeof record.modelConfigId === 'string' && record.modelConfigId
       ? { modelConfigId: record.modelConfigId }

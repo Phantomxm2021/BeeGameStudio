@@ -6,6 +6,7 @@ import {
   BeeGameSessionManager,
   isResourceWorkerDurableProgress,
   type BeeGameSessionRunner,
+  type BeeGameSessionRunnerStartInput,
   type DashboardSDKMessage,
   type DashboardPermissionDecision,
 } from '../beegame/session-manager'
@@ -107,6 +108,56 @@ describe('BeeGame session runtime resilience', () => {
         createdAt: new Date(),
       }),
     ).toBe(false)
+  })
+
+  test('keeps BGS routing identity separate from native resume identity', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-native-session-boundary-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const starts: BeeGameSessionRunnerStartInput[] = []
+    const nativeSessionId = '550e8400-e29b-41d4-a716-446655440000'
+    const runner: BeeGameSessionRunner = {
+      start: async input => {
+        starts.push(input)
+        return {
+          submit: async ({ onMessage }) => {
+            input.onNativeSessionId?.(nativeSessionId)
+            onMessage({
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              session_id: nativeSessionId,
+              result: 'done',
+            } as DashboardSDKMessage)
+          },
+          stop: () => undefined,
+        }
+      },
+    }
+    const firstManager = new BeeGameSessionManager(runner, root)
+    const session = firstManager.start({
+      workspacePath,
+      userId: 'user-1',
+    })
+    await firstManager.send(session.id, 'first turn')
+    await waitForIdle(firstManager, session.id)
+
+    expect(session.id.startsWith('beegame_')).toBe(true)
+    expect(starts[0]?.resumeSessionId).toBeUndefined()
+    await firstManager.dispose()
+
+    const resumedManager = new BeeGameSessionManager(runner, root)
+    resumedManager.start({
+      workspacePath,
+      userId: 'user-1',
+      transcriptSessionId: session.id,
+    })
+    await resumedManager.send(session.id, 'resumed turn')
+    await waitForIdle(resumedManager, session.id)
+
+    expect(starts[1]?.sessionId).toBe(session.id)
+    expect(starts[1]?.resumeSessionId).toBe(nativeSessionId)
+    await resumedManager.dispose()
   })
 
   test('workflow stop barrier drains the active turn and durable usage', async () => {

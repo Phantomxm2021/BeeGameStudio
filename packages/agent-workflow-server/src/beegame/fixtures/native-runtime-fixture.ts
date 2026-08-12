@@ -31,7 +31,7 @@ for await (const chunk of Bun.stdin.stream()) {
       : rawContent
     if (content === 'error') {
       process.stdout.write(
-        `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['provider exploded'] })}\n`,
+        `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: '550e8400-e29b-41d4-a716-446655440000', errors: ['provider exploded'] })}\n`,
       )
       continue
     }
@@ -55,7 +55,7 @@ for await (const chunk of Bun.stdin.stream()) {
       `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } })}\n`,
     )
     process.stdout.write(
-      `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false })}\n`,
+      `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: '550e8400-e29b-41d4-a716-446655440000', received_session_id: message.session_id })}\n`,
     )
   }
 }

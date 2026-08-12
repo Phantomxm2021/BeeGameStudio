@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { fileURLToPath } from 'node:url'
-import { createNativeCliProcessRunner } from './native-cli-process-runner'
+import {
+  createNativeCliProcessRunner,
+  nativeRuntimeCommand,
+} from './native-cli-process-runner'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
@@ -24,6 +27,31 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  test('never resumes a first native process with the BGS routing identity', () => {
+    const input = {
+      sessionId: 'beegame_route_only',
+      cwd: process.cwd(),
+      env: {},
+    }
+    expect(nativeRuntimeCommand(input)).not.toContain(
+      '--resume=beegame_route_only',
+    )
+    expect(() => nativeRuntimeCommand({
+      ...input,
+      resumeSessionId: 'beegame_route_only',
+    })).toThrow('native resume session ID must be a UUID')
+  })
+
+  test('resumes only an explicit native UUID', () => {
+    const nativeSessionId = '550e8400-e29b-41d4-a716-446655440000'
+    expect(nativeRuntimeCommand({
+      sessionId: 'beegame_route_only',
+      resumeSessionId: nativeSessionId,
+      cwd: process.cwd(),
+      env: {},
+    })).toContain(`--resume=${nativeSessionId}`)
+  })
+
   test('forwards native messages and resolves only on result', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []
@@ -38,6 +66,47 @@ describe('native CLI process runner', () => {
     expect(messages.map(message => message.type)).toEqual([
       'assistant',
       'result',
+    ])
+    expect(messages.at(-1)?.received_session_id).toBe('')
+    runtime.dispose?.()
+  })
+
+  test('captures the native UUID and uses it only on later stream messages', async () => {
+    const nativeSessionIds: string[] = []
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, fixturePath],
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'beegame_route_only',
+      cwd: process.cwd(),
+      env: {},
+      onNativeSessionId: sessionId => nativeSessionIds.push(sessionId),
+    })
+
+    const results: Record<string, unknown>[] = []
+    for (const prompt of ['first', 'second']) {
+      await runtime.submit({
+        prompt,
+        signal: new AbortController().signal,
+        onMessage: message => {
+          if (message.type === 'result') results.push(message)
+        },
+        requestPermission: async () => ({ behavior: 'deny' }),
+      })
+    }
+
+    expect(nativeSessionIds).toEqual([
+      '550e8400-e29b-41d4-a716-446655440000',
+    ])
+    expect(results.map(result => result.received_session_id)).toEqual([
+      '',
+      '550e8400-e29b-41d4-a716-446655440000',
     ])
     runtime.dispose?.()
   })

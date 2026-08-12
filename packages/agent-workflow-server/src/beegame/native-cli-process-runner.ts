@@ -45,7 +45,12 @@ export function createNativeCliProcessRunner(options: {
   }
 }
 
-function nativeRuntimeCommand(input: BeeGameSessionRunnerStartInput): string[] {
+export function nativeRuntimeCommand(
+  input: BeeGameSessionRunnerStartInput,
+): string[] {
+  if (input.resumeSessionId && !isNativeSessionId(input.resumeSessionId)) {
+    throw new Error('Bee Game Studio native resume session ID must be a UUID')
+  }
   return [
     ...resolveNativeRuntimeCommand(),
     '--print',
@@ -69,12 +74,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   } | null = null
   private disposed = false
   private stderrTail = ''
+  private nativeSessionId: string | undefined
 
   private constructor(
     private readonly child: RuntimeProcess,
     private readonly sessionInput: BeeGameSessionRunnerStartInput,
     private readonly observability: RuntimeObservability,
-  ) {}
+  ) {
+    this.nativeSessionId = sessionInput.resumeSessionId
+  }
 
   static async start(
     input: BeeGameSessionRunnerStartInput,
@@ -140,7 +148,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.write({
         type: 'user',
         uuid: requestId,
-        session_id: this.sessionInput.sessionId,
+        // The BGS session ID is a routing identity, not the native runtime's
+        // UUID. An empty value is the native stream protocol's first-turn
+        // handshake; subsequent messages use the UUID reported by the native
+        // runtime itself.
+        session_id: this.nativeSessionId ?? '',
         parent_tool_use_id: null,
         message: {
           role: 'user',
@@ -191,6 +203,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   private async onMessage(message: Record<string, unknown>): Promise<void> {
+    const reportedSessionId = stringField(message, 'session_id')
+    if (reportedSessionId && isNativeSessionId(reportedSessionId)) {
+      if (reportedSessionId !== this.nativeSessionId) {
+        this.nativeSessionId = reportedSessionId
+        this.sessionInput.onNativeSessionId?.(reportedSessionId)
+      }
+    }
     if (message.type === 'control_request') {
       await this.resolvePermissionRequest(message)
       return
@@ -277,6 +296,12 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.child.stdin.write(`${JSON.stringify(message)}\n`)
     this.child.stdin.flush()
   }
+}
+
+function isNativeSessionId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
 }
 
 function runtimeIdentity(env: Record<string, string>): {
