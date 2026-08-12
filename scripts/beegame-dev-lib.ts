@@ -34,6 +34,10 @@ export type BeeGameDevProcessPlan = {
 export type BeeGameDevPlan = {
   workspacePath: string
   frontendDir: string
+  nativeRuntimeBuild: {
+    command: string[]
+    cwd: string
+  }
   ports: BeeGameDevPorts
   urls: {
     frontend: string
@@ -85,6 +89,10 @@ export function buildBeeGameDevPlan(
   return {
     workspacePath,
     frontendDir,
+    nativeRuntimeBuild: {
+      command: [bunExecutable, 'run', 'build.ts'],
+      cwd: input.cwd,
+    },
     ports,
     urls,
     processes: [

@@ -32,6 +32,15 @@ const plan = buildBeeGameDevPlan(argv, {
 const children: Array<ReturnType<typeof Bun.spawn>> = []
 
 await assertFixedServicePortsAvailable()
+console.log('Building Bee Game Studio native runtime...')
+const nativeRuntimeBuild = Bun.spawnSync(plan.nativeRuntimeBuild.command, {
+  cwd: plan.nativeRuntimeBuild.cwd,
+  env: process.env,
+  stdout: 'inherit',
+  stderr: 'inherit',
+})
+if (nativeRuntimeBuild.exitCode !== 0)
+  throw new Error('Bee Game Studio native runtime build failed')
 console.log('Starting BeeGame local dev stack...')
 console.log(`Workspace: ${plan.workspacePath}`)
 for (const processPlan of plan.processes) {

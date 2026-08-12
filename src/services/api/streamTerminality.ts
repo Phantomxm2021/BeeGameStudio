@@ -31,6 +31,64 @@ export class ProviderStreamIncompleteError extends Error {
   }
 }
 
+export class ProviderStreamIdleError extends Error {
+  readonly retryable = true
+
+  constructor(readonly timeoutMs: number) {
+    super(`Provider stream produced no events for ${timeoutMs}ms`)
+    this.name = 'ProviderStreamIdleError'
+  }
+}
+
+/**
+ * Applies the idle deadline to each iterator read instead of relying on the
+ * provider SDK to react to AbortController. Some compatible gateways leave a
+ * pending `next()` unresolved even after their response body is cancelled.
+ * Racing the read itself guarantees that the consumer regains control.
+ */
+export async function* withProviderStreamIdleTimeout<T>(
+  input: AsyncIterable<T>,
+  options: Readonly<{
+    timeoutMs: number
+    warningMs?: number
+    onWarning?(): void
+    onTimeout?(): void
+  }>,
+): AsyncGenerator<T> {
+  if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)
+    throw new Error('Provider stream idle timeout must be positive')
+  const iterator = input[Symbol.asyncIterator]()
+  try {
+    for (;;) {
+      let warningTimer: ReturnType<typeof setTimeout> | undefined
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+      const timeout = new Promise<never>((_resolve, reject) => {
+        if (
+          options.onWarning &&
+          options.warningMs !== undefined &&
+          options.warningMs > 0 &&
+          options.warningMs < options.timeoutMs
+        ) warningTimer = setTimeout(options.onWarning, options.warningMs)
+        timeoutTimer = setTimeout(() => {
+          options.onTimeout?.()
+          reject(new ProviderStreamIdleError(options.timeoutMs))
+        }, options.timeoutMs)
+      })
+      let result: IteratorResult<T>
+      try {
+        result = await Promise.race([iterator.next(), timeout])
+      } finally {
+        if (warningTimer !== undefined) clearTimeout(warningTimer)
+        if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+      }
+      if (result.done) return
+      yield result.value
+    }
+  } finally {
+    void iterator.return?.()
+  }
+}
+
 export function createProviderStreamTerminality(input: {
   requestId: string
 }): {

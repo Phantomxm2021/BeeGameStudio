@@ -1,10 +1,51 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ProviderStreamIdleError,
   ProviderStreamIncompleteError,
   createProviderStreamTerminality,
+  withProviderStreamIdleTimeout,
 } from '../streamTerminality'
 
 describe('provider stream terminality', () => {
+  test('rejects even when the provider iterator ignores abort forever', async () => {
+    let returnCalls = 0
+    const hangingStream: AsyncIterable<string> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<string>>(() => {}),
+          return: async () => {
+            returnCalls += 1
+            return { done: true, value: undefined }
+          },
+        }
+      },
+    }
+
+    const iterator = withProviderStreamIdleTimeout(hangingStream, {
+      timeoutMs: 10,
+    })[Symbol.asyncIterator]()
+
+    await expect(iterator.next()).rejects.toBeInstanceOf(
+      ProviderStreamIdleError,
+    )
+    expect(returnCalls).toBe(1)
+  })
+
+  test('resets the idle deadline after every provider event', async () => {
+    async function* delayedStream() {
+      yield 'first'
+      await Bun.sleep(5)
+      yield 'second'
+    }
+
+    const received: string[] = []
+    for await (const value of withProviderStreamIdleTimeout(delayedStream(), {
+      timeoutMs: 20,
+    })) received.push(value)
+
+    expect(received).toEqual(['first', 'second'])
+  })
+
   test('rejects a response body that stops inside tool JSON', () => {
     const terminality = createProviderStreamTerminality({
       requestId: 'request-mid-tool-json',

@@ -27,6 +27,10 @@ describe('BeeGame local dev launcher helpers', () => {
       skills: 'http://127.0.0.1:62176',
       resources: 'http://127.0.0.1:62177',
     })
+    expect(plan.nativeRuntimeBuild).toEqual({
+      command: ['bun', 'run', 'build.ts'],
+      cwd: '/repo',
+    })
     expect(plan.processes.map(process => process.name)).toEqual([
       'billing',
       'skills',
