@@ -144,9 +144,11 @@ describe('canonical document commit', () => {
     expect(prompt).toContain('source and evidenceRefs')
     expect(prompt).toContain('model_estimate must use assumed or deferred')
     expect(prompt).toContain('verified requires evidenceRefs')
+    expect(prompt).toContain('returns document_parts_prepared')
+    expect(prompt).toContain('without publishing Markdown')
   })
 
-  test('prepares Markdown before accepting authority without resending the body', async () => {
+  test('keeps prepared document parts invisible until authority succeeds', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-two-phase-'))
     try {
       const path = 'docs/GDD.md'
@@ -169,10 +171,23 @@ describe('canonical document commit', () => {
       const call = tool?.call as (input: unknown) => Promise<{
         data: { status: string }
       }>
-      const body = renderCompleteGameDocument(path, completeSubmission(path))
-      await expect(call({ body })).resolves.toMatchObject({
-        data: { status: 'document_prepared' },
+      await expect(call({ document: completeSubmission(path) })).resolves.toMatchObject({
+        data: { status: 'document_parts_prepared' },
       })
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+      expect(
+        await readCanonicalDocumentCommitReceipt(
+          workspacePath,
+          'dispatch-two-phase-gdd',
+        ),
+      ).toBeUndefined()
+      await expect(
+        call({ authority: { records: authoritySubmission(path).records.slice(1) } }),
+      ).rejects.toThrow(/coverage/i)
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+      await expect(
+        readFile(join(workspacePath, authoritySidecarPath(path)), 'utf8'),
+      ).rejects.toThrow()
       await expect(
         call({
           authority: {
@@ -184,6 +199,9 @@ describe('canonical document commit', () => {
           },
         }),
       ).resolves.toMatchObject({ data: { status: 'committed' } })
+      await expect(readFile(join(workspacePath, path), 'utf8')).resolves.toContain(
+        'document_id: GDD',
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -214,10 +232,8 @@ describe('canonical document commit', () => {
       }>
       await expect(
         call({ document: completeSubmission(path) }),
-      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
-      const markdown = await readFile(join(workspacePath, path), 'utf8')
-      expect(markdown).toContain('<!-- beegame-section:visual_pillars -->')
-      expect(markdown).toContain('<!-- beegame-material:visual-pillar-board -->')
+      ).resolves.toMatchObject({ data: { status: 'document_parts_prepared' } })
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -364,13 +380,14 @@ describe('canonical document commit', () => {
       }
       await expect(
         (tool?.call as (value: unknown) => Promise<unknown>)({ document }),
-      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+      ).resolves.toMatchObject({ data: { status: 'document_parts_prepared' } })
 
       await expect(
         (tool?.call as (value: unknown) => Promise<unknown>)({
           authority: authoritySubmission(path),
         }),
       ).rejects.toThrow(/open decision.*closure|closure.*decision/i)
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -439,12 +456,15 @@ describe('canonical document commit', () => {
         call({
           part: { kind: 'audit', auditAppendix: submission.auditAppendix },
         }),
-      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+      ).resolves.toMatchObject({ data: { status: 'document_parts_prepared' } })
       await expect(
         call({
           part: { kind: 'audit', auditAppendix: submission.auditAppendix },
         }),
-      ).resolves.toMatchObject({ data: { status: 'document_prepared' } })
+      ).resolves.toMatchObject({ data: { status: 'document_parts_prepared' } })
+
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
+      await call({ authority: authoritySubmission(path) })
 
       const markdown = await readFile(join(workspacePath, path), 'utf8')
       expect(markdown).toContain('<!-- beegame-section:experience_architecture -->')
@@ -553,7 +573,7 @@ describe('canonical document commit', () => {
     }
   })
 
-  test('initial authoring accepts one complete Markdown document and rejects incomplete bodies', async () => {
+  test('initial authoring accepts one complete structured document and rejects raw bypasses', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-complete-'))
     try {
       const path = 'docs/GDD.md'
@@ -577,10 +597,8 @@ describe('canonical document commit', () => {
       const submission = completeSubmission(path)
       const call = tool?.call as ((input: unknown) => Promise<unknown>) | undefined
       expect(call).toBeDefined()
-      await call!({
-        body: renderCompleteGameDocument(path, submission),
-        authority: authoritySubmission(path),
-      })
+      await call!({ document: submission })
+      await call!({ authority: authoritySubmission(path) })
       const content = await readFile(join(workspacePath, path), 'utf8')
       for (const section of contract.sections)
         expect(content).toContain(`<!-- beegame-section:${section.sectionId} -->`)
@@ -591,7 +609,7 @@ describe('canonical document commit', () => {
     }
   })
 
-  test('retains valid Markdown and repairs only an invalid authority sidecar', async () => {
+  test('retains the prepared draft while invalid authority remains invisible', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-sidecar-repair-'))
     try {
       const path = 'docs/GDD.md'
@@ -613,21 +631,18 @@ describe('canonical document commit', () => {
       })
       const call = tool?.call as (input: unknown) => Promise<unknown>
       const authority = authoritySubmission(path)
+      await call({ document: completeSubmission(path) })
       await expect(
-        call({
-          body: renderCompleteGameDocument(path, completeSubmission(path)),
-          authority: { records: authority.records.slice(1) },
-        }),
+        call({ authority: { records: authority.records.slice(1) } }),
       ).rejects.toThrow(/coverage/i)
 
-      const preparedMarkdown = await readFile(join(workspacePath, path), 'utf8')
-      expect(preparedMarkdown).toContain('document_id: GDD')
+      await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
       expect(
         await readCanonicalDocumentCommitReceipt(
           workspacePath,
           'dispatch-sidecar-repair',
         ),
-      ).toMatchObject({ status: 'document_prepared', authorityDigest: null })
+      ).toBeUndefined()
       await expect(
         readFile(join(workspacePath, authoritySidecarPath(path)), 'utf8'),
       ).rejects.toThrow()
@@ -637,8 +652,112 @@ describe('canonical document commit', () => {
       }
       expect(result.data.status).toBe('committed')
       expect(result.data.authorityDigest).toMatch(/^[a-f0-9]{64}$/)
-      expect(await readFile(join(workspacePath, path), 'utf8')).toBe(
-        preparedMarkdown,
+      expect(await readFile(join(workspacePath, path), 'utf8')).toContain(
+        'document_id: GDD',
+      )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('does not replace a revision baseline when authority validation fails', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-revision-visibility-'))
+    try {
+      const path = 'docs/GDD.md'
+      const baseline =
+        '---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-01-01T00:00:00.000Z\n---\n\n# Existing document\n'
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(join(workspacePath, path), baseline)
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId: 'dispatch-revision-visibility',
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'revise',
+          baselineDigest: createHash('sha256').update(baseline).digest('hex'),
+          baselineVersion: '1.0.0',
+          baselineUpdatedAt: '2026-01-01T00:00:00.000Z',
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<unknown>
+      await call({ document: completeSubmission(path) })
+      await expect(
+        call({
+          authority: { records: authoritySubmission(path).records.slice(1) },
+        }),
+      ).rejects.toThrow(/coverage/i)
+      expect(await readFile(join(workspacePath, path), 'utf8')).toBe(baseline)
+      await expect(
+        readFile(join(workspacePath, authoritySidecarPath(path)), 'utf8'),
+      ).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('reconciles a fully landed v3 package after a final-receipt crash', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'canonical-package-recovery-'))
+    try {
+      const path = 'docs/GDD.md'
+      const dispatchId = 'dispatch-package-recovery'
+      let tool: Record<string, unknown> | undefined
+      createNativeCanonicalDocumentTool({
+        buildTool: definition => {
+          tool = definition
+          return definition
+        },
+        workspacePath,
+        contract: {
+          dispatchId,
+          targetPath: path,
+          documentId: 'GDD',
+          operation: 'create',
+          baselineDigest: null,
+          submissionKind: 'complete_game_document',
+        },
+      })
+      const call = tool?.call as (input: unknown) => Promise<{ data: Record<string, unknown> }>
+      await call({ document: completeSubmission(path) })
+      const draftPath = join(
+        workspacePath,
+        '.beegame/workflow/canonical-document-drafts',
+        `${dispatchId}.json`,
+      )
+      const draft = await readFile(draftPath, 'utf8')
+      const committed = (await call({ authority: authoritySubmission(path) })).data
+      expect(committed).toMatchObject({ schemaVersion: 3, status: 'committed' })
+      const receiptPath = join(
+        workspacePath,
+        '.beegame/workflow/document-commits',
+        `${dispatchId}.json`,
+      )
+      await writeFile(
+        receiptPath,
+        `${JSON.stringify({ ...committed, status: 'package_prepared' }, null, 2)}\n`,
+      )
+      await mkdir(join(draftPath, '..'), { recursive: true })
+      await writeFile(draftPath, draft)
+
+      await expect(
+        reconcileCanonicalDocumentCommitReceipt({ workspacePath, dispatchId }),
+      ).resolves.toMatchObject({ schemaVersion: 3, status: 'committed' })
+      await expect(call({ authority: authoritySubmission(path) })).resolves.toEqual({
+        data: { ...committed, status: 'committed' },
+      })
+      const changedAuthority = authoritySubmission(path)
+      changedAuthority.records[0] = {
+        ...changedAuthority.records[0]!,
+        statement: 'Changed authority after package preparation.',
+      }
+      await expect(call({ authority: changedAuthority })).rejects.toThrow(
+        /different authority/i,
       )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -728,7 +847,12 @@ describe('canonical document commit', () => {
         },
       })
       const call = tool?.call as (input: unknown) => Promise<unknown>
-      await expect(call({ document: completeSubmission(path) })).rejects.toThrow()
+      await expect(call({ document: completeSubmission(path) })).resolves.toMatchObject({
+        data: { status: 'document_parts_prepared' },
+      })
+      await expect(
+        call({ authority: authoritySubmission(path) }),
+      ).rejects.toThrow()
       await expect(readFile(join(workspacePath, path), 'utf8')).rejects.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

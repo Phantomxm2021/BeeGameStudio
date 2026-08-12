@@ -78,9 +78,18 @@ const completeDocumentCommitInputSchema = z.union([
   z.object({ authority: foundationAuthoritySubmissionSchema }).strict(),
 ])
 
+const artifactReceiptSchema = z
+  .object({
+    artifactId: z.string().min(1),
+    path: z.string().min(1),
+    mediaType: z.literal('image/svg+xml'),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict()
+
 const completeDocumentDraftSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
     dispatchId: z.string().min(1),
     targetPath: z.string().min(1),
     title: z.string().min(1),
@@ -88,6 +97,7 @@ const completeDocumentDraftSchema = z
     sections: z.array(completeGameDocumentSectionSchema),
     productionMaterials: z.array(productionMaterialSchema),
     auditAppendix: completeGameDocumentAuditAppendixSchema.optional(),
+    artifacts: z.array(artifactReceiptSchema).default([]),
   })
   .strict()
 
@@ -116,18 +126,7 @@ const completeDocumentReceiptSchema = z
     finalDigest: z.string().length(64),
     authorityPath: z.string().min(1),
     authorityDigest: z.string().length(64).nullable(),
-    artifacts: z
-      .array(
-        z
-          .object({
-            artifactId: z.string().min(1),
-            path: z.string().min(1),
-            mediaType: z.literal('image/svg+xml'),
-            digest: z.string().regex(/^[a-f0-9]{64}$/),
-          })
-          .strict(),
-      )
-      .default([]),
+    artifacts: z.array(artifactReceiptSchema).default([]),
     documentId: z.string().min(1),
     version: z.string().min(1),
     updatedAt: z.string().datetime({ offset: true }),
@@ -138,6 +137,22 @@ const completeDocumentReceiptSchema = z
 const receiptSchema = z.union([
   legacyReceiptSchema,
   completeDocumentReceiptSchema,
+  z
+    .object({
+      schemaVersion: z.literal(3),
+      dispatchId: z.string().min(1),
+      targetPath: z.string().min(1),
+      baselineDigest: z.string().length(64).nullable(),
+      finalDigest: z.string().length(64),
+      authorityPath: z.string().min(1),
+      authorityDigest: z.string().length(64),
+      artifacts: z.array(artifactReceiptSchema),
+      documentId: z.string().min(1),
+      version: z.string().min(1),
+      updatedAt: z.string().datetime({ offset: true }),
+      status: z.enum(['package_prepared', 'committed']),
+    })
+    .strict(),
 ])
 
 export type CanonicalDocumentCommitContract = {
@@ -178,9 +193,25 @@ export type CompleteGameDocumentCommitReceipt = {
   status: 'document_prepared' | 'committed'
 }
 
+export type CompleteGameDocumentCommitReceiptV3 = {
+  schemaVersion: 3
+  dispatchId: string
+  targetPath: string
+  baselineDigest: string | null
+  finalDigest: string
+  authorityPath: string
+  authorityDigest: string
+  artifacts: readonly Omit<CompleteGameDocumentArtifact, 'content'>[]
+  documentId: string
+  version: string
+  updatedAt: string
+  status: 'package_prepared' | 'committed'
+}
+
 export type CanonicalDocumentCommitReceipt =
   | LegacyCanonicalDocumentCommitReceipt
   | CompleteGameDocumentCommitReceipt
+  | CompleteGameDocumentCommitReceiptV3
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 
@@ -246,7 +277,7 @@ export function createNativeCanonicalDocumentTool(options: {
             .join('\n')
         : ''
       return completeGameDocument
-        ? `Submit bounded structured document parts through separate calls so no call contains the complete document. Call {part:{kind:"header",title,executiveSummary}} first. Then submit each section in the listed contract order as {part:{kind:"section",section:{sectionId,title,body}}}. Then submit each production material in contract order as {part:{kind:"material",material:{materialId,title,format,body}}}. Finally call {part:{kind:"audit",auditAppendix}}. The service persists each part and returns the exact nextPart; never skip or combine parts. It renders every protocol marker, heading, and canonical order and returns document_prepared only after the audit part completes the full document. Never handwrite protocol markers in section or material body content. After document_prepared, call with {authority:{records}} only. Each record must contain authorityId, sectionId, kind, state, source and evidenceRefs, statement, and responsibilityIds; omit value and unit when they do not apply. model_estimate must use assumed or deferred; verified requires evidenceRefs. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred and include decision owner and neededBy. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nProduction material content must use the stated mechanical format for these exact contracts:\n${productionMaterialContract}`
+        ? `Submit bounded structured document parts through separate calls so no call contains the complete document. Call {part:{kind:"header",title,executiveSummary}} first. Then submit each section in the listed contract order as {part:{kind:"section",section:{sectionId,title,body}}}. Then submit each production material in contract order as {part:{kind:"material",material:{materialId,title,format,body}}}. Finally call {part:{kind:"audit",auditAppendix}}. The service persists each part and returns the exact nextPart; never skip or combine parts. It renders every protocol marker, heading, and canonical order and returns document_parts_prepared after the audit part completes the full draft, without publishing Markdown. Never handwrite protocol markers in section or material body content. After document_parts_prepared, call with {authority:{records}} only. Each record must contain authorityId, sectionId, kind, state, source and evidenceRefs, statement, and responsibilityIds; omit value and unit when they do not apply. model_estimate must use assumed or deferred; verified requires evidenceRefs. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision; open_decision records must use state=deferred and include decision owner and neededBy. The service canonicalizes record and responsibility ordering. Use only the responsibilityIds allowed for that section:\n${responsibilityContract}\nProduction material content must use the stated mechanical format for these exact contracts:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
@@ -264,57 +295,50 @@ export function createNativeCanonicalDocumentTool(options: {
             part: parsed.part,
           }),
         }
-      const structuredDocument =
-        completeGameDocument && 'document' in parsed
-          ? await validateCompleteGameDocumentEvidence(
-              options.workspacePath,
-              options.contract.targetPath as FoundationDocumentPath,
-              parsed.document,
-            )
-          : undefined
-      const structuredBody = structuredDocument
-        ? renderCompleteGameDocument(
-            options.contract.targetPath as FoundationDocumentPath,
-            structuredDocument,
-          )
-          : undefined
-      const structuredArtifacts = structuredDocument
-        ? prepareCompleteGameDocumentArtifacts(
-            options.contract.targetPath as FoundationDocumentPath,
-            structuredDocument,
-          )
-        : undefined
-      if (structuredDocument)
+      if (completeGameDocument && 'document' in parsed) {
+        const document = await validateCompleteGameDocumentEvidence(
+          options.workspacePath,
+          options.contract.targetPath as FoundationDocumentPath,
+          parsed.document,
+        )
         await persistCompleteDocumentDraftSnapshot({
           workspacePath: options.workspacePath,
           contract: options.contract,
-          document: structuredDocument,
+          document,
         })
+        return {
+          data: {
+            status: 'document_parts_prepared',
+            nextPart: 'authority',
+          },
+        }
+      }
+      if (completeGameDocument && 'authority' in parsed) {
+        const result = await commitPreparedCompleteDocument({
+          workspacePath: options.workspacePath,
+          contract: options.contract,
+          authority: parsed.authority,
+        })
+        if (result.status === 'committed')
+          await unlink(
+            completeDocumentDraftPath(
+              options.workspacePath,
+              options.contract.dispatchId,
+            ),
+          ).catch(() => undefined)
+        return { data: result }
+      }
+      if (completeGameDocument)
+        throw new Error(
+          'complete game document commits require structured document parts before authority',
+        )
+      if (!('body' in parsed))
+        throw new Error('canonical document body is required')
       const result = await commitCanonicalDocument({
           workspacePath: options.workspacePath,
           contract: options.contract,
-          ...(structuredBody !== undefined
-            ? { body: structuredBody }
-            : 'body' in parsed
-              ? { body: parsed.body }
-              : {}),
-          ...('authority' in parsed ? { authority: parsed.authority } : {}),
-          ...(structuredArtifacts !== undefined
-            ? { artifacts: structuredArtifacts }
-            : {}),
+          body: parsed.body,
         })
-      if (
-        completeGameDocument &&
-        'authority' in parsed &&
-        result.schemaVersion === 2 &&
-        result.status === 'committed'
-      )
-        await unlink(
-          completeDocumentDraftPath(
-            options.workspacePath,
-            options.contract.dispatchId,
-          ),
-        ).catch(() => undefined)
       return { data: result }
     },
     renderToolUseMessage() {
@@ -340,7 +364,7 @@ async function prepareCompleteDocumentPart(input: {
     | { kind: 'audit'; auditAppendix: z.infer<typeof completeGameDocumentAuditAppendixSchema> }
 }): Promise<
   | { status: 'part_prepared'; nextPart: string }
-  | CompleteGameDocumentCommitReceipt
+  | { status: 'document_parts_prepared'; nextPart: 'authority' }
 > {
   const targetPath = input.contract.targetPath as FoundationDocumentPath
   const contract = getGameDocumentContract(targetPath)
@@ -372,16 +396,26 @@ async function prepareCompleteDocumentPart(input: {
       throw new Error(`next document part is ${nextDraftPart(contract, draft)}`)
     }
     draft = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       dispatchId: input.contract.dispatchId,
       targetPath: input.contract.targetPath,
       title: input.part.title,
       executiveSummary: input.part.executiveSummary,
       sections: [],
       productionMaterials: [],
+      artifacts: [],
     }
   } else {
     if (!draft) throw new Error('next document part is header')
+    if (draft.auditAppendix) {
+      if (
+        input.part.kind === 'audit' &&
+        JSON.stringify(draft.auditAppendix) ===
+          JSON.stringify(input.part.auditAppendix)
+      )
+        return { status: 'document_parts_prepared', nextPart: 'authority' }
+      throw new Error('next document part is authority')
+    }
     const expected = nextDraftPart(contract, draft)
     if (input.part.kind === 'section') {
       const submittedSection = input.part.section
@@ -440,13 +474,11 @@ async function prepareCompleteDocumentPart(input: {
       )
       draft.auditAppendix = document.auditAppendix
       await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
-      const receipt = await commitCanonicalDocument({
-        workspacePath: input.workspacePath,
-        contract: input.contract,
-        body: renderCompleteGameDocument(targetPath, document),
-        artifacts: prepareCompleteGameDocumentArtifacts(targetPath, document),
-      })
-      return receipt as CompleteGameDocumentCommitReceipt
+      const artifacts = prepareCompleteGameDocumentArtifacts(targetPath, document)
+      draft.schemaVersion = 2
+      draft.artifacts = artifacts.map(({ content: _, ...artifact }) => artifact)
+      await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
+      return { status: 'document_parts_prepared', nextPart: 'authority' }
     }
   }
   await durableWrite(draftPath, `${JSON.stringify(draft, null, 2)}\n`)
@@ -463,7 +495,7 @@ async function persistCompleteDocumentDraftSnapshot(input: {
     input.contract.dispatchId,
   )
   const snapshot: CompleteDocumentDraft = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     dispatchId: input.contract.dispatchId,
     targetPath: input.contract.targetPath,
     title: input.document.title,
@@ -471,6 +503,10 @@ async function persistCompleteDocumentDraftSnapshot(input: {
     sections: input.document.sections,
     productionMaterials: input.document.productionMaterials,
     auditAppendix: input.document.auditAppendix,
+    artifacts: prepareCompleteGameDocumentArtifacts(
+      input.contract.targetPath as FoundationDocumentPath,
+      input.document,
+    ).map(({ content: _, ...artifact }) => artifact),
   }
   const existingRaw = await readOptionalFile(draftPath)
   if (existingRaw) {
@@ -503,6 +539,183 @@ function completeDocumentDraftPath(
     'canonical-document-drafts',
     `${dispatchId}.json`,
   )
+}
+
+async function commitPreparedCompleteDocument(input: {
+  workspacePath: string
+  contract: CanonicalDocumentCommitContract
+  authority: unknown
+}): Promise<CompleteGameDocumentCommitReceiptV3> {
+  const existingReceipt = await readCanonicalDocumentCommitReceipt(
+    input.workspacePath,
+    input.contract.dispatchId,
+  )
+  if (existingReceipt) {
+    assertReceiptMatchesContract(existingReceipt, input.contract)
+    if (existingReceipt.schemaVersion !== 3)
+      throw new Error('canonical document receipt kind does not match dispatch')
+    const reconciled = await reconcileCanonicalDocumentCommitReceipt({
+      workspacePath: input.workspacePath,
+      dispatchId: input.contract.dispatchId,
+    })
+    if (reconciled?.schemaVersion === 3) {
+      const markdown = await readFile(
+        resolve(input.workspacePath, reconciled.targetPath),
+        'utf8',
+      )
+      const submittedSidecar = createFoundationAuthoritySidecar({
+        documentPath: reconciled.targetPath as FoundationDocumentPath,
+        markdown,
+        submission: input.authority,
+      })
+      if (
+        digest(canonicalFoundationAuthoritySidecarBytes(submittedSidecar)) !==
+        reconciled.authorityDigest
+      )
+        throw new Error(
+          'canonical document package was already prepared with different authority',
+        )
+      return reconciled
+    }
+    if (existingReceipt.status === 'committed')
+      throw new Error('committed canonical document package is missing or stale')
+  }
+
+  const draftPath = completeDocumentDraftPath(
+    input.workspacePath,
+    input.contract.dispatchId,
+  )
+  const draftRaw = await readOptionalFile(draftPath)
+  if (!draftRaw)
+    throw new Error('prepared complete document draft is missing')
+  const draft = completeDocumentDraftSchema.parse(JSON.parse(draftRaw))
+  if (
+    draft.dispatchId !== input.contract.dispatchId ||
+    draft.targetPath !== input.contract.targetPath ||
+    !draft.auditAppendix
+  )
+    throw new Error('prepared complete document draft is incomplete or invalid')
+
+  const documentPath = input.contract.targetPath as FoundationDocumentPath
+  const document = await validateCompleteGameDocumentEvidence(
+    input.workspacePath,
+    documentPath,
+    {
+      title: draft.title,
+      executiveSummary: draft.executiveSummary,
+      sections: draft.sections,
+      productionMaterials: draft.productionMaterials,
+      auditAppendix: draft.auditAppendix,
+    },
+  )
+  const artifacts = prepareCompleteGameDocumentArtifacts(documentPath, document)
+  const artifactDescriptors = artifacts.map(({ content: _, ...artifact }) => artifact)
+  if (JSON.stringify(artifactDescriptors) !== JSON.stringify(draft.artifacts))
+    throw new Error('prepared complete document artifacts changed after audit')
+
+  const workspacePath = resolve(input.workspacePath)
+  const targetPath = resolve(workspacePath, input.contract.targetPath)
+  const currentContent = await readOptionalFile(targetPath)
+  const currentDigest = currentContent === undefined ? null : digest(currentContent)
+  const version = existingReceipt?.version ?? nextVersion(input.contract)
+  const updatedAt = existingReceipt?.updatedAt ?? nextUpdatedAt(input.contract)
+  if (
+    currentDigest !== input.contract.baselineDigest &&
+    currentDigest !== existingReceipt?.finalDigest
+  )
+    throw new Error(
+      'canonical document baseline changed before package commit; refusing to overwrite concurrent content',
+    )
+  const markdown = canonicalizeCompleteGameDocumentMarkdown(
+    documentPath,
+    renderCompleteGameDocument(documentPath, document),
+    { version, updatedAt },
+  )
+  const sidecar = createFoundationAuthoritySidecar({
+    documentPath,
+    markdown,
+    submission: input.authority,
+  })
+  const trustedScheduleAuthorityIds = new Set(
+    sidecar.records
+      .filter(
+        record =>
+          record.state === 'verified' ||
+          ((record.source === 'user_setting' ||
+            record.source === 'confirmed_brief') &&
+            record.state === 'confirmed'),
+      )
+      .map(record => record.authorityId),
+  )
+  assertOpenDecisionClosure({
+    audit: document.auditAppendix,
+    authority: sidecar,
+    trustedScheduleAuthorityIds,
+  })
+  const sidecarBytes = canonicalFoundationAuthoritySidecarBytes(sidecar)
+  const prepared: CompleteGameDocumentCommitReceiptV3 = {
+    schemaVersion: 3,
+    dispatchId: input.contract.dispatchId,
+    targetPath: input.contract.targetPath,
+    baselineDigest: input.contract.baselineDigest,
+    finalDigest: digest(markdown),
+    authorityPath: authoritySidecarPath(documentPath),
+    authorityDigest: digest(sidecarBytes),
+    artifacts: artifactDescriptors,
+    documentId: input.contract.documentId,
+    version,
+    updatedAt,
+    status: 'package_prepared',
+  }
+  if (
+    existingReceipt &&
+    JSON.stringify({ ...existingReceipt, status: 'package_prepared' }) !==
+      JSON.stringify(prepared)
+  )
+    throw new Error(
+      'canonical document package was already prepared with different content',
+    )
+
+  const preparedFiles: Array<{ temporary: string; target: string }> = []
+  try {
+    for (const artifact of artifacts)
+      preparedFiles.push(
+        await prepareDurableFile(
+          resolve(workspacePath, artifact.path),
+          artifact.content,
+        ),
+      )
+    preparedFiles.push(
+      await prepareDurableFile(
+        resolve(workspacePath, prepared.authorityPath),
+        sidecarBytes,
+      ),
+    )
+    preparedFiles.push(await prepareDurableFile(targetPath, markdown))
+    await durableWrite(
+      canonicalDocumentReceiptPath(
+        input.workspacePath,
+        input.contract.dispatchId,
+      ),
+      `${JSON.stringify(prepared, null, 2)}\n`,
+    )
+    for (const file of preparedFiles) await rename(file.temporary, file.target)
+    await syncDirectories(preparedFiles.map(file => dirname(file.target)))
+  } catch (error) {
+    await Promise.all(
+      preparedFiles.map(file => unlink(file.temporary).catch(() => undefined)),
+    )
+    throw error
+  }
+  const committed: CompleteGameDocumentCommitReceiptV3 = {
+    ...prepared,
+    status: 'committed',
+  }
+  await durableWrite(
+    canonicalDocumentReceiptPath(input.workspacePath, input.contract.dispatchId),
+    `${JSON.stringify(committed, null, 2)}\n`,
+  )
+  return committed
 }
 
 export async function commitCanonicalDocument(input: {
@@ -551,6 +764,10 @@ export async function commitCanonicalDocument(input: {
     input.contract.dispatchId,
   )
   if (completeGameDocument) {
+    if (existingReceipt?.schemaVersion !== 2)
+      throw new Error(
+        'complete game document commits require a prepared structured draft',
+      )
     return commitCompleteGameDocument({
       workspacePath,
       targetPath,
@@ -867,6 +1084,46 @@ export async function reconcileCanonicalDocumentCommitReceipt(input: {
   )
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
+  if (receipt.schemaVersion === 3) {
+    if (
+      receipt.status === 'package_prepared' &&
+      (await readOptionalFile(
+        completeDocumentDraftPath(input.workspacePath, input.dispatchId),
+      )) === undefined
+    )
+      return undefined
+    if (!(await completeDocumentArtifactsMatch(input.workspacePath, receipt.artifacts)))
+      return undefined
+    const authorityRaw = await readOptionalFile(
+      resolve(input.workspacePath, receipt.authorityPath),
+    )
+    if (
+      authorityRaw === undefined ||
+      digest(authorityRaw) !== receipt.authorityDigest
+    )
+      return undefined
+    let authority: unknown
+    try {
+      authority = JSON.parse(authorityRaw)
+    } catch {
+      return undefined
+    }
+    validateFoundationAuthoritySidecar({
+      documentPath: receipt.targetPath as FoundationDocumentPath,
+      markdown: target,
+      value: authority,
+    })
+    if (receipt.status === 'committed') return receipt
+    const committed: CompleteGameDocumentCommitReceiptV3 = {
+      ...receipt,
+      status: 'committed',
+    }
+    await durableWrite(
+      canonicalDocumentReceiptPath(input.workspacePath, input.dispatchId),
+      `${JSON.stringify(committed, null, 2)}\n`,
+    )
+    return committed
+  }
   if (receipt.schemaVersion === 2) {
     if (!(await completeDocumentArtifactsMatch(input.workspacePath, receipt.artifacts)))
       return undefined
@@ -1032,9 +1289,40 @@ async function durableWrite(path: string, content: string): Promise<void> {
       await handle.close()
     }
     await rename(temporary, path)
+    await syncDirectories([dirname(path)])
   } catch (error) {
     await unlink(temporary).catch(() => undefined)
     throw error
+  }
+}
+
+async function prepareDurableFile(
+  target: string,
+  content: string,
+): Promise<{ temporary: string; target: string }> {
+  await mkdir(dirname(target), { recursive: true })
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+  const handle = await open(temporary, 'wx')
+  try {
+    await handle.writeFile(content, 'utf8')
+    await handle.sync()
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  } finally {
+    await handle.close()
+  }
+  return { temporary, target }
+}
+
+async function syncDirectories(paths: readonly string[]): Promise<void> {
+  for (const path of [...new Set(paths)].sort()) {
+    const handle = await open(path, 'r')
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
   }
 }
 
