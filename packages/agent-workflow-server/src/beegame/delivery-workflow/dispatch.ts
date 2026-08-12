@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { parseDispatchRecord } from './schema'
 import {
@@ -20,6 +22,7 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
+import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 
 export type DispatchCredits = {
   reserve?: (
@@ -186,6 +189,60 @@ function resourceTaskPerformance(input: {
         : 0,
     usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
     ...input.result.taskMetrics,
+  }
+}
+
+async function documentPerformance(input: {
+  dispatch: DispatchRecord
+  request: WorkerDispatchRequest | undefined
+  result: WorkerTerminalResult
+  currentUsage: WorkflowUsage | undefined
+  finishedAt: string
+}): Promise<Record<string, unknown> | undefined> {
+  if (
+    input.result.workerType !== 'document-author' ||
+    input.request?.workerType !== 'document-author' ||
+    input.request.contract.authoringMode === 'repair-planning'
+  )
+    return undefined
+  const receipt = await readCanonicalDocumentCommitReceipt(
+    input.request.workspacePath,
+    input.dispatch.dispatchId,
+  )
+  const fileBytes = async (path: string | undefined): Promise<number> => {
+    if (!path) return 0
+    try {
+      return (await stat(resolve(input.request!.workspacePath, path))).size
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
+      throw error
+    }
+  }
+  const targetPath =
+    typeof input.request.contract.foundationDocumentPath === 'string'
+      ? input.request.contract.foundationDocumentPath
+      : receipt?.targetPath
+  const projectionPath = `.beegame/workflow/authority-projections/${input.dispatch.dispatchId}.json`
+  const startedAt = Date.parse(input.dispatch.startedAt)
+  const finishedAt = Date.parse(input.finishedAt)
+  return {
+    targetPath,
+    authorityMode:
+      input.request.contract.authorityMode === 'sidecar_only'
+        ? 'sidecar_only'
+        : 'document_and_sidecar',
+    usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
+    durationMs:
+      Number.isFinite(startedAt) && Number.isFinite(finishedAt)
+        ? Math.max(0, finishedAt - startedAt)
+        : 0,
+    markdownBytes: await fileBytes(receipt?.targetPath ?? targetPath),
+    sidecarBytes:
+      receipt?.schemaVersion === 2
+        ? await fileBytes(receipt.authorityPath)
+        : 0,
+    projectionBytes: await fileBytes(projectionPath),
+    retryReason: null,
   }
 }
 
@@ -677,6 +734,13 @@ export function createDeliveryDispatcher(options: {
       currentUsage: run.usage,
       finishedAt,
     })
+    const completedDocumentPerformance = await documentPerformance({
+      dispatch: run.activeDispatch,
+      request,
+      result,
+      currentUsage: run.usage,
+      finishedAt,
+    })
     await options.store.commit(updated, {
       runId: run.runId,
       type: `dispatch.${status}`,
@@ -688,6 +752,9 @@ export function createDeliveryDispatcher(options: {
       ...(performance ? { reviewerPerformance: performance } : {}),
       ...(resourcePerformance
         ? { resourceTaskPerformance: resourcePerformance }
+        : {}),
+      ...(completedDocumentPerformance
+        ? { documentPerformance: completedDocumentPerformance }
         : {}),
     })
     const key = request

@@ -1510,6 +1510,29 @@ describe('delivery workflow recovery', () => {
             )
           }
           const recoveredStore = await resumeFromDisk(false)
+          if (
+            workerType === 'document-author' &&
+            checkpoint === 'terminal-accepted'
+          ) {
+            const completedEvent = (await recoveredStore.readEvents()).find(
+              event =>
+                event.type === 'dispatch.completed' &&
+                event.dispatchId === active!.dispatchId,
+            )
+            expect(completedEvent?.documentPerformance).toMatchObject({
+              targetPath: originalRequest.taskId,
+              usage: {
+                input_tokens: 0,
+                cache_read_tokens: 0,
+                completion_tokens: 0,
+              },
+              retryReason: null,
+            })
+            expect(
+              (completedEvent?.documentPerformance as { markdownBytes: number })
+                .markdownBytes,
+            ).toBeGreaterThan(0)
+          }
           if (checkpoint === 'canonical-receipt') {
             const acceptedUnitId =
               workerType === 'document-author'
