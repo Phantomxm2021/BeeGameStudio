@@ -111,6 +111,15 @@ describe('canonical document commit', () => {
       expect(prompt).toContain(`required mechanical format: ${material.format}`)
     }
     expect(prompt).not.toContain('format=')
+    expect(prompt).toContain('authority ID prefix: gdd.')
+    for (const section of getGameDocumentContract('docs/GDD.md').sections) {
+      expect(prompt).toContain(
+        `sectionId=${section.sectionId}; allowed responsibilityIds=${[
+          ...section.responsibilityIds,
+        ].sort(bytewise).join(',')}`,
+      )
+    }
+    expect(prompt).toContain('sort responsibilityIds bytewise within each record')
   })
 
   test('prepares Markdown before accepting authority without resending the body', async () => {

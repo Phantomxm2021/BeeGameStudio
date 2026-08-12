@@ -148,18 +148,35 @@ export function createNativeCanonicalDocumentTool(options: {
         : 'Atomically commit the complete Markdown body of the assigned canonical document. The workflow service owns front matter, version, timestamp, target path, and durable recovery.'
     },
     async prompt() {
-      const productionMaterialContract = completeGameDocument
+      const documentContract = completeGameDocument
         ? getGameDocumentContract(
             options.contract.targetPath as FoundationDocumentPath,
-          ).productionMaterials
+          )
+        : undefined
+      const productionMaterialContract = documentContract
+        ? documentContract.productionMaterials
             .map(
               material =>
                 `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\nrequired mechanical format: ${material.format}`,
             )
             .join('\n')
         : ''
+      const responsibilityContract = documentContract
+        ? documentContract.sections
+            .map(
+              section =>
+                `sectionId=${section.sectionId}; allowed responsibilityIds=${[
+                  ...section.responsibilityIds,
+                ]
+                  .sort((left, right) =>
+                    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+                  )
+                  .join(',')}`,
+            )
+            .join('\n')
+        : ''
       return completeGameDocument
-        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. authorityId must use <document-id>.<section-id>.<stable-id>. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. The Production Materials block must contain these exact markers and headings in this exact order, with content using the stated mechanical format; the format descriptions are instructions and must not be copied into the Markdown:\n${productionMaterialContract}`
+        ? `Use two bounded phases. First call with {body} only; after the service returns document_prepared, call with {authority:{records}} only and never resend the body. Each record must contain authorityId, sectionId, kind, state, statement, and responsibilityIds; omit value and unit when they do not apply. Exact lowercase authority ID prefix: ${options.contract.documentId.toLowerCase()}. followed by the exact sectionId and a stable lowercase suffix. Records contain every downstream-relevant fact, decision, constraint, metric, dependency, risk, and open decision and must be bytewise sorted by authorityId. Use only the responsibilityIds allowed for that section and sort responsibilityIds bytewise within each record:\n${responsibilityContract}\nThe Production Materials block must contain these exact markers and headings in this exact order, with content using the stated mechanical format; the format descriptions are instructions and must not be copied into the Markdown:\n${productionMaterialContract}`
         : 'Call exactly once with only the complete Markdown body, beginning with the document heading. Do not include YAML front matter, version, updated_at, path, finding IDs, or completion prose.'
     },
     async checkPermissions(input: unknown) {
