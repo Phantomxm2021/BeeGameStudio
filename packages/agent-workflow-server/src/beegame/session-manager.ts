@@ -565,10 +565,15 @@ export class BeeGameSessionManager {
     private readonly allowExternalRuntimeEnv = false,
     private readonly resourceSelectionConfig?: ResourceSelectionRuntimeConfig,
   ) {
-    this.dashboardDataRoot = resolveExistingPath(
+    const configuredDataRoot =
       dashboardDataRoot?.trim() ||
-        process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-        resolve(process.cwd(), 'Projects'),
+      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
+      process.env.AGENT_WORKFLOW_DATA_DIR?.trim()
+    if (!configuredDataRoot) {
+      throw new Error('BeeGame session data root is required')
+    }
+    this.dashboardDataRoot = resolveExistingPath(
+      configuredDataRoot,
     )
   }
 

@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { describe, expect, test, afterEach } from 'bun:test'
 import { zipSync, strToU8 } from 'fflate'
 import {
+  clearRuntimeBuiltinSkills,
   importUserSkill,
   listUserSkills,
-  materializeBuiltinSkills,
   materializeUserSkills,
   parseSkillZipPackage,
 } from '../store'
@@ -237,48 +237,18 @@ describe('BeeGame skills store', () => {
     ), 'utf8')).resolves.toContain('# Touch contract')
   })
 
-  test('materializes built-in skills into the isolated runtime config', async () => {
-    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-builtins-'))
-    const sourceDir = join(dataDir, 'source-builtins')
-    await mkdir(join(sourceDir, 'acceptance'), { recursive: true })
-    await writeFile(join(sourceDir, 'acceptance', 'SKILL.md'), [
-      '---',
-      'name: acceptance',
-      'description: Validate a deliverable.',
-      '---',
-      '',
-      '# Acceptance',
-    ].join('\n'), 'utf8')
-
-    materializeBuiltinSkills({ dataDir }, sourceDir)
-
-    await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', 'acceptance', 'SKILL.md'),
+  test('clears BeeGame built-ins without removing user-selected skills', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-clear-builtins-'))
+    const runtimeSkillsDir = join(dataDir, '.runtime', 'app', 'skills')
+    const projectedSkillDir = join(runtimeSkillsDir, 'acceptance')
+    await mkdir(projectedSkillDir, { recursive: true })
+    await writeFile(join(projectedSkillDir, 'SKILL.md'), 'projected skill', 'utf8')
+    await writeFile(join(projectedSkillDir, '.beegame-builtin'), '', 'utf8')
+    await writeFile(
+      join(runtimeSkillsDir, '.beegame-builtins.json'),
+      JSON.stringify({ version: 1, skills: ['acceptance'] }),
       'utf8',
-    )).resolves.toContain('# Acceptance')
-    await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', '.beegame-builtins.json'),
-      'utf8',
-    )).resolves.toContain('"acceptance"')
-    expect(existsSync(join(
-      dataDir,
-      '.runtime',
-      'app',
-      'skills',
-      'builtinskills',
-    ))).toBe(false)
-  })
-
-  test('preserves user skills and removes only stale built-in projections', async () => {
-    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-projection-'))
-    const sourceDir = join(dataDir, 'source-builtins')
-    await mkdir(join(sourceDir, 'first'), { recursive: true })
-    await writeFile(join(sourceDir, 'first', 'SKILL.md'), [
-      '---',
-      'name: first',
-      'description: First built-in.',
-      '---',
-    ].join('\n'), 'utf8')
+    )
     const userSkillDir = join(
       dataDir,
       '.runtime',
@@ -288,43 +258,22 @@ describe('BeeGame skills store', () => {
     )
     await mkdir(userSkillDir, { recursive: true })
     await writeFile(join(userSkillDir, 'SKILL.md'), 'user skill', 'utf8')
-
-    materializeBuiltinSkills({ dataDir }, sourceDir)
-    await rm(join(sourceDir, 'first'), { recursive: true, force: true })
-    await mkdir(join(sourceDir, 'second'), { recursive: true })
-    await writeFile(join(sourceDir, 'second', 'SKILL.md'), [
-      '---',
-      'name: second',
-      'description: Second built-in.',
-      '---',
-    ].join('\n'), 'utf8')
-    await writeFile(join(
-      dataDir,
-      '.runtime',
-      'app',
-      'skills',
-      '.beegame-builtins.json',
-    ), JSON.stringify({
-      version: 1,
-      skills: ['first', 'user-custom', '../outside'],
-    }), 'utf8')
-    materializeBuiltinSkills({ dataDir }, sourceDir)
+    clearRuntimeBuiltinSkills({ dataDir })
 
     expect(existsSync(join(
       dataDir,
       '.runtime',
       'app',
       'skills',
-      'first',
+      'acceptance',
     ))).toBe(false)
-    await expect(readFile(join(
+    expect(existsSync(join(
       dataDir,
       '.runtime',
       'app',
       'skills',
-      'second',
-      'SKILL.md',
-    ), 'utf8')).resolves.toContain('Second built-in')
+      '.beegame-builtins.json',
+    ))).toBe(false)
     await expect(readFile(join(userSkillDir, 'SKILL.md'), 'utf8'))
       .resolves.toBe('user skill')
   })

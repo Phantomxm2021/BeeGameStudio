@@ -169,14 +169,6 @@ vi.mock('../../services/beeGameAdapter', () => ({
     workspacePath: '/tmp/beegame-projects',
     isDefault: true,
   }),
-  resetBeeGameWorkspaceRoot: vi.fn().mockResolvedValue({
-    workspacePath: '/tmp/beegame-projects',
-    isDefault: true,
-  }),
-  setBeeGameWorkspaceRoot: vi.fn().mockReturnValue({
-    workspacePath: '/tmp/beegame-projects',
-    isDefault: false,
-  }),
 }));
 
 vi.mock('../../services/modelConfigApi', () => ({

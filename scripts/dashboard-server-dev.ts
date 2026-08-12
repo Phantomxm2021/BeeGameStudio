@@ -44,6 +44,10 @@ const { resolveResourceSelectionRuntimeConfig } = await import(
 )
 
 const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
+const configuredWorkspacePath = process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim()
+if (!configuredWorkspacePath) {
+  throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH is required')
+}
 const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
 const cleanupHandlers: Array<() => void | Promise<void>> = []
 const server = Bun.serve({
@@ -52,9 +56,7 @@ const server = Bun.serve({
   fetch: createAgentWorkflowApp({
     registerCleanup: cleanup => cleanupHandlers.push(cleanup),
     modelConfigStore: {},
-    defaultWorkspacePath: process.env.AGENT_WORKFLOW_WORKSPACE_PATH
-      ? resolve(process.env.AGENT_WORKFLOW_WORKSPACE_PATH)
-      : resolve(import.meta.dir, '..', 'Projects'),
+    defaultWorkspacePath: resolve(configuredWorkspacePath),
     ...(resourceSelectionConfig
       ? {
           resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig),

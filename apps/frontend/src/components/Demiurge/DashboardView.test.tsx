@@ -261,8 +261,6 @@ vi.mock('../../services/supabaseAuthApi', () => ({
 
 vi.mock('../../services/beeGameAdapter', () => ({
   getBeeGameWorkspaceSettings: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
-  resetBeeGameWorkspaceRoot: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
-  setBeeGameWorkspaceRoot: vi.fn((workspacePath: string) => ({ workspacePath, isDefault: false })),
 }));
 
 vi.mock('./TopBar', () => ({

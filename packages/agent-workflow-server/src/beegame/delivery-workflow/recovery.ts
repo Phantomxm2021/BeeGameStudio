@@ -33,7 +33,7 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
-import { reconcileCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+import { reconcileAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
@@ -258,7 +258,7 @@ async function reconcileActiveCanonicalReceipt(input: {
       recoveryConflict(
         'canonical document receipt does not prove the exact active drafting unit',
       )
-    const receipt = await reconcileCanonicalDocumentCommitReceipt({
+    const receipt = await reconcileAuthoredDocumentReceipt({
       workspacePath: input.workspacePath,
       dispatchId: identity.dispatchId,
     })
@@ -268,7 +268,7 @@ async function reconcileActiveCanonicalReceipt(input: {
         events: input.events,
         acceptedUnits: [],
       }
-    if (receipt.schemaVersion === 1 || receipt.status !== 'committed')
+    if (receipt.status !== 'committed')
       recoveryConflict(
         'canonical Foundation document receipt is missing committed authority',
       )
@@ -742,7 +742,7 @@ async function restoreCanonicalDocumentCommit(
     dispatch.terminalResult
   )
     return run
-  const receipt = await reconcileCanonicalDocumentCommitReceipt({
+  const receipt = await reconcileAuthoredDocumentReceipt({
     workspacePath,
     dispatchId: dispatch.dispatchId,
   })

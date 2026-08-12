@@ -20,7 +20,9 @@ import {
 import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
-import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import { renderCompleteGameDocument } from '../beegame/complete-game-document'
+import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import {
   computeDocumentRevision,
   computeWorkspaceRevision,
@@ -39,6 +41,54 @@ const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
+
+function completeTestFoundationDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): string {
+  const contract = getGameDocumentContract(path)
+  return renderCompleteGameDocument(path, {
+    title: contract.discipline,
+    executiveSummary: 'Complete test foundation authority.',
+    sections: contract.sections.map(section => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Authoritative test requirements for ${section.sectionId}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [{
+              evidenceId: `${material.materialId}.pending`,
+              category: 'search_direction' as const,
+              displayName: 'Pending reference direction',
+              purpose: 'Record a production need before source selection.',
+              state: 'source_not_selected' as const,
+              evidenceRefs: [],
+            }],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Test |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
+    auditAppendix: {
+      acceptanceCriteria: ['The test foundation document is complete.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  })
+}
 
 beforeEach(async () => {
   const directory = await mkdtemp(
@@ -606,13 +656,25 @@ describe('delivery workflow session continuation', () => {
         }),
       })
       expect(modelConfigResponse.status).toBe(200)
-      const sessionResponse = await app.request('/api/beegame-sessions', {
+      const removedLegacyCreateResponse = await app.request('/api/beegame-sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({
+          projectId,
+          workspacePath: join(projectsRoot, 'client-selected-workspace'),
+        }),
       })
+      expect(removedLegacyCreateResponse.status).toBe(404)
+      const sessionResponse = await app.request(
+        `/api/projects/${encodeURIComponent(projectId)}/session/ensure`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'English' }),
+        },
+      )
       const sessionPayload = (await sessionResponse.clone().json()) as {
-        id?: string
+        session?: { id: string }
         error?: string
       }
       expect({
@@ -622,7 +684,9 @@ describe('delivery workflow session continuation', () => {
         status: 200,
         error: undefined,
       })
-      const session = (await sessionResponse.json()) as { id: string }
+      const session = ((await sessionResponse.json()) as {
+        session: { id: string }
+      }).session
 
       const brief = JSON.stringify({
         kind: 'confirmed_build_brief',
@@ -811,16 +875,15 @@ describe('delivery workflow session continuation', () => {
 
       const acceptedPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
       const acceptedDispatchId = 'accepted-foundation-draft'
-      await commitCanonicalDocument({
+      await mkdir(join(workspace, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspace, acceptedPath),
+        completeTestFoundationDocument(acceptedPath),
+      )
+      await commitAuthoredFoundationDocument({
         workspacePath: workspace,
-        contract: {
-          dispatchId: acceptedDispatchId,
-          targetPath: acceptedPath,
-          documentId: CANONICAL_PROJECT_DOCUMENT_IDS[acceptedPath],
-          operation: 'create',
-          baselineDigest: null,
-        },
-        body: '# Accepted foundation authority',
+        dispatchId: acceptedDispatchId,
+        targetPath: acceptedPath,
       })
       const recoverableRevision = {
         document: await computeDocumentRevision(

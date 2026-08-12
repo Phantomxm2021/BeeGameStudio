@@ -8,7 +8,7 @@ describe('BeeGame local dev launcher helpers', () => {
   test('plans all local BeeGame services with stable default ports', () => {
     const plan = buildBeeGameDevPlan([], {
       cwd: '/repo',
-      env: {},
+      env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
       ports: {
       runtime: 62174,
       frontend: 62173,
@@ -18,7 +18,7 @@ describe('BeeGame local dev launcher helpers', () => {
       },
     })
 
-    expect(plan.workspacePath).toBe(resolve('/repo', 'Projects'))
+    expect(plan.workspacePath).toBe('/srv/beegame/projects')
     expect(plan.frontendDir).toBe(resolve('/repo', 'apps/frontend'))
     expect(plan.urls).toEqual({
       frontend: 'http://127.0.0.1:62173',
@@ -46,6 +46,7 @@ describe('BeeGame local dev launcher helpers', () => {
     const plan = buildBeeGameDevPlan([], {
       cwd: '/repo',
       env: {
+        AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects',
         BEEGAME_SUPABASE_URL: 'https://project.supabase.co',
         BEEGAME_SUPABASE_SERVICE_ROLE_KEY: 'service-secret',
         SUPABASE_SERVICE_ROLE_KEY: 'generic-service-secret',
@@ -117,7 +118,7 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(frontend?.env.BEEGAME_RESOURCE_SERVICE_TOKEN).toBeUndefined()
   })
 
-  test('supports cli port and path overrides', () => {
+  test('supports cli port overrides without allowing a second workspace root', () => {
     const plan = buildBeeGameDevPlan([
       '--runtime-port',
       '50174',
@@ -126,13 +127,11 @@ describe('BeeGame local dev launcher helpers', () => {
       '50175',
       '--skills-port',
       '50176',
-      '--workspace',
-      'BeeProjects',
       '--frontend',
       'custom/frontend',
     ], {
       cwd: '/repo',
-      env: {},
+      env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
       ports: {
         runtime: 50174,
         frontend: 50173,
@@ -141,11 +140,39 @@ describe('BeeGame local dev launcher helpers', () => {
       },
     })
 
-    expect(plan.workspacePath).toBe(resolve('/repo', 'BeeProjects'))
+    expect(plan.workspacePath).toBe('/srv/beegame/projects')
     expect(plan.frontendDir).toBe(resolve('/repo', 'custom/frontend'))
     expect(plan.urls.frontend).toBe('http://127.0.0.1:50173')
     expect(plan.urls.runtime).toBe('http://127.0.0.1:50174')
     expect(plan.urls.billing).toBe('http://127.0.0.1:50175')
     expect(plan.urls.skills).toBe('http://127.0.0.1:50176')
+  })
+
+  test('fails closed when the server-managed workspace root is missing', () => {
+    expect(() => buildBeeGameDevPlan([], {
+      cwd: '/repo',
+      env: {},
+      ports: {
+        runtime: 62174,
+        frontend: 62173,
+        billing: 62175,
+        skills: 62176,
+        resources: 62177,
+      },
+    })).toThrow('AGENT_WORKFLOW_WORKSPACE_PATH is required')
+  })
+
+  test('rejects the removed workspace command-line override', () => {
+    expect(() => buildBeeGameDevPlan(['--workspace', 'BeeProjects'], {
+      cwd: '/repo',
+      env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
+      ports: {
+        runtime: 62174,
+        frontend: 62173,
+        billing: 62175,
+        skills: 62176,
+        resources: 62177,
+      },
+    })).toThrow('workspace root is server-managed')
   })
 })

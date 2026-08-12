@@ -257,14 +257,9 @@ export type BeeGameBuildBrief = {
   analysisId?: string
 }
 
-const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root'
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text'
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:'
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:'
-const ALLOW_CLIENT_WORKSPACE_ROOT =
-  String(
-    import.meta.env.VITE_BEEGAME_ALLOW_CLIENT_WORKSPACE_ROOT ?? '',
-  ).trim() === '1' || import.meta.env.MODE === 'test'
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId'
 
 export type BeeGameWorkspaceSettings = {
@@ -273,35 +268,6 @@ export type BeeGameWorkspaceSettings = {
 }
 
 export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSettings> {
-  const configured = readConfiguredWorkspaceRoot()
-  if (configured) {
-    return { workspacePath: configured, isDefault: false }
-  }
-  return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true }
-}
-
-export function setBeeGameWorkspaceRoot(
-  path: string,
-): BeeGameWorkspaceSettings {
-  if (!ALLOW_CLIENT_WORKSPACE_ROOT) {
-    throw new Error('Workspace root is managed by the server deployment')
-  }
-  const normalized = path.trim()
-  if (!isAbsolutePath(normalized)) {
-    throw new Error('工作路径必须是绝对路径')
-  }
-  localStorage.setItem(WORKSPACE_ROOT_KEY, normalized)
-  return { workspacePath: normalized, isDefault: false }
-}
-
-export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSettings> {
-  if (!ALLOW_CLIENT_WORKSPACE_ROOT) {
-    return {
-      workspacePath: await resolveDefaultWorkspacePath(),
-      isDefault: true,
-    }
-  }
-  localStorage.removeItem(WORKSPACE_ROOT_KEY)
   return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true }
 }
 
@@ -913,12 +879,6 @@ function isDeleteAlreadyGoneError(error: unknown): boolean {
     message === 'not found' ||
     message.includes('enoent: no such file or directory')
   )
-}
-
-function readConfiguredWorkspaceRoot(): string {
-  if (!ALLOW_CLIENT_WORKSPACE_ROOT) return ''
-  const value = String(localStorage.getItem(WORKSPACE_ROOT_KEY) || '').trim()
-  return isAbsolutePath(value) ? value : ''
 }
 
 async function resolveDefaultWorkspacePath(): Promise<string> {

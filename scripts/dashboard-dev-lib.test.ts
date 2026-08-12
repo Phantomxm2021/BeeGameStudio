@@ -11,13 +11,27 @@ describe('dashboard dev launcher helpers', () => {
   test('uses stable defaults for local development', () => {
     const options = resolveDashboardDevOptions([], {
       cwd: '/repo',
-      env: {},
+      env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
     })
 
     expect(options.preferredApiPort).toBe(62174)
     expect(options.preferredFrontendPort).toBe(62173)
-    expect(options.workspacePath).toBe(resolve('/repo', 'Projects'))
+    expect(options.workspacePath).toBe('/srv/beegame/projects')
     expect(options.frontendDir).toBe(resolve('/repo', 'apps/frontend'))
+  })
+
+  test('fails closed without the server-managed workspace root', () => {
+    expect(() => resolveDashboardDevOptions([], {
+      cwd: '/repo',
+      env: {},
+    })).toThrow('AGENT_WORKFLOW_WORKSPACE_PATH is required')
+  })
+
+  test('rejects the removed workspace command-line override', () => {
+    expect(() => resolveDashboardDevOptions(['--workspace', 'OtherProjects'], {
+      cwd: '/repo',
+      env: { AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects' },
+    })).toThrow('workspace root is server-managed')
   })
 
   test('injects the selected api port into the frontend dev server', () => {

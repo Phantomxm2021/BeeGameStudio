@@ -35,7 +35,6 @@ export function parseMigrationArgs(
   input: {
     env?: Env
     homeDir?: string
-    cwd?: string
   } = {},
 ): MigrationCliOptions {
   const env = input.env ?? process.env
@@ -78,7 +77,6 @@ function resolveDefaultMigrationDataDir(
   env: Env,
   input: {
     homeDir?: string
-    cwd?: string
   },
 ): string {
   const explicitDataDir = (
@@ -86,11 +84,6 @@ function resolveDefaultMigrationDataDir(
     env.AGENT_WORKFLOW_DATA_DIR?.trim()
   )
   if (explicitDataDir) return resolve(explicitDataDir)
-
-  const currentProjectsDir = join(input.cwd ?? process.cwd(), 'Projects')
-  if (existsSync(join(currentProjectsDir, 'beegame.sqlite'))) {
-    return resolve(currentProjectsDir)
-  }
 
   return resolve(join(input.homeDir ?? homedir(), '.beegame', 'dashboard'))
 }

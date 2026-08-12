@@ -54,7 +54,6 @@ describe('BeeGame local migration CLI', () => {
         BEEGAME_MIGRATION_AUTH_USER_ID: 'owner-user',
       },
       homeDir: '/Users/demo',
-      cwd: '/tmp/beegame-no-local-projects',
     })
 
     expect(options.ownerId).toBe('owner-user')
@@ -69,29 +68,20 @@ describe('BeeGame local migration CLI', () => {
         BEEGAME_MIGRATION_AUTH_USER_ID: 'owner-user',
       },
       homeDir: '/Users/demo',
-      cwd: '/tmp/beegame-no-local-projects',
     })
 
     expect(options.includePlatformSettings).toBe(true)
   })
 
-  test('uses a local Projects dashboard store when it exists in the current workspace', async () => {
-    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises')
-    const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
-    const cwd = await mkdtemp(join(tmpdir(), 'beegame-migration-cwd-'))
-    await mkdir(join(cwd, 'Projects'), { recursive: true })
-    await writeFile(join(cwd, 'Projects', 'beegame.sqlite'), '')
-
+  test('uses only the user-level fallback when no migration data root is configured', () => {
     const options = parseMigrationArgs([], {
       env: {
         BEEGAME_MIGRATION_AUTH_USER_ID: 'owner-user',
       },
       homeDir: '/Users/demo',
-      cwd,
     })
 
-    expect(options.dataDir).toBe(join(cwd, 'Projects'))
+    expect(options.dataDir).toBe('/Users/demo/.beegame/dashboard')
   })
 
   test('extracts access token from copied Supabase localStorage JSON', async () => {

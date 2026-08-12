@@ -5,8 +5,8 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
 import {
   commitAuthoredFoundationDocument,
-  readCanonicalDocumentCommitReceipt,
-} from '../native-canonical-document-tool'
+  readAuthoredDocumentReceipt,
+} from '../authored-document-receipt'
 import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
@@ -1523,7 +1523,7 @@ async function completeInitialFoundationDocumentDraft(input: {
   )
   const dispatchId = input.run.activeDispatch?.dispatchId
   let commitReceipt = dispatchId
-    ? await readCanonicalDocumentCommitReceipt(input.workspacePath, dispatchId)
+    ? await readAuthoredDocumentReceipt(input.workspacePath, dispatchId)
     : undefined
   let authoredCommitIssue: string | undefined
   if (!commitReceipt && dispatchId) {
@@ -1542,10 +1542,9 @@ async function completeInitialFoundationDocumentDraft(input: {
   }
   const hasCommittedAuthority =
     commitReceipt !== undefined &&
-    commitReceipt.schemaVersion !== 1 &&
     commitReceipt.status === 'committed' &&
     commitReceipt.targetPath === expectedPath &&
-    commitReceipt.authorityDigest !== null
+    Boolean(commitReceipt.authorityDigest)
   const canonicalizationIssues = authoredCommitIssue
     ? [`${expectedPath}: ${authoredCommitIssue}`]
     : []

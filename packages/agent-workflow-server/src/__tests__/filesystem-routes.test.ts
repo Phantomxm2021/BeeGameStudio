@@ -11,6 +11,7 @@ describe('filesystem routes', () => {
       await mkdir(join(root, 'ProjectA'))
       await mkdir(join(root, 'ProjectB'))
       const app = createAgentWorkflowApp({
+        defaultWorkspacePath: root,
         currentUser: { id: 'filesystem-owner', role: 'owner' },
       })
 
@@ -40,6 +41,7 @@ describe('filesystem routes', () => {
 
   test('rejects relative directory listing paths', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'filesystem-owner', role: 'owner' },
     })
 

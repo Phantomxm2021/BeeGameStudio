@@ -674,8 +674,8 @@ describe('BeeGame session runtime resilience', () => {
                 index: 0,
                 content_block: {
                   type: 'tool_use',
-                  id: 'document-terminal-1',
-                  name: 'CommitCanonicalDocument',
+                  id: 'native-write-1',
+                  name: 'Write',
                   input: {},
                 },
               },

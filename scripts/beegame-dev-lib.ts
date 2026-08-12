@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 
 export const DEFAULT_BEEGAME_RUNTIME_PORT = 62174
 export const DEFAULT_BEEGAME_FRONTEND_PORT = 62173
@@ -53,6 +53,10 @@ export function buildBeeGameDevPlan(
   input: BeeGameDevPlanInput,
 ): BeeGameDevPlan {
   const values = parseArgs(argv)
+  if (values.workspace !== undefined)
+    throw new Error(
+      'BeeGame workspace root is server-managed; remove the --workspace override',
+    )
   const ports = {
     runtime: parsePort(
       values['runtime-port'] || values['api-port'] || input.env.AGENT_WORKFLOW_PORT,
@@ -75,13 +79,14 @@ export function buildBeeGameDevPlan(
       input.ports.resources,
     ),
   }
-  const workspacePath = resolve(
-    input.cwd,
-    values.workspace ||
-      input.env.AGENT_WORKFLOW_WORKSPACE_PATH ||
-      input.env.VITE_BEEGAME_WORKSPACE_PATH ||
-      'Projects',
-  )
+  const configuredWorkspace = String(
+    input.env.AGENT_WORKFLOW_WORKSPACE_PATH || '',
+  ).trim()
+  if (!configuredWorkspace)
+    throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH is required')
+  if (!isAbsolute(configuredWorkspace))
+    throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH must be absolute')
+  const workspacePath = resolve(configuredWorkspace)
   const frontendDir = resolve(input.cwd, values.frontend || 'apps/frontend')
   const bunExecutable = input.bunExecutable ?? 'bun'
   const urls = {

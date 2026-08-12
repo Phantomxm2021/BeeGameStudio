@@ -47,7 +47,7 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
-import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
+import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
@@ -169,6 +169,24 @@ function matrixCompleteDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[nu
       risks: [],
       openDecisions: [],
     },
+  })
+}
+
+async function commitMatrixFoundationDocument(input: {
+  workspacePath: string
+  dispatchId: string
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
+  body?: string
+}): Promise<void> {
+  await mkdir(join(input.workspacePath, 'docs'), { recursive: true })
+  await writeFile(
+    join(input.workspacePath, input.path),
+    input.body ?? matrixCompleteDocument(input.path),
+  )
+  await commitAuthoredFoundationDocument({
+    workspacePath: input.workspacePath,
+    dispatchId: input.dispatchId,
+    targetPath: input.path,
   })
 }
 
@@ -349,26 +367,10 @@ async function matrixTerminal(input: {
   }
   if (request.workerType === 'document-author') {
     const targetPath = request.taskId! as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
-    const baseline = await readFile(join(workspacePath, targetPath), 'utf8')
-    const baselineVersion = matrixFrontmatterValue(baseline, 'version')
-    const baselineUpdatedAt = matrixFrontmatterValue(baseline, 'updated_at')
-    await commitCanonicalDocument({
+    await commitMatrixFoundationDocument({
       workspacePath,
-      contract: {
-        dispatchId: request.dispatchId!,
-        targetPath,
-        documentId:
-          CANONICAL_PROJECT_DOCUMENT_IDS[
-            targetPath as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
-          ],
-        operation: 'revise',
-        baselineDigest: sha256(baseline),
-        baselineVersion,
-        baselineUpdatedAt,
-        submissionKind: 'complete_game_document',
-      },
-      body: matrixCompleteDocument(targetPath),
-      authority: matrixAuthority(targetPath),
+      dispatchId: request.dispatchId!,
+      path: targetPath,
     })
     return {
       workerType: request.workerType,
@@ -577,20 +579,23 @@ async function createWorkerRecoveryRun(input: {
   workspacePath: string
   workerType: DispatchWorkerType
 }): Promise<DeliveryRun> {
-  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
-    await commitCanonicalDocument({
-      workspacePath: input.workspacePath,
-      contract: {
+  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
+    if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never))
+      await commitMatrixFoundationDocument({
+        workspacePath: input.workspacePath,
         dispatchId: `matrix-document-${index}`,
-        targetPath: path,
-        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-        operation: 'create',
-        baselineDigest: null,
-      },
-      body: path.endsWith('gameplay-checklist.md')
-        ? '# Acceptance\n- [ ] CHECK-001 source: docs/GDD.md implement: Execute the synthetic action expected: observable result evidence: runtime\n'
-        : '# Spec\nSynthetic authority.',
-    })
+        path: path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+      })
+    else {
+      await mkdir(join(input.workspacePath, 'docs/acceptance'), {
+        recursive: true,
+      })
+      await writeFile(
+        join(input.workspacePath, path),
+        '# Acceptance\n- [ ] CHECK-001 source: docs/GDD.md implement: Execute the synthetic action expected: observable result evidence: runtime\n',
+      )
+    }
+  }
 
   const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
   const documentRevision = await computeDocumentRevision(
@@ -839,27 +844,18 @@ function sha256(value: string): string {
 
 async function createStaleReviewerRecoveryFixture() {
   const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-exact-resume-'))
-  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
-    await commitCanonicalDocument({
-      workspacePath,
-      contract: {
+  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
+    if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never))
+      await commitMatrixFoundationDocument({
+        workspacePath,
         dispatchId: `fixture-document-${index}`,
-        targetPath: path,
-        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-        operation: 'create',
-        baselineDigest: null,
-        ...(path === 'docs/GDD.md'
-          ? { submissionKind: 'complete_game_document' as const }
-          : {}),
-      },
-      body:
-        path === 'docs/GDD.md'
-          ? matrixCompleteDocument(path)
-          : '# Fixture',
-      ...(path === 'docs/GDD.md'
-        ? { authority: matrixAuthority(path) }
-        : {}),
-    })
+        path: path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+      })
+    else {
+      await mkdir(join(workspacePath, 'docs/acceptance'), { recursive: true })
+      await writeFile(join(workspacePath, path), '# Fixture')
+    }
+  }
   await writeBeeGameAssetManifest(workspacePath, {
     version: 8,
     project_target: {
@@ -1282,18 +1278,10 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
   const firstPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
   const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
   const dispatchId = 'committed-document-dispatch'
-  await commitCanonicalDocument({
+  await commitMatrixFoundationDocument({
     workspacePath,
-    contract: {
-      dispatchId,
-      targetPath: firstPath,
-      documentId: CANONICAL_PROJECT_DOCUMENT_IDS[firstPath],
-      operation: 'create',
-      baselineDigest: null,
-      submissionKind: 'complete_game_document',
-    },
-    body: matrixCompleteDocument(firstPath),
-    authority: matrixAuthority(firstPath),
+    dispatchId,
+    path: firstPath,
   })
   const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
   const revision = {
@@ -1605,16 +1593,10 @@ describe('delivery workflow recovery', () => {
         foundationDocumentPath: 'docs/GDD.md',
       },
     }
-    await commitCanonicalDocument({
+    await commitMatrixFoundationDocument({
       workspacePath: workspace,
-      contract: {
-        dispatchId: request.dispatchId!,
-        targetPath: 'docs/GDD.md',
-        documentId: 'GDD',
-        operation: 'create',
-        baselineDigest: null,
-      },
-      body: '# Game Design\n\nRepaired rules.',
+      dispatchId: request.dispatchId!,
+      path: 'docs/GDD.md',
     })
     await store.save({
       ...initial,

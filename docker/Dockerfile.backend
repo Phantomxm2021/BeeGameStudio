@@ -72,19 +72,17 @@ RUN mkdir -p /out/resource-node-modules && \
 
 FROM backend-source AS runtime
 
-COPY .beegame /opt/beegame/default-config
 COPY docker/runtime-entrypoint.sh /usr/local/bin/beegame-runtime-entrypoint.sh
 
 RUN mkdir -p /srv/beegame/projects /home/bun/.beegame && \
     chmod +x /usr/local/bin/beegame-runtime-entrypoint.sh && \
-    chown -R bun:bun /srv/beegame /home/bun/.beegame /app /opt/beegame/default-config
+    chown -R bun:bun /srv/beegame /home/bun/.beegame /app
 
 ENV NODE_ENV=production
 ENV AGENT_WORKFLOW_HOST=0.0.0.0
 ENV AGENT_WORKFLOW_PORT=62174
-ENV BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
+ENV AGENT_WORKFLOW_WORKSPACE_PATH=/srv/beegame/projects
 ENV BEEGAME_CONFIG_DIR=/home/bun/.beegame
-ENV BEEGAME_BUILTIN_SKILLS_DIR=/opt/beegame/default-config/skills/builtinskills
 
 EXPOSE 62174
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
   computeResourceContentRootDigest,
   readResourceContentCommitReceipt,
@@ -1163,10 +1163,10 @@ async function validateAcceptedArtifacts(input: {
           `accepted document checkpoint ${unit.unitId} has no exact dispatch receipt identity`,
         )
       let receipt: Awaited<
-        ReturnType<typeof readCanonicalDocumentCommitReceipt>
+        ReturnType<typeof readAuthoredDocumentReceipt>
       >
       try {
-        receipt = await readCanonicalDocumentCommitReceipt(
+        receipt = await readAuthoredDocumentReceipt(
           input.workspacePath,
           dispatchId,
         )

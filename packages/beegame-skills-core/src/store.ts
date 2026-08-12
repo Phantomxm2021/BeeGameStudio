@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -23,10 +21,10 @@ import {
 
 const STORE_FILE = 'user-skills.json'
 const SKILL_METADATA_FILE = 'skill.json'
-const BUILTIN_SKILLS_DIR = 'builtinskills'
 const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
 const RUNTIME_BUILTINS_MANIFEST = '.beegame-builtins.json'
 const RUNTIME_BUILTIN_MARKER = '.beegame-builtin'
+const RETIRED_BUILTIN_SKILLS_DIR = 'builtinskills'
 const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
 const MAX_FILE_COUNT = 128
@@ -75,80 +73,26 @@ export function getDefaultBeeGameSkillsStoreDir(): string {
   return getSkillsStoreRootDir({})
 }
 
-export function getDefaultBeeGameBuiltinSkillsDir(): string {
-  if (process.env.BEEGAME_BUILTIN_SKILLS_DIR) {
-    return process.env.BEEGAME_BUILTIN_SKILLS_DIR
-  }
-  const workspaceBuiltinSkills = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    '..',
-    '..',
-    '..',
-    '.beegame',
-    'skills',
-    BUILTIN_SKILLS_DIR,
-  )
-  if (existsSync(workspaceBuiltinSkills)) return workspaceBuiltinSkills
-  return join(getDefaultBeeGameSkillsStoreDir(), BUILTIN_SKILLS_DIR)
-}
-
-export function materializeBuiltinSkills(
+/**
+ * Remove only BeeGame-projected built-ins from Claude Code's isolated runtime.
+ * User-imported skills are deliberately left untouched: they are explicit user
+ * configuration, while the bundled BeeGame catalog must not silently become
+ * part of every Claude Code prompt.
+ */
+export function clearRuntimeBuiltinSkills(
   options: LocalBeeGameSkillsStoreOptions = {},
-  sourceDir = getDefaultBeeGameBuiltinSkillsDir(),
 ): void {
   const runtimeSkillsDir = join(
     options.dataDir ?? getDefaultBeeGameSkillsStoreDir(),
     RUNTIME_SKILLS_DIR,
   )
-  if (!existsSync(sourceDir)) {
-    throw new BeeGameSkillValidationError(
-      `BeeGame built-in skills directory is unavailable: ${sourceDir}`,
-    )
-  }
-
-  mkdirSync(runtimeSkillsDir, { recursive: true })
-  const skillNames = readdirSync(sourceDir, { withFileTypes: true })
-    .filter(entry =>
-      entry.isDirectory() &&
-      existsSync(join(sourceDir, entry.name, 'SKILL.md'))
-    )
-    .map(entry => entry.name)
-    .sort()
-  if (skillNames.length === 0) {
-    throw new BeeGameSkillValidationError(
-      `BeeGame built-in skills directory contains no skills: ${sourceDir}`,
-    )
-  }
-
-  const previousSkillNames = readRuntimeBuiltinSkillNames(runtimeSkillsDir)
-  for (const skillName of skillNames) {
-    const sourceSkillDir = join(sourceDir, skillName)
-    const targetSkillDir = join(runtimeSkillsDir, skillName)
-    if (resolve(sourceSkillDir) === resolve(targetSkillDir)) continue
-    const temporaryDir = `${targetSkillDir}.${randomUUID()}.tmp`
-    try {
-      cpSync(sourceSkillDir, temporaryDir, { recursive: true })
-      writeFileSync(join(temporaryDir, RUNTIME_BUILTIN_MARKER), '', 'utf8')
-      rmSync(targetSkillDir, { recursive: true, force: true })
-      renameSync(temporaryDir, targetSkillDir)
-    } finally {
-      rmSync(temporaryDir, { recursive: true, force: true })
+  for (const skillName of readRuntimeBuiltinSkillNames(runtimeSkillsDir)) {
+    const skillDir = join(runtimeSkillsDir, skillName)
+    if (existsSync(join(skillDir, RUNTIME_BUILTIN_MARKER))) {
+      rmSync(skillDir, { recursive: true, force: true })
     }
   }
-
-  const desiredSkillNames = new Set(skillNames)
-  for (const skillName of previousSkillNames) {
-    const staleSkillDir = join(runtimeSkillsDir, skillName)
-    if (
-      !desiredSkillNames.has(skillName) &&
-      existsSync(join(staleSkillDir, RUNTIME_BUILTIN_MARKER))
-    ) rmSync(staleSkillDir, { recursive: true, force: true })
-  }
-  writeRuntimeBuiltinSkillNames(runtimeSkillsDir, skillNames)
-  rmSync(join(runtimeSkillsDir, BUILTIN_SKILLS_DIR), {
-    recursive: true,
-    force: true,
-  })
+  rmSync(join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST), { force: true })
 }
 
 function readRuntimeBuiltinSkillNames(runtimeSkillsDir: string): string[] {
@@ -171,23 +115,6 @@ function readRuntimeBuiltinSkillNames(runtimeSkillsDir: string): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function writeRuntimeBuiltinSkillNames(
-  runtimeSkillsDir: string,
-  skillNames: string[],
-): void {
-  const path = join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST)
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify({
-      version: 1,
-      skills: skillNames,
-    }, null, 2)}\n`, 'utf8')
-    renameSync(temporaryPath, path)
-  } finally {
-    rmSync(temporaryPath, { force: true })
-  }
 }
 
 export function parseSkillZipPackage(input: ArrayBuffer | Uint8Array): BeeGameSkillFile[] {
@@ -603,7 +530,10 @@ function migrateUnscopedSkillDirs(options: LocalBeeGameSkillsStoreOptions): void
   mkdirSync(scopedRoot, { recursive: true })
   for (const userEntry of readdirSync(unscopedRoot, { withFileTypes: true })) {
     if (!userEntry.isDirectory()) continue
-    if (userEntry.name === basename(scopedRoot) || userEntry.name === BUILTIN_SKILLS_DIR) continue
+    if (
+      userEntry.name === basename(scopedRoot) ||
+      userEntry.name === RETIRED_BUILTIN_SKILLS_DIR
+    ) continue
     if (userEntry.name.startsWith('.') || userEntry.name === '.runtime') continue
     const userDir = join(unscopedRoot, userEntry.name)
     for (const skillEntry of readdirSync(userDir, { withFileTypes: true })) {

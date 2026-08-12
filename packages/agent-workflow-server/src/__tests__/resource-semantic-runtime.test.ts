@@ -3,6 +3,7 @@ import { RESOURCE_SEMANTIC_EVIDENCE_SOURCES, RESOURCE_USAGE_TAGS } from '../../.
 import { RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA, RESOURCE_SEMANTIC_MODEL_TOOL_NAME } from '../../../beegame-resource-core/src/semantic-curation'
 import { createAgentWorkflowApp } from '../app'
 import { BeeGameUsageBillingError } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import { tmpdir } from 'node:os'
 
 const SINGLE_VISUAL_INPUT = {
   mode: 'individual',
@@ -22,6 +23,7 @@ const THREE_ATLAS_VISUAL_INPUT = {
 describe('resource semantic model runtime bridge', () => {
   test('runs semantic curation through the existing model runtime with the supplied backend config', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       modelRuntimeHost: {
         generate: async () => '{}',
@@ -85,6 +87,7 @@ describe('resource semantic model runtime bridge', () => {
 
   test('does not expose the bridge without the existing resource service token', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       resourceSelectionRuntimeConfig: { baseUrl: 'http://resource.test', serviceToken: 'resource-token' },
       modelRuntimeHost: { generate: async () => '{}' },
@@ -96,6 +99,7 @@ describe('resource semantic model runtime bridge', () => {
   test('rejects a model projection without rendered visual input before invoking the model runtime', async () => {
     let called = false
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       modelRuntimeHost: {
         generate: async () => '{}',
@@ -123,6 +127,7 @@ describe('resource semantic model runtime bridge', () => {
     let imageBlockCount = -1
     let userText = ''
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       modelRuntimeHost: {
         generate: async () => '{}',
@@ -166,6 +171,7 @@ describe('resource semantic model runtime bridge', () => {
 
   test('returns the runtime failure detail to the resource worker as a dependency error', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       modelRuntimeHost: {
         generate: async () => '{}',
@@ -215,6 +221,7 @@ describe('resource semantic model runtime bridge', () => {
 
   test('returns usage billing failures as usage failures instead of model failures', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       modelRuntimeHost: {
         generate: async () => '{}',

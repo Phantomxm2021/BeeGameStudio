@@ -92,7 +92,6 @@ services:
       AGENT_WORKFLOW_HOST: 0.0.0.0
       AGENT_WORKFLOW_PORT: 62174
       AGENT_WORKFLOW_WORKSPACE_PATH: /srv/beegame/projects
-      BEEGAME_WORKSPACE_ROOT: /srv/beegame/projects
       BEEGAME_CONFIG_DIR: /home/bun/.beegame
       BEEGAME_BILLING_MODE: remote
       BEEGAME_BILLING_API_BASE_URL: http://beegame-billing:62175

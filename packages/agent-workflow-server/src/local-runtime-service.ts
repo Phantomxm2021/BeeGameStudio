@@ -30,11 +30,7 @@ export async function deleteWorkspaceDirectoryIfSafe(
 }
 
 export function getDashboardDataRoot(defaultWorkspacePath?: string): string {
-  return resolve(
-    defaultWorkspacePath?.trim() ||
-      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      resolve(process.cwd(), 'Projects'),
-  )
+  return resolveConfiguredWorkspaceRoot(defaultWorkspacePath)
 }
 
 export function getUserDashboardDataRoot(
@@ -57,9 +53,6 @@ export async function resolveSessionWorkspacePath(
     throw new Error('Workspace path must be absolute')
   }
   const resolvedWorkspace = resolve(trimmed)
-  if (!hasWorkspaceBoundary(defaultWorkspacePath)) {
-    return resolvedWorkspace
-  }
   const defaultWorkspace = resolve(
     await getDefaultWorkspacePath({ defaultWorkspacePath }),
   )
@@ -103,7 +96,6 @@ export async function assertSessionWorkspaceIsProjectDirectory(
   workspacePath: string,
   defaultWorkspacePath?: string,
 ): Promise<void> {
-  if (!hasWorkspaceBoundary(defaultWorkspacePath)) return
   const defaultWorkspace = resolve(
     await getDefaultWorkspacePath({ defaultWorkspacePath }),
   )
@@ -111,13 +103,6 @@ export async function assertSessionWorkspaceIsProjectDirectory(
   if (resolvedWorkspace !== defaultWorkspace) return
   throw new Error(
     `Workspace path must target a project directory under the default Projects directory, not the Projects root: ${defaultWorkspace}`,
-  )
-}
-
-export function hasWorkspaceBoundary(defaultWorkspacePath?: string): boolean {
-  return Boolean(
-    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      defaultWorkspacePath?.trim(),
   )
 }
 
@@ -169,16 +154,25 @@ function canonicalizeWorkspaceCandidate(
   defaultWorkspacePath?: string,
 ): string {
   if (isInsideOrEqual(candidate, canonicalRoot)) return candidate
-  const configuredRoot = resolve(
-    defaultWorkspacePath?.trim() ||
-      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      resolve(process.cwd(), 'Projects'),
-  )
+  const configuredRoot = resolveConfiguredWorkspaceRoot(defaultWorkspacePath)
   const rel = relative(configuredRoot, candidate)
   if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
     return resolve(canonicalRoot, rel)
   }
   return candidate
+}
+
+function resolveConfiguredWorkspaceRoot(defaultWorkspacePath?: string): string {
+  const configured =
+    defaultWorkspacePath?.trim() ||
+    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim()
+  if (!configured) {
+    throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH is required')
+  }
+  if (!isAbsolute(configured)) {
+    throw new Error('AGENT_WORKFLOW_WORKSPACE_PATH must be absolute')
+  }
+  return resolve(configured)
 }
 
 function isInsideOrEqual(candidate: string, root: string): boolean {

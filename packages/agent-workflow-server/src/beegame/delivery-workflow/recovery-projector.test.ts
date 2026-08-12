@@ -18,9 +18,11 @@ import {
   registerBeeGameAuthoredResources,
   writeBeeGameAssetManifest,
 } from '../asset-contracts'
-import { commitCanonicalDocument } from '../native-canonical-document-tool'
+import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
+import { renderCompleteGameDocument } from '../complete-game-document'
 import { createNativeResourceContentTool } from '../native-resource-content-tool'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   artifactsForDocumentReviewCheck,
   documentReviewArtifactDigests,
@@ -63,6 +65,54 @@ function digest(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
+function completeFoundationDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): string {
+  const contract = getGameDocumentContract(path)
+  return renderCompleteGameDocument(path, {
+    title: contract.discipline,
+    executiveSummary: 'Synthetic recovery authority.',
+    sections: contract.sections.map(section => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Synthetic production authority for ${section.sectionId}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [{
+              evidenceId: `${material.materialId}.pending`,
+              category: 'search_direction' as const,
+              displayName: 'Pending reference direction',
+              purpose: 'Record a production need before source selection.',
+              state: 'source_not_selected' as const,
+              evidenceRefs: [],
+            }],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Recovery |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
+    auditAppendix: {
+      acceptanceCriteria: ['Synthetic recovery document is complete.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  })
+}
+
 async function createProjectionFixture(
   acceptedThrough:
     | 'resource-gate'
@@ -72,21 +122,25 @@ async function createProjectionFixture(
     | 'acceptance' = 'resource-gate',
 ) {
   const workspacePath = await mkdtemp(join(tmpdir(), 'workflow-projector-'))
-  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries())
-    await commitCanonicalDocument({
-      workspacePath,
-      contract: {
+  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
+    if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never)) {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspacePath, path),
+        completeFoundationDocument(
+          path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+        ),
+      )
+      await commitAuthoredFoundationDocument({
+        workspacePath,
         dispatchId: `canonical-document-${index}`,
-        targetPath: path,
-        documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-        operation: 'create',
-        baselineDigest: null,
-      },
-      body:
-        path === 'docs/GDD.md'
-          ? '# Synthetic authority'
-          : '# Synthetic artifact',
-    })
+        targetPath: path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+      })
+    } else {
+      await mkdir(join(workspacePath, 'docs/acceptance'), { recursive: true })
+      await writeFile(join(workspacePath, path), '# Synthetic artifact')
+    }
+  }
   await writeBeeGameAssetManifest(workspacePath, {
     version: 8,
     project_target: {

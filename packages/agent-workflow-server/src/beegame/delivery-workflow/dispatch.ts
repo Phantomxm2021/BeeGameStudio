@@ -22,7 +22,7 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
-import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
+import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 
 export type DispatchCredits = {
   reserve?: (
@@ -205,7 +205,7 @@ async function documentPerformance(input: {
     input.request.contract.authoringMode === 'repair-planning'
   )
     return undefined
-  const receipt = await readCanonicalDocumentCommitReceipt(
+  const receipt = await readAuthoredDocumentReceipt(
     input.request.workspacePath,
     input.dispatch.dispatchId,
   )
@@ -237,10 +237,7 @@ async function documentPerformance(input: {
         ? Math.max(0, finishedAt - startedAt)
         : 0,
     markdownBytes: await fileBytes(receipt?.targetPath ?? targetPath),
-    sidecarBytes:
-      receipt !== undefined && receipt.schemaVersion !== 1
-        ? await fileBytes(receipt.authorityPath)
-        : 0,
+    sidecarBytes: receipt ? await fileBytes(receipt.authorityPath) : 0,
     projectionBytes: await fileBytes(projectionPath),
     retryReason: null,
   }

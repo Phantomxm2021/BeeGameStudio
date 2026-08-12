@@ -14,12 +14,11 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import { renderCompleteGameDocument } from '../beegame/complete-game-document'
-import { commitCanonicalDocument } from '../beegame/native-canonical-document-tool'
-
-function bytewise(left: string, right: string): number {
-  return Buffer.compare(Buffer.from(left), Buffer.from(right))
-}
+import {
+  prepareCompleteGameDocumentArtifacts,
+  renderCompleteGameDocument,
+} from '../beegame/complete-game-document'
+import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 
 function completeSubmission(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -126,33 +125,20 @@ describe('idea to complete game documents', () => {
       const dispatchId = `complete-document-${documentIndex}`
       const submission = completeSubmission(path)
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await commitCanonicalDocument({
+      await writeFile(
+        join(workspacePath, path),
+        renderCompleteGameDocument(path, submission),
+      )
+      for (const artifact of prepareCompleteGameDocumentArtifacts(path, submission)) {
+        await mkdir(join(workspacePath, artifact.path, '..'), {
+          recursive: true,
+        })
+        await writeFile(join(workspacePath, artifact.path), artifact.content)
+      }
+      await commitAuthoredFoundationDocument({
         workspacePath,
-        contract: {
-          dispatchId,
-          targetPath: path,
-          documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-          operation: 'create',
-          baselineDigest: null,
-          submissionKind: 'complete_game_document',
-        },
-        body: renderCompleteGameDocument(path, submission),
-        authority: {
-          records: documentContract.sections
-            .map(section => ({
-              authorityId: `${CANONICAL_PROJECT_DOCUMENT_IDS[
-                path
-              ].toLowerCase()}.${section.sectionId}.primary`,
-              sectionId: section.sectionId,
-              kind: 'fact' as const,
-              state: 'confirmed' as const,
-              source: 'confirmed_brief' as const,
-              evidenceRefs: [],
-              statement: `Confirmed authority for ${section.sectionId}.`,
-              responsibilityIds: [...section.responsibilityIds].sort(bytewise),
-            }))
-            .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
-        },
+        dispatchId,
+        targetPath: path,
       })
 
       const now = new Date().toISOString()

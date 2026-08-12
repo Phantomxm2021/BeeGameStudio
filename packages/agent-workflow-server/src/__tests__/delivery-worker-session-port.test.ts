@@ -741,7 +741,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('does not expose remediation tools during initial document authoring', async () => {
+  test('does not inject a custom document commit contract during initial authoring', async () => {
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
       start(input: Record<string, unknown>) {
@@ -781,17 +781,11 @@ describe('delivery worker session credentials', () => {
 
     expect(starts[0]?.workflowDocumentAuthorMode).toBe('initial')
     expect(starts[1]?.workflowDocumentAuthorMode).toBe('initial')
-    expect(starts[0]?.workflowCanonicalDocumentCommitContract).toMatchObject({
-      dispatchId: 'dispatch-gdd',
-      targetPath: 'docs/GDD.md',
-    })
-    expect(starts[1]?.workflowCanonicalDocumentCommitContract).toMatchObject({
-      dispatchId: 'dispatch-level',
-      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
-    })
+    expect(starts[0]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
+    expect(starts[1]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
   })
 
-  test('projects upstream authority and the controlled target baseline without file tools', async () => {
+  test('projects upstream authority while preserving native file tools', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'initial-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -814,8 +808,8 @@ describe('delivery worker session credentials', () => {
       })
       expect(block).toContain('replacement baseline from an earlier run')
       expect(block).not.toContain('stale target content')
-      expect(block).toContain('CommitCanonicalDocument')
-      expect(block).toContain('do not write or edit the assigned path directly')
+      expect(block).not.toContain('CommitCanonicalDocument')
+      expect(block).toContain('Write the complete assigned Markdown document directly')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -899,7 +893,7 @@ describe('delivery worker session credentials', () => {
           },
         }),
       ).rejects.toThrow(
-        'canonical document revision requires baseline metadata',
+        'document repair owner target is invalid',
       )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

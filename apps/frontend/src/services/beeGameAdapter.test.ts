@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   beeGameAdapter,
   getBeeGameWorkspaceSettings,
-  setBeeGameWorkspaceRoot,
 } from './beeGameAdapter';
 import { clearSupabaseSession, hydrateSupabaseSessionUser } from './supabaseAuthApi';
 
@@ -704,19 +703,22 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
   });
 
-  it('uses the configured workspace root for new projects without replacing it with a project path', async () => {
+  it('reads the only workspace root from the server and ignores stale browser state', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === '/api/filesystem/default-workspace') {
+        return jsonResponse({ path: '/srv/beegame/projects' });
+      }
       if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
         return bootstrapResponse(init, {
           sessionId: 'beegame_custom_root',
-          workspacePath: '/tmp/custom-beegame-projects/arena-prototype',
+          workspacePath: '/srv/beegame/projects/arena-prototype',
         });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
-    setBeeGameWorkspaceRoot('/tmp/custom-beegame-projects');
+    localStorage.setItem('beegame-adapter-workspace-root', '/tmp/stale-client-root');
 
     const result = await beeGameAdapter.bootstrapProjectFromBrief({
       idea: 'arena prototype',
@@ -734,9 +736,12 @@ describe('beeGameAdapter prompt rules', () => {
 
     const settings = await getBeeGameWorkspaceSettings();
 
-    expect(result.project.root_path).toBe('/tmp/custom-beegame-projects/arena-prototype');
-    expect(settings.workspacePath).toBe('/tmp/custom-beegame-projects');
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
+    expect(result.project.root_path).toBe('/srv/beegame/projects/arena-prototype');
+    expect(settings).toEqual({
+      workspacePath: '/srv/beegame/projects',
+      isDefault: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
   });
 
   it('sends a confirmed attachment GDD as the direct build source', async () => {

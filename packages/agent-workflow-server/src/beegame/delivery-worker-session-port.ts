@@ -501,6 +501,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
   const sessions = new Map<string, string>()
   const records = new Map<string, DispatchRecord>()
   const requests = new Map<string, WorkerDispatchRequest>()
+  const documentAuthorityBlocks = new Map<string, string>()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
@@ -515,6 +516,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
   return {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
+      const documentAuthorityBlock =
+        request.workerType === 'document-author' &&
+        request.contract.authoringMode === 'remediation'
+          ? await buildDocumentAuthorAuthorityBlock(request)
+          : ''
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -600,6 +606,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       })
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, { ...request, dispatchId })
+      documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
       eventOffsets.set(dispatchId, 0)
       records.set(dispatchId, {
         dispatchId,
@@ -637,9 +644,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
-      const documentAuthorAuthorityBlock = request
-        ? await buildDocumentAuthorAuthorityBlock(request)
-        : ''
+      const documentAuthorAuthorityBlock =
+        documentAuthorityBlocks.get(dispatchId) ||
+        (request ? await buildDocumentAuthorAuthorityBlock(request) : '')
       const nativeToolAutonomyInstruction = request
         ? "Claude Code's native tools, thinking, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
         : ''

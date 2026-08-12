@@ -47,7 +47,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       'SubmitAtomicTaskPlan',
       'SubmitImplementationResult',
       'SubmitValidationResult',
-      'CommitCanonicalDocument',
       'SubmitDocumentReviewPacket',
       'SubmitChangeImpactResult',
       'SubmitQuestionAnswerResult',

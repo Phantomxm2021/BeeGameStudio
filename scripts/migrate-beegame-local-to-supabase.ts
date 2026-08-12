@@ -65,7 +65,7 @@ function printHelp(): void {
   bun scripts/migrate-beegame-local-to-supabase.ts [--owner-id <supabase-user-id>] [--data-dir <dir>] [--include-platform-settings] [--apply]
 
 Defaults:
-  --data-dir uses BEEGAME_MIGRATION_DATA_DIR, AGENT_WORKFLOW_DATA_DIR, ./Projects when it contains beegame.sqlite, or ~/.beegame/dashboard.
+  --data-dir uses BEEGAME_MIGRATION_DATA_DIR, AGENT_WORKFLOW_DATA_DIR, or ~/.beegame/dashboard.
   Supabase access uses .env.local plus BEEGAME_SUPABASE_URL, BEEGAME_SUPABASE_ANON_KEY or VITE_SUPABASE_ANON_KEY.
   Auth uses BEEGAME_SUPABASE_ACCESS_TOKEN, or BEEGAME_MIGRATION_EMAIL + BEEGAME_MIGRATION_PASSWORD.
   When email/password auth is used, --owner-id defaults to the signed-in user id.

@@ -125,7 +125,6 @@ import {
   ProjectQuotaExceededError,
 } from './dashboard-repository'
 import {
-  assertSessionWorkspaceIsProjectDirectory,
   createManagedProjectWorkspacePath,
   deleteWorkspaceDirectoryIfSafe,
   getDashboardDataRoot,
@@ -3734,14 +3733,6 @@ export function createAgentWorkflowApp(
         dashboardRepository.modelConfigExists(request, user, id),
       listModelConfigs: (request, user) =>
         dashboardRepository.listModelConfigs(request, user),
-      getProjectWorkspacePath: async (request, user, projectId) => {
-        try {
-          const projects = await dashboardRepository.listProjects(request, user)
-          return projects.find(project => project.id === projectId)?.root_path
-        } catch {
-          return undefined
-        }
-      },
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
       resumeDeliveryWorkflow: input =>
         continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
@@ -3749,12 +3740,6 @@ export function createAgentWorkflowApp(
         const controller = getDeliveryController(input)
         return controller.requestChange(input.run, input.message)
       },
-      ownsProjectWorkspacePath: (request, user, workspacePath) =>
-        dashboardRepository.ownsProjectWorkspacePath(
-          request,
-          user,
-          workspacePath,
-        ),
     },
   )
   return app
@@ -4095,79 +4080,6 @@ function requireBeeGameSessionOwner(
   return metadata.userId === getCurrentUser(request).id
     ? undefined
     : { error: 'Session not found' }
-}
-
-async function resolveNewBeeGameSessionWorkspacePath(
-  body: JsonObject,
-  user: BeeGameUserContext,
-  request: Request,
-  options: {
-    defaultWorkspacePath?: string
-    getProjectWorkspacePath?: (
-      request: Request,
-      user: BeeGameUserContext,
-      projectId: string,
-    ) => Promise<string | undefined>
-    ownsProjectWorkspacePath?: (
-      request: Request,
-      user: BeeGameUserContext,
-      workspacePath: string,
-    ) => Promise<boolean>
-  },
-): Promise<string> {
-  if (
-    canUseClientWorkspacePath(user) &&
-    typeof body.workspacePath === 'string'
-  ) {
-    const workspacePath = await resolveSessionWorkspacePath(
-      body.workspacePath,
-      options.defaultWorkspacePath,
-    )
-    await assertSessionWorkspaceIsProjectDirectory(
-      workspacePath,
-      options.defaultWorkspacePath,
-    )
-    return workspacePath
-  }
-  const projectName =
-    typeof body.projectName === 'string' ? body.projectName : undefined
-  const projectId =
-    typeof body.projectId === 'string' ? body.projectId : undefined
-  if (projectId && options.getProjectWorkspacePath) {
-    const projectWorkspacePath = await options.getProjectWorkspacePath(
-      request,
-      user,
-      projectId,
-    )
-    if (projectWorkspacePath) {
-      const workspacePath = await resolveSessionWorkspacePath(
-        projectWorkspacePath,
-        options.defaultWorkspacePath,
-      )
-      await assertSessionWorkspaceIsProjectDirectory(
-        workspacePath,
-        options.defaultWorkspacePath,
-      )
-      if (
-        options.ownsProjectWorkspacePath &&
-        !(await options.ownsProjectWorkspacePath(request, user, workspacePath))
-      ) {
-        throw new Error('Project workspace does not belong to the current user')
-      }
-      return workspacePath
-    }
-  }
-  return createManagedProjectWorkspacePath({
-    defaultWorkspacePath: options.defaultWorkspacePath,
-    userId: user.id,
-    ...(projectName ? { projectName } : {}),
-    ...(projectId ? { projectId } : {}),
-  })
-}
-
-function canUseClientWorkspacePath(user: BeeGameUserContext): boolean {
-  if (user.id === DEFAULT_LOCAL_USER_ID) return true
-  return process.env.BEEGAME_ALLOW_CLIENT_WORKSPACE_PATH === '1'
 }
 
 async function optionalOwnedModelConfigId(
@@ -6745,11 +6657,6 @@ function registerBeeGameSessionRoutes(
       request: Request,
       user: BeeGameUserContext,
     ) => Promise<Array<{ id: string; isDefault?: boolean }>>
-    getProjectWorkspacePath?: (
-      request: Request,
-      user: BeeGameUserContext,
-      projectId: string,
-    ) => Promise<string | undefined>
     startDeliveryWorkflow?: (input: {
       request: Request
       user: BeeGameUserContext
@@ -6776,11 +6683,6 @@ function registerBeeGameSessionRoutes(
       run: import('./beegame/delivery-workflow/types').DeliveryRun
       message: string
     }) => Promise<unknown>
-    ownsProjectWorkspacePath: (
-      request: Request,
-      user: BeeGameUserContext,
-      workspacePath: string,
-    ) => Promise<boolean>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -6806,65 +6708,6 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(beeGameSessions.list(options.getCurrentUser(c.req.raw).id))
-  })
-
-  app.post(basePath, async c => {
-    const forbidden = check(c.req.raw, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    if (
-      body.modelConfigId !== undefined ||
-      body.transcriptSessionId !== undefined
-    ) {
-      return c.json({ error: 'Runtime session fields are server-owned' }, 400)
-    }
-    try {
-      const currentUser = options.getCurrentUser(c.req.raw)
-      const workspacePath = await resolveNewBeeGameSessionWorkspacePath(
-        body,
-        currentUser,
-        c.req.raw,
-        {
-          defaultWorkspacePath,
-          getProjectWorkspacePath: options.getProjectWorkspacePath,
-          ownsProjectWorkspacePath: options.ownsProjectWorkspacePath,
-        },
-      )
-      // Configuration management is admin-only. Session creation resolves the
-      // current user's readable default here, so clients never need access to
-      // the management endpoint or any provider configuration details.
-      const modelConfigId = await resolveDefaultModelConfigId(
-        c.req.raw,
-        currentUser,
-        undefined,
-        options.modelConfigExists,
-        options.listModelConfigs,
-      )
-      if (modelConfigId)
-        await options.assertPermittedModelConfigRuntime(modelConfigId)
-      const session = beeGameSessions.start({
-        workspacePath,
-        ...(typeof body.projectId === 'string' && body.projectId
-          ? { projectId: body.projectId }
-          : {}),
-        modelConfigId,
-        ...(isBeeGameSessionLanguage(body.language)
-          ? { language: body.language }
-          : {}),
-        userId: currentUser.id,
-        ...(options.getAuthToken(c.req.raw)
-          ? { authToken: options.getAuthToken(c.req.raw) }
-          : {}),
-        userDataRoot: options.getUserDataRoot(c.req.raw),
-      })
-      await options.persistSessionMetadata(
-        c.req.raw,
-        beeGameSessions.metadata(session.id),
-      )
-      return c.json(session)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
   })
 
   app.get(`${basePath}/:id`, async c => {

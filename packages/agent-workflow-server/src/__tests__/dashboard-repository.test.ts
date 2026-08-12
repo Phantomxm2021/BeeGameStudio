@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,7 +51,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('maps platform runtime capabilities into every user runtime settings file', async () => {
+  test('maps platform runtime settings without injecting BeeGame skills', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const userARoot = join(dataRoot, 'users', 'owner-a')
     const userBRoot = join(dataRoot, 'users', 'owner-b')
@@ -77,18 +78,11 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerAEnv.CLAUDE_CONFIG_DIR).not.toBe(ownerBEnv.CLAUDE_CONFIG_DIR)
-      await expect(
-        readFile(
-          join(
-            ownerBEnv.CLAUDE_CONFIG_DIR,
-            'skills',
-            'game-art-director-expert',
-            'references',
-            'lighting-mood-framework.md',
-          ),
-          'utf8',
-        ),
-      ).resolves.toContain('#')
+      expect(existsSync(join(
+        ownerBEnv.CLAUDE_CONFIG_DIR,
+        'skills',
+        'game-art-director-expert',
+      ))).toBe(false)
       await expect(
         readFile(join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"skillSearchEnabled": true')
@@ -246,6 +240,11 @@ describe('DashboardRepository Supabase boundaries', () => {
           'utf8',
         ),
       ).resolves.toContain('Runtime Skill')
+      expect(existsSync(join(
+        env.CLAUDE_CONFIG_DIR,
+        'skills',
+        '.beegame-builtins.json',
+      ))).toBe(false)
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createAgentWorkflowApp } from '../app'
 import type { InvitationService } from '../invitation-service'
+import { tmpdir } from 'node:os'
 
 function createFakeInvitationService(
   observedTokens: string[] = [],
@@ -32,6 +33,7 @@ function createFakeInvitationService(
 describe('invitation routes', () => {
   test('keeps public registration checks available without authentication', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUserResolver: async () => undefined,
       invitationService: createFakeInvitationService(),
     })
@@ -52,6 +54,7 @@ describe('invitation routes', () => {
   test('passes the authenticated owner token to invitation administration', async () => {
     const observedTokens: string[] = []
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'owner-1', role: 'owner' },
       invitationService: createFakeInvitationService(observedTokens),
     })
@@ -67,6 +70,7 @@ describe('invitation routes', () => {
 
   test('rejects invitation administration without owner permission', async () => {
     const app = createAgentWorkflowApp({
+      defaultWorkspacePath: tmpdir(),
       currentUser: { id: 'developer-1', role: 'developer' },
       invitationService: createFakeInvitationService(),
     })

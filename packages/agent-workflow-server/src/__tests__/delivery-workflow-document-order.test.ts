@@ -27,6 +27,11 @@ import {
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
+import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import {
+  prepareCompleteGameDocumentArtifacts,
+  renderCompleteGameDocument,
+} from '../beegame/complete-game-document'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
   CANONICAL_ASSET_MANIFEST,
@@ -434,8 +439,11 @@ describe('single-track document review workflow', () => {
         workspacePath,
         dispatcher: {
           async dispatch(value) {
-            request = value
-            return value
+            request = {
+              ...value,
+              dispatchId: `author-dispatch-${index}`,
+            }
+            return request
           },
         },
       })
@@ -451,10 +459,25 @@ describe('single-track document review workflow', () => {
         path,
       })
       await mkdir(join(workspacePath, path, '..'), { recursive: true })
+      const submission = completeFoundationSubmission(path)
       await writeFile(
         join(workspacePath, path),
-        completeFoundationContent(path),
+        renderCompleteGameDocument(path, submission),
       )
+      for (const artifact of prepareCompleteGameDocumentArtifacts(
+        path,
+        submission,
+      )) {
+        await mkdir(join(workspacePath, artifact.path, '..'), {
+          recursive: true,
+        })
+        await writeFile(join(workspacePath, artifact.path), artifact.content)
+      }
+      await commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: request!.dispatchId!,
+        targetPath: path,
+      })
       run = await completeDocumentDraft({
         run: withDispatch(run, request!),
         workspacePath,
@@ -2784,10 +2807,60 @@ function completeFoundationContent(path: FoundationDocumentPath): string {
       `Risk ${index + 1} has an owned mitigation.`,
       '',
       '### Open Decisions',
-      'No unresolved section decisions.',
+      'All section decisions are resolved for production.',
       '',
     ]),
   ].join('\n')
+}
+
+function completeFoundationSubmission(path: FoundationDocumentPath) {
+  const contract = getGameDocumentContract(path)
+  return {
+    title: contract.discipline,
+    executiveSummary: `Complete ${contract.discipline} authority and production outcome.`,
+    sections: contract.sections.map((section, index) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Complete authority and production requirements ${index + 1}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material =>
+      material.format === 'evidence_register'
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Authority |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
+    auditAppendix: {
+      acceptanceCriteria: [
+        'The document is complete, inspectable, and implementation-ready.',
+      ],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  }
 }
 
 async function reviewRun(
@@ -2982,7 +3055,7 @@ function withDispatch(
   return {
     ...run,
     activeDispatch: {
-      dispatchId: 'author-dispatch',
+      dispatchId: request.dispatchId ?? 'author-dispatch',
       workerType: 'document-author',
       phase: run.phase,
       revision: run.revision.document,
