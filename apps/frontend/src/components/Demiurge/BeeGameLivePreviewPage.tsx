@@ -54,6 +54,7 @@ interface BeeGameLivePreviewPageProps {
   phaseLabel: string;
   credits?: {
     consumedCredits: number;
+    weightedTokens?: number;
   } | null;
   accountCreditBalance?: {
     balanceCredits: number;
@@ -370,21 +371,33 @@ export function BeeGameLivePreviewPage({
                 ) : null}
                 <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                 <ProjectHintRow
-                  label={labels.inputTokens || 'Input Tokens'}
-                  value={formatTokenCount(projectTokenCounts.input)}
+                  label={labels.freshInputTokens || 'Fresh Input'}
+                  value={formatTokenCount(projectTokenCounts.freshInput)}
                 />
                 <ProjectHintRow
-                  label={labels.cachedInputTokens || 'Cached Input Tokens'}
-                  value={formatTokenCount(projectTokenCounts.cached)}
+                  label={labels.cacheReadTokens || 'Cache Read'}
+                  value={formatTokenCount(projectTokenCounts.cacheRead)}
                 />
+                {projectTokenCounts.cacheCreation > 0 ? (
+                  <ProjectHintRow
+                    label={labels.cacheCreationTokens || 'Cache Creation'}
+                    value={formatTokenCount(projectTokenCounts.cacheCreation)}
+                  />
+                ) : null}
                 <ProjectHintRow
                   label={labels.outputTokens || 'Output Tokens'}
                   value={formatTokenCount(projectTokenCounts.output)}
                 />
                 <ProjectHintRow
-                  label={labels.totalTokens || 'Total Tokens'}
-                  value={formatTokenCount(projectTokenCounts.total)}
+                  label={labels.rawProcessedTokens || 'Raw Processed'}
+                  value={formatTokenCount(projectTokenCounts.rawProcessed)}
                 />
+                {credits?.weightedTokens !== undefined ? (
+                  <ProjectHintRow
+                    label={labels.weightedConsumption || 'Weighted Consumption'}
+                    value={formatTokenCount(credits.weightedTokens)}
+                  />
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -870,18 +883,21 @@ function formatCreditAmount(value: number): string {
 }
 
 function normalizeProjectTokenUsage(usage?: TokenUsage | null): {
-  input: number;
-  cached: number;
+  freshInput: number;
+  cacheRead: number;
+  cacheCreation: number;
   output: number;
-  total: number;
+  rawProcessed: number;
 } {
-  const input = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) || 0;
-  const cached =
-    Number(usage?.cached_input_tokens ?? 0) ||
-    (Number(usage?.cache_read_tokens ?? 0) || 0) + (Number(usage?.cache_creation_tokens ?? 0) || 0);
+  const freshInput = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) || 0;
+  const combinedCached = Number(usage?.cached_input_tokens ?? 0) || 0;
+  const explicitCacheRead = Number(usage?.cache_read_tokens ?? 0) || 0;
+  const cacheCreation = Number(usage?.cache_creation_tokens ?? 0) || 0;
+  const cacheRead = explicitCacheRead || Math.max(0, combinedCached - cacheCreation);
   const output = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0) || 0;
-  const total = Number(usage?.total_tokens ?? 0) || input + cached + output;
-  return { input, cached, output, total };
+  const rawProcessed =
+    Number(usage?.total_tokens ?? 0) || freshInput + cacheRead + cacheCreation + output;
+  return { freshInput, cacheRead, cacheCreation, output, rawProcessed };
 }
 
 function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {

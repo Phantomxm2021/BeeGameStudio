@@ -658,9 +658,15 @@ describe('DashboardView runtime loading', () => {
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
     expect(within(hint).getByText('1,234')).toBeInTheDocument();
-    expect(within(hint).getByText('63')).toBeInTheDocument();
+    expect(within(hint).getByText('56')).toBeInTheDocument();
+    expect(within(hint).getByText('7')).toBeInTheDocument();
     expect(within(hint).getByText('89')).toBeInTheDocument();
     expect(within(hint).getByText('1,386')).toBeInTheDocument();
+    expect(within(hint).getByText('2,000')).toBeInTheDocument();
+    expect(within(hint).getByText('Fresh Input')).toBeInTheDocument();
+    expect(within(hint).getByText('Cache Read')).toBeInTheDocument();
+    expect(within(hint).getByText('Raw Processed')).toBeInTheDocument();
+    expect(within(hint).getByText('Weighted Consumption')).toBeInTheDocument();
   });
 
   it('shows the live durable workflow usage ahead of a trailing billing summary', async () => {
@@ -699,7 +705,7 @@ describe('DashboardView runtime loading', () => {
     expect(within(hint).getByText('36,931,943')).toBeInTheDocument();
     expect(within(hint).getByText('569,805')).toBeInTheDocument();
     expect(within(hint).getByText('42,032,117')).toBeInTheDocument();
-    expect(within(hint).queryByText('35,097,910')).not.toBeInTheDocument();
+    expect(within(hint).getByText('35,097,910')).toBeInTheDocument();
   });
 
   it('does not use the runtime transcript snapshot as project accounting authority', async () => {
@@ -720,7 +726,8 @@ describe('DashboardView runtime loading', () => {
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
     expect(within(hint).getByText('80,000')).toBeInTheDocument();
-    expect(within(hint).getByText('30,000')).toBeInTheDocument();
+    expect(within(hint).getByText('25,000')).toBeInTheDocument();
+    expect(within(hint).getByText('5,000')).toBeInTheDocument();
     expect(within(hint).getByText('15,000')).toBeInTheDocument();
     expect(within(hint).getByText('125,000')).toBeInTheDocument();
     expect(within(hint).queryByText('254,542')).not.toBeInTheDocument();
@@ -773,10 +780,12 @@ describe('DashboardView runtime loading', () => {
     expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('left-5');
     expect(screen.getByText('平台')).toBeInTheDocument();
     expect(screen.getByText('Web')).toBeInTheDocument();
-    expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
+    expect(screen.getByText('Fresh Input')).toBeInTheDocument();
+    expect(screen.getByText('Cache Read')).toBeInTheDocument();
+    expect(screen.getByText('Cache Creation')).toBeInTheDocument();
     expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('总 Tokens')).toBeInTheDocument();
+    expect(screen.getByText('Raw Processed')).toBeInTheDocument();
+    expect(screen.getByText('Weighted Consumption')).toBeInTheDocument();
     expect(screen.getByText('Agent 状态')).toBeInTheDocument();
     expect(screen.queryByText('部署就绪')).not.toBeInTheDocument();
     expect(screen.queryByText('文档审查')).not.toBeInTheDocument();
