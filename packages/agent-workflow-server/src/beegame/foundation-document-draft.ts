@@ -8,7 +8,7 @@ import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 const SECTIONS_PER_TURN = 1
 const SECTION_PART_COUNT = 2
-export const MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES = 5_200
+const MAX_NATIVE_REPLACEMENT_BYTES = 2_400
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number
@@ -260,17 +260,27 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   const isFirst = group.groupIndex === 0
   const isFinal = group.groupIndex === groups.length - 1
   const currentCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${input.progress.completedPartCount} -->`
-  const nativeTool =
-    isFirst && input.progress.completedPartCount === 0 ? 'Write' : 'Edit'
-  const section = group.sections[0]
-  const replacementInstruction = isFinal
-    ? (() => {
-        const material = group.productionMaterials[nextPart - 1]!
-        return `${nextPart === 1 ? `Replace ${currentCursor} with <!-- beegame-production-materials -->, ## Production Materials, ` : `Replace ${currentCursor} with `}<!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body. ${nextPart === partCount ? 'This last material leaves no cursor.' : `Finish with <!-- beegame-draft-cursor:${group.groupIndex}:${nextPart} -->.`}`
-      })()
-    : input.progress.completedPartCount === 0
-      ? `${isFirst ? 'Create the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, ' : `Replace ${currentCursor} with `}<!-- beegame-section:${section?.sectionId} -->, ## ${section?.title}, <!-- beegame-part:${section?.sectionId}:1 --> and the first half, then <!-- beegame-part:${section?.sectionId}:2 --> and the second half. Finish with <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`
-      : `Replace ${currentCursor} with <!-- beegame-part:${section?.sectionId}:2 --> and the missing second half. Finish with <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`
+  const checkpointInstructions = isFinal
+    ? group.productionMaterials
+        .slice(input.progress.completedPartCount)
+        .map((material, offset) => {
+          const materialIndex = input.progress.completedPartCount + offset
+          const materialCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${materialIndex} -->`
+          const nextMaterialCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${materialIndex + 1} -->`
+          return materialIndex === 0
+            ? `Checkpoint ${materialIndex + 1}, native Edit: replace ${materialCursor} with <!-- beegame-production-materials -->, ## Production Materials, <!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body${materialIndex + 1 === partCount ? '; leave no cursor' : `; finish with ${nextMaterialCursor}`}.`
+            : `Checkpoint ${materialIndex + 1}, native Edit: replace ${materialCursor} with <!-- beegame-material:${material.materialId} -->, ### ${material.title}, and its complete bounded ${material.format} body${materialIndex + 1 === partCount ? '; leave no cursor' : `; finish with ${nextMaterialCursor}`}.`
+        })
+    : [
+        ...(input.progress.completedPartCount === 0
+          ? [
+              isFirst
+                ? `Checkpoint 1: native Write creates the title, a concise <!-- beegame-executive-summary --> with ## Executive Summary, the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, then <!-- beegame-draft-cursor:0:1 -->.`
+                : `Checkpoint 1, native Edit: replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.`,
+            ]
+          : []),
+        `Checkpoint 2, native Edit: replace <!-- beegame-draft-cursor:${group.groupIndex}:1 --> with <!-- beegame-part:${group.sections[0]?.sectionId}:2 --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
+      ]
   const groupContract = {
     path: input.path,
     discipline: contract.discipline,
@@ -279,7 +289,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
     groupCount: groups.length,
     currentPart: input.progress.completedPartCount,
     partCount,
-    maxNativeReplacementBytes: MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES,
+    maxNativeReplacementBytes: MAX_NATIVE_REPLACEMENT_BYTES,
     sections: group.sections,
     productionMaterials: group.productionMaterials,
     ...(typeof input.confirmedBriefDigest === 'string'
@@ -296,15 +306,15 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   }
   return [
     `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume chunk ${nextPart}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
-    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}perform exactly one bounded native ${nativeTool} for this active ${isFinal ? 'production material' : 'section'}. Its content or new_string value must be at most ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes. Do not wait to generate the whole document.`,
-    replacementInstruction,
+    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}continue bounded native file calls until this active group is complete. Perform one native file call for each checkpoint below, in order, and start the next checkpoint immediately after the prior tool succeeds. Every content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes; never generate the whole section as one tool input.`,
+    ...checkpointInstructions,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'
       : 'Do not rewrite or reread the completed prefix. The cursor is the only edit target.',
     'The confirmed brief and projected upstream authority are binding. Define only this discipline\'s owned facts; reference upstream facts instead of copying them and do not invent behavior delegated to a downstream owner.',
     'Write production-ready human development authority, not a skeleton: make concrete choices, state boundaries and tradeoffs, use units and dense tables where useful, and include observable acceptance criteria. Do not repeat the brief, upstream prose, or another section.',
     'Do not write YAML front matter, an Audit Appendix, workflow metadata, or another project file. Do not claim verified license status without concrete evidence.',
-    'BGS mechanically validates the proposed group before the native tool writes it. After the one native tool succeeds, end the turn normally. If interrupted, the durable cursor resumes at the missing group.',
+    'BGS mechanically validates every proposed checkpoint before the native tool writes it. After this group\'s final checkpoint succeeds, end the turn normally. If interrupted, the durable cursor resumes at the next missing checkpoint.',
     JSON.stringify(groupContract),
   ].join('\n\n')
 }
@@ -363,9 +373,9 @@ function assertBoundedDraftPart(
     throw new Error(`foundation document draft part is empty: ${contentMarker}`)
   if (
     Buffer.byteLength(markdown.slice(replacementStart, end), 'utf8') >
-    MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES
+    MAX_NATIVE_REPLACEMENT_BYTES
   )
     throw new Error(
-      `foundation document draft part exceeds ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES} bytes: ${contentMarker}`,
+      `foundation document draft part exceeds ${MAX_NATIVE_REPLACEMENT_BYTES} bytes: ${contentMarker}`,
     )
 }

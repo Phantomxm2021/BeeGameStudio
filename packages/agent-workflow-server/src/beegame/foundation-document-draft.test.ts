@@ -62,11 +62,12 @@ describe('foundation document draft groups', () => {
     expect(progress.complete).toBe(false)
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
-    expect(prompt).toContain('perform exactly one bounded native Edit')
-    expect(prompt).toContain('<!-- beegame-part:experience_pillars:1 -->')
-    expect(prompt).toContain('<!-- beegame-part:experience_pillars:2 -->')
+    expect(prompt).toContain(
+      'continue bounded native file calls until this active group is complete',
+    )
+    expect(prompt).toContain('<!-- beegame-draft-cursor:1:1 -->')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
-    expect(prompt).toContain('5,200 UTF-8 bytes')
+    expect(prompt).toContain('2,400 UTF-8 bytes')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
@@ -142,12 +143,12 @@ describe('foundation document draft groups', () => {
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
       `<!-- beegame-part:${section.sectionId}:1 -->`,
-      'x'.repeat(5_201),
+      'x'.repeat(2_401),
       '<!-- beegame-draft-cursor:0:1 -->',
     ].join('\n')
 
     expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
-      /exceeds 5200 bytes/i,
+      /exceeds 2400 bytes/i,
     )
   })
 })

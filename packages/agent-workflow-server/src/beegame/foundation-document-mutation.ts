@@ -1,6 +1,5 @@
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import {
-  MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES,
   foundationDocumentDraftPartCount,
   foundationDocumentDraftGroups,
   inspectFoundationDocumentDraft,
@@ -57,8 +56,7 @@ export function authorizeFoundationDocumentDraftMutation(input: {
       return { behavior: 'allow' }
     if (
       after.completedGroupCount === before.completedGroupCount + 1 &&
-      (before.completedPartCount + 1 === currentPartCount ||
-        currentGroup?.sections.length === 1) &&
+      before.completedPartCount + 1 === currentPartCount &&
       after.completedPartCount === 0
     )
       return { behavior: 'allow' }
@@ -85,7 +83,6 @@ function proposedMarkdown(input: {
       throw new Error('native Write cannot overwrite an existing draft')
     if (typeof input.mutation.content !== 'string')
       throw new Error('native Write content is required')
-    assertBoundedReplacement(input.mutation.content)
     return input.mutation.content
   }
   if (!input.currentMarkdown)
@@ -94,7 +91,6 @@ function proposedMarkdown(input: {
   const newString = input.mutation.new_string
   if (typeof oldString !== 'string' || typeof newString !== 'string')
     throw new Error('native Edit strings are required')
-  assertBoundedReplacement(newString)
   const before = inspectFoundationDocumentDraft(
     input.path,
     input.currentMarkdown,
@@ -105,13 +101,6 @@ function proposedMarkdown(input: {
   if (input.currentMarkdown.split(oldString).length !== 2)
     throw new Error('native Edit cursor must occur exactly once')
   return input.currentMarkdown.replace(oldString, newString)
-}
-
-function assertBoundedReplacement(value: string): void {
-  if (Buffer.byteLength(value, 'utf8') > MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES)
-    throw new Error(
-      `native replacement exceeds ${MAX_FOUNDATION_NATIVE_REPLACEMENT_BYTES} bytes`,
-    )
 }
 
 function deny(message: string): FoundationDocumentMutationAuthority {
