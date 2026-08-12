@@ -787,12 +787,17 @@ describe('delivery workflow session continuation', () => {
           event => event.type === 'run.resumed',
         ),
       ).toHaveLength(1)
+      expect(controllerFactory).toHaveBeenCalledTimes(1)
       const validProjectBoundaries = await Promise.all([
         app.request(`/api/projects/${projectId}/workflow/resume`, {
           method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'en' }),
         }),
         app.request(`/api/projects/${projectId}/workflow/retry`, {
           method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'en' }),
         }),
       ])
       expect(validProjectBoundaries.map(response => response.status)).toEqual([
@@ -801,6 +806,7 @@ describe('delivery workflow session continuation', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(workflowWorkerStarts).toBe(1)
       expect(workflowControllerResumeCalls).toBe(1)
+      expect(controllerFactory).toHaveBeenCalledTimes(1)
       expect(
         (await store.readEvents()).filter(
           event => event.type === 'run.resumed',

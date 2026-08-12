@@ -245,16 +245,28 @@ describe('beeGameAdapter prompt rules', () => {
     );
   });
 
-  it('continues a recoverable workflow through the project resume endpoint once', async () => {
+  it('continues and retries a recoverable workflow with the current UI language', async () => {
+    localStorage.setItem('i18nextLng', 'zh-TW');
     const fetchMock = vi.fn(async () => jsonResponse({ status: 'running' }));
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.resumeWorkflow('project recovery');
+    await beeGameAdapter.retryWorkflow('project recovery');
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/project%20recovery/workflow/resume',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ language: 'zh-TW' }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project%20recovery/workflow/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ language: 'zh-TW' }),
+      }),
     );
   });
 

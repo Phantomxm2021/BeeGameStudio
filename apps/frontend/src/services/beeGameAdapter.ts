@@ -414,14 +414,14 @@ export const beeGameAdapter = {
   async resumeWorkflow(projectId: string): Promise<Record<string, unknown>> {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/resume`,
-      {},
+      { language: getCurrentUiLanguage() },
     )
   },
 
   async retryWorkflow(projectId: string): Promise<Record<string, unknown>> {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
-      {},
+      { language: getCurrentUiLanguage() },
     )
   },
 

@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createHash, randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -667,7 +668,7 @@ export function createAgentWorkflowApp(
     modelConfigId?: string
     language?: BeeGameSessionLanguage
   }) => {
-    const workspaceKey = resolve(input.workspacePath)
+    const workspaceKey = normalizeResolvedPath(input.workspacePath)
     const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}`
     const requestCredential = sessionAuth?.getCredential?.(input.request)
     const existing = deliveryControllers.get(key)
@@ -764,7 +765,7 @@ export function createAgentWorkflowApp(
     userId: string
     controller: ReturnType<typeof getDeliveryController>
   }): Promise<void> => {
-    const workspacePath = resolve(input.workspacePath)
+    const workspacePath = normalizeResolvedPath(input.workspacePath)
     const workerIds = new Set<string>()
     const controllers = new Set([
       input.controller,
@@ -772,7 +773,7 @@ export function createAgentWorkflowApp(
         .filter(
           entry =>
             entry.ownerId === input.userId &&
-            entry.workspacePath === workspacePath,
+            normalizeResolvedPath(entry.workspacePath) === workspacePath,
         )
         .map(entry => entry.controller),
     ])
@@ -790,7 +791,7 @@ export function createAgentWorkflowApp(
         .filter(
           session =>
             beeGameSessions.isWorkflowWorker(session.id) &&
-            resolve(session.cwd) === workspacePath,
+            normalizeResolvedPath(session.cwd) === workspacePath,
         )
       for (const worker of workers) {
         workerIds.add(worker.id)
@@ -936,7 +937,7 @@ export function createAgentWorkflowApp(
   const continueBeeGameDeliveryWorkflow = async (
     input: Parameters<typeof continueBeeGameDeliveryWorkflowUnlocked>[0],
   ): Promise<DeliveryRun | undefined> => {
-    const key = `${input.user.id}:${resolve(input.workspacePath)}`
+    const key = `${input.user.id}:${normalizeResolvedPath(input.workspacePath)}`
     const previous = deliveryContinuationQueues.get(key) ?? Promise.resolve()
     const queued = previous
       .catch(() => undefined)
@@ -962,7 +963,7 @@ export function createAgentWorkflowApp(
     modelConfigId?: string
     language?: BeeGameSessionLanguage
   }) => {
-    const key = `${input.user.id}:${resolve(input.workspacePath)}`
+    const key = `${input.user.id}:${normalizeResolvedPath(input.workspacePath)}`
     const previous = deliveryStartQueues.get(key) ?? Promise.resolve()
     let queued!: Promise<{ runId: string; phase: string; status: string }>
     queued = previous
@@ -2726,12 +2727,24 @@ export function createAgentWorkflowApp(
       )
       if (!project?.root_path)
         return c.json({ error: 'Project not found' }, 404)
+      const body = await readOptionalJson(c.req.raw)
+      const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
+        request: c.req.raw,
+        user,
+        project,
+        requestedLanguage: body.language,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        assertPermittedModelConfigRuntime,
+      })
       const resumed = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
         projectId: project.id,
         workspacePath: project.root_path,
         mode: 'resume',
+        ...runtimeBinding,
       })
       return resumed
         ? c.json(resumed)
@@ -2756,6 +2769,16 @@ export function createAgentWorkflowApp(
         return c.json({ error: 'Project not found' }, 404)
       const body = await readOptionalJson(c.req.raw)
       const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
+      const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
+        request: c.req.raw,
+        user,
+        project,
+        requestedLanguage: body.language,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        assertPermittedModelConfigRuntime,
+      })
       const retried = await continueBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
@@ -2763,6 +2786,7 @@ export function createAgentWorkflowApp(
         workspacePath: project.root_path,
         mode: 'retry',
         ...(taskId ? { taskId } : {}),
+        ...runtimeBinding,
       })
       return retried
         ? c.json(retried, 202)
@@ -5402,6 +5426,54 @@ async function getLatestProjectSessionMetadata(input: {
     : undefined
 }
 
+async function resolveProjectWorkflowRuntimeBinding(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  requestedLanguage: unknown
+  defaultWorkspacePath?: string
+  beeGameSessions: BeeGameSessionManager
+  dashboardRepository: DashboardRepository
+  assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
+}): Promise<{
+  modelConfigId?: string
+  language?: BeeGameSessionLanguage
+}> {
+  const sessionRef = await resolveBeeGameProjectSessionReference({
+    request: input.request,
+    user: input.user,
+    project: input.project,
+    defaultWorkspacePath: input.defaultWorkspacePath,
+    beeGameSessions: input.beeGameSessions,
+    dashboardRepository: input.dashboardRepository,
+  })
+  const modelConfigId =
+    sessionRef?.live?.modelConfigId ??
+    sessionRef?.latest?.modelConfigId ??
+    input.project.runtime_snapshot?.model_config_id
+  if (
+    modelConfigId &&
+    !(await input.dashboardRepository.modelConfigExists(
+      input.request,
+      input.user,
+      modelConfigId,
+    ))
+  ) {
+    throw new Error('Selected project model configuration is unavailable')
+  }
+  if (modelConfigId)
+    await input.assertPermittedModelConfigRuntime(modelConfigId)
+  const language = isBeeGameSessionLanguage(input.requestedLanguage)
+    ? input.requestedLanguage
+    : sessionRef?.live
+      ? input.beeGameSessions.language(sessionRef.live.id)
+      : undefined
+  return {
+    ...(modelConfigId ? { modelConfigId } : {}),
+    ...(language ? { language } : {}),
+  }
+}
+
 function findLiveProjectSession(
   beeGameSessions: BeeGameSessionManager,
   userId: string,
@@ -6600,7 +6672,12 @@ function inferBeeGameSessionIdFromProjectId(projectId: string): string {
 }
 
 function normalizeResolvedPath(path: string): string {
-  return resolve(path)
+  const resolved = resolve(path)
+  try {
+    return realpathSync.native(resolved)
+  } catch {
+    return resolved
+  }
 }
 
 function registerBeeGameSessionRoutes(
