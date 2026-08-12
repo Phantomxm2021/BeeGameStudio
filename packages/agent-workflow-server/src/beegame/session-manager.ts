@@ -37,7 +37,6 @@ import type {
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
 import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
 import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
-import type { CanonicalDocumentCommitContract } from './native-canonical-document-tool'
 import type { ResourceContentCommitContract } from './native-resource-content-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
@@ -54,10 +53,6 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
-import {
-  createWorkflowToolInputBudgetState,
-  observeWorkflowToolInput,
-} from './workflow-tool-input-budget'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -258,7 +253,6 @@ export type BeeGameSessionRunnerStartInput = {
   workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
-  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   language?: BeeGameSessionLanguage
@@ -380,7 +374,6 @@ type SessionRecord = {
   workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
-  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
@@ -518,7 +511,6 @@ export type StartBeeGameSessionInput = {
   workflowReadOnlyPaths?: string[]
   workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
   workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
-  workflowCanonicalDocumentCommitContract?: CanonicalDocumentCommitContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
 
@@ -663,12 +655,6 @@ export class BeeGameSessionManager {
         ? {
             workflowDocumentRepairPlanContract:
               input.workflowDocumentRepairPlanContract,
-          }
-        : {}),
-      ...(input.workflowCanonicalDocumentCommitContract
-        ? {
-            workflowCanonicalDocumentCommitContract:
-              input.workflowCanonicalDocumentCommitContract,
           }
         : {}),
       ...(input.workflowResourceContentCommitContract
@@ -1351,12 +1337,6 @@ export class BeeGameSessionManager {
                     record.workflowDocumentRepairPlanContract,
                 }
               : {}),
-            ...(record.workflowCanonicalDocumentCommitContract
-              ? {
-                  workflowCanonicalDocumentCommitContract:
-                    record.workflowCanonicalDocumentCommitContract,
-                }
-              : {}),
             ...(record.workflowResourceContentCommitContract
               ? {
                   workflowResourceContentCommitContract:
@@ -1463,7 +1443,6 @@ export class BeeGameSessionManager {
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
-    const toolInputBudget = createWorkflowToolInputBudgetState()
     await runner.submit({
       prompt,
       ...(record.confirmedBriefContext
@@ -1478,15 +1457,6 @@ export class BeeGameSessionManager {
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
-        if (record.workflowWorkerType === 'document-author') {
-          const overflow = observeWorkflowToolInput(toolInputBudget, message)
-          if (overflow && !executionError) {
-            executionError = new Error(
-              `${overflow.code}: ${overflow.toolName} streamed ${overflow.observedBytes} bytes; maximum ${overflow.maxBytes} bytes`,
-            )
-            record.abortController?.abort(executionError)
-          }
-        }
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -2012,9 +1982,7 @@ export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
 export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
   return (
     event.type === 'tool.completed' &&
-    (isFileMutationTool(getDashboardPayloadString(event.payload, 'toolName')) ||
-      getDashboardPayloadString(event.payload, 'toolName') ===
-        'CommitCanonicalDocument')
+    isFileMutationTool(getDashboardPayloadString(event.payload, 'toolName'))
   )
 }
 

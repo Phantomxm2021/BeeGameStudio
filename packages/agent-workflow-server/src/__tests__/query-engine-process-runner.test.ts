@@ -151,7 +151,7 @@ describe('process-isolated QueryEngine runner', () => {
     })
   })
 
-  test('preserves the exact document author contract across process serialization', () => {
+  test('preserves native document author boundaries across process serialization', () => {
     const serialized = serializeQueryEngineStartInput({
       sessionId: 'document-author',
       cwd: '/tmp/project',
@@ -161,15 +161,6 @@ describe('process-isolated QueryEngine runner', () => {
       workflowDispatchId: 'dispatch-1',
       workflowAllowedPaths: ['docs/GDD.md'],
       workflowDocumentAuthorMode: 'remediation',
-      workflowCanonicalDocumentCommitContract: {
-        dispatchId: 'dispatch-1',
-        targetPath: 'docs/GDD.md',
-        documentId: 'GDD',
-        operation: 'revise',
-        baselineDigest: 'baseline-digest',
-        baselineVersion: '1.2.3',
-        baselineUpdatedAt: '2026-08-04T00:00:00.000Z',
-      },
     })
 
     expect(deserializeQueryEngineStartInput(serialized)).toMatchObject({
@@ -178,16 +169,10 @@ describe('process-isolated QueryEngine runner', () => {
       workflowDispatchId: 'dispatch-1',
       workflowAllowedPaths: ['docs/GDD.md'],
       workflowDocumentAuthorMode: 'remediation',
-      workflowCanonicalDocumentCommitContract: {
-        dispatchId: 'dispatch-1',
-        targetPath: 'docs/GDD.md',
-        documentId: 'GDD',
-        operation: 'revise',
-        baselineDigest: 'baseline-digest',
-        baselineVersion: '1.2.3',
-        baselineUpdatedAt: '2026-08-04T00:00:00.000Z',
-      },
     })
+    expect(JSON.stringify(serialized)).not.toContain(
+      'CanonicalDocumentCommit',
+    )
   })
 
   test('preserves the frozen Resource Content contract across process serialization', () => {

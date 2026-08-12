@@ -4,6 +4,7 @@ import { getGameDocumentContract } from './delivery-workflow/game-document-contr
 import {
   authoritySidecarPath,
   canonicalFoundationAuthoritySidecarBytes,
+  createDocumentSectionAuthoritySidecar,
   createFoundationAuthoritySidecar,
   validateFoundationAuthoritySidecar,
 } from './foundation-authority-sidecar'
@@ -54,6 +55,37 @@ function storedSidecar() {
 }
 
 describe('foundation authority sidecar', () => {
+  test('derives a trustworthy section index from the completed Markdown file', () => {
+    const path = 'docs/GDD.md' as const
+    const contract = getGameDocumentContract(path)
+    const markdown = '# Game Design Document\n\nCompleted human-authored content.\n'
+    const sidecar = createDocumentSectionAuthoritySidecar({
+      documentPath: path,
+      markdown,
+    })
+
+    expect(sidecar.records).toHaveLength(contract.sections.length)
+    expect(sidecar.records[0]).toMatchObject({
+      authorityId: 'gdd.accessibility_localization.canonical_section',
+      source: 'upstream_authority',
+      state: 'confirmed',
+      evidenceRefs: [
+        {
+          kind: 'file',
+          locator: 'docs/GDD.md#accessibility_localization',
+          digest: sidecar.documentDigest,
+        },
+      ],
+    })
+    expect(
+      validateFoundationAuthoritySidecar({
+        documentPath: path,
+        markdown,
+        value: sidecar,
+      }),
+    ).toEqual(sidecar)
+  })
+
   test('creates canonical frozen sidecars with service-owned identity', () => {
     const sidecar = createFoundationAuthoritySidecar({
       documentPath: 'docs/GDD.md',

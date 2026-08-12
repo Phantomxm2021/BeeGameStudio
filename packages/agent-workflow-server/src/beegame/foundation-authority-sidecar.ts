@@ -414,3 +414,42 @@ export function createFoundationAuthoritySidecar(input: {
     },
   })
 }
+
+/**
+ * Build service-owned navigation metadata after Claude Code has authored the
+ * canonical Markdown file. The sidecar deliberately indexes whole contracted
+ * sections instead of asking the model to repeat document claims through a
+ * second, BGS-specific transport.
+ */
+export function createDocumentSectionAuthoritySidecar(input: {
+  documentPath: FoundationDocumentPath
+  markdown: string
+}): FoundationAuthoritySidecar {
+  const documentDigest = foundationDocumentDigest(input.markdown)
+  const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[
+    input.documentPath
+  ].toLowerCase()
+  const records = getGameDocumentContract(input.documentPath).sections.map(
+    section => ({
+      authorityId: `${documentId}.${section.sectionId}.canonical_section`,
+      sectionId: section.sectionId,
+      kind: 'fact' as const,
+      state: 'confirmed' as const,
+      source: 'upstream_authority' as const,
+      evidenceRefs: [
+        {
+          kind: 'file' as const,
+          locator: `${input.documentPath}#${section.sectionId}`,
+          digest: documentDigest,
+        },
+      ],
+      statement: `${section.title} is the canonical source for ${section.purpose}`,
+      responsibilityIds: section.responsibilityIds,
+    }),
+  )
+  return createFoundationAuthoritySidecar({
+    documentPath: input.documentPath,
+    markdown: input.markdown,
+    submission: { records },
+  })
+}

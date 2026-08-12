@@ -40,40 +40,14 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain(
       'one contract section per native file operation',
     )
-    expect(prompt).toContain(
-      'Do not serialize the complete document into one tool-call argument',
-    )
-    expect(prompt).toContain('two or three consecutive parts')
-    expect(prompt).toContain('one CommitCanonicalDocument call')
-    expect(prompt).toContain('top-level parts array')
-    expect(prompt).toContain(
-      'Never issue multiple CommitCanonicalDocument calls in parallel',
-    )
-    expect(prompt).toContain('body content only, without any Markdown heading')
-    expect(prompt).toContain(
-      'audit decisionId must equal the full future authorityId',
-    )
-    expect(prompt).toContain(
-      'at least one authority record for every contracted section',
-    )
-    expect(prompt).toContain('under 16 KiB')
-    expect(prompt).toContain('submit one part when a body is large')
-    expect(prompt).toContain('Wait for the exact nextPart')
-    expect(prompt).toContain('document_parts_prepared')
-    expect(prompt).toContain('source, state, and evidenceRefs')
-    expect(prompt).toContain('Do not use TodoWrite')
-    expect(prompt).toContain(
-      'Do not perform a full-document Read after a committed digest receipt',
-    )
-    expect(prompt).toContain('Do not write or edit the assigned path directly')
+    expect(prompt).toContain('Write the complete assigned Markdown document directly')
+    expect(prompt).toContain("Claude Code's normal workflow")
+    expect(prompt).toContain('BGS validates the completed file after the turn')
+    expect(prompt).not.toContain('CommitCanonicalDocument')
+    expect(prompt).not.toContain('document_parts_prepared')
+    expect(prompt).not.toContain('Do not write or edit the assigned path directly')
     expect(prompt).toContain('Do not claim verified license')
-    expect(prompt).toContain(
-      'Do not hand-author rendered upstream or open-decision lists',
-    )
     expect(prompt).toContain('one final lightweight structural verification')
-    expect(prompt).toContain(
-      'Do not perform a full-document Read after a committed digest receipt',
-    )
     expect(prompt).toContain(
       'Read all authorized upstream sections in one batched tool round',
     )
@@ -88,8 +62,8 @@ describe('resource-content worker prompts', () => {
       'Do not restate the confirmed brief, upstream text or another section',
     )
     expect(prompt).toContain('exactly one # document title')
-    expect(prompt).toContain('service renders exactly one # document title')
-    expect(prompt).toContain('canonical headings, table of contents')
+    expect(prompt).toContain('canonical structures in order')
+    expect(prompt).toContain('## Executive Summary')
     expect(prompt).not.toContain('handwrite protocol markers')
     for (const material of completeDocumentContract.productionMaterials)
       expect(prompt).toContain(material.materialId)
@@ -453,17 +427,17 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('Document metadata is service-owned')
+    expect(prompt).toContain('BGS adds only canonical front matter')
     expect(prompt).not.toContain('updated_at set to')
     expect(prompt).toContain('complete human development discipline')
     expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('committed digest receipt is terminal')
-    expect(prompt).toContain('CommitCanonicalDocument')
+    expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
-    expect(prompt).toContain('then the audit appendix in nextPart order')
+    expect(prompt).toContain('then the audit appendix in canonical order')
     expect(prompt).toContain('Define each authoritative fact once')
     expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(

@@ -21,7 +21,6 @@ import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
-import { DOCUMENT_NATIVE_WRITE_MAX_BYTES } from '../beegame/workflow-tool-input-budget'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -809,7 +808,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('fails a document author with the exact oversized native write error', async () => {
+  test('does not override Claude Code native write sizing', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-document-author-large-write-'))
     const runner: BeeGameSessionRunner = {
       start: async () => ({
@@ -834,7 +833,7 @@ describe('BeeGame session runtime resilience', () => {
               index: 0,
               delta: {
                 type: 'input_json_delta',
-                partial_json: 'x'.repeat(DOCUMENT_NATIVE_WRITE_MAX_BYTES + 1),
+                partial_json: 'x'.repeat(24 * 1024 + 1),
               },
             },
           } as DashboardSDKMessage)
@@ -856,8 +855,8 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
 
     expect(
-      manager.events(session.id).find(event => event.type === 'turn.failed')?.text,
-    ).toContain('document_native_write_input_too_large')
+      manager.events(session.id).some(event => event.type === 'turn.failed'),
+    ).toBe(false)
     manager.dispose()
   })
 

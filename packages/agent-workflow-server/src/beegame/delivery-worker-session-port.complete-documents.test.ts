@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  buildCanonicalDocumentCommitContract,
   buildDocumentAuthorAuthorityBlock,
 } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
@@ -68,34 +67,7 @@ async function writeAuthoritySource(
   )
 }
 
-describe('delivery worker complete document commit contract', () => {
-  test('requires structured complete submissions for initial Foundation authors', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'complete-doc-contract-'),
-    )
-    try {
-      const contract = await buildCanonicalDocumentCommitContract(
-        {
-          workerType: 'document-author',
-          workspacePath,
-          allowedPaths: ['docs/GDD.md'],
-          contract: {
-            authoringMode: 'initial',
-            documentSet: 'foundation',
-            foundationDocumentPath: 'docs/GDD.md',
-          },
-        } as never,
-        'dispatch-complete-document',
-      )
-      expect(contract).toMatchObject({
-        targetPath: 'docs/GDD.md',
-        submissionKind: 'complete_game_document',
-      })
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
+describe('delivery worker complete document boundary', () => {
   test('projects document authority as paths and section ids without source bodies', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
@@ -126,26 +98,13 @@ describe('delivery worker complete document commit contract', () => {
           expect(block).toContain(`upstreamPath=${source.path}`)
           expect(block).toContain(`sectionId=${sectionId}`)
         }
-      expect(block).toContain('two or three consecutive parts')
-      expect(block).toContain('one CommitCanonicalDocument call')
-      expect(block).toContain('top-level parts array')
-      expect(block).toContain(
-        'Never issue multiple CommitCanonicalDocument calls in parallel',
-      )
-      expect(block).toContain('body content only, without any Markdown heading')
-      expect(block).toContain('document_parts_prepared')
-      expect(block).toContain(
-        'Every audit decisionId must be the full future authorityId',
-      )
-      expect(block).toContain('at least one record per contracted section')
-      expect(block).toContain('Do not hand-author')
-      expect(block).toContain('write or edit the assigned path directly')
-      expect(block).not.toContain('document_prepared')
+      expect(block).toContain('Write the complete assigned Markdown document directly')
+      expect(block).toContain('Claude Code')
+      expect(block).toContain('workflow service validates')
       expect(block).toContain('Read the compact authority projection')
-      expect(block).toContain('CommitCanonicalDocument')
-      expect(block).toContain('submit two or three consecutive parts')
-      expect(block).toContain('make one authority call')
-      expect(block).not.toContain('Submit the complete Markdown body first')
+      expect(block).not.toContain('CommitCanonicalDocument')
+      expect(block).not.toContain('document_parts_prepared')
+      expect(block).not.toContain('write or edit the assigned path directly')
       expect(block).toContain(
         'Read only the listed source sections when deeper rationale',
       )

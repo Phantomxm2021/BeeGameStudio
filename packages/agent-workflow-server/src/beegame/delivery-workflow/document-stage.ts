@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import { readCanonicalDocumentCommitReceipt } from '../native-canonical-document-tool'
 import {
-  canonicalizeCompleteGameDocumentMarkdown,
-  validateCompleteGameDocumentMarkdown,
-} from '../complete-game-document'
+  commitAuthoredFoundationDocument,
+  readCanonicalDocumentCommitReceipt,
+} from '../native-canonical-document-tool'
+import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { resolveWorkflowEvidencePath } from './evidence'
 import {
   buildDocumentReviewWireReferenceIndex,
@@ -1522,23 +1522,33 @@ async function completeInitialFoundationDocumentDraft(input: {
     path.split('\\').join('/'),
   )
   const dispatchId = input.run.activeDispatch?.dispatchId
-  const commitReceipt = dispatchId
+  let commitReceipt = dispatchId
     ? await readCanonicalDocumentCommitReceipt(input.workspacePath, dispatchId)
     : undefined
+  let authoredCommitIssue: string | undefined
+  if (!commitReceipt && dispatchId) {
+    try {
+      commitReceipt = await commitAuthoredFoundationDocument({
+        workspacePath: input.workspacePath,
+        dispatchId,
+        targetPath: expectedPath,
+      })
+    } catch (error) {
+      authoredCommitIssue =
+        error instanceof Error
+          ? error.message
+          : 'authored document validation failed'
+    }
+  }
   const hasCommittedAuthority =
     commitReceipt !== undefined &&
     commitReceipt.schemaVersion !== 1 &&
     commitReceipt.status === 'committed' &&
     commitReceipt.targetPath === expectedPath &&
     commitReceipt.authorityDigest !== null
-  const canonicalizationIssues = hasCommittedAuthority
-    ? []
-    : canonicalizeFoundationDocumentFile({
-        workspacePath: input.workspacePath,
-        path: expectedPath,
-        version: '1.0.0',
-        updatedAt: new Date().toISOString(),
-      })
+  const canonicalizationIssues = authoredCommitIssue
+    ? [`${expectedPath}: ${authoredCommitIssue}`]
+    : []
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
@@ -1624,29 +1634,6 @@ async function completeInitialFoundationDocumentDraft(input: {
     documentStep: 'FOUNDATION_REVIEW',
     currentItemId: undefined,
     blockedReason: undefined,
-  }
-}
-
-function canonicalizeFoundationDocumentFile(input: {
-  workspacePath: string
-  path: FoundationDocumentPath
-  version: string
-  updatedAt: string
-}): string[] {
-  try {
-    const absolutePath = join(input.workspacePath, input.path)
-    const authored = readFileSync(absolutePath, 'utf8')
-    const canonical = canonicalizeCompleteGameDocumentMarkdown(
-      input.path,
-      authored,
-      { version: input.version, updatedAt: input.updatedAt },
-    )
-    writeFileSync(absolutePath, canonical, 'utf8')
-    return []
-  } catch (error) {
-    return [
-      `${input.path}: ${error instanceof Error ? error.message : 'canonical document normalization failed'}`,
-    ]
   }
 }
 

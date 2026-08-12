@@ -8,7 +8,10 @@ import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
 import { acceptedWorkflowUnitSchema, parseDeliveryRun } from './schema'
 import { transitionDeliveryRun } from './transition'
-import { createNativeCanonicalDocumentTool } from '../native-canonical-document-tool'
+import {
+  renderCompleteGameDocument,
+  type CompleteGameDocumentSubmission,
+} from '../complete-game-document'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -400,26 +403,7 @@ describe('accepted workflow unit journal', () => {
           if (requests.size > 1) return new Promise(() => undefined)
           const path = request.taskId as FoundationDocumentPath
           const documentContract = getGameDocumentContract(path)
-          const contract = {
-            dispatchId,
-            targetPath: path,
-            documentId: CANONICAL_PROJECT_DOCUMENT_IDS[path],
-            operation: 'create',
-            baselineDigest: null,
-            submissionKind: 'complete_game_document',
-          } as const
-          let tool: Record<string, unknown> | undefined
-          createNativeCanonicalDocumentTool({
-            buildTool: definition => {
-              tool = definition
-              return definition
-            },
-            workspacePath: workspace,
-            contract,
-          })
-          const call = tool?.call as (input: unknown) => Promise<unknown>
-          await call({
-            document: {
+          const document = {
               title: documentContract.discipline,
               executiveSummary:
                 'Synthetic complete document used to verify the accepted-unit handoff.',
@@ -464,25 +448,15 @@ describe('accepted workflow unit journal', () => {
                 risks: [],
                 openDecisions: [],
               },
-            },
-          })
-          await call({
-            authority: {
-              records: documentContract.sections.map(section => ({
-                authorityId: `${CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()}.${section.sectionId}.primary`,
-                sectionId: section.sectionId,
-                kind: 'fact',
-                state: 'confirmed',
-                source: 'confirmed_brief',
-                evidenceRefs: [],
-                statement: `Confirmed authority for ${section.title}.`,
-                responsibilityIds: [...section.responsibilityIds].sort(
-                  (left, right) =>
-                    Buffer.compare(Buffer.from(left), Buffer.from(right)),
-                ),
-              })),
-            },
-          })
+            } as const
+          await mkdir(join(workspace, 'docs'), { recursive: true })
+          await writeFile(
+            join(workspace, path),
+            renderCompleteGameDocument(
+              path,
+              document as unknown as CompleteGameDocumentSubmission,
+            ),
+          )
           return {
             workerType: 'document-author' as const,
             status: 'completed' as const,

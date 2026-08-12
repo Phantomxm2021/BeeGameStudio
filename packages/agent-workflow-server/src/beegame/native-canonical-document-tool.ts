@@ -17,6 +17,7 @@ import {
 import {
   authoritySidecarPath,
   canonicalFoundationAuthoritySidecarBytes,
+  createDocumentSectionAuthoritySidecar,
   createFoundationAuthoritySidecar,
   foundationAuthoritySubmissionSchema,
   validateFoundationAuthoritySidecar,
@@ -1265,6 +1266,91 @@ export async function readCanonicalDocumentCommitReceipt(
   )
     throw new Error('canonical document commit receipt identity is invalid')
   return parsed
+}
+
+/**
+ * Accept a complete Markdown file authored through Claude Code's native file
+ * tools, then add only BGS-owned metadata. Document bodies never pass through
+ * a custom workflow tool.
+ */
+export async function commitAuthoredFoundationDocument(input: {
+  workspacePath: string
+  dispatchId: string
+  targetPath: FoundationDocumentPath
+}): Promise<CompleteGameDocumentCommitReceiptV3> {
+  const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[input.targetPath]
+  const existing = await readCanonicalDocumentCommitReceipt(
+    input.workspacePath,
+    input.dispatchId,
+  )
+  if (existing?.schemaVersion === 3 && existing.status === 'committed') {
+    if (
+      existing.targetPath !== input.targetPath ||
+      existing.documentId !== documentId
+    )
+      throw new Error('authored document receipt does not match dispatch')
+    return existing
+  }
+
+  const target = resolve(input.workspacePath, input.targetPath)
+  const authored = await readFile(target, 'utf8')
+  const updatedAt = new Date().toISOString()
+  const markdown = canonicalizeCompleteGameDocumentMarkdown(
+    input.targetPath,
+    authored,
+    { version: '1.0.0', updatedAt },
+  )
+  const sidecar = createDocumentSectionAuthoritySidecar({
+    documentPath: input.targetPath,
+    markdown,
+  })
+  const sidecarBytes = canonicalFoundationAuthoritySidecarBytes(sidecar)
+  const prepared: CompleteGameDocumentCommitReceiptV3 = {
+    schemaVersion: 3,
+    dispatchId: input.dispatchId,
+    targetPath: input.targetPath,
+    baselineDigest: null,
+    finalDigest: digest(markdown),
+    authorityPath: authoritySidecarPath(input.targetPath),
+    authorityDigest: digest(sidecarBytes),
+    artifacts: [],
+    documentId,
+    version: '1.0.0',
+    updatedAt,
+    status: 'package_prepared',
+  }
+  if (existing)
+    throw new Error('authored document receipt is not safely replayable')
+
+  const preparedFiles = await Promise.all([
+    prepareDurableFile(target, markdown),
+    prepareDurableFile(
+      resolve(input.workspacePath, prepared.authorityPath),
+      sidecarBytes,
+    ),
+  ])
+  try {
+    await durableWrite(
+      canonicalDocumentReceiptPath(input.workspacePath, input.dispatchId),
+      `${JSON.stringify(prepared, null, 2)}\n`,
+    )
+    for (const file of preparedFiles) await rename(file.temporary, file.target)
+    await syncDirectories(preparedFiles.map(file => dirname(file.target)))
+  } catch (error) {
+    await Promise.all(
+      preparedFiles.map(file => unlink(file.temporary).catch(() => undefined)),
+    )
+    throw error
+  }
+  const committed: CompleteGameDocumentCommitReceiptV3 = {
+    ...prepared,
+    status: 'committed',
+  }
+  await durableWrite(
+    canonicalDocumentReceiptPath(input.workspacePath, input.dispatchId),
+    `${JSON.stringify(committed, null, 2)}\n`,
+  )
+  return committed
 }
 
 export async function reconcileCanonicalDocumentCommitReceipt(input: {
