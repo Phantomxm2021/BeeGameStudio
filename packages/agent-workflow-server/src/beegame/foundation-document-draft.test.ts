@@ -32,8 +32,8 @@ describe('foundation document draft groups', () => {
     const contract = getGameDocumentContract(path)
     const groups = foundationDocumentDraftGroups(path)
 
-    expect(groups.length).toBe(5)
-    expect(groups.slice(0, -1).every(group => group.sections.length <= 3)).toBe(
+    expect(groups.length).toBe(contract.sections.length + 1)
+    expect(groups.slice(0, -1).every(group => group.sections.length === 1)).toBe(
       true,
     )
     expect(groups.flatMap(group => group.sections.map(section => section.sectionId))).toEqual(

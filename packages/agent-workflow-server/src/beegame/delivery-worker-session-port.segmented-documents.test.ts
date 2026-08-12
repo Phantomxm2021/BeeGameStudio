@@ -130,7 +130,7 @@ describe('segmented initial document authoring', () => {
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
       expect(prompts.length).toBe(foundationDocumentDraftGroups('docs/GDD.md').length)
-      expect(prompts[0]).toContain('Active bounded document group 1/5')
+      expect(prompts[0]).toContain('Active bounded document group 1/13')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',

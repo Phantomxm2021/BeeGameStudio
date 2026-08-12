@@ -90,18 +90,12 @@ describe('foundation authority projection', () => {
       ).byteLength,
     )
     const serialized = canonicalFoundationAuthorityProjectionBytes(result)
-    expect(serialized).toContain('Owned source content for')
+    expect(serialized).not.toContain('Owned source content for')
     expect(serialized).not.toContain('Source materials are intentionally')
-    expect(
-      result.sources.every(source =>
-        source.sections.every(section =>
-          section.contentLines.includes(
-            `<!-- beegame-section:${section.sectionId} -->`,
-          ),
-        ),
-      ),
-    ).toBe(true)
+    expect(result.sources[0]?.sections[0]).not.toHaveProperty('content')
+    expect(result.sources[0]?.sections[0]).not.toHaveProperty('contentLines')
     expect(serialized).not.toContain('"content":')
+    expect(Buffer.byteLength(serialized)).toBeLessThan(16 * 1024)
     expect(
       Math.max(...serialized.split('\n').map(line => Buffer.byteLength(line))),
     ).toBeLessThan(4096)
@@ -139,5 +133,28 @@ describe('foundation authority projection', () => {
         documents: incompleteDocuments,
       }),
     ).toThrow(/section.*missing/i)
+  })
+
+  test('indexes upstream authority for the active target section without proxying content', () => {
+    const targetPath = 'docs/TECHNICAL_DESIGN.md'
+    const input = sources([
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+    ])
+    const result = projectFoundationAuthority({
+      targetPath,
+      targetSectionIds: ['runtime_state'],
+      ...input,
+    })
+    const projectedIds = result.sources.flatMap(source =>
+      source.sections.map(section => `${source.path}#${section.sectionId}`),
+    )
+
+    expect(result.targetSectionIds).toEqual(['runtime_state'])
+    expect(projectedIds).toContain('docs/GDD.md#states_flow')
+    expect(projectedIds).toContain('docs/LEVEL_SCENE_DESIGN.md#scene_states')
+    expect(projectedIds).toContain('docs/GDD.md#player_actions')
+    expect(projectedIds).toContain('docs/BALANCE_DESIGN.md#formulas')
   })
 })

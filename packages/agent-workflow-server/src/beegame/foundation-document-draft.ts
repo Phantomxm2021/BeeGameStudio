@@ -6,7 +6,7 @@ import type {
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
-const SECTIONS_PER_TURN = 3
+const SECTIONS_PER_TURN = 1
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number
@@ -183,10 +183,10 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   return [
     `Active bounded document group ${group.groupIndex + 1}/${groups.length}. Author only this group at ${input.path}; do not author later groups in this turn.`,
     isFirst
-      ? `Read ${input.projectionRelativePath} once, then use native Write to create the title, <!-- beegame-executive-summary --> with ## Executive Summary, the exact group sections below, and finish the file with <!-- beegame-draft-cursor:${nextCursor} -->.`
+      ? `${contract.upstreamSections.length ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}use native Write to create the title, <!-- beegame-executive-summary --> with ## Executive Summary, the exact group section below, and finish the file with <!-- beegame-draft-cursor:${nextCursor} -->.`
       : isFinal
         ? `Use native Edit to replace the sole <!-- beegame-draft-cursor:${group.groupIndex} --> with <!-- beegame-production-materials -->, ## Production Materials, and every exact production material below. Do not leave a draft cursor.`
-        : `Use native Edit to replace the sole <!-- beegame-draft-cursor:${group.groupIndex} --> with the exact group sections below followed by <!-- beegame-draft-cursor:${nextCursor} -->.`,
+        : `Read the refreshed small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then use native Edit to replace the sole <!-- beegame-draft-cursor:${group.groupIndex} --> with the exact group section below followed by <!-- beegame-draft-cursor:${nextCursor} -->.`,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'
       : 'Do not rewrite or reread the completed prefix. The cursor is the only edit target.',
