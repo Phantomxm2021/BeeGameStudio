@@ -28,6 +28,8 @@ import {
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
+import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
+import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 
 function reviewerContract(
   atomicCheckId: DocumentReviewCheckId = 'cross_document_consistency',
@@ -812,12 +814,65 @@ describe('delivery worker session credentials', () => {
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain(
-        'The assigned Markdown file must be complete when the turn ends',
+      expect(block).not.toContain('complete when the turn ends')
+      expect(block).not.toContain('file-operation sequence')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('sends one authoritative initial document instruction without wrapper repetition', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-once-'))
+    let submittedPrompt = ''
+    const sessions = {
+      start() {
+        return { id: 'session-document-prompt-once' }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay(_sessionId: string, prompt: string) {
+        submittedPrompt = prompt
+      },
+    } as unknown as BeeGameSessionManager
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'dispatch-document-prompt-once',
+      runId: 'run-document-prompt-once',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'initial',
+        documentSet: 'foundation',
+        foundationDocumentPath: 'docs/GDD.md',
+        upstreamDocumentPaths: [],
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+      },
+    }
+    try {
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions,
+        userId: 'user-1',
+        confirmedBriefContext: '{"kind":"confirmed_build_brief"}',
+      })
+      await port.start(request)
+      await port.submit(
+        request.dispatchId!,
+        buildWorkerPrompt(request),
       )
-      expect(block).toContain(
-        'The native runtime owns the file-operation sequence',
-      )
+
+      expect(
+        submittedPrompt.match(/Author the assigned Markdown document/gi),
+      ).toHaveLength(1)
+      expect(
+        submittedPrompt.match(/complete when the turn ends/gi),
+      ).toHaveLength(1)
+      expect(submittedPrompt.match(/file-operation sequence/gi)).toHaveLength(1)
+      expect(submittedPrompt).toContain('Read the compact document projection')
+      expect(submittedPrompt).toContain('contract.completeDocumentContract')
+      expect(submittedPrompt).toContain('one final lightweight structural verification')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

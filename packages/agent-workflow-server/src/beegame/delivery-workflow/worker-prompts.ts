@@ -323,7 +323,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.documentSet === 'checklist'
           ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Bee Game Studio's normal workflow."
           : request.contract.authoringMode === 'initial'
-            ? `Author the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow. The assigned Markdown file must be complete when the turn ends. The native runtime owns the file-operation sequence. BGS validates the completed file after the turn; it does not replace the native authoring tools.`
+            ? `Author the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow.`
             : request.contract.authoringMode === 'repair-planning'
               ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
               : `Use the service-projected current target, apply only the locked repair decision, and revise the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow. The assigned Markdown file must be complete when the turn ends. The native runtime owns the file-operation sequence.`,
@@ -475,7 +475,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
         : request.contract.authoringMode === 'initial' &&
             request.contract.documentSet === 'foundation'
-          ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. The native runtime owns the file-operation sequence.`
+          ? `Verify the final bytes at ${documentAuthorTargetPath(request)} and end the turn normally.`
           : request.contract.authoringMode === 'initial'
             ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. The native runtime owns the file-operation sequence.`
             : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. The native runtime owns the file-operation sequence.`

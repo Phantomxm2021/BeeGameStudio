@@ -61,7 +61,7 @@ describe('resource-content worker prompts', () => {
       'The native runtime owns the file-operation sequence',
     )
     expect(prompt).toContain("Bee Game Studio's normal workflow")
-    expect(prompt).toContain('BGS validates the completed file after the turn')
+    expect(prompt).toContain('BGS validates the finished file without rewriting it')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('document_parts_prepared')
     expect(prompt).not.toContain('Do not write or edit the assigned path directly')

@@ -59,32 +59,17 @@ describe('delivery worker complete document boundary', () => {
           upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
         },
       } as never)
-      const projection =
-        getGameDocumentContract('docs/UI_UX_SPEC.md').upstreamSections
-      for (const source of projection)
-        for (const sectionId of source.sectionIds) {
-          expect(block).toContain(`upstreamPath=${source.path}`)
-          expect(block).toContain(`sectionId=${sectionId}`)
-        }
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain(
-        'The assigned Markdown file must be complete when the turn ends',
-      )
-      expect(block).toContain(
-        'The native runtime owns the file-operation sequence',
-      )
-      expect(block).toContain('Bee Game Studio')
-      expect(block).toContain('workflow service only validates')
       expect(block).toContain('Read the compact document projection')
-      expect(block).toContain('file itself is the sole authority')
+      expect(block).toContain('exact authorized upstream line ranges')
+      expect(block).not.toContain('complete when the turn ends')
+      expect(block).not.toContain('file-operation sequence')
+      expect(block).not.toContain('completeDocumentContract')
       expect(block).not.toContain('CommitCanonicalDocument')
       expect(block).not.toContain('document_parts_prepared')
       expect(block).not.toContain('write or edit the assigned path directly')
-      expect(block).toContain(
-        'Read only the listed source sections when deeper rationale',
-      )
       expect(block).toContain(
         '.beegame/workflow/document-projections/dispatch-ui-authority.json',
       )
