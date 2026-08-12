@@ -73,7 +73,7 @@ export function createNativeWorkflowResultTool(options: {
     options.documentAuthorMode !== 'repair-planning'
   )
     throw new Error(
-      'direct document authoring completes through Claude Code normal file delivery',
+      'direct document authoring completes through Bee Game Studio normal file delivery',
     )
   if (
     options.workerType === 'document-author' &&

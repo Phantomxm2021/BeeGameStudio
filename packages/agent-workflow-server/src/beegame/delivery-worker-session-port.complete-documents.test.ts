@@ -6,11 +6,6 @@ import {
   buildDocumentAuthorAuthorityBlock,
 } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import {
-  authoritySidecarPath,
-  canonicalFoundationAuthoritySidecarBytes,
-  createFoundationAuthoritySidecar,
-} from './foundation-authority-sidecar'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 function canonicalSource(
@@ -30,10 +25,6 @@ function canonicalSource(
   ].join('\n')
 }
 
-function bytewise(left: string, right: string): number {
-  return Buffer.compare(Buffer.from(left), Buffer.from(right))
-}
-
 async function writeAuthoritySource(
   workspacePath: string,
   path: FoundationDocumentPath,
@@ -42,29 +33,6 @@ async function writeAuthoritySource(
     path as 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
   )
   await writeFile(join(workspacePath, path), markdown)
-  const prefix = path.slice('docs/'.length, -'.md'.length).toLowerCase()
-  const sidecar = createFoundationAuthoritySidecar({
-    documentPath: path,
-    markdown,
-    submission: {
-      records: getGameDocumentContract(path)
-        .sections.map(section => ({
-          authorityId: `${prefix}.${section.sectionId}.primary`,
-          sectionId: section.sectionId,
-          kind: 'fact' as const,
-          state: 'confirmed' as const,
-          source: 'confirmed_brief' as const,
-          evidenceRefs: [],
-          statement: `Confirmed authority for ${section.sectionId}.`,
-          responsibilityIds: [...section.responsibilityIds].sort(bytewise),
-        }))
-        .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
-    },
-  })
-  await writeFile(
-    join(workspacePath, authoritySidecarPath(path)),
-    canonicalFoundationAuthoritySidecarBytes(sidecar),
-  )
 }
 
 describe('delivery worker complete document boundary', () => {
@@ -99,9 +67,10 @@ describe('delivery worker complete document boundary', () => {
           expect(block).toContain(`sectionId=${sectionId}`)
         }
       expect(block).toContain('Write the complete assigned Markdown document directly')
-      expect(block).toContain('Claude Code')
-      expect(block).toContain('workflow service validates')
-      expect(block).toContain('Read the compact authority projection')
+      expect(block).toContain('Bee Game Studio')
+      expect(block).toContain('workflow service only validates')
+      expect(block).toContain('Read the compact document projection')
+      expect(block).toContain('file itself is the sole authority')
       expect(block).not.toContain('CommitCanonicalDocument')
       expect(block).not.toContain('document_parts_prepared')
       expect(block).not.toContain('write or edit the assigned path directly')
@@ -109,19 +78,20 @@ describe('delivery worker complete document boundary', () => {
         'Read only the listed source sections when deeper rationale',
       )
       expect(block).toContain(
-        '.beegame/workflow/authority-projections/dispatch-ui-authority.json',
+        '.beegame/workflow/document-projections/dispatch-ui-authority.json',
       )
       const projected = JSON.parse(
         await readFile(
           join(
             workspacePath,
-            '.beegame/workflow/authority-projections/dispatch-ui-authority.json',
+            '.beegame/workflow/document-projections/dispatch-ui-authority.json',
           ),
           'utf8',
         ),
       )
       expect(projected.targetPath).toBe('docs/UI_UX_SPEC.md')
-      expect(projected.records.length).toBeGreaterThan(0)
+      expect(projected.sources.length).toBeGreaterThan(0)
+      expect(projected).not.toHaveProperty('records')
       expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')

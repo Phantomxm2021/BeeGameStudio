@@ -3,39 +3,19 @@ import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
-  canonicalizeCompleteGameDocumentMarkdown,
-  type CompleteGameDocumentArtifact,
+  validateCompleteGameDocumentMarkdown,
 } from './complete-game-document'
-import {
-  authoritySidecarPath,
-  canonicalFoundationAuthoritySidecarBytes,
-  createDocumentSectionAuthoritySidecar,
-  validateFoundationAuthoritySidecar,
-} from './foundation-authority-sidecar'
 import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
 
-const artifactReceiptSchema = z
-  .object({
-    artifactId: z.string().min(1),
-    path: z.string().min(1),
-    mediaType: z.literal('image/svg+xml'),
-    digest: z.string().regex(/^[a-f0-9]{64}$/),
-  })
-  .strict()
-
 const authoredDocumentReceiptSchema = z
   .object({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     dispatchId: z.string().min(1),
     targetPath: z.string().min(1),
-    baselineDigest: z.null(),
     finalDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    authorityPath: z.string().min(1),
-    authorityDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    artifacts: z.array(artifactReceiptSchema),
     documentId: z.string().min(1),
     version: z.literal('1.0.0'),
     updatedAt: z.string().datetime({ offset: true }),
@@ -44,14 +24,10 @@ const authoredDocumentReceiptSchema = z
   .strict()
 
 export type AuthoredDocumentReceipt = {
-  schemaVersion: 3
+  schemaVersion: 4
   dispatchId: string
   targetPath: string
-  baselineDigest: null
   finalDigest: string
-  authorityPath: string
-  authorityDigest: string
-  artifacts: readonly Omit<CompleteGameDocumentArtifact, 'content'>[]
   documentId: string
   version: '1.0.0'
   updatedAt: string
@@ -59,8 +35,9 @@ export type AuthoredDocumentReceipt = {
 }
 
 /**
- * Record the result of a complete Markdown file written through Claude Code's
- * native file tools. BGS owns only metadata, validation and durable recovery.
+ * Record the result of a complete Markdown file written through Bee Game
+ * Studio's native file tools. The authored Markdown is the only document
+ * authority; this function validates and receipts it without rewriting bytes.
  */
 export async function commitAuthoredFoundationDocument(input: {
   workspacePath: string
@@ -85,51 +62,25 @@ export async function commitAuthoredFoundationDocument(input: {
 
   const target = resolve(input.workspacePath, input.targetPath)
   const authored = await readFile(target, 'utf8')
-  const updatedAt = new Date().toISOString()
-  const markdown = canonicalizeCompleteGameDocumentMarkdown(
+  const metadata = validateCanonicalAuthoredDocument(
     input.targetPath,
     authored,
-    { version: '1.0.0', updatedAt },
   )
-  const sidecar = createDocumentSectionAuthoritySidecar({
-    documentPath: input.targetPath,
-    markdown,
-  })
-  const sidecarBytes = canonicalFoundationAuthoritySidecarBytes(sidecar)
   const prepared: AuthoredDocumentReceipt = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     dispatchId: input.dispatchId,
     targetPath: input.targetPath,
-    baselineDigest: null,
-    finalDigest: digest(markdown),
-    authorityPath: authoritySidecarPath(input.targetPath),
-    authorityDigest: digest(sidecarBytes),
-    artifacts: [],
+    finalDigest: digest(authored),
     documentId,
-    version: '1.0.0',
-    updatedAt,
+    version: metadata.version,
+    updatedAt: metadata.updatedAt,
     status: 'package_prepared',
   }
-  const preparedFiles = await Promise.all([
-    prepareDurableFile(target, markdown),
-    prepareDurableFile(
-      resolve(input.workspacePath, prepared.authorityPath),
-      sidecarBytes,
-    ),
-  ])
-  try {
-    await durableWrite(
-      authoredDocumentReceiptPath(input.workspacePath, input.dispatchId),
-      `${JSON.stringify(prepared, null, 2)}\n`,
-    )
-    for (const file of preparedFiles) await rename(file.temporary, file.target)
-    await syncDirectories(preparedFiles.map(file => dirname(file.target)))
-  } catch (error) {
-    await Promise.all(
-      preparedFiles.map(file => unlink(file.temporary).catch(() => undefined)),
-    )
-    throw error
-  }
+  await syncFile(target)
+  await durableWrite(
+    authoredDocumentReceiptPath(input.workspacePath, input.dispatchId),
+    `${JSON.stringify(prepared, null, 2)}\n`,
+  )
   const committed: AuthoredDocumentReceipt = {
     ...prepared,
     status: 'committed',
@@ -177,32 +128,14 @@ export async function reconcileAuthoredDocumentReceipt(input: {
   )
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
-  for (const artifact of receipt.artifacts) {
-    const content = await readOptionalFile(
-      resolve(input.workspacePath, artifact.path),
-    )
-    if (content === undefined || digest(content) !== artifact.digest)
-      return undefined
-  }
-  const authorityRaw = await readOptionalFile(
-    resolve(input.workspacePath, receipt.authorityPath),
-  )
-  if (
-    authorityRaw === undefined ||
-    digest(authorityRaw) !== receipt.authorityDigest
-  )
-    return undefined
-  let authority: unknown
   try {
-    authority = JSON.parse(authorityRaw)
+    validateCanonicalAuthoredDocument(
+      receipt.targetPath as FoundationDocumentPath,
+      target,
+    )
   } catch {
     return undefined
   }
-  validateFoundationAuthoritySidecar({
-    documentPath: receipt.targetPath as FoundationDocumentPath,
-    markdown: target,
-    value: authority,
-  })
   if (receipt.status === 'committed') return receipt
   const committed: AuthoredDocumentReceipt = {
     ...receipt,
@@ -252,23 +185,14 @@ async function durableWrite(path: string, content: string): Promise<void> {
   }
 }
 
-async function prepareDurableFile(
-  target: string,
-  content: string,
-): Promise<{ temporary: string; target: string }> {
-  await mkdir(dirname(target), { recursive: true })
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  const handle = await open(temporary, 'wx')
+async function syncFile(target: string): Promise<void> {
+  const handle = await open(target, 'r')
   try {
-    await handle.writeFile(content, 'utf8')
     await handle.sync()
-  } catch (error) {
-    await unlink(temporary).catch(() => undefined)
-    throw error
   } finally {
     await handle.close()
   }
-  return { temporary, target }
+  await syncDirectories([dirname(target)])
 }
 
 async function syncDirectories(paths: readonly string[]): Promise<void> {
@@ -293,4 +217,24 @@ async function readOptionalFile(path: string): Promise<string | undefined> {
 
 function digest(content: string): string {
   return createHash('sha256').update(content).digest('hex')
+}
+
+function validateCanonicalAuthoredDocument(
+  path: FoundationDocumentPath,
+  markdown: string,
+): { version: '1.0.0'; updatedAt: string } {
+  const expectedDocumentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
+  const lines = markdown.split('\n')
+  if (
+    lines[0] !== '---' ||
+    lines[1] !== `document_id: ${expectedDocumentId}` ||
+    lines[2] !== 'version: 1.0.0' ||
+    !lines[3]?.startsWith('updated_at: ') ||
+    lines[4] !== '---'
+  )
+    throw new Error('canonical document front matter is invalid')
+  const updatedAt = lines[3].slice('updated_at: '.length)
+  z.string().datetime({ offset: true }).parse(updatedAt)
+  validateCompleteGameDocumentMarkdown(path, lines.slice(5).join('\n'))
+  return { version: '1.0.0', updatedAt }
 }

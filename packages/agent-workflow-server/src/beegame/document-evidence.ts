@@ -2,10 +2,35 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
-import {
-  authorityEvidenceRefSchema,
-  type AuthorityEvidenceRef,
-} from './foundation-authority-sidecar'
+
+export const DOCUMENT_EVIDENCE_REFERENCE_KINDS = [
+  'file',
+  'receipt',
+  'test',
+  'measurement',
+  'license',
+  'url',
+] as const
+
+export const documentEvidenceReferenceSchema = z
+  .object({
+    kind: z.enum(DOCUMENT_EVIDENCE_REFERENCE_KINDS),
+    locator: z.string().trim().min(1).max(1_024),
+    digest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  })
+  .strict()
+  .superRefine((reference, context) => {
+    if (reference.kind === 'file' && reference.digest === undefined)
+      context.addIssue({
+        code: 'custom',
+        message: 'document file evidence requires a SHA-256 digest',
+        path: ['digest'],
+      })
+  })
+
+export type DocumentEvidenceReference = Readonly<
+  z.infer<typeof documentEvidenceReferenceSchema>
+>
 
 export const DOCUMENT_LICENSE_STATES = [
   'planned_original',
@@ -34,7 +59,7 @@ export const documentEvidenceEntrySchema = z
     licenseType: z.string().trim().min(1).max(240).optional(),
     commercialUse: z.boolean().optional(),
     attribution: z.string().trim().min(1).max(600).optional(),
-    evidenceRefs: z.array(authorityEvidenceRefSchema),
+    evidenceRefs: z.array(documentEvidenceReferenceSchema),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -68,7 +93,7 @@ export const documentEvidenceEntrySchema = z
 
 export type DocumentEvidenceEntry = Readonly<
   Omit<z.infer<typeof documentEvidenceEntrySchema>, 'evidenceRefs'> & {
-    evidenceRefs: readonly AuthorityEvidenceRef[]
+    evidenceRefs: readonly DocumentEvidenceReference[]
   }
 >
 

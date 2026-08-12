@@ -6,7 +6,7 @@ import {
   type StorageObjectLocator,
 } from '@bee-game-studio/beegame-storage-core'
 /*
- * The active Claude Code workspace remains on its isolated filesystem. This
+ * The active Bee Game Studio workspace remains on its isolated filesystem. This
  * adapter persists only project-owned file copies in R2.
  */
 

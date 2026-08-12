@@ -487,7 +487,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('relays native Claude Code permission requests without BeeGame policy decisions', async () => {
+  test('relays native Bee Game Studio permission requests without BeeGame policy decisions', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-native-permission-relay-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined
@@ -497,7 +497,7 @@ describe('BeeGame session runtime resilience', () => {
           decisionPromise = startInput.requestPermission?.({
             toolUseID: 'native-write-request',
             toolName: 'Write',
-            message: 'Claude Code requests permission',
+            message: 'Bee Game Studio requests permission',
             input: { file_path: join(root, 'outside.md') },
           })
         },
@@ -583,7 +583,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('surfaces a native runtime failure without restarting Claude Code', async () => {
+  test('surfaces a native runtime failure without restarting Bee Game Studio', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-runtime-retry-'))
     let starts = 0
     const runner: BeeGameSessionRunner = {
@@ -808,7 +808,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('does not override Claude Code native write sizing', async () => {
+  test('does not override Bee Game Studio native write sizing', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-document-author-large-write-'))
     const runner: BeeGameSessionRunner = {
       start: async () => ({

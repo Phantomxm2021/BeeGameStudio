@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
@@ -14,16 +13,10 @@ import {
   renderDocumentEvidenceRegister,
   validateDocumentEvidenceEntries,
 } from './document-evidence'
-import {
-  authoritySidecarPath,
-  validateFoundationAuthoritySidecar,
-  type FoundationAuthoritySidecar,
-} from './foundation-authority-sidecar'
-
 const upstreamReferenceSchema = z
   .object({
     path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-    authorityId: z.string().trim().min(1),
+    sectionId: z.string().trim().min(1),
   })
   .strict()
 
@@ -43,7 +36,7 @@ const openDecisionSchema = z
       .trim()
       .min(1)
       .describe(
-        'Exact future authorityId in <document-id>.<sectionId>.<suffix> form; the deferred open_decision record must reuse it unchanged.',
+        'Stable decision ID in <document-id>.<sectionId>.<suffix> form.',
       ),
     question: z.string().trim().min(1),
     owner: z.string().trim().min(1),
@@ -111,14 +104,6 @@ export type CompleteGameDocumentSubmission = z.infer<
   typeof completeGameDocumentSubmissionSchema
 >
 
-type AuthoredProductionMaterial = Extract<
-  CompleteGameDocumentSubmission['productionMaterials'][number],
-  { body: string }
->
-type InlineSvgProductionMaterial = AuthoredProductionMaterial & {
-  format: 'inline_svg'
-}
-
 export type CompleteGameDocumentAuditAppendix = z.infer<
   typeof completeGameDocumentAuditAppendixSchema
 >
@@ -126,14 +111,6 @@ export type CompleteGameDocumentAuditAppendix = z.infer<
 export type UpstreamAuthorityReference = z.infer<
   typeof upstreamReferenceSchema
 >
-
-export type CompleteGameDocumentArtifact = Readonly<{
-  artifactId: string
-  path: string
-  mediaType: 'image/svg+xml'
-  digest: string
-  content: string
-}>
 
 function bytewise(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left), Buffer.from(right))
@@ -212,62 +189,6 @@ function renderCanonicalTableOfContents(
   ]
 }
 
-function documentArtifactSlug(path: FoundationDocumentPath): string {
-  return CANONICAL_PROJECT_DOCUMENT_IDS[path]
-    .toLowerCase()
-    .replaceAll('_', '-')
-}
-
-export function completeGameDocumentArtifactPath(
-  path: FoundationDocumentPath,
-  materialId: string,
-): string {
-  return `docs/artifacts/${documentArtifactSlug(path)}/${materialId}.svg`
-}
-
-export function prepareCompleteGameDocumentArtifacts(
-  path: FoundationDocumentPath,
-  value: CompleteGameDocumentSubmission,
-): readonly CompleteGameDocumentArtifact[] {
-  const parsed = validateCompleteGameDocumentSubmission(path, value)
-  return Object.freeze(
-    parsed.productionMaterials
-      .filter(
-        (material): material is InlineSvgProductionMaterial =>
-          material.format === 'inline_svg',
-      )
-      .map(material => {
-        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(material.materialId))
-          throw new Error(`production material artifact ID is unsafe: ${material.materialId}`)
-        const content = `${material.body.trim()}\n`
-        return Object.freeze({
-          artifactId: material.materialId,
-          path: completeGameDocumentArtifactPath(path, material.materialId),
-          mediaType: 'image/svg+xml' as const,
-          digest: createHash('sha256').update(content).digest('hex'),
-          content,
-        })
-      }),
-  )
-}
-
-function externalArtifactReference(
-  path: FoundationDocumentPath,
-  material: AuthoredProductionMaterial,
-): string {
-  if (material.format !== 'inline_svg')
-    throw new Error(`production material is not an SVG artifact: ${material.materialId}`)
-  const contract = getGameDocumentContract(path).productionMaterials.find(
-    candidate => candidate.materialId === material.materialId,
-  )!
-  return [
-    `![${material.title}](artifacts/${documentArtifactSlug(path)}/${material.materialId}.svg)`,
-    '',
-    `- Artifact ID: \`${material.materialId}\``,
-    `- Contract purpose: ${contract.purpose}`,
-  ].join('\n')
-}
-
 export async function resolveUpstreamAuthorityReferences(input: {
   workspacePath: string
   targetPath: FoundationDocumentPath
@@ -277,7 +198,7 @@ export async function resolveUpstreamAuthorityReferences(input: {
   const contract = getGameDocumentContract(input.targetPath)
   const allowedPaths = new Set(contract.allowedUpstreamPaths)
   const keys = references.map(
-    reference => `${reference.path}\u0000${reference.authorityId}`,
+    reference => `${reference.path}\u0000${reference.sectionId}`,
   )
   if (new Set(keys).size !== keys.length)
     throw new Error('upstream authority references are duplicated')
@@ -287,39 +208,28 @@ export async function resolveUpstreamAuthorityReferences(input: {
       throw new Error(
         `upstream authority path is not allowed for ${input.targetPath}: ${reference.path}`,
       )
+    const allowedSections = contract.upstreamSections.find(
+      source => source.path === reference.path,
+    )?.sectionIds
+    if (!allowedSections?.includes(reference.sectionId))
+      throw new Error(
+        `upstream section is not allowed for ${input.targetPath}: ${reference.path}#${reference.sectionId}`,
+      )
     let markdown: string
-    let rawSidecar: string
     try {
-      ;[markdown, rawSidecar] = await Promise.all([
-        readFile(resolve(input.workspacePath, reference.path), 'utf8'),
-        readFile(
-          resolve(input.workspacePath, authoritySidecarPath(reference.path)),
-          'utf8',
-        ),
-      ])
+      markdown = await readFile(
+        resolve(input.workspacePath, reference.path),
+        'utf8',
+      )
     } catch {
       throw new Error(
-        `upstream authority source is missing: ${reference.path} — ${reference.authorityId}`,
+        `upstream document source is missing: ${reference.path}#${reference.sectionId}`,
       )
     }
-    let storedSidecar: unknown
-    try {
-      storedSidecar = JSON.parse(rawSidecar)
-    } catch {
+    const marker = `<!-- beegame-section:${reference.sectionId} -->`
+    if (!markdown.split('\n').some(line => line.trim() === marker))
       throw new Error(
-        `upstream authority sidecar is invalid: ${reference.path} — ${reference.authorityId}`,
-      )
-    }
-    const sidecar = validateFoundationAuthoritySidecar({
-      documentPath: reference.path,
-      markdown,
-      value: storedSidecar,
-    })
-    if (
-      !sidecar.records.some(record => record.authorityId === reference.authorityId)
-    )
-      throw new Error(
-        `upstream authority ID does not exist: ${reference.path} — ${reference.authorityId}`,
+        `upstream document section does not exist: ${reference.path}#${reference.sectionId}`,
       )
   }
 
@@ -327,66 +237,12 @@ export async function resolveUpstreamAuthorityReferences(input: {
     [...references]
       .sort((left, right) =>
         bytewise(
-          `${left.path}\u0000${left.authorityId}`,
-          `${right.path}\u0000${right.authorityId}`,
+          `${left.path}\u0000${left.sectionId}`,
+          `${right.path}\u0000${right.sectionId}`,
         ),
       )
       .map(reference => Object.freeze({ ...reference })),
   )
-}
-
-export function assertOpenDecisionClosure(input: {
-  audit: CompleteGameDocumentAuditAppendix
-  authority: FoundationAuthoritySidecar
-  trustedScheduleAuthorityIds: ReadonlySet<string>
-}): void {
-  const auditById = new Map(
-    input.audit.openDecisions.map(decision => [decision.decisionId, decision]),
-  )
-  const authorityDecisions = input.authority.records.filter(
-    record => record.kind === 'open_decision',
-  )
-  const authorityById = new Map(
-    authorityDecisions.map(record => [record.authorityId, record]),
-  )
-  if (
-    auditById.size !== input.audit.openDecisions.length ||
-    authorityById.size !== authorityDecisions.length
-  )
-    throw new Error('open decision closure contains duplicate IDs')
-  const auditIds = [...auditById.keys()].sort(bytewise)
-  const authorityIds = [...authorityById.keys()].sort(bytewise)
-  if (
-    auditIds.length !== authorityIds.length ||
-    auditIds.some((authorityId, index) => authorityIds[index] !== authorityId)
-  )
-    throw new Error('audit and authority open decision closure does not match')
-
-  for (const decisionId of auditIds) {
-    const auditDecision = auditById.get(decisionId)!
-    const authorityRecord = authorityById.get(decisionId)!
-    if (authorityRecord.state !== 'deferred' || !authorityRecord.decision)
-      throw new Error(`open decision authority is not deferred: ${decisionId}`)
-    if (auditDecision.owner !== authorityRecord.decision.owner)
-      throw new Error(`open decision owner does not match authority: ${decisionId}`)
-    if (auditDecision.neededBy !== authorityRecord.decision.neededBy)
-      throw new Error(
-        `open decision needed-by does not match authority: ${decisionId}`,
-      )
-    const concreteDate = /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(
-      auditDecision.neededBy,
-    )
-    if (
-      concreteDate &&
-      (!auditDecision.scheduleAuthorityId ||
-        !input.trustedScheduleAuthorityIds.has(
-          auditDecision.scheduleAuthorityId,
-        ))
-    )
-      throw new Error(
-        `open decision concrete date requires trusted schedule authority: ${decisionId}`,
-      )
-  }
 }
 
 function assertExactOrder(
@@ -441,8 +297,8 @@ export function validateCompleteGameDocumentSubmission(
       upstreamReferences: [...submitted.auditAppendix.upstreamReferences].sort(
         (left, right) =>
           bytewise(
-            `${left.path}\u0000${left.authorityId}`,
-            `${right.path}\u0000${right.authorityId}`,
+            `${left.path}\u0000${left.sectionId}`,
+            `${right.path}\u0000${right.sectionId}`,
           ),
       ),
     },
@@ -498,16 +354,23 @@ export function validateCompleteGameDocumentSubmission(
       assertMaterialFormat(material.format, material.body, material.materialId)
   })
 
-  const allowedUpstreamPaths = new Set(contract.allowedUpstreamPaths)
+  const allowedUpstreamSections = new Set(
+    contract.upstreamSections.flatMap(source =>
+      source.sectionIds.map(sectionId => `${source.path}\u0000${sectionId}`),
+    ),
+  )
   assertUniqueIds(
     parsed.auditAppendix.upstreamReferences.map(
-      reference => `${reference.path}\u0000${reference.authorityId}`,
+      reference => `${reference.path}\u0000${reference.sectionId}`,
     ),
     'upstream authority reference',
   )
   if (
     parsed.auditAppendix.upstreamReferences.some(
-      reference => !allowedUpstreamPaths.has(reference.path),
+      reference =>
+        !allowedUpstreamSections.has(
+          `${reference.path}\u0000${reference.sectionId}`,
+        ),
     )
   )
     throw new Error(`upstream authority reference is not allowed for ${path}`)
@@ -519,16 +382,16 @@ export function validateCompleteGameDocumentSubmission(
     parsed.auditAppendix.openDecisions.map(decision => decision.decisionId),
     'open decision',
   )
-  const authorityPrefix = `${CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()}.`
+  const documentPrefix = `${CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()}.`
   for (const decision of parsed.auditAppendix.openDecisions) {
     const ownsCanonicalSection = contract.sections.some(section =>
       decision.decisionId.startsWith(
-        `${authorityPrefix}${section.sectionId}.`,
+        `${documentPrefix}${section.sectionId}.`,
       ),
     )
     if (!ownsCanonicalSection)
       throw new Error(
-        `open decision ID must use ${authorityPrefix}<sectionId>.<suffix>: ${decision.decisionId}`,
+        `open decision ID must use ${documentPrefix}<sectionId>.<suffix>: ${decision.decisionId}`,
       )
   }
   return parsed
@@ -599,9 +462,7 @@ export function renderCompleteGameDocument(
       '',
       material.format === 'evidence_register'
         ? renderDocumentEvidenceRegister(material.entries)
-        : material.format === 'inline_svg'
-          ? externalArtifactReference(path, material)
-          : material.body,
+        : material.body,
       '',
     )
 
@@ -619,7 +480,7 @@ export function renderCompleteGameDocument(
       '### Upstream Authority',
       '',
       ...parsed.auditAppendix.upstreamReferences.map(
-        reference => `- \`${reference.path}\` — \`${reference.authorityId}\``,
+        reference => `- \`${reference.path}\` — section \`${reference.sectionId}\``,
       ),
       '',
     )
@@ -796,96 +657,4 @@ export function validateCompleteGameDocumentMarkdown(
   )
     throw new Error('complete game document acceptance criteria are empty or invalid')
   return `${body}\n`
-}
-
-export function canonicalizeCompleteGameDocumentMarkdown(
-  path: FoundationDocumentPath,
-  value: unknown,
-  metadata: { version: string; updatedAt: string },
-): string {
-  const authored = z.string().trim().min(1).parse(value)
-  const lines = authored.split('\n')
-  const bodyStart =
-    lines[0]?.trim() === '---'
-      ? lines.findIndex((line, index) => index > 0 && line.trim() === '---') + 1
-      : 0
-  if (bodyStart === 0 && lines[0]?.trim() === '---')
-    throw new Error('complete game document front matter is incomplete')
-  const bodyLines = lines.slice(bodyStart)
-  const contract = getGameDocumentContract(path)
-  const canonicalMarkers = new Map<string, string>([
-    ...contract.sections.map(
-      section =>
-        [
-          `beegame-section:${section.sectionId}`,
-          `<!-- beegame-section:${section.sectionId} -->`,
-        ] as const,
-    ),
-    ...contract.productionMaterials.map(
-      material =>
-        [
-          `beegame-material:${material.materialId}`,
-          `<!-- beegame-material:${material.materialId} -->`,
-        ] as const,
-    ),
-  ])
-  for (let index = 0; index < bodyLines.length; index += 1) {
-    const line = bodyLines[index]!.trim()
-    if (!line.startsWith('<!--') || !line.endsWith('-->')) continue
-    const inner = line.slice('<!--'.length, -'-->'.length).trim()
-    const separator = inner.indexOf(':')
-    if (separator < 0) continue
-    const key = `${inner.slice(0, separator).trim()}:${inner
-      .slice(separator + 1)
-      .trim()}`
-    const canonical = canonicalMarkers.get(key)
-    if (canonical) bodyLines[index] = canonical
-  }
-  const normalizeMarkerHeading = (
-    marker: string,
-    heading: string,
-    acceptLocalizedHeading = false,
-  ) => {
-    const markerIndex = bodyLines.findIndex(line => line.trim() === marker)
-    if (markerIndex < 0) return
-    const headingIndex = bodyLines.findIndex(
-      (line, index) => index > markerIndex && line.trim().length > 0,
-    )
-    if (headingIndex <= markerIndex) return
-    const authoredHeading = bodyLines[headingIndex]!.trim()
-    if (authoredHeading !== heading && !(acceptLocalizedHeading && authoredHeading.startsWith('## ')))
-      return
-    bodyLines.splice(markerIndex + 1, headingIndex - markerIndex, heading)
-  }
-  for (const [marker, heading] of [
-    ['<!-- beegame-executive-summary -->', '## Executive Summary'],
-    ['<!-- beegame-production-materials -->', '## Production Materials'],
-    ['<!-- beegame-audit-appendix -->', '## Audit Appendix'],
-  ] as const) {
-    normalizeMarkerHeading(marker, heading, true)
-  }
-  for (const section of contract.sections)
-    normalizeMarkerHeading(
-      `<!-- beegame-section:${section.sectionId} -->`,
-      `## ${section.title}`,
-    )
-  for (const material of contract.productionMaterials)
-    normalizeMarkerHeading(
-      `<!-- beegame-material:${material.materialId} -->`,
-      `### ${material.title}`,
-    )
-  const body = validateCompleteGameDocumentMarkdown(
-    path,
-    bodyLines.join('\n').trimStart(),
-  )
-  const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
-  return [
-    '---',
-    `document_id: ${documentId}`,
-    `version: ${metadata.version}`,
-    `updated_at: ${metadata.updatedAt}`,
-    '---',
-    body.trimEnd(),
-    '',
-  ].join('\n')
 }

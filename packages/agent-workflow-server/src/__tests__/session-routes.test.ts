@@ -27,7 +27,10 @@ import {
   computeDocumentRevision,
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createTestDeliveryRun,
+  withTestDocumentMetadata,
+} from './delivery-workflow-test-helpers'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
@@ -878,7 +881,10 @@ describe('delivery workflow session continuation', () => {
       await mkdir(join(workspace, 'docs'), { recursive: true })
       await writeFile(
         join(workspace, acceptedPath),
-        completeTestFoundationDocument(acceptedPath),
+        withTestDocumentMetadata(
+          acceptedPath,
+          completeTestFoundationDocument(acceptedPath),
+        ),
       )
       await commitAuthoredFoundationDocument({
         workspacePath: workspace,

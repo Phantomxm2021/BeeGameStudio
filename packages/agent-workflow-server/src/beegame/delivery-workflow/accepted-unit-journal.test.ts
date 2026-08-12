@@ -22,7 +22,10 @@ import {
   type WorkflowEvent,
   type WorkerDispatchRequest,
 } from './types'
-import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
+import {
+  createTestDeliveryRun,
+  withTestDocumentMetadata,
+} from '../../__tests__/delivery-workflow-test-helpers'
 import {
   activeElapsedWithinStage,
   isFrozenWorkflowStageCardEvent,
@@ -452,9 +455,12 @@ describe('accepted workflow unit journal', () => {
           await mkdir(join(workspace, 'docs'), { recursive: true })
           await writeFile(
             join(workspace, path),
-            renderCompleteGameDocument(
+            withTestDocumentMetadata(
               path,
-              document as unknown as CompleteGameDocumentSubmission,
+              renderCompleteGameDocument(
+                path,
+                document as unknown as CompleteGameDocumentSubmission,
+              ),
             ),
           )
           return {

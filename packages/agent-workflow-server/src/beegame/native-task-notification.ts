@@ -13,7 +13,7 @@ export type NativeTerminalTaskNotification = {
 }
 
 /**
- * Reads Claude Code's native task-notification transport envelope without
+ * Reads Bee Game Studio's native task-notification transport envelope without
  * interpreting the task result or controlling the task lifecycle.
  */
 export function parseNativeTerminalTaskNotification(

@@ -2272,7 +2272,7 @@ describe('beeGameAdapter prompt rules', () => {
           sessionId: 'beegame_empty_turn',
           turnId: 'turn-1',
           type: 'turn.empty',
-          text: 'Claude Code 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。',
+          text: 'Bee Game Studio 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。',
           payload: { type: 'turn.empty', reason: 'missing_native_final_result' },
           createdAt: '2026-06-21T00:00:02.000Z',
         }]);

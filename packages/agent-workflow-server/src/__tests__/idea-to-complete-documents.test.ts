@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createTestDeliveryRun,
+  withTestDocumentMetadata,
+} from './delivery-workflow-test-helpers'
 import {
   completeDocumentDraft,
   startDocumentStage,
@@ -14,10 +17,7 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import {
-  prepareCompleteGameDocumentArtifacts,
-  renderCompleteGameDocument,
-} from '../beegame/complete-game-document'
+import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 
 function completeSubmission(
@@ -127,14 +127,11 @@ describe('idea to complete game documents', () => {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       await writeFile(
         join(workspacePath, path),
-        renderCompleteGameDocument(path, submission),
+        withTestDocumentMetadata(
+          path,
+          renderCompleteGameDocument(path, submission),
+        ),
       )
-      for (const artifact of prepareCompleteGameDocumentArtifacts(path, submission)) {
-        await mkdir(join(workspacePath, artifact.path, '..'), {
-          recursive: true,
-        })
-        await writeFile(join(workspacePath, artifact.path), artifact.content)
-      }
       await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId,

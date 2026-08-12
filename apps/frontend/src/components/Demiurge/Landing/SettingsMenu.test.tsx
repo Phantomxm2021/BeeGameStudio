@@ -844,7 +844,7 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.getByRole('tab', { name: 'MCP' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByText('通过 MCP，BeeGame 可以连接本机正在运行的编辑器、游戏引擎和工具服务。你可以在这里发现本机服务、添加 Server，并确认连接是否可用。')).toBeInTheDocument();
-        expect(screen.queryByText(/Claude Code/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Bee Game Studio/)).not.toBeInTheDocument();
         expect(screen.getByText('已配置')).toBeInTheDocument();
         expect(screen.getByText('暂无 MCP server')).toBeInTheDocument();
         expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();

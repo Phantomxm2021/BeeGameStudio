@@ -154,8 +154,8 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
     || (localBindingOverride !== '0' && process.env.NODE_ENV !== 'production')
   const next = {
     ...previous,
-    // BeeGame runs each Claude Code session in a dedicated process and
-    // workspace. Keep the remaining command boundary in Claude Code's native
+    // BeeGame runs each Bee Game Studio session in a dedicated process and
+    // workspace. Keep the remaining command boundary in Bee Game Studio's native
     // sandbox instead of granting broad Bash permissions from the dashboard.
     // This is host isolation policy, not a user/model-provider feature flag.
     sandbox: {
@@ -164,7 +164,7 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
       autoAllowBashIfSandboxed: sandboxEnabled,
       // Keep sandboxing as the default execution path. When a native runtime
       // capability (for example a browser process) cannot run inside it,
-      // Claude Code may request the user's normal Bash permission to retry
+      // Bee Game Studio may request the user's normal Bash permission to retry
       // outside the sandbox. This enables the same explicit fallback as the
       // TUI; it does not auto-approve or bypass that permission decision.
       allowUnsandboxedCommands: true,

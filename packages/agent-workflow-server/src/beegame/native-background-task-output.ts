@@ -23,11 +23,11 @@ const usageCache = new Map<string, { size: number; usage?: NativeBackgroundTaskU
 const TERMINAL_TAIL_BYTES = 128 * 1024
 
 /**
- * Claude Code reports an asynchronously launched native Agent through the
+ * Bee Game Studio reports an asynchronously launched native Agent through the
  * Agent tool result before it later emits task_started/task_notification SDK
  * events. Preserve the opaque task id and output file only for passive token
  * accounting. Delivery evidence never reads this file and is captured from
- * Claude Code's native terminal notification instead.
+ * Bee Game Studio's native terminal notification instead.
  */
 export function parseNativeBackgroundTaskLaunch(
   output: string,
@@ -39,7 +39,7 @@ export function parseNativeBackgroundTaskLaunch(
     if (separator < 0) continue
     const field = rawLine.slice(0, separator).trim()
     const value = rawLine.slice(separator + 1).trim()
-    // Claude Code may append a human-readable explanation after the opaque id,
+    // Bee Game Studio may append a human-readable explanation after the opaque id,
     // for example `agentId: abc123 (internal ID - do not mention ...)`. Only
     // the first non-whitespace token is the native task identity. Keeping the
     // annotation creates a second, impossible task that can never match the
@@ -61,7 +61,7 @@ function firstToken(value: string): string {
 }
 
 /**
- * Reads the structured result emitted by Claude Code's native TaskOutput tool.
+ * Reads the structured result emitted by Bee Game Studio's native TaskOutput tool.
  * The caller must still link the opaque task id to an observed Agent dispatch;
  * this function does not infer task ownership or workflow meaning.
  */

@@ -293,7 +293,7 @@ export class MessageValidator {
     }
 
     // Preserve native content exactly. React/Markdown rendering owns output
-    // safety; transport code must never rewrite Claude Code events.
+    // safety; transport code must never rewrite Bee Game Studio events.
     const isValid = errors.length === 0;
     const sanitizedMessage = isValid ? message as ProjectEventMessage : undefined;
 

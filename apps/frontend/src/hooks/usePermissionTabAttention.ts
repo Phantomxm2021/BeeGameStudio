@@ -19,7 +19,7 @@ export const formatPermissionTabTitle = (
 /**
  * Keeps native tool approvals visible even when the user switches browser
  * tabs. This is presentation only: it does not resolve, retry, or otherwise
- * alter Claude Code's permission request.
+ * alter Bee Game Studio's permission request.
  */
 export function usePermissionTabAttention(
   pendingCount: number,

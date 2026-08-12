@@ -41,7 +41,7 @@ describe('resource-content worker prompts', () => {
       'one contract section per native file operation',
     )
     expect(prompt).toContain('Write the complete assigned Markdown document directly')
-    expect(prompt).toContain("Claude Code's normal workflow")
+    expect(prompt).toContain("Bee Game Studio's normal workflow")
     expect(prompt).toContain('BGS validates the completed file after the turn')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('document_parts_prepared')
@@ -102,7 +102,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('YAML owns only contract.yamlKinds')
     expect(prompt).toContain('contract.requiredRequirementIds')
     expect(prompt).toContain('contract.verifiedResourceIds')
-    expect(prompt).toContain("Claude Code's native tools remain available")
+    expect(prompt).toContain("Bee Game Studio's native tools remain available")
     expect(prompt).toContain('call CommitResourceContent once')
     expect(prompt).toContain(
       'CommitResourceContent is the atomic delivery interface',
@@ -427,7 +427,9 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('BGS adds only canonical front matter')
+    expect(prompt).toContain('Markdown file is the sole document authority')
+    expect(prompt).toContain('document_id: GDD')
+    expect(prompt).toContain('without rewriting it')
     expect(prompt).not.toContain('updated_at set to')
     expect(prompt).toContain('complete human development discipline')
     expect(prompt).toContain('sufficient for a human game development team')
@@ -559,7 +561,7 @@ describe('resource-content worker prompts', () => {
       contract: {},
     })
     expect(prompt).toContain('contract.authorityPaths')
-    expect(prompt).toContain("Claude Code's native tools remain available")
+    expect(prompt).toContain("Bee Game Studio's native tools remain available")
     expect(prompt).toContain('When the complete writable set is ready')
     expect(prompt).toContain(
       'validates the merged set before replacing any file',

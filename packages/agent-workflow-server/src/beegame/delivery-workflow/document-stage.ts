@@ -1540,19 +1540,19 @@ async function completeInitialFoundationDocumentDraft(input: {
           : 'authored document validation failed'
     }
   }
-  const hasCommittedAuthority =
+  const hasCommittedDocument =
     commitReceipt !== undefined &&
     commitReceipt.status === 'committed' &&
     commitReceipt.targetPath === expectedPath &&
-    Boolean(commitReceipt.authorityDigest)
+    Boolean(commitReceipt.finalDigest)
   const canonicalizationIssues = authoredCommitIssue
     ? [`${expectedPath}: ${authoredCommitIssue}`]
     : []
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
-    ...(!hasCommittedAuthority
-      ? [`${expectedPath}: committed Foundation authority sidecar is missing`]
+    ...(!hasCommittedDocument
+      ? [`${expectedPath}: committed canonical Markdown receipt is missing`]
       : []),
     ...(!exactStringSet(normalizedWrittenPaths, [expectedPath])
       ? [

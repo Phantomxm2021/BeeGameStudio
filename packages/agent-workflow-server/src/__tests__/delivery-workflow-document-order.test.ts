@@ -28,10 +28,7 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import {
-  prepareCompleteGameDocumentArtifacts,
-  renderCompleteGameDocument,
-} from '../beegame/complete-game-document'
+import { renderCompleteGameDocument } from '../beegame/complete-game-document'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
   CANONICAL_ASSET_MANIFEST,
@@ -53,7 +50,10 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import type { WorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import {
+  createTestDeliveryRun,
+  withTestDocumentMetadata,
+} from './delivery-workflow-test-helpers'
 
 const workspaces: string[] = []
 const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
@@ -462,17 +462,11 @@ describe('single-track document review workflow', () => {
       const submission = completeFoundationSubmission(path)
       await writeFile(
         join(workspacePath, path),
-        renderCompleteGameDocument(path, submission),
+        withTestDocumentMetadata(
+          path,
+          renderCompleteGameDocument(path, submission),
+        ),
       )
-      for (const artifact of prepareCompleteGameDocumentArtifacts(
-        path,
-        submission,
-      )) {
-        await mkdir(join(workspacePath, artifact.path, '..'), {
-          recursive: true,
-        })
-        await writeFile(join(workspacePath, artifact.path), artifact.content)
-      }
       await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: request!.dispatchId!,

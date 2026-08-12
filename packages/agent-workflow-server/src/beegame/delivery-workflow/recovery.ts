@@ -307,7 +307,6 @@ async function reconcileActiveCanonicalReceipt(input: {
       inputRevision: documentRevision,
       dependencyDigests: {
         [targetPath]: receipt.finalDigest,
-        [receipt.authorityPath]: receipt.authorityDigest!,
       },
       dispatchId: identity.dispatchId,
       receiptRef: `.beegame/workflow/document-commits/${identity.dispatchId}.json`,

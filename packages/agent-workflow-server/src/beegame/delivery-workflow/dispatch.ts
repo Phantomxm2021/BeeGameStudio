@@ -222,22 +222,18 @@ async function documentPerformance(input: {
     typeof input.request.contract.foundationDocumentPath === 'string'
       ? input.request.contract.foundationDocumentPath
       : receipt?.targetPath
-  const projectionPath = `.beegame/workflow/authority-projections/${input.dispatch.dispatchId}.json`
+  const projectionPath = `.beegame/workflow/document-projections/${input.dispatch.dispatchId}.json`
   const startedAt = Date.parse(input.dispatch.startedAt)
   const finishedAt = Date.parse(input.finishedAt)
   return {
     targetPath,
-    authorityMode:
-      input.request.contract.authorityMode === 'sidecar_only'
-        ? 'sidecar_only'
-        : 'document_and_sidecar',
+    documentAuthority: 'markdown_only',
     usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
     durationMs:
       Number.isFinite(startedAt) && Number.isFinite(finishedAt)
         ? Math.max(0, finishedAt - startedAt)
         : 0,
     markdownBytes: await fileBytes(receipt?.targetPath ?? targetPath),
-    sidecarBytes: receipt ? await fileBytes(receipt.authorityPath) : 0,
     projectionBytes: await fileBytes(projectionPath),
     retryReason: null,
   }

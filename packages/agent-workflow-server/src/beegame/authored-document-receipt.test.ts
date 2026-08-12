@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
@@ -13,7 +13,7 @@ import { getGameDocumentContract } from './delivery-workflow/game-document-contr
 
 function completeDocument(path: 'docs/GDD.md'): string {
   const contract = getGameDocumentContract(path)
-  return renderCompleteGameDocument(path, {
+  const body = renderCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Complete game design production authority.',
     sections: contract.sections.map((section, index) => ({
@@ -55,6 +55,14 @@ function completeDocument(path: 'docs/GDD.md'): string {
       openDecisions: [],
     },
   })
+  return [
+    '---',
+    'document_id: GDD',
+    'version: 1.0.0',
+    'updated_at: 2026-08-12T00:00:00.000Z',
+    '---',
+    body,
+  ].join('\n')
 }
 
 describe('native authored document receipts', () => {
@@ -63,7 +71,8 @@ describe('native authored document receipts', () => {
     try {
       const targetPath = 'docs/GDD.md' as const
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(join(workspacePath, targetPath), completeDocument(targetPath))
+      const authored = completeDocument(targetPath)
+      await writeFile(join(workspacePath, targetPath), authored)
 
       const first = await commitAuthoredFoundationDocument({
         workspacePath,
@@ -78,12 +87,18 @@ describe('native authored document receipts', () => {
 
       expect(second).toEqual(first)
       expect(first).toMatchObject({
-        schemaVersion: 3,
+        schemaVersion: 4,
         documentId: 'GDD',
         status: 'committed',
       })
-      expect(await readFile(join(workspacePath, targetPath), 'utf8'))
-        .toContain('document_id: GDD')
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toBe(
+        authored,
+      )
+      await expect(
+        access(join(workspacePath, 'docs/GDD.authority.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(first).not.toHaveProperty('authorityPath')
+      expect(first).not.toHaveProperty('authorityDigest')
       await expect(
         readAuthoredDocumentReceipt(workspacePath, 'native-gdd'),
       ).resolves.toEqual(first)

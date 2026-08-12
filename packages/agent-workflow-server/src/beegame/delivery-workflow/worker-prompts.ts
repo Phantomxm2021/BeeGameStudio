@@ -1,5 +1,6 @@
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
@@ -50,7 +51,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    'Use Claude Code normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -320,12 +321,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
-          ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Claude Code's normal workflow."
+          ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Bee Game Studio's normal workflow."
           : request.contract.authoringMode === 'initial'
-            ? `Write the complete assigned Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow. BGS validates the completed file after the turn; it does not replace Claude Code's authoring tools.`
+            ? `Write the complete assigned Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow. BGS validates the completed file after the turn; it does not replace Bee Game Studio's authoring tools.`
             : request.contract.authoringMode === 'repair-planning'
               ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
-              : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Claude Code's normal workflow.`,
+              : `Use the service-projected current target, apply only the locked repair decision, and write the complete revised Markdown document directly at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow.`,
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
@@ -351,12 +352,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : request.contract.authoringMode === 'initial'
               ? [
                   `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file. The eight documents together must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline's design work now; do not delegate completeness to a reviewer.`,
-                  'Write one complete Markdown file with exactly one # document title. Follow contract.completeDocumentContract exactly and include these canonical structures in order: <!-- beegame-executive-summary --> with ## Executive Summary; each <!-- beegame-section:<sectionId> --> with its exact ## title; <!-- beegame-production-materials --> with ## Production Materials; each <!-- beegame-material:<materialId> --> with its exact ### title and required format; then <!-- beegame-audit-appendix --> with ## Audit Appendix and ### Acceptance Criteria. BGS adds only canonical front matter and validates the finished file.',
+                  `Write one complete Markdown file with exactly one # document title. The Markdown file is the sole document authority. Begin with exactly five front-matter lines: ---, document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[String(request.contract.foundationDocumentPath) as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS]}, version: 1.0.0, updated_at: <current ISO-8601 timestamp with offset>, ---. Follow contract.completeDocumentContract exactly and include these canonical structures in order: <!-- beegame-executive-summary --> with ## Executive Summary; each <!-- beegame-section:<sectionId> --> with its exact ## title; <!-- beegame-production-materials --> with ## Production Materials; each <!-- beegame-material:<materialId> --> with its exact ### title and required format; then <!-- beegame-audit-appendix --> with ## Audit Appendix and ### Acceptance Criteria. BGS validates the finished file without rewriting it.`,
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Author the executive summary, every exact contract section, every production material, then the audit appendix in canonical order. Define each authoritative fact once and reference projected upstream authority instead of copying it.',
                   'Read all authorized upstream sections in one batched tool round before authoring; do not spend one model round per section. If the target already exists, first make one lightweight structural and authority check. When it is structurally complete and still agrees with the current brief and upstream authority, repair only the missing or invalid parts; do not rewrite a complete current-authority document.',
                   'Prefer production-dense tables and matrices over repeated narrative. Every section must add new implementation authority. Do not restate the confirmed brief, upstream text or another section; reference its stable authority instead. Keep rationale to the shortest explanation needed for a production decision, and make Acceptance Criteria verify the contract without paraphrasing the document.',
-                  'Use Claude Code native Read, Write and Edit capabilities normally. Do not create or edit .beegame workflow metadata. Do not claim verified license status without concrete evidence. After writing, perform one final lightweight structural verification and end the turn normally; do not repeat equivalent checks. Keep Claude Code thinking, tools, context management and normal completion behavior unchanged.',
+                  'Use Bee Game Studio native Read, Write and Edit capabilities normally. Do not create or edit .beegame workflow metadata. Do not claim verified license status without concrete evidence. After writing, perform one final lightweight structural verification and end the turn normally; do not repeat equivalent checks. Keep Bee Game Studio reasoning, tools, context management and normal completion behavior unchanged.',
                   'Provide enough concrete choices, tradeoffs, examples, units, boundaries and observable criteria for the assigned discipline to be implementable and testable. A downstream owner may specialize only behavior already authorized by the Confirmed Brief, GDD or its projected upstream owner.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
@@ -437,7 +438,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           )
         : []
       return [
-        `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Claude Code's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
+        `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Bee Game Studio's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
         'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
         request.contract.remediation
           ? 'This is one accepted resource-content repair batch. Resolve only the supplied content findings and preserve the protected canonical content. Do not attempt to repair Manifest, inventory or Resource Library findings.'
@@ -448,7 +449,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     }
     case 'atomic-task-planner':
       return [
-        'Use contract.planningDocuments plus resourceIds and contentIds as the acceptance authority. Claude Code may inspect the current workspace and use its native tools as needed to produce a correct plan.',
+        'Use contract.planningDocuments plus resourceIds and contentIds as the acceptance authority. Bee Game Studio may inspect the current workspace and use its native tools as needed to produce a correct plan.',
         'Submit one dependency graph through SubmitAtomicTaskPlan. Each task owns durable implementation artifacts and project-owned verification actions. Checklist items have one owner; resource and content IDs are read-only dependencies.',
         'Resources and content are ready before implementation. Tasks consume declared files; they do not download, generate substitute media or mutate assets/asset-manifest.json.',
         'Do not create trailing cleanup, final verification or acceptance tasks. The workflow owns those phases.',
@@ -456,7 +457,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'implementation-worker':
       return [
         'Implement the active atomic task completely within allowedPaths. Treat current source, direct dependencies, verified resources, declared JSON/YAML content, and canonical design documents as available context.',
-        'Claude Code may inspect the project and use its native tools as needed. Keep changes within the active task deliverables; resource acquisition and manifest changes remain separate workflow deliverables.',
+        'Bee Game Studio may inspect the project and use its native tools as needed. Keep changes within the active task deliverables; resource acquisition and manifest changes remain separate workflow deliverables.',
         'Execute every deterministic test, build, file and asset verification with project-owned tooling. Runtime checks are deferred to acceptance.',
       ].join(' ')
     case 'implementation-auditor':

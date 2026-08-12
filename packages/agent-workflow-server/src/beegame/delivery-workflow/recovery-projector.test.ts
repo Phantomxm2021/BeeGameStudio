@@ -13,6 +13,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
+  withTestDocumentMetadata,
 } from '../../__tests__/delivery-workflow-test-helpers'
 import {
   registerBeeGameAuthoredResources,
@@ -127,8 +128,11 @@ async function createProjectionFixture(
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       await writeFile(
         join(workspacePath, path),
-        completeFoundationDocument(
+        withTestDocumentMetadata(
           path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+          completeFoundationDocument(
+            path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+          ),
         ),
       )
       await commitAuthoredFoundationDocument({

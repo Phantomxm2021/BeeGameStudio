@@ -1025,7 +1025,7 @@ describe('delivery worker session credentials', () => {
 
     expect(submittedPrompt).toContain('SubmitImplementationResult exactly once')
     expect(submittedPrompt).toContain(
-      "Claude Code's native tools, thinking, permissions, context management, and normal completion behavior remain unchanged",
+      "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged",
     )
     const {
       verificationObservations: _verificationObservations,

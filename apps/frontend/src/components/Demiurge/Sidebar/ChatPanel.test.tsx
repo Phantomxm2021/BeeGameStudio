@@ -296,7 +296,7 @@ describe('ChatPanel approval bar', () => {
                 project_id: 'proj_1',
                 phase: 'running',
                 blocked: false,
-                next_action: 'Claude Code is processing',
+                next_action: 'Bee Game Studio is processing',
                 workflow: {
                     runId: 'proj_1',
                     status: 'running',

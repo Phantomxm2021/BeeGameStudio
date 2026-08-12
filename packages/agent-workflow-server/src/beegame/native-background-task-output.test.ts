@@ -25,7 +25,7 @@ describe('native background task output', () => {
     })
   })
 
-  test('keeps only the opaque agent id when Claude Code appends an annotation', () => {
+  test('keeps only the opaque agent id when Bee Game Studio appends an annotation', () => {
     expect(parseNativeBackgroundTaskLaunch([
       'Async agent launched successfully.',
       'agentId: task-annotated (internal ID - do not mention it to the user)',

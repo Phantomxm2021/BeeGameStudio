@@ -1,27 +1,26 @@
-import {
-  validateFoundationAuthoritySidecar,
-  type FoundationAuthorityRecord,
-  type FoundationAuthoritySidecar,
-} from './foundation-authority-sidecar'
+import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 
+export type FoundationAuthoritySource = Readonly<{
+  path: FoundationDocumentPath
+  sectionIds: readonly string[]
+  digest: string
+}>
+
 export type FoundationAuthorityProjection = Readonly<{
   targetPath: FoundationDocumentPath
-  sourceDigests: Readonly<Record<string, string>>
-  records: readonly FoundationAuthorityRecord[]
+  sources: readonly FoundationAuthoritySource[]
   byteLength: number
 }>
 
 function projectionPayload(input: {
   targetPath: FoundationDocumentPath
-  sourceDigests: Readonly<Record<string, string>>
-  records: readonly FoundationAuthorityRecord[]
+  sources: readonly FoundationAuthoritySource[]
 }) {
   return {
     targetPath: input.targetPath,
-    sourceDigests: input.sourceDigests,
-    records: input.records,
+    sources: input.sources,
   }
 }
 
@@ -34,52 +33,45 @@ export function canonicalFoundationAuthorityProjectionBytes(
 export function projectFoundationAuthority(input: {
   targetPath: FoundationDocumentPath
   documents: ReadonlyMap<FoundationDocumentPath, string>
-  sidecars: ReadonlyMap<FoundationDocumentPath, FoundationAuthoritySidecar | unknown>
 }): FoundationAuthorityProjection {
   const target = getGameDocumentContract(input.targetPath)
-  const records: FoundationAuthorityRecord[] = []
-  const sourceDigests: Record<string, string> = {}
-  const seenAuthorityIds = new Set<string>()
+  const sources: FoundationAuthoritySource[] = []
 
   for (const source of target.upstreamSections) {
     const markdown = input.documents.get(source.path)
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
-    const rawSidecar = input.sidecars.get(source.path)
-    if (rawSidecar === undefined)
-      throw new Error(`canonical upstream authority sidecar is missing: ${source.path}`)
-    const sidecar = validateFoundationAuthoritySidecar({
-      documentPath: source.path,
-      markdown,
-      value: rawSidecar,
-    })
-    sourceDigests[source.path] = sidecar.documentDigest
-    const allowedSections = new Set(source.sectionIds)
-    for (const record of sidecar.records) {
-      if (!allowedSections.has(record.sectionId)) continue
-      if (seenAuthorityIds.has(record.authorityId))
+    const sourceContract = getGameDocumentContract(source.path)
+    for (const sectionId of source.sectionIds) {
+      const section = sourceContract.sections.find(
+        candidate => candidate.sectionId === sectionId,
+      )
+      const marker = `<!-- beegame-section:${sectionId} -->`
+      if (!section || !markdown.split('\n').some(line => line.trim() === marker))
         throw new Error(
-          `projected foundation authority ID is duplicated: ${record.authorityId}`,
+          `canonical upstream section is missing: ${source.path}#${sectionId}`,
         )
-      seenAuthorityIds.add(record.authorityId)
-      records.push(record)
     }
+    sources.push(
+      Object.freeze({
+        path: source.path,
+        sectionIds: Object.freeze([...source.sectionIds]),
+        digest: createHash('sha256').update(markdown).digest('hex'),
+      }),
+    )
   }
 
-  const frozenSourceDigests = Object.freeze({ ...sourceDigests })
-  const frozenRecords = Object.freeze([...records])
+  const frozenSources = Object.freeze([...sources])
   const payload = projectionPayload({
     targetPath: input.targetPath,
-    sourceDigests: frozenSourceDigests,
-    records: frozenRecords,
+    sources: frozenSources,
   })
   const byteLength = new TextEncoder().encode(
     `${JSON.stringify(payload, null, 2)}\n`,
   ).byteLength
   return Object.freeze({
     targetPath: input.targetPath,
-    sourceDigests: frozenSourceDigests,
-    records: frozenRecords,
+    sources: frozenSources,
     byteLength,
   })
 }

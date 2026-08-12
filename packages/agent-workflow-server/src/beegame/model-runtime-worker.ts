@@ -50,7 +50,7 @@ async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> 
     globalThis.fetch = pinnedFetch
     ensureBeeGameMacroGlobals()
 
-    // sideQuery is a Claude Code native service and intentionally rejects any
+    // sideQuery is a Bee Game Studio native service and intentionally rejects any
     // configuration read before the native configuration gate is enabled.
     // This isolated entrypoint bypasses the CLI bootstrap, so mirror the same
     // minimal native initialization used by the bridge and query-engine paths.

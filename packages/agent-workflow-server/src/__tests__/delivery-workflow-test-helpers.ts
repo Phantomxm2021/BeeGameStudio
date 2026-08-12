@@ -2,11 +2,27 @@ import { createHash } from 'node:crypto'
 import { createInitialDeliveryRun } from '../beegame/delivery-workflow/run-store'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENT_IDS,
   COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
   type DeliveryRun,
   type DocumentReviewCheckId,
+  type FoundationDocumentPath,
 } from '../beegame/delivery-workflow/types'
+
+export function withTestDocumentMetadata(
+  path: FoundationDocumentPath,
+  body: string,
+): string {
+  return [
+    '---',
+    `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
+    'version: 1.0.0',
+    'updated_at: 2026-08-12T00:00:00.000Z',
+    '---',
+    body,
+  ].join('\n')
+}
 
 type InitialRunInput = Omit<
   Parameters<typeof createInitialDeliveryRun>[0],

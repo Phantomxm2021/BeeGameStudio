@@ -29,6 +29,7 @@ import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import {
   createAcceptedComprehensiveReview,
   createTestDeliveryRun,
+  withTestDocumentMetadata,
 } from './delivery-workflow-test-helpers'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -126,7 +127,7 @@ function matrixAtomicTask(): AtomicTask {
 
 function matrixCompleteDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
   const contract = getGameDocumentContract(path)
-  return renderCompleteGameDocument(path, {
+  return withTestDocumentMetadata(path, renderCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Synthetic complete recovery authority.',
     sections: contract.sections.map(section => ({
@@ -169,7 +170,7 @@ function matrixCompleteDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[nu
       risks: [],
       openDecisions: [],
     },
-  })
+  }))
 }
 
 async function commitMatrixFoundationDocument(input: {
@@ -188,27 +189,6 @@ async function commitMatrixFoundationDocument(input: {
     dispatchId: input.dispatchId,
     targetPath: input.path,
   })
-}
-
-function matrixAuthority(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) {
-  const contract = getGameDocumentContract(path)
-  const prefix = CANONICAL_PROJECT_DOCUMENT_IDS[path].toLowerCase()
-  const bytewise = (left: string, right: string) =>
-    Buffer.compare(Buffer.from(left), Buffer.from(right))
-  return {
-    records: contract.sections
-      .map(section => ({
-        authorityId: `${prefix}.${section.sectionId}.primary`,
-        sectionId: section.sectionId,
-        kind: 'fact' as const,
-        state: 'confirmed' as const,
-        source: 'confirmed_brief' as const,
-        evidenceRefs: [],
-        statement: `Confirmed authority for ${section.sectionId}.`,
-        responsibilityIds: [...section.responsibilityIds].sort(bytewise),
-      }))
-      .sort((left, right) => bytewise(left.authorityId, right.authorityId)),
-  }
 }
 
 function matrixContentDocument() {

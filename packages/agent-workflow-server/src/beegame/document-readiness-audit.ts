@@ -1,12 +1,7 @@
-import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
-import {
-  completeGameDocumentArtifactPath,
-  validateCompleteGameDocumentMarkdown,
-} from './complete-game-document'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
@@ -51,7 +46,7 @@ export function readAcceptanceChecklistIds(workspacePath: string): string[] {
 
 /**
  * Checks only deterministic delivery-contract facts. This deliberately does
- * not interpret game semantics or advance Claude Code's task state.
+ * not interpret game semantics or advance Bee Game Studio's task state.
  */
 export function auditDocumentReadiness(
   workspacePath: string,
@@ -137,93 +132,12 @@ function auditCompleteFoundationDocument(
       path,
       lines.slice(bodyStart).join('\n').trimStart(),
     )
-    const issues: string[] = []
-    const body = lines.slice(bodyStart).join('\n')
-    if (body.includes('<svg'))
-      issues.push(`${path}: inline SVG is not allowed in a committed document`)
-    for (const material of getGameDocumentContract(path).productionMaterials) {
-      if (material.format !== 'inline_svg') continue
-      const artifactPath = completeGameDocumentArtifactPath(
-        path,
-        material.materialId,
-      )
-      const markdownPath = artifactPath.slice('docs/'.length)
-      if (!body.includes(`](${markdownPath})`)) {
-        issues.push(`${path}: external artifact reference is missing: ${material.materialId}`)
-        continue
-      }
-      const absoluteArtifactPath = resolve(workspacePath, artifactPath)
-      if (
-        !existsSync(absoluteArtifactPath) ||
-        !statSync(absoluteArtifactPath).isFile()
-      ) {
-        issues.push(`${path}: external artifact is missing: ${artifactPath}`)
-        continue
-      }
-      const artifactBytes = readFileSync(absoluteArtifactPath, 'utf8')
-      if (
-        !(artifactBytes.includes('<svg ') || artifactBytes.includes('<svg>')) ||
-        !artifactBytes.includes('</svg>')
-      )
-        issues.push(`${path}: external artifact SVG is invalid: ${artifactPath}`)
-      const receiptArtifact = matchingReceiptArtifact({
-        workspacePath,
-        path,
-        content,
-        artifactPath,
-      })
-      if (
-        receiptArtifact &&
-        createHash('sha256').update(artifactBytes).digest('hex') !==
-          receiptArtifact.digest
-      )
-        issues.push(`${path}: external artifact digest is stale: ${artifactPath}`)
-    }
-    return issues
+    return []
   } catch (error) {
     return [
       `${path}: ${error instanceof Error ? error.message : 'complete document contract is invalid'}`,
     ]
   }
-}
-
-function matchingReceiptArtifact(input: {
-  workspacePath: string
-  path: string
-  content: string
-  artifactPath: string
-}): { digest: string } | undefined {
-  const receiptsPath = join(
-    input.workspacePath,
-    '.beegame/workflow/document-commits',
-  )
-  if (!existsSync(receiptsPath)) return undefined
-  const documentDigest = createHash('sha256').update(input.content).digest('hex')
-  for (const filename of readdirSync(receiptsPath).sort()) {
-    if (!filename.endsWith('.json')) continue
-    try {
-      const receipt = JSON.parse(
-        readFileSync(join(receiptsPath, filename), 'utf8'),
-      ) as {
-        targetPath?: string
-        finalDigest?: string
-        artifacts?: Array<{ path?: string; digest?: string }>
-      }
-      if (
-        receipt.targetPath !== input.path ||
-        receipt.finalDigest !== documentDigest
-      )
-        continue
-      const artifact = receipt.artifacts?.find(
-        candidate => candidate.path === input.artifactPath,
-      )
-      if (artifact?.digest?.match(/^[a-f0-9]{64}$/))
-        return { digest: artifact.digest }
-    } catch {
-      continue
-    }
-  }
-  return undefined
 }
 
 function auditChecklistStructure(content: string, path: string): string[] {

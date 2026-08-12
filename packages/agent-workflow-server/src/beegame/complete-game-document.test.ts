@@ -3,10 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  assertOpenDecisionClosure,
-  canonicalizeCompleteGameDocumentMarkdown,
   renderCompleteGameDocument,
-  prepareCompleteGameDocumentArtifacts,
   resolveUpstreamAuthorityReferences,
   validateCompleteGameDocumentMarkdown,
   validateCompleteGameDocumentSubmission,
@@ -16,49 +13,20 @@ import {
   getGameDocumentContract,
 } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
-import {
-  authoritySidecarPath,
-  canonicalFoundationAuthoritySidecarBytes,
-  createFoundationAuthoritySidecar,
-} from './foundation-authority-sidecar'
-
-function bytewise(left: string, right: string): number {
-  return Buffer.compare(Buffer.from(left), Buffer.from(right))
-}
-
-function authorityRecords(path: FoundationDocumentPath) {
-  const documentId = path.slice('docs/'.length, -'.md'.length).toLowerCase()
-  return getGameDocumentContract(path).sections
-    .map(section => ({
-      authorityId: `${documentId}.${section.sectionId}.primary`,
-      sectionId: section.sectionId,
-      kind: 'fact' as const,
-      state: 'confirmed' as const,
-      source: 'confirmed_brief' as const,
-      evidenceRefs: [],
-      statement: `Confirmed authority for ${section.sectionId}.`,
-      responsibilityIds: [...section.responsibilityIds].sort(bytewise),
-    }))
-    .sort((left, right) => bytewise(left.authorityId, right.authorityId))
-}
-
-async function writeAuthoritySource(
+async function writeDocumentSource(
   workspacePath: string,
   path: FoundationDocumentPath,
-): Promise<ReturnType<typeof createFoundationAuthoritySidecar>> {
-  const markdown = `# ${path}\n\nDigest-bound authority source.\n`
+): Promise<void> {
+  const markdown = [
+    `# ${path}`,
+    ...getGameDocumentContract(path).sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `Document authority for ${section.sectionId}.`,
+    ]),
+  ].join('\n')
   await mkdir(join(workspacePath, 'docs'), { recursive: true })
   await writeFile(join(workspacePath, path), markdown)
-  const sidecar = createFoundationAuthoritySidecar({
-    documentPath: path,
-    markdown,
-    submission: { records: authorityRecords(path) },
-  })
-  await writeFile(
-    join(workspacePath, authoritySidecarPath(path)),
-    canonicalFoundationAuthoritySidecarBytes(sidecar),
-  )
-  return sidecar
 }
 
 function completeSubmission(
@@ -104,10 +72,10 @@ function completeSubmission(
     ),
     auditAppendix: {
       acceptanceCriteria: ['Every canonical section and production material is complete and implementation-ready.'],
-      upstreamReferences: contract.allowedUpstreamPaths.slice(0, 1).map(
-        upstreamPath => ({
-          path: upstreamPath,
-          authorityId: `${contract.path}.authority.1`,
+      upstreamReferences: contract.upstreamSections.slice(0, 1).map(
+        source => ({
+          path: source.path,
+          sectionId: source.sectionIds[0]!,
         }),
       ),
       risks: [],
@@ -180,23 +148,14 @@ describe('complete game document submission', () => {
       )
   })
 
-  test('externalizes inline SVG materials into deterministic artifact descriptors', () => {
+  test('keeps SVG production material inside the sole Markdown authority', () => {
     const path = 'docs/ART_DIRECTION.md'
     const submission = completeSubmission(path)
-    const artifacts = prepareCompleteGameDocumentArtifacts(path, submission)
     const rendered = renderCompleteGameDocument(path, submission)
 
-    expect(artifacts).toHaveLength(3)
-    expect(artifacts[0]).toMatchObject({
-      artifactId: 'visual-pillar-board',
-      mediaType: 'image/svg+xml',
-      path: 'docs/artifacts/art-direction/visual-pillar-board.svg',
-    })
-    expect(artifacts[0]!.digest).toMatch(/^[a-f0-9]{64}$/)
-    expect(rendered).not.toContain('<svg')
-    expect(rendered).toContain(
-      '![Palette Board](artifacts/art-direction/palette-board.svg)',
-    )
+    expect(rendered).toContain('<svg')
+    expect(rendered).not.toContain('docs/artifacts/')
+    expect(rendered).not.toContain('artifacts/art-direction/')
   })
 
   test('rejects missing, duplicate, or out-of-order sections', () => {
@@ -269,7 +228,7 @@ describe('complete game document submission', () => {
           upstreamReferences: [
             {
               path: 'docs/AUDIO_DESIGN.md',
-              authorityId: 'untrusted.authority',
+              sectionId: 'untrusted_section',
             },
           ],
         },
@@ -277,32 +236,25 @@ describe('complete game document submission', () => {
     ).toThrow(/upstream|authority/i)
   })
 
-  test('resolves exact upstream authority IDs from digest-valid sidecars', async () => {
+  test('resolves exact upstream Markdown section references', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'upstream-authority-'))
     try {
-      const sidecar = await writeAuthoritySource(workspacePath, 'docs/GDD.md')
-      const authorityId = sidecar.records.find(
-        record => record.sectionId === 'core_loop',
-      )!.authorityId
+      await writeDocumentSource(workspacePath, 'docs/GDD.md')
+      const sectionId = 'core_loop'
       await expect(
         resolveUpstreamAuthorityReferences({
           workspacePath,
           targetPath: 'docs/UI_UX_SPEC.md',
-          references: [{ path: 'docs/GDD.md', authorityId }],
+          references: [{ path: 'docs/GDD.md', sectionId }],
         }),
-      ).resolves.toEqual([{ path: 'docs/GDD.md', authorityId }])
+      ).resolves.toEqual([{ path: 'docs/GDD.md', sectionId }])
 
-      for (const invalidId of [
-        'core_loop.primary',
-        'gdd.core_loop',
-        'gdd.core-loop.primary',
-        'gdd.core_loop.not-present',
-      ])
+      for (const invalidId of ['vision', 'not-present'])
         await expect(
           resolveUpstreamAuthorityReferences({
             workspacePath,
             targetPath: 'docs/UI_UX_SPEC.md',
-            references: [{ path: 'docs/GDD.md', authorityId: invalidId }],
+            references: [{ path: 'docs/GDD.md', sectionId: invalidId }],
           }),
         ).rejects.toThrow(new RegExp(`${invalidId.replaceAll('.', '\\.')}`, 'i'))
 
@@ -311,8 +263,8 @@ describe('complete game document submission', () => {
           workspacePath,
           targetPath: 'docs/UI_UX_SPEC.md',
           references: [
-            { path: 'docs/GDD.md', authorityId },
-            { path: 'docs/GDD.md', authorityId },
+            { path: 'docs/GDD.md', sectionId },
+            { path: 'docs/GDD.md', sectionId },
           ],
         }),
       ).rejects.toThrow(/duplicate/i)
@@ -321,13 +273,13 @@ describe('complete game document submission', () => {
     }
   })
 
-  test('rejects upstream authority when the source document changed after its sidecar', async () => {
+  test('rejects an upstream reference when its Markdown section is missing', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'upstream-authority-'))
     try {
-      const sidecar = await writeAuthoritySource(workspacePath, 'docs/GDD.md')
+      await writeDocumentSource(workspacePath, 'docs/GDD.md')
       await writeFile(
         join(workspacePath, 'docs/GDD.md'),
-        '# Changed source\n\nThe sidecar is now stale.\n',
+        '# Changed source\n\nThe required section is absent.\n',
       )
       await expect(
         resolveUpstreamAuthorityReferences({
@@ -336,91 +288,14 @@ describe('complete game document submission', () => {
           references: [
             {
               path: 'docs/GDD.md',
-              authorityId: sidecar.records[0]!.authorityId,
+              sectionId: 'core_loop',
             },
           ],
         }),
-      ).rejects.toThrow(/digest|stale/i)
+      ).rejects.toThrow(/section.*does not exist/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
-  })
-
-  test('requires exact audit and authority open-decision closure', () => {
-    const path = 'docs/GDD.md'
-    const markdown = '# GDD\n\nDecision authority.\n'
-    const records = authorityRecords(path)
-    const decisionId = 'gdd.scope_risks.platform-target'
-    const sidecar = createFoundationAuthoritySidecar({
-      documentPath: path,
-      markdown,
-      submission: {
-        records: records.map(record =>
-          record.sectionId === 'scope_risks'
-            ? {
-                ...record,
-                authorityId: decisionId,
-                kind: 'open_decision' as const,
-                state: 'deferred' as const,
-                decision: {
-                  owner: 'product',
-                  neededBy: 'milestone.prototype',
-                },
-              }
-            : record,
-        ),
-      },
-    })
-    const audit = {
-      acceptanceCriteria: ['All contracted authority is inspectable.'],
-      upstreamReferences: [],
-      risks: [],
-      openDecisions: [
-        {
-          decisionId,
-          question: 'Which platform target is authoritative?',
-          owner: 'product',
-          neededBy: 'milestone.prototype',
-        },
-      ],
-    }
-
-    expect(() =>
-      assertOpenDecisionClosure({
-        audit,
-        authority: sidecar,
-        trustedScheduleAuthorityIds: new Set(),
-      }),
-    ).not.toThrow()
-    expect(() =>
-      assertOpenDecisionClosure({
-        audit: { ...audit, openDecisions: [] },
-        authority: sidecar,
-        trustedScheduleAuthorityIds: new Set(),
-      }),
-    ).toThrow(/closure|missing|decision/i)
-    expect(() =>
-      assertOpenDecisionClosure({
-        audit: {
-          ...audit,
-          openDecisions: [{ ...audit.openDecisions[0]!, owner: 'engineering' }],
-        },
-        authority: sidecar,
-        trustedScheduleAuthorityIds: new Set(),
-      }),
-    ).toThrow(/owner|match/i)
-    expect(() =>
-      assertOpenDecisionClosure({
-        audit: {
-          ...audit,
-          openDecisions: [
-            { ...audit.openDecisions[0]!, neededBy: '2026-12-01' },
-          ],
-        },
-        authority: sidecar,
-        trustedScheduleAuthorityIds: new Set(),
-      }),
-    ).toThrow(/date|schedule|needed/i)
   })
 
   test('renders summary, production materials, and one audit appendix', () => {
@@ -446,17 +321,17 @@ describe('complete game document submission', () => {
         upstreamReferences: [
           {
             path: 'docs/LEVEL_SCENE_DESIGN.md',
-            authorityId: 'level_scene_design.camera_readability.primary',
+            sectionId: 'camera_readability',
           },
           {
             path: 'docs/GDD.md',
-            authorityId: 'gdd.core_loop.primary',
+            sectionId: 'core_loop',
           },
         ],
       },
     })
 
-    expect(rendered).toContain('- `docs/GDD.md` — `gdd.core_loop.primary`')
+    expect(rendered).toContain('- `docs/GDD.md` — section `core_loop`')
     expect(rendered.indexOf('`docs/GDD.md`')).toBeLessThan(
       rendered.indexOf('`docs/LEVEL_SCENE_DESIGN.md`'),
     )
@@ -532,109 +407,6 @@ describe('complete game document submission', () => {
       'No unresolved section decisions.',
     )
     expect(() => validateCompleteGameDocumentMarkdown(path, rendered)).toThrow(/template|empty/i)
-  })
-
-  test('replaces model-authored front matter with service-owned metadata', () => {
-    const path = 'docs/GDD.md'
-    const body = renderCompleteGameDocument(path, completeSubmission(path))
-    const authored = `---\ndocument_id: WRONG\nversion: 99.0.0\nupdated_at: 2099-01-01T00:00:00.000Z\n---\n${body}`
-
-    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
-      version: '1.0.0',
-      updatedAt: '2026-08-11T04:30:00.000Z',
-    })
-
-    expect(canonical.startsWith(
-      '---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-08-11T04:30:00.000Z\n---\n',
-    )).toBe(true)
-    expect(canonical).not.toContain('2099-01-01')
-    expect(canonical).not.toContain('document_id: WRONG')
-  })
-
-  test('normalizes localized service-owned document layer headings', () => {
-    const path = 'docs/GDD.md'
-    const authored = renderCompleteGameDocument(path, completeSubmission(path))
-      .replace('## Executive Summary', '\n## 摘要')
-      .replace('## Production Materials', '\n## 生产资料')
-      .replace('## Audit Appendix', '\n## 审计附录')
-
-    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
-      version: '1.0.0',
-      updatedAt: '2026-08-11T04:30:00.000Z',
-    })
-
-    expect(canonical).toContain(
-      '<!-- beegame-executive-summary -->\n## Executive Summary',
-    )
-    expect(canonical).toContain(
-      '<!-- beegame-production-materials -->\n## Production Materials',
-    )
-    expect(canonical).toContain(
-      '<!-- beegame-audit-appendix -->\n## Audit Appendix',
-    )
-  })
-
-  test('normalizes blank lines between contract markers and exact headings', () => {
-    const path = 'docs/GDD.md'
-    const contract = getGameDocumentContract(path)
-    let authored = renderCompleteGameDocument(path, completeSubmission(path))
-    for (const section of contract.sections) {
-      authored = authored.replace(
-        `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}`,
-        `<!-- beegame-section:${section.sectionId} -->\n\n## ${section.title}`,
-      )
-    }
-    for (const material of contract.productionMaterials) {
-      authored = authored.replace(
-        `<!-- beegame-material:${material.materialId} -->\n### ${material.title}`,
-        `<!-- beegame-material:${material.materialId} -->\n\n### ${material.title}`,
-      )
-    }
-
-    expect(() => canonicalizeCompleteGameDocumentMarkdown(path, authored, {
-      version: '1.0.0',
-      updatedAt: '2026-08-11T04:30:00.000Z',
-    })).not.toThrow()
-  })
-
-  test('normalizes whitespace in known service-owned section and material markers', () => {
-    const path = 'docs/GDD.md'
-    const authored = renderCompleteGameDocument(path, completeSubmission(path))
-      .replace(
-        '<!-- beegame-section:vision -->',
-        '<!-- beegame-section: vision -->',
-      )
-      .replace(
-        '<!-- beegame-material:core-loop-diagram -->',
-        '<!-- beegame-material: core-loop-diagram -->',
-      )
-
-    const canonical = canonicalizeCompleteGameDocumentMarkdown(path, authored, {
-      version: '1.0.0',
-      updatedAt: '2026-08-11T04:30:00.000Z',
-    })
-    expect(canonical).toContain('<!-- beegame-section:vision -->')
-    expect(canonical).toContain(
-      '<!-- beegame-material:core-loop-diagram -->',
-    )
-    expect(canonical).not.toContain('<!-- beegame-section: vision -->')
-    expect(canonical).not.toContain(
-      '<!-- beegame-material: core-loop-diagram -->',
-    )
-
-    expect(() =>
-      canonicalizeCompleteGameDocumentMarkdown(
-        path,
-        authored.replace(
-          '<!-- beegame-section: vision -->',
-          '<!-- beegame-section:not-contracted -->',
-        ),
-        {
-          version: '1.0.0',
-          updatedAt: '2026-08-11T04:30:00.000Z',
-        },
-      ),
-    ).toThrow(/section|order/i)
   })
 
   test('rejects repeated substantive blocks across document sections', () => {
