@@ -171,6 +171,7 @@ export function validateCompleteGameDocumentMarkdown(
   const summaryIndex = lines.indexOf(summaryMarker)
   const productionIndex = lines.indexOf(productionMarker)
   const auditIndex = lines.indexOf(auditMarker)
+  const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
   const orderedIndexes = [
@@ -178,7 +179,7 @@ export function validateCompleteGameDocumentMarkdown(
     ...sectionIndexes,
     productionIndex,
     ...materialIndexes,
-    auditIndex,
+    ...(auditIndex >= 0 ? [auditIndex] : []),
   ]
   if (
     orderedIndexes.some(index => index < 0) ||
@@ -224,7 +225,7 @@ export function validateCompleteGameDocumentMarkdown(
     throw new Error('complete game document production materials heading is invalid')
   contract.productionMaterials.forEach((material, index) => {
     const start = materialIndexes[index]!
-    const end = materialIndexes[index + 1] ?? auditIndex
+    const end = materialIndexes[index + 1] ?? documentEnd
     const heading = nextNonBlankLine(lines, start)
     if (heading?.value !== `### ${material.title}`)
       throw new Error(`production material title is invalid: ${material.materialId}`)
@@ -235,18 +236,30 @@ export function validateCompleteGameDocumentMarkdown(
     )
   })
 
-  if (nextNonBlankLine(lines, auditIndex)?.value !== '## Audit Appendix')
-    throw new Error('complete game document audit appendix heading is invalid')
-  const acceptanceIndex = lines.indexOf('### Acceptance Criteria', auditIndex + 1)
-  const acceptanceLines = lines.slice(acceptanceIndex + 1)
-  const hasAcceptanceList = acceptanceLines.some(line => line.trim().startsWith('- '))
-  const tableLines = acceptanceLines.filter(line => {
-    const trimmed = line.trim()
-    return trimmed.startsWith('|') && trimmed.endsWith('|')
-  })
-  const hasAcceptanceTable =
-    tableLines.length >= 3 && tableLines.some(line => line.includes('---'))
-  if (acceptanceIndex < auditIndex || (!hasAcceptanceList && !hasAcceptanceTable))
-    throw new Error('complete game document acceptance criteria are empty or invalid')
+  if (auditIndex >= 0) {
+    if (nextNonBlankLine(lines, auditIndex)?.value !== '## Audit Appendix')
+      throw new Error('complete game document audit appendix heading is invalid')
+    const acceptanceIndex = lines.indexOf(
+      '### Acceptance Criteria',
+      auditIndex + 1,
+    )
+    const acceptanceLines = lines.slice(acceptanceIndex + 1)
+    const hasAcceptanceList = acceptanceLines.some(line =>
+      line.trim().startsWith('- '),
+    )
+    const tableLines = acceptanceLines.filter(line => {
+      const trimmed = line.trim()
+      return trimmed.startsWith('|') && trimmed.endsWith('|')
+    })
+    const hasAcceptanceTable =
+      tableLines.length >= 3 && tableLines.some(line => line.includes('---'))
+    if (
+      acceptanceIndex < auditIndex ||
+      (!hasAcceptanceList && !hasAcceptanceTable)
+    )
+      throw new Error(
+        'complete game document acceptance criteria are empty or invalid',
+      )
+  }
   return `${body}\n`
 }

@@ -36,7 +36,7 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
-  test('projects document authority as paths and section ids without source bodies', async () => {
+  test('persists one content-bearing upstream authority snapshot', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -62,8 +62,9 @@ describe('delivery worker complete document boundary', () => {
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain('Read the compact document projection')
-      expect(block).toContain('exact authorized upstream line ranges')
+      expect(block).toContain('Read the one content-bearing authority snapshot')
+      expect(block).toContain('one content-bearing authority snapshot')
+      expect(block).toContain('Read it once')
       expect(block).not.toContain('complete when the turn ends')
       expect(block).not.toContain('file-operation sequence')
       expect(block).not.toContain('completeDocumentContract')
@@ -104,6 +105,9 @@ describe('delivery worker complete document boundary', () => {
       ).toBe(true)
       expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
+      expect(projected.sources[0].sections[0].content).toContain(
+        'Authority content for',
+      )
       expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')

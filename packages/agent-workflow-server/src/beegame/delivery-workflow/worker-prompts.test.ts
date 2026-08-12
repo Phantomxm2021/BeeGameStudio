@@ -43,13 +43,11 @@ describe('resource-content worker prompts', () => {
       'one contract section per native file operation',
     )
     expect(prompt).not.toContain('12 KiB')
-    expect(prompt).not.toContain('three to eight')
-    expect(prompt).not.toContain('content writes')
+    expect(prompt).toContain('four to six bounded native Write/Edit operations')
+    expect(prompt).toContain('efficiency guidance, not a tool restriction')
     expect(prompt).not.toContain('tool-call argument')
     expect(prompt).not.toContain('chunk boundaries')
-    expect(prompt).toContain(
-      'BGS does not prescribe native file-operation count, size, or sequence',
-    )
+    expect(prompt).toContain('BGS does not intercept or proxy file content')
     expect(prompt).not.toContain(
       'Write the complete assigned Markdown document directly',
     )
@@ -61,18 +59,19 @@ describe('resource-content worker prompts', () => {
       'The native runtime owns the file-operation sequence',
     )
     expect(prompt).toContain("Bee Game Studio's normal workflow")
-    expect(prompt).toContain('BGS validates the finished file without rewriting it')
+    expect(prompt).toContain('BGS writes those results to workflow audit metadata')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('document_parts_prepared')
     expect(prompt).not.toContain('Do not write or edit the assigned path directly')
     expect(prompt).toContain('Do not claim verified license')
-    expect(prompt).toContain('one final lightweight structural verification')
+    expect(prompt).toContain('Do not reread the finished file')
+    expect(prompt).not.toContain('one final lightweight structural verification')
     expect(prompt).not.toContain('Read all authorized upstream sections')
     expect(prompt).not.toContain('one batched tool round')
     expect(prompt).toContain(
       'repair only the missing or invalid parts; do not rewrite a complete current-authority document',
     )
-    expect(prompt).toContain('do not repeat equivalent checks')
+    expect(prompt).toContain('without repeating equivalent checks')
     expect(prompt).toContain(
       'Prefer production-dense tables and matrices over repeated narrative',
     )
@@ -82,6 +81,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('exactly one # document title')
     expect(prompt).toContain('canonical structures in order')
     expect(prompt).toContain('## Executive Summary')
+    expect(prompt).toContain('Do not author YAML front matter')
+    expect(prompt).toContain('BGS injects document_id, version and updated_at')
+    expect(prompt).toContain('Do not add an Audit Appendix')
     expect(prompt).not.toContain('handwrite protocol markers')
     for (const material of completeDocumentContract.productionMaterials)
       expect(prompt).toContain(material.materialId)
@@ -463,9 +465,11 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('Markdown file is the sole document authority')
-    expect(prompt).toContain('document_id: GDD')
-    expect(prompt).toContain('without rewriting it')
+    expect(prompt).toContain('Markdown body is the sole human document authority')
+    expect(prompt).toContain(
+      'BGS injects document_id, version and updated_at deterministically',
+    )
+    expect(prompt).toContain('BGS injects document_id, version and updated_at')
     expect(prompt).not.toContain('updated_at set to')
     expect(prompt).toContain('complete human development discipline')
     expect(prompt).toContain('sufficient for a human game development team')
@@ -475,7 +479,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('end the turn normally')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
-    expect(prompt).toContain('then the audit appendix in canonical order')
+    expect(prompt).not.toContain('then the audit appendix in canonical order')
+    expect(prompt).toContain('every production material in canonical order')
     expect(prompt).toContain('Define each authoritative fact once')
     expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(

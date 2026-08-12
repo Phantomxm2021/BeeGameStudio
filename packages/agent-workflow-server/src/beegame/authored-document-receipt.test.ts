@@ -55,14 +55,7 @@ function completeDocument(path: 'docs/GDD.md'): string {
       openDecisions: [],
     },
   })
-  return [
-    '---',
-    'document_id: GDD',
-    'version: 1.0.0',
-    'updated_at: 2026-08-12T00:00:00.000Z',
-    '---',
-    body,
-  ].join('\n')
+  return body
 }
 
 describe('native authored document receipts', () => {
@@ -78,11 +71,13 @@ describe('native authored document receipts', () => {
         workspacePath,
         dispatchId: 'native-gdd',
         targetPath,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
       const second = await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: 'native-gdd',
         targetPath,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
 
       expect(second).toEqual(first)
@@ -91,9 +86,38 @@ describe('native authored document receipts', () => {
         documentId: 'GDD',
         status: 'committed',
       })
-      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toBe(
-        authored,
+      const committedMarkdown = await readFile(
+        join(workspacePath, targetPath),
+        'utf8',
       )
+      expect(committedMarkdown).not.toBe(authored)
+      expect(committedMarkdown).toContain(
+        'updated_at: 2026-08-13T01:00:00.000+08:00',
+      )
+      expect(first.finalDigest).toBe(
+        createHash('sha256').update(committedMarkdown).digest('hex'),
+      )
+      const audit = JSON.parse(
+        await readFile(
+          join(
+            workspacePath,
+            '.beegame/workflow/document-audits/native-gdd.json',
+          ),
+          'utf8',
+        ),
+      )
+      expect(audit).toEqual({
+        schemaVersion: 1,
+        dispatchId: 'native-gdd',
+        targetPath: 'docs/GDD.md',
+        documentId: 'GDD',
+        documentDigest: first.finalDigest,
+        checks: {
+          canonicalStructure: 'passed',
+          productionMaterials: 'passed',
+          repeatedContent: 'passed',
+        },
+      })
       await expect(
         access(join(workspacePath, 'docs/GDD.authority.json')),
       ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -119,6 +143,7 @@ describe('native authored document receipts', () => {
         workspacePath,
         dispatchId: 'native-reconcile',
         targetPath: 'docs/GDD.md',
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
       const receiptPath = join(
         workspacePath,

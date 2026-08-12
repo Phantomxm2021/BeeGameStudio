@@ -24,7 +24,9 @@ describe('native complete game document validation', () => {
       completeTestSubmission(path),
     ).replaceAll(/(<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+|audit-appendix) -->)\n/g, '$1\n\n')
 
-    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(
+      markdown.trimEnd() + '\n',
+    )
   })
 
   test('rejects missing, duplicate, and out-of-order canonical sections', () => {
@@ -74,6 +76,18 @@ describe('native complete game document validation', () => {
         markdown.replace(/### Acceptance Criteria[^]*$/, '### Acceptance Criteria\n'),
       ),
     ).toThrow(/acceptance criteria/i)
+  })
+
+  test('accepts a human document with the mechanical audit externalized', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(
+      path,
+      completeTestSubmission(path),
+    ).replace(/\n<!-- beegame-audit-appendix -->[^]*$/, '\n')
+
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(
+      `${markdown.trimEnd()}\n`,
+    )
   })
 
   test('rejects empty-template prose and repeated substantive content', () => {

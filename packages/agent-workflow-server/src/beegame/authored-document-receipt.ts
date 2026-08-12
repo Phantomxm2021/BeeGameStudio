@@ -37,13 +37,15 @@ export type AuthoredDocumentReceipt = {
 
 /**
  * Record the result of a complete Markdown file written through Bee Game
- * Studio's native file tools. The authored Markdown is the only document
- * authority; this function validates and receipts it without rewriting bytes.
+ * Studio's native file tools. The authored body is the only human document
+ * authority; this function validates it, injects deterministic service-owned
+ * metadata, writes a machine audit sidecar, and commits the resulting bytes.
  */
 export async function commitAuthoredFoundationDocument(input: {
   workspacePath: string
   dispatchId: string
   targetPath: FoundationDocumentPath
+  updatedAt?: string
 }): Promise<AuthoredDocumentReceipt> {
   const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[input.targetPath]
   const existing = await readAuthoredDocumentReceipt(
@@ -63,18 +65,38 @@ export async function commitAuthoredFoundationDocument(input: {
 
   const target = resolve(input.workspacePath, input.targetPath)
   const authored = await readFile(target, 'utf8')
-  const metadata = validateCanonicalAuthoredDocument(
+  const updatedAt = input.updatedAt ?? new Date().toISOString()
+  z.string().datetime({ offset: true }).parse(updatedAt)
+  const canonical = canonicalizeAuthoredDocument(
     input.targetPath,
     authored,
+    updatedAt,
+  )
+  await durableWrite(target, canonical)
+  const audit = {
+    schemaVersion: 1 as const,
+    dispatchId: input.dispatchId,
+    targetPath: input.targetPath,
+    documentId,
+    documentDigest: digest(canonical),
+    checks: {
+      canonicalStructure: 'passed' as const,
+      productionMaterials: 'passed' as const,
+      repeatedContent: 'passed' as const,
+    },
+  }
+  await durableWrite(
+    authoredDocumentAuditPath(input.workspacePath, input.dispatchId),
+    `${JSON.stringify(audit, null, 2)}\n`,
   )
   const prepared: AuthoredDocumentReceipt = {
     schemaVersion: 4,
     dispatchId: input.dispatchId,
     targetPath: input.targetPath,
-    finalDigest: digest(authored),
+    finalDigest: audit.documentDigest,
     documentId,
-    version: metadata.version,
-    updatedAt: metadata.updatedAt,
+    version: '1.0.0',
+    updatedAt,
     status: 'package_prepared',
   }
   await syncFile(target)
@@ -137,10 +159,14 @@ export async function reconcileAuthoredDocumentReceipt(input: {
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
   try {
-    validateCanonicalAuthoredDocument(
-      receipt.targetPath as FoundationDocumentPath,
-      target,
+    if (
+      canonicalizeAuthoredDocument(
+        receipt.targetPath as FoundationDocumentPath,
+        target,
+        receipt.updatedAt,
+      ) !== target
     )
+      return undefined
   } catch {
     return undefined
   }
@@ -160,11 +186,7 @@ function authoredDocumentReceiptPath(
   workspacePath: string,
   dispatchId: string,
 ): string {
-  const allowed = new Set(
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'.split(''),
-  )
-  if (!dispatchId || [...dispatchId].some(character => !allowed.has(character)))
-    throw new Error('authored document dispatch identity is invalid')
+  validateDispatchId(dispatchId)
   return join(
     resolve(workspacePath),
     '.beegame',
@@ -172,6 +194,28 @@ function authoredDocumentReceiptPath(
     'document-commits',
     `${dispatchId}.json`,
   )
+}
+
+function authoredDocumentAuditPath(
+  workspacePath: string,
+  dispatchId: string,
+): string {
+  validateDispatchId(dispatchId)
+  return join(
+    resolve(workspacePath),
+    '.beegame',
+    'workflow',
+    'document-audits',
+    `${dispatchId}.json`,
+  )
+}
+
+function validateDispatchId(dispatchId: string): void {
+  const allowed = new Set(
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'.split(''),
+  )
+  if (!dispatchId || [...dispatchId].some(character => !allowed.has(character)))
+    throw new Error('authored document dispatch identity is invalid')
 }
 
 async function durableWrite(path: string, content: string): Promise<void> {
@@ -227,22 +271,24 @@ function digest(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-function validateCanonicalAuthoredDocument(
+function canonicalizeAuthoredDocument(
   path: FoundationDocumentPath,
   markdown: string,
-): { version: '1.0.0'; updatedAt: string } {
+  updatedAt: string,
+): string {
   const expectedDocumentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
   const lines = markdown.split('\n')
-  if (
-    lines[0] !== '---' ||
-    lines[1] !== `document_id: ${expectedDocumentId}` ||
-    lines[2] !== 'version: 1.0.0' ||
-    !lines[3]?.startsWith('updated_at: ') ||
-    lines[4] !== '---'
-  )
-    throw new Error('canonical document front matter is invalid')
-  const updatedAt = lines[3].slice('updated_at: '.length)
-  z.string().datetime({ offset: true }).parse(updatedAt)
-  validateCompleteGameDocumentMarkdown(path, lines.slice(5).join('\n'))
-  return { version: '1.0.0', updatedAt }
+  const body =
+    lines[0] === '---' && lines[4] === '---'
+      ? lines.slice(5).join('\n')
+      : markdown
+  const validatedBody = validateCompleteGameDocumentMarkdown(path, body)
+  return [
+    '---',
+    `document_id: ${expectedDocumentId}`,
+    'version: 1.0.0',
+    `updated_at: ${updatedAt}`,
+    '---',
+    validatedBody,
+  ].join('\n')
 }

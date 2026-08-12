@@ -33,7 +33,7 @@ function sources(paths: readonly FoundationDocumentPath[]) {
 }
 
 describe('foundation authority projection', () => {
-  test('projects only contracted Markdown section references in source order', () => {
+  test('projects only contracted Markdown section content in source order', () => {
     const targetPath = 'docs/UI_UX_SPEC.md'
     const input = sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'])
     const result = projectFoundationAuthority({ targetPath, ...input })
@@ -89,9 +89,18 @@ describe('foundation authority projection', () => {
         canonicalFoundationAuthorityProjectionBytes(result),
       ).byteLength,
     )
-    expect(canonicalFoundationAuthorityProjectionBytes(result)).not.toContain(
-      'Source materials are intentionally',
-    )
+    const serialized = canonicalFoundationAuthorityProjectionBytes(result)
+    expect(serialized).toContain('Owned source content for')
+    expect(serialized).not.toContain('Source materials are intentionally')
+    expect(
+      result.sources.every(source =>
+        source.sections.every(section =>
+          section.content.includes(
+            `<!-- beegame-section:${section.sectionId} -->`,
+          ),
+        ),
+      ),
+    ).toBe(true)
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.sources.every(Object.isFrozen)).toBe(true)
     expect(result.sources.every(source => Object.isFrozen(source.sections))).toBe(true)
