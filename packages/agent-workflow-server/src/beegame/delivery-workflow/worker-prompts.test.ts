@@ -43,7 +43,11 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('12 KiB')
     expect(prompt).not.toContain('four to six bounded native Write/Edit operations')
     expect(prompt).not.toContain('efficiency guidance, not a tool restriction')
-    expect(prompt).not.toContain('tool-call argument')
+    expect(prompt).toContain(
+      'Do not buffer the complete document inside one file-tool argument',
+    )
+    expect(prompt).toContain('Create the target early')
+    expect(prompt).toContain('You still choose every native file operation')
     expect(prompt).not.toContain('chunk boundaries')
     expect(prompt).toContain('You own the read, write, edit, verification')
     expect(prompt).not.toContain(
