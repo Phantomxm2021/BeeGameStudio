@@ -8,6 +8,11 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
+
+function count(value: string, needle: string): number {
+  return value.split(needle).length - 1
+}
 
 function request(workspacePath: string, dispatchId: string) {
   return {
@@ -139,18 +144,32 @@ describe('native initial document authoring', () => {
       const port = createBeeGameDeliveryWorkerPort({
         sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
         userId: 'user',
+        confirmedBriefContext:
+          '{"kind":"confirmed_build_brief","marker":"unique-authority"}',
       })
 
-      await port.start(request(workspacePath, 'dispatch-native') as never)
-      await port.submit('dispatch-native', 'original complete document prompt')
+      const dispatch = request(workspacePath, 'dispatch-native')
+      await port.start(dispatch as never)
+      await port.submit('dispatch-native', buildWorkerPrompt(dispatch as never))
       const terminal = await port.waitForTerminal?.('dispatch-native')
 
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toContain('Write the complete assigned document')
-      expect(prompts[0]).toContain('original complete document prompt')
+      expect(count(prompts[0]!, 'Write the complete assigned document')).toBe(1)
+      expect(count(prompts[0]!, 'end the turn normally')).toBe(1)
+      expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
+      expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
+      for (const materialId of [
+        'product-gameplay-overview',
+        'core-loop-diagram',
+        'game-state-flow',
+      ])
+        expect(count(prompts[0]!, materialId)).toBe(1)
+      expect(count(prompts[0]!, 'unique-authority')).toBe(1)
       expect(prompts[0]).not.toContain('checkpoint')
       expect(prompts[0]).not.toContain('beegame-draft-cursor')
+      expect(prompts[0]).not.toContain('must use Write')
+      expect(prompts[0]).not.toContain('three writes')
       expect(terminal).toMatchObject({
         status: 'completed',
         writtenPaths: ['docs/GDD.md'],

@@ -6,6 +6,10 @@ import {
 } from './types'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
+  const initialFoundationAuthor =
+    request.workerType === 'document-author' &&
+    request.contract.documentSet === 'foundation' &&
+    request.contract.authoringMode === 'initial'
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -57,17 +61,21 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
           : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    `Phase: ${request.phase}`,
+    initialFoundationAuthor ? undefined : `Phase: ${request.phase}`,
     `Run: ${request.runId}`,
-    `Revision: ${request.revision}`,
-    `Workspace root: ${request.workspacePath}`,
+    initialFoundationAuthor ? undefined : `Revision: ${request.revision}`,
+    initialFoundationAuthor ? undefined : `Workspace root: ${request.workspacePath}`,
     `${pathScopeLabel}: ${pathScope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
-    'Request kind: confirmed_build_brief. The durable confirmed brief context and its digest are the product authority for this run.',
-    'Confirmed Brief settings are higher authority than free-form idea text. When they conflict, apply the structured setting selected in the settings interface, state only that resolved authority in project documents, and do not preserve both sides as simultaneous requirements.',
+    'The durable confirmed brief context and its digest are the product authority for this run.',
+    'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
-    'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    initialFoundationAuthor
+      ? undefined
+      : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
+    initialFoundationAuthor
+      ? undefined
+      : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
@@ -366,7 +374,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.documentSet === 'checklist'
           ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Bee Game Studio's normal workflow."
           : request.contract.authoringMode === 'initial'
-            ? `Author the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow.`
+            ? ''
             : request.contract.authoringMode === 'repair-planning'
               ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
               : `Use the service-projected current target, apply only the locked repair decision, and revise the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow. The assigned Markdown file must be complete when the turn ends. The native runtime owns the file-operation sequence.`,
@@ -394,13 +402,11 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [
-                  `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file. The eight documents together must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline's design work now; do not delegate completeness to a reviewer.`,
-                  `The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority. The final Markdown must contain exactly one # document title. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically after validating the complete body. Follow contract.completeDocumentContract exactly and include these canonical structures in order: <!-- beegame-executive-summary --> with ## Executive Summary; each <!-- beegame-section:<sectionId> --> with its exact ## title; then <!-- beegame-production-materials --> with ## Production Materials and each <!-- beegame-material:<materialId> --> with its exact ### title and required format. Do not add an Audit Appendix or duplicate the mechanical contract checks in the human document; BGS writes those results to workflow audit metadata without rewriting the authored body.`,
+                  `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file using Bee Game Studio's normal workflow. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
+                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
-                  'Author the executive summary, every exact contract section and every production material in canonical order. Define each authoritative fact once and reference projected upstream authority instead of copying it.',
-                  'Prefer production-dense tables and matrices over repeated narrative. Every section must add new implementation authority. Do not restate the confirmed brief, upstream text or another section; reference its stable authority instead. Keep rationale to the shortest explanation needed for a production decision.',
-                  'Use Bee Game Studio native file tools normally. Do not create or edit .beegame workflow metadata. Do not claim verified license status without concrete evidence. End the turn normally after the final on-disk document is complete. Keep Bee Game Studio reasoning, tools, context management and normal completion behavior unchanged.',
-                  'Provide enough concrete choices, tradeoffs, examples, units, boundaries and observable criteria for the assigned discipline to be implementable and testable. A downstream owner may specialize only behavior already authorized by the Confirmed Brief, GDD or its projected upstream owner.',
+                  'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
+                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Use native file tools normally. Do not edit .beegame metadata. Do not claim verified license status without concrete evidence.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
                     ? [

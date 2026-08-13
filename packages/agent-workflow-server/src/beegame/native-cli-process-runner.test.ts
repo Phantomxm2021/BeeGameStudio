@@ -149,6 +149,27 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('keeps confirmed brief evidence metadata out of native prompt content', async () => {
+    const runtime = await startRuntime()
+    let result: Record<string, unknown> | undefined
+
+    await runtime.submit({
+      prompt: 'single-visible-brief',
+      confirmedBriefContext: 'metadata-brief-must-not-be-appended',
+      signal: new AbortController().signal,
+      onMessage: message => {
+        if (message.type === 'result') result = message
+      },
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(result?.received_content).toBe('single-visible-brief')
+    expect(JSON.stringify(result)).not.toContain(
+      'metadata-brief-must-not-be-appended',
+    )
+    runtime.dispose?.()
+  })
+
   test('captures the native UUID and uses it only on later stream messages', async () => {
     const nativeSessionIds: string[] = []
     const runtime = await createNativeCliProcessRunner({

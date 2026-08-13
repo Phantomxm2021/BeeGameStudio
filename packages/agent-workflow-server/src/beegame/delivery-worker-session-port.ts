@@ -955,7 +955,7 @@ async function initialFoundationDocumentTurnPrompt(
     throw new Error('foundation authority index requires a dispatch identity')
   const projectionPath = foundationProjectionRelativePath(dispatchId)
   return [
-    `Write the complete assigned document at ${path} and end the turn normally.`,
+    `Write the complete assigned document at ${path}.`,
     getGameDocumentContract(path).upstreamSections.length
       ? `A compact navigation index is available at ${projectionPath}. It lists approved upstream ranges and digests without copying their bodies; native reads remain your decision.`
       : 'This document has no upstream document dependency.',
