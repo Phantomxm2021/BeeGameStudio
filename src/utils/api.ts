@@ -77,6 +77,19 @@ type BetaToolWithExtras = BetaTool & {
   eager_input_streaming?: boolean
 }
 
+export function shouldEnableFineGrainedToolStreaming(input: {
+  provider: ReturnType<typeof getAPIProvider>
+  firstPartyBaseUrl: boolean
+  featureEnabled: boolean
+  explicitlyEnabled: boolean
+}): boolean {
+  return (
+    input.provider === 'firstParty' &&
+    (input.explicitlyEnabled ||
+      (input.firstPartyBaseUrl && input.featureEnabled))
+  )
+}
+
 export type CacheScope = 'global' | 'org'
 export type SystemPromptBlock = {
   text: string
@@ -197,10 +210,17 @@ export async function toolToAPISchema(
     // Gated to direct api.anthropic.com: proxies (LiteLLM etc.) and Bedrock/Vertex
     // with Claude 4.5 reject this field with 400. See GH#32742, PR #21729.
     if (
-      getAPIProvider() === 'firstParty' &&
-      isFirstPartyAnthropicBaseUrl() &&
-      (getFeatureValue_CACHED_MAY_BE_STALE('tengu_fgts', false) ||
-        isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING))
+      shouldEnableFineGrainedToolStreaming({
+        provider: getAPIProvider(),
+        firstPartyBaseUrl: isFirstPartyAnthropicBaseUrl(),
+        featureEnabled: getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_fgts',
+          false,
+        ),
+        explicitlyEnabled: isEnvTruthy(
+          process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING,
+        ),
+      })
     ) {
       base.eager_input_streaming = true
     }
