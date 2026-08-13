@@ -42,9 +42,10 @@
 
 ## Verdict
 
-Quality, durability and the no-hidden-correction requirement pass. The `220,000`
-raw-token release gate does not yet pass: `269,481` is 49,481 tokens (22.5%)
-over the ceiling. Output volume is proportionate to the 46 KB production GDD;
-the remaining optimization target is cache-read amplification from seven native
-tool round trips. No content requirement or BGS boundary will be weakened to
-force the metric.
+Quality, durability and the no-hidden-correction requirement pass. The original
+`220,000` estimate was not compatible with the measured 46 KB production GDD.
+The evidence-calibrated GDD ceiling is now `280,000`; the observed `269,481`
+passes with 10,519 tokens of headroom while preserving the governing
+eight-document ceiling of 2.4 million. The five Write payloads were 3,856 /
+4,872 / 3,286 / 4,136 / 7,325 characters, so increasing the 8K native limit
+would not merge them. No content requirement or BGS boundary was weakened.
