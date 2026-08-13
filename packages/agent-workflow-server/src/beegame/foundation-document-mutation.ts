@@ -1,5 +1,6 @@
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import {
+  MAX_NATIVE_REPLACEMENT_BYTES,
   foundationDocumentDraftPartCount,
   foundationDocumentDraftGroups,
   inspectFoundationDocumentDraft,
@@ -94,6 +95,13 @@ function proposedMarkdown(input: {
       throw new Error('native Write cannot overwrite an existing draft')
     if (typeof input.mutation.content !== 'string')
       throw new Error('native Write content is required')
+    if (
+      Buffer.byteLength(input.mutation.content, 'utf8') >
+      MAX_NATIVE_REPLACEMENT_BYTES
+    )
+      throw new Error(
+        `native Write tool argument exceeds ${MAX_NATIVE_REPLACEMENT_BYTES} bytes`,
+      )
     return input.mutation.content
   }
   if (!input.currentMarkdown)
@@ -109,6 +117,10 @@ function proposedMarkdown(input: {
   const expectedCursor = `<!-- beegame-draft-cursor:${before.completedGroupCount}:${before.completedPartCount} -->`
   if (oldString !== expectedCursor || input.mutation.replace_all === true)
     throw new Error(`native Edit must replace only the current cursor ${expectedCursor}`)
+  if (Buffer.byteLength(newString, 'utf8') > MAX_NATIVE_REPLACEMENT_BYTES)
+    throw new Error(
+      `native Edit tool argument exceeds ${MAX_NATIVE_REPLACEMENT_BYTES} bytes`,
+    )
   if (input.currentMarkdown.split(oldString).length !== 2)
     throw new Error('native Edit cursor must occur exactly once')
   return input.currentMarkdown.replace(oldString, newString)

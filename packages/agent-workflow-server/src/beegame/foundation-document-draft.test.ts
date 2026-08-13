@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildFoundationDocumentDraftTurnPrompt,
+  foundationDocumentDraftPartCount,
   foundationDocumentDraftGroups,
   inspectFoundationDocumentDraft,
 } from './foundation-document-draft'
@@ -18,9 +19,7 @@ function firstGroupMarkdown(path: 'docs/GDD.md'): string {
     ...group.sections.flatMap(section => [
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
-      `<!-- beegame-part:${section.sectionId}:1 -->`,
       `Production authority for ${section.sectionId} with implementation and acceptance detail.`,
-      `<!-- beegame-part:${section.sectionId}:2 -->`,
       `Additional production decisions and acceptance criteria for ${section.sectionId}.`,
       '',
     ]),
@@ -45,6 +44,7 @@ describe('foundation document draft groups', () => {
     expect(groups.at(-1)?.productionMaterials).toEqual(
       contract.productionMaterials,
     )
+    expect(foundationDocumentDraftPartCount(groups[0]!)).toBe(1)
     const emptyProgress = inspectFoundationDocumentDraft(path, undefined)
     const firstPrompt = buildFoundationDocumentDraftTurnPrompt({
       path,
@@ -56,8 +56,10 @@ describe('foundation document draft groups', () => {
     expect(firstPrompt).toContain('Checkpoint 1: native Write creates only')
     expect(firstPrompt).toContain('<!-- beegame-draft-cursor:0:0 -->')
     expect(firstPrompt).toContain('Checkpoint 2, native Edit')
-    expect(firstPrompt).toContain('<!-- beegame-part:vision:1 -->')
-    expect(firstPrompt).toContain('Checkpoint 3, native Edit')
+    expect(firstPrompt).toContain('one complete bounded section')
+    expect(firstPrompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
+    expect(firstPrompt).not.toContain('beegame-part')
+    expect(firstPrompt).not.toContain('Checkpoint 3')
   })
 
   test('derives the next bounded turn from a durable on-disk cursor', () => {
@@ -75,10 +77,7 @@ describe('foundation document draft groups', () => {
     expect(progress.complete).toBe(false)
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
-    expect(prompt).toContain(
-      'continue bounded native file calls until this active group is complete',
-    )
-    expect(prompt).toContain('<!-- beegame-draft-cursor:1:1 -->')
+    expect(prompt).toContain('perform the single bounded native file call')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
     expect(prompt).toContain('3,600 UTF-8 bytes')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
@@ -87,7 +86,7 @@ describe('foundation document draft groups', () => {
     )
   })
 
-  test('resumes a partially streamed section from its durable chunk cursor', () => {
+  test('rejects obsolete partial-section cursors and markers', () => {
     const path = 'docs/GDD.md'
     const firstSection = foundationDocumentDraftGroups(path)[0]!.sections[0]!
     const markdown = [
@@ -99,30 +98,15 @@ describe('foundation document draft groups', () => {
       '',
       `<!-- beegame-section:${firstSection.sectionId} -->`,
       `## ${firstSection.title}`,
-      `<!-- beegame-part:${firstSection.sectionId}:1 -->`,
       'The first bounded native write has landed durably.',
       '',
       '<!-- beegame-draft-cursor:0:1 -->',
       '',
     ].join('\n')
 
-    const progress = inspectFoundationDocumentDraft(path, markdown)
-    const prompt = buildFoundationDocumentDraftTurnPrompt({
-      path,
-      progress,
-      projectionRelativePath:
-        '.beegame/workflow/document-projections/dispatch.json',
-    })
-
-    expect(progress).toMatchObject({
-      completedGroupCount: 0,
-      completedPartCount: 1,
-      complete: false,
-    })
-    expect(prompt).toContain('resume chunk 2/2')
-    expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
-    expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
-    expect(prompt).not.toContain('native Write')
+    expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
+      /cursor|part/i,
+    )
   })
 
   test('resumes after the title and summary landed without a section body', () => {
@@ -151,11 +135,12 @@ describe('foundation document draft groups', () => {
     })
     expect(prompt).not.toContain('native Write')
     expect(prompt).toContain('Checkpoint 1, native Edit')
-    expect(prompt).toContain('<!-- beegame-part:vision:1 -->')
-    expect(prompt).toContain('<!-- beegame-draft-cursor:0:1 -->')
+    expect(prompt).toContain('one complete bounded section')
+    expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
+    expect(prompt).not.toContain('beegame-part')
   })
 
-  test('bounds the preamble and first section chunk as independent checkpoints', () => {
+  test('bounds the preamble and complete first section as independent checkpoints', () => {
     const path = 'docs/GDD.md'
     const section = foundationDocumentDraftGroups(path)[0]!.sections[0]!
     const valid = [
@@ -165,14 +150,13 @@ describe('foundation document draft groups', () => {
       's'.repeat(3_000),
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
-      `<!-- beegame-part:${section.sectionId}:1 -->`,
       'p'.repeat(3_000),
-      '<!-- beegame-draft-cursor:0:1 -->',
+      '<!-- beegame-draft-cursor:1:0 -->',
     ].join('\n')
     expect(inspectFoundationDocumentDraft(path, valid)).toMatchObject({
       started: true,
-      completedGroupCount: 0,
-      completedPartCount: 1,
+      completedGroupCount: 1,
+      completedPartCount: 0,
     })
     expect(() =>
       inspectFoundationDocumentDraft(
@@ -212,9 +196,8 @@ describe('foundation document draft groups', () => {
       'Summary.',
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
-      `<!-- beegame-part:${section.sectionId}:1 -->`,
       'x'.repeat(3_601),
-      '<!-- beegame-draft-cursor:0:1 -->',
+      '<!-- beegame-draft-cursor:1:0 -->',
     ].join('\n')
 
     expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(

@@ -78,6 +78,38 @@ describe('native complete game document validation', () => {
     ).toThrow(/acceptance criteria/i)
   })
 
+  test('scopes repeated authored headings to their owning section', () => {
+    const path = 'docs/GDD.md'
+    const submission = completeTestSubmission(path)
+    const repeatedAcrossSections = renderTestCompleteGameDocument(path, {
+      ...submission,
+      sections: submission.sections.map((section, index) => ({
+        ...section,
+        body:
+          index < 2
+            ? `${section.body}\n\n### Acceptance Criteria\n\n- Observable section outcome ${index + 1}.`
+            : section.body,
+      })),
+    })
+    const repeatedInsideSection = renderTestCompleteGameDocument(path, {
+      ...submission,
+      sections: submission.sections.map((section, index) => ({
+        ...section,
+        body:
+          index === 0
+            ? `${section.body}\n\n### Acceptance Criteria\n\n- First observable outcome.\n\n### Acceptance Criteria\n\n- Duplicate heading in one section.`
+            : section.body,
+      })),
+    })
+
+    expect(
+      validateCompleteGameDocumentMarkdown(path, repeatedAcrossSections),
+    ).toBe(repeatedAcrossSections)
+    expect(() =>
+      validateCompleteGameDocumentMarkdown(path, repeatedInsideSection),
+    ).toThrow(/heading is duplicated/i)
+  })
+
   test('accepts a human document with the mechanical audit externalized', () => {
     const path = 'docs/GDD.md'
     const markdown = renderTestCompleteGameDocument(

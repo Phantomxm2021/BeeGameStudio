@@ -45,22 +45,13 @@ async function advanceDraft(
     ].join('\n')
   } else {
     const section = group.sections[0]!
-    replacement =
-      partIndex === 0
-        ? [
-            `<!-- beegame-section:${section.sectionId} -->`,
-            `## ${section.title}`,
-            `<!-- beegame-part:${section.sectionId}:1 -->`,
-            `Production authority for ${section.sectionId}, chunk one.`,
-            '',
-            `<!-- beegame-draft-cursor:${groupIndex}:1 -->`,
-          ].join('\n')
-        : [
-            `<!-- beegame-part:${section.sectionId}:2 -->`,
-            `Production authority for ${section.sectionId}, chunk two.`,
-            '',
-            `<!-- beegame-draft-cursor:${groupIndex + 1}:0 -->`,
-          ].join('\n')
+    replacement = [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `Production authority for ${section.sectionId} with complete implementation decisions and observable acceptance criteria.`,
+      '',
+      `<!-- beegame-draft-cursor:${groupIndex + 1}:0 -->`,
+    ].join('\n')
   }
   await writeFile(target, current.replace(cursor, replacement))
 }
@@ -90,7 +81,7 @@ describe('segmented initial document authoring', () => {
         sendWithDisplay: async (_sessionId: string, prompt: string) => {
           prompts.push(prompt)
           const groupMatch = /Active bounded document group (\d+)\//.exec(prompt)
-          const partMatch = /resume chunk (\d+)\//.exec(prompt)
+          const partMatch = /resume checkpoint (\d+)\//.exec(prompt)
           const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
           const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
           const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
@@ -151,13 +142,15 @@ describe('segmented initial document authoring', () => {
       )
       expect(prompts[0]).toContain('Active bounded document group 1/13')
       expect(prompts[0]).toContain(
-        'continue bounded native file calls until this active group is complete',
+        'perform each bounded native file call below in order',
       )
       expect(prompts[0]).toContain('Checkpoint 1: native Write creates only')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:0 -->')
-      expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:1 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
       expect(prompts[0]).toContain('3,600 UTF-8 bytes')
+      expect(
+        prompts.slice(0, -1).every(prompt => !prompt.includes('beegame-part')),
+      ).toBe(true)
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
       expect(terminal).toMatchObject({
         status: 'completed',

@@ -18,15 +18,20 @@ function preamble(cursor = '<!-- beegame-draft-cursor:0:0 -->') {
   ].join('\n')
 }
 
-function firstWrite(cursor = '<!-- beegame-draft-cursor:0:1 -->') {
+function completeSection(
+  body = 'Concrete production decisions and observable acceptance criteria.',
+  cursor = '<!-- beegame-draft-cursor:1:0 -->',
+) {
   return [
-    preamble('').trimEnd(),
     `<!-- beegame-section:${section.sectionId} -->`,
     `## ${section.title}`,
-    `<!-- beegame-part:${section.sectionId}:1 -->`,
-    'Concrete production decisions and observable acceptance criteria.',
+    body,
     cursor,
   ].join('\n')
+}
+
+function firstWrite() {
+  return [preamble('').trimEnd(), completeSection()].join('\n')
 }
 
 function authorize(input: {
@@ -68,18 +73,14 @@ describe('foundation document native mutation authority', () => {
     })
   })
 
-  test('requires Edit to replace only the current cursor and advance one part', () => {
-    const currentMarkdown = firstWrite()
+  test('requires Edit to replace only the current cursor and advance one section', () => {
+    const currentMarkdown = preamble()
     const valid = authorize({
       currentMarkdown,
       toolName: 'Edit',
       mutation: {
-        old_string: '<!-- beegame-draft-cursor:0:1 -->',
-        new_string: [
-          `<!-- beegame-part:${section.sectionId}:2 -->`,
-          'The final bounded decisions and acceptance criteria.',
-          '<!-- beegame-draft-cursor:1:0 -->',
-        ].join('\n'),
+        old_string: '<!-- beegame-draft-cursor:0:0 -->',
+        new_string: completeSection(),
       },
     })
     const rewritesPrefix = authorize({
@@ -95,6 +96,75 @@ describe('foundation document native mutation authority', () => {
     expect(rewritesPrefix).toMatchObject({
       behavior: 'deny',
       message: expect.stringMatching(/cursor/i),
+    })
+  })
+
+  test('rejects skipped sections and oversized section checkpoints', () => {
+    const currentMarkdown = preamble()
+    const secondSection = foundationDocumentDraftGroups(path)[1]!.sections[0]!
+    const skipped = authorize({
+      currentMarkdown,
+      toolName: 'Edit',
+      mutation: {
+        old_string: '<!-- beegame-draft-cursor:0:0 -->',
+        new_string: [
+          completeSection('', ''),
+          `<!-- beegame-section:${secondSection.sectionId} -->`,
+          `## ${secondSection.title}`,
+          'Skipped into a second section.',
+          '<!-- beegame-draft-cursor:2:0 -->',
+        ].join('\n'),
+      },
+    })
+    const oversized = authorize({
+      currentMarkdown,
+      toolName: 'Edit',
+      mutation: {
+        old_string: '<!-- beegame-draft-cursor:0:0 -->',
+        new_string: completeSection('x'.repeat(3_601)),
+      },
+    })
+
+    expect(skipped).toMatchObject({ behavior: 'deny' })
+    expect(oversized).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringMatching(/exceeds 3600 bytes/i),
+    })
+  })
+
+  test('counts the complete native tool argument against the byte limit', () => {
+    const currentMarkdown = preamble()
+    const fixedBytes = Buffer.byteLength(completeSection(''), 'utf8')
+    const newString = completeSection('x'.repeat(3_601 - fixedBytes))
+
+    expect(Buffer.byteLength(newString, 'utf8')).toBe(3_601)
+    expect(
+      authorize({
+        currentMarkdown,
+        toolName: 'Edit',
+        mutation: {
+          old_string: '<!-- beegame-draft-cursor:0:0 -->',
+          new_string: newString,
+        },
+      }),
+    ).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringMatching(/tool argument exceeds 3600 bytes/i),
+    })
+
+    const writePrefix = preamble('').trimEnd()
+    const oversizedWrite = `${writePrefix}\n${'x'.repeat(
+      3_601 - Buffer.byteLength(writePrefix, 'utf8') - 1,
+    )}`
+    expect(Buffer.byteLength(oversizedWrite, 'utf8')).toBe(3_601)
+    expect(
+      authorize({
+        toolName: 'Write',
+        mutation: { content: oversizedWrite },
+      }),
+    ).toMatchObject({
+      behavior: 'deny',
+      message: expect.stringMatching(/tool argument exceeds 3600 bytes/i),
     })
   })
 })

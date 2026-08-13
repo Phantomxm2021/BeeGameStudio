@@ -26,8 +26,8 @@ function authoredHeadings(markdown: string): Array<{ level: number; text: string
 function validateSectionHeadingStructure(
   sections: readonly { sectionId: string; body: string }[],
 ): void {
-  const seen = new Set<string>()
   for (const section of sections) {
+    const seen = new Set<string>()
     let priorLevel = 2
     for (const heading of authoredHeadings(section.body)) {
       if (heading.level < 3 || heading.level > 4)

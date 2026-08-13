@@ -7,8 +7,7 @@ import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 const SECTIONS_PER_TURN = 1
-const SECTION_PART_COUNT = 2
-const MAX_NATIVE_REPLACEMENT_BYTES = 3_600
+export const MAX_NATIVE_REPLACEMENT_BYTES = 3_600
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number
@@ -112,9 +111,7 @@ export function inspectFoundationDocumentDraft(
   const completedSections = groups
     .slice(0, completedGroupCount)
     .flatMap(group => group.sections)
-  const activeSections =
-    completedPartCount > 0 ? activeGroup?.sections ?? [] : []
-  const expectedSections = [...completedSections, ...activeSections]
+  const expectedSections = completedSections
   const actualSectionMarkers = nonBlankLines.filter(line =>
     line.startsWith('<!-- beegame-section:'),
   )
@@ -181,45 +178,13 @@ export function inspectFoundationDocumentDraft(
       expectedSectionMarkers[index + 1] ?? cursor,
     ),
   )
-  const actualPartMarkers = nonBlankLines.filter(line =>
-    line.startsWith('<!-- beegame-part:'),
-  )
-  const expectedPartMarkersBySection = expectedSections.map((section, index) => {
-    const completedParts =
-      index < completedSections.length
-        ? SECTION_PART_COUNT
-        : completedPartCount
-    return Array.from(
-      { length: completedParts },
-      (_, partIndex) =>
-        `<!-- beegame-part:${section.sectionId}:${partIndex + 1} -->`,
-    )
-  })
-  const expectedPartMarkers = expectedPartMarkersBySection.flat()
-  if (
-    actualPartMarkers.length !== expectedPartMarkers.length ||
-    expectedPartMarkers.some(
-      (marker, index) => actualPartMarkers[index] !== marker,
-    )
-  )
-    throw new Error('foundation document draft part order is invalid')
-  expectedPartMarkersBySection.forEach((sectionParts, sectionIndex) => {
-    sectionParts.forEach((marker, partIndex) => {
-      const nextBoundary =
-        sectionParts[partIndex + 1] ??
-        expectedSectionMarkers[sectionIndex + 1] ??
-        (expectedMaterials.length > 0
-          ? '<!-- beegame-production-materials -->'
-          : cursor)
-      assertBoundedDraftPart(
-        markdown,
-        partIndex === 0
-          ? expectedSectionMarkers[sectionIndex]!
-          : marker,
-        marker,
-        nextBoundary,
-      )
-    })
+  expectedSectionMarkers.forEach((marker, sectionIndex) => {
+    const nextBoundary =
+      expectedSectionMarkers[sectionIndex + 1] ??
+      (expectedMaterials.length > 0
+        ? '<!-- beegame-production-materials -->'
+        : cursor)
+    assertBoundedDraftPart(markdown, marker, marker, nextBoundary)
   })
   expectedMaterials.forEach((material, index) => {
     assertNonEmptyDraftRange(
@@ -263,7 +228,6 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   if (!group)
     throw new Error('foundation document draft group is unavailable')
   const partCount = foundationDocumentDraftPartCount(group)
-  const nextPart = input.progress.completedPartCount + 1
   const isFirst = group.groupIndex === 0
   const isFinal = group.groupIndex === groups.length - 1
   const currentCursor = `<!-- beegame-draft-cursor:${group.groupIndex}:${input.progress.completedPartCount} -->`
@@ -284,12 +248,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
               'Checkpoint 1: native Write creates only the document title, <!-- beegame-executive-summary -->, ## Executive Summary, one concise product summary, then <!-- beegame-draft-cursor:0:0 -->. Do not include the first section in this Write.',
             ]
           : []),
-        ...(input.progress.completedPartCount === 0
-          ? [
-              `${isFirst && !input.progress.started ? 'Checkpoint 2' : 'Checkpoint 1'}, native Edit: replace ${currentCursor} with the section marker and heading, <!-- beegame-part:${group.sections[0]?.sectionId}:1 -->, one bounded content chunk, and <!-- beegame-draft-cursor:${group.groupIndex}:1 -->.`,
-            ]
-          : []),
-        `Checkpoint ${isFirst && !input.progress.started ? 3 : 2}, native Edit: replace <!-- beegame-draft-cursor:${group.groupIndex}:1 --> with <!-- beegame-part:${group.sections[0]?.sectionId}:2 --> and the final bounded content chunk, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
+        `${isFirst && !input.progress.started ? 'Checkpoint 2' : 'Checkpoint 1'}, native Edit: replace ${currentCursor} with <!-- beegame-section:${group.sections[0]?.sectionId} -->, ## ${group.sections[0]?.title}, one complete bounded section body, then <!-- beegame-draft-cursor:${group.groupIndex + 1}:0 -->.`,
       ]
   const groupContract = {
     path: input.path,
@@ -316,8 +275,8 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
       : {}),
   }
   return [
-    `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume chunk ${nextPart}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
-    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}continue bounded native file calls until this active group is complete. Perform one native file call for each checkpoint below, in order, and start the next checkpoint immediately after the prior tool succeeds. Every content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes; never generate the whole section as one tool input.`,
+    `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume checkpoint ${input.progress.completedPartCount + 1}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
+    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}${isFinal || (isFirst && !input.progress.started) ? 'perform each bounded native file call below in order and start the next immediately after the prior tool succeeds' : 'perform the single bounded native file call below'}. Every content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes.`,
     ...checkpointInstructions,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'
@@ -333,7 +292,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
 export function foundationDocumentDraftPartCount(
   group: FoundationDocumentDraftGroup,
 ): number {
-  return group.productionMaterials.length || SECTION_PART_COUNT
+  return group.productionMaterials.length || 1
 }
 
 function assertNonEmptyDraftRange(
