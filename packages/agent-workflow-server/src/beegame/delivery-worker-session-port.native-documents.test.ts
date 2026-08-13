@@ -159,6 +159,15 @@ describe('native initial document authoring', () => {
       expect(count(prompts[0]!, 'end the turn normally')).toBe(1)
       expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
       expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
+      for (const protocolLiteral of [
+        '<!-- beegame-executive-summary -->',
+        '<!-- beegame-section:vision -->',
+        '<!-- beegame-production-materials -->',
+        '<!-- beegame-material:product-gameplay-overview -->',
+        '## Production Materials',
+        '### Product and Gameplay Overview',
+      ])
+        expect(count(prompts[0]!, protocolLiteral)).toBe(1)
       for (const materialId of [
         'product-gameplay-overview',
         'core-loop-diagram',

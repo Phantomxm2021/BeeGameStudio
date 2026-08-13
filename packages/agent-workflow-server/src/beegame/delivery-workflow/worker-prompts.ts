@@ -107,10 +107,45 @@ function formatContract(request: WorkerDispatchRequest): string {
         const {
           allowedUpstreamPaths: _allowedUpstreamPaths,
           upstreamSections: _upstreamSections,
+          sections,
+          productionMaterials,
           ...authorDocumentContract
         } = completeDocumentContract as Record<string, unknown>
         contractWithoutDuplicatedBrief.completeDocumentContract =
-          authorDocumentContract
+          {
+            ...authorDocumentContract,
+            mechanicalMarkdownProtocol: {
+              executiveSummary: {
+                marker: '<!-- beegame-executive-summary -->',
+                heading: '## Executive Summary',
+              },
+              sections: Array.isArray(sections)
+                ? sections.map(value => {
+                    const section = value as Record<string, unknown>
+                    return {
+                      ...section,
+                      marker: `<!-- beegame-section:${section.sectionId} -->`,
+                      heading: `## ${section.title}`,
+                    }
+                  })
+                : sections,
+              productionMaterials: {
+                marker: '<!-- beegame-production-materials -->',
+                heading: '## Production Materials',
+                entries: Array.isArray(productionMaterials)
+                  ? productionMaterials.map(value => {
+                      const material = value as Record<string, unknown>
+                      const { materialId, ...materialContract } = material
+                      return {
+                        ...materialContract,
+                        marker: `<!-- beegame-material:${materialId} -->`,
+                        heading: `### ${material.title}`,
+                      }
+                    })
+                  : productionMaterials,
+              },
+            },
+          }
       }
       if (
         request.contract.foundationDocumentPath !==
