@@ -33,6 +33,7 @@ function request(workspacePath: string, dispatchId: string) {
 function fakeSessions(input: {
   workspacePath: string
   body: string
+  correctionBody?: string
   prompts: string[]
   sessionIds: string[]
 }) {
@@ -64,7 +65,12 @@ function fakeSessions(input: {
     waitForWorkflowWorkerIdle: async () => undefined,
     sendWithDisplay: async (_sessionId: string, prompt: string) => {
       input.prompts.push(prompt)
-      await writeFile(join(input.workspacePath, 'docs/GDD.md'), input.body)
+      await writeFile(
+        join(input.workspacePath, 'docs/GDD.md'),
+        input.prompts.length > 1 && input.correctionBody
+          ? input.correctionBody
+          : input.body,
+      )
       events.push({ type: 'result', text: 'turn complete' })
     },
     stop: () => undefined,
@@ -151,7 +157,52 @@ describe('native initial document authoring', () => {
         port.waitForTerminal?.('dispatch-incomplete'),
       ).rejects.toThrow(/complete game document/i)
       expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toBe(body)
-      expect(prompts).toHaveLength(1)
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).toContain('complete game document sections')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('returns a mechanical validation failure to the same native session once', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-correction-'))
+    const prompts: string[] = []
+    const sessionIds: string[] = []
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const completeBody = renderTestCompleteGameDocument(
+        'docs/GDD.md',
+        completeTestSubmission('docs/GDD.md'),
+      )
+      const incompleteBody = completeBody.replace(
+        '<!-- beegame-material:product-gameplay-overview -->',
+        '',
+      )
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: fakeSessions({
+          workspacePath,
+          body: incompleteBody,
+          correctionBody: completeBody,
+          prompts,
+          sessionIds,
+        }) as never,
+        userId: 'user',
+      })
+
+      await port.start(request(workspacePath, 'dispatch-correction') as never)
+      await port.submit('dispatch-correction', 'original complete document prompt')
+      const terminal = await port.waitForTerminal?.('dispatch-correction')
+
+      expect(sessionIds).toHaveLength(1)
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).toContain(
+        'complete game document production materials must exactly match',
+      )
+      expect(prompts[1]).toContain('Fix only the reported mechanical contract failure')
+      expect(terminal).toMatchObject({
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+      })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

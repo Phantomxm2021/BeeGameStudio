@@ -443,6 +443,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
   const requests = new Map<string, WorkerDispatchRequest>()
   const documentAuthorityBlocks = new Map<string, string>()
   const eventOffsets = new Map<string, number>()
+  const documentValidationCorrections = new Set<string>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
@@ -692,6 +693,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         records.delete(dispatchId)
         requests.delete(dispatchId)
         eventOffsets.delete(dispatchId)
+        documentValidationCorrections.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -850,10 +852,35 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 `document author output is missing: ${targetPath}`,
               )
             if (isInitialFoundationDocumentAuthor(request)) {
-              validateCompleteGameDocumentMarkdown(
-                request.contract.foundationDocumentPath as never,
-                body,
-              )
+              try {
+                validateCompleteGameDocumentMarkdown(
+                  request.contract.foundationDocumentPath as never,
+                  body,
+                )
+              } catch (error) {
+                if (documentValidationCorrections.has(dispatchId)) throw error
+                documentValidationCorrections.add(dispatchId)
+                eventOffsets.set(dispatchId, sessionEvents(sessionId).length)
+                const reason =
+                  error instanceof Error
+                    ? error.message
+                    : 'complete document validation failed'
+                await input.sessions.sendWithDisplay(
+                  sessionId,
+                  [
+                    `The on-disk document failed the mechanical completion gate: ${reason}`,
+                    'Fix only the reported mechanical contract failure in the assigned document using Bee Game Studio native file tools, verify the final bytes, and end the turn normally.',
+                    'Do not rewrite completed content, do not change product authority, and do not create another file.',
+                  ].join('\n'),
+                  {
+                    taskType: taskTypeForWorker('document-author', 'initial'),
+                    displayKind: 'workflow_worker',
+                    ...(input.language ? { language: input.language } : {}),
+                  },
+                )
+                closedTurnDrained = false
+                continue
+              }
             }
             return createDeterministicCanonicalDocumentTerminal(
               request,
