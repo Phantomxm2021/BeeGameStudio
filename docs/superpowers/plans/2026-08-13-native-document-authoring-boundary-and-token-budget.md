@@ -382,7 +382,7 @@ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/worker-pro
 - [ ] **Step 2: Run typecheck**
 
 ```bash
-bun --cwd packages/agent-workflow-server run typecheck
+(cd packages/agent-workflow-server && bun run typecheck)
 ```
 
 - [ ] **Step 3: Audit forbidden mechanisms**
