@@ -47,6 +47,12 @@ describe('resource-content worker prompts', () => {
       'Do not buffer the complete document inside one file-tool argument',
     )
     expect(prompt).toContain('Create the target early')
+    expect(prompt).toContain(
+      'The first file mutation must persist the title and one coherent production-ready portion',
+    )
+    expect(prompt).toContain(
+      'must not attempt to carry the complete document body',
+    )
     expect(prompt).toContain('You still choose every native file operation')
     expect(prompt).not.toContain('chunk boundaries')
     expect(prompt).toContain('You own the read, write, edit, verification')
