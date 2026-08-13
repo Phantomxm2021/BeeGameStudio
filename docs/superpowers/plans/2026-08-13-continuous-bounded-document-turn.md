@@ -16,11 +16,11 @@
 - Modify: `packages/agent-workflow-server/src/beegame/foundation-document-draft.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/foundation-document-draft.ts`
 
-- [ ] **Step 1: Write the failing prompt tests**
+- [x] **Step 1: Write the failing prompt tests**
 
 Assert a fresh GDD prompt contains groups 1 through 13 in canonical order, explicitly requires each checkpoint to succeed before generating the next, and never authorizes a multi-section tool argument. Assert a cursor at group 6 produces only groups 7 through 13.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -30,15 +30,15 @@ bun test packages/agent-workflow-server/src/beegame/foundation-document-draft.te
 
 Expected: failure because the existing prompt contains only the active group.
 
-- [ ] **Step 3: Implement the ordered remaining-group prompt**
+- [x] **Step 3: Implement the ordered remaining-group prompt**
 
 Keep `FoundationDocumentDraftGroup`, `inspectFoundationDocumentDraft`, byte targets, and cursor syntax unchanged. Refactor prompt construction so it maps from the current group/part through the final production-material checkpoint. Each serialized item must contain exactly one canonical native `Write` or `Edit` mutation contract and retain the existing ownership, no-reread, no-frontmatter, and quality requirements.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run the Task 1 command. Expected: all prompt/draft tests pass.
 
-- [ ] **Step 5: Commit the prompt change**
+- [x] **Step 5: Commit the prompt change**
 
 ```bash
 git add packages/agent-workflow-server/src/beegame/foundation-document-draft.ts packages/agent-workflow-server/src/beegame/foundation-document-draft.test.ts
@@ -51,11 +51,11 @@ git commit -m "fix: author bounded document groups continuously"
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-worker-session-port.segmented-documents.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts`
 
-- [ ] **Step 1: Write the failing delivery tests**
+- [x] **Step 1: Write the failing delivery tests**
 
 Change the complete GDD fixture so one `sendWithDisplay` call applies every ordered checkpoint and assert exactly one prompt. Add a second test whose native turn applies only the first group and returns; assert `waitForTerminal` rejects the incomplete document and does not call `sendWithDisplay` again.
 
-- [ ] **Step 2: Run the delivery test and verify RED**
+- [x] **Step 2: Run the delivery test and verify RED**
 
 Run:
 
@@ -65,15 +65,15 @@ bun test packages/agent-workflow-server/src/beegame/delivery-worker-session-port
 
 Expected: the existing port sends one new prompt per incomplete group.
 
-- [ ] **Step 3: Fail closed after an incomplete native result**
+- [x] **Step 3: Fail closed after an incomplete native result**
 
 In the initial foundation-document terminal path, inspect the on-disk draft once after the worker is idle. If it is incomplete, throw a `WorkerNeedsActionError` containing the remaining cursor; do not update the event offset and do not call `sendWithDisplay` again. Preserve complete document terminal creation unchanged.
 
-- [ ] **Step 4: Run the delivery test and verify GREEN**
+- [x] **Step 4: Run the delivery test and verify GREEN**
 
 Run the Task 2 command. Expected: both one-turn completion and premature-end rejection pass.
 
-- [ ] **Step 5: Commit the delivery change**
+- [x] **Step 5: Commit the delivery change**
 
 ```bash
 git add packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.segmented-documents.test.ts
@@ -85,7 +85,7 @@ git commit -m "fix: require one continuous document turn"
 **Files:**
 - No production additions
 
-- [ ] **Step 1: Run foundation document regression suites**
+- [x] **Step 1: Run foundation document regression suites**
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/foundation-document-draft.test.ts packages/agent-workflow-server/src/beegame/foundation-document-mutation.test.ts packages/agent-workflow-server/src/beegame/complete-game-document.test.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.segmented-documents.test.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.complete-documents.test.ts
@@ -93,7 +93,7 @@ bun test packages/agent-workflow-server/src/beegame/foundation-document-draft.te
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run static verification**
+- [x] **Step 2: Run static verification**
 
 ```bash
 bun run typecheck
@@ -108,18 +108,23 @@ Expected: typecheck exits zero and diff check emits no output.
 - Runtime output only under canonical `Projects/users/...`
 - Create an exact evidence review under `docs/superpowers/reviews/` after acceptance
 
-- [ ] **Step 1: Start fixed ports**
+- [x] **Step 1: Start fixed ports**
 
 Start frontend `62173`, runtime `62174`, billing `62175`, skills `62176`, resources `62177`, then verify every listener.
 
 - [ ] **Step 2: Generate one fresh non-tower-defense GDD through Chrome**
 
+The fresh GDD completed and committed through Chrome. The Chrome control
+connection timed out while clicking Stop, so `LEVEL_SCENE_DESIGN.md` wrote
+9,111 bytes before the fixed-port stack was terminated. This run therefore
+does not claim the stricter “no second-document bytes” isolation condition.
+
 Use the configured Web React flow. Stop after GDD completion and before the second document writes content. Do not alter the test project to make the test pass.
 
-- [ ] **Step 3: Audit quality, durability, time, and tokens**
+- [x] **Step 3: Audit quality, durability, time, and tokens**
 
 Require the canonical validator and receipt digest to pass, all sections/materials to exist without repeated substantive content, each native mutation to advance exactly one checkpoint, no intermediate per-group terminal reply, no completed-prefix rewrite, and no response gap above 45 seconds. Compare raw token categories against the prior 1,660,669-token run and report any remaining dominant source.
 
-- [ ] **Step 4: Stop and diagnose on failure**
+- [x] **Step 4: Stop and diagnose on failure**
 
 If any acceptance condition fails, stop the workflow and services, inspect native raw/runtime/workflow logs, and identify the root cause before changing code or rerunning.
