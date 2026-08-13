@@ -17,6 +17,8 @@ export type FoundationAuthorityProjection = Readonly<{
   targetSectionIds: readonly string[]
   sources: readonly FoundationAuthoritySource[]
   byteLength: number
+  rangeCount: number
+  projectedLineCount: number
 }>
 
 function projectionPayload(input: {
@@ -120,5 +122,15 @@ export function projectFoundationAuthority(input: {
     targetSectionIds,
     sources: frozenSources,
     byteLength,
+    rangeCount: frozenSources.reduce(
+      (total, source) => total + source.sections.length,
+      0,
+    ),
+    projectedLineCount: frozenSources.reduce(
+      (total, source) =>
+        total +
+        source.sections.reduce((sum, section) => sum + section.lineCount, 0),
+      0,
+    ),
   })
 }

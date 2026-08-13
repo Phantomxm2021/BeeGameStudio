@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
@@ -33,6 +34,33 @@ function sources(paths: readonly FoundationDocumentPath[]) {
 }
 
 describe('foundation authority projection', () => {
+  test('keeps every downstream projection equal to its declared selector matrix', () => {
+    for (const targetPath of CANONICAL_FOUNDATION_DOCUMENTS.slice(1)) {
+      const contract = getGameDocumentContract(targetPath)
+      const input = sources(contract.upstreamSections.map(source => source.path))
+      const result = projectFoundationAuthority({ targetPath, ...input })
+      const declared = contract.upstreamSections.flatMap(source =>
+        source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
+      )
+      const projected = result.sources.flatMap(source =>
+        source.sections.map(section => `${source.path}#${section.sectionId}`),
+      )
+
+      expect(projected).toEqual(declared)
+      expect(result.rangeCount).toBe(declared.length)
+      expect(result.projectedLineCount).toBe(
+        result.sources.reduce(
+          (total, source) =>
+            total + source.sections.reduce((sum, section) => sum + section.lineCount, 0),
+          0,
+        ),
+      )
+      const serialized = canonicalFoundationAuthorityProjectionBytes(result)
+      expect(serialized).not.toContain('Owned source content for')
+      expect(serialized).not.toContain('Source materials are intentionally')
+    }
+  })
+
   test('projects only contracted Markdown section content in source order', () => {
     const targetPath = 'docs/UI_UX_SPEC.md'
     const input = sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'])

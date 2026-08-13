@@ -10,10 +10,16 @@ export type DocumentAuthoringMetrics = {
   toolCalls: Record<string, number>
   failedToolCalls: number
   permissionDenials: number
+  authorityProjection?: {
+    byteLength: number
+    rangeCount: number
+    projectedLineCount: number
+  }
 }
 
 export function documentAuthoringMetrics(
   events: readonly BeeGameEvent[],
+  authorityProjection?: DocumentAuthoringMetrics['authorityProjection'],
 ): DocumentAuthoringMetrics | undefined {
   const result = [...events].reverse().find(event => event.type === 'result')
   if (!result?.payload) return undefined
@@ -51,6 +57,7 @@ export function documentAuthoringMetrics(
     toolCalls,
     failedToolCalls: events.filter(event => event.type === 'tool.failed').length,
     permissionDenials,
+    ...(authorityProjection ? { authorityProjection } : {}),
   }
 }
 

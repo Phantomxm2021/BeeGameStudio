@@ -266,6 +266,14 @@ export const documentAuthorTerminalSchema = z
         toolCalls: z.record(z.string(), z.number().int().nonnegative()),
         failedToolCalls: z.number().int().nonnegative(),
         permissionDenials: z.number().int().nonnegative(),
+        authorityProjection: z
+          .object({
+            byteLength: z.number().int().nonnegative(),
+            rangeCount: z.number().int().nonnegative(),
+            projectedLineCount: z.number().int().nonnegative(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

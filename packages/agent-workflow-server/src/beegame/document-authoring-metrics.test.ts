@@ -50,7 +50,13 @@ describe('document authoring metrics', () => {
       }),
     ]
 
-    expect(documentAuthoringMetrics(events)).toEqual({
+    expect(
+      documentAuthoringMetrics(events, {
+        byteLength: 2_048,
+        rangeCount: 7,
+        projectedLineCount: 196,
+      }),
+    ).toEqual({
       inputTokens: 50_957,
       cacheReadTokens: 169_721,
       cacheCreationTokens: 0,
@@ -60,6 +66,11 @@ describe('document authoring metrics', () => {
       toolCalls: { Write: 4, Read: 1, Edit: 1 },
       failedToolCalls: 1,
       permissionDenials: 1,
+      authorityProjection: {
+        byteLength: 2_048,
+        rangeCount: 7,
+        projectedLineCount: 196,
+      },
     })
   })
 

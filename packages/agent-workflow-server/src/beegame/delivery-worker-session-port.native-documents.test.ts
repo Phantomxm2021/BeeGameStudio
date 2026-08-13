@@ -177,6 +177,11 @@ describe('native initial document authoring', () => {
           toolCalls: {},
           failedToolCalls: 0,
           permissionDenials: 0,
+          authorityProjection: {
+            byteLength: expect.any(Number),
+            rangeCount: 0,
+            projectedLineCount: 0,
+          },
         },
       })
     } finally {

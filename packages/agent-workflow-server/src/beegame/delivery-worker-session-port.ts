@@ -61,6 +61,7 @@ import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
+  type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 
@@ -226,6 +227,7 @@ function taskTypeForWorker(
 
 export async function buildDocumentAuthorAuthorityBlock(
   request: WorkerDispatchRequest,
+  onProjection?: (projection: FoundationAuthorityProjection) => void,
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
   if (request.contract.authoringMode === 'repair-planning') {
@@ -394,7 +396,8 @@ export async function buildDocumentAuthorAuthorityBlock(
       'initial document authority projection requires a dispatch identity',
     )
   const projectionRelativePath = foundationProjectionRelativePath(dispatchId)
-  await persistFoundationAuthorityIndex({ ...request, dispatchId })
+  const projection = await persistFoundationAuthorityIndex({ ...request, dispatchId })
+  onProjection?.(projection)
   return [
     expectedUpstreamPaths.length
       ? `BGS persisted a compact navigation index at ${projectionRelativePath}. It contains only approved source paths, exact line ranges and source digests, never proxied document content; native reads remain your decision.`
@@ -443,6 +446,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
   const records = new Map<string, DispatchRecord>()
   const requests = new Map<string, WorkerDispatchRequest>()
   const documentAuthorityBlocks = new Map<string, string>()
+  const documentAuthorityProjections = new Map<
+    string,
+    FoundationAuthorityProjection
+  >()
   const eventOffsets = new Map<string, number>()
   const documentValidationCorrections = new Set<string>()
   const sessionEvents = (sessionId: string) =>
@@ -591,7 +598,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
         : undefined
       const documentAuthorAuthorityBlock =
         documentAuthorityBlocks.get(dispatchId) ||
-        (request ? await buildDocumentAuthorAuthorityBlock(request) : '')
+        (request
+          ? await buildDocumentAuthorAuthorityBlock(request, projection =>
+              documentAuthorityProjections.set(dispatchId, projection),
+            )
+          : '')
       const nativeToolAutonomyInstruction =
         request && request.workerType !== 'document-author'
         ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
@@ -693,6 +704,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
+        documentAuthorityProjections.delete(dispatchId)
         eventOffsets.delete(dispatchId)
         documentValidationCorrections.delete(dispatchId)
       }
@@ -888,7 +900,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
             return createDeterministicCanonicalDocumentTerminal(
               request,
               targetPath,
-              documentAuthoringMetrics(sessionEvents(sessionId)),
+              documentAuthoringMetrics(
+                sessionEvents(sessionId),
+                projectionMetrics(documentAuthorityProjections.get(dispatchId)),
+              ),
             )
           }
           if (request)
@@ -967,7 +982,7 @@ async function initialFoundationDocumentTurnPrompt(
 
 async function persistFoundationAuthorityIndex(
   request: WorkerDispatchRequest,
-): Promise<string> {
+): Promise<FoundationAuthorityProjection> {
   if (!isInitialFoundationDocumentAuthor(request))
     throw new Error('foundation authority index requires an initial document author')
   const targetPath = request.contract.foundationDocumentPath as never
@@ -993,11 +1008,21 @@ async function persistFoundationAuthorityIndex(
     resolve(request.workspacePath, relativePath),
     canonicalFoundationAuthorityProjectionBytes(projection),
   )
-  return relativePath
+  return projection
 }
 
 function foundationProjectionRelativePath(dispatchId: string): string {
   return `.beegame/workflow/document-projections/${dispatchId}.json`
+}
+
+function projectionMetrics(projection?: FoundationAuthorityProjection) {
+  return projection
+    ? {
+        byteLength: projection.byteLength,
+        rangeCount: projection.rangeCount,
+        projectedLineCount: projection.projectedLineCount,
+      }
+    : undefined
 }
 
 function createDeterministicCanonicalDocumentTerminal(
