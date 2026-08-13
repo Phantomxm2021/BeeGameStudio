@@ -73,6 +73,32 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
+  test('creates a fresh native session for every document dispatch', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-sessions-'))
+    const sessionIds: string[] = []
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const sessions = fakeSessions({
+        workspacePath,
+        body: '',
+        prompts: [],
+        sessionIds,
+      })
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: sessions as never,
+        userId: 'user',
+      })
+
+      const first = await port.start(request(workspacePath, 'dispatch-one') as never)
+      const second = await port.start(request(workspacePath, 'dispatch-two') as never)
+
+      expect(first.sessionId).not.toBe(second.sessionId)
+      expect(new Set(sessionIds).size).toBe(2)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('completes one document in one unconstrained native session', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-'))
     const prompts: string[] = []
