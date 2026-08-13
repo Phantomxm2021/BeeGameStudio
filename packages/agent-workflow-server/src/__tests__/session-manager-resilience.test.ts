@@ -550,7 +550,18 @@ describe('BeeGame session runtime resilience', () => {
             toolUseID: 'project-write-request',
             toolName: 'Write',
             message: 'Write the assigned document',
-            input: { file_path: join(workspacePath, 'docs', 'GDD.md') },
+            input: {
+              file_path: join(workspacePath, 'docs', 'GDD.md'),
+              content: [
+                '# Complete document',
+                '<!-- beegame-section:product-definition -->',
+                '## Product Definition',
+                'First section body.',
+                '<!-- beegame-section:experience-pillars -->',
+                '## Experience Pillars',
+                'Second section body.',
+              ].join('\n'),
+            },
           })
         },
         stop: () => undefined,
@@ -565,6 +576,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'document-author',
+      workflowDocumentAuthorMode: 'initial',
       workflowAllowedPaths: ['docs/GDD.md'],
     })
 
@@ -587,6 +599,11 @@ describe('BeeGame session runtime resilience', () => {
       autoApproved: true,
       reason: 'project_workspace_file_mutation',
     })
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).not.toMatchObject({ reason: 'foundation_document_draft_checkpoint' })
     manager.dispose()
   })
 

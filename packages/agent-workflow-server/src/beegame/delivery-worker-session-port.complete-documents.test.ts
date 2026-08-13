@@ -62,7 +62,8 @@ describe('delivery worker complete document boundary', () => {
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain('persisted the small active-section authority index')
+      expect(block).toContain('navigation index')
+      expect(block).toContain('native reads remain your decision')
       expect(block).not.toContain('complete when the turn ends')
       expect(block).not.toContain('file-operation sequence')
       expect(block).not.toContain('completeDocumentContract')
@@ -109,7 +110,9 @@ describe('delivery worker complete document boundary', () => {
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')
       expect(block).not.toContain('STALE TARGET BODY')
-      expect(block).toContain('do not perform a separate target read')
+      expect(block).not.toContain('remaining bounded checkpoint sequence')
+      expect(block).not.toContain('do not perform a separate target read')
+      expect(block).not.toContain('Follow that sequence')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

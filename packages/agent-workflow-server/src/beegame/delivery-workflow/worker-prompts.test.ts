@@ -50,9 +50,14 @@ describe('resource-content worker prompts', () => {
       'Write the complete assigned Markdown document directly',
     )
     expect(prompt).not.toContain('Write one complete Markdown file')
-    expect(prompt).toContain(
-      'End the native turn only after the final bounded checkpoint succeeds',
-    )
+    expect(prompt).toContain('native file tools')
+    expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('checkpoint')
+    expect(prompt).not.toContain('beegame-draft-cursor')
+    expect(prompt).not.toContain('targetNativeReplacementBytes')
+    expect(prompt).not.toContain('maxNativeReplacementBytes')
+    expect(prompt).not.toContain('first native Write')
+    expect(prompt).not.toContain('every Edit must')
     expect(prompt).not.toContain('Finish only the active bounded group')
     expect(prompt).toContain('BGS does not intercept, proxy or synthesize file content')
     expect(prompt).toContain("Bee Game Studio's normal workflow")
