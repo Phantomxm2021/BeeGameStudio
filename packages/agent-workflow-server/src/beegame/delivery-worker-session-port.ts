@@ -865,6 +865,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
                   error instanceof Error
                     ? error.message
                     : 'complete document validation failed'
+                if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+                  await input.sessions.waitForWorkflowWorkerIdle(sessionId)
                 await input.sessions.sendWithDisplay(
                   sessionId,
                   [

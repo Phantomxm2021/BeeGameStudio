@@ -34,10 +34,12 @@ function fakeSessions(input: {
   workspacePath: string
   body: string
   correctionBody?: string
+  keepProcessingUntilIdle?: boolean
   prompts: string[]
   sessionIds: string[]
 }) {
   const events: Array<Record<string, unknown>> = []
+  let processing = false
   return {
     start: () => {
       const session = {
@@ -62,8 +64,12 @@ function fakeSessions(input: {
     }),
     events: () => events,
     isWorkflowWorkerOpen: () => true,
-    waitForWorkflowWorkerIdle: async () => undefined,
+    waitForWorkflowWorkerIdle: async () => {
+      processing = false
+    },
     sendWithDisplay: async (_sessionId: string, prompt: string) => {
+      if (processing) throw new Error('Session is already processing a prompt')
+      processing = true
       input.prompts.push(prompt)
       await writeFile(
         join(input.workspacePath, 'docs/GDD.md'),
@@ -72,6 +78,7 @@ function fakeSessions(input: {
           : input.body,
       )
       events.push({ type: 'result', text: 'turn complete' })
+      if (!input.keepProcessingUntilIdle) processing = false
     },
     stop: () => undefined,
     disposeWorkflowWorker: async () => undefined,
@@ -183,6 +190,7 @@ describe('native initial document authoring', () => {
           workspacePath,
           body: incompleteBody,
           correctionBody: completeBody,
+          keepProcessingUntilIdle: true,
           prompts,
           sessionIds,
         }) as never,
