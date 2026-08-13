@@ -43,17 +43,17 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('12 KiB')
     expect(prompt).not.toContain('four to six bounded native Write/Edit operations')
     expect(prompt).not.toContain('efficiency guidance, not a tool restriction')
-    expect(prompt).toContain(
+    expect(prompt).not.toContain(
       'Do not buffer the complete document inside one file-tool argument',
     )
-    expect(prompt).toContain('Create the target early')
-    expect(prompt).toContain(
+    expect(prompt).not.toContain('Create the target early')
+    expect(prompt).not.toContain(
       'The first file mutation must persist the title and one coherent production-ready portion',
     )
-    expect(prompt).toContain(
+    expect(prompt).not.toContain(
       'must not attempt to carry the complete document body',
     )
-    expect(prompt).toContain('You still choose every native file operation')
+    expect(prompt).not.toContain('BGS does not prescribe sections')
     expect(prompt).not.toContain('chunk boundaries')
     expect(prompt).toContain('You own the read, write, edit, verification')
     expect(prompt).not.toContain(

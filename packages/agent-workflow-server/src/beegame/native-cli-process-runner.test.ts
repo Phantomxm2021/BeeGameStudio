@@ -29,13 +29,13 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
-  test('enables the native provider stream recovery for every BGS process', () => {
+  test('does not override native provider stream recovery policy', () => {
     const env = nativeRuntimeEnvironment({
       ANTHROPIC_AUTH_TOKEN: 'selected-token',
     })
 
-    expect(env.CLAUDE_ENABLE_STREAM_WATCHDOG).toBe('1')
-    expect(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS).toBe('45000')
+    expect(env.CLAUDE_ENABLE_STREAM_WATCHDOG).toBeUndefined()
+    expect(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS).toBeUndefined()
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('selected-token')
   })
 
