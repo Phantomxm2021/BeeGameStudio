@@ -8,7 +8,7 @@ import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 const SECTIONS_PER_TURN = 1
 export const TARGET_NATIVE_REPLACEMENT_BYTES = 3_600
-export const MAX_NATIVE_REPLACEMENT_BYTES = 4_600
+export const MAX_NATIVE_REPLACEMENT_BYTES = 4_800
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number

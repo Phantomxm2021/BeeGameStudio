@@ -63,7 +63,7 @@ Run the Task 1 command. Expected: all tests pass.
 
 - [ ] **Step 1: Write the failing mutation test**
 
-Make the allowed mutation replace cursor `0:0` with one complete section and cursor `1:0`. Assert attempts to add two sections, exceed the measured 4,600-byte safety limit, or rewrite completed text are denied. Keep 3,600 bytes as the writing target.
+Make the allowed mutation replace cursor `0:0` with one complete section and cursor `1:0`. Assert attempts to add two sections, exceed the measured 4,800-byte safety limit, or rewrite completed text are denied. Keep 3,600 bytes as the writing target.
 
 ```ts
 expect(authorize({

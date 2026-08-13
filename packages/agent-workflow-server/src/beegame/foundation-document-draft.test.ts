@@ -80,7 +80,7 @@ describe('foundation document draft groups', () => {
     expect(prompt).toContain('perform the single bounded native file call')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
     expect(prompt).toContain('3,600 UTF-8 bytes')
-    expect(prompt).toContain('"maxNativeReplacementBytes":4600')
+    expect(prompt).toContain('"maxNativeReplacementBytes":4800')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
     expect(prompt).not.toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
@@ -162,9 +162,9 @@ describe('foundation document draft groups', () => {
     expect(() =>
       inspectFoundationDocumentDraft(
         path,
-        valid.replace('s'.repeat(3_000), 's'.repeat(4_601)),
+        valid.replace('s'.repeat(3_000), 's'.repeat(4_801)),
       ),
-    ).toThrow(/exceeds 4600 bytes/i)
+    ).toThrow(/exceeds 4800 bytes/i)
   })
 
   test('rejects skipped, duplicated, and trailing draft content', () => {
@@ -197,12 +197,12 @@ describe('foundation document draft groups', () => {
       'Summary.',
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
-      'x'.repeat(4_601),
+      'x'.repeat(4_801),
       '<!-- beegame-draft-cursor:1:0 -->',
     ].join('\n')
 
     expect(() => inspectFoundationDocumentDraft(path, markdown)).toThrow(
-      /exceeds 4600 bytes/i,
+      /exceeds 4800 bytes/i,
     )
   })
 })

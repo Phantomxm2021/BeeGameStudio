@@ -20,7 +20,7 @@ The existing delivery workflow remains the only path.
 
 1. One native session is kept for the complete GDD so terminology, mechanics, and production assumptions remain coherent.
 2. The preamble is written once with `Write`. Every semantic section and production material is then appended with exactly one `Edit` checkpoint.
-3. A checkpoint targets about 3,600 UTF-8 bytes and has a 4,600-byte mechanical hard limit. The section contract must request dense, production-useful content rather than a long narrative. It may not omit required decisions, tables, acceptance criteria, risks, dependencies, or implementation facts to meet the target. The hard limit is measured from Chrome evidence: natural first drafts of 4,359 and 3,705 bytes streamed within the 45-second response-gap limit, while rejecting them caused a full second generation and 86k–95k avoidable tokens per section.
+3. A checkpoint targets about 3,600 UTF-8 bytes and has a 4,800-byte mechanical hard limit. The section contract must request dense, production-useful content rather than a long narrative. It may not omit required decisions, tables, acceptance criteria, risks, dependencies, or implementation facts to meet the target. The hard limit is measured from Chrome evidence: natural first drafts up to 4,632 bytes streamed within the 45-second response-gap limit, while rejecting them caused a full second generation and 86k–95k avoidable tokens per section. It remains below the previously unstable 5,200-byte range.
 4. After a checkpoint succeeds, BGS advances the durable cursor to the next semantic group. It never asks the author to reread or rewrite the completed prefix.
 5. Heading uniqueness is validated inside the current section. Reusing a structural heading such as `验收标准` in a different section is valid. Duplicate headings inside one section remain invalid.
 6. Final validation remains global and fail-closed for section order, required section and material coverage, unfinished markers, malformed tables or diagrams, unresolved placeholders, missing acceptance criteria, and cursor/package identity.
@@ -39,7 +39,7 @@ There is no batch-authoring fallback, whole-document replacement path, prompt-on
 
 Implementation starts with failing tests and keeps the current production path:
 
-- Unit tests prove one checkpoint per normal section/material, the 3,600-byte target and 4,600-byte hard bound, cursor advancement, prefix immutability, and no fixed half-section markers.
+- Unit tests prove one checkpoint per normal section/material, the 3,600-byte target and 4,800-byte hard bound, cursor advancement, prefix immutability, and no fixed half-section markers.
 - Validator tests prove a repeated heading is allowed across sections but rejected inside the same section.
 - Session tests prove accepted groups resume without regeneration and validation errors preserve the current cursor.
 - A fixed-port Chrome Web React acceptance creates a new non-example project, requests only the GDD, and stops before the next document is authored.
