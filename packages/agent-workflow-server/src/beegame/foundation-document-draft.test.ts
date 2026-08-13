@@ -29,7 +29,7 @@ function firstGroupMarkdown(path: 'docs/GDD.md'): string {
 }
 
 describe('foundation document draft groups', () => {
-  test('bounds each native turn and keeps canonical contract order', () => {
+  test('serializes every remaining bounded checkpoint in canonical order', () => {
     const path = 'docs/GDD.md'
     const contract = getGameDocumentContract(path)
     const groups = foundationDocumentDraftGroups(path)
@@ -59,10 +59,23 @@ describe('foundation document draft groups', () => {
     expect(firstPrompt).toContain('one complete bounded section')
     expect(firstPrompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(firstPrompt).not.toContain('beegame-part')
-    expect(firstPrompt).not.toContain('Checkpoint 3')
+    expect(firstPrompt).toContain('Continuous bounded document sequence 1/13')
+    expect(firstPrompt).toContain('Continuous bounded document sequence 13/13')
+    expect(firstPrompt).toContain(
+      `<!-- beegame-section:${contract.sections.at(-1)!.sectionId} -->`,
+    )
+    expect(firstPrompt).toContain(
+      `<!-- beegame-material:${contract.productionMaterials.at(-1)!.materialId} -->`,
+    )
+    expect(firstPrompt.indexOf('Continuous bounded document sequence 1/13')).toBeLessThan(
+      firstPrompt.indexOf('Continuous bounded document sequence 13/13'),
+    )
+    expect(firstPrompt).toContain(
+      'Wait for each native tool result before generating the next checkpoint',
+    )
   })
 
-  test('derives the next bounded turn from a durable on-disk cursor', () => {
+  test('derives only the remaining sequence from a durable on-disk cursor', () => {
     const path = 'docs/GDD.md'
     const markdown = firstGroupMarkdown(path)
     const progress = inspectFoundationDocumentDraft(path, markdown)
@@ -77,13 +90,18 @@ describe('foundation document draft groups', () => {
     expect(progress.complete).toBe(false)
     expect(prompt).toContain('<!-- beegame-draft-cursor:1:0 -->')
     expect(prompt).toContain('native Edit')
-    expect(prompt).toContain('perform the single bounded native file call')
     expect(prompt).toContain('<!-- beegame-draft-cursor:2:0 -->')
     expect(prompt).toContain('3,600 UTF-8 bytes')
     expect(prompt).toContain('"maxNativeReplacementBytes":4800')
     expect(prompt).toContain('Do not rewrite or reread the completed prefix')
-    expect(prompt).not.toContain(
+    expect(prompt).toContain(
       getGameDocumentContract(path).sections.at(-1)!.sectionId,
+    )
+    expect(prompt).not.toContain(
+      `<!-- beegame-section:${getGameDocumentContract(path).sections[0]!.sectionId} -->`,
+    )
+    expect(prompt).toContain(
+      'Wait for each native tool result before generating the next checkpoint',
     )
   })
 
