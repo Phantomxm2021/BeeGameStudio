@@ -207,8 +207,11 @@ describe('native initial document authoring', () => {
         port.waitForTerminal?.('dispatch-incomplete'),
       ).rejects.toThrow(/complete game document/i)
       expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toBe(body)
+      expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(2)
       expect(prompts[1]).toContain('complete game document sections')
+      expect(prompts[1]).not.toContain(body)
+      expect(prompts[1]).not.toContain('rewrite the document')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -250,6 +253,8 @@ describe('native initial document authoring', () => {
         'complete game document production materials must exactly match',
       )
       expect(prompts[1]).toContain('Fix only the reported mechanical contract failure')
+      expect(prompts[1]).not.toContain(incompleteBody)
+      expect(prompts[1]).not.toContain('rewrite the document')
       expect(terminal).toMatchObject({
         status: 'completed',
         writtenPaths: ['docs/GDD.md'],
