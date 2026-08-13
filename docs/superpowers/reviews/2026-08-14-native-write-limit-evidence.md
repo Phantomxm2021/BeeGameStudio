@@ -25,8 +25,14 @@ React application rather than the current shell. They will run through the
 fixed-port Chrome acceptance so the user-selected model remains authoritative.
 Until nine valid results exist, the production limit remains 8192 characters.
 
+The fixed-port Chrome GDD run at the 8192-character production limit supplied
+the first application-authoritative baseline: 269,481 raw tokens, 5 Write + 2
+Read, 46,217 final bytes, 92,110 ms maximum stdout silence and canonical
+validation passed. It is not counted as one of the direct triple because the
+measurement candidates must remain fresh and comparable.
+
 | Limit | Run 1 | Run 2 | Run 3 | Verdict |
 | ---: | --- | --- | --- | --- |
-| 8192 | pending | pending | pending | retained by default |
+| 8192 | Chrome baseline: 269,481 raw, valid | pending | pending | retained by default |
 | 10240 | pending | pending | pending | no production change |
 | 12288 | pending | pending | pending | no production change |
