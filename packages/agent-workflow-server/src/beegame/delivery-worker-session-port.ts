@@ -62,6 +62,7 @@ import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
 } from './foundation-authority-projection'
+import { documentAuthoringMetrics } from './document-authoring-metrics'
 
 function reviewerSubmissionContract(
   request: WorkerDispatchRequest,
@@ -887,6 +888,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
             return createDeterministicCanonicalDocumentTerminal(
               request,
               targetPath,
+              documentAuthoringMetrics(sessionEvents(sessionId)),
             )
           }
           if (request)
@@ -1001,6 +1003,7 @@ function foundationProjectionRelativePath(dispatchId: string): string {
 function createDeterministicCanonicalDocumentTerminal(
   request: WorkerDispatchRequest,
   targetPath: string,
+  authoringMetrics?: ReturnType<typeof documentAuthoringMetrics>,
 ) {
   if (!isCanonicalDocumentAuthor(request))
     throw new Error('canonical document author contract is invalid')
@@ -1009,6 +1012,7 @@ function createDeterministicCanonicalDocumentTerminal(
     status: 'completed',
     writtenPaths: [targetPath],
     resolvedFindingIds: [],
+    ...(authoringMetrics ? { authoringMetrics } : {}),
   })
 }
 

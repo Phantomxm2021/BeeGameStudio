@@ -77,7 +77,21 @@ function fakeSessions(input: {
           ? input.correctionBody
           : input.body,
       )
-      events.push({ type: 'result', text: 'turn complete' })
+      events.push({
+        type: 'result',
+        text: 'turn complete',
+        payload: {
+          type: 'result',
+          num_turns: 1,
+          usage: {
+            input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+          },
+          permission_denials: [],
+        },
+      })
       if (!input.keepProcessingUntilIdle) processing = false
     },
     stop: () => undefined,
@@ -140,6 +154,11 @@ describe('native initial document authoring', () => {
       expect(terminal).toMatchObject({
         status: 'completed',
         writtenPaths: ['docs/GDD.md'],
+        authoringMetrics: {
+          toolCalls: {},
+          failedToolCalls: 0,
+          permissionDenials: 0,
+        },
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

@@ -255,6 +255,20 @@ export const documentAuthorTerminalSchema = z
     writtenPaths: z.array(z.string().min(1)),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
     repairPlan: documentRepairPlanSubmissionSchema.optional(),
+    authoringMetrics: z
+      .object({
+        inputTokens: z.number().int().nonnegative(),
+        cacheReadTokens: z.number().int().nonnegative(),
+        cacheCreationTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+        rawProcessedTokens: z.number().int().nonnegative(),
+        nativeTurns: z.number().int().nonnegative(),
+        toolCalls: z.record(z.string(), z.number().int().nonnegative()),
+        failedToolCalls: z.number().int().nonnegative(),
+        permissionDenials: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
