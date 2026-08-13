@@ -80,6 +80,13 @@ describe('bounded native Write input', () => {
     })
 
     expect(appendedThird).toBe(first + second + third)
+    expect(
+      FileWriteTool.inputSchema.safeParse({
+        file_path: '/tmp/document.md',
+        content: 'provider-compatible append',
+        mode: 'append',
+      }).success,
+    ).toBe(true)
   })
 
   test('rejects missing, stale, and replayed append targets without content change', () => {
@@ -145,6 +152,19 @@ describe('bounded native Write input', () => {
     )
 
     expect(readFileSync(path, 'utf8')).toBe('第一段\nsecond block\n')
+    await FileWriteTool.call(
+      {
+        file_path: path,
+        content: 'provider append without byte hint\n',
+        mode: 'append',
+      },
+      context,
+      (() => true) as never,
+      parentMessage,
+    )
+    expect(readFileSync(path, 'utf8')).toBe(
+      '第一段\nsecond block\nprovider append without byte hint\n',
+    )
     await expect(
       FileWriteTool.call(
         {
@@ -158,7 +178,9 @@ describe('bounded native Write input', () => {
         parentMessage,
       ),
     ).rejects.toThrow(/expected.*bytes/i)
-    expect(readFileSync(path, 'utf8')).toBe('第一段\nsecond block\n')
+    expect(readFileSync(path, 'utf8')).toBe(
+      '第一段\nsecond block\nprovider append without byte hint\n',
+    )
   })
 
   test('continues a newly created file for legacy calls without changing existing-file overwrite semantics', async () => {

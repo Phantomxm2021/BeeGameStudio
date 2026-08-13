@@ -75,13 +75,6 @@ const inputSchema = lazySchema(() =>
       expected_bytes: z.number().int().nonnegative().optional(),
     })
     .superRefine((input, ctx) => {
-      if (input.mode === 'append' && input.expected_bytes === undefined) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['expected_bytes'],
-          message: 'expected_bytes is required when mode is append',
-        })
-      }
       if (input.mode !== 'append' && input.expected_bytes !== undefined) {
         ctx.addIssue({
           code: 'custom',
@@ -156,7 +149,7 @@ export function resolveWriteContent(input: {
     throw new Error('Cannot append because the target file does not exist')
   }
   if (input.expectedBytes === undefined) {
-    throw new Error('expected_bytes is required for append')
+    return input.currentContent + input.content
   }
   const currentBytes =
     input.currentBytes ?? Buffer.byteLength(input.currentContent)
