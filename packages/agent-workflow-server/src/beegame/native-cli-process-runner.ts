@@ -61,6 +61,9 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
+    ...(input.workflowWorkerType === 'document-author'
+      ? ['--tools=Read,Write,Edit', '--allowedTools=Read,Write,Edit']
+      : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }

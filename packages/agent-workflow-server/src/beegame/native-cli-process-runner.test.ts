@@ -117,6 +117,19 @@ describe('native CLI process runner', () => {
     })).toContain(`--resume=${nativeSessionId}`)
   })
 
+  test('limits a document author process to native document file tools', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_route_only',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-author',
+    })
+
+    expect(command).toContain('--tools=Read,Write,Edit')
+    expect(command).toContain('--allowedTools=Read,Write,Edit')
+  })
+
   test('forwards native messages and resolves only on result', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []
