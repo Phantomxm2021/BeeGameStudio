@@ -55,7 +55,7 @@ describe('resource-content worker prompts', () => {
     )
     expect(prompt).not.toContain('BGS does not prescribe sections')
     expect(prompt).not.toContain('chunk boundaries')
-    expect(prompt).toContain('You own the read, write, edit, verification')
+    expect(prompt).not.toContain('You own the read, write, edit, verification')
     expect(prompt).not.toContain(
       'Write the complete assigned Markdown document directly',
     )
@@ -75,7 +75,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('document_parts_prepared')
     expect(prompt).not.toContain('Do not write or edit the assigned path directly')
     expect(prompt).toContain('Do not claim verified license')
-    expect(prompt).toContain('Save meaningful progress during long authoring work')
+    expect(prompt).not.toContain('choose the operation count, size, and order')
+    expect(prompt).not.toContain('Save meaningful progress during long authoring work')
+    expect(prompt).not.toContain('one custom payload')
     expect(prompt).not.toContain(
       'End each bounded turn normally after its write succeeds',
     )
