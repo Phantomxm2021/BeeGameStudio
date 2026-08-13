@@ -50,15 +50,46 @@ import {
   userFacingName,
 } from './UI.js'
 
+export const MAX_WRITE_CONTENT_CHARS = 8_192
+
 const inputSchema = lazySchema(() =>
-  z.strictObject({
-    file_path: z
-      .string()
-      .describe(
-        'The absolute path to the file to write (must be absolute, not relative)',
-      ),
-    content: z.string().describe('The content to write to the file'),
-  }),
+  z
+    .strictObject({
+      file_path: z
+        .string()
+        .describe(
+          'The absolute path to the file to write (must be absolute, not relative)',
+        ),
+      content: z
+        .string()
+        .max(MAX_WRITE_CONTENT_CHARS)
+        .describe(
+          `The bounded content for this operation (maximum ${MAX_WRITE_CONTENT_CHARS} characters)`,
+        ),
+      mode: z
+        .enum(['overwrite', 'append'])
+        .optional()
+        .describe(
+          'Write behavior: overwrite replaces the entire file; append preserves existing bytes and adds content at the end',
+        ),
+      expected_bytes: z.number().int().nonnegative().optional(),
+    })
+    .superRefine((input, ctx) => {
+      if (input.mode === 'append' && input.expected_bytes === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expected_bytes'],
+          message: 'expected_bytes is required when mode is append',
+        })
+      }
+      if (input.mode !== 'append' && input.expected_bytes !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expected_bytes'],
+          message: 'expected_bytes is only valid when mode is append',
+        })
+      }
+    }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
 
@@ -87,6 +118,55 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 export type FileWriteToolInput = InputSchema
+
+const filesCreatedByWriteState = new WeakMap<object, Set<string>>()
+
+function createdFilesFor(readFileState: object): Set<string> {
+  let files = filesCreatedByWriteState.get(readFileState)
+  if (!files) {
+    files = new Set<string>()
+    filesCreatedByWriteState.set(readFileState, files)
+  }
+  return files
+}
+
+function effectiveWriteMode(
+  readFileState: object,
+  fullFilePath: string,
+  mode: 'overwrite' | 'append' | undefined,
+  content: string,
+): 'overwrite' | 'append' {
+  if (mode) return mode
+  return fullFilePath.toLowerCase().endsWith('.md') &&
+    createdFilesFor(readFileState).has(fullFilePath) &&
+    !content.split('\n').some((line) => line.startsWith('# '))
+    ? 'append'
+    : 'overwrite'
+}
+
+export function resolveWriteContent(input: {
+  currentContent: string | null
+  currentBytes?: number
+  content: string
+  mode?: 'overwrite' | 'append'
+  expectedBytes?: number
+}): string {
+  if (input.mode !== 'append') return input.content
+  if (input.currentContent === null) {
+    throw new Error('Cannot append because the target file does not exist')
+  }
+  if (input.expectedBytes === undefined) {
+    throw new Error('expected_bytes is required for append')
+  }
+  const currentBytes =
+    input.currentBytes ?? Buffer.byteLength(input.currentContent)
+  if (currentBytes !== input.expectedBytes) {
+    throw new Error(
+      `Append expected ${input.expectedBytes} bytes but found ${currentBytes} bytes`,
+    )
+  }
+  return input.currentContent + input.content
+}
 
 export const FileWriteTool = buildTool({
   name: FILE_WRITE_TOOL_NAME,
@@ -147,14 +227,17 @@ export const FileWriteTool = buildTool({
     // shown — phantom. Under-count: tool_use already indexes file_path.
     return ''
   },
-  async validateInput({ file_path, content }, toolUseContext: ToolUseContext) {
+  async validateInput(
+    { file_path, content, mode, expected_bytes },
+    toolUseContext: ToolUseContext,
+  ) {
     const fullFilePath = expandPath(file_path)
-
-    // Reject writes to team memory files that contain secrets
-    const secretError = checkTeamMemSecrets(fullFilePath, content)
-    if (secretError) {
-      return { result: false, message: secretError, errorCode: 0 }
-    }
+    const resolvedMode = effectiveWriteMode(
+      toolUseContext.readFileState,
+      fullFilePath,
+      mode,
+      content,
+    )
 
     // Check if path should be ignored based on permission settings
     const appState = toolUseContext.getAppState()
@@ -182,6 +265,7 @@ export const FileWriteTool = buildTool({
 
     const fs = getFsImplementation()
     let fileMtimeMs: number
+    let fileSize: number
     try {
       const fileStat = await fs.stat(fullFilePath)
       // 预检：如果路径已是一个存在的目录，及时拒绝并给出指引
@@ -196,11 +280,40 @@ export const FileWriteTool = buildTool({
         }
       }
       fileMtimeMs = fileStat.mtimeMs
+      fileSize = fileStat.size
     } catch (e) {
       if (isENOENT(e)) {
+        if (resolvedMode === 'append') {
+          return {
+            result: false,
+            message: 'Cannot append because the target file does not exist.',
+            errorCode: 6,
+          }
+        }
+        const secretError = checkTeamMemSecrets(fullFilePath, content)
+        if (secretError) {
+          return { result: false, message: secretError, errorCode: 0 }
+        }
         return { result: true }
       }
       throw e
+    }
+
+    if (mode === 'append' && fileSize !== expected_bytes) {
+      return {
+        result: false,
+        message: `Append expected ${expected_bytes} bytes but found ${fileSize} bytes. Read the file again and retry with its current byte length.`,
+        errorCode: 6,
+      }
+    }
+
+    const resultingContent =
+      resolvedMode === 'append'
+        ? readFileSyncWithMetadata(fullFilePath).content + content
+        : content
+    const secretError = checkTeamMemSecrets(fullFilePath, resultingContent)
+    if (secretError) {
+      return { result: false, message: secretError, errorCode: 0 }
     }
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
@@ -222,7 +335,7 @@ export const FileWriteTool = buildTool({
     return { result: true }
   },
   async call(
-    { file_path, content },
+    { file_path, content, mode, expected_bytes },
     { readFileState, updateFileHistoryState, dynamicSkillDirTriggers },
     _,
     parentMessage,
@@ -297,13 +410,51 @@ export const FileWriteTool = buildTool({
 
     const enc = meta?.encoding ?? 'utf8'
     const oldContent = meta?.content ?? null
+    const resolvedMode = effectiveWriteMode(
+      readFileState,
+      fullFilePath,
+      mode,
+      content,
+    )
+    if (
+      resolvedMode === 'append' &&
+      mode === undefined &&
+      oldContent !== null &&
+      oldContent.endsWith(content)
+    ) {
+      throw new Error(
+        'Rejected replayed append because the file already ends with this content',
+      )
+    }
+    const nextContent = resolveWriteContent({
+      currentContent: oldContent,
+      currentBytes:
+        meta === null
+          ? undefined
+          : getFsImplementation().statSync(fullFilePath).size,
+      content,
+      mode: resolvedMode,
+      expectedBytes:
+        resolvedMode === 'append'
+          ? (expected_bytes ?? getFsImplementation().statSync(fullFilePath).size)
+          : undefined,
+    })
 
     // Write is a full content replacement — the model sent explicit line endings
     // in `content` and meant them. Do not rewrite them. Previously we preserved
     // the old file's line endings (or sampled the repo via ripgrep for new
     // files), which silently corrupted e.g. bash scripts with \r on Linux when
     // overwriting a CRLF file or when binaries in cwd poisoned the repo sample.
-    writeTextContent(fullFilePath, content, enc, 'LF')
+    writeTextContent(
+      fullFilePath,
+      nextContent,
+      enc,
+      resolvedMode === 'append' ? (meta?.lineEndings ?? 'LF') : 'LF',
+    )
+
+    if (oldContent === null) {
+      createdFilesFor(readFileState).add(fullFilePath)
+    }
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()
@@ -311,7 +462,7 @@ export const FileWriteTool = buildTool({
       // Clear previously delivered diagnostics so new ones will be shown
       clearDeliveredDiagnosticsForFile(`file://${fullFilePath}`)
       // didChange: Content has been modified
-      lspManager.changeFile(fullFilePath, content).catch((err: Error) => {
+      lspManager.changeFile(fullFilePath, nextContent).catch((err: Error) => {
         logForDebugging(
           `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
         )
@@ -327,11 +478,11 @@ export const FileWriteTool = buildTool({
     }
 
     // Notify VSCode about the file change for diff view
-    notifyVscodeFileUpdated(fullFilePath, oldContent, content)
+    notifyVscodeFileUpdated(fullFilePath, oldContent, nextContent)
 
     // Update read timestamp, to invalidate stale writes
     readFileState.set(fullFilePath, {
-      content,
+      content: nextContent,
       timestamp: getFileModificationTime(fullFilePath),
       offset: undefined,
       limit: undefined,
@@ -364,7 +515,7 @@ export const FileWriteTool = buildTool({
         edits: [
           {
             old_string: oldContent,
-            new_string: content,
+            new_string: nextContent,
             replace_all: false,
           },
         ],
@@ -373,7 +524,7 @@ export const FileWriteTool = buildTool({
       const data = {
         type: 'update' as const,
         filePath: file_path,
-        content,
+        content: nextContent,
         structuredPatch: patch,
         originalFile: oldContent,
         ...(gitDiff && { gitDiff }),
@@ -396,14 +547,14 @@ export const FileWriteTool = buildTool({
     const data = {
       type: 'create' as const,
       filePath: file_path,
-      content,
+      content: nextContent,
       structuredPatch: [],
       originalFile: null,
       ...(gitDiff && { gitDiff }),
     }
 
     // For creation of new files, count all lines as additions, right before yielding the result
-    countLinesChanged([], content)
+    countLinesChanged([], nextContent)
 
     logFileOperation({
       operation: 'write',

@@ -16,11 +16,11 @@
 - Modify: `packages/builtin-tools/src/tools/FileWriteTool/FileWriteTool.test.ts`
 - Modify: `packages/builtin-tools/src/tools/FileWriteTool/FileWriteTool.ts`
 
-- [ ] Add a test that `FileWriteTool.inputSchema.safeParse()` rejects 16,385 characters and accepts 16,384 characters.
-- [ ] Add a test that the generated tool JSON Schema contains `maxLength: 16384` for `content`.
-- [ ] Run the focused test and confirm RED because content is currently unbounded.
-- [ ] Add the exported `MAX_WRITE_CONTENT_CHARS` constant and `z.string().max(MAX_WRITE_CONTENT_CHARS)`.
-- [ ] Run the focused test and confirm GREEN.
+- [x] Add a test that `FileWriteTool.inputSchema.safeParse()` rejects 8,193 characters and accepts 8,192 characters.
+- [x] Add a test that the generated tool JSON Schema contains `maxLength: 8192` for `content`.
+- [x] Run the focused test and confirm RED because content is currently unbounded.
+- [x] Add the exported `MAX_WRITE_CONTENT_CHARS` constant and `z.string().max(MAX_WRITE_CONTENT_CHARS)`.
+- [x] Run the focused test and confirm GREEN.
 
 ### Task 2: Add optimistic append semantics
 
@@ -29,13 +29,13 @@
 - Modify: `packages/builtin-tools/src/tools/FileWriteTool/FileWriteTool.ts`
 - Modify: `packages/builtin-tools/src/tools/FileWriteTool/prompt.ts`
 
-- [ ] Add a failing test that three bounded calls produce the exact bytes of one larger reference string.
-- [ ] Add failing tests for missing target, wrong `expected_bytes`, and replayed append; each must leave bytes unchanged.
-- [ ] Add optional `mode: "overwrite" | "append"` and `expected_bytes` fields, with cross-field validation requiring the byte count for append.
-- [ ] In validation, read the current file for append, check `Buffer.byteLength`, and scan the resulting complete content for secrets.
-- [ ] In call, form `existing + content` only after validation and pass the result through the existing atomic write/history/diff path.
-- [ ] Update the native Write description with bounded overwrite/append usage and optimistic byte-count semantics.
-- [ ] Run focused tests and confirm GREEN.
+- [x] Add a failing test that three bounded calls produce the exact bytes of one larger reference string.
+- [x] Add failing tests for missing target, wrong `expected_bytes`, and replayed append; each must leave bytes unchanged.
+- [x] Add optional `mode: "overwrite" | "append"` and `expected_bytes` fields, with cross-field validation requiring the byte count for append.
+- [x] In validation, read the current file for append, check `Buffer.byteLength`, and scan the resulting complete content for secrets.
+- [x] In call, form `existing + content` only after validation and pass the result through the existing atomic write/history/diff path.
+- [x] Update the native Write description with bounded overwrite/append usage and optimistic byte-count semantics.
+- [x] Run focused tests and confirm GREEN.
 
 ### Task 3: Preserve core integrations
 
@@ -43,11 +43,11 @@
 - Modify only if a failing compatibility test requires it: `src/services/tools/toolExecution.ts`
 - Test: existing FileWrite, permission, hook and message suites.
 
-- [ ] Run all FileWriteTool tests.
+- [x] Run all FileWriteTool tests.
 - [ ] Run tool execution and session file access hook tests.
-- [ ] Run `bun run typecheck`.
-- [ ] Build the native distribution used by Bee Game Studio.
-- [ ] Run `git diff --check` and inspect the diff for any document-specific or BGS content-control logic.
+- [x] Run `bun run typecheck`.
+- [x] Build the native distribution used by Bee Game Studio.
+- [x] Run `git diff --check` and inspect the diff for any document-specific or BGS content-control logic.
 
 ### Task 4: Production acceptance
 
@@ -60,4 +60,3 @@
 - [ ] Verify the GDD with `validateCompleteGameDocumentMarkdown`.
 - [ ] Record Write call count, largest per-call content, elapsed time, input/cache/output tokens and any API stalls.
 - [ ] Compare against the prior 32,316-byte direct success and the zero-byte stalled production run.
-
