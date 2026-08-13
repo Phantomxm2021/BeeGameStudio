@@ -7,7 +7,8 @@ import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 const SECTIONS_PER_TURN = 1
-export const MAX_NATIVE_REPLACEMENT_BYTES = 3_600
+export const TARGET_NATIVE_REPLACEMENT_BYTES = 3_600
+export const MAX_NATIVE_REPLACEMENT_BYTES = 4_600
 
 export type FoundationDocumentDraftGroup = Readonly<{
   groupIndex: number
@@ -259,6 +260,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
     currentPart: input.progress.completedPartCount,
     started: input.progress.started,
     partCount,
+    targetNativeReplacementBytes: TARGET_NATIVE_REPLACEMENT_BYTES,
     maxNativeReplacementBytes: MAX_NATIVE_REPLACEMENT_BYTES,
     sections: group.sections,
     productionMaterials: group.productionMaterials,
@@ -276,7 +278,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
   }
   return [
     `Active bounded document group ${group.groupIndex + 1}/${groups.length}, resume checkpoint ${input.progress.completedPartCount + 1}/${partCount}. Author only this group at ${input.path}; do not author later groups in this turn.`,
-    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}${isFinal || (isFirst && !input.progress.started) ? 'perform each bounded native file call below in order and start the next immediately after the prior tool succeeds' : 'perform the single bounded native file call below'}. Every content or new_string value must be at most ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes.`,
+    `${contract.upstreamSections.length && input.progress.completedPartCount === 0 ? `Read the small authority index ${input.projectionRelativePath} once. Select only the upstream sections directly required for this active section and read each exact source range by its startLine and lineCount; never read a whole upstream document. Then ` : ''}${isFinal || (isFirst && !input.progress.started) ? 'perform each bounded native file call below in order and start the next immediately after the prior tool succeeds' : 'perform the single bounded native file call below'}. Target about ${TARGET_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes for each content or new_string value; the measured safe hard limit is ${MAX_NATIVE_REPLACEMENT_BYTES.toLocaleString('en-US')} UTF-8 bytes.`,
     ...checkpointInstructions,
     isFirst
       ? 'Do not reread the target after writing this bounded group.'

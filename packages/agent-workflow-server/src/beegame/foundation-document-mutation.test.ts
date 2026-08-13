@@ -121,23 +121,37 @@ describe('foundation document native mutation authority', () => {
       toolName: 'Edit',
       mutation: {
         old_string: '<!-- beegame-draft-cursor:0:0 -->',
-        new_string: completeSection('x'.repeat(3_601)),
+        new_string: completeSection('x'.repeat(4_601)),
       },
     })
 
     expect(skipped).toMatchObject({ behavior: 'deny' })
     expect(oversized).toMatchObject({
       behavior: 'deny',
-      message: expect.stringMatching(/exceeds 3600 bytes/i),
+      message: expect.stringMatching(/exceeds 4600 bytes/i),
     })
   })
 
-  test('counts the complete native tool argument against the byte limit', () => {
+  test('allows measured natural output but rejects tool arguments beyond the safe limit', () => {
     const currentMarkdown = preamble()
     const fixedBytes = Buffer.byteLength(completeSection(''), 'utf8')
-    const newString = completeSection('x'.repeat(3_601 - fixedBytes))
+    const measuredNaturalOutput = completeSection(
+      'x'.repeat(4_359 - fixedBytes),
+    )
+    const newString = completeSection('x'.repeat(4_601 - fixedBytes))
 
-    expect(Buffer.byteLength(newString, 'utf8')).toBe(3_601)
+    expect(Buffer.byteLength(measuredNaturalOutput, 'utf8')).toBe(4_359)
+    expect(
+      authorize({
+        currentMarkdown,
+        toolName: 'Edit',
+        mutation: {
+          old_string: '<!-- beegame-draft-cursor:0:0 -->',
+          new_string: measuredNaturalOutput,
+        },
+      }),
+    ).toEqual({ behavior: 'allow' })
+    expect(Buffer.byteLength(newString, 'utf8')).toBe(4_601)
     expect(
       authorize({
         currentMarkdown,
@@ -149,14 +163,14 @@ describe('foundation document native mutation authority', () => {
       }),
     ).toMatchObject({
       behavior: 'deny',
-      message: expect.stringMatching(/tool argument exceeds 3600 bytes/i),
+      message: expect.stringMatching(/tool argument exceeds 4600 bytes/i),
     })
 
     const writePrefix = preamble('').trimEnd()
     const oversizedWrite = `${writePrefix}\n${'x'.repeat(
-      3_601 - Buffer.byteLength(writePrefix, 'utf8') - 1,
+      4_601 - Buffer.byteLength(writePrefix, 'utf8') - 1,
     )}`
-    expect(Buffer.byteLength(oversizedWrite, 'utf8')).toBe(3_601)
+    expect(Buffer.byteLength(oversizedWrite, 'utf8')).toBe(4_601)
     expect(
       authorize({
         toolName: 'Write',
@@ -164,7 +178,7 @@ describe('foundation document native mutation authority', () => {
       }),
     ).toMatchObject({
       behavior: 'deny',
-      message: expect.stringMatching(/tool argument exceeds 3600 bytes/i),
+      message: expect.stringMatching(/tool argument exceeds 4600 bytes/i),
     })
   })
 })
