@@ -94,6 +94,8 @@ function formatContract(request: WorkerDispatchRequest): string {
       request.contract.documentSet === 'foundation' &&
       request.contract.authoringMode === 'initial'
     if (initialFoundationAuthor) {
+      delete contractWithoutDuplicatedBrief.maxNativeWriteContentChars
+      delete contractWithoutDuplicatedBrief.nativeWriteLimit
       delete contractWithoutDuplicatedBrief.upstreamDocumentPaths
       const completeDocumentContract =
         contractWithoutDuplicatedBrief.completeDocumentContract

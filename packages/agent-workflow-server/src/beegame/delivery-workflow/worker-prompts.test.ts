@@ -128,6 +128,28 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('"upstreamSections"')
   })
 
+  test('never forwards native Write limit controls from workflow contracts', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      revision: 'revision',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+        maxNativeWriteContentChars: 12_288,
+        nativeWriteLimit: 12_288,
+      },
+    } as never)
+
+    expect(prompt).not.toContain('maxNativeWriteContentChars')
+    expect(prompt).not.toContain('nativeWriteLimit')
+    expect(prompt).not.toContain('12288')
+  })
+
   test('instructs one JSON/YAML resource lane', () => {
     const request: WorkerDispatchRequest = {
       runId: 'run',
