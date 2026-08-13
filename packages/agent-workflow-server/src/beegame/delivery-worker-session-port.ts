@@ -57,14 +57,11 @@ import {
 } from './native-resource-content-tool'
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
 } from './foundation-authority-projection'
-import {
-  buildFoundationDocumentDraftTurnPrompt,
-  inspectFoundationDocumentDraft,
-} from './foundation-document-draft'
 
 function reviewerSubmissionContract(
   request: WorkerDispatchRequest,
@@ -396,20 +393,13 @@ export async function buildDocumentAuthorAuthorityBlock(
       'initial document authority projection requires a dispatch identity',
     )
   const projectionRelativePath = foundationProjectionRelativePath(dispatchId)
-  try {
-    await access(resolve(request.workspacePath, projectionRelativePath))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    await initialFoundationDocumentTurnPrompt({ ...request, dispatchId })
-  }
+  await persistFoundationAuthorityIndex({ ...request, dispatchId })
   return [
     expectedUpstreamPaths.length
-      ? `BGS persisted the small active-section authority index at ${projectionRelativePath}. It contains only authorized source paths, exact line ranges and source digests, never proxied document content. Follow the bounded turn instruction for selecting native reads; do not read whole upstream documents or unrelated ranges.`
-      : `This fact-owner document has no upstream document index. Use the confirmed brief and active section contract directly.`,
+      ? `BGS persisted a compact navigation index at ${projectionRelativePath}. It contains only approved source paths, exact line ranges and source digests, never proxied document content; native reads remain your decision.`
+      : `This fact-owner document has no upstream document dependency. Use the confirmed brief and document contract directly.`,
     targetExists
-      ? typeof request.contract.changeRequest === 'string'
-        ? `BGS mechanically inspected the controlled change-request baseline at ${targetPath} and selected the exact remaining bounded checkpoint sequence. Follow that sequence; do not perform a separate baseline read.`
-        : `BGS mechanically inspected the earlier target at ${targetPath} and selected either its exact remaining draft sequence or a safe first-checkpoint replacement. Follow that sequence; do not perform a separate target read or elevate stale content above current authority.`
+      ? `An existing ${targetPath} is present. Inspect and replace or revise it as needed under current authority.`
       : `The assigned target ${targetPath} does not exist and must be created.`,
   ].join('\n\n')
 }
@@ -594,7 +584,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
-      const boundedDocumentPrompt = request
+      const initialDocumentPrompt = request
         ? await initialFoundationDocumentTurnPrompt(request)
         : undefined
       const documentAuthorAuthorityBlock =
@@ -639,7 +629,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? undefined
           : confirmedBriefContext,
         documentAuthorAuthorityBlock,
-        boundedDocumentPrompt ?? prompt,
+        initialDocumentPrompt ?? prompt,
         nativeToolAutonomyInstruction,
         atomicTaskEvidenceInstruction,
         implementationResultInstruction,
@@ -859,16 +849,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 `document author output is missing: ${targetPath}`,
               )
             if (isInitialFoundationDocumentAuthor(request)) {
-              const progress = inspectFoundationDocumentDraft(
+              validateCompleteGameDocumentMarkdown(
                 request.contract.foundationDocumentPath as never,
                 body,
               )
-              if (!progress.complete) {
-                await persistActiveFoundationAuthorityIndex(request, progress)
-                throw new Error(
-                  `document author native turn ended before completing ${targetPath}: durable cursor ${progress.completedGroupCount}:${progress.completedPartCount}`,
-                )
-              }
             }
             return createDeterministicCanonicalDocumentTerminal(
               request,
@@ -927,41 +911,32 @@ async function initialFoundationDocumentTurnPrompt(
 ): Promise<string | undefined> {
   if (!isInitialFoundationDocumentAuthor(request)) return undefined
   const path = request.contract.foundationDocumentPath as never
-  let markdown: string | undefined
+  let targetExists = true
   try {
-    markdown = await readFile(resolve(request.workspacePath, path), 'utf8')
+    await access(resolve(request.workspacePath, path))
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') targetExists = false
+    else throw error
   }
-  let progress
-  try {
-    progress = inspectFoundationDocumentDraft(path, markdown)
-  } catch (error) {
-    if (markdown?.includes('<!-- beegame-draft-cursor:')) throw error
-    progress = inspectFoundationDocumentDraft(path, undefined)
-  }
-  await persistActiveFoundationAuthorityIndex(request, progress)
-  return buildFoundationDocumentDraftTurnPrompt({
-    path,
-    progress,
-    projectionRelativePath: foundationProjectionRelativePath(
-      request.dispatchId!,
-    ),
-    confirmedBriefDigest: request.contract.confirmedBriefDigest,
-    changeRequest: request.contract.changeRequest,
-    systemDeliveryContract: request.contract.systemDeliveryContract,
-  })
+  const projectionPath = await persistFoundationAuthorityIndex(request)
+  return [
+    `Write the complete assigned document at ${path} and end the turn normally.`,
+    getGameDocumentContract(path).upstreamSections.length
+      ? `A compact navigation index is available at ${projectionPath}. It lists approved upstream ranges and digests without copying their bodies; native reads remain your decision.`
+      : 'This document has no upstream document dependency.',
+    targetExists
+      ? `An existing ${path} is present. Inspect and replace or revise it as needed under current authority.`
+      : `The target ${path} does not exist and must be created.`,
+  ].join('\n\n')
 }
 
-async function persistActiveFoundationAuthorityIndex(
+async function persistFoundationAuthorityIndex(
   request: WorkerDispatchRequest,
-  progress: ReturnType<typeof inspectFoundationDocumentDraft>,
-): Promise<void> {
-  if (!isInitialFoundationDocumentAuthor(request) || progress.complete) return
+): Promise<string> {
+  if (!isInitialFoundationDocumentAuthor(request))
+    throw new Error('foundation authority index requires an initial document author')
   const targetPath = request.contract.foundationDocumentPath as never
   const contract = getGameDocumentContract(targetPath)
-  const targetSectionId = contract.sections[progress.completedGroupCount]?.sectionId
-  if (!targetSectionId) return
   const documents = new Map<
     (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
     string
@@ -976,16 +951,14 @@ async function persistActiveFoundationAuthorityIndex(
   )
   const projection = projectFoundationAuthority({
     targetPath,
-    targetSectionIds: [targetSectionId],
     documents,
   })
+  const relativePath = foundationProjectionRelativePath(request.dispatchId!)
   await durableWriteProjection(
-    resolve(
-      request.workspacePath,
-      foundationProjectionRelativePath(request.dispatchId!),
-    ),
+    resolve(request.workspacePath, relativePath),
     canonicalFoundationAuthorityProjectionBytes(projection),
   )
+  return relativePath
 }
 
 function foundationProjectionRelativePath(dispatchId: string): string {

@@ -1,0 +1,133 @@
+import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../__tests__/complete-game-document-fixture'
+import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+
+function request(workspacePath: string, dispatchId: string) {
+  return {
+    dispatchId,
+    runId: 'run',
+    ownerId: 'owner',
+    projectId: 'project',
+    workspacePath,
+    workerType: 'document-author',
+    phase: 'DOCUMENT_DRAFTING',
+    revision: 'revision',
+    allowedPaths: ['docs/GDD.md'],
+    contract: {
+      authoringMode: 'initial',
+      documentSet: 'foundation',
+      foundationDocumentPath: 'docs/GDD.md',
+      upstreamDocumentPaths: [],
+      completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+    },
+  } as const
+}
+
+function fakeSessions(input: {
+  workspacePath: string
+  body: string
+  prompts: string[]
+  sessionIds: string[]
+}) {
+  const events: Array<Record<string, unknown>> = []
+  return {
+    start: () => {
+      const session = {
+        id: `session-${input.sessionIds.length + 1}`,
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: input.workspacePath,
+      }
+      input.sessionIds.push(session.id)
+      return session
+    },
+    updateAuthToken: () => undefined,
+    get: () => ({
+      id: input.sessionIds.at(-1)!,
+      status: 'running',
+      turnStatus: 'idle',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      cwd: input.workspacePath,
+    }),
+    events: () => events,
+    isWorkflowWorkerOpen: () => true,
+    waitForWorkflowWorkerIdle: async () => undefined,
+    sendWithDisplay: async (_sessionId: string, prompt: string) => {
+      input.prompts.push(prompt)
+      await writeFile(join(input.workspacePath, 'docs/GDD.md'), input.body)
+      events.push({ type: 'result', text: 'turn complete' })
+    },
+    stop: () => undefined,
+    disposeWorkflowWorker: async () => undefined,
+  }
+}
+
+describe('native initial document authoring', () => {
+  test('completes one document in one unconstrained native session', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-'))
+    const prompts: string[] = []
+    const sessionIds: string[] = []
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const body = renderTestCompleteGameDocument(
+        'docs/GDD.md',
+        completeTestSubmission('docs/GDD.md'),
+      )
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
+        userId: 'user',
+      })
+
+      await port.start(request(workspacePath, 'dispatch-native') as never)
+      await port.submit('dispatch-native', 'original complete document prompt')
+      const terminal = await port.waitForTerminal?.('dispatch-native')
+
+      expect(sessionIds).toHaveLength(1)
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain('Write the complete assigned document')
+      expect(prompts[0]).not.toContain('checkpoint')
+      expect(prompts[0]).not.toContain('beegame-draft-cursor')
+      expect(prompts[0]).not.toContain('original complete document prompt')
+      expect(terminal).toMatchObject({
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('preserves incomplete native output and reports the final contract failure', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-incomplete-'))
+    const prompts: string[] = []
+    const sessionIds: string[] = []
+    const body = '# Incomplete GDD\n\nNative progress remains on disk.\n'
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
+        userId: 'user',
+      })
+
+      await port.start(request(workspacePath, 'dispatch-incomplete') as never)
+      await port.submit('dispatch-incomplete', 'original complete document prompt')
+      await expect(
+        port.waitForTerminal?.('dispatch-incomplete'),
+      ).rejects.toThrow(/complete game document/i)
+      expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toBe(body)
+      expect(prompts).toHaveLength(1)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+})

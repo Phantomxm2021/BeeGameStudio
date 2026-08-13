@@ -44,6 +44,11 @@ describe('foundation authority projection', () => {
     )
 
     expect(result.targetPath).toBe(targetPath)
+    expect(result.targetSectionIds).toEqual(
+      getGameDocumentContract(targetPath).sections.map(
+        section => section.sectionId,
+      ),
+    )
     expect(
       result.sources.map(source => ({
         path: source.path,
@@ -95,7 +100,7 @@ describe('foundation authority projection', () => {
     expect(result.sources[0]?.sections[0]).not.toHaveProperty('content')
     expect(result.sources[0]?.sections[0]).not.toHaveProperty('contentLines')
     expect(serialized).not.toContain('"content":')
-    expect(Buffer.byteLength(serialized)).toBeLessThan(16 * 1024)
+    expect(Buffer.byteLength(serialized)).toBeLessThan(8 * 1024)
     expect(
       Math.max(...serialized.split('\n').map(line => Buffer.byteLength(line))),
     ).toBeLessThan(4096)
