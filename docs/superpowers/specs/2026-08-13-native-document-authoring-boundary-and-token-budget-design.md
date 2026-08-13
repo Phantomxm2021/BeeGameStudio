@@ -211,7 +211,7 @@ For the same GDD assignment, persist the direct-native and Bee Game Studio launc
 
 ### Controlled Chrome GDD gate
 
-Run the Web React product through controlled Chrome on fixed service ports. Create a fresh ordinary project idea that is not embedded in product code or test fixtures. Generate only the GDD, then pause before the next author writes content.
+Run the Web React product through controlled Chrome on the repository-owned fixed service ports: frontend `62173`, runtime `62174`, billing `62175`, skills `62176`, and resources `62177`. Create a fresh ordinary project idea that is not embedded in product code or test fixtures. Generate only the GDD, then pause before the next author writes content.
 
 The gate passes only when:
 

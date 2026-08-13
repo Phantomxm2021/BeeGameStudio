@@ -408,7 +408,7 @@ git status --short
 
 - [ ] **Step 1: Start and verify fixed ports**
 
-Use frontend `62273`, runtime `62274`, billing `62275`, skills `62276`, and resources `62277`. Verify every listener and health endpoint before opening Chrome. Keep the user's provider, model, thinking, and `BEEGAME_CONFIG_DIR` unchanged.
+Use frontend `62173`, runtime `62174`, billing `62175`, skills `62176`, and resources `62177`. These values come from `BEEGAME_FIXED_SERVICE_PORTS` and must not be overridden. Verify every listener and health endpoint before opening Chrome. Keep the user's provider, model, thinking, and `BEEGAME_CONFIG_DIR` unchanged.
 
 - [ ] **Step 2: Create a fresh project through controlled Chrome**
 

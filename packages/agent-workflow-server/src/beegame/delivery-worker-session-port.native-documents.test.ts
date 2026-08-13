@@ -121,9 +121,9 @@ describe('native initial document authoring', () => {
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
       expect(prompts[0]).toContain('Write the complete assigned document')
+      expect(prompts[0]).toContain('original complete document prompt')
       expect(prompts[0]).not.toContain('checkpoint')
       expect(prompts[0]).not.toContain('beegame-draft-cursor')
-      expect(prompts[0]).not.toContain('original complete document prompt')
       expect(terminal).toMatchObject({
         status: 'completed',
         writtenPaths: ['docs/GDD.md'],

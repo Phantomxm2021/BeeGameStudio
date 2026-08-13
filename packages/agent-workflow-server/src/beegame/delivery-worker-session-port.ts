@@ -629,7 +629,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? undefined
           : confirmedBriefContext,
         documentAuthorAuthorityBlock,
-        initialDocumentPrompt ?? prompt,
+        prompt,
+        initialDocumentPrompt,
         nativeToolAutonomyInstruction,
         atomicTaskEvidenceInstruction,
         implementationResultInstruction,
@@ -918,7 +919,10 @@ async function initialFoundationDocumentTurnPrompt(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') targetExists = false
     else throw error
   }
-  const projectionPath = await persistFoundationAuthorityIndex(request)
+  const dispatchId = request.dispatchId
+  if (typeof dispatchId !== 'string' || !dispatchId)
+    throw new Error('foundation authority index requires a dispatch identity')
+  const projectionPath = foundationProjectionRelativePath(dispatchId)
   return [
     `Write the complete assigned document at ${path} and end the turn normally.`,
     getGameDocumentContract(path).upstreamSections.length
