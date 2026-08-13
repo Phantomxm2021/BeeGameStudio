@@ -408,8 +408,8 @@ export async function buildDocumentAuthorAuthorityBlock(
       : `This fact-owner document has no upstream document index. Use the confirmed brief and active section contract directly.`,
     targetExists
       ? typeof request.contract.changeRequest === 'string'
-        ? `BGS mechanically inspected the controlled change-request baseline at ${targetPath} and selected the exact active bounded group. Follow that group; do not perform a separate baseline read.`
-        : `BGS mechanically inspected the earlier target at ${targetPath} and selected either its exact next draft group or a safe first-group replacement. Follow that active group; do not perform a separate target read or elevate stale content above current authority.`
+        ? `BGS mechanically inspected the controlled change-request baseline at ${targetPath} and selected the exact remaining bounded checkpoint sequence. Follow that sequence; do not perform a separate baseline read.`
+        : `BGS mechanically inspected the earlier target at ${targetPath} and selected either its exact remaining draft sequence or a safe first-checkpoint replacement. Follow that sequence; do not perform a separate target read or elevate stale content above current authority.`
       : `The assigned target ${targetPath} does not exist and must be created.`,
   ].join('\n\n')
 }
@@ -864,36 +864,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 body,
               )
               if (!progress.complete) {
-                if (
-                  typeof input.sessions.waitForWorkflowWorkerIdle === 'function'
-                )
-                  await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-                eventOffsets.set(dispatchId, sessionEvents(sessionId).length)
                 await persistActiveFoundationAuthorityIndex(request, progress)
-                const authToken = await input.getAuthToken?.()
-                input.sessions.updateAuthToken(sessionId, authToken)
-                await input.sessions.sendWithDisplay(
-                  sessionId,
-                  buildFoundationDocumentDraftTurnPrompt({
-                    path: request.contract.foundationDocumentPath as never,
-                    progress,
-                    projectionRelativePath: foundationProjectionRelativePath(
-                      dispatchId,
-                    ),
-                    confirmedBriefDigest:
-                      request.contract.confirmedBriefDigest,
-                    changeRequest: request.contract.changeRequest,
-                    systemDeliveryContract:
-                      request.contract.systemDeliveryContract,
-                  }),
-                  {
-                    taskType: 'edit_turn',
-                    displayKind: 'workflow_worker',
-                    ...(authToken ? { authToken } : {}),
-                    ...(input.language ? { language: input.language } : {}),
-                  },
+                throw new Error(
+                  `document author native turn ended before completing ${targetPath}: durable cursor ${progress.completedGroupCount}:${progress.completedPartCount}`,
                 )
-                continue
               }
             }
             return createDeterministicCanonicalDocumentTerminal(

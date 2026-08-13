@@ -27,7 +27,7 @@ describe('resource-content worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('bounded consecutive groups in one native session')
+    expect(prompt).toContain('bounded consecutive checkpoints in one native turn')
     expect(prompt).toContain('human development discipline')
     for (const section of completeDocumentContract.sections)
       expect(prompt).toContain(`"sectionId":"${section.sectionId}"`)
@@ -50,7 +50,10 @@ describe('resource-content worker prompts', () => {
       'Write the complete assigned Markdown document directly',
     )
     expect(prompt).not.toContain('Write one complete Markdown file')
-    expect(prompt).toContain('Finish only the active bounded group')
+    expect(prompt).toContain(
+      'End the native turn only after the final bounded checkpoint succeeds',
+    )
+    expect(prompt).not.toContain('Finish only the active bounded group')
     expect(prompt).toContain('BGS does not intercept, proxy or synthesize file content')
     expect(prompt).toContain("Bee Game Studio's normal workflow")
     expect(prompt).toContain('BGS writes those results to workflow audit metadata')
@@ -58,13 +61,16 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('document_parts_prepared')
     expect(prompt).not.toContain('Do not write or edit the assigned path directly')
     expect(prompt).toContain('Do not claim verified license')
-    expect(prompt).toContain('Do not reread a completed group')
+    expect(prompt).toContain('Do not reread a completed checkpoint')
+    expect(prompt).not.toContain(
+      'End each bounded turn normally after its write succeeds',
+    )
     expect(prompt).not.toContain('one final lightweight structural verification')
     expect(prompt).not.toContain('Read all authorized upstream sections')
     expect(prompt).not.toContain('one batched tool round')
     expect(prompt).toContain('BGS mechanically inspects any existing target')
     expect(prompt).toContain('do not independently reread or reclassify the target')
-    expect(prompt).toContain('without repeating equivalent checks')
+    expect(prompt).toContain('without an intermediate completion message')
     expect(prompt).toContain(
       'Prefer production-dense tables and matrices over repeated narrative',
     )
@@ -469,7 +475,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
     expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('end the turn normally')
+    expect(prompt).toContain(
+      'End the native turn only after the final bounded checkpoint succeeds',
+    )
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')
     expect(prompt).not.toContain('then the audit appendix in canonical order')

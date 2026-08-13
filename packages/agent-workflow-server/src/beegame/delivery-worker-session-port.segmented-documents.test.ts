@@ -80,30 +80,25 @@ describe('segmented initial document authoring', () => {
         waitForWorkflowWorkerIdle: async () => undefined,
         sendWithDisplay: async (_sessionId: string, prompt: string) => {
           prompts.push(prompt)
-          const groupMatch = /Active bounded document group (\d+)\//.exec(prompt)
-          const partMatch = /resume checkpoint (\d+)\//.exec(prompt)
-          const groupIndex = groupMatch ? Number(groupMatch[1]) - 1 : 0
-          const firstPartIndex = partMatch ? Number(partMatch[1]) - 1 : 0
-          const group = foundationDocumentDraftGroups('docs/GDD.md')[groupIndex]!
-          if (groupIndex === 0 && firstPartIndex === 0) {
-            await writeFile(
-              join(workspacePath, 'docs/GDD.md'),
-              [
-                '# Game Design Document',
-                '<!-- beegame-executive-summary -->',
-                '## Executive Summary',
-                'Production-ready game authority for implementation and acceptance.',
-                '<!-- beegame-draft-cursor:0:0 -->',
-                '',
-              ].join('\n'),
-            )
-          }
-          for (
-            let partIndex = firstPartIndex;
-            partIndex < foundationDocumentDraftPartCount(group);
-            partIndex += 1
+          await writeFile(
+            join(workspacePath, 'docs/GDD.md'),
+            [
+              '# Game Design Document',
+              '<!-- beegame-executive-summary -->',
+              '## Executive Summary',
+              'Production-ready game authority for implementation and acceptance.',
+              '<!-- beegame-draft-cursor:0:0 -->',
+              '',
+            ].join('\n'),
           )
-            await advanceDraft(workspacePath, groupIndex, partIndex)
+          const groups = foundationDocumentDraftGroups('docs/GDD.md')
+          for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1)
+            for (
+              let partIndex = 0;
+              partIndex < foundationDocumentDraftPartCount(groups[groupIndex]!);
+              partIndex += 1
+            )
+              await advanceDraft(workspacePath, groupIndex, partIndex)
           events.push({ type: 'result', text: 'turn complete' })
           return session
         },
@@ -137,21 +132,24 @@ describe('segmented initial document authoring', () => {
       await port.submit('dispatch-segmented', 'original complete document prompt')
       const terminal = await port.waitForTerminal?.('dispatch-segmented')
 
-      expect(prompts.length).toBe(
-        foundationDocumentDraftGroups('docs/GDD.md').length,
-      )
-      expect(prompts[0]).toContain('Active bounded document group 1/13')
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain('Continuous bounded document sequence 1/13')
+      expect(prompts[0]).toContain('Continuous bounded document sequence 13/13')
       expect(prompts[0]).toContain(
-        'perform each bounded native file call below in order',
+        'Each listed checkpoint is a separate native file call',
       )
       expect(prompts[0]).toContain('Checkpoint 1: native Write creates only')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:0:0 -->')
       expect(prompts[0]).toContain('<!-- beegame-draft-cursor:1:0 -->')
       expect(prompts[0]).toContain('3,600 UTF-8 bytes')
-      expect(
-        prompts.slice(0, -1).every(prompt => !prompt.includes('beegame-part')),
-      ).toBe(true)
+      expect(prompts[0]).not.toContain('beegame-part')
       expect(prompts.every(prompt => !prompt.includes('original complete document prompt'))).toBe(true)
+      expect(prompts[0]).not.toContain(
+        'End each bounded turn normally after its write succeeds',
+      )
+      expect(prompts[0]).toContain(
+        'End the native turn only after the final bounded checkpoint succeeds',
+      )
       expect(terminal).toMatchObject({
         status: 'completed',
         writtenPaths: ['docs/GDD.md'],
@@ -162,6 +160,83 @@ describe('segmented initial document authoring', () => {
           await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8'),
         ).complete,
       ).toBe(true)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('fails closed when the continuous native turn ends before the document is complete', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'segmented-document-incomplete-'))
+    const events: Array<Record<string, unknown>> = []
+    const prompts: string[] = []
+    const session = {
+      id: 'session-incomplete',
+      status: 'running',
+      turnStatus: 'idle',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      cwd: workspacePath,
+    }
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const sessions = {
+        start: () => session,
+        updateAuthToken: () => undefined,
+        get: () => session,
+        events: () => events,
+        isWorkflowWorkerOpen: () => true,
+        waitForWorkflowWorkerIdle: async () => undefined,
+        sendWithDisplay: async (_sessionId: string, prompt: string) => {
+          prompts.push(prompt)
+          if (prompts.length > 1)
+            throw new Error('unexpected second native turn')
+          await writeFile(
+            join(workspacePath, 'docs/GDD.md'),
+            [
+              '# Game Design Document',
+              '<!-- beegame-executive-summary -->',
+              '## Executive Summary',
+              'Production-ready game authority for implementation and acceptance.',
+              '<!-- beegame-draft-cursor:0:0 -->',
+              '',
+            ].join('\n'),
+          )
+          await advanceDraft(workspacePath, 0, 0)
+          events.push({ type: 'result', text: 'turn complete' })
+          return session
+        },
+        stop: () => session,
+        disposeWorkflowWorker: async () => undefined,
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: sessions as never,
+        userId: 'user',
+      })
+      const request = {
+        dispatchId: 'dispatch-incomplete',
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          authoringMode: 'initial',
+          documentSet: 'foundation',
+          foundationDocumentPath: 'docs/GDD.md',
+          upstreamDocumentPaths: [],
+          completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+        },
+      } as const
+
+      await port.start(request as never)
+      await port.submit('dispatch-incomplete', 'original complete document prompt')
+      await expect(
+        port.waitForTerminal?.('dispatch-incomplete'),
+      ).rejects.toThrow('native turn ended before completing docs/GDD.md')
+      expect(prompts).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

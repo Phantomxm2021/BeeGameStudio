@@ -808,7 +808,8 @@ describe('delivery worker session credentials', () => {
           upstreamDocumentPaths: [],
         },
       })
-      expect(block).toContain('replacement baseline from an earlier run')
+      expect(block).toContain('exact remaining draft sequence')
+      expect(block).toContain('safe first-checkpoint replacement')
       expect(block).not.toContain('stale target content')
       expect(block).not.toContain('CommitCanonicalDocument')
       expect(block).not.toContain(
@@ -863,16 +864,23 @@ describe('delivery worker session credentials', () => {
         buildWorkerPrompt(request),
       )
 
-      expect(
-        submittedPrompt.match(/Author the assigned Markdown document/gi),
-      ).toHaveLength(1)
-      expect(
-        submittedPrompt.match(/complete when the turn ends/gi),
-      ).toHaveLength(1)
-      expect(submittedPrompt.match(/file-operation sequence/gi)).toHaveLength(1)
-      expect(submittedPrompt).toContain('Read the compact document projection')
-      expect(submittedPrompt).toContain('contract.completeDocumentContract')
-      expect(submittedPrompt).toContain('one final lightweight structural verification')
+      expect(submittedPrompt).not.toContain(
+        'Author the assigned Markdown document',
+      )
+      expect(submittedPrompt).not.toContain('complete when the turn ends')
+      expect(submittedPrompt).not.toContain('file-operation sequence')
+      expect(submittedPrompt).toContain(
+        'Continuous bounded document sequence 1/13',
+      )
+      expect(submittedPrompt).toContain(
+        'Continuous bounded document sequence 13/13',
+      )
+      expect(submittedPrompt).toContain(
+        'End the native turn only after the final bounded checkpoint succeeds',
+      )
+      expect(submittedPrompt).not.toContain(
+        'original complete document prompt',
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

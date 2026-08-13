@@ -294,7 +294,7 @@ export function buildFoundationDocumentDraftTurnPrompt(input: {
     'The confirmed brief and projected upstream authority are binding. Define only this discipline\'s owned facts; reference upstream facts instead of copying them and do not invent behavior delegated to a downstream owner.',
     'Write production-ready human development authority, not a skeleton: make concrete choices, state boundaries and tradeoffs, use units and dense tables where useful, and include observable acceptance criteria. Do not repeat the brief, upstream prose, or another section.',
     'Do not write YAML front matter, an Audit Appendix, workflow metadata, or another project file. Do not claim verified license status without concrete evidence.',
-    'BGS mechanically validates every proposed checkpoint before the native tool writes it. Do not emit an intermediate group-completion summary. After the final listed checkpoint succeeds, end the turn normally with one concise document-completion message. If interrupted, the durable cursor resumes at the next missing checkpoint.',
+    'BGS mechanically validates every proposed checkpoint before the native tool writes it. Do not emit an intermediate group-completion summary. End the native turn only after the final bounded checkpoint succeeds, with one concise document-completion message. If interrupted, the durable cursor resumes at the next missing checkpoint.',
     JSON.stringify(sharedContract),
     ...remainingSequence,
   ].join('\n\n')
