@@ -462,6 +462,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
                   'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Use native file tools normally. Do not edit .beegame metadata. Do not claim verified license status without concrete evidence.',
+                  'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
                     ? [

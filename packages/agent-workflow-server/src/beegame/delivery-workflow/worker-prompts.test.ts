@@ -62,6 +62,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Write one complete Markdown file')
     expect(prompt).toContain('native file tools')
     expect(prompt).toContain('end the turn normally')
+    expect(prompt).toContain(
+      'do not launch or wait for an independent review or audit',
+    )
     expect(prompt).not.toContain('verify its final bytes')
     expect(prompt).not.toContain('checkpoint')
     expect(prompt).not.toContain('beegame-draft-cursor')
