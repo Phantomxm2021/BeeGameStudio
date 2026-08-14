@@ -244,6 +244,18 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       turn.reject(error)
       return
     }
+    if (
+      this.sessionInput.workflowMarkdownStreamContract &&
+      isIncompleteMarkdownStreamResult(message)
+    ) {
+      const error = new Error(
+        'Bee Game Studio native model response ended without visible Markdown or a valid stop reason',
+      )
+      this.observability.finishTurn({ outcome: 'error', error })
+      await this.observability.flush()
+      turn.reject(error)
+      return
+    }
     this.observability.finishTurn({ outcome: 'success' })
     await this.observability.flush()
     turn.resolve()
@@ -418,6 +430,15 @@ async function* ndjsonLines(
 function isErrorResult(message: Record<string, unknown>): boolean {
   return message.is_error === true ||
     (typeof message.subtype === 'string' && message.subtype !== 'success')
+}
+
+function isIncompleteMarkdownStreamResult(
+  message: Record<string, unknown>,
+): boolean {
+  return (
+    stringField(message, 'stop_reason') !== 'end_turn' ||
+    stringField(message, 'result').trim().length === 0
+  )
 }
 
 function nativeErrorDetail(message: Record<string, unknown>): string {

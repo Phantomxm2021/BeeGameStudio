@@ -10,7 +10,7 @@ const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
 )
 
-function startRuntime() {
+function startRuntime(options: { markdownStream?: boolean } = {}) {
   return createNativeCliProcessRunner({
     command: [process.execPath, fixturePath],
     observabilityFactory: () => ({
@@ -25,6 +25,17 @@ function startRuntime() {
     sessionId: 'session-1',
     cwd: process.cwd(),
     env: {},
+    ...(options.markdownStream
+      ? {
+          workflowMarkdownStreamContract: {
+            workspacePath: process.cwd(),
+            runId: 'run-1',
+            dispatchId: 'dispatch-1',
+            targetPath: 'docs/GDD.md' as const,
+            maxBytes: 512_000,
+          },
+        }
+      : {}),
   })
 }
 
@@ -256,6 +267,21 @@ describe('native CLI process runner', () => {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('exited without a terminal result')
+  })
+
+  test('rejects a thinking-only provider result for a Markdown stream turn', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    await expect(
+      runtime.submit({
+        prompt: 'incomplete-success',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'native model response ended without visible Markdown or a valid stop reason',
+    )
+    runtime.dispose?.()
   })
 
   test('routes native permission requests through the BGS authority callback', async () => {
