@@ -3,6 +3,7 @@ import type { Message } from '../../../types/message.js'
 import {
   microcompactMessages,
   projectCompletedFileMutationInputs,
+  projectOlderCompactableToolResults,
 } from '../microCompact.js'
 
 const originalBaseUrl = process.env.ANTHROPIC_BASE_URL
@@ -141,6 +142,52 @@ describe('projectCompletedFileMutationInputs', () => {
     })
   })
 
+  test('keeps an older small scaffold available as structural context', () => {
+    const scaffold = '# GDD\n\n<!-- vision -->\n\n<!-- systems -->\n'
+    const messages: Message[] = [
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-write-scaffold',
+          name: 'Write',
+          input: { file_path: '/project/docs/GDD.md', content: scaffold },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-write-scaffold',
+          content: 'File written successfully',
+        },
+      ]),
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-edit-latest',
+          name: 'Edit',
+          input: {
+            file_path: '/project/docs/GDD.md',
+            old_string: '<!-- vision -->',
+            new_string: 'Vision body',
+          },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-edit-latest',
+          content: 'File edited successfully',
+        },
+      ]),
+    ]
+
+    const projected = projectCompletedFileMutationInputs(messages)
+
+    expect(
+      (blocksOf(projected[0]!)[0]!.input as { content: string }).content,
+    ).toBe(scaffold)
+  })
+
   test('keeps failed and unresolved file mutation inputs intact', () => {
     const failedInput = {
       file_path: '/project/docs/GDD.md',
@@ -264,5 +311,57 @@ describe('projectCompletedFileMutationInputs', () => {
     const block = blocksOf(result.messages[0]!)[0]!
 
     expect((block.input as { content: string }).content).toBe(originalContent)
+  })
+})
+
+describe('projectOlderCompactableToolResults', () => {
+  test('clears older Read output while preserving the latest tool working set', () => {
+    const readOutput = 'document line\n'.repeat(4_000)
+    const messages: Message[] = [
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-read-1',
+          name: 'Read',
+          input: { file_path: '/project/docs/GDD.md' },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-read-1',
+          content: readOutput,
+        },
+      ]),
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-edit-latest',
+          name: 'Edit',
+          input: {
+            file_path: '/project/docs/GDD.md',
+            old_string: 'old',
+            new_string: 'new',
+          },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-edit-latest',
+          content: 'File edited successfully',
+        },
+      ]),
+    ]
+
+    const projected = projectOlderCompactableToolResults(messages)
+
+    expect(blocksOf(projected[1]!)[0]!.content).toBe(
+      '[Old tool result content cleared]',
+    )
+    expect(blocksOf(projected[3]!)[0]!.content).toBe(
+      'File edited successfully',
+    )
+    expect(blocksOf(messages[1]!)[0]!.content).toBe(readOutput)
   })
 })

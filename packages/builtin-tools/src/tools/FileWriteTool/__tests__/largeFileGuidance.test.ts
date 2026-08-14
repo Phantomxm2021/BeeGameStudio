@@ -11,6 +11,7 @@ describe('native large-file authoring guidance', () => {
     expect(description).toContain('Group related sections')
     expect(description).toContain('Trust each successful file mutation result')
     expect(description).toContain('validate the completed file once')
+    expect(description).toContain('creates missing parent directories')
     expect(description).toContain('Edit tool')
     expect(description).not.toMatch(/8,?192|maximum \d+ characters|bounded append/i)
   })

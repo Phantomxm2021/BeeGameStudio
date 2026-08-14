@@ -11,6 +11,7 @@ export function getWriteToolDescription(): string {
 
 Usage:
 - This tool will overwrite the existing file if there is one at the provided path.${getPreReadInstruction()}
+- This tool creates missing parent directories automatically; do not run a separate mkdir command first.
 - Prefer the Edit tool for modifying existing files \u2014 it only sends the diff. Only use this tool to create new files or for complete rewrites.
 - IMPORTANT: Never send a complete long document or other long file as one Write argument. First create a small stable scaffold, then normally use 3 to 6 Edit calls to fill it. Group related sections into each durable step and choose the checkpoints yourself from the file's natural structure.
 - Trust each successful file mutation result instead of rereading completed sections. Unless a mutation reports an error, validate the completed file once after all planned steps.

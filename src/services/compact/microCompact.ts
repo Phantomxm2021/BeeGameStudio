@@ -56,6 +56,7 @@ const COMPACTABLE_TOOLS = new Set<string>([
 const CLEARED_FILE_CONTENT =
   '[Previously written content cleared; read the file if needed]'
 const CLEARED_REPLACED_TEXT = '[Previously replaced text cleared]'
+const MIN_DURABLE_MUTATION_INPUT_CLEAR_CHARS = 4096
 
 /**
  * Build an API-only projection that drops large payloads from file mutations
@@ -124,11 +125,28 @@ export function projectCompletedFileMutationInputs(
       ) {
         return block
       }
-      changed = true
       const input = block.input as {
         file_path?: unknown
         replace_all?: unknown
+        content?: unknown
+        old_string?: unknown
+        new_string?: unknown
       }
+      const payloadChars =
+        block.name === FILE_WRITE_TOOL_NAME
+          ? typeof input.content === 'string'
+            ? input.content.length
+            : 0
+          : (typeof input.old_string === 'string'
+              ? input.old_string.length
+              : 0) +
+            (typeof input.new_string === 'string'
+              ? input.new_string.length
+              : 0)
+      if (payloadChars < MIN_DURABLE_MUTATION_INPUT_CLEAR_CHARS) {
+        return block
+      }
+      changed = true
       return {
         ...block,
         input:
@@ -150,6 +168,58 @@ export function projectCompletedFileMutationInputs(
                 content: CLEARED_FILE_CONTENT,
               },
       }
+    })
+    return changed
+      ? { ...message, message: { ...message.message, content } }
+      : message
+  })
+}
+
+/**
+ * Clear older successful tool outputs for custom Anthropic endpoints while
+ * retaining the most recent compactable tool result as the active working set.
+ */
+export function projectOlderCompactableToolResults(
+  messages: Message[],
+): Message[] {
+  const compactableToolUseIds = collectCompactableToolIds(messages)
+  const compactableToolUseIdSet = new Set(compactableToolUseIds)
+  const successfulToolUseIds = new Set<string>()
+  for (const message of messages) {
+    if (message.type !== 'user' || !Array.isArray(message.message?.content)) {
+      continue
+    }
+    for (const block of message.message.content) {
+      if (
+        block.type === 'tool_result' &&
+        block.is_error !== true &&
+        compactableToolUseIdSet.has(block.tool_use_id)
+      ) {
+        successfulToolUseIds.add(block.tool_use_id)
+      }
+    }
+  }
+
+  const successfulCompactableIds = compactableToolUseIds.filter(id =>
+    successfulToolUseIds.has(id),
+  )
+  const clearSet = new Set(successfulCompactableIds.slice(0, -1))
+
+  return messages.map(message => {
+    if (message.type !== 'user' || !Array.isArray(message.message?.content)) {
+      return message
+    }
+    let changed = false
+    const content = message.message.content.map(block => {
+      if (
+        block.type !== 'tool_result' ||
+        !clearSet.has(block.tool_use_id) ||
+        block.content === TIME_BASED_MC_CLEARED_MESSAGE
+      ) {
+        return block
+      }
+      changed = true
+      return { ...block, content: TIME_BASED_MC_CLEARED_MESSAGE }
     })
     return changed
       ? { ...message, message: { ...message.message, content } }
@@ -379,6 +449,7 @@ export async function microcompactMessages(
     !isFirstPartyAnthropicBaseUrl()
   ) {
     messages = projectCompletedFileMutationInputs(messages)
+    messages = projectOlderCompactableToolResults(messages)
   }
 
   // Time-based trigger runs first and short-circuits. If the gap since the
