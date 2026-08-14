@@ -1097,13 +1097,18 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return runMutation(runId, undefined, async () => {
       const run = await loadUnlocked()
       if (!run || run.runId !== runId) return run
-      const activeDispatch = run.activeDispatch
+      const usageDispatch =
+        run.activeDispatch?.dispatchId === dispatchId
+          ? run.activeDispatch
+          : run.foundationDraftState.documents?.find(
+              document => document.dispatch?.dispatchId === dispatchId,
+            )?.dispatch
       const acceptsRunningUsage =
-        run.status === 'running' && activeDispatch?.status === 'running'
+        run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
-        run.status === 'stopped' && activeDispatch?.status === 'interrupted'
+        run.status === 'stopped' && usageDispatch?.status === 'interrupted'
       if (
-        activeDispatch?.dispatchId !== dispatchId ||
+        !usageDispatch ||
         (!acceptsRunningUsage && !acceptsStoppedTailUsage)
       )
         return null

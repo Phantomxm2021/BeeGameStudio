@@ -3166,6 +3166,29 @@ describe('delivery workflow recovery', () => {
         .map(document => document.dispatch?.status),
     ).toEqual(paths.map(() => 'running'))
 
+    const parallelUsage = {
+      input_tokens: 1,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 1,
+    }
+    expect(
+      await store.addWorkflowUsage(
+        initial.runId,
+        parallelUsage,
+        records[0]!.dispatchId,
+      ),
+    ).not.toBeNull()
+    expect(
+      await store.addWorkflowUsage(
+        initial.runId,
+        parallelUsage,
+        records[1]!.dispatchId,
+      ),
+    ).not.toBeNull()
+    expect((await store.load())?.usage?.total_tokens).toBe(2)
+
     const duplicate = await dispatcher.dispatch({
       ...records[0]!.request!,
       dispatchId: undefined,
