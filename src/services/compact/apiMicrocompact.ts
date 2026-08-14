@@ -1,5 +1,4 @@
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
-import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/GlobTool/prompt.js'
@@ -28,7 +27,6 @@ const TOOLS_CLEARABLE_RESULTS = [
 
 const TOOLS_CLEARABLE_USES = [
   FILE_EDIT_TOOL_NAME,
-  MULTI_EDIT_TOOL_NAME,
   FILE_WRITE_TOOL_NAME,
   NOTEBOOK_EDIT_TOOL_NAME,
 ]

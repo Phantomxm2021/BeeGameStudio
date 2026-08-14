@@ -3,7 +3,6 @@ import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs
 import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
-import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/GlobTool/prompt.js'
@@ -51,7 +50,6 @@ const COMPACTABLE_TOOLS = new Set<string>([
   WEB_SEARCH_TOOL_NAME,
   WEB_FETCH_TOOL_NAME,
   FILE_EDIT_TOOL_NAME,
-  MULTI_EDIT_TOOL_NAME,
   FILE_WRITE_TOOL_NAME,
 ])
 
@@ -80,8 +78,7 @@ export function projectCompletedFileMutationInputs(
       if (
         block.type === 'tool_use' &&
         (block.name === FILE_WRITE_TOOL_NAME ||
-          block.name === FILE_EDIT_TOOL_NAME ||
-          block.name === MULTI_EDIT_TOOL_NAME)
+          block.name === FILE_EDIT_TOOL_NAME)
       ) {
         fileMutationToolUseIds.push(block.id)
       }
@@ -123,8 +120,7 @@ export function projectCompletedFileMutationInputs(
       if (
         block.type !== 'tool_use' ||
         (block.name !== FILE_WRITE_TOOL_NAME &&
-          block.name !== FILE_EDIT_TOOL_NAME &&
-          block.name !== MULTI_EDIT_TOOL_NAME) ||
+          block.name !== FILE_EDIT_TOOL_NAME) ||
         !completedToolUseIds.has(block.id)
       ) {
         return block
@@ -135,7 +131,6 @@ export function projectCompletedFileMutationInputs(
         content?: unknown
         old_string?: unknown
         new_string?: unknown
-        edits?: unknown
       }
       const payloadChars =
         block.name === FILE_WRITE_TOOL_NAME
@@ -169,26 +164,6 @@ export function projectCompletedFileMutationInputs(
                   ? { replace_all: input.replace_all }
                   : {}),
               }
-            : block.name === MULTI_EDIT_TOOL_NAME
-              ? {
-                  ...(typeof input.file_path === 'string'
-                    ? { file_path: input.file_path }
-                    : {}),
-                  edits: Array.isArray(input.edits)
-                    ? input.edits.map(edit => {
-                        const candidate = edit as {
-                          replace_all?: unknown
-                        }
-                        return {
-                          old_string: CLEARED_REPLACED_TEXT,
-                          new_string: CLEARED_FILE_CONTENT,
-                          ...(typeof candidate.replace_all === 'boolean'
-                            ? { replace_all: candidate.replace_all }
-                            : {}),
-                        }
-                      })
-                    : [],
-                }
             : {
                 ...(typeof input.file_path === 'string'
                   ? { file_path: input.file_path }

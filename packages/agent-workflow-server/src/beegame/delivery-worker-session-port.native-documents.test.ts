@@ -176,7 +176,6 @@ describe('native initial document authoring', () => {
         expect(count(prompts[0]!, materialId)).toBe(1)
       expect(count(prompts[0]!, 'unique-authority')).toBe(1)
       expect(prompts[0]).not.toContain('checkpoint')
-      expect(prompts[0]).not.toContain('MultiEdit')
       expect(prompts[0]).not.toContain('beegame-draft-cursor')
       expect(prompts[0]).not.toContain('must use Write')
       expect(prompts[0]).not.toContain('three writes')
