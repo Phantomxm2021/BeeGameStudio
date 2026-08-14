@@ -12,6 +12,10 @@ import { WEB_SEARCH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/WebSe
 import type { Message } from '../../types/message.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from '../../utils/model/providers.js'
 import { SHELL_TOOL_NAMES } from '../../utils/shell/shellToolUtils.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
@@ -48,6 +52,80 @@ const COMPACTABLE_TOOLS = new Set<string>([
   FILE_EDIT_TOOL_NAME,
   FILE_WRITE_TOOL_NAME,
 ])
+
+const CLEARED_FILE_CONTENT =
+  '[Previously written content cleared; read the file if needed]'
+const CLEARED_REPLACED_TEXT = '[Previously replaced text cleared]'
+
+/**
+ * Build an API-only projection that drops large payloads from file mutations
+ * after their matching tool result has succeeded. The transcript remains
+ * untouched; the durable file is the source of truth for later turns.
+ */
+export function projectCompletedFileMutationInputs(
+  messages: Message[],
+): Message[] {
+  const completedToolUseIds = new Set<string>()
+  for (const message of messages) {
+    if (message.type !== 'user' || !Array.isArray(message.message?.content)) {
+      continue
+    }
+    for (const block of message.message.content) {
+      if (block.type === 'tool_result' && block.is_error !== true) {
+        completedToolUseIds.add(block.tool_use_id)
+      }
+    }
+  }
+
+  return messages.map(message => {
+    if (
+      message.type !== 'assistant' ||
+      !Array.isArray(message.message?.content)
+    ) {
+      return message
+    }
+    let changed = false
+    const content = message.message.content.map(block => {
+      if (
+        block.type !== 'tool_use' ||
+        (block.name !== FILE_WRITE_TOOL_NAME &&
+          block.name !== FILE_EDIT_TOOL_NAME) ||
+        !completedToolUseIds.has(block.id)
+      ) {
+        return block
+      }
+      changed = true
+      const input = block.input as {
+        file_path?: unknown
+        replace_all?: unknown
+      }
+      return {
+        ...block,
+        input:
+          block.name === FILE_EDIT_TOOL_NAME
+            ? {
+                ...(typeof input.file_path === 'string'
+                  ? { file_path: input.file_path }
+                  : {}),
+                old_string: CLEARED_REPLACED_TEXT,
+                new_string: CLEARED_FILE_CONTENT,
+                ...(typeof input.replace_all === 'boolean'
+                  ? { replace_all: input.replace_all }
+                  : {}),
+              }
+            : {
+                ...(typeof input.file_path === 'string'
+                  ? { file_path: input.file_path }
+                  : {}),
+                content: CLEARED_FILE_CONTENT,
+              },
+      }
+    })
+    return changed
+      ? { ...message, message: { ...message.message, content } }
+      : message
+  })
+}
 
 // --- Cached microcompact state (ant-only, gated by feature('CACHED_MICROCOMPACT')) ---
 
@@ -261,6 +339,17 @@ export async function microcompactMessages(
 ): Promise<MicrocompactResult> {
   // Clear suppression flag at start of new microcompact attempt
   clearCompactWarningSuppression()
+
+  // Anthropic-compatible custom endpoints do not receive first-party beta
+  // headers. Some accept context_management in the body but silently ignore
+  // it, so project completed durable file mutations locally for the API view.
+  // Official Anthropic traffic keeps using its native server-side strategy.
+  if (
+    getAPIProvider() === 'firstParty' &&
+    !isFirstPartyAnthropicBaseUrl()
+  ) {
+    messages = projectCompletedFileMutationInputs(messages)
+  }
 
   // Time-based trigger runs first and short-circuits. If the gap since the
   // last assistant message exceeds the threshold, the server cache has expired

@@ -9,6 +9,8 @@ describe('native large-file authoring guidance', () => {
     expect(description).toContain('small stable scaffold')
     expect(description).toContain('3 to 6 Edit calls')
     expect(description).toContain('Group related sections')
+    expect(description).toContain('Trust each successful file mutation result')
+    expect(description).toContain('validate the completed file once')
     expect(description).toContain('Edit tool')
     expect(description).not.toMatch(/8,?192|maximum \d+ characters|bounded append/i)
   })
