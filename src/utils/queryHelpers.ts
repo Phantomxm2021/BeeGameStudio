@@ -9,6 +9,7 @@ import { runTools } from '../services/tools/toolOrchestration.js'
 import { findToolByName, type Tool, type Tools } from '../Tool.js'
 import { BASH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
+import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import type { Input as FileReadInput } from '@bee-game-studio/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import {
   FILE_READ_TOOL_NAME,
@@ -392,7 +393,7 @@ export function extractReadFilesFromMessages(
 ): FileStateCache {
   const cache = createFileStateCacheWithSizeLimit(maxSize)
 
-  // First pass: find all FileReadTool/FileWriteTool/FileEditTool uses in assistant messages
+  // First pass: find native read, write, and edit tool uses in assistant messages.
   const fileReadToolUseIds = new Map<string, string>() // toolUseId -> filePath
   const fileWriteToolUseIds = new Map<
     string,
@@ -444,9 +445,10 @@ export function extractReadFilesFromMessages(
           }
         } else if (
           content.type === 'tool_use' &&
-          content.name === FILE_EDIT_TOOL_NAME
+          (content.name === FILE_EDIT_TOOL_NAME ||
+            content.name === MULTI_EDIT_TOOL_NAME)
         ) {
-          // Edit's input has old_string/new_string, not the resulting content.
+          // Edit inputs describe replacements, not the resulting content.
           // Track the path so the second pass can read current disk state.
           const input = content.input as { file_path?: string } | undefined
           if (input?.file_path) {
@@ -515,14 +517,14 @@ export function extractReadFilesFromMessages(
             })
           }
 
-          // Handle Edit tool results — post-edit content isn't in the
+          // Handle Edit/MultiEdit results — post-edit content isn't in the
           // tool_use input (only old_string/new_string) nor fully in the
           // result (only a snippet). Read from disk now, using actual mtime
           // so getChangedFiles's mtime check passes on the next turn.
           //
           // Callers seed the cache once at process start (print.ts --resume,
           // Cowork cold-restart per turn), so disk content at extraction time
-          // IS the post-edit state. No dedup: processing every Edit preserves
+          // IS the post-edit state. No dedup: processing every edit preserves
           // last-wins semantics when Read/Write interleave (Edit→Read→Edit).
           const editFilePath = fileEditToolUseIds.get(content.tool_use_id)
           if (editFilePath && content.is_error !== true) {

@@ -11,6 +11,7 @@
 import type { SDKAssistantMessage } from 'src/entrypoints/agentSdkTypes.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
+import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/GlobTool/prompt.js'
@@ -45,6 +46,7 @@ const READ_TOOLS = [FILE_READ_TOOL_NAME, LIST_MCP_RESOURCES_TOOL_NAME]
 const WRITE_TOOLS = [
   FILE_WRITE_TOOL_NAME,
   FILE_EDIT_TOOL_NAME,
+  MULTI_EDIT_TOOL_NAME,
   NOTEBOOK_EDIT_TOOL_NAME,
 ]
 const COMMAND_TOOLS = [...SHELL_TOOL_NAMES, 'Tmux', TASK_STOP_TOOL_NAME]

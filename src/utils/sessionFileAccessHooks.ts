@@ -1,7 +1,7 @@
 /**
  * Session file access analytics hooks.
  * Tracks access to session memory and transcript files via Read, Grep, Glob tools.
- * Also tracks memdir file access via Read, Grep, Glob, Edit, and Write tools.
+ * Also tracks memdir access via Read, Grep, Glob, Edit, MultiEdit, and Write.
  */
 import { feature } from 'bun:bundle'
 import { registerHookCallbacks } from '../bootstrap/state.js'
@@ -12,6 +12,8 @@ import {
 } from '../services/analytics/index.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
 import { inputSchema as editInputSchema } from '@bee-game-studio/builtin-tools/tools/FileEditTool/types.js'
+import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
+import { inputSchema as multiEditInputSchema } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/types.js'
 import { FileReadTool } from '@bee-game-studio/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
 import { FileWriteTool } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/FileWriteTool.js'
@@ -44,7 +46,7 @@ import { getSubagentLogName } from './agentContext.js'
 
 /**
  * Extract the file path from a tool input for memdir detection.
- * Covers Read (file_path), Edit (file_path), and Write (file_path).
+ * Covers Read, Edit, MultiEdit, and Write file paths.
  */
 function getFilePathFromInput(
   toolName: string,
@@ -57,6 +59,10 @@ function getFilePathFromInput(
     }
     case FILE_EDIT_TOOL_NAME: {
       const parsed = editInputSchema().safeParse(toolInput)
+      return parsed.success ? parsed.data.file_path : null
+    }
+    case MULTI_EDIT_TOOL_NAME: {
+      const parsed = multiEditInputSchema().safeParse(toolInput)
       return parsed.success ? parsed.data.file_path : null
     }
     case FILE_WRITE_TOOL_NAME: {
@@ -117,7 +123,7 @@ function getSessionFileTypeFromInput(
 
 /**
  * Check if a tool use constitutes a memory file access.
- * Detects session memory (via Read/Grep/Glob) and memdir access (via Read/Edit/Write).
+ * Detects session memory and memdir access through native file tools.
  * Uses the same conditions as the PostToolUse session file access hooks.
  */
 export function isMemoryFileAccess(
@@ -180,6 +186,7 @@ async function handleSessionFileAccess(
         logEvent('tengu_memdir_file_read', { ...subagentProps })
         break
       case FILE_EDIT_TOOL_NAME:
+      case MULTI_EDIT_TOOL_NAME:
         logEvent('tengu_memdir_file_edit', { ...subagentProps })
         break
       case FILE_WRITE_TOOL_NAME:
@@ -200,6 +207,7 @@ async function handleSessionFileAccess(
         logEvent('tengu_team_mem_file_read', { ...subagentProps })
         break
       case FILE_EDIT_TOOL_NAME:
+      case MULTI_EDIT_TOOL_NAME:
         logEvent('tengu_team_mem_file_edit', { ...subagentProps })
         teamMemWatcher?.notifyTeamMemoryWrite()
         break
@@ -215,6 +223,7 @@ async function handleSessionFileAccess(
     if (
       scope !== null &&
       (input.tool_name === FILE_EDIT_TOOL_NAME ||
+        input.tool_name === MULTI_EDIT_TOOL_NAME ||
         input.tool_name === FILE_WRITE_TOOL_NAME)
     ) {
       memoryShapeTelemetry!.logMemoryWriteShape(
@@ -247,6 +256,7 @@ export function registerSessionFileAccessHooks(): void {
       { matcher: GREP_TOOL_NAME, hooks: [hook] },
       { matcher: GLOB_TOOL_NAME, hooks: [hook] },
       { matcher: FILE_EDIT_TOOL_NAME, hooks: [hook] },
+      { matcher: MULTI_EDIT_TOOL_NAME, hooks: [hook] },
       { matcher: FILE_WRITE_TOOL_NAME, hooks: [hook] },
     ],
   })

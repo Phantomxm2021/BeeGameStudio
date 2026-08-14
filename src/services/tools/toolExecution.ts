@@ -937,8 +937,7 @@ async function checkPermissionsAndCallTool(
     if (tool.name === FILE_READ_TOOL_NAME && 'file_path' in processedInput) {
       toolAttributes.file_path = String(processedInput.file_path)
     } else if (
-      (tool.name === FILE_EDIT_TOOL_NAME ||
-        tool.name === FILE_WRITE_TOOL_NAME) &&
+      isCodeEditingTool(tool.name) &&
       'file_path' in processedInput
     ) {
       toolAttributes.file_path = String(processedInput.file_path)
@@ -1301,8 +1300,7 @@ async function checkPermissionsAndCallTool(
 
       // Edit/Write tools: capture file_path and diff
       if (
-        (tool.name === FILE_EDIT_TOOL_NAME ||
-          tool.name === FILE_WRITE_TOOL_NAME) &&
+        isCodeEditingTool(tool.name) &&
         'file_path' in processedInput
       ) {
         contentAttributes.file_path = String(processedInput.file_path)
@@ -1380,8 +1378,7 @@ async function checkPermissionsAndCallTool(
     if (processedInput && typeof processedInput === 'object') {
       if (
         (tool.name === FILE_READ_TOOL_NAME ||
-          tool.name === FILE_EDIT_TOOL_NAME ||
-          tool.name === FILE_WRITE_TOOL_NAME) &&
+          isCodeEditingTool(tool.name)) &&
         'file_path' in processedInput
       ) {
         fileExtension = getFileExtensionForAnalytics(
