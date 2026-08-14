@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { Message } from '../../../types/message.js'
-import {
-  microcompactMessages,
-  projectCompletedFileMutationInputs,
-  projectOlderCompactableToolResults,
-} from '../microCompact.js'
+import { microcompactMessages } from '../microCompact.js'
 
 const originalBaseUrl = process.env.ANTHROPIC_BASE_URL
 const originalModelType = process.env.BEEGAME_MODEL_TYPE
@@ -33,264 +29,17 @@ const user = (content: unknown[]): Message =>
 const blocksOf = (message: Message): Array<Record<string, unknown>> =>
   message.message!.content as unknown as Array<Record<string, unknown>>
 
-describe('projectCompletedFileMutationInputs', () => {
-  test('removes older Write content but keeps the latest mutation in working context', () => {
-    const originalContent = '# Long document\n' + 'body '.repeat(4_000)
-    const latestContent = 'latest section body'
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-1',
-          name: 'Write',
-          input: { file_path: '/project/docs/GDD.md', content: originalContent },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-1',
-          content: 'File written successfully',
-        },
-      ]),
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-2',
-          name: 'Write',
-          input: {
-            file_path: '/project/docs/Latest.md',
-            content: latestContent,
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-2',
-          content: 'File written successfully',
-        },
-      ]),
-    ]
-
-    const projected = projectCompletedFileMutationInputs(messages)
-    const projectedBlock = blocksOf(projected[0]!)[0]!
-    const originalBlock = blocksOf(messages[0]!)[0]!
-
-    expect(projectedBlock.input).toEqual({
-      file_path: '/project/docs/GDD.md',
-      content: '[Previously written content cleared; read the file if needed]',
-    })
-    expect((originalBlock.input as { content: string }).content).toBe(
-      originalContent,
-    )
-    expect(
-      (blocksOf(projected[2]!)[0]!.input as { content: string }).content,
-    ).toBe(latestContent)
-  })
-
-  test('removes completed Edit replacement payloads', () => {
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-edit-1',
-          name: 'Edit',
-          input: {
-            file_path: '/project/docs/GDD.md',
-            old_string: '<!-- section -->',
-            new_string: 'body '.repeat(4_000),
-            replace_all: false,
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-edit-1',
-          content: 'File edited successfully',
-        },
-      ]),
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-after-edit',
-          name: 'Write',
-          input: {
-            file_path: '/project/docs/Latest.md',
-            content: 'latest mutation',
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-after-edit',
-          content: 'File written successfully',
-        },
-      ]),
-    ]
-
-    const projected = projectCompletedFileMutationInputs(messages)
-    const block = blocksOf(projected[0]!)[0]!
-
-    expect(block.input).toEqual({
-      file_path: '/project/docs/GDD.md',
-      old_string: '[Previously replaced text cleared]',
-      new_string: '[Previously written content cleared; read the file if needed]',
-      replace_all: false,
-    })
-  })
-
-  test('keeps an older small scaffold available as structural context', () => {
-    const scaffold = '# GDD\n\n<!-- vision -->\n\n<!-- systems -->\n'
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-scaffold',
-          name: 'Write',
-          input: { file_path: '/project/docs/GDD.md', content: scaffold },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-scaffold',
-          content: 'File written successfully',
-        },
-      ]),
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-edit-latest',
-          name: 'Edit',
-          input: {
-            file_path: '/project/docs/GDD.md',
-            old_string: '<!-- vision -->',
-            new_string: 'Vision body',
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-edit-latest',
-          content: 'File edited successfully',
-        },
-      ]),
-    ]
-
-    const projected = projectCompletedFileMutationInputs(messages)
-
-    expect(
-      (blocksOf(projected[0]!)[0]!.input as { content: string }).content,
-    ).toBe(scaffold)
-  })
-
-  test('keeps failed and unresolved file mutation inputs intact', () => {
-    const failedInput = {
-      file_path: '/project/docs/GDD.md',
-      content: 'failed body',
-    }
-    const pendingInput = {
-      file_path: '/project/docs/GDD.md',
-      content: 'pending body',
-    }
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-failed',
-          name: 'Write',
-          input: failedInput,
-        },
-        {
-          type: 'tool_use',
-          id: 'tool-write-pending',
-          name: 'Write',
-          input: pendingInput,
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-failed',
-          content: 'permission denied',
-          is_error: true,
-        },
-      ]),
-    ]
-
-    const projected = projectCompletedFileMutationInputs(messages)
-    const blocks = blocksOf(projected[0]!)
-
-    expect(blocks[0]!.input).toEqual(failedInput)
-    expect(blocks[1]!.input).toEqual(pendingInput)
-  })
-
-  test('uses the local projection for a custom Anthropic endpoint', async () => {
+describe('durable tool history', () => {
+  test('preserves the cached prefix for a custom Anthropic endpoint', async () => {
     process.env.BEEGAME_MODEL_TYPE = 'anthropic'
     process.env.ANTHROPIC_BASE_URL = 'https://provider.example.test'
+    const originalContent = 'body '.repeat(4_000)
+    const readResult = 'document line\n'.repeat(4_000)
     const messages: Message[] = [
       assistant([
         {
           type: 'tool_use',
           id: 'tool-write-custom',
-          name: 'Write',
-          input: {
-            file_path: '/project/docs/GDD.md',
-            content: 'body '.repeat(4_000),
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-custom',
-          content: 'File written successfully',
-        },
-      ]),
-    ]
-
-    messages.push(
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-custom-latest',
-          name: 'Write',
-          input: {
-            file_path: '/project/docs/Latest.md',
-            content: 'latest mutation',
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-write-custom-latest',
-          content: 'File written successfully',
-        },
-      ]),
-    )
-
-    const result = await microcompactMessages(messages)
-    const block = blocksOf(result.messages[0]!)[0]!
-
-    expect((block.input as { content: string }).content).toBe(
-      '[Previously written content cleared; read the file if needed]',
-    )
-  })
-
-  test('leaves official Anthropic history for server-side context management', async () => {
-    process.env.BEEGAME_MODEL_TYPE = 'anthropic'
-    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
-    const originalContent = 'body '.repeat(4_000)
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-write-official',
           name: 'Write',
           input: {
             file_path: '/project/docs/GDD.md',
@@ -301,27 +50,14 @@ describe('projectCompletedFileMutationInputs', () => {
       user([
         {
           type: 'tool_result',
-          tool_use_id: 'tool-write-official',
+          tool_use_id: 'tool-write-custom',
           content: 'File written successfully',
         },
       ]),
-    ]
-
-    const result = await microcompactMessages(messages)
-    const block = blocksOf(result.messages[0]!)[0]!
-
-    expect((block.input as { content: string }).content).toBe(originalContent)
-  })
-})
-
-describe('projectOlderCompactableToolResults', () => {
-  test('clears older Read output while preserving the latest tool working set', () => {
-    const readOutput = 'document line\n'.repeat(4_000)
-    const messages: Message[] = [
       assistant([
         {
           type: 'tool_use',
-          id: 'tool-read-1',
+          id: 'tool-read-custom',
           name: 'Read',
           input: { file_path: '/project/docs/GDD.md' },
         },
@@ -329,8 +65,8 @@ describe('projectOlderCompactableToolResults', () => {
       user([
         {
           type: 'tool_result',
-          tool_use_id: 'tool-read-1',
-          content: readOutput,
+          tool_use_id: 'tool-read-custom',
+          content: readResult,
         },
       ]),
       assistant([
@@ -354,14 +90,14 @@ describe('projectOlderCompactableToolResults', () => {
       ]),
     ]
 
-    const projected = projectOlderCompactableToolResults(messages)
+    const result = await microcompactMessages(messages)
 
-    expect(blocksOf(projected[1]!)[0]!.content).toBe(
-      '[Old tool result content cleared]',
+    expect(
+      (blocksOf(result.messages[0]!)[0]!.input as { content: string }).content,
+    ).toBe(originalContent)
+    expect(blocksOf(result.messages[1]!)[0]!.content).toBe(
+      'File written successfully',
     )
-    expect(blocksOf(projected[3]!)[0]!.content).toBe(
-      'File edited successfully',
-    )
-    expect(blocksOf(messages[1]!)[0]!.content).toBe(readOutput)
+    expect(blocksOf(result.messages[3]!)[0]!.content).toBe(readResult)
   })
 })
