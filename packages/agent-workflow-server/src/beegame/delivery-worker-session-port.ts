@@ -513,6 +513,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
         throw new Error(
           'native resume session is unavailable, stopped, busy, or belongs to another workspace',
         )
+      if (resumeWorkerSessionId) {
+        await input.sessions.rebindWorkflowWorker(resumeWorkerSessionId, {
+          runId: request.runId,
+          dispatchId,
+          workerType: request.workerType,
+        })
+      }
       const session = resumedSession ?? input.sessions.start({
         workspacePath: request.workspacePath,
         projectId: request.projectId,
@@ -946,6 +953,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 continue
               }
             }
+            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
             return createDeterministicCanonicalDocumentTerminal(
               request,
               targetPath,

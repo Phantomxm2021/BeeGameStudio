@@ -1235,6 +1235,20 @@ export class BeeGameSessionManager {
     }
   }
 
+  async rebindWorkflowWorker(
+    sessionId: string,
+    binding: { runId: string; dispatchId: string; workerType: string },
+  ): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.workflowWorker)
+      throw new Error('workflow worker session is unavailable')
+    await this.waitForWorkflowWorkerIdle(sessionId)
+    record.workflowRunId = binding.runId
+    record.workflowDispatchId = binding.dispatchId
+    record.workflowWorkerType = binding.workerType
+    this.persistRuntimeSnapshot(record)
+  }
+
   async waitForWorkflowWorkerIdle(sessionId: string): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return

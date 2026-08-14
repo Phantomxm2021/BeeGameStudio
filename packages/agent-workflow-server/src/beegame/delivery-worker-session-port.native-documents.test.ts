@@ -141,6 +141,13 @@ describe('native initial document authoring', () => {
     const prompts: string[] = []
     const sessionIds: string[] = []
     const disposedSessionIds: string[] = []
+    const idleSessionIds: string[] = []
+    const reboundDispatches: Array<{
+      sessionId: string
+      runId: string
+      dispatchId: string
+      workerType: string
+    }> = []
     const events: Array<Record<string, unknown>> = []
     const states = new Map<
       string,
@@ -191,7 +198,19 @@ describe('native initial document authoring', () => {
         },
         events: () => events,
         isWorkflowWorkerOpen: () => true,
-        waitForWorkflowWorkerIdle: async () => undefined,
+        waitForWorkflowWorkerIdle: async (id: string) => {
+          idleSessionIds.push(id)
+        },
+        rebindWorkflowWorker: async (
+          id: string,
+          binding: {
+            runId: string
+            dispatchId: string
+            workerType: string
+          },
+        ) => {
+          reboundDispatches.push({ sessionId: id, ...binding })
+        },
         sendWithDisplay: async (_sessionId: string, prompt: string) => {
           prompts.push(prompt)
           events.push({
@@ -249,6 +268,15 @@ describe('native initial document authoring', () => {
       await port.close?.(calibration.dispatchId)
 
       expect(sessionIds).toHaveLength(1)
+      expect(idleSessionIds).toContain(started.sessionId)
+      expect(reboundDispatches).toEqual([
+        {
+          sessionId: started.sessionId,
+          runId: 'run',
+          dispatchId: 'dispatch-calibration',
+          workerType: 'document-author',
+        },
+      ])
       expect(disposedSessionIds).toEqual([started.sessionId])
       expect(prompts).toHaveLength(2)
       expect(prompts[1]).toContain('Calibrate only')
