@@ -14,7 +14,6 @@ import { WEB_FETCH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/WebFet
 import { GLOB_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/GlobTool/prompt.js'
 import { SHELL_TOOL_NAMES } from '../utils/shell/shellToolUtils.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
-import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/NotebookEditTool/constants.js'
 import { SKILL_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SkillTool/constants.js'
@@ -78,7 +77,6 @@ export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
   GLOB_TOOL_NAME,
   ...SHELL_TOOL_NAMES,
   FILE_EDIT_TOOL_NAME,
-  MULTI_EDIT_TOOL_NAME,
   FILE_WRITE_TOOL_NAME,
   NOTEBOOK_EDIT_TOOL_NAME,
   SKILL_TOOL_NAME,
@@ -141,7 +139,6 @@ export const CORE_TOOLS = new Set([
   ...SHELL_TOOL_NAMES, // 'Bash', 'Shell'
   FILE_READ_TOOL_NAME, // 'Read'
   FILE_EDIT_TOOL_NAME, // 'Edit'
-  MULTI_EDIT_TOOL_NAME, // 'MultiEdit'
   FILE_WRITE_TOOL_NAME, // 'Write'
   GLOB_TOOL_NAME, // 'Glob'
   GREP_TOOL_NAME, // 'Grep'

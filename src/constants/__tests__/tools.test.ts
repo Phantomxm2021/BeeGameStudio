@@ -61,7 +61,6 @@ describe('CORE_TOOLS', () => {
       'Bash',
       'Read',
       'Edit',
-      'MultiEdit',
       'Write',
       'Glob',
       'Grep',
@@ -103,15 +102,7 @@ describe('CORE_TOOLS', () => {
 
 describe('isDeferredTool', () => {
   test('returns false for core tools', () => {
-    const coreNames = [
-      'Read',
-      'Edit',
-      'MultiEdit',
-      'Bash',
-      'Glob',
-      'Grep',
-      'Agent',
-    ]
+    const coreNames = ['Read', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent']
     for (const name of coreNames) {
       const tool = makeTool({ name })
       expect(

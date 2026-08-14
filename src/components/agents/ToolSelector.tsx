@@ -8,7 +8,6 @@ import { AGENT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/AgentTool/
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import { ExitPlanModeV2Tool } from '@bee-game-studio/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
 import { FileEditTool } from '@bee-game-studio/builtin-tools/tools/FileEditTool/FileEditTool.js';
-import { MultiEditTool } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/MultiEditTool.js';
 import { FileReadTool } from '@bee-game-studio/builtin-tools/tools/FileReadTool/FileReadTool.js';
 import { FileWriteTool } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/FileWriteTool.js';
 import { GlobTool } from '@bee-game-studio/builtin-tools/tools/GlobTool/GlobTool.js';
@@ -69,7 +68,7 @@ function getToolBuckets(): ToolBuckets {
     },
     EDIT: {
       name: 'Edit tools',
-      toolNames: new Set([FileEditTool.name, MultiEditTool.name, FileWriteTool.name, NotebookEditTool.name]),
+      toolNames: new Set([FileEditTool.name, FileWriteTool.name, NotebookEditTool.name]),
     },
     EXECUTION: {
       name: 'Execution tools',

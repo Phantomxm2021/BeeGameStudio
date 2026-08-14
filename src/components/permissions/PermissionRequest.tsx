@@ -8,7 +8,6 @@ import type { AnyObject, Tool, ToolUseContext } from '../../Tool.js';
 import { AskUserQuestionTool } from '@bee-game-studio/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import { FileEditTool } from '@bee-game-studio/builtin-tools/tools/FileEditTool/FileEditTool.js';
-import { MultiEditTool } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/MultiEditTool.js';
 import { FileReadTool } from '@bee-game-studio/builtin-tools/tools/FileReadTool/FileReadTool.js';
 import { FileWriteTool } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/FileWriteTool.js';
 import { GlobTool } from '@bee-game-studio/builtin-tools/tools/GlobTool/GlobTool.js';
@@ -25,7 +24,6 @@ import { EnterPlanModePermissionRequest } from './EnterPlanModePermissionRequest
 import { ExitPlanModePermissionRequest } from './ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.js';
 import { FallbackPermissionRequest } from './FallbackPermissionRequest.js';
 import { FileEditPermissionRequest } from './FileEditPermissionRequest/FileEditPermissionRequest.js';
-import { MultiEditPermissionRequest } from './MultiEditPermissionRequest/MultiEditPermissionRequest.js';
 import { FilesystemPermissionRequest } from './FilesystemPermissionRequest/FilesystemPermissionRequest.js';
 import { FileWritePermissionRequest } from './FileWritePermissionRequest/FileWritePermissionRequest.js';
 import { NotebookEditPermissionRequest } from './NotebookEditPermissionRequest/NotebookEditPermissionRequest.js';
@@ -78,8 +76,6 @@ function permissionComponentForTool(tool: Tool): React.ComponentType<PermissionR
   switch (tool) {
     case FileEditTool:
       return FileEditPermissionRequest;
-    case MultiEditTool:
-      return MultiEditPermissionRequest;
     case FileWriteTool:
       return FileWritePermissionRequest;
     case BashTool:

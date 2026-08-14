@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  parseToolPreset,
-  filterToolsByDenyRules,
-  getAllBaseTools,
-  ASYNC_AGENT_ALLOWED_TOOLS,
-} from '../tools'
+import { parseToolPreset, filterToolsByDenyRules } from '../tools'
 import { getEmptyToolPermissionContext } from '../Tool'
 
 describe('parseToolPreset', () => {
@@ -26,16 +21,6 @@ describe('parseToolPreset', () => {
 
   test('returns null for random string', () => {
     expect(parseToolPreset('custom-preset')).toBeNull()
-  })
-})
-
-describe('native file tool inventory', () => {
-  test('includes MultiEdit beside Edit in the base inventory', () => {
-    const names = getAllBaseTools().map(tool => tool.name)
-    expect(names).toContain('Edit')
-    expect(names).toContain('MultiEdit')
-    expect(names.indexOf('MultiEdit')).toBe(names.indexOf('Edit') + 1)
-    expect(ASYNC_AGENT_ALLOWED_TOOLS.has('MultiEdit')).toBe(true)
   })
 })
 

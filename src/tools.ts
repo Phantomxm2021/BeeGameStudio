@@ -4,7 +4,6 @@ import { AgentTool } from '@bee-game-studio/builtin-tools/tools/AgentTool/AgentT
 import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js'
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js'
 import { FileEditTool } from '@bee-game-studio/builtin-tools/tools/FileEditTool/FileEditTool.js'
-import { MultiEditTool } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/MultiEditTool.js'
 import { FileReadTool } from '@bee-game-studio/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FileWriteTool } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/FileWriteTool.js'
 import { GlobTool } from '@bee-game-studio/builtin-tools/tools/GlobTool/GlobTool.js'
@@ -228,7 +227,6 @@ export function getAllBaseTools(): Tools {
     ExitPlanModeV2Tool,
     FileReadTool,
     FileEditTool,
-    MultiEditTool,
     FileWriteTool,
     NotebookEditTool,
     ArtifactTool,
@@ -319,12 +317,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       }
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
-    const simpleTools: Tool[] = [
-      BashTool,
-      FileReadTool,
-      FileEditTool,
-      MultiEditTool,
-    ]
+    const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).

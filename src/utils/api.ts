@@ -19,7 +19,6 @@ import { prefetchAllMcpResources } from 'src/services/mcp/client.js'
 import type { ScopedMcpServerConfig } from 'src/services/mcp/types.js'
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js'
 import { FileEditTool } from '@bee-game-studio/builtin-tools/tools/FileEditTool/FileEditTool.js'
-import { MultiEditTool } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/MultiEditTool.js'
 import {
   normalizeFileEditInput,
   stripTrailingWhitespace,
@@ -675,17 +674,6 @@ export function normalizeToolInput<T extends Tool>(
         old_string: edits[0]!.old_string,
         new_string: edits[0]!.new_string,
       } as z.infer<T['inputSchema']>
-    }
-    case MultiEditTool.name: {
-      const parsedInput = MultiEditTool.inputSchema.parse(input)
-      const normalized = normalizeFileEditInput({
-        file_path: parsedInput.file_path,
-        edits: parsedInput.edits.map(edit => ({
-          ...edit,
-          replace_all: edit.replace_all ?? false,
-        })),
-      })
-      return normalized as z.infer<T['inputSchema']>
     }
     case FileWriteTool.name: {
       // Validated upstream, won't throw
