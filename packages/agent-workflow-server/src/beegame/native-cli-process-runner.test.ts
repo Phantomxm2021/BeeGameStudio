@@ -117,7 +117,7 @@ describe('native CLI process runner', () => {
     })).toContain(`--resume=${nativeSessionId}`)
   })
 
-  test('limits a document author process to native document file tools', () => {
+  test('does not replace the native document author tool inventory', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_route_only',
       cwd: process.cwd(),
@@ -126,8 +126,10 @@ describe('native CLI process runner', () => {
       workflowWorkerType: 'document-author',
     })
 
-    expect(command).toContain('--tools=Read,Write,Edit')
-    expect(command).toContain('--allowedTools=Read,Write,Edit')
+    expect(command.some(argument => argument.startsWith('--tools='))).toBe(false)
+    expect(
+      command.some(argument => argument.startsWith('--allowedTools=')),
+    ).toBe(false)
   })
 
   test('forwards native messages and resolves only on result', async () => {
