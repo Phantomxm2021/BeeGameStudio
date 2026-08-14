@@ -5,6 +5,9 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 
+const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
+  'Treat each section as the final decision record, not a derivation transcript. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
+
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
@@ -438,12 +441,14 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ? [
                 `Author exactly ${String(request.contract.foundationDocumentPath)} as one complete production-usable discipline document using Bee Game Studio's normal native file workflow. Do not write any other file.`,
                 'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
+                DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                 'Write the complete canonical Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
               ].join(' ')
             : request.contract.authoringMode === 'calibration'
               ? [
                   `Calibrate exactly ${String(request.contract.foundationDocumentPath)} against the newly available committed upstream authority using the existing native session.`,
                   'Read the current canonical file and compact authority projection. Revise only statements whose authority changed or became available; preserve unrelated valid content and limit changes to affected authority.',
+                  DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                   'Leave one complete production-usable Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
                 ].join(' ')
               : request.contract.authoringMode === 'repair-planning'
@@ -461,7 +466,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
-                  'Treat each section as the final decision record, not a derivation transcript. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.',
+                  DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                   'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Use native file tools normally. Do not edit .beegame metadata. Do not claim verified license status without concrete evidence.',
                   'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===

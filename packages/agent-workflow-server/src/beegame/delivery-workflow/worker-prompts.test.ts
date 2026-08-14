@@ -187,6 +187,18 @@ describe('resource-content worker prompts', () => {
     expect(prompts[1]).toContain('Revise only statements whose authority changed')
     expect(prompts[1]).toContain('limit changes to affected authority')
     for (const prompt of prompts) {
+      expect(prompt).toContain(
+        'Treat each section as the final decision record, not a derivation transcript',
+      )
+      expect(prompt).toContain(
+        'Production materials are canonical compact views of owned decisions and must not repeat section narrative',
+      )
+      expect(prompt).toContain(
+        'Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior',
+      )
+      expect(prompt).toContain(
+        'Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases',
+      )
       expect(prompt).not.toContain('checkpoint count')
       expect(prompt).not.toContain('forced Edit')
       expect(prompt).not.toContain('API retry')
