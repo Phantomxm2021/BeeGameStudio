@@ -109,7 +109,8 @@ function acceptedDispatchIdentity(input: {
     )
   if (
     input.workerType === 'document-author' &&
-    (request.contract.authoringMode !== 'initial' ||
+    ((request.contract.authoringMode !== 'initial' &&
+      request.contract.authoringMode !== 'parallel-draft') ||
       request.contract.foundationDocumentPath !== input.taskId ||
       request.allowedPaths?.length !== 1 ||
       request.allowedPaths[0] !== input.taskId)

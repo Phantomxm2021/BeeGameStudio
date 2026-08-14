@@ -43,6 +43,7 @@ function run(): DeliveryRun {
 function completedDocumentDispatch(
   base: DeliveryRun,
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+  authoringMode: 'initial' | 'parallel-draft' = 'initial',
 ): NonNullable<DeliveryRun['activeDispatch']> {
   const dispatchId = `dispatch-${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`
   return {
@@ -66,7 +67,7 @@ function completedDocumentDispatch(
       revision: base.revision.document,
       allowedPaths: [path],
       contract: {
-        authoringMode: 'initial',
+        authoringMode,
         foundationDocumentPath: path,
       },
     },
@@ -802,7 +803,7 @@ describe('accepted workflow unit journal', () => {
     const base = run()
     const gdd = CANONICAL_FOUNDATION_DOCUMENTS[0]
     const level = CANONICAL_FOUNDATION_DOCUMENTS[1]
-    const completed = completedDocumentDispatch(base, level)
+    const completed = completedDocumentDispatch(base, level, 'parallel-draft')
     const previous = {
       ...base,
       phase: 'DOCUMENT_DRAFTING' as const,
