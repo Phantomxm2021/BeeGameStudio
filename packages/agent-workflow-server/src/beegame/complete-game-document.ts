@@ -135,6 +135,13 @@ export function validateCompleteGameDocumentMarkdown(
   value: unknown,
 ): string {
   const body = z.string().trim().min(1).parse(value)
+  const contract = getGameDocumentContract(path)
+  const byteLength = new TextEncoder().encode(body).byteLength
+  if (byteLength > contract.outputPolicy.maximumUtf8Bytes) {
+    throw new Error(
+      `complete game document exceeds the ${contract.outputPolicy.maximumUtf8Bytes}-byte budget for ${path}`,
+    )
+  }
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')
@@ -145,7 +152,6 @@ export function validateCompleteGameDocumentMarkdown(
   if (new Set(blocks).size !== blocks.length)
     throw new Error('complete game document repeats a substantive content block')
 
-  const contract = getGameDocumentContract(path)
   const summaryMarker = '<!-- beegame-executive-summary -->'
   const productionMarker = '<!-- beegame-production-materials -->'
   const auditMarker = '<!-- beegame-audit-appendix -->'

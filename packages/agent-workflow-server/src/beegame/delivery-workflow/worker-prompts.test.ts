@@ -591,6 +591,10 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain(
       'Production materials are canonical compact views of owned decisions and must not repeat section narrative',
     )
+    expect(prompt).toContain('48,000 UTF-8 bytes')
+    expect(prompt).toContain(
+      'finish every required section and production material within that single response',
+    )
     expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',

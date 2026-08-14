@@ -14,6 +14,7 @@ describe('complete game document contracts', () => {
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       const contract = getGameDocumentContract(path)
       expect(contract.path).toBe(path)
+      expect(contract.outputPolicy.maximumUtf8Bytes).toBe(48_000)
       expect(contract.sections.length).toBeGreaterThanOrEqual(8)
       expect(new Set(contract.sections.map(section => section.sectionId)).size).toBe(
         contract.sections.length,
@@ -93,6 +94,7 @@ describe('complete game document contracts', () => {
   test('makes every section and production material decision-dense by contract', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).toEqual({
+        maximumUtf8Bytes: 48_000,
         sectionStyle: 'final_owned_decisions',
         productionMaterialStyle: 'canonical_compact_views',
         workedExamples: 'one_per_distinct_boundary',

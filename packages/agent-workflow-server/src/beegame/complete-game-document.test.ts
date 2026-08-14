@@ -17,6 +17,19 @@ describe('native complete game document validation', () => {
     }
   })
 
+  test('rejects a complete document that exceeds the native response byte budget', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const oversized = renderTestCompleteGameDocument(path, {
+      ...submission,
+      executiveSummary: `Concrete production authority ${'x'.repeat(50_000)}`,
+    })
+
+    expect(() =>
+      validateCompleteGameDocumentMarkdown(path, oversized),
+    ).toThrow(/byte budget/i)
+  })
+
   test('accepts normal Markdown blank lines between canonical markers and headings', () => {
     const path = 'docs/GDD.md'
     const markdown = renderTestCompleteGameDocument(
