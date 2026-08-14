@@ -13,10 +13,11 @@ import { appendDocumentReceiptObservation } from './runtime-observability'
 
 const authoredDocumentReceiptSchema = z
   .object({
-    schemaVersion: z.literal(4),
+    schemaVersion: z.literal(5),
     dispatchId: z.string().min(1),
     targetPath: z.string().min(1),
     finalDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    byteLength: z.number().int().positive(),
     documentId: z.string().min(1),
     version: z.literal('1.0.0'),
     updatedAt: z.string().datetime({ offset: true }),
@@ -25,10 +26,11 @@ const authoredDocumentReceiptSchema = z
   .strict()
 
 export type AuthoredDocumentReceipt = {
-  schemaVersion: 4
+  schemaVersion: 5
   dispatchId: string
   targetPath: string
   finalDigest: string
+  byteLength: number
   documentId: string
   version: '1.0.0'
   updatedAt: string
@@ -46,6 +48,8 @@ export async function commitAuthoredFoundationDocument(input: {
   dispatchId: string
   targetPath: FoundationDocumentPath
   updatedAt?: string
+  authoredBody?: string
+  expectedOriginalDigest?: string | null
 }): Promise<AuthoredDocumentReceipt> {
   const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[input.targetPath]
   const existing = await readAuthoredDocumentReceipt(
@@ -64,7 +68,13 @@ export async function commitAuthoredFoundationDocument(input: {
     throw new Error('authored document receipt is not safely replayable')
 
   const target = resolve(input.workspacePath, input.targetPath)
-  const authored = await readFile(target, 'utf8')
+  if (input.expectedOriginalDigest !== undefined) {
+    const current = await readOptionalFile(target)
+    const currentDigest = current === undefined ? null : digest(current)
+    if (currentDigest !== input.expectedOriginalDigest)
+      throw new Error('authored document target changed during generation')
+  }
+  const authored = input.authoredBody ?? await readFile(target, 'utf8')
   const updatedAt = input.updatedAt ?? new Date().toISOString()
   z.string().datetime({ offset: true }).parse(updatedAt)
   const canonical = canonicalizeAuthoredDocument(
@@ -90,10 +100,11 @@ export async function commitAuthoredFoundationDocument(input: {
     `${JSON.stringify(audit, null, 2)}\n`,
   )
   const prepared: AuthoredDocumentReceipt = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     dispatchId: input.dispatchId,
     targetPath: input.targetPath,
     finalDigest: audit.documentDigest,
+    byteLength: Buffer.byteLength(canonical),
     documentId,
     version: '1.0.0',
     updatedAt,

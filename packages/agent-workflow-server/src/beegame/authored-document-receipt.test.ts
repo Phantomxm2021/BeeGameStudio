@@ -81,15 +81,16 @@ describe('native authored document receipts', () => {
       })
 
       expect(second).toEqual(first)
-      expect(first).toMatchObject({
-        schemaVersion: 4,
-        documentId: 'GDD',
-        status: 'committed',
-      })
       const committedMarkdown = await readFile(
         join(workspacePath, targetPath),
         'utf8',
       )
+      expect(first).toMatchObject({
+        schemaVersion: 5,
+        documentId: 'GDD',
+        byteLength: Buffer.byteLength(committedMarkdown),
+        status: 'committed',
+      })
       expect(committedMarkdown).not.toBe(authored)
       expect(committedMarkdown).toContain(
         'updated_at: 2026-08-13T01:00:00.000+08:00',
