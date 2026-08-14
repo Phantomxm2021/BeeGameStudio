@@ -11,6 +11,7 @@ import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   13: '263640f06ada501afb0421806f29215b83e54b4fb239591b9dc1256e8e4b5067',
   14: 'e96f3be72863e49335cfa40a30339e3aba4bc8731a94c6e7dd71dc806772502f',
+  15: 'b3ab7051195615c4fc10604119a5d5c182d8c5d5dd148e36eff7727f0d949c17',
 }
 
 function canonicalize(value: unknown): unknown {

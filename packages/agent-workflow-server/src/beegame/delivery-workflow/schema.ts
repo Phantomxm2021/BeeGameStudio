@@ -536,13 +536,9 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
             status: z.enum([
               'pending',
               'drafting',
-              'drafted',
-              'calibrating',
               'committed',
               'needs_action',
             ]),
-            draftDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-            workerSessionId: z.string().min(1).optional(),
             upstreamDigests: z
               .record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/))
               .optional(),
@@ -581,22 +577,6 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
           path: ['documents'],
           message:
             'parallel foundation document checkpoints must exactly match canonical order',
-        })
-      if (
-        state.documents.some(
-          document =>
-            (document.status === 'drafted' ||
-              document.status === 'calibrating' ||
-              document.status === 'committed') &&
-            document.path !== 'docs/GDD.md' &&
-            (!document.draftDigest || !document.workerSessionId),
-        )
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['documents'],
-          message:
-            'authored foundation checkpoints require draft digest and worker session',
         })
     }
   })

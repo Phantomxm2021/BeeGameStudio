@@ -787,7 +787,7 @@ describe('delivery worker session credentials', () => {
     expect(starts[1]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
   })
 
-  test('projects upstream authority while preserving native file tools', async () => {
+  test('does not expose stale target content or native file instructions', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'initial-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -808,8 +808,7 @@ describe('delivery worker session credentials', () => {
           upstreamDocumentPaths: [],
         },
       })
-      expect(block).toContain('exact remaining draft sequence')
-      expect(block).toContain('safe first-checkpoint replacement')
+      expect(block).toBe('')
       expect(block).not.toContain('stale target content')
       expect(block).not.toContain('CommitCanonicalDocument')
       expect(block).not.toContain(
@@ -870,13 +869,11 @@ describe('delivery worker session credentials', () => {
       expect(submittedPrompt).not.toContain('complete when the turn ends')
       expect(submittedPrompt).not.toContain('file-operation sequence')
       expect(submittedPrompt).toContain(
-        'Continuous bounded document sequence 1/13',
+        'Return exactly one complete raw Markdown body for docs/GDD.md',
       )
-      expect(submittedPrompt).toContain(
-        'Continuous bounded document sequence 13/13',
-      )
-      expect(submittedPrompt).toContain(
-        'End the native turn only after the final bounded checkpoint succeeds',
+      expect(submittedPrompt).toContain('Do not call tools')
+      expect(submittedPrompt).not.toContain(
+        'Continuous bounded document sequence',
       )
       expect(submittedPrompt).not.toContain(
         'original complete document prompt',

@@ -58,13 +58,15 @@ import {
 } from './native-resource-content-tool'
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
+import { readAuthoredDocumentReceipt } from './authored-document-receipt'
+
+const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
 function reviewerSubmissionContract(
   request: WorkerDispatchRequest,
@@ -404,11 +406,16 @@ export async function buildDocumentAuthorAuthorityBlock(
   onProjection?.(projection)
   return [
     upstreamPaths.length
-      ? `BGS persisted the complete selected upstream authority input at ${projectionRelativePath}. It contains the exact contracted section bodies, source ranges and digests without summarization or rewriting. Use this projection as the upstream authority for the assignment. Do not reread whole upstream documents merely to rediscover the same selected authority; consult a source document only when a projection digest or integrity issue requires it.`
+      ? [
+          'BGS projected the complete selected upstream authority below without summarization or rewriting. Use it as the upstream authority for this assignment.',
+          `--- BEGIN FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
+          canonicalFoundationAuthorityProjectionBytes(projection).trimEnd(),
+          `--- END FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
+        ].join('\n')
       : `This fact-owner document has no upstream document dependency. Use the confirmed brief and document contract directly.`,
     targetExists
-      ? `An existing ${targetPath} is present. Inspect and replace or revise it as needed under current authority.`
-      : `The assigned target ${targetPath} does not exist and must be created.`,
+      ? `An existing ${targetPath} is present, but this initial stream must return a complete replacement Markdown body from current authority.`
+      : `The assigned target is ${targetPath}.`,
   ].join('\n\n')
 }
 
@@ -455,7 +462,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
     FoundationAuthorityProjection
   >()
   const eventOffsets = new Map<string, number>()
-  const documentValidationCorrections = new Set<string>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
@@ -470,24 +476,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
       const requestedResumeSession = request.contract.resumeWorkerSessionId
-      if (
-        requestedResumeSession !== undefined &&
-        (typeof requestedResumeSession !== 'string' ||
-          !requestedResumeSession.trim())
-      )
-        throw new Error('native resume session identity is invalid')
-      const resumeWorkerSessionId =
-        typeof requestedResumeSession === 'string'
-          ? requestedResumeSession
-          : undefined
-      if (
-        resumeWorkerSessionId &&
-        (request.workerType !== 'document-author' ||
-          request.contract.authoringMode !== 'calibration')
-      )
-        throw new Error(
-          'native resume session is only valid for document calibration',
-        )
+      if (requestedResumeSession !== undefined)
+        throw new Error('document author session resume is not supported')
       const documentAuthorityBlock =
         request.workerType === 'document-author' &&
         request.contract.authoringMode === 'remediation'
@@ -499,28 +489,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         })
       }
       const authToken = await input.getAuthToken?.()
-      const resumedSession = resumeWorkerSessionId
-        ? input.sessions.get(resumeWorkerSessionId)
-        : undefined
-      if (
-        resumeWorkerSessionId &&
-        (!resumedSession ||
-          resumedSession.status !== 'running' ||
-          resumedSession.turnStatus !== 'idle' ||
-          resolve(resumedSession.cwd) !== resolve(request.workspacePath) ||
-          [...sessions.values()].includes(resumeWorkerSessionId))
-      )
-        throw new Error(
-          'native resume session is unavailable, stopped, busy, or belongs to another workspace',
-        )
-      if (resumeWorkerSessionId) {
-        await input.sessions.rebindWorkflowWorker(resumeWorkerSessionId, {
-          runId: request.runId,
-          dispatchId,
-          workerType: request.workerType,
-        })
-      }
-      const session = resumedSession ?? input.sessions.start({
+      const session = input.sessions.start({
         workspacePath: request.workspacePath,
         projectId: request.projectId,
         userId: input.userId,
@@ -579,6 +548,18 @@ export function createBeeGameDeliveryWorkerPort(input: {
                   : request.contract.authoringMode,
             }
           : {}),
+        ...(isStreamedFoundationAuthoringTurn(request)
+          ? {
+              workflowMarkdownStreamContract: {
+                workspacePath: request.workspacePath,
+                runId: request.runId,
+                dispatchId,
+                targetPath: request.contract
+                  .foundationDocumentPath as FoundationDocumentPath,
+                maxBytes: FOUNDATION_MARKDOWN_STREAM_MAX_BYTES,
+              },
+            }
+          : {}),
         ...(request.workerType === 'document-author' &&
         request.contract.authoringMode === 'repair-planning'
           ? {
@@ -608,7 +589,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
       eventOffsets.set(
         dispatchId,
-        resumeWorkerSessionId ? sessionEvents(session.id).length : 0,
+        0,
       )
       records.set(dispatchId, {
         dispatchId,
@@ -762,7 +743,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
         eventOffsets.delete(dispatchId)
-        documentValidationCorrections.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -903,6 +883,31 @@ export function createBeeGameDeliveryWorkerPort(input: {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
+            if (isStreamedFoundationAuthoringTurn(request)) {
+              if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+                await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+              const receipt = await readAuthoredDocumentReceipt(
+                request.workspacePath,
+                dispatchId,
+              )
+              if (
+                receipt?.status !== 'committed' ||
+                receipt.targetPath !== targetPath
+              )
+                throw new Error(
+                  'document author completed without a committed Markdown stream receipt',
+                )
+              return createDeterministicCanonicalDocumentTerminal(
+                request,
+                receipt.targetPath,
+                documentAuthoringMetrics(
+                  sessionEvents(sessionId),
+                  projectionMetrics(
+                    documentAuthorityProjections.get(dispatchId),
+                  ),
+                ),
+              )
+            }
             let body: string
             try {
               body = await readFile(
@@ -920,39 +925,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
               throw new Error(
                 `document author output is missing: ${targetPath}`,
               )
-            if (isFoundationDocumentAuthoringTurn(request)) {
-              try {
-                validateCompleteGameDocumentMarkdown(
-                  request.contract.foundationDocumentPath as never,
-                  body,
-                )
-              } catch (error) {
-                if (documentValidationCorrections.has(dispatchId)) throw error
-                documentValidationCorrections.add(dispatchId)
-                eventOffsets.set(dispatchId, sessionEvents(sessionId).length)
-                const reason =
-                  error instanceof Error
-                    ? error.message
-                    : 'complete document validation failed'
-                if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-                  await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-                await input.sessions.sendWithDisplay(
-                  sessionId,
-                  [
-                    `The on-disk document failed the mechanical completion gate: ${reason}`,
-                    'Fix only the reported mechanical contract failure in the assigned document using Bee Game Studio native file tools, verify the final bytes, and end the turn normally.',
-                    'Do not rewrite completed content, do not change product authority, and do not create another file.',
-                  ].join('\n'),
-                  {
-                    taskType: taskTypeForWorker('document-author', 'initial'),
-                    displayKind: 'workflow_worker',
-                    ...(input.language ? { language: input.language } : {}),
-                  },
-                )
-                closedTurnDrained = false
-                continue
-              }
-            }
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
             return createDeterministicCanonicalDocumentTerminal(
@@ -1002,7 +974,7 @@ function isFoundationDocumentAuthoringTurn(
 ): boolean {
   return (
     request.workerType === 'document-author' &&
-    ['initial', 'parallel-draft', 'calibration'].includes(
+    ['initial', 'parallel-draft'].includes(
       String(request.contract.authoringMode),
     ) &&
     request.contract.documentSet === 'foundation' &&
@@ -1010,6 +982,16 @@ function isFoundationDocumentAuthoringTurn(
     CANONICAL_FOUNDATION_DOCUMENTS.includes(
       request.contract.foundationDocumentPath as never,
     )
+  )
+}
+
+function isStreamedFoundationAuthoringTurn(
+  request: WorkerDispatchRequest,
+): boolean {
+  return (
+    isFoundationDocumentAuthoringTurn(request) &&
+    (request.contract.authoringMode === 'initial' ||
+      request.contract.authoringMode === 'parallel-draft')
   )
 }
 
@@ -1028,17 +1010,14 @@ async function initialFoundationDocumentTurnPrompt(
   const dispatchId = request.dispatchId
   if (typeof dispatchId !== 'string' || !dispatchId)
     throw new Error('foundation authority index requires a dispatch identity')
-  const projectionPath = foundationProjectionRelativePath(dispatchId)
   return [
-    request.contract.authoringMode === 'calibration'
-      ? `Calibrate the existing complete document at ${path} against only the newly available committed upstream authority. Preserve unrelated valid content and limit changes to affected authority.`
-      : `Write the complete assigned document at ${path}.`,
+    `Return exactly one complete raw Markdown body for ${path} as the visible response. Do not call tools, do not wrap it in JSON or a code fence, and do not add a completion explanation.`,
     getGameDocumentContract(path).upstreamSections.length
-      ? `The complete selected upstream authority input is available at ${projectionPath}. It contains the exact contracted section bodies, source ranges and digests without summarization or rewriting. Use it as the upstream authority for this assignment. Do not reread whole upstream documents merely to rediscover the same selected authority; consult a source document only for a projection digest or integrity issue.`
+      ? `The exact selected upstream authority is included above with its contracted section bodies, source ranges, and digests. Use that projection directly without rereading whole upstream documents.`
       : 'This document has no upstream document dependency.',
     targetExists
-      ? `An existing ${path} is present. Inspect and replace or revise it as needed under current authority.`
-      : `The target ${path} does not exist and must be created.`,
+      ? `Replace the existing document body completely in this response from current authority.`
+      : `Produce the complete document body in this response.`,
   ].join('\n\n')
 }
 

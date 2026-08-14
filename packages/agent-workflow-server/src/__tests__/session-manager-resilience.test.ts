@@ -774,6 +774,7 @@ describe('BeeGame session runtime resilience', () => {
       ANTHROPIC_AUTH_TOKEN: 'provider-token',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
       BEEGAME_CONFIG_DIR: '/bgs/config',
+      BEEGAME_MODEL_TYPE: 'anthropic',
     })
     expect(launchContract).toEqual({
       selectedEnvironmentKeys: [
@@ -781,6 +782,7 @@ describe('BeeGame session runtime resilience', () => {
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'BEEGAME_CONFIG_DIR',
+        'BEEGAME_MODEL_TYPE',
         'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
         'FEATURE_BASH_CLASSIFIER',
         'NPM_CONFIG_USERCONFIG',
@@ -790,6 +792,7 @@ describe('BeeGame session runtime resilience', () => {
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'BEEGAME_CONFIG_DIR',
+        'BEEGAME_MODEL_TYPE',
       ],
       endpointClass: 'custom',
       configDirectoryConfigured: true,

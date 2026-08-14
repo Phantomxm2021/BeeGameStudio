@@ -60,8 +60,8 @@ describe('resource-content worker prompts', () => {
       'Write the complete assigned Markdown document directly',
     )
     expect(prompt).not.toContain('Write one complete Markdown file')
-    expect(prompt).toContain('native file tools')
-    expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('native file tools')
+    expect(prompt).not.toContain('end the turn normally')
     expect(prompt).toContain(
       'do not launch or wait for an independent review or audit',
     )
@@ -73,7 +73,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('first native Write')
     expect(prompt).not.toContain('every Edit must')
     expect(prompt).not.toContain('Finish only the active bounded group')
-    expect(prompt).toContain("Bee Game Studio's normal workflow")
+    expect(prompt).not.toContain("Bee Game Studio's normal workflow")
     expect(prompt).toContain('BGS writes those results to workflow audit metadata')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('document_parts_prepared')
@@ -119,7 +119,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain(
       'do not preserve both sides as simultaneous requirements',
     )
-    expect(prompt).not.toContain('Return one Markdown body')
+    expect(prompt).toContain('complete raw Markdown body')
+    expect(prompt).toContain('Do not call tools')
     expect(prompt).toContain('Canonical artifacts: docs/GDD.md')
     expect(prompt).toContain('Writable paths: read-only')
     expect(prompt).not.toContain('Allowed paths:')
@@ -154,10 +155,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('12288')
   })
 
-  test('keeps draft and calibration prompts inside the native authoring boundary', () => {
-    const prompts = (['parallel-draft', 'calibration'] as const).map(
-      authoringMode =>
-        buildWorkerPrompt({
+  test('returns a downstream draft as one text-only Markdown stream', () => {
+    const prompt = buildWorkerPrompt({
           runId: 'run',
           ownerId: 'owner',
           projectId: 'project',
@@ -169,24 +168,18 @@ describe('resource-content worker prompts', () => {
           allowedPaths: ['docs/BALANCE_DESIGN.md'],
           contract: {
             documentSet: 'foundation',
-            authoringMode,
+            authoringMode: 'parallel-draft',
             foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-            availableUpstreamPaths:
-              authoringMode === 'parallel-draft'
-                ? ['docs/GDD.md']
-                : ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+            availableUpstreamPaths: ['docs/GDD.md'],
             completeDocumentContract: getGameDocumentContract(
               'docs/BALANCE_DESIGN.md',
             ),
           },
-        }),
-    )
+        })
 
-    expect(prompts[0]).toContain('one complete production-usable discipline document')
-    expect(prompts[0]).toContain('genuinely unavailable upstream decisions')
-    expect(prompts[1]).toContain('Revise only statements whose authority changed')
-    expect(prompts[1]).toContain('limit changes to affected authority')
-    for (const prompt of prompts) {
+      expect(prompt).toContain('complete raw Markdown body')
+      expect(prompt).toContain('Do not call tools')
+      expect(prompt).toContain('genuinely unavailable upstream decisions')
       expect(prompt).toContain(
         'Treat each section as the final decision record, not a derivation transcript',
       )
@@ -206,7 +199,7 @@ describe('resource-content worker prompts', () => {
       expect(prompt).not.toContain('whole-file grep')
       expect(prompt).not.toContain('byte count check')
       expect(prompt).not.toContain('docs/UI_UX_SPEC.md')
-    }
+      expect(prompt).not.toContain('calibrat')
   })
 
   test('instructs one JSON/YAML resource lane', () => {
@@ -560,7 +553,7 @@ describe('resource-content worker prompts', () => {
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(prompt).toContain('Author exactly docs/GDD.md')
+    expect(prompt).toContain('raw Markdown body for docs/GDD.md')
     expect(prompt).toContain('Markdown body is the sole human document authority')
     expect(prompt).toContain(
       'BGS injects document_id, version and updated_at deterministically',
@@ -571,9 +564,9 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('sufficient for a human game development team')
     expect(prompt).toContain('BALANCE_DESIGN owns')
     expect(prompt).toContain('LEVEL_SCENE_DESIGN owns')
-    expect(prompt).toContain('Author exactly docs/GDD.md')
-    expect(prompt).toContain('You own the native file-operation sequence')
-    expect(prompt).toContain('end the turn normally')
+    expect(prompt).toContain('raw Markdown body for docs/GDD.md')
+    expect(prompt).not.toContain('native file-operation sequence')
+    expect(prompt).not.toContain('end the turn normally')
     expect(prompt).not.toContain('checkpoint')
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('terminal JSON')

@@ -9,6 +9,7 @@ import {
 import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
+import { commitAuthoredFoundationDocument } from './authored-document-receipt'
 
 function count(value: string, needle: string): number {
   return value.split(needle).length - 1
@@ -76,8 +77,20 @@ function fakeSessions(input: {
 }) {
   const events: Array<Record<string, unknown>> = []
   let processing = false
+  let streamContract:
+    | {
+        dispatchId: string
+        targetPath: 'docs/GDD.md'
+      }
+    | undefined
   return {
-    start: () => {
+    start: (startInput?: {
+      workflowMarkdownStreamContract?: {
+        dispatchId: string
+        targetPath: 'docs/GDD.md'
+      }
+    }) => {
+      streamContract = startInput?.workflowMarkdownStreamContract
       const session = {
         id: `session-${input.sessionIds.length + 1}`,
         status: 'running',
@@ -107,12 +120,29 @@ function fakeSessions(input: {
       if (processing) throw new Error('Session is already processing a prompt')
       processing = true
       input.prompts.push(prompt)
-      await writeFile(
-        join(input.workspacePath, 'docs/GDD.md'),
+      const body =
         input.prompts.length > 1 && input.correctionBody
           ? input.correctionBody
-          : input.body,
-      )
+          : input.body
+      if (streamContract) {
+        try {
+          await commitAuthoredFoundationDocument({
+            workspacePath: input.workspacePath,
+            dispatchId: streamContract.dispatchId,
+            targetPath: streamContract.targetPath,
+            authoredBody: body,
+          })
+        } catch (error) {
+          events.push({
+            type: 'turn.failed',
+            text: error instanceof Error ? error.message : String(error),
+          })
+          processing = false
+          return
+        }
+      } else {
+        await writeFile(join(input.workspacePath, 'docs/GDD.md'), body)
+      }
       events.push({
         type: 'result',
         text: 'turn complete',
@@ -136,7 +166,7 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
-  test('preserves and resumes one native session for draft calibration', async () => {
+  test.skip('legacy calibration session resume is removed', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
     const prompts: string[] = []
     const sessionIds: string[] = []
@@ -328,7 +358,7 @@ describe('native initial document authoring', () => {
               sessionId,
             ) as never,
           ),
-        ).rejects.toThrow(/resume session/i)
+        ).rejects.toThrow(/resume|not supported/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -384,8 +414,8 @@ describe('native initial document authoring', () => {
 
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
-      expect(count(prompts[0]!, 'Write the complete assigned document')).toBe(1)
-      expect(count(prompts[0]!, 'end the turn normally')).toBe(1)
+      expect(count(prompts[0]!, 'complete raw Markdown body')).toBeGreaterThan(0)
+      expect(prompts[0]).toContain('Do not call tools')
       expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
       expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
       for (const protocolLiteral of [
@@ -444,18 +474,15 @@ describe('native initial document authoring', () => {
       await expect(
         port.waitForTerminal?.('dispatch-incomplete'),
       ).rejects.toThrow(/complete game document/i)
-      expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toBe(body)
+      await expect(readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).rejects.toThrow()
       expect(sessionIds).toHaveLength(1)
-      expect(prompts).toHaveLength(2)
-      expect(prompts[1]).toContain('complete game document sections')
-      expect(prompts[1]).not.toContain(body)
-      expect(prompts[1]).not.toContain('rewrite the document')
+      expect(prompts).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
   })
 
-  test('returns a mechanical validation failure to the same native session once', async () => {
+  test('fails once without a hidden correction turn', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-correction-'))
     const prompts: string[] = []
     const sessionIds: string[] = []
@@ -483,20 +510,12 @@ describe('native initial document authoring', () => {
 
       await port.start(request(workspacePath, 'dispatch-correction') as never)
       await port.submit('dispatch-correction', 'original complete document prompt')
-      const terminal = await port.waitForTerminal?.('dispatch-correction')
+      await expect(
+        port.waitForTerminal?.('dispatch-correction'),
+      ).rejects.toThrow(/production materials/i)
 
       expect(sessionIds).toHaveLength(1)
-      expect(prompts).toHaveLength(2)
-      expect(prompts[1]).toContain(
-        'complete game document production materials must exactly match',
-      )
-      expect(prompts[1]).toContain('Fix only the reported mechanical contract failure')
-      expect(prompts[1]).not.toContain(incompleteBody)
-      expect(prompts[1]).not.toContain('rewrite the document')
-      expect(terminal).toMatchObject({
-        status: 'completed',
-        writtenPaths: ['docs/GDD.md'],
-      })
+      expect(prompts).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

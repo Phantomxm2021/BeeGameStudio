@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -43,8 +43,6 @@ import { getGameDocumentContract } from './game-document-contracts'
 import {
   beginParallelFoundationAuthoring,
   recordFoundationCommit,
-  recordFoundationDraft,
-  readyCalibrationPaths,
   readyDraftPaths,
 } from './foundation-authoring-batch'
 import {
@@ -1024,7 +1022,9 @@ export async function startDocumentStage(input: {
               authoringMode: 'parallel-draft',
               foundationDocumentPath: path,
               completeDocumentContract: getGameDocumentContract(path),
-              availableUpstreamPaths: ['docs/GDD.md'],
+              availableUpstreamPaths: getGameDocumentContract(
+                path,
+              ).upstreamSections.map(section => section.path),
             },
           }),
         ),
@@ -1034,49 +1034,6 @@ export async function startDocumentStage(input: {
       document => document.status === 'drafting',
     )
     if (hasUnsettledDraft) return input.run.foundationDraftState
-    const calibrationPaths = readyCalibrationPaths(
-      input.run.foundationDraftState,
-    )
-    if (calibrationPaths.length)
-      return Promise.all(
-        calibrationPaths.map(path => {
-          const checkpoint = input.run.foundationDraftState.documents!.find(
-            document => document.path === path,
-          )!
-          const currentDraftDigest = createHash('sha256')
-            .update(readFileSync(join(input.workspacePath, path), 'utf8'))
-            .digest('hex')
-          if (currentDraftDigest !== checkpoint.draftDigest)
-            throw new Error(
-              `foundation draft changed before calibration: ${path}`,
-            )
-          return input.dispatcher.dispatch({
-            runId: input.run.runId,
-            ownerId: input.run.ownerId,
-            projectId: input.run.projectId,
-            workspacePath: input.workspacePath,
-            workerType: 'document-author',
-            phase: 'DOCUMENT_DRAFTING',
-            taskId: path,
-            revision: input.run.revision.document,
-            allowedPaths: [path],
-            contract: {
-              confirmedBriefDigest: input.run.confirmedBriefDigest,
-              confirmedBriefContext: input.run.confirmedBriefContext,
-              documentSet: 'foundation',
-              systemDeliveryContract: buildSystemDeliveryContract(),
-              authoringMode: 'calibration',
-              foundationDocumentPath: path,
-              completeDocumentContract: getGameDocumentContract(path),
-              resumeWorkerSessionId: checkpoint.workerSessionId,
-              expectedDraftDigest: checkpoint.draftDigest,
-              availableUpstreamPaths: getGameDocumentContract(
-                path,
-              ).upstreamSections.map(section => section.path),
-            },
-          })
-        }),
-      )
     return input.run.foundationDraftState
   }
   const cycle = input.run.documentReviewState.activeCycle
@@ -1601,8 +1558,6 @@ async function completeInitialFoundationDocumentDraft(input: {
   const authoringMode = input.run.activeDispatch?.request?.contract.authoringMode
   if (authoringMode === 'parallel-draft')
     return completeParallelFoundationDraft(input)
-  if (authoringMode === 'calibration')
-    return completeParallelFoundationCalibration(input)
   const completedPaths = input.run.foundationDraftState.completedPaths
   const expectedPath = CANONICAL_FOUNDATION_DOCUMENTS[completedPaths.length]
   if (!expectedPath)
@@ -1738,27 +1693,6 @@ async function completeInitialFoundationDocumentDraft(input: {
   }
 }
 
-function rawFoundationDocument(input: {
-  workspacePath: string
-  path: FoundationDocumentPath
-}): { body?: string; issue?: string } {
-  try {
-    const body = readFileSync(join(input.workspacePath, input.path), 'utf8')
-    if (body.trimStart().startsWith('---'))
-      return { issue: `${input.path}: draft cannot contain canonical front matter` }
-    validateCompleteGameDocumentMarkdown(input.path, body)
-    return { body }
-  } catch (error) {
-    return {
-      issue: `${input.path}: ${
-        error instanceof Error
-          ? error.message
-          : 'complete document validation failed'
-      }`,
-    }
-  }
-}
-
 async function completeParallelFoundationDraft(input: {
   run: DeliveryRun
   workspacePath: string
@@ -1771,19 +1705,19 @@ async function completeParallelFoundationDraft(input: {
   )
     throw new Error('parallel foundation draft path is invalid')
   const canonicalPath = path as FoundationDocumentPath
-  const checkpoint = input.run.foundationDraftState.documents?.find(
-    document => document.path === canonicalPath,
-  )
-  if (!checkpoint?.workerSessionId)
-    throw new Error('parallel foundation draft session is missing')
   const normalizedWrittenPaths = input.terminal.writtenPaths.map(value =>
     value.split('\\').join('/'),
   )
-  const raw = rawFoundationDocument({
-    workspacePath: input.workspacePath,
-    path: canonicalPath,
-  })
+  const dispatchId = input.run.activeDispatch?.dispatchId
+  const receipt = dispatchId
+    ? await readAuthoredDocumentReceipt(input.workspacePath, dispatchId)
+    : undefined
   const issues = [
+    ...(!receipt ||
+    receipt.status !== 'committed' ||
+    receipt.targetPath !== canonicalPath
+      ? [`${canonicalPath}: committed Markdown stream receipt is missing`]
+      : []),
     ...(!exactStringSet(normalizedWrittenPaths, [canonicalPath])
       ? [`parallel document author must write exactly ${canonicalPath}`]
       : []),
@@ -1792,7 +1726,7 @@ async function completeParallelFoundationDraft(input: {
     )
       ? ['parallel document author returned an unsafe document path']
       : []),
-    ...(raw.issue ? [raw.issue] : []),
+    ...completeFoundationDocumentIssues(input.workspacePath, canonicalPath),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['parallel document author cannot resolve review findings']
       : []),
@@ -1804,83 +1738,6 @@ async function completeParallelFoundationDraft(input: {
       status: 'needs_action',
       blockedReason: issues.join('; '),
     }
-  const digest = createHash('sha256').update(raw.body!).digest('hex')
-  return {
-    ...input.run,
-    activeDispatch: undefined,
-    foundationDraftState: recordFoundationDraft(
-      input.run.foundationDraftState,
-      canonicalPath,
-      { digest, workerSessionId: checkpoint.workerSessionId },
-    ),
-    currentItemId: undefined,
-    blockedReason: undefined,
-    updatedAt: new Date().toISOString(),
-  }
-}
-
-async function completeParallelFoundationCalibration(input: {
-  run: DeliveryRun
-  workspacePath: string
-  terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
-  audit?: ReadinessAudit
-}): Promise<DeliveryRun> {
-  const request = input.run.activeDispatch?.request
-  const path = request?.contract.foundationDocumentPath
-  if (
-    typeof path !== 'string' ||
-    !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as FoundationDocumentPath)
-  )
-    throw new Error('foundation calibration path is invalid')
-  const canonicalPath = path as FoundationDocumentPath
-  const checkpoint = input.run.foundationDraftState.documents?.find(
-    document => document.path === canonicalPath,
-  )
-  const expectedDraftDigest = request?.contract.expectedDraftDigest
-  if (
-    !checkpoint?.draftDigest ||
-    expectedDraftDigest !== checkpoint.draftDigest
-  )
-    throw new Error('foundation calibration draft baseline does not match')
-  const normalizedWrittenPaths = input.terminal.writtenPaths.map(value =>
-    value.split('\\').join('/'),
-  )
-  const raw = rawFoundationDocument({
-    workspacePath: input.workspacePath,
-    path: canonicalPath,
-  })
-  const issues = [
-    ...(!exactStringSet(normalizedWrittenPaths, [canonicalPath])
-      ? [`foundation calibration must write exactly ${canonicalPath}`]
-      : []),
-    ...(raw.issue ? [raw.issue] : []),
-    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
-      ? ['foundation calibration cannot resolve review findings']
-      : []),
-  ]
-  if (issues.length)
-    return {
-      ...input.run,
-      activeDispatch: undefined,
-      status: 'needs_action',
-      blockedReason: issues.join('; '),
-    }
-  try {
-    await commitAuthoredFoundationDocument({
-      workspacePath: input.workspacePath,
-      dispatchId: input.run.activeDispatch!.dispatchId,
-      targetPath: canonicalPath,
-    })
-  } catch (error) {
-    return {
-      ...input.run,
-      status: 'needs_action',
-      blockedReason:
-        error instanceof Error
-          ? error.message
-          : 'calibrated document commit failed',
-    }
-  }
   const foundationDraftState = recordFoundationCommit(
     input.run.foundationDraftState,
     canonicalPath,
@@ -1908,17 +1765,11 @@ async function completeParallelFoundationCalibration(input: {
     CANONICAL_FOUNDATION_DOCUMENTS.length
   )
     return base
-  const readiness = input.audit
-    ? input.audit(input.workspacePath, {
-        includeChecklist: false,
-        includeAssetManifest: false,
-        requireCompleteFoundation: true,
-      })
-    : await defaultAudit(input.workspacePath, {
-        includeChecklist: false,
-        includeAssetManifest: false,
-        requireCompleteFoundation: true,
-      })
+  const readiness = await defaultAudit(input.workspacePath, {
+    includeChecklist: false,
+    includeAssetManifest: false,
+    requireCompleteFoundation: true,
+  })
   if (!readiness.valid)
     return {
       ...base,

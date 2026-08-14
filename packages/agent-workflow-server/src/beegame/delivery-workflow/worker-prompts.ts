@@ -13,6 +13,11 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
     request.contract.authoringMode === 'initial'
+  const streamedFoundationAuthor =
+    request.workerType === 'document-author' &&
+    request.contract.documentSet === 'foundation' &&
+    (request.contract.authoringMode === 'initial' ||
+      request.contract.authoringMode === 'parallel-draft')
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -38,7 +43,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const foundationAuthorArtifacts =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
-    ['initial', 'parallel-draft', 'calibration'].includes(
+    ['initial', 'parallel-draft'].includes(
       String(request.contract.authoringMode),
     ) &&
     typeof request.contract.foundationDocumentPath === 'string'
@@ -80,7 +85,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     initialFoundationAuthor
       ? undefined
       : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    initialFoundationAuthor
+    streamedFoundationAuthor
       ? undefined
       : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
@@ -99,7 +104,7 @@ function formatContract(request: WorkerDispatchRequest): string {
     const initialFoundationAuthor =
       request.workerType === 'document-author' &&
       request.contract.documentSet === 'foundation' &&
-      ['initial', 'parallel-draft', 'calibration'].includes(
+      ['initial', 'parallel-draft'].includes(
         String(request.contract.authoringMode),
       )
     if (initialFoundationAuthor) {
@@ -419,8 +424,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       return [
         request.contract.documentSet === 'checklist'
           ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Bee Game Studio's normal workflow."
-          : request.contract.authoringMode === 'initial'
-            ? ''
+          : request.contract.authoringMode === 'initial' ||
+              request.contract.authoringMode === 'parallel-draft'
+            ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
             : request.contract.authoringMode === 'repair-planning'
               ? 'Act only as the read-only Repair Lead for the complete ordered repair graph in contract.repairPlanTask. Submit one structured plan containing one group decision and the necessary coordinated path decisions per service-owned group; do not write or mutate project files.'
               : `Use the service-projected current target, apply only the locked repair decision, and revise the assigned Markdown document at ${String(request.contract.foundationDocumentPath)} using Bee Game Studio's normal workflow. The assigned Markdown file must be complete when the turn ends. The native runtime owns the file-operation sequence.`,
@@ -439,19 +445,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ].join(' ')
           : request.contract.authoringMode === 'parallel-draft'
             ? [
-                `Author exactly ${String(request.contract.foundationDocumentPath)} as one complete production-usable discipline document using Bee Game Studio's normal native file workflow. Do not write any other file.`,
+                `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                 'Write the complete canonical Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
               ].join(' ')
-            : request.contract.authoringMode === 'calibration'
-              ? [
-                  `Calibrate exactly ${String(request.contract.foundationDocumentPath)} against the newly available committed upstream authority using the existing native session.`,
-                  'Read the current canonical file and compact authority projection. Revise only statements whose authority changed or became available; preserve unrelated valid content and limit changes to affected authority.',
-                  DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                  'Leave one complete production-usable Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
-                ].join(' ')
-              : request.contract.authoringMode === 'repair-planning'
+            : request.contract.authoringMode === 'repair-planning'
             ? [
                 'This is the sole planning task for every ordered group in contract.repairPlanTask.groups.',
                 'Produce exactly one minimum groupDecision per group in the supplied order, plus one pathDecision for each subject path and each candidate path that must change to preserve downstream consistency. Evidence, subjects, blocking impacts and required outcomes are immutable service-owned constraints; do not restate them.',
@@ -462,12 +461,12 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [
-                  `This is one complete human development discipline assignment. Author exactly ${String(request.contract.foundationDocumentPath)} and no other file using Bee Game Studio's normal workflow. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
+                  `This is one complete human development discipline assignment. Return exactly the complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
                   'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
                   DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Use native file tools normally. Do not edit .beegame metadata. Do not claim verified license status without concrete evidence.',
+                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
                   'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
@@ -583,9 +582,10 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return request.contract.authoringMode === 'repair-planning'
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
-        : request.contract.authoringMode === 'initial' &&
-            request.contract.documentSet === 'foundation'
-          ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. You own the native file-operation sequence.`
+        : request.contract.documentSet === 'foundation' &&
+            (request.contract.authoringMode === 'initial' ||
+              request.contract.authoringMode === 'parallel-draft')
+          ? ''
           : request.contract.authoringMode === 'initial'
             ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
             : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`

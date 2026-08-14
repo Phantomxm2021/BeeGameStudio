@@ -51,7 +51,7 @@ function foundationPathFor(
   const path = request.contract.foundationDocumentPath
   const mode = request.contract.authoringMode
   return request.workerType === 'document-author' &&
-    (mode === 'parallel-draft' || mode === 'calibration') &&
+    mode === 'parallel-draft' &&
     typeof path === 'string' &&
     CANONICAL_FOUNDATION_DOCUMENTS.includes(path as FoundationDocumentPath)
     ? (path as FoundationDocumentPath)
@@ -102,30 +102,6 @@ function withFoundationDispatch(
       ...run.foundationDraftState,
       documents: documents.map(document =>
         document.path === path ? { ...document, dispatch } : { ...document },
-      ),
-    },
-  }
-}
-
-function withFoundationSession(
-  run: DeliveryRun,
-  path: FoundationDocumentPath,
-  workerSessionId: string,
-): DeliveryRun {
-  const documents = run.foundationDraftState.documents
-  if (!documents)
-    throw new DispatchError(
-      'blocked',
-      'parallel foundation authoring state is missing',
-    )
-  return {
-    ...run,
-    foundationDraftState: {
-      ...run.foundationDraftState,
-      documents: documents.map(document =>
-        document.path === path
-          ? { ...document, workerSessionId }
-          : { ...document },
       ),
     },
   }
@@ -631,9 +607,7 @@ export function createDeliveryDispatcher(options: {
               foundationDraftState: recordFoundationDispatch(
                 current.foundationDraftState,
                 currentFoundationPath,
-                request.contract.authoringMode === 'calibration'
-                  ? 'calibrating'
-                  : 'drafting',
+                'drafting',
                 record,
               ),
             }
@@ -680,12 +654,7 @@ export function createDeliveryDispatcher(options: {
           const location = locked
             ? dispatchLocation(locked, record.dispatchId)
             : undefined
-          if (locked && location?.path === foundationPath) {
-            current = await options.store.save(
-              withFoundationSession(locked, foundationPath, started.sessionId),
-              lease,
-            )
-          }
+          if (locked && location?.path === foundationPath) current = locked
         } finally {
           await options.store.unlock(lease)
         }

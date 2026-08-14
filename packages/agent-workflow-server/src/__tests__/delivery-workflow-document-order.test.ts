@@ -24,7 +24,6 @@ import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/c
 import {
   MAX_PARALLEL_FOUNDATION_DRAFTS,
   beginParallelFoundationAuthoring,
-  recordFoundationDraft,
   recordFoundationDispatch,
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
@@ -54,6 +53,7 @@ import {
   type DocumentReviewCheck,
   type DocumentReviewScope,
   type FoundationDocumentPath,
+  type FoundationDraftState,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import type { WorkerTerminalResult } from '../beegame/delivery-workflow/worker-contracts'
@@ -64,6 +64,26 @@ import {
 
 const workspaces: string[] = []
 const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+
+function recordLegacyFoundationDraft(
+  state: FoundationDraftState,
+  path: FoundationDocumentPath,
+  input: { digest: string; workerSessionId: string },
+): FoundationDraftState {
+  return {
+    ...state,
+    documents: state.documents?.map(document =>
+      document.path === path
+        ? ({
+            ...document,
+            status: 'drafted',
+            draftDigest: input.digest,
+            workerSessionId: input.workerSessionId,
+          } as never)
+        : document,
+    ),
+  }
+}
 
 function minimumRepairPlan(
   request: WorkerDispatchRequest,
@@ -407,7 +427,7 @@ describe('single-track document review workflow', () => {
     expect(request?.contract).not.toHaveProperty('existingDocumentPaths')
   })
 
-  test('dispatches a bounded foundation draft pool after GDD commits', async () => {
+  test('dispatches the first dependency-ready document after GDD commits', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-drafts-'))
     workspaces.push(workspacePath)
     const initial = createTestDeliveryRun({
@@ -434,12 +454,9 @@ describe('single-track document review workflow', () => {
       },
     })
 
-    expect(requests.map(request => request.taskId)).toEqual(
-      CANONICAL_FOUNDATION_DOCUMENTS.slice(
-        1,
-        MAX_PARALLEL_FOUNDATION_DRAFTS + 1,
-      ),
-    )
+    expect(requests.map(request => request.taskId)).toEqual([
+      'docs/LEVEL_SCENE_DESIGN.md',
+    ])
     expect(
       requests.every(
         request => request.contract.authoringMode === 'parallel-draft',
@@ -454,7 +471,7 @@ describe('single-track document review workflow', () => {
     ).toBe(true)
   })
 
-  test('accepts a complete parallel draft without committing canonical metadata', async () => {
+  test('commits a complete streamed document directly', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-draft-'))
     workspaces.push(workspacePath)
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -496,18 +513,15 @@ describe('single-track document review workflow', () => {
       'drafting',
       { ...dispatch, status: 'running', finishedAt: undefined },
     )
-    foundationDraftState = {
-      ...foundationDraftState,
-      documents: foundationDraftState.documents?.map(document =>
-        document.path === path
-          ? { ...document, workerSessionId: 'session-level' }
-          : document,
-      ),
-    }
     await writeFile(
       join(workspacePath, path),
       renderTestCompleteGameDocument(path, completeFoundationSubmission(path)),
     )
+    await commitAuthoredFoundationDocument({
+      workspacePath,
+      dispatchId: request.dispatchId!,
+      targetPath: path,
+    })
     const initial = createTestDeliveryRun({
       runId: request.runId,
       projectId: request.projectId,
@@ -537,16 +551,19 @@ describe('single-track document review workflow', () => {
         document => document.path === path,
       ),
     ).toMatchObject({
-      status: 'drafted',
-      draftDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
-      workerSessionId: 'session-level',
+      status: 'committed',
     })
-    expect(next.foundationDraftState.completedPaths).toEqual(['docs/GDD.md'])
-    expect(await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!)).toBeUndefined()
-    expect(await readFile(join(workspacePath, path), 'utf8')).toStartWith('#')
+    expect(next.foundationDraftState.completedPaths).toEqual([
+      'docs/GDD.md',
+      path,
+    ])
+    expect(
+      await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!),
+    ).toMatchObject({ status: 'committed', targetPath: path })
+    expect(await readFile(join(workspacePath, path), 'utf8')).toStartWith('---')
   })
 
-  test('commits calibration and releases the next dependency wave with preserved sessions', async () => {
+  test.skip('legacy calibration lane is removed', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-calibration-wave-'))
     workspaces.push(workspacePath)
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -559,7 +576,7 @@ describe('single-track document review workflow', () => {
         completeFoundationSubmission(path),
       )
       await writeFile(join(workspacePath, path), body)
-      foundationDraftState = recordFoundationDraft(
+      foundationDraftState = recordLegacyFoundationDraft(
         foundationDraftState,
         path,
         {
@@ -587,8 +604,8 @@ describe('single-track document review workflow', () => {
         authoringMode: 'calibration',
         documentSet: 'foundation',
         foundationDocumentPath: path,
-        expectedDraftDigest: checkpoint.draftDigest,
-        resumeWorkerSessionId: checkpoint.workerSessionId,
+        expectedDraftDigest: (checkpoint as never as { draftDigest: string }).draftDigest,
+        resumeWorkerSessionId: (checkpoint as never as { workerSessionId: string }).workerSessionId,
       },
     }
     const runningDispatch = {
@@ -604,7 +621,7 @@ describe('single-track document review workflow', () => {
     foundationDraftState = recordFoundationDispatch(
       foundationDraftState,
       path,
-      'calibrating',
+      'calibrating' as never,
       runningDispatch,
     )
     const completedDispatch = {
@@ -668,7 +685,7 @@ describe('single-track document review workflow', () => {
     ])
   })
 
-  test('authors seven drafts then commits four calibration waves before review', async () => {
+  test.skip('legacy multi-wave calibration lifecycle is removed', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-lifecycle-'))
     workspaces.push(workspacePath)
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -846,7 +863,7 @@ describe('single-track document review workflow', () => {
         const state = recordFoundationDispatch(
           run.foundationDraftState,
           path,
-          'calibrating',
+          'calibrating' as never,
           runningDispatch,
         )
         run = await completeDocumentDraft({

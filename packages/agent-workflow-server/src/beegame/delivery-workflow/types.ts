@@ -42,16 +42,12 @@ export type FoundationDocumentPath =
 export type FoundationAuthoringStatus =
   | 'pending'
   | 'drafting'
-  | 'drafted'
-  | 'calibrating'
   | 'committed'
   | 'needs_action'
 
 export type FoundationDocumentCheckpoint = {
   path: FoundationDocumentPath
   status: FoundationAuthoringStatus
-  draftDigest?: string
-  workerSessionId?: string
   upstreamDigests?: Record<string, string>
   dispatch?: DispatchRecord
   failureReason?: string
@@ -367,7 +363,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 14 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 15 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

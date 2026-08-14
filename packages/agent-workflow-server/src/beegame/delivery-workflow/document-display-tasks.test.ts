@@ -116,7 +116,7 @@ describe('resource-content display tasks', () => {
 })
 
 describe('document repair display tasks', () => {
-  test('projects concurrent draft and calibration lifecycle states', async () => {
+  test('projects dependency-wave stream lifecycle states', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-display-parallel-'))
     try {
       const tasks = projectDocumentDisplayTasks({
@@ -127,8 +127,8 @@ describe('document repair display tasks', () => {
         foundationDraftCompletedPaths: ['docs/GDD.md'],
         foundationDocuments: [
           { path: 'docs/GDD.md', status: 'committed' },
-          { path: 'docs/LEVEL_SCENE_DESIGN.md', status: 'calibrating' },
-          { path: 'docs/BALANCE_DESIGN.md', status: 'drafted' },
+          { path: 'docs/LEVEL_SCENE_DESIGN.md', status: 'committed' },
+          { path: 'docs/BALANCE_DESIGN.md', status: 'pending' },
           { path: 'docs/TECHNICAL_DESIGN.md', status: 'drafting' },
           { path: 'docs/ART_DIRECTION.md', status: 'needs_action' },
           { path: 'docs/UI_UX_SPEC.md', status: 'pending' },
@@ -139,12 +139,12 @@ describe('document repair display tasks', () => {
 
       expect(tasks.slice(0, 5).map(task => [task.id, task.status])).toEqual([
         ['docs/GDD.md', 'completed'],
-        ['docs/LEVEL_SCENE_DESIGN.md', 'running'],
+        ['docs/LEVEL_SCENE_DESIGN.md', 'completed'],
         ['docs/BALANCE_DESIGN.md', 'pending'],
         ['docs/TECHNICAL_DESIGN.md', 'running'],
         ['docs/ART_DIRECTION.md', 'failed'],
       ])
-      expect(tasks[2]?.title).toContain('等待校准')
+      expect(tasks[2]?.title).toBe('docs/BALANCE_DESIGN.md')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

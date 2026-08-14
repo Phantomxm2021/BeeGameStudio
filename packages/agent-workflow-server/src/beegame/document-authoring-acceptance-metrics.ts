@@ -30,7 +30,7 @@ export type DocumentAuthoringEvidence = Readonly<{
   documents: readonly Readonly<{
     path: string
     dispatchId: string
-    phase?: 'draft' | 'calibration' | 'final'
+    phase?: 'stream' | 'final'
     usage: Usage
     modelStops: number
     toolCalls: Readonly<Record<string, number>>
@@ -48,7 +48,7 @@ export type DocumentAuthoringAcceptanceReport = Readonly<{
     phases: Readonly<
       Partial<
         Record<
-          'draft' | 'calibration' | 'final',
+          'stream' | 'final',
           Readonly<{
             dispatchId: string
             rawTokens: number
@@ -92,8 +92,12 @@ export function summarizeDocumentAuthoringAcceptance(
       throw new Error(`document authoring evidence path is not canonical: ${document.path}`)
     const phase = document.phase ?? 'final'
     const phaseKey = `${document.path}:${phase}`
-    if (phaseKeys.has(phaseKey) || dispatchIds.has(document.dispatchId))
-      throw new Error('document authoring evidence contains a duplicate phase or dispatch')
+    if (
+      paths.has(document.path) ||
+      phaseKeys.has(phaseKey) ||
+      dispatchIds.has(document.dispatchId)
+    )
+      throw new Error('document authoring evidence contains a duplicate document or dispatch')
     paths.add(document.path)
     phaseKeys.add(phaseKey)
     dispatchIds.add(document.dispatchId)
@@ -118,10 +122,7 @@ export function summarizeDocumentAuthoringAcceptance(
         ]),
       ),
     ) as DocumentAuthoringAcceptanceReport['documents'][number]['phases']
-    const finalEntry =
-      entries.find(entry => entry.phase === 'calibration') ??
-      entries.find(entry => entry.phase === 'final') ??
-      entries.at(-1)!
+    const finalEntry = entries.at(-1)!
     return Object.freeze({
       path,
       phases,

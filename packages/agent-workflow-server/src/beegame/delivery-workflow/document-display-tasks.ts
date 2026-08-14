@@ -76,8 +76,6 @@ export type DocumentDisplayTaskInput = {
     status:
       | 'pending'
       | 'drafting'
-      | 'drafted'
-      | 'calibrating'
       | 'committed'
       | 'needs_action'
   }>
@@ -133,7 +131,7 @@ export function projectDocumentDisplayTasks(
       : input.documentStep === 'COMPREHENSIVE_REVIEW'
         ? canonicalReviewArtifacts
         : CANONICAL_FOUNDATION_DOCUMENTS
-  const draftedPaths = new Set(
+  const committedPaths = new Set(
     input.foundationDraftCompletedPaths?.filter(path =>
       CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
     ) ?? [],
@@ -249,13 +247,11 @@ export function projectDocumentDisplayTasks(
     )
       return {
         id: path,
-        title:
-          parallelStatus === 'drafted' ? `${path}（等待校准）` : path,
+        title: path,
         status:
           parallelStatus === 'committed'
             ? ('completed' as const)
-            : parallelStatus === 'drafting' ||
-                parallelStatus === 'calibrating'
+            : parallelStatus === 'drafting'
               ? ('running' as const)
               : parallelStatus === 'needs_action'
                 ? ('failed' as const)
@@ -295,7 +291,7 @@ export function projectDocumentDisplayTasks(
             : isFailed
               ? 'failed'
               : input.documentStep === 'FOUNDATION_DRAFTING'
-                ? draftedPaths.has(path)
+                ? committedPaths.has(path)
                   ? 'completed'
                   : 'pending'
                 : exists

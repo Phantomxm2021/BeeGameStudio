@@ -62,8 +62,8 @@ describe('delivery worker complete document boundary', () => {
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain('complete selected upstream authority input')
-      expect(block).toContain('Do not reread whole upstream documents')
+      expect(block).toContain('complete selected upstream authority')
+      expect(block).toContain('BEGIN FOUNDATION AUTHORITY')
       expect(block).not.toContain('complete when the turn ends')
       expect(block).not.toContain('file-operation sequence')
       expect(block).not.toContain('completeDocumentContract')
@@ -113,7 +113,7 @@ describe('delivery worker complete document boundary', () => {
       expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
       expect(projected.sources[0].sections[0]).not.toHaveProperty('contentLines')
-      expect(block).not.toContain('Authority content for')
+      expect(block).toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')
       expect(block).not.toContain('STALE TARGET BODY')

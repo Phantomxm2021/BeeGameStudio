@@ -8,8 +8,6 @@ import {
   type FoundationDraftState,
 } from './types'
 
-const DIGEST = /^[a-f0-9]{64}$/
-
 // The selected provider stopped delivering SSE events when all seven native
 // authors started together during Chrome acceptance. Keep authoring parallel,
 // but leave connection headroom for the runtime and refill the pool whenever
@@ -69,52 +67,22 @@ export function readyDraftPaths(
   return documents
     .filter(document => document.path !== 'docs/GDD.md')
     .filter(document => document.status === 'pending')
-    .map(document => document.path)
-    .slice(0, availableSlots)
-}
-
-export function readyCalibrationPaths(
-  state: FoundationDraftState,
-): FoundationDocumentPath[] {
-  const committed = new Set(
-    (state.documents ?? [])
-      .filter(document => document.status === 'committed')
-      .map(document => document.path),
-  )
-  return (state.documents ?? [])
-    .filter(document => document.status === 'drafted')
     .filter(document =>
       getGameDocumentContract(document.path).upstreamSections.every(source =>
-        committed.has(source.path),
+        documents.some(
+          candidate =>
+            candidate.path === source.path && candidate.status === 'committed',
+        ),
       ),
     )
     .map(document => document.path)
-}
-
-export function recordFoundationDraft(
-  state: FoundationDraftState,
-  path: FoundationDocumentPath,
-  input: { digest: string; workerSessionId: string },
-): FoundationDraftState {
-  if (!DIGEST.test(input.digest))
-    throw new Error('foundation draft digest must be lowercase sha256')
-  if (!input.workerSessionId.trim())
-    throw new Error('foundation draft worker session is required')
-  const current = checkpoint(state, path)
-  if (current.status !== 'pending' && current.status !== 'drafting')
-    throw new Error(`foundation document is not pending or drafting: ${path}`)
-  return replace(state, path, value => ({
-    path: value.path,
-    status: 'drafted',
-    draftDigest: input.digest,
-    workerSessionId: input.workerSessionId,
-  }))
+    .slice(0, availableSlots)
 }
 
 export function recordFoundationDispatch(
   state: FoundationDraftState,
   path: FoundationDocumentPath,
-  status: Extract<FoundationAuthoringStatus, 'drafting' | 'calibrating'>,
+  status: Extract<FoundationAuthoringStatus, 'drafting'>,
   dispatch: DispatchRecord,
 ): FoundationDraftState {
   const current = checkpoint(state, path)
@@ -122,12 +90,6 @@ export function recordFoundationDispatch(
     throw new Error(`foundation dispatch does not match document: ${path}`)
   if (status === 'drafting' && current.status !== 'pending')
     throw new Error(`foundation document is not pending: ${path}`)
-  if (
-    status === 'calibrating' &&
-    (current.status !== 'drafted' ||
-      !readyCalibrationPaths(state).includes(path))
-  )
-    throw new Error(`foundation document is not ready to calibrate: ${path}`)
   return replace(state, path, value => ({
     ...value,
     status,
@@ -143,7 +105,7 @@ export function recordFoundationFailure(
 ): FoundationDraftState {
   if (!reason.trim()) throw new Error('foundation failure reason is required')
   const current = checkpoint(state, path)
-  if (current.status !== 'drafting' && current.status !== 'calibrating')
+  if (current.status !== 'drafting')
     throw new Error(`foundation document has no active dispatch: ${path}`)
   return replace(state, path, value => ({
     ...value,
@@ -158,11 +120,8 @@ export function recordFoundationCommit(
   path: FoundationDocumentPath,
 ): FoundationDraftState {
   const current = checkpoint(state, path)
-  if (current.status !== 'drafted' && current.status !== 'calibrating')
-    throw new Error(`foundation document must be drafted before commit: ${path}`)
-  const ready = readyCalibrationPaths(state)
-  if (current.status === 'drafted' && !ready.includes(path))
-    throw new Error(`foundation document upstream authority is incomplete: ${path}`)
+  if (current.status !== 'drafting')
+    throw new Error(`foundation document must be drafting before commit: ${path}`)
   return replace(state, path, value => ({
     ...value,
     status: 'committed',
