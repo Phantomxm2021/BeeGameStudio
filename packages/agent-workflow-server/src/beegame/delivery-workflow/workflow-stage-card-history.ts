@@ -529,7 +529,6 @@ function elapsedTiming(
           }
         }
         if (activeSince !== undefined && Number.isFinite(endedAt)) {
-          durableElapsed += Math.max(0, endedAt - activeSince)
           activeSinceAt = activeSince
         }
         elapsedMs = durableElapsed

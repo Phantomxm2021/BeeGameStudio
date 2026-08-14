@@ -164,7 +164,7 @@ describe('workflow stage card history', () => {
     expect(card?.block?.message).toBe('user stopped workflow')
   })
 
-  test('includes an open running interval in the live elapsed time', () => {
+  test('keeps an open running interval out of durable elapsed time', () => {
     const run = createTestDeliveryRun({
       projectId: 'project-open-interval',
       ownerId: 'owner-open-interval',
@@ -184,7 +184,7 @@ describe('workflow stage card history', () => {
         events: [eventAt('2026-08-06T00:00:02.000Z', 'running')],
       },
     })
-    expect(card?.elapsedMs).toBe(8000)
+    expect(card?.elapsedMs).toBe(0)
     expect(card?.activeSince).toBe('2026-08-06T00:00:02.000Z')
   })
 
