@@ -33,8 +33,9 @@ const blocksOf = (message: Message): Array<Record<string, unknown>> =>
   message.message!.content as unknown as Array<Record<string, unknown>>
 
 describe('projectCompletedFileMutationInputs', () => {
-  test('removes completed Write content only from the outbound projection', () => {
+  test('removes older Write content but keeps the latest mutation in working context', () => {
     const originalContent = '# Long document\n' + 'body '.repeat(4_000)
+    const latestContent = 'latest section body'
     const messages: Message[] = [
       assistant([
         {
@@ -51,6 +52,24 @@ describe('projectCompletedFileMutationInputs', () => {
           content: 'File written successfully',
         },
       ]),
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-write-2',
+          name: 'Write',
+          input: {
+            file_path: '/project/docs/Latest.md',
+            content: latestContent,
+          },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-write-2',
+          content: 'File written successfully',
+        },
+      ]),
     ]
 
     const projected = projectCompletedFileMutationInputs(messages)
@@ -64,6 +83,9 @@ describe('projectCompletedFileMutationInputs', () => {
     expect((originalBlock.input as { content: string }).content).toBe(
       originalContent,
     )
+    expect(
+      (blocksOf(projected[2]!)[0]!.input as { content: string }).content,
+    ).toBe(latestContent)
   })
 
   test('removes completed Edit replacement payloads', () => {
@@ -86,6 +108,24 @@ describe('projectCompletedFileMutationInputs', () => {
           type: 'tool_result',
           tool_use_id: 'tool-edit-1',
           content: 'File edited successfully',
+        },
+      ]),
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-write-after-edit',
+          name: 'Write',
+          input: {
+            file_path: '/project/docs/Latest.md',
+            content: 'latest mutation',
+          },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-write-after-edit',
+          content: 'File written successfully',
         },
       ]),
     ]
@@ -165,6 +205,27 @@ describe('projectCompletedFileMutationInputs', () => {
         },
       ]),
     ]
+
+    messages.push(
+      assistant([
+        {
+          type: 'tool_use',
+          id: 'tool-write-custom-latest',
+          name: 'Write',
+          input: {
+            file_path: '/project/docs/Latest.md',
+            content: 'latest mutation',
+          },
+        },
+      ]),
+      user([
+        {
+          type: 'tool_result',
+          tool_use_id: 'tool-write-custom-latest',
+          content: 'File written successfully',
+        },
+      ]),
+    )
 
     const result = await microcompactMessages(messages)
     const block = blocksOf(result.messages[0]!)[0]!

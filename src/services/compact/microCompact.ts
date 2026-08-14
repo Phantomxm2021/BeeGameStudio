@@ -65,17 +65,47 @@ const CLEARED_REPLACED_TEXT = '[Previously replaced text cleared]'
 export function projectCompletedFileMutationInputs(
   messages: Message[],
 ): Message[] {
-  const completedToolUseIds = new Set<string>()
+  const fileMutationToolUseIds: string[] = []
+  for (const message of messages) {
+    if (
+      message.type !== 'assistant' ||
+      !Array.isArray(message.message?.content)
+    ) {
+      continue
+    }
+    for (const block of message.message.content) {
+      if (
+        block.type === 'tool_use' &&
+        (block.name === FILE_WRITE_TOOL_NAME ||
+          block.name === FILE_EDIT_TOOL_NAME)
+      ) {
+        fileMutationToolUseIds.push(block.id)
+      }
+    }
+  }
+
+  const fileMutationToolUseIdSet = new Set(fileMutationToolUseIds)
+  const successfulToolUseIds = new Set<string>()
   for (const message of messages) {
     if (message.type !== 'user' || !Array.isArray(message.message?.content)) {
       continue
     }
     for (const block of message.message.content) {
-      if (block.type === 'tool_result' && block.is_error !== true) {
-        completedToolUseIds.add(block.tool_use_id)
+      if (
+        block.type === 'tool_result' &&
+        block.is_error !== true &&
+        fileMutationToolUseIdSet.has(block.tool_use_id)
+      ) {
+        successfulToolUseIds.add(block.tool_use_id)
       }
     }
   }
+
+  const completedToolUseIds = new Set(
+    fileMutationToolUseIds
+      .filter(id => successfulToolUseIds.has(id))
+      .slice(0, -1),
+  )
 
   return messages.map(message => {
     if (
