@@ -143,7 +143,10 @@ export function projectCompletedFileMutationInputs(
             (typeof input.new_string === 'string'
               ? input.new_string.length
               : 0)
-      if (payloadChars < MIN_DURABLE_MUTATION_INPUT_CLEAR_CHARS) {
+      if (
+        block.name === FILE_WRITE_TOOL_NAME &&
+        payloadChars < MIN_DURABLE_MUTATION_INPUT_CLEAR_CHARS
+      ) {
         return block
       }
       changed = true
