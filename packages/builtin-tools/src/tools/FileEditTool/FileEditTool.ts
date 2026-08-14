@@ -1,17 +1,43 @@
-import { isAbsolute } from 'path'
+import { dirname, isAbsolute, sep } from 'path'
+import { logEvent } from 'src/services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { diagnosticTracker } from 'src/services/diagnosticTracking.js'
+import { clearDeliveredDiagnosticsForFile } from 'src/services/lsp/LSPDiagnosticRegistry.js'
+import { getLspServerManager } from 'src/services/lsp/manager.js'
+import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js'
 import { checkTeamMemSecrets } from 'src/services/teamMemorySync/teamMemSecretGuard.js'
+import {
+  activateConditionalSkillsForPaths,
+  addSkillDirectories,
+  discoverSkillDirsForPaths,
+} from 'src/skills/loadSkillsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { logForDebugging } from 'src/utils/debug.js'
+import { countLinesChanged } from 'src/utils/diff.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isENOENT } from 'src/utils/errors.js'
 import {
   FILE_NOT_FOUND_CWD_NOTE,
   findSimilarFile,
   getFileModificationTime,
   suggestPathUnderCwd,
+  writeTextContent,
 } from 'src/utils/file.js'
+import {
+  fileHistoryEnabled,
+  fileHistoryTrackEdit,
+} from 'src/utils/fileHistory.js'
+import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
+import {
+  type LineEndingType,
+  readFileSyncWithMetadata,
+} from 'src/utils/fileRead.js'
 import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
+import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
+import { logError } from 'src/utils/log.js'
 import { expandPath } from 'src/utils/path.js'
 import {
   checkWritePermissionForTool,
@@ -23,8 +49,8 @@ import { validateInputForSettingsFileEdit } from 'src/utils/settings/validateEdi
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
 import {
   FILE_EDIT_TOOL_NAME,
+  FILE_UNEXPECTEDLY_MODIFIED_ERROR,
 } from './constants.js'
-import { executeFileEdits } from './fileEditPipeline.js'
 import { getEditToolDescription } from './prompt.js'
 import {
   type FileEditInput,
@@ -43,6 +69,7 @@ import {
 import {
   areFileEditsInputsEquivalent,
   findActualString,
+  getPatchForEdit,
 } from './utils.js'
 
 // V8/Bun string length limit is ~2^30 characters (~1 billion). For typical
@@ -355,29 +382,180 @@ export const FileEditTool = buildTool({
   },
   async call(
     input: FileEditInput,
-    context,
+    {
+      readFileState,
+      userModified,
+      updateFileHistoryState,
+      dynamicSkillDirTriggers,
+    },
     _,
     parentMessage,
   ) {
     const { file_path, old_string, new_string, replace_all = false } = input
-    const shared = await executeFileEdits(
-      {
-        file_path,
-        edits: [{ old_string, new_string, replace_all }],
-      },
-      context,
-      parentMessage,
-    )
-    const resolved = shared.edits[0]!
-    const data = {
-      filePath: shared.filePath,
-      oldString: resolved.old_string,
-      newString: resolved.new_string,
-      originalFile: shared.originalFile,
-      structuredPatch: shared.structuredPatch,
-      userModified: shared.userModified,
+
+    // 1. Get current state
+    const fs = getFsImplementation()
+    const absoluteFilePath = expandPath(file_path)
+
+    // Discover skills from this file's path (fire-and-forget, non-blocking)
+    // Skip in simple mode - no skills available
+    const cwd = getCwd()
+    if (!isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+      const newSkillDirs = await discoverSkillDirsForPaths(
+        [absoluteFilePath],
+        cwd,
+      )
+      if (newSkillDirs.length > 0) {
+        // Store discovered dirs for attachment display
+        for (const dir of newSkillDirs) {
+          dynamicSkillDirTriggers?.add(dir)
+        }
+        // Don't await - let skill loading happen in the background
+        addSkillDirectories(newSkillDirs).catch(() => {})
+      }
+
+      // Activate conditional skills whose path patterns match this file
+      activateConditionalSkillsForPaths([absoluteFilePath], cwd)
+    }
+
+    await diagnosticTracker.beforeFileEdited(absoluteFilePath)
+
+    // Ensure parent directory exists before the atomic read-modify-write section.
+    // These awaits must stay OUTSIDE the critical section below — a yield between
+    // the staleness check and writeTextContent lets concurrent edits interleave.
+    await fs.mkdir(dirname(absoluteFilePath))
+    if (fileHistoryEnabled()) {
+      // Backup captures pre-edit content — safe to call before the staleness
+      // check (idempotent v1 backup keyed on content hash; if staleness fails
+      // later we just have an unused backup, not corrupt state).
+      await fileHistoryTrackEdit(
+        updateFileHistoryState,
+        absoluteFilePath,
+        parentMessage.uuid,
+      )
+    }
+
+    // 2. Load current state and confirm no changes since last read
+    // Please avoid async operations between here and writing to disk to preserve atomicity
+    const {
+      content: originalFileContents,
+      fileExists,
+      encoding,
+      lineEndings: endings,
+    } = readFileForEdit(absoluteFilePath)
+
+    if (fileExists) {
+      const lastWriteTime = getFileModificationTime(absoluteFilePath)
+      const lastRead = readFileState.get(absoluteFilePath)
+      if (!lastRead || lastWriteTime > lastRead.timestamp) {
+        // Timestamp indicates modification, but on Windows timestamps can change
+        // without content changes (cloud sync, antivirus, etc.). For full reads,
+        // compare content as a fallback to avoid false positives.
+        const isFullRead =
+          lastRead &&
+          lastRead.offset === undefined &&
+          lastRead.limit === undefined
+        const contentUnchanged =
+          isFullRead && originalFileContents === lastRead.content
+        if (!contentUnchanged) {
+          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+        }
+      }
+    }
+
+    // 3. Find the exact string in file content
+    const actualOldString =
+      findActualString(originalFileContents, old_string) || old_string
+
+    // 4. Generate patch
+    const { patch, updatedFile } = getPatchForEdit({
+      filePath: absoluteFilePath,
+      fileContents: originalFileContents,
+      oldString: actualOldString,
+      newString: new_string,
       replaceAll: replace_all,
-      ...(shared.gitDiff && { gitDiff: shared.gitDiff }),
+    })
+
+    // 5. Write to disk
+    writeTextContent(absoluteFilePath, updatedFile, encoding, endings)
+
+    // Notify LSP servers about file modification (didChange) and save (didSave)
+    const lspManager = getLspServerManager()
+    if (lspManager) {
+      // Clear previously delivered diagnostics so new ones will be shown
+      clearDeliveredDiagnosticsForFile(`file://${absoluteFilePath}`)
+      // didChange: Content has been modified
+      lspManager
+        .changeFile(absoluteFilePath, updatedFile)
+        .catch((err: Error) => {
+          logForDebugging(
+            `LSP: Failed to notify server of file change for ${absoluteFilePath}: ${err.message}`,
+          )
+          logError(err)
+        })
+      // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
+      lspManager.saveFile(absoluteFilePath).catch((err: Error) => {
+        logForDebugging(
+          `LSP: Failed to notify server of file save for ${absoluteFilePath}: ${err.message}`,
+        )
+        logError(err)
+      })
+    }
+
+    // Notify VSCode about the file change for diff view
+    notifyVscodeFileUpdated(absoluteFilePath, originalFileContents, updatedFile)
+
+    // 6. Update read timestamp, to invalidate stale writes
+    readFileState.set(absoluteFilePath, {
+      content: updatedFile,
+      timestamp: getFileModificationTime(absoluteFilePath),
+      offset: undefined,
+      limit: undefined,
+    })
+
+    // 7. Log events
+    if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
+      logEvent('tengu_write_claudemd', {})
+    }
+    countLinesChanged(patch)
+
+    logFileOperation({
+      operation: 'edit',
+      tool: 'FileEditTool',
+      filePath: absoluteFilePath,
+    })
+
+    logEvent('tengu_edit_string_lengths', {
+      oldStringBytes: Buffer.byteLength(old_string, 'utf8'),
+      newStringBytes: Buffer.byteLength(new_string, 'utf8'),
+      replaceAll: replace_all,
+    })
+
+    let gitDiff: ToolUseDiff | undefined
+    if (
+      isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
+    ) {
+      const startTime = Date.now()
+      const diff = await fetchSingleFileGitDiff(absoluteFilePath)
+      if (diff) gitDiff = diff
+      logEvent('tengu_tool_use_diff_computed', {
+        isEditTool: true,
+        durationMs: Date.now() - startTime,
+        hasDiff: !!diff,
+      })
+    }
+
+    // 8. Yield result
+    const data = {
+      filePath: file_path,
+      oldString: actualOldString,
+      newString: new_string,
+      originalFile: originalFileContents,
+      structuredPatch: patch,
+      userModified: userModified ?? false,
+      replaceAll: replace_all,
+      ...(gitDiff && { gitDiff }),
     }
     return {
       data,
@@ -404,3 +582,33 @@ export const FileEditTool = buildTool({
     }
   },
 } satisfies ToolDef<ReturnType<typeof inputSchema>, FileEditOutput>)
+
+// --
+
+function readFileForEdit(absoluteFilePath: string): {
+  content: string
+  fileExists: boolean
+  encoding: BufferEncoding
+  lineEndings: LineEndingType
+} {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs
+    const meta = readFileSyncWithMetadata(absoluteFilePath)
+    return {
+      content: meta.content,
+      fileExists: true,
+      encoding: meta.encoding,
+      lineEndings: meta.lineEndings,
+    }
+  } catch (e) {
+    if (isENOENT(e)) {
+      return {
+        content: '',
+        fileExists: false,
+        encoding: 'utf8',
+        lineEndings: 'LF',
+      }
+    }
+    throw e
+  }
+}
