@@ -528,6 +528,30 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+    documents: z
+      .array(
+        z
+          .object({
+            path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+            status: z.enum([
+              'pending',
+              'drafting',
+              'drafted',
+              'calibrating',
+              'committed',
+              'needs_action',
+            ]),
+            draftDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+            workerSessionId: z.string().min(1).optional(),
+            upstreamDigests: z
+              .record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/))
+              .optional(),
+            dispatch: dispatchRecordSchema.optional(),
+            failureReason: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
   .superRefine((state, context) => {
@@ -544,6 +568,37 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
         message:
           'foundation draft checkpoints must be a canonical dependency-order prefix',
       })
+    if (state.documents) {
+      const expectedPaths = [...CANONICAL_FOUNDATION_DOCUMENTS]
+      if (
+        state.documents.length !== expectedPaths.length ||
+        state.documents.some(
+          (document, index) => document.path !== expectedPaths[index],
+        )
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message:
+            'parallel foundation document checkpoints must exactly match canonical order',
+        })
+      if (
+        state.documents.some(
+          document =>
+            (document.status === 'drafted' ||
+              document.status === 'calibrating' ||
+              document.status === 'committed') &&
+            document.path !== 'docs/GDD.md' &&
+            (!document.draftDigest || !document.workerSessionId),
+        )
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message:
+            'authored foundation checkpoints require draft digest and worker session',
+        })
+    }
   })
 
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z

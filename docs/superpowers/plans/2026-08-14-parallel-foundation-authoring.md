@@ -129,7 +129,7 @@ All returned objects and arrays must be fresh values. Sort paths by `CANONICAL_F
 
 - [ ] **Step 5: Extend the Zod schema**
 
-Parse strict checkpoint objects. Require lowercase 64-hex digests, unique canonical paths and canonical array order. Permit `documents` to be absent only for old serial snapshots; once present it must contain GDD plus all seven downstream paths exactly once.
+Increment `DELIVERY_RUN_SCHEMA_VERSION` because the repository deliberately rejects obsolete durable snapshots instead of migrating them. Parse strict checkpoint objects. Require lowercase 64-hex digests, unique canonical paths and canonical array order. Permit `documents` to be absent only for serial runs created under the current schema; once present it must contain GDD plus all seven downstream paths exactly once.
 
 - [ ] **Step 6: Run GREEN and compatibility tests**
 
@@ -137,7 +137,7 @@ Parse strict checkpoint objects. Require lowercase 64-hex digests, unique canoni
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts
 ```
 
-Expected: all tests pass; prior snapshots without `documents` still parse.
+Expected: all tests pass; current-schema serial snapshots without `documents` still parse and older schema versions remain explicitly obsolete.
 
 - [ ] **Step 7: Commit**
 

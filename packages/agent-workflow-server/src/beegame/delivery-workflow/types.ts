@@ -39,9 +39,29 @@ export const CANONICAL_FOUNDATION_DOCUMENTS = [
 export type FoundationDocumentPath =
   (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
 
+export type FoundationAuthoringStatus =
+  | 'pending'
+  | 'drafting'
+  | 'drafted'
+  | 'calibrating'
+  | 'committed'
+  | 'needs_action'
+
+export type FoundationDocumentCheckpoint = {
+  path: FoundationDocumentPath
+  status: FoundationAuthoringStatus
+  draftDigest?: string
+  workerSessionId?: string
+  upstreamDigests?: Record<string, string>
+  dispatch?: DispatchRecord
+  failureReason?: string
+}
+
 export type FoundationDraftState = {
   /** Completed initial-authoring checkpoints in canonical dependency order. */
   completedPaths: FoundationDocumentPath[]
+  /** Per-document state exists only for the parallel downstream authoring batch. */
+  documents?: FoundationDocumentCheckpoint[]
 }
 
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
@@ -347,7 +367,7 @@ export type DocumentReviewState = {
   }
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 13 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 14 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
