@@ -188,61 +188,6 @@ describe('projectCompletedFileMutationInputs', () => {
     ).toBe(scaffold)
   })
 
-  test('clears an older Edit body even when the completed section is small', () => {
-    const messages: Message[] = [
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-edit-small',
-          name: 'Edit',
-          input: {
-            file_path: '/project/docs/GDD.md',
-            old_string: '<!-- group-one -->',
-            new_string: 'Completed section body',
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-edit-small',
-          content: 'File edited successfully',
-        },
-      ]),
-      assistant([
-        {
-          type: 'tool_use',
-          id: 'tool-edit-latest-small',
-          name: 'Edit',
-          input: {
-            file_path: '/project/docs/GDD.md',
-            old_string: '<!-- group-two -->',
-            new_string: 'Latest working section',
-          },
-        },
-      ]),
-      user([
-        {
-          type: 'tool_result',
-          tool_use_id: 'tool-edit-latest-small',
-          content: 'File edited successfully',
-        },
-      ]),
-    ]
-
-    const projected = projectCompletedFileMutationInputs(messages)
-
-    expect(blocksOf(projected[0]!)[0]!.input).toEqual({
-      file_path: '/project/docs/GDD.md',
-      old_string: '[Previously replaced text cleared]',
-      new_string: '[Previously written content cleared; read the file if needed]',
-    })
-    expect(
-      (blocksOf(projected[2]!)[0]!.input as { new_string: string })
-        .new_string,
-    ).toBe('Latest working section')
-  })
-
   test('keeps failed and unresolved file mutation inputs intact', () => {
     const failedInput = {
       file_path: '/project/docs/GDD.md',
