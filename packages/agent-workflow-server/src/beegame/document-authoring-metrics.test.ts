@@ -21,7 +21,15 @@ function event(
 describe('document authoring metrics', () => {
   test('aggregates terminal usage and observed native tool activity', () => {
     const events = [
-      ...['Write', 'Write', 'Write', 'Write', 'Read', 'Edit'].flatMap(
+      ...[
+        'Write',
+        'Write',
+        'Write',
+        'Write',
+        'Read',
+        'Edit',
+        'MultiEdit',
+      ].flatMap(
         (toolName, index) => [
           event(index * 2 + 1, 'tool.started', {
             toolName,
@@ -63,7 +71,7 @@ describe('document authoring metrics', () => {
       outputTokens: 19_500,
       rawProcessedTokens: 240_178,
       nativeTurns: 7,
-      toolCalls: { Write: 4, Read: 1, Edit: 1 },
+      toolCalls: { Write: 4, Read: 1, Edit: 1, MultiEdit: 1 },
       failedToolCalls: 1,
       permissionDenials: 1,
       authorityProjection: {
