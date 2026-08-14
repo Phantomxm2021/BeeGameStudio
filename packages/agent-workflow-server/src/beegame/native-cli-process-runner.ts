@@ -61,6 +61,7 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
+    ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }

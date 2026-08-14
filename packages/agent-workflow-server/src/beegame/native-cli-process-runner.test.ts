@@ -132,6 +132,26 @@ describe('native CLI process runner', () => {
     ).toBe(false)
   })
 
+  test('disables native tools only for a foundation Markdown stream turn', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_stream_author',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-author',
+      workflowMarkdownStreamContract: {
+        workspacePath: process.cwd(),
+        runId: 'run-1',
+        dispatchId: 'dispatch-1',
+        targetPath: 'docs/GDD.md',
+        maxBytes: 512_000,
+      },
+    })
+
+    expect(command).toContain('--tools')
+    expect(command[command.indexOf('--tools') + 1]).toBe('')
+  })
+
   test('forwards native messages and resolves only on result', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []
