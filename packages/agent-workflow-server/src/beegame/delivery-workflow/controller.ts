@@ -65,6 +65,7 @@ import {
   parseWorkerTerminalResult,
   type WorkerTerminalResult,
 } from './worker-contracts'
+import { recordFoundationFailure } from './foundation-authoring-batch'
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
@@ -172,8 +173,18 @@ export function createDeliveryWorkflowController(input: {
     request?: WorkerDispatchRequest,
   ): Promise<void> {
     const run = await store.load()
-    if (!run || run.activeDispatch?.dispatchId !== record.dispatchId) return
-    let next: DeliveryRun = { ...run, activeDispatch: undefined }
+    const foundationCheckpoint = run?.foundationDraftState.documents?.find(
+      document => document.dispatch?.dispatchId === record.dispatchId,
+    )
+    if (
+      !run ||
+      (run.activeDispatch?.dispatchId !== record.dispatchId &&
+        !foundationCheckpoint)
+    )
+      return
+    let next: DeliveryRun = foundationCheckpoint
+      ? { ...run, activeDispatch: record }
+      : { ...run, activeDispatch: undefined }
     if (result.workerType === 'change-impact-analyzer') {
       const message =
         typeof request?.contract.message === 'string'
@@ -301,7 +312,7 @@ export function createDeliveryWorkflowController(input: {
       next = await completeDocumentDraft({
         run: {
           ...next,
-          activeDispatch: run.activeDispatch,
+          activeDispatch: record,
           phase:
             documentSet === 'checklist'
               ? 'DOCUMENT_REVIEW'
@@ -883,6 +894,54 @@ export function createDeliveryWorkflowController(input: {
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
+    if (
+      run.phase === 'DOCUMENT_DRAFTING' &&
+      run.foundationDraftState.documents
+    ) {
+      const replayable = run.foundationDraftState.documents.find(
+        document => document.dispatch?.terminalResult,
+      )?.dispatch
+      if (replayable) {
+        await dispatcher.replayTerminal(replayable, handleTerminalUnlocked)
+        return
+      }
+      const runningDocuments = run.foundationDraftState.documents.filter(
+        document => document.dispatch?.status === 'running',
+      )
+      if (runningDocuments.length) {
+        const unavailable: typeof runningDocuments = []
+        for (const document of runningDocuments) {
+          const isOpen = await dispatcher
+            .workerIsOpen(document.dispatch!.dispatchId)
+            .catch(() => false)
+          if (!isOpen) unavailable.push(document)
+        }
+        if (!unavailable.length) return
+        let foundationDraftState = run.foundationDraftState
+        for (const document of unavailable)
+          foundationDraftState = recordFoundationFailure(
+            foundationDraftState,
+            document.path,
+            'preserved native document session is unavailable',
+          )
+        const stillRunning = foundationDraftState.documents?.some(
+          document => document.dispatch?.status === 'running',
+        )
+        const recovered = await persist(
+          {
+            ...run,
+            foundationDraftState,
+            status: stillRunning ? 'running' : 'needs_action',
+            blockedReason: stillRunning
+              ? undefined
+              : 'one or more preserved native document sessions are unavailable',
+          },
+          'document.parallel.session_unavailable',
+        )
+        if (recovered.status === 'running') await resumeUnlocked(recovered)
+        return
+      }
+    }
     if (run.activeDispatch?.terminalResult) {
       if (
         !documentReviewerDispatchMatchesActivePacket(run, run.activeDispatch)

@@ -21,6 +21,11 @@ import {
 import { repairPlanMatchesCanonicalGraph } from '../beegame/delivery-workflow/document-repair-graph'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
+import {
+  beginParallelFoundationAuthoring,
+  recordFoundationDraft,
+  recordFoundationDispatch,
+} from '../beegame/delivery-workflow/foundation-authoring-batch'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import {
   computeDocumentRevision,
@@ -28,6 +33,7 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { startResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import { readAuthoredDocumentReceipt } from '../beegame/authored-document-receipt'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import {
@@ -400,13 +406,271 @@ describe('single-track document review workflow', () => {
     expect(request?.contract).not.toHaveProperty('existingDocumentPaths')
   })
 
-  test('authors eight durable single-document tasks before entering review', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'document-serial-'))
+  test('dispatches all seven independent foundation drafts after GDD commits', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-drafts-'))
+    workspaces.push(workspacePath)
+    const initial = createTestDeliveryRun({
+      projectId: 'project-document-parallel-drafts',
+      ownerId: 'owner-1',
+      documentRevision: 'revision-gdd',
+      foundationDraftComplete: false,
+    })
+    const requests: WorkerDispatchRequest[] = []
+
+    await startDocumentStage({
+      run: {
+        ...initial,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+      },
+      workspacePath,
+      dispatcher: {
+        async dispatch(request) {
+          requests.push(request)
+          return request
+        },
+      },
+    })
+
+    expect(requests.map(request => request.taskId)).toEqual(
+      CANONICAL_FOUNDATION_DOCUMENTS.slice(1),
+    )
+    expect(
+      requests.every(
+        request => request.contract.authoringMode === 'parallel-draft',
+      ),
+    ).toBe(true)
+    expect(
+      requests.every(
+        request =>
+          Array.isArray(request.contract.availableUpstreamPaths) &&
+          request.contract.availableUpstreamPaths[0] === 'docs/GDD.md',
+      ),
+    ).toBe(true)
+  })
+
+  test('accepts a complete parallel draft without committing canonical metadata', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-draft-'))
+    workspaces.push(workspacePath)
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'parallel-level-draft',
+      runId: 'run-parallel-level-draft',
+      ownerId: 'owner-1',
+      projectId: 'project-parallel-level-draft',
+      workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: 'revision-gdd',
+      allowedPaths: [path],
+      contract: {
+        authoringMode: 'parallel-draft',
+        documentSet: 'foundation',
+        foundationDocumentPath: path,
+      },
+    }
+    const dispatch = {
+      dispatchId: request.dispatchId!,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: path,
+      revision: request.revision,
+      status: 'completed' as const,
+      request,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    }
+    let foundationDraftState = beginParallelFoundationAuthoring([
+      'docs/GDD.md',
+    ])
+    foundationDraftState = recordFoundationDispatch(
+      foundationDraftState,
+      path,
+      'drafting',
+      { ...dispatch, status: 'running', finishedAt: undefined },
+    )
+    foundationDraftState = {
+      ...foundationDraftState,
+      documents: foundationDraftState.documents?.map(document =>
+        document.path === path
+          ? { ...document, workerSessionId: 'session-level' }
+          : document,
+      ),
+    }
+    await writeFile(
+      join(workspacePath, path),
+      renderTestCompleteGameDocument(path, completeFoundationSubmission(path)),
+    )
+    const initial = createTestDeliveryRun({
+      runId: request.runId,
+      projectId: request.projectId,
+      ownerId: request.ownerId,
+      documentRevision: request.revision,
+      foundationDraftComplete: false,
+    })
+
+    const next = await completeDocumentDraft({
+      run: {
+        ...initial,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        foundationDraftState,
+        activeDispatch: dispatch,
+      },
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [path],
+      },
+    })
+
+    expect(
+      next.foundationDraftState.documents?.find(
+        document => document.path === path,
+      ),
+    ).toMatchObject({
+      status: 'drafted',
+      draftDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      workerSessionId: 'session-level',
+    })
+    expect(next.foundationDraftState.completedPaths).toEqual(['docs/GDD.md'])
+    expect(await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!)).toBeUndefined()
+    expect(await readFile(join(workspacePath, path), 'utf8')).toStartWith('#')
+  })
+
+  test('commits calibration and releases the next dependency wave with preserved sessions', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-calibration-wave-'))
+    workspaces.push(workspacePath)
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let foundationDraftState = beginParallelFoundationAuthoring([
+      'docs/GDD.md',
+    ])
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS.slice(1)) {
+      const body = renderTestCompleteGameDocument(
+        path,
+        completeFoundationSubmission(path),
+      )
+      await writeFile(join(workspacePath, path), body)
+      foundationDraftState = recordFoundationDraft(
+        foundationDraftState,
+        path,
+        {
+          digest: createHash('sha256').update(body).digest('hex'),
+          workerSessionId: `session:${path}`,
+        },
+      )
+    }
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const checkpoint = foundationDraftState.documents!.find(
+      document => document.path === path,
+    )!
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'calibrate-level',
+      runId: 'run-calibration-wave',
+      ownerId: 'owner-1',
+      projectId: 'project-calibration-wave',
+      workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: 'revision-gdd',
+      allowedPaths: [path],
+      contract: {
+        authoringMode: 'calibration',
+        documentSet: 'foundation',
+        foundationDocumentPath: path,
+        expectedDraftDigest: checkpoint.draftDigest,
+        resumeWorkerSessionId: checkpoint.workerSessionId,
+      },
+    }
+    const runningDispatch = {
+      dispatchId: request.dispatchId!,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: path,
+      revision: request.revision,
+      status: 'running' as const,
+      request,
+      startedAt: new Date().toISOString(),
+    }
+    foundationDraftState = recordFoundationDispatch(
+      foundationDraftState,
+      path,
+      'calibrating',
+      runningDispatch,
+    )
+    const completedDispatch = {
+      ...runningDispatch,
+      status: 'completed' as const,
+      finishedAt: new Date().toISOString(),
+    }
+    const initial = createTestDeliveryRun({
+      runId: request.runId,
+      projectId: request.projectId,
+      ownerId: request.ownerId,
+      documentRevision: request.revision,
+      foundationDraftComplete: false,
+    })
+    const calibrated = await completeDocumentDraft({
+      run: {
+        ...initial,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        foundationDraftState,
+        activeDispatch: completedDispatch,
+      },
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [path],
+      },
+      audit: () => ({ valid: true, issues: [] }),
+    })
+
+    expect(calibrated.foundationDraftState.completedPaths).toEqual([
+      'docs/GDD.md',
+      path,
+    ])
+    expect(
+      await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!),
+    ).toMatchObject({ status: 'committed', targetPath: path })
+    const nextWave: WorkerDispatchRequest[] = []
+    await startDocumentStage({
+      run: calibrated,
+      workspacePath,
+      dispatcher: {
+        async dispatch(value) {
+          nextWave.push(value)
+          return value
+        },
+      },
+    })
+    expect(nextWave.map(value => value.taskId)).toEqual([
+      'docs/BALANCE_DESIGN.md',
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+    ])
+    expect(
+      nextWave.map(value => value.contract.resumeWorkerSessionId),
+    ).toEqual([
+      'session:docs/BALANCE_DESIGN.md',
+      'session:docs/ART_DIRECTION.md',
+      'session:docs/UI_UX_SPEC.md',
+    ])
+  })
+
+  test('authors seven drafts then commits four calibration waves before review', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-lifecycle-'))
     workspaces.push(workspacePath)
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
     let run: DeliveryRun = {
       ...createTestDeliveryRun({
-        projectId: 'project-document-serial',
+        projectId: 'project-document-parallel-lifecycle',
         ownerId: 'owner-1',
         documentRevision: 'uncomputed',
         foundationDraftComplete: false,
@@ -414,93 +678,188 @@ describe('single-track document review workflow', () => {
       phase: 'DOCUMENT_DRAFTING',
       documentStep: 'FOUNDATION_DRAFTING',
     }
-    const expectedUpstreamPaths = [
-      [],
-      ['docs/GDD.md'],
-      ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/BALANCE_DESIGN.md'],
-      ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'],
-      [
-        'docs/GDD.md',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        'docs/TECHNICAL_DESIGN.md',
-        'docs/ART_DIRECTION.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-      ],
-    ]
-
-    for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
-      let request: WorkerDispatchRequest | undefined
-      await startDocumentStage({
-        run,
-        workspacePath,
-        dispatcher: {
-          async dispatch(value) {
-            request = {
-              ...value,
-              dispatchId: `author-dispatch-${index}`,
-            }
-            return request
-          },
+    let gddRequest: WorkerDispatchRequest | undefined
+    await startDocumentStage({
+      run,
+      workspacePath,
+      dispatcher: {
+        async dispatch(value) {
+          gddRequest = { ...value, dispatchId: 'author-gdd' }
+          return gddRequest
         },
-      })
-      expect(request?.allowedPaths).toEqual([path])
-      expect(request?.taskId).toBe(path)
-      expect(request?.contract.upstreamDocumentPaths).toEqual(
-        expectedUpstreamPaths[index],
-      )
-      expect(request?.contract.confirmedBriefContext).toBe(
-        run.confirmedBriefContext,
-      )
-      expect(request?.contract.completeDocumentContract).toMatchObject({
+      },
+    })
+    const gddPath = 'docs/GDD.md' as const
+    await writeFile(
+      join(workspacePath, gddPath),
+      renderTestCompleteGameDocument(
+        gddPath,
+        completeFoundationSubmission(gddPath),
+      ),
+    )
+    await commitAuthoredFoundationDocument({
+      workspacePath,
+      dispatchId: gddRequest!.dispatchId!,
+      targetPath: gddPath,
+    })
+    run = await completeDocumentDraft({
+      run: withDispatch(run, gddRequest!),
+      workspacePath,
+      terminal: {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [gddPath],
+      },
+      audit: () => ({ valid: true, issues: [] }),
+    })
+    expect(run.foundationDraftState.documents).toHaveLength(8)
+
+    const draftRequests: WorkerDispatchRequest[] = []
+    await startDocumentStage({
+      run,
+      workspacePath,
+      dispatcher: {
+        async dispatch(value) {
+          const request = {
+            ...value,
+            dispatchId: `draft-${draftRequests.length + 1}`,
+          }
+          draftRequests.push(request)
+          return request
+        },
+      },
+    })
+    expect(draftRequests).toHaveLength(7)
+    for (const request of draftRequests) {
+      const path = request.taskId as FoundationDocumentPath
+      const runningDispatch = {
+        dispatchId: request.dispatchId!,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: path,
+        revision: request.revision,
+        status: 'running' as const,
+        request,
+        startedAt: new Date().toISOString(),
+      }
+      let state = recordFoundationDispatch(
+        run.foundationDraftState,
         path,
-      })
-      await mkdir(join(workspacePath, path, '..'), { recursive: true })
-      const submission = completeFoundationSubmission(path)
+        'drafting',
+        runningDispatch,
+      )
+      state = {
+        ...state,
+        documents: state.documents?.map(document =>
+          document.path === path
+            ? { ...document, workerSessionId: `session:${path}` }
+            : document,
+        ),
+      }
       await writeFile(
         join(workspacePath, path),
-        withTestDocumentMetadata(
+        renderTestCompleteGameDocument(
           path,
-          renderTestCompleteGameDocument(path, submission),
+          completeFoundationSubmission(path),
         ),
       )
-      await commitAuthoredFoundationDocument({
-        workspacePath,
-        dispatchId: request!.dispatchId!,
-        targetPath: path,
-      })
       run = await completeDocumentDraft({
-        run: withDispatch(run, request!),
+        run: {
+          ...run,
+          foundationDraftState: state,
+          activeDispatch: {
+            ...runningDispatch,
+            status: 'completed',
+            finishedAt: new Date().toISOString(),
+          },
+        },
         workspacePath,
         terminal: {
           workerType: 'document-author',
           status: 'completed',
           writtenPaths: [path],
-          resolvedFindingIds: [],
         },
-        documentSet: 'foundation',
-        audit: () => ({ valid: true, issues: [] }),
       })
-      expect(run.foundationDraftState.completedPaths).toEqual(
-        CANONICAL_FOUNDATION_DOCUMENTS.slice(0, index + 1),
+      expect(
+        await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!),
+      ).toBeUndefined()
+    }
+
+    const waves: FoundationDocumentPath[][] = []
+    while (run.phase === 'DOCUMENT_DRAFTING') {
+      const calibrationRequests: WorkerDispatchRequest[] = []
+      await startDocumentStage({
+        run,
+        workspacePath,
+        dispatcher: {
+          async dispatch(value) {
+            const request = {
+              ...value,
+              dispatchId: `calibrate-${waves.length + 1}-${
+                calibrationRequests.length + 1
+              }`,
+            }
+            calibrationRequests.push(request)
+            return request
+          },
+        },
+      })
+      expect(calibrationRequests.length).toBeGreaterThan(0)
+      waves.push(
+        calibrationRequests.map(
+          request => request.taskId as FoundationDocumentPath,
+        ),
       )
-      const committedDocument = await readFile(join(workspacePath, path), 'utf8')
-      expect(committedDocument).toContain(
-        `document_id: ${CANONICAL_PROJECT_DOCUMENT_IDS[path]}`,
-      )
-      expect(committedDocument).toContain('version: 1.0.0')
-      expect(committedDocument).not.toContain('2099-01-01')
-      if (index < CANONICAL_FOUNDATION_DOCUMENTS.length - 1) {
-        expect(run.phase).toBe('DOCUMENT_DRAFTING')
-        expect(run.documentStep).toBe('FOUNDATION_DRAFTING')
+      for (const request of calibrationRequests) {
+        const path = request.taskId as FoundationDocumentPath
+        const runningDispatch = {
+          dispatchId: request.dispatchId!,
+          workerType: 'document-author' as const,
+          phase: 'DOCUMENT_DRAFTING' as const,
+          taskId: path,
+          revision: request.revision,
+          status: 'running' as const,
+          request,
+          startedAt: new Date().toISOString(),
+        }
+        const state = recordFoundationDispatch(
+          run.foundationDraftState,
+          path,
+          'calibrating',
+          runningDispatch,
+        )
+        run = await completeDocumentDraft({
+          run: {
+            ...run,
+            foundationDraftState: state,
+            activeDispatch: {
+              ...runningDispatch,
+              status: 'completed',
+              finishedAt: new Date().toISOString(),
+            },
+          },
+          workspacePath,
+          terminal: {
+            workerType: 'document-author',
+            status: 'completed',
+            writtenPaths: [path],
+          },
+          audit: () => ({ valid: true, issues: [] }),
+        })
       }
     }
 
+    expect(waves).toEqual([
+      ['docs/LEVEL_SCENE_DESIGN.md'],
+      ['docs/BALANCE_DESIGN.md', 'docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
+      ['docs/TECHNICAL_DESIGN.md', 'docs/AUDIO_DESIGN.md'],
+      ['docs/ASSET_PLAN.md'],
+    ])
     expect(run.phase).toBe('DOCUMENT_REVIEW')
     expect(run.documentStep).toBe('FOUNDATION_REVIEW')
+    expect(run.foundationDraftState.completedPaths).toEqual(
+      [...CANONICAL_FOUNDATION_DOCUMENTS],
+    )
   })
 
   test('rejects review state before all durable authoring checkpoints exist', () => {

@@ -956,10 +956,18 @@ export function createDeliveryDispatcher(options: {
       : dispatchId
     let terminalHandlerStarted = false
     let terminalHandlerCompleted = false
+    let draftSessionPreserved = false
     try {
       if (!creditSettled.has(key)) {
         await options.credits?.settle?.(key, result)
         creditSettled.add(key)
+      }
+      if (request?.contract.authoringMode === 'parallel-draft') {
+        await options.workerPort.close?.(dispatchId, {
+          preserveSession: true,
+        })
+        forgetDispatch(dispatchId)
+        draftSessionPreserved = true
       }
       terminalHandlerStarted = true
       await options.onTerminal?.(completed, result, request)
@@ -1017,11 +1025,12 @@ export function createDeliveryDispatcher(options: {
     } finally {
       // The durable run/event journal is the worker's retained evidence. The
       // private transport session is disposable once a terminal result exists.
-      releaseDispatch(dispatchId, {
-        preserveSession:
-          terminalHandlerCompleted &&
-          request?.contract.authoringMode === 'parallel-draft',
-      })
+      if (!draftSessionPreserved || !terminalHandlerCompleted)
+        releaseDispatch(dispatchId, {
+          preserveSession:
+            terminalHandlerCompleted &&
+            request?.contract.authoringMode === 'parallel-draft',
+        })
     }
     return { record: completed, result }
   }

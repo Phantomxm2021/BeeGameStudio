@@ -19,7 +19,10 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
-import { beginParallelFoundationAuthoring } from '../beegame/delivery-workflow/foundation-authoring-batch'
+import {
+  beginParallelFoundationAuthoring,
+  recordFoundationDispatch,
+} from '../beegame/delivery-workflow/foundation-authoring-batch'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
@@ -1741,9 +1744,9 @@ describe('delivery workflow recovery', () => {
 
     const resumed = await controller.store.load()
     expect(resumed?.foundationDraftState.completedPaths).toEqual([path])
-    expect(started.map(candidate => candidate.taskId)).toEqual([
-      CANONICAL_FOUNDATION_DOCUMENTS[1],
-    ])
+    expect(started.map(candidate => candidate.taskId)).toEqual(
+      CANONICAL_FOUNDATION_DOCUMENTS.slice(1),
+    )
     await expect(
       readAuthoredDocumentReceipt(workspace, request.dispatchId!),
     ).resolves.toMatchObject({
@@ -3269,6 +3272,86 @@ describe('delivery workflow recovery', () => {
         document => document.path === 'docs/BALANCE_DESIGN.md',
       )?.dispatch?.dispatchId,
     ).toBe(running.dispatchId)
+  })
+
+  test('pauses an orphaned parallel author instead of silently restarting it', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-orphan-'))
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-orphan',
+      projectId: 'project-foundation-orphan',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      foundationDraftComplete: false,
+    })
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'orphan-level',
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: initial.revision.document,
+      allowedPaths: [path],
+      contract: {
+        authoringMode: 'parallel-draft',
+        foundationDocumentPath: path,
+      },
+    }
+    const dispatch = {
+      dispatchId: request.dispatchId!,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId: path,
+      revision: request.revision,
+      status: 'running' as const,
+      request,
+      startedAt: new Date().toISOString(),
+    }
+    const foundationDraftState = recordFoundationDispatch(
+      beginParallelFoundationAuthoring(['docs/GDD.md']),
+      path,
+      'drafting',
+      dispatch,
+    )
+    const run: DeliveryRun = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState,
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start() {
+          throw new Error('must not silently start a replacement author')
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('native session is unavailable')
+        },
+      },
+    })
+    await controller.store.save(run)
+
+    await controller.resume(run)
+
+    expect(await controller.store.load()).toMatchObject({
+      status: 'needs_action',
+      foundationDraftState: {
+        documents: expect.arrayContaining([
+          expect.objectContaining({
+            path,
+            status: 'needs_action',
+            failureReason: 'preserved native document session is unavailable',
+          }),
+        ]),
+      },
+    })
   })
 
   test('claims the first dispatch durably across independent dispatcher instances', async () => {
