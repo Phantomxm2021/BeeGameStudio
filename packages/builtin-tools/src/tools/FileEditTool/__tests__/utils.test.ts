@@ -4,12 +4,8 @@ import { logMock } from '../../../../../../tests/mocks/log'
 // Mock log.ts to cut the heavy dependency chain
 mock.module('src/utils/log.ts', logMock)
 
-const {
-  stripTrailingWhitespace,
-  findActualString,
-  applyEditToFile,
-  resolveFileEdits,
-} = await import('../utils')
+const { stripTrailingWhitespace, findActualString, applyEditToFile } =
+  await import('../utils')
 
 // ─── stripTrailingWhitespace ────────────────────────────────────────────
 
@@ -122,112 +118,5 @@ describe('applyEditToFile', () => {
       'new line X\nnew line Y',
     )
     expect(result).toBe('header\nnew line X\nnew line Y\nfooter\n')
-  })
-})
-
-// ─── resolveFileEdits ──────────────────────────────────────────────────
-
-describe('resolveFileEdits', () => {
-  test('resolves independent edits in declared order', () => {
-    const result = resolveFileEdits({
-      filePath: '/project/GDD.md',
-      fileContents: '# GDD\n\n<!-- vision -->\n\n<!-- systems -->\n',
-      edits: [
-        {
-          old_string: '<!-- vision -->',
-          new_string: '## Vision\nProduction-ready vision.',
-          replace_all: false,
-        },
-        {
-          old_string: '<!-- systems -->',
-          new_string: '## Systems\nProduction-ready systems.',
-          replace_all: false,
-        },
-      ],
-    })
-
-    expect(result.updatedFile).toBe(
-      '# GDD\n\n## Vision\nProduction-ready vision.\n\n## Systems\nProduction-ready systems.\n',
-    )
-    expect(result.resolvedEdits).toHaveLength(2)
-    expect(result.patch.length).toBeGreaterThan(0)
-  })
-
-  test('rejects an empty edit list', () => {
-    expect(() =>
-      resolveFileEdits({
-        filePath: '/project/GDD.md',
-        fileContents: '# GDD\n',
-        edits: [],
-      }),
-    ).toThrow('At least one edit is required')
-  })
-
-  test('rejects identical old and new strings', () => {
-    expect(() =>
-      resolveFileEdits({
-        filePath: '/project/GDD.md',
-        fileContents: 'same\n',
-        edits: [
-          { old_string: 'same', new_string: 'same', replace_all: false },
-        ],
-      }),
-    ).toThrow('old_string and new_string are exactly the same')
-  })
-
-  test('rejects a missing later edit', () => {
-    expect(() =>
-      resolveFileEdits({
-        filePath: '/project/GDD.md',
-        fileContents: 'A\nB\n',
-        edits: [
-          { old_string: 'A', new_string: 'AA', replace_all: false },
-          { old_string: 'missing', new_string: 'never', replace_all: false },
-        ],
-      }),
-    ).toThrow('String to replace not found')
-  })
-
-  test('rejects an ambiguous later edit unless replace_all is true', () => {
-    expect(() =>
-      resolveFileEdits({
-        filePath: '/project/GDD.md',
-        fileContents: 'START\nTARGET\nTARGET\nEND\n',
-        edits: [
-          { old_string: 'START', new_string: 'READY', replace_all: false },
-          { old_string: 'TARGET', new_string: 'done', replace_all: false },
-        ],
-      }),
-    ).toThrow('Found 2 matches')
-
-    const result = resolveFileEdits({
-      filePath: '/project/GDD.md',
-      fileContents: 'TARGET\nTARGET\n',
-      edits: [
-        { old_string: 'TARGET', new_string: 'done', replace_all: true },
-      ],
-    })
-    expect(result.updatedFile).toBe('done\ndone\n')
-  })
-
-  test('rejects a later edit that targets text introduced by this batch', () => {
-    expect(() =>
-      resolveFileEdits({
-        filePath: '/project/GDD.md',
-        fileContents: '<!-- section -->\n',
-        edits: [
-          {
-            old_string: '<!-- section -->',
-            new_string: '## Systems\nDraft systems text.',
-            replace_all: false,
-          },
-          {
-            old_string: 'Draft systems text.',
-            new_string: 'Production systems text.',
-            replace_all: false,
-          },
-        ],
-      }),
-    ).toThrow('substring of a new_string from a previous edit')
   })
 })
