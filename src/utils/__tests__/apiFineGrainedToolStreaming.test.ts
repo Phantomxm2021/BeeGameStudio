@@ -5,6 +5,7 @@ import {
   toolToAPISchema,
 } from '../api.js'
 import { clearToolSchemaCache } from '../toolSchemaCache.js'
+import { selectedBeeGameAPIProvider } from '../model/providers.js'
 
 const originalBaseUrl = process.env.ANTHROPIC_BASE_URL
 const originalStreamingFlag =
@@ -23,6 +24,10 @@ afterEach(() => {
 })
 
 describe('fine-grained tool input streaming capability', () => {
+  test('uses the selected Bee Game Studio Anthropic provider over stale local model settings', () => {
+    expect(selectedBeeGameAPIProvider('anthropic')).toBe('firstParty')
+    expect(selectedBeeGameAPIProvider('openai')).toBe('openai')
+  })
   test('honors an explicit native opt-in on an Anthropic-compatible custom endpoint', () => {
     expect(
       shouldEnableFineGrainedToolStreaming({

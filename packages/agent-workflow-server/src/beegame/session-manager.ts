@@ -280,6 +280,7 @@ export type RuntimeLaunchContract = {
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_CONFIG_DIR',
+  'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
@@ -4495,11 +4496,17 @@ function buildRuntimeEnv(
   )
 }
 
-function mergeRuntimeEnv(
+export function mergeRuntimeEnv(
   runtime: RuntimeModelConfig | undefined,
   additionalEnv: Record<string, string>,
 ): Record<string, string> {
-  return { ...additionalEnv, ...(runtime?.env ?? {}) }
+  return {
+    ...additionalEnv,
+    ...(runtime?.env ?? {}),
+    ...(runtime?.modelType
+      ? { BEEGAME_MODEL_TYPE: runtime.modelType }
+      : {}),
+  }
 }
 
 function buildRuntimeLaunchContract(

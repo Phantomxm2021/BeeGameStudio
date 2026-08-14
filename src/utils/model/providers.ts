@@ -9,9 +9,23 @@ export {
   isThirdPartyAPIProvider,
 } from './providerClassification.js'
 
+export function selectedBeeGameAPIProvider(
+  modelType: string | undefined,
+): APIProvider | undefined {
+  if (modelType === 'anthropic') return 'firstParty'
+  if (modelType === 'openai') return 'openai'
+  if (modelType === 'gemini') return 'gemini'
+  if (modelType === 'grok') return 'grok'
+  return undefined
+}
+
 export function getAPIProvider(
   settings: Pick<SettingsJson, 'modelType'> = getInitialSettings(),
 ): APIProvider {
+  const selectedProvider = selectedBeeGameAPIProvider(
+    process.env.BEEGAME_MODEL_TYPE,
+  )
+  if (selectedProvider) return selectedProvider
   const modelType = settings.modelType
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'
