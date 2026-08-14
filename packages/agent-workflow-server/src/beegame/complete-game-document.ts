@@ -136,12 +136,6 @@ export function validateCompleteGameDocumentMarkdown(
 ): string {
   const body = z.string().trim().min(1).parse(value)
   const contract = getGameDocumentContract(path)
-  const byteLength = new TextEncoder().encode(body).byteLength
-  if (byteLength > contract.outputPolicy.maximumUtf8Bytes) {
-    throw new Error(
-      `complete game document exceeds the ${contract.outputPolicy.maximumUtf8Bytes}-byte budget for ${path}`,
-    )
-  }
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')

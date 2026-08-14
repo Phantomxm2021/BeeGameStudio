@@ -51,7 +51,7 @@ export type GameDocumentUpstreamProjection = {
 }
 
 export type GameDocumentOutputPolicy = Readonly<{
-  maximumUtf8Bytes: number
+  targetMaximumUtf8Bytes: number
   sectionStyle: 'final_owned_decisions'
   productionMaterialStyle: 'canonical_compact_views'
   workedExamples: 'one_per_distinct_boundary'
@@ -71,7 +71,7 @@ export type GameDocumentContract = {
 
 export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
   Object.freeze({
-    maximumUtf8Bytes: 48_000,
+    targetMaximumUtf8Bytes: 48_000,
     sectionStyle: 'final_owned_decisions',
     productionMaterialStyle: 'canonical_compact_views',
     workedExamples: 'one_per_distinct_boundary',
