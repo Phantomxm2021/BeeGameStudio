@@ -212,6 +212,7 @@ import {
 } from '../../utils/sessionActivity.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
+  DEFAULT_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
   ProviderStreamIdleError,
   resolveProviderStreamIdleTimeoutMs,
   withProviderStreamIdleDeadline,
@@ -1966,26 +1967,35 @@ async function* queryModel(
     stopReason = null
     isAdvisorInProgress = false
 
-    // Bound each iterator read itself. Cancelling the SDK response is not
-    // sufficient for compatible gateways that leave next() pending after SSE
-    // delivery stops while the socket remains open.
-    const STREAM_IDLE_TIMEOUT_MS = resolveProviderStreamIdleTimeoutMs(
-      process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS,
+    // Keep the iterator deadline explicitly opt-in. Healthy native tool-input
+    // generation can remain silent for several minutes, so elapsed silence is
+    // not sufficient evidence that the provider stream is dead.
+    const streamWatchdogEnabled = isEnvTruthy(
+      process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
     )
-    const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
+    const STREAM_IDLE_TIMEOUT_MS = resolveProviderStreamIdleTimeoutMs(
+      streamWatchdogEnabled
+        ? (process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS ??
+            String(DEFAULT_PROVIDER_STREAM_IDLE_TIMEOUT_MS))
+        : undefined,
+    )
+    const STREAM_IDLE_WARNING_MS =
+      STREAM_IDLE_TIMEOUT_MS === undefined
+        ? undefined
+        : STREAM_IDLE_TIMEOUT_MS / 2
     const providerStream = withProviderStreamIdleDeadline(stream, {
       timeoutMs: STREAM_IDLE_TIMEOUT_MS,
       warningMs: STREAM_IDLE_WARNING_MS,
       onWarning: () => {
         logForDebugging(
-          `Streaming idle warning: no chunks received for ${STREAM_IDLE_WARNING_MS / 1000}s`,
+          `Streaming idle warning: no chunks received for ${(STREAM_IDLE_WARNING_MS ?? 0) / 1000}s`,
           { level: 'warn' },
         )
         logForDiagnosticsNoPII('warn', 'cli_streaming_idle_warning')
       },
       onTimeout: () => {
         logForDebugging(
-          `Streaming idle timeout: no chunks received for ${STREAM_IDLE_TIMEOUT_MS / 1000}s, aborting stream`,
+          `Streaming idle timeout: no chunks received for ${(STREAM_IDLE_TIMEOUT_MS ?? 0) / 1000}s, aborting stream`,
           { level: 'error' },
         )
         logForDiagnosticsNoPII('error', 'cli_streaming_idle_timeout')
@@ -1994,7 +2004,7 @@ async function* queryModel(
             options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           request_id: (streamRequestId ??
             'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          timeout_ms: STREAM_IDLE_TIMEOUT_MS,
+          timeout_ms: STREAM_IDLE_TIMEOUT_MS ?? 0,
         })
         releaseStreamResources()
       },

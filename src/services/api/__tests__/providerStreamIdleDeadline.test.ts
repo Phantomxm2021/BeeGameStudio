@@ -7,13 +7,11 @@ import {
 } from '../providerStreamIdleDeadline.js'
 
 describe('provider stream idle deadline', () => {
-  test('uses a native default above observed healthy long-generation gaps', () => {
-    expect(resolveProviderStreamIdleTimeoutMs(undefined)).toBe(
-      DEFAULT_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
-    )
+  test('keeps the idle deadline opt-in for healthy long tool generation', () => {
+    expect(resolveProviderStreamIdleTimeoutMs(undefined)).toBeUndefined()
     expect(DEFAULT_PROVIDER_STREAM_IDLE_TIMEOUT_MS).toBe(180_000)
     expect(resolveProviderStreamIdleTimeoutMs('240000')).toBe(240_000)
-    expect(resolveProviderStreamIdleTimeoutMs('invalid')).toBe(180_000)
+    expect(resolveProviderStreamIdleTimeoutMs('invalid')).toBeUndefined()
   })
 
   test('rejects when the provider leaves iterator.next pending forever', async () => {
