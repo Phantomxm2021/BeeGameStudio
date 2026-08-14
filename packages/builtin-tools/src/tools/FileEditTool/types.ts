@@ -43,6 +43,17 @@ export const hunkSchema = lazySchema(() =>
   }),
 )
 
+export type FileEditsRequest = {
+  file_path: string
+  edits: FileEdit[]
+}
+
+export type ResolvedFileEdits = {
+  resolvedEdits: FileEdit[]
+  updatedFile: string
+  patch: z.infer<ReturnType<typeof hunkSchema>>[]
+}
+
 export const gitDiffSchema = lazySchema(() =>
   z.object({
     filename: z.string(),

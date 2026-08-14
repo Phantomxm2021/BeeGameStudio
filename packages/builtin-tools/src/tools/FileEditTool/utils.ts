@@ -13,7 +13,11 @@ import {
   convertLeadingTabsToSpaces,
   readFileSyncCached,
 } from 'src/utils/file.js'
-import type { EditInput, FileEdit } from './types.js'
+import type {
+  EditInput,
+  FileEdit,
+  ResolvedFileEdits,
+} from './types.js'
 
 /**
  * Strips trailing whitespace from each line in a string while preserving line endings
@@ -208,6 +212,82 @@ export function getPatchForEdits({
   })
 
   return { patch, updatedFile }
+}
+
+/**
+ * Resolves and validates an ordered batch of exact file edits without touching
+ * the filesystem. Every edit is checked against the in-memory result of the
+ * previous edit, while edits may not target text introduced by this batch.
+ */
+export function resolveFileEdits({
+  filePath,
+  fileContents,
+  edits,
+}: {
+  filePath: string
+  fileContents: string
+  edits: FileEdit[]
+}): ResolvedFileEdits {
+  if (edits.length === 0) {
+    throw new Error('At least one edit is required.')
+  }
+
+  let current = fileContents
+  const resolvedEdits: FileEdit[] = []
+  const appliedNewStrings: string[] = []
+
+  for (const edit of edits) {
+    if (edit.old_string === edit.new_string) {
+      throw new Error(
+        'No changes to make: old_string and new_string are exactly the same.',
+      )
+    }
+
+    const oldStringToCheck = edit.old_string.replace(/\n+$/, '')
+    for (const previousNewString of appliedNewStrings) {
+      if (
+        oldStringToCheck !== '' &&
+        previousNewString.includes(oldStringToCheck)
+      ) {
+        throw new Error(
+          'Cannot edit file: old_string is a substring of a new_string from a previous edit.',
+        )
+      }
+    }
+
+    const actualOldString = findActualString(current, edit.old_string)
+    if (actualOldString === null) {
+      throw new Error(
+        `String to replace not found in file.\nString: ${edit.old_string}`,
+      )
+    }
+
+    if (actualOldString !== '') {
+      const matches = current.split(actualOldString).length - 1
+      if (matches > 1 && !edit.replace_all) {
+        throw new Error(
+          `Found ${matches} matches of the string to replace, but replace_all is false.`,
+        )
+      }
+    }
+
+    const resolvedEdit = { ...edit, old_string: actualOldString }
+    current = getPatchForEdits({
+      filePath,
+      fileContents: current,
+      edits: [resolvedEdit],
+    }).updatedFile
+    resolvedEdits.push(resolvedEdit)
+    appliedNewStrings.push(edit.new_string)
+  }
+
+  const patch = getPatchFromContents({
+    filePath,
+    oldContent: convertLeadingTabsToSpaces(fileContents),
+    newContent: convertLeadingTabsToSpaces(current),
+  })
+
+  return { resolvedEdits, updatedFile: current, patch }
 }
 
 // Cap on edited_text_file attachment snippets. Format-on-save of a large file
