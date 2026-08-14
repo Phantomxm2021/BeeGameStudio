@@ -98,4 +98,37 @@ describe('document authoring acceptance metrics', () => {
       }).completeDocumentSet,
     ).toBe(false)
   })
+
+  test('aggregates draft and calibration metrics without summing wall-clock stage time', () => {
+    const report = summarizeDocumentAuthoringAcceptance({
+      stageElapsedMs: 900_000,
+      documents: [
+        { ...evidence('docs/GDD.md', 200_000), phase: 'final' as const },
+        {
+          ...evidence('docs/LEVEL_SCENE_DESIGN.md', 240_000),
+          dispatchId: 'level-draft',
+          phase: 'draft' as const,
+          elapsedMs: 600_000,
+        },
+        {
+          ...evidence('docs/LEVEL_SCENE_DESIGN.md', 60_000),
+          dispatchId: 'level-calibration',
+          phase: 'calibration' as const,
+          elapsedMs: 180_000,
+        },
+      ],
+    })
+
+    expect(report.documents.find(document => document.path === 'docs/LEVEL_SCENE_DESIGN.md')).toMatchObject({
+      rawTokens: 300_000,
+      phases: {
+        draft: { dispatchId: 'level-draft', rawTokens: 240_000 },
+        calibration: {
+          dispatchId: 'level-calibration',
+          rawTokens: 60_000,
+        },
+      },
+    })
+    expect(report.stageElapsedMs).toBe(900_000)
+  })
 })

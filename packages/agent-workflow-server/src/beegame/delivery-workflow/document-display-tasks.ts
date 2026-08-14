@@ -71,6 +71,16 @@ export type DocumentDisplayTaskInput = {
   workspacePath: string
   currentItemId?: string
   foundationDraftCompletedPaths?: string[]
+  foundationDocuments?: Array<{
+    path: string
+    status:
+      | 'pending'
+      | 'drafting'
+      | 'drafted'
+      | 'calibrating'
+      | 'committed'
+      | 'needs_action'
+  }>
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
@@ -127,6 +137,13 @@ export function projectDocumentDisplayTasks(
     input.foundationDraftCompletedPaths?.filter(path =>
       CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
     ) ?? [],
+  )
+  const parallelDocuments = new Map(
+    (input.foundationDocuments ?? [])
+      .filter(document =>
+        CANONICAL_FOUNDATION_DOCUMENTS.includes(document.path as never),
+      )
+      .map(document => [document.path, document.status]),
   )
 
   if (operation === 'review' && input.reviewCheckIds?.length) {
@@ -224,6 +241,28 @@ export function projectDocumentDisplayTasks(
   }
 
   return documentPaths.map(path => {
+    const parallelStatus = parallelDocuments.get(path)
+    if (
+      operation === 'write' &&
+      input.documentStep === 'FOUNDATION_DRAFTING' &&
+      parallelStatus
+    )
+      return {
+        id: path,
+        title:
+          parallelStatus === 'drafted' ? `${path}（等待校准）` : path,
+        status:
+          parallelStatus === 'committed'
+            ? ('completed' as const)
+            : parallelStatus === 'drafting' ||
+                parallelStatus === 'calibrating'
+              ? ('running' as const)
+              : parallelStatus === 'needs_action'
+                ? ('failed' as const)
+                : ('pending' as const),
+        attempt: 0,
+        operation,
+      }
     const absolutePath = join(workspace, path)
     const exists = (() => {
       try {

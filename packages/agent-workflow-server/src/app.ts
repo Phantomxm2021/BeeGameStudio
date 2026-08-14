@@ -5813,6 +5813,37 @@ function workflowViewForDisplay(
                   typeof path === 'string' ? [path] : [],
                 )
               : undefined,
+          foundationDocuments:
+            isObject(workflow.foundationDraftState) &&
+            Array.isArray(workflow.foundationDraftState.documents)
+              ? workflow.foundationDraftState.documents.flatMap(document => {
+                  if (
+                    !isObject(document) ||
+                    typeof document.path !== 'string' ||
+                    ![
+                      'pending',
+                      'drafting',
+                      'drafted',
+                      'calibrating',
+                      'committed',
+                      'needs_action',
+                    ].includes(String(document.status))
+                  )
+                    return []
+                  return [
+                    {
+                      path: document.path,
+                      status: document.status as Parameters<
+                        typeof projectDocumentDisplayTasks
+                      >[0]['foundationDocuments'] extends Array<infer Value>
+                        ? Value extends { status: infer Status }
+                          ? Status
+                          : never
+                        : never,
+                    },
+                  ]
+                })
+              : undefined,
           documentStep:
             typeof workflow.documentStep === 'string'
               ? (workflow.documentStep as Parameters<

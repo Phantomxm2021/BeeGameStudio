@@ -26,15 +26,18 @@ type Usage = Readonly<{
 }>
 
 export type DocumentAuthoringEvidence = Readonly<{
+  stageElapsedMs?: number
   documents: readonly Readonly<{
     path: string
     dispatchId: string
+    phase?: 'draft' | 'calibration' | 'final'
     usage: Usage
     modelStops: number
     toolCalls: Readonly<Record<string, number>>
     elapsedMs: number
     bytes: number
     lines: number
+    digest?: string
     accepted: boolean
   }>[]
 }>
@@ -42,11 +45,25 @@ export type DocumentAuthoringEvidence = Readonly<{
 export type DocumentAuthoringAcceptanceReport = Readonly<{
   documents: readonly Readonly<{
     path: FoundationDocumentPath
-    dispatchId: string
+    phases: Readonly<
+      Partial<
+        Record<
+          'draft' | 'calibration' | 'final',
+          Readonly<{
+            dispatchId: string
+            rawTokens: number
+            elapsedMs: number
+          }>
+        >
+      >
+    >
     rawTokens: number
     ceiling: number
     withinBudget: boolean
     accepted: boolean
+    finalBytes: number
+    finalLines: number
+    finalDigest?: string
   }>[]
   total: Readonly<{
     freshInputTokens: number
@@ -57,6 +74,7 @@ export type DocumentAuthoringAcceptanceReport = Readonly<{
   }>
   completeDocumentSet: boolean
   withinAuthoringBudget: boolean
+  stageElapsedMs?: number
 }>
 
 export function summarizeDocumentAuthoringAcceptance(
@@ -64,22 +82,56 @@ export function summarizeDocumentAuthoringAcceptance(
 ): DocumentAuthoringAcceptanceReport {
   const paths = new Set<string>()
   const dispatchIds = new Set<string>()
-  const documents = input.documents.map(document => {
+  const phaseKeys = new Set<string>()
+  const grouped = new Map<
+    FoundationDocumentPath,
+    DocumentAuthoringEvidence['documents'][number][]
+  >()
+  for (const document of input.documents) {
     if (!CANONICAL_FOUNDATION_DOCUMENTS.includes(document.path as never))
       throw new Error(`document authoring evidence path is not canonical: ${document.path}`)
-    if (paths.has(document.path) || dispatchIds.has(document.dispatchId))
-      throw new Error('document authoring evidence contains a duplicate path or dispatch')
+    const phase = document.phase ?? 'final'
+    const phaseKey = `${document.path}:${phase}`
+    if (phaseKeys.has(phaseKey) || dispatchIds.has(document.dispatchId))
+      throw new Error('document authoring evidence contains a duplicate phase or dispatch')
     paths.add(document.path)
+    phaseKeys.add(phaseKey)
     dispatchIds.add(document.dispatchId)
     const path = document.path as FoundationDocumentPath
+    grouped.set(path, [...(grouped.get(path) ?? []), document])
+  }
+  const documents = [...grouped.entries()].map(([path, entries]) => {
     const ceiling = DOCUMENT_AUTHORING_RAW_TOKEN_CEILINGS[path]
+    const rawTokens = entries.reduce(
+      (total, entry) => total + entry.usage.total_tokens,
+      0,
+    )
+    const phases = Object.freeze(
+      Object.fromEntries(
+        entries.map(entry => [
+          entry.phase ?? 'final',
+          Object.freeze({
+            dispatchId: entry.dispatchId,
+            rawTokens: entry.usage.total_tokens,
+            elapsedMs: entry.elapsedMs,
+          }),
+        ]),
+      ),
+    ) as DocumentAuthoringAcceptanceReport['documents'][number]['phases']
+    const finalEntry =
+      entries.find(entry => entry.phase === 'calibration') ??
+      entries.find(entry => entry.phase === 'final') ??
+      entries.at(-1)!
     return Object.freeze({
       path,
-      dispatchId: document.dispatchId,
-      rawTokens: document.usage.total_tokens,
+      phases,
+      rawTokens,
       ceiling,
-      withinBudget: document.usage.total_tokens <= ceiling,
-      accepted: document.accepted,
+      withinBudget: rawTokens <= ceiling,
+      accepted: entries.every(entry => entry.accepted),
+      finalBytes: finalEntry.bytes,
+      finalLines: finalEntry.lines,
+      ...(finalEntry.digest ? { finalDigest: finalEntry.digest } : {}),
     })
   })
   const total = Object.freeze({
@@ -99,6 +151,9 @@ export function summarizeDocumentAuthoringAcceptance(
     withinAuthoringBudget:
       documents.every(document => document.accepted && document.withinBudget) &&
       total.rawTokens <= EIGHT_DOCUMENT_AUTHORING_RAW_TOKEN_CEILING,
+    ...(input.stageElapsedMs !== undefined
+      ? { stageElapsedMs: input.stageElapsedMs }
+      : {}),
   })
 }
 

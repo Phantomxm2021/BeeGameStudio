@@ -405,6 +405,10 @@ function documentTasks(
     workspacePath,
     currentItemId: run.currentItemId,
     foundationDraftCompletedPaths: run.foundationDraftState.completedPaths,
+    foundationDocuments: run.foundationDraftState.documents?.map(document => ({
+      path: document.path,
+      status: document.status,
+    })),
     documentStep: run.documentStep as DocumentWorkflowStep | undefined,
     workflowStatus: run.status,
     thinking: workflowThinking(run),
