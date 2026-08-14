@@ -32,15 +32,19 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     : request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
       : 'read-only'
-  const initialFoundationAuthorArtifacts =
+  const foundationAuthorArtifacts =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
-    request.contract.authoringMode === 'initial' &&
+    ['initial', 'parallel-draft', 'calibration'].includes(
+      String(request.contract.authoringMode),
+    ) &&
     typeof request.contract.foundationDocumentPath === 'string'
       ? [
-          ...(Array.isArray(request.contract.upstreamDocumentPaths)
-            ? request.contract.upstreamDocumentPaths
-            : []),
+          ...(Array.isArray(request.contract.availableUpstreamPaths)
+            ? request.contract.availableUpstreamPaths
+            : Array.isArray(request.contract.upstreamDocumentPaths)
+              ? request.contract.upstreamDocumentPaths
+              : []),
           request.contract.foundationDocumentPath,
         ].filter(
           (path, index, paths): path is string =>
@@ -48,7 +52,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
         )
       : undefined
   const canonicalArtifacts =
-    initialFoundationAuthorArtifacts ??
+    foundationAuthorArtifacts ??
     (request.workerType === 'document-reviewer' &&
     request.contract.reviewScope === 'foundation'
       ? CANONICAL_FOUNDATION_DOCUMENTS
@@ -92,7 +96,9 @@ function formatContract(request: WorkerDispatchRequest): string {
     const initialFoundationAuthor =
       request.workerType === 'document-author' &&
       request.contract.documentSet === 'foundation' &&
-      request.contract.authoringMode === 'initial'
+      ['initial', 'parallel-draft', 'calibration'].includes(
+        String(request.contract.authoringMode),
+      )
     if (initialFoundationAuthor) {
       delete contractWithoutDuplicatedBrief.maxNativeWriteContentChars
       delete contractWithoutDuplicatedBrief.nativeWriteLimit
@@ -428,7 +434,19 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 : []),
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
-          : request.contract.authoringMode === 'repair-planning'
+          : request.contract.authoringMode === 'parallel-draft'
+            ? [
+                `Author exactly ${String(request.contract.foundationDocumentPath)} as one complete production-usable discipline document using Bee Game Studio's normal native file workflow. Do not write any other file.`,
+                'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
+                'Write the complete canonical Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
+              ].join(' ')
+            : request.contract.authoringMode === 'calibration'
+              ? [
+                  `Calibrate exactly ${String(request.contract.foundationDocumentPath)} against the newly available committed upstream authority using the existing native session.`,
+                  'Read the current canonical file and compact authority projection. Revise only statements whose authority changed or became available; preserve unrelated valid content and limit changes to affected authority.',
+                  'Leave one complete production-usable Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
+                ].join(' ')
+              : request.contract.authoringMode === 'repair-planning'
             ? [
                 'This is the sole planning task for every ordered group in contract.repairPlanTask.groups.',
                 'Produce exactly one minimum groupDecision per group in the supplied order, plus one pathDecision for each subject path and each candidate path that must change to preserve downstream consistency. Evidence, subjects, blocking impacts and required outcomes are immutable service-owned constraints; do not restate them.',

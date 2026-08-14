@@ -42,9 +42,21 @@ export function canonicalFoundationAuthorityProjectionBytes(
 export function projectFoundationAuthority(input: {
   targetPath: FoundationDocumentPath
   targetSectionIds?: readonly string[]
+  availableUpstreamPaths?: readonly FoundationDocumentPath[]
   documents: ReadonlyMap<FoundationDocumentPath, string>
 }): FoundationAuthorityProjection {
   const target = getGameDocumentContract(input.targetPath)
+  const contractedPaths = target.upstreamSections.map(source => source.path)
+  const availableUpstreamPaths =
+    input.availableUpstreamPaths ?? contractedPaths
+  if (
+    new Set(availableUpstreamPaths).size !== availableUpstreamPaths.length ||
+    availableUpstreamPaths.some(path => !contractedPaths.includes(path))
+  )
+    throw new Error(
+      'available upstream authority must be unique and declared by the document contract',
+    )
+  const available = new Set(availableUpstreamPaths)
   const targetSectionIds = Object.freeze(
     input.targetSectionIds === undefined
       ? target.sections.map(section => section.sectionId)
@@ -61,6 +73,7 @@ export function projectFoundationAuthority(input: {
   const sources: FoundationAuthoritySource[] = []
 
   for (const source of target.upstreamSections) {
+    if (!available.has(source.path)) continue
     const markdown = input.documents.get(source.path)
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)

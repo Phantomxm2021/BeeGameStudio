@@ -151,6 +151,49 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('12288')
   })
 
+  test('keeps draft and calibration prompts inside the native authoring boundary', () => {
+    const prompts = (['parallel-draft', 'calibration'] as const).map(
+      authoringMode =>
+        buildWorkerPrompt({
+          runId: 'run',
+          ownerId: 'owner',
+          projectId: 'project',
+          workspacePath: '/workspace',
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          taskId: 'docs/BALANCE_DESIGN.md',
+          revision: 'revision',
+          allowedPaths: ['docs/BALANCE_DESIGN.md'],
+          contract: {
+            documentSet: 'foundation',
+            authoringMode,
+            foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+            availableUpstreamPaths:
+              authoringMode === 'parallel-draft'
+                ? ['docs/GDD.md']
+                : ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+            completeDocumentContract: getGameDocumentContract(
+              'docs/BALANCE_DESIGN.md',
+            ),
+          },
+        }),
+    )
+
+    expect(prompts[0]).toContain('one complete production-usable discipline document')
+    expect(prompts[0]).toContain('genuinely unavailable upstream decisions')
+    expect(prompts[1]).toContain('Revise only statements whose authority changed')
+    expect(prompts[1]).toContain('limit changes to affected authority')
+    for (const prompt of prompts) {
+      expect(prompt).not.toContain('checkpoint count')
+      expect(prompt).not.toContain('forced Edit')
+      expect(prompt).not.toContain('API retry')
+      expect(prompt).not.toContain('watchdog')
+      expect(prompt).not.toContain('whole-file grep')
+      expect(prompt).not.toContain('byte count check')
+      expect(prompt).not.toContain('docs/UI_UX_SPEC.md')
+    }
+  })
+
   test('instructs one JSON/YAML resource lane', () => {
     const request: WorkerDispatchRequest = {
       runId: 'run',

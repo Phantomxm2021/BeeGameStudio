@@ -57,6 +57,7 @@ function parallelRequest(
       documentSet: 'foundation',
       foundationDocumentPath: 'docs/LEVEL_SCENE_DESIGN.md',
       upstreamDocumentPaths: ['docs/GDD.md'],
+      availableUpstreamPaths: ['docs/GDD.md'],
       completeDocumentContract: getGameDocumentContract(
         'docs/LEVEL_SCENE_DESIGN.md',
       ),
@@ -149,7 +150,17 @@ describe('native initial document authoring', () => {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       await writeFile(
         join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
-        '# Level and Scene Design\n\nDraft content.\n',
+        renderTestCompleteGameDocument(
+          'docs/LEVEL_SCENE_DESIGN.md',
+          completeTestSubmission('docs/LEVEL_SCENE_DESIGN.md'),
+        ),
+      )
+      await writeFile(
+        join(workspacePath, 'docs/GDD.md'),
+        renderTestCompleteGameDocument(
+          'docs/GDD.md',
+          completeTestSubmission('docs/GDD.md'),
+        ),
       )
       const nativeSessions = {
         start: () => {

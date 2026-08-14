@@ -168,6 +168,25 @@ describe('foundation authority projection', () => {
     ).toThrow(/section.*missing/i)
   })
 
+  test('projects only currently available contracted authority for an early draft', () => {
+    const targetPath = 'docs/BALANCE_DESIGN.md'
+    const input = sources(['docs/GDD.md'])
+    const result = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: ['docs/GDD.md'],
+      ...input,
+    })
+
+    expect(result.sources.map(source => source.path)).toEqual(['docs/GDD.md'])
+    expect(() =>
+      projectFoundationAuthority({
+        targetPath,
+        availableUpstreamPaths: ['docs/UI_UX_SPEC.md'],
+        ...input,
+      }),
+    ).toThrow(/available upstream authority.*contract/i)
+  })
+
   test('indexes upstream authority for the active target section without proxying content', () => {
     const targetPath = 'docs/TECHNICAL_DESIGN.md'
     const input = sources([

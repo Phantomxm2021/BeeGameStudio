@@ -27,6 +27,7 @@ import {
   type DeliveryWorkerPort,
   type DispatchRecord,
   type DocumentReviewCheckId,
+  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
 import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
@@ -332,7 +333,7 @@ export async function buildDocumentAuthorAuthorityBlock(
       ),
     ].join('\n\n')
   }
-  if (request.contract.authoringMode !== 'initial') return ''
+  if (!isFoundationDocumentAuthoringTurn(request)) return ''
   const targetPath = request.contract.foundationDocumentPath
   if (
     typeof targetPath !== 'string' ||
@@ -341,9 +342,11 @@ export async function buildDocumentAuthorAuthorityBlock(
     )
   )
     throw new Error('initial document authority target is invalid')
-  const upstreamPaths = Array.isArray(request.contract.upstreamDocumentPaths)
-    ? request.contract.upstreamDocumentPaths
-    : []
+  const upstreamPaths = Array.isArray(request.contract.availableUpstreamPaths)
+    ? request.contract.availableUpstreamPaths
+    : Array.isArray(request.contract.upstreamDocumentPaths)
+      ? request.contract.upstreamDocumentPaths
+      : []
   if (
     new Set(upstreamPaths).size !== upstreamPaths.length ||
     upstreamPaths.some(
@@ -363,8 +366,9 @@ export async function buildDocumentAuthorAuthorityBlock(
     typedTargetPath,
   ).upstreamSections.map(source => source.path)
   if (
-    upstreamPaths.length !== expectedUpstreamPaths.length ||
-    expectedUpstreamPaths.some((path, index) => upstreamPaths[index] !== path)
+    request.contract.authoringMode === 'initial' &&
+    (upstreamPaths.length !== expectedUpstreamPaths.length ||
+      expectedUpstreamPaths.some((path, index) => upstreamPaths[index] !== path))
   )
     throw new Error(
       'initial document upstream authority does not match its contract',
@@ -377,7 +381,7 @@ export async function buildDocumentAuthorAuthorityBlock(
     else throw error
   }
   await Promise.all(
-    expectedUpstreamPaths.map(path =>
+    upstreamPaths.map(path =>
       access(resolve(request.workspacePath, path)),
     ),
   )
@@ -399,7 +403,7 @@ export async function buildDocumentAuthorAuthorityBlock(
   const projection = await persistFoundationAuthorityIndex({ ...request, dispatchId })
   onProjection?.(projection)
   return [
-    expectedUpstreamPaths.length
+    upstreamPaths.length
       ? `BGS persisted a compact navigation index at ${projectionRelativePath}. It contains only approved source paths, exact line ranges and source digests, never proxied document content; native reads remain your decision.`
       : `This fact-owner document has no upstream document dependency. Use the confirmed brief and document contract directly.`,
     targetExists
@@ -909,7 +913,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               throw new Error(
                 `document author output is missing: ${targetPath}`,
               )
-            if (isInitialFoundationDocumentAuthor(request)) {
+            if (isFoundationDocumentAuthoringTurn(request)) {
               try {
                 validateCompleteGameDocumentMarkdown(
                   request.contract.foundationDocumentPath as never,
@@ -984,12 +988,14 @@ function isCanonicalDocumentAuthor(request: WorkerDispatchRequest): boolean {
   )
 }
 
-function isInitialFoundationDocumentAuthor(
+function isFoundationDocumentAuthoringTurn(
   request: WorkerDispatchRequest,
 ): boolean {
   return (
     request.workerType === 'document-author' &&
-    request.contract.authoringMode === 'initial' &&
+    ['initial', 'parallel-draft', 'calibration'].includes(
+      String(request.contract.authoringMode),
+    ) &&
     request.contract.documentSet === 'foundation' &&
     typeof request.contract.foundationDocumentPath === 'string' &&
     CANONICAL_FOUNDATION_DOCUMENTS.includes(
@@ -1001,7 +1007,7 @@ function isInitialFoundationDocumentAuthor(
 async function initialFoundationDocumentTurnPrompt(
   request: WorkerDispatchRequest,
 ): Promise<string | undefined> {
-  if (!isInitialFoundationDocumentAuthor(request)) return undefined
+  if (!isFoundationDocumentAuthoringTurn(request)) return undefined
   const path = request.contract.foundationDocumentPath as never
   let targetExists = true
   try {
@@ -1015,7 +1021,9 @@ async function initialFoundationDocumentTurnPrompt(
     throw new Error('foundation authority index requires a dispatch identity')
   const projectionPath = foundationProjectionRelativePath(dispatchId)
   return [
-    `Write the complete assigned document at ${path}.`,
+    request.contract.authoringMode === 'calibration'
+      ? `Calibrate the existing complete document at ${path} against only the newly available committed upstream authority. Preserve unrelated valid content and limit changes to affected authority.`
+      : `Write the complete assigned document at ${path}.`,
     getGameDocumentContract(path).upstreamSections.length
       ? `A compact navigation index is available at ${projectionPath}. It lists approved upstream ranges and digests without copying their bodies; native reads remain your decision.`
       : 'This document has no upstream document dependency.',
@@ -1028,24 +1036,32 @@ async function initialFoundationDocumentTurnPrompt(
 async function persistFoundationAuthorityIndex(
   request: WorkerDispatchRequest,
 ): Promise<FoundationAuthorityProjection> {
-  if (!isInitialFoundationDocumentAuthor(request))
-    throw new Error('foundation authority index requires an initial document author')
+  if (!isFoundationDocumentAuthoringTurn(request))
+    throw new Error('foundation authority index requires a document authoring turn')
   const targetPath = request.contract.foundationDocumentPath as never
   const contract = getGameDocumentContract(targetPath)
+  const availableUpstreamPaths = Array.isArray(
+    request.contract.availableUpstreamPaths,
+  )
+    ? (request.contract.availableUpstreamPaths as FoundationDocumentPath[])
+    : contract.upstreamSections.map(source => source.path)
   const documents = new Map<
     (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
     string
   >()
   await Promise.all(
-    contract.upstreamSections.map(async source => {
+    contract.upstreamSections
+      .filter(source => availableUpstreamPaths.includes(source.path))
+      .map(async source => {
       documents.set(
         source.path,
         await readFile(resolve(request.workspacePath, source.path), 'utf8'),
       )
-    }),
+      }),
   )
   const projection = projectFoundationAuthority({
     targetPath,
+    availableUpstreamPaths,
     documents,
   })
   const relativePath = foundationProjectionRelativePath(request.dispatchId!)
