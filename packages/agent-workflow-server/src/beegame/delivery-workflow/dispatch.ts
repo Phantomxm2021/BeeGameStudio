@@ -23,6 +23,14 @@ import type {
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
+import {
+  recordFoundationDispatch,
+  recordFoundationFailure,
+} from './foundation-authoring-batch'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './types'
 
 export type DispatchCredits = {
   reserve?: (
@@ -36,6 +44,96 @@ export type DispatchCredits = {
 }
 
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
+
+function foundationPathFor(
+  request: WorkerDispatchRequest,
+): FoundationDocumentPath | undefined {
+  const path = request.contract.foundationDocumentPath
+  const mode = request.contract.authoringMode
+  return request.workerType === 'document-author' &&
+    (mode === 'parallel-draft' || mode === 'calibration') &&
+    typeof path === 'string' &&
+    CANONICAL_FOUNDATION_DOCUMENTS.includes(path as FoundationDocumentPath)
+    ? (path as FoundationDocumentPath)
+    : undefined
+}
+
+function foundationDispatch(
+  run: DeliveryRun,
+  path: FoundationDocumentPath,
+): DispatchRecord | undefined {
+  return run.foundationDraftState.documents?.find(
+    document => document.path === path,
+  )?.dispatch
+}
+
+function dispatchLocation(
+  run: DeliveryRun,
+  dispatchId: string,
+): { record: DispatchRecord; path?: FoundationDocumentPath } | undefined {
+  if (run.activeDispatch?.dispatchId === dispatchId)
+    return { record: run.activeDispatch }
+  for (const document of run.foundationDraftState.documents ?? [])
+    if (document.dispatch?.dispatchId === dispatchId)
+      return { record: document.dispatch, path: document.path }
+  return undefined
+}
+
+function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
+  return (run.foundationDraftState.documents ?? []).some(
+    document => document.dispatch?.status === 'running',
+  )
+}
+
+function withFoundationDispatch(
+  run: DeliveryRun,
+  path: FoundationDocumentPath,
+  dispatch: DispatchRecord,
+): DeliveryRun {
+  const documents = run.foundationDraftState.documents
+  if (!documents)
+    throw new DispatchError(
+      'blocked',
+      'parallel foundation authoring state is missing',
+    )
+  return {
+    ...run,
+    foundationDraftState: {
+      ...run.foundationDraftState,
+      documents: documents.map(document =>
+        document.path === path ? { ...document, dispatch } : { ...document },
+      ),
+    },
+  }
+}
+
+function withFoundationSession(
+  run: DeliveryRun,
+  path: FoundationDocumentPath,
+  workerSessionId: string,
+): DeliveryRun {
+  const documents = run.foundationDraftState.documents
+  if (!documents)
+    throw new DispatchError(
+      'blocked',
+      'parallel foundation authoring state is missing',
+    )
+  return {
+    ...run,
+    foundationDraftState: {
+      ...run.foundationDraftState,
+      documents: documents.map(document =>
+        document.path === path
+          ? { ...document, workerSessionId }
+          : { ...document },
+      ),
+    },
+  }
+}
+
+function isolatedFoundationFailureStatus(run: DeliveryRun): DeliveryRun['status'] {
+  return hasRunningFoundationDispatch(run) ? 'running' : 'needs_action'
+}
 
 export class DispatchError extends Error {
   constructor(
@@ -225,10 +323,20 @@ async function documentPerformance(input: {
   const projectionPath = `.beegame/workflow/document-projections/${input.dispatch.dispatchId}.json`
   const startedAt = Date.parse(input.dispatch.startedAt)
   const finishedAt = Date.parse(input.finishedAt)
+  const authoringUsage = input.result.authoringMetrics
+    ? {
+        input_tokens: input.result.authoringMetrics.inputTokens,
+        cache_read_tokens: input.result.authoringMetrics.cacheReadTokens,
+        cache_creation_tokens:
+          input.result.authoringMetrics.cacheCreationTokens,
+        completion_tokens: input.result.authoringMetrics.outputTokens,
+        total_tokens: input.result.authoringMetrics.rawProcessedTokens,
+      }
+    : usageDelta(input.currentUsage, input.dispatch.startingUsage)
   return {
     targetPath,
     documentAuthority: 'markdown_only',
-    usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
+    usage: authoringUsage,
     durationMs:
       Number.isFinite(startedAt) && Number.isFinite(finishedAt)
         ? Math.max(0, finishedAt - startedAt)
@@ -355,7 +463,7 @@ export function createDeliveryDispatcher(options: {
 
   function releaseDispatch(
     dispatchId: string,
-    cleanup: { stopReason?: string } = {},
+    cleanup: { stopReason?: string; preserveSession?: boolean } = {},
   ): void {
     // Durable state is authoritative. Release the idempotency lane before
     // touching the disposable transport so a stalled session close can never
@@ -368,7 +476,11 @@ export function createDeliveryDispatcher(options: {
         await options.workerPort
           .stop(dispatchId, cleanup.stopReason)
           .catch(() => undefined)
-      await options.workerPort.close?.(dispatchId).catch(() => undefined)
+      await options.workerPort
+        .close?.(dispatchId, {
+          ...(cleanup.preserveSession ? { preserveSession: true } : {}),
+        })
+        .catch(() => undefined)
     })()
     let cleanupTimer: ReturnType<typeof setTimeout> | undefined
     const cleanupDeadline = new Promise<void>(resolve => {
@@ -402,18 +514,20 @@ export function createDeliveryDispatcher(options: {
     assertSingleResourceWorkAuthority(request, run)
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
+    const foundationPath = foundationPathFor(request)
+    const durableDispatch = foundationPath
+      ? foundationDispatch(run, foundationPath)
+      : run.activeDispatch
     if (
-      run.activeDispatch &&
-      run.activeDispatch.status === 'completed' &&
-      run.activeDispatch.phase === request.phase &&
-      run.activeDispatch.revision === request.revision &&
-      run.activeDispatch.taskId === request.taskId &&
-      run.activeDispatch.workerType === request.workerType
-    ) {
-      return run.activeDispatch
-    }
-    if (run.activeDispatch?.status === 'running') {
-      const existing = run.activeDispatch
+      durableDispatch?.status === 'completed' &&
+      durableDispatch.phase === request.phase &&
+      durableDispatch.revision === request.revision &&
+      durableDispatch.taskId === request.taskId &&
+      durableDispatch.workerType === request.workerType
+    )
+      return durableDispatch
+    if (durableDispatch?.status === 'running') {
+      const existing = durableDispatch
       if (
         existing.phase === request.phase &&
         existing.revision === request.revision &&
@@ -426,6 +540,16 @@ export function createDeliveryDispatcher(options: {
         'another delivery worker is already running',
       )
     }
+    if (foundationPath && run.activeDispatch?.status === 'running')
+      throw new DispatchError(
+        'duplicate',
+        'a regular delivery worker is already running',
+      )
+    if (!foundationPath && hasRunningFoundationDispatch(run))
+      throw new DispatchError(
+        'duplicate',
+        'foundation document authoring batch is active',
+      )
     const attempt = request.taskId
       ? Math.max(
           1,
@@ -472,8 +596,11 @@ export function createDeliveryDispatcher(options: {
         assertSingleResourceWorkAuthority(request, current)
         if (current.status !== 'running')
           throw new DispatchError('blocked', 'delivery run is not running')
-        if (current.activeDispatch) {
-          const active = current.activeDispatch
+        const currentFoundationPath = foundationPathFor(request)
+        const active = currentFoundationPath
+          ? foundationDispatch(current, currentFoundationPath)
+          : current.activeDispatch
+        if (active) {
           if (
             active.phase === request.phase &&
             active.revision === request.revision &&
@@ -488,10 +615,32 @@ export function createDeliveryDispatcher(options: {
             'another delivery worker is already running',
           )
         }
+        if (currentFoundationPath && current.activeDispatch?.status === 'running')
+          throw new DispatchError(
+            'duplicate',
+            'a regular delivery worker is already running',
+          )
+        if (!currentFoundationPath && hasRunningFoundationDispatch(current))
+          throw new DispatchError(
+            'duplicate',
+            'foundation document authoring batch is active',
+          )
+        const next = currentFoundationPath
+          ? {
+              ...current,
+              foundationDraftState: recordFoundationDispatch(
+                current.foundationDraftState,
+                currentFoundationPath,
+                request.contract.authoringMode === 'calibration'
+                  ? 'calibrating'
+                  : 'drafting',
+                record,
+              ),
+            }
+          : { ...current, activeDispatch: record }
         await options.store.commit(
           {
-            ...current,
-            activeDispatch: record,
+            ...next,
             lastProgressAt: record.startedAt,
             currentMessage: undefined,
             currentItemId:
@@ -523,18 +672,37 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker returned a dispatch id that does not match the durable dispatch',
         )
-      const current = await options.store.load()
+      let current = await options.store.load()
+      if (foundationPath && current) {
+        const lease = await acquireDispatchLease(run.runId)
+        try {
+          const locked = await options.store.load(lease)
+          const location = locked
+            ? dispatchLocation(locked, record.dispatchId)
+            : undefined
+          if (locked && location?.path === foundationPath) {
+            current = await options.store.save(
+              withFoundationSession(locked, foundationPath, started.sessionId),
+              lease,
+            )
+          }
+        } finally {
+          await options.store.unlock(lease)
+        }
+      }
+      const currentLocation = current
+        ? dispatchLocation(current, record.dispatchId)
+        : undefined
       if (
         !current ||
         current.runId !== run.runId ||
         current.status !== 'running' ||
-        current.activeDispatch?.status !== 'running' ||
-        current.activeDispatch.dispatchId !== record.dispatchId
+        currentLocation?.record.status !== 'running'
       ) {
         releaseDispatch(record.dispatchId, {
           stopReason: 'delivery dispatch lost durable authority before submit',
         })
-        if (current?.activeDispatch) return current.activeDispatch
+        if (currentLocation) return currentLocation.record
         throw new DispatchError(
           'blocked',
           'delivery dispatch lost durable authority before submit',
@@ -566,12 +734,12 @@ export function createDeliveryDispatcher(options: {
       await options.workerPort.submit(dispatchId, buildWorkerPrompt(request))
     } catch (error) {
       const current = await options.store.load()
-      if (
-        current?.activeDispatch?.dispatchId === record.dispatchId &&
-        current.activeDispatch.status !== 'running'
-      ) {
+      const currentLocation = current
+        ? dispatchLocation(current, record.dispatchId)
+        : undefined
+      if (currentLocation && currentLocation.record.status !== 'running') {
         releaseDispatch(record.dispatchId)
-        return current.activeDispatch
+        return currentLocation.record
       }
       await markDispatchFailed(
         record.dispatchId,
@@ -599,11 +767,14 @@ export function createDeliveryDispatcher(options: {
     terminalValue: unknown,
   ): Promise<{ record: DispatchRecord; result?: WorkerTerminalResult }> {
     const run = await options.store.load()
-    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
-    if (run.status !== 'running' || run.activeDispatch.status !== 'running')
+    if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is no longer running')
-    const request = requests.get(dispatchId) ?? run.activeDispatch.request
+    if (location.record.status !== 'running')
+      throw new DispatchError('not_found', 'dispatch is not active')
+    const request = requests.get(dispatchId) ?? location.record.request
     let result: WorkerTerminalResult
     try {
       result = parseWorkerTerminalResult(terminalValue)
@@ -653,24 +824,44 @@ export function createDeliveryDispatcher(options: {
           ? error.message
           : 'invalid worker terminal result'
       const invalid = parseDispatchRecord({
-        ...run.activeDispatch,
+        ...location.record,
         status: 'invalid' as const,
         finishedAt: now(),
         failureReason: reason,
       })
+      const failedRun = location.path
+        ? {
+            ...run,
+            foundationDraftState: recordFoundationFailure(
+              run.foundationDraftState,
+              location.path,
+              reason,
+            ),
+            thinking: 'idle' as const,
+          }
+        : {
+            ...run,
+            status: 'failed' as const,
+            blockedReason: reason,
+            activeDispatch: invalid,
+            thinking: 'idle' as const,
+          }
+      const isolatedStatus = location.path
+        ? isolatedFoundationFailureStatus(failedRun)
+        : failedRun.status
       await options.store.commit(
         {
-          ...run,
-          status: 'failed',
-          blockedReason: reason,
-          activeDispatch: invalid,
-          thinking: 'idle',
+          ...failedRun,
+          status: isolatedStatus,
+          ...(isolatedStatus === 'needs_action'
+            ? { blockedReason: reason }
+            : {}),
         },
         {
           runId: run.runId,
           type: 'dispatch.invalid',
           phase: run.phase,
-          status: 'failed',
+          status: isolatedStatus,
           revision: run.revision,
           dispatchId,
           reason,
@@ -697,7 +888,7 @@ export function createDeliveryDispatcher(options: {
               : 'failed'
     const finishedAt = now()
     const completed = parseDispatchRecord({
-      ...run.activeDispatch,
+      ...location.record,
       status,
       ...(terminalEvidencePath(result)
         ? { terminalEvidencePath: terminalEvidencePath(result) }
@@ -705,27 +896,31 @@ export function createDeliveryDispatcher(options: {
       terminalResult: result as unknown as Record<string, unknown>,
       finishedAt,
     })
+    const updatedWithDispatch = location.path
+      ? withFoundationDispatch(run, location.path, completed)
+      : { ...run, activeDispatch: completed }
     const updated = {
-      ...run,
-      activeDispatch: completed,
-      thinking: 'idle' as const,
+      ...updatedWithDispatch,
+      thinking: hasRunningFoundationDispatch(updatedWithDispatch)
+        ? ('working' as const)
+        : ('idle' as const),
     }
     const performance = reviewerPerformance({
-      dispatch: run.activeDispatch,
+      dispatch: location.record,
       request,
       result,
       currentUsage: run.usage,
       finishedAt,
     })
     const resourcePerformance = resourceTaskPerformance({
-      dispatch: run.activeDispatch,
+      dispatch: location.record,
       request,
       result,
       currentUsage: run.usage,
       finishedAt,
     })
     const completedDocumentPerformance = await documentPerformance({
-      dispatch: run.activeDispatch,
+      dispatch: location.record,
       request,
       result,
       currentUsage: run.usage,
@@ -760,6 +955,7 @@ export function createDeliveryDispatcher(options: {
         )
       : dispatchId
     let terminalHandlerStarted = false
+    let terminalHandlerCompleted = false
     try {
       if (!creditSettled.has(key)) {
         await options.credits?.settle?.(key, result)
@@ -767,6 +963,7 @@ export function createDeliveryDispatcher(options: {
       }
       terminalHandlerStarted = true
       await options.onTerminal?.(completed, result, request)
+      terminalHandlerCompleted = true
     } catch (error) {
       const reason =
         error instanceof Error
@@ -779,27 +976,36 @@ export function createDeliveryDispatcher(options: {
         failureReason: reason,
         terminalResult: undefined,
       })
-      if (
-        current &&
-        current.runId === run.runId &&
-        (!current.activeDispatch ||
-          current.activeDispatch.dispatchId === dispatchId)
-      ) {
+      const currentLocation = current
+        ? dispatchLocation(current, dispatchId)
+        : undefined
+      if (current && current.runId === run.runId && currentLocation) {
         const handlerFailure = terminalHandlerStarted
-        const status = handlerFailure ? 'needs_action' : 'failed'
+        const status: DeliveryRun['status'] = handlerFailure
+          ? 'needs_action'
+          : 'failed'
+        const failedCurrent = currentLocation.path
+          ? {
+              ...current,
+              foundationDraftState: recordFoundationFailure(
+                current.foundationDraftState,
+                currentLocation.path,
+                reason,
+              ),
+              status: isolatedFoundationFailureStatus(current),
+            }
+          : { ...current, status, activeDispatch: failed }
         await options.store.commit(
           {
-            ...current,
-            status,
+            ...failedCurrent,
             blockedReason: reason,
-            activeDispatch: failed,
             thinking: 'idle',
           },
           {
             runId: current.runId,
             type: 'workflow.handler_failed',
             phase: current.phase,
-            status,
+            status: failedCurrent.status,
             revision: current.revision,
             dispatchId,
             reason,
@@ -811,7 +1017,11 @@ export function createDeliveryDispatcher(options: {
     } finally {
       // The durable run/event journal is the worker's retained evidence. The
       // private transport session is disposable once a terminal result exists.
-      releaseDispatch(dispatchId)
+      releaseDispatch(dispatchId, {
+        preserveSession:
+          terminalHandlerCompleted &&
+          request?.contract.authoringMode === 'parallel-draft',
+      })
     }
     return { record: completed, result }
   }
@@ -886,35 +1096,48 @@ export function createDeliveryDispatcher(options: {
     reason: string,
   ): Promise<DispatchRecord> {
     const run = await options.store.load()
-    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
-    if (run.activeDispatch.status !== 'running') return run.activeDispatch
+    if (location.record.status !== 'running') return location.record
     const failed = parseDispatchRecord({
-      ...run.activeDispatch,
+      ...location.record,
       status: 'failed',
       finishedAt: now(),
       failureReason: reason,
     })
-    const saved = await options.store.commit(
+    const failedRun = location.path
+      ? {
+          ...run,
+          foundationDraftState: recordFoundationFailure(
+            run.foundationDraftState,
+            location.path,
+            reason,
+          ),
+        }
+      : { ...run, activeDispatch: failed }
+    const status: DeliveryRun['status'] = location.path
+      ? isolatedFoundationFailureStatus(failedRun)
+      : 'failed'
+    await options.store.commit(
       {
-        ...run,
-        status: 'failed',
-        blockedReason: reason,
-        activeDispatch: failed,
-        thinking: 'idle',
+        ...failedRun,
+        status,
+        ...(status === 'running' ? {} : { blockedReason: reason }),
+        thinking: hasRunningFoundationDispatch(failedRun) ? 'working' : 'idle',
       },
       {
         runId: run.runId,
         type: 'dispatch.failed',
         phase: run.phase,
-        status: 'failed',
+        status,
         revision: run.revision,
         dispatchId,
         reason,
       },
     )
     releaseDispatch(dispatchId, { stopReason: reason })
-    return saved.activeDispatch ?? failed
+    return failed
   }
 
   async function markDispatchNeedsAction(
@@ -922,35 +1145,50 @@ export function createDeliveryDispatcher(options: {
     reason: string,
   ): Promise<DispatchRecord> {
     const run = await options.store.load()
-    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
-    if (run.activeDispatch.status !== 'running') return run.activeDispatch
+    if (location.record.status !== 'running') return location.record
     const interrupted = parseDispatchRecord({
-      ...run.activeDispatch,
+      ...location.record,
       status: 'interrupted',
       finishedAt: now(),
       failureReason: reason,
     })
-    const saved = await options.store.commit(
+    const interruptedRun = location.path
+      ? {
+          ...run,
+          foundationDraftState: recordFoundationFailure(
+            run.foundationDraftState,
+            location.path,
+            reason,
+          ),
+        }
+      : { ...run, activeDispatch: interrupted }
+    const status: DeliveryRun['status'] = location.path
+      ? isolatedFoundationFailureStatus(interruptedRun)
+      : 'needs_action'
+    await options.store.commit(
       {
-        ...run,
-        status: 'needs_action',
-        blockedReason: reason,
-        activeDispatch: interrupted,
-        thinking: 'idle',
+        ...interruptedRun,
+        status,
+        ...(status === 'running' ? {} : { blockedReason: reason }),
+        thinking: hasRunningFoundationDispatch(interruptedRun)
+          ? 'working'
+          : 'idle',
       },
       {
         runId: run.runId,
         type: 'dispatch.needs_action',
         phase: run.phase,
-        status: 'needs_action',
+        status,
         revision: run.revision,
         dispatchId,
         reason,
       },
     )
     releaseDispatch(dispatchId, { stopReason: reason })
-    return saved.activeDispatch ?? interrupted
+    return interrupted
   }
 
   async function stop(
@@ -958,20 +1196,23 @@ export function createDeliveryDispatcher(options: {
     reason: string,
   ): Promise<DispatchRecord> {
     const run = await options.store.load()
-    if (!run?.activeDispatch || run.activeDispatch.dispatchId !== dispatchId)
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
-    if (run.activeDispatch.status !== 'running') return run.activeDispatch
+    if (location.record.status !== 'running') return location.record
     const stopped = parseDispatchRecord({
-      ...run.activeDispatch,
+      ...location.record,
       status: 'interrupted',
       finishedAt: now(),
     })
+    const stoppedRun = location.path
+      ? withFoundationDispatch(run, location.path, stopped)
+      : { ...run, activeDispatch: stopped }
     await options.store.commit(
       {
-        ...run,
+        ...stoppedRun,
         status: 'stopped',
         blockedReason: reason,
-        activeDispatch: stopped,
         thinking: 'idle',
       },
       {
@@ -989,8 +1230,8 @@ export function createDeliveryDispatcher(options: {
 
   async function status(dispatchId: string): Promise<DispatchRecord> {
     const run = await options.store.load()
-    if (run?.activeDispatch?.dispatchId === dispatchId)
-      return run.activeDispatch
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (location) return location.record
     const record = [...byKey.values()].find(
       candidate => candidate.dispatchId === dispatchId,
     )

@@ -19,6 +19,7 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
+import { beginParallelFoundationAuthoring } from '../beegame/delivery-workflow/foundation-authoring-batch'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
@@ -46,6 +47,7 @@ import {
   type DeliveryRun,
   type DispatchWorkerType,
   type DocumentReviewCheck,
+  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
@@ -3086,6 +3088,187 @@ describe('delivery workflow recovery', () => {
     expect(running?.status).toBe('running')
     expect(running?.activeDispatch?.dispatchId).toBe(dispatch.dispatchId)
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
+  })
+
+  test('keeps one durable dispatch slot per parallel foundation document', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-parallel',
+      projectId: 'project-foundation-parallel',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+    })
+    const started: string[] = []
+    const closed: string[] = []
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          started.push(request.taskId!)
+          return {
+            sessionId: `session:${request.taskId}`,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async close(dispatchId) {
+          closed.push(dispatchId)
+        },
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const paths = CANONICAL_FOUNDATION_DOCUMENTS.slice(1)
+    const records = []
+    for (const path of paths) {
+      records.push(
+        await dispatcher.dispatch({
+          runId: initial.runId,
+          ownerId: initial.ownerId,
+          projectId: initial.projectId,
+          workspacePath: workspace,
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          taskId: path,
+          revision: initial.revision.document,
+          allowedPaths: [path],
+          contract: {
+            authoringMode: 'parallel-draft',
+            documentSet: 'foundation',
+            foundationDocumentPath: path,
+          },
+        }),
+      )
+    }
+
+    expect(started).toEqual(paths)
+    expect((await store.load())?.activeDispatch).toBeUndefined()
+    expect(
+      (await store.load())?.foundationDraftState.documents
+        ?.slice(1)
+        .map(document => document.dispatch?.status),
+    ).toEqual(paths.map(() => 'running'))
+
+    const duplicate = await dispatcher.dispatch({
+      ...records[0]!.request!,
+      dispatchId: undefined,
+    })
+    expect(duplicate.dispatchId).toBe(records[0]!.dispatchId)
+    await expect(
+      dispatcher.dispatch({
+        runId: initial.runId,
+        ownerId: initial.ownerId,
+        projectId: initial.projectId,
+        workspacePath: workspace,
+        workerType: 'question-answerer',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: initial.revision.document,
+        contract: {},
+      }),
+    ).rejects.toThrow('foundation document authoring batch is active')
+
+    for (const [index, record] of [...records].reverse().entries()) {
+      const path = record.taskId as (typeof paths)[number]
+      await dispatcher.completeDispatch(record.dispatchId, {
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: [path],
+        resolvedFindingIds: [],
+      })
+      if (index === 0)
+        await expect(
+          dispatcher.completeDispatch(record.dispatchId, {
+            workerType: 'document-author',
+            status: 'completed',
+            writtenPaths: [path],
+            resolvedFindingIds: [],
+          }),
+        ).rejects.toThrow('dispatch is not active')
+    }
+    expect(closed).toHaveLength(paths.length)
+  })
+
+  test('isolates one invalid foundation terminal while another author keeps running', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-isolation-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-isolation',
+      projectId: 'project-foundation-isolation',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+    })
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return {
+            sessionId: `session:${request.taskId}`,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const dispatchFor = (path: FoundationDocumentPath) =>
+      dispatcher.dispatch({
+        runId: initial.runId,
+        ownerId: initial.ownerId,
+        projectId: initial.projectId,
+        workspacePath: workspace,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: path,
+        revision: initial.revision.document,
+        allowedPaths: [path],
+        contract: {
+          authoringMode: 'parallel-draft',
+          documentSet: 'foundation',
+          foundationDocumentPath: path,
+        },
+      })
+    const failed = await dispatchFor('docs/LEVEL_SCENE_DESIGN.md')
+    const running = await dispatchFor('docs/BALANCE_DESIGN.md')
+
+    await expect(dispatcher.completeDispatch(failed.dispatchId, {})).rejects.toThrow(
+      'invalid worker terminal result',
+    )
+    const saved = await store.load()
+    expect(saved?.status).toBe('running')
+    expect(
+      saved?.foundationDraftState.documents?.find(
+        document => document.path === 'docs/LEVEL_SCENE_DESIGN.md',
+      ),
+    ).toMatchObject({
+      status: 'needs_action',
+      failureReason: expect.any(String),
+    })
+    expect(
+      saved?.foundationDraftState.documents?.find(
+        document => document.path === 'docs/BALANCE_DESIGN.md',
+      )?.dispatch?.dispatchId,
+    ).toBe(running.dispatchId)
   })
 
   test('claims the first dispatch durably across independent dispatcher instances', async () => {
