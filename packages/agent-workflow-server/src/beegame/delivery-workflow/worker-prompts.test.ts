@@ -98,6 +98,12 @@ describe('resource-content worker prompts', () => {
       'Do not restate the confirmed brief, upstream text or another section',
     )
     expect(prompt).toContain('exactly one # document title')
+    expect(prompt).toContain(
+      '"documentTitle":{"position":"first_non_blank_line","headingPrefix":"# "}',
+    )
+    expect(prompt).toContain(
+      'The first non-blank line must be the single # document title',
+    )
     expect(prompt).toContain('canonical structures in order')
     expect(prompt).toContain('## Executive Summary')
     expect(prompt).toContain('Do not author YAML front matter')

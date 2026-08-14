@@ -129,6 +129,10 @@ function formatContract(request: WorkerDispatchRequest): string {
           {
             ...authorDocumentContract,
             mechanicalMarkdownProtocol: {
+              documentTitle: {
+                position: 'first_non_blank_line',
+                headingPrefix: '# ',
+              },
               executiveSummary: {
                 marker: '<!-- beegame-executive-summary -->',
                 heading: '## Executive Summary',
@@ -462,7 +466,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : request.contract.authoringMode === 'initial'
               ? [
                   `This is one complete human development discipline assignment. Return exactly the complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
-                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
+                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title; emit the executive-summary marker only after that title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
                   DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
