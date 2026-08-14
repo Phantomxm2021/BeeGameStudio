@@ -12,7 +12,6 @@ import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
 import { getLanguageName } from '../../utils/cliHighlight.js'
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
 import { logOTelEvent } from '../../utils/telemetry/events.js'
-import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import type {
   PermissionApprovalSource,
   PermissionRejectionSource,
@@ -31,12 +30,7 @@ type PermissionDecisionArgs =
   | { decision: 'accept'; source: PermissionApprovalSource | 'config' }
   | { decision: 'reject'; source: PermissionRejectionSource | 'config' }
 
-const CODE_EDITING_TOOLS = [
-  'Edit',
-  MULTI_EDIT_TOOL_NAME,
-  'Write',
-  'NotebookEdit',
-]
+const CODE_EDITING_TOOLS = ['Edit', 'Write', 'NotebookEdit']
 
 function isCodeEditingTool(toolName: string): boolean {
   return CODE_EDITING_TOOLS.includes(toolName)

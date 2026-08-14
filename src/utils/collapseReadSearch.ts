@@ -4,7 +4,6 @@ import { findToolByName, type Tools } from '../Tool.js'
 import { extractBashCommentLabel } from '@bee-game-studio/builtin-tools/tools/BashTool/commentLabel.js'
 import { BASH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileEditTool/constants.js'
-import { MULTI_EDIT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/MultiEditTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { REPL_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/REPLTool/constants.js'
 import { getReplPrimitiveTools } from '@bee-game-studio/builtin-tools/tools/REPLTool/primitiveTools.js'
@@ -127,14 +126,10 @@ function isMemorySearch(toolInput: unknown): boolean {
 }
 
 /**
- * Check if a native file mutation targets a memory file and should be collapsed.
+ * Check if a Write or Edit tool use targets a memory file and should be collapsed.
  */
 function isMemoryWriteOrEdit(toolName: string, toolInput: unknown): boolean {
-  if (
-    toolName !== FILE_WRITE_TOOL_NAME &&
-    toolName !== FILE_EDIT_TOOL_NAME &&
-    toolName !== MULTI_EDIT_TOOL_NAME
-  ) {
+  if (toolName !== FILE_WRITE_TOOL_NAME && toolName !== FILE_EDIT_TOOL_NAME) {
     return false
   }
   const filePath = getFilePathFromToolInput(toolInput)
