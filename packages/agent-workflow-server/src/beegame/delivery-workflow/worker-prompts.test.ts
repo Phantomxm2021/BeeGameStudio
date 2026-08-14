@@ -62,6 +62,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Write one complete Markdown file')
     expect(prompt).toContain('native file tools')
     expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('verify its final bytes')
     expect(prompt).not.toContain('checkpoint')
     expect(prompt).not.toContain('beegame-draft-cursor')
     expect(prompt).not.toContain('targetNativeReplacementBytes')
@@ -609,6 +610,7 @@ describe('resource-content worker prompts', () => {
       'The native runtime owns the file-operation sequence',
     )
     expect(ownerPrompt).toContain('end the turn normally')
+    expect(ownerPrompt).not.toContain('verify its final bytes')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
   })
 
@@ -630,6 +632,7 @@ describe('resource-content worker prompts', () => {
     )
     expect(prompt).toContain('docs/acceptance/gameplay-checklist.md')
     expect(prompt).toContain('end the turn normally')
+    expect(prompt).not.toContain('verify its final bytes')
     expect(prompt).not.toContain('undefined')
     expect(prompt).not.toContain('only file mutation')
     expect(prompt).not.toContain('CommitCanonicalDocument')

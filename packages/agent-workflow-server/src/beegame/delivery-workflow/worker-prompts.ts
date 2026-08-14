@@ -560,10 +560,10 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         ? 'Call SubmitDocumentRepairPlan exactly once. Do not write files, return terminal JSON, or add completion prose.'
         : request.contract.authoringMode === 'initial' &&
             request.contract.documentSet === 'foundation'
-          ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. You own the native file-operation sequence.`
+          ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. You own the native file-operation sequence.`
           : request.contract.authoringMode === 'initial'
-            ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. The native runtime owns the file-operation sequence.`
-            : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete, verify its final bytes, and end the turn normally. The native runtime owns the file-operation sequence.`
+            ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
+            : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'document-reviewer':
       return 'Produce exactly one accepted SubmitDocumentReviewPacket containing the complete ordered checks array for contract.currentCheckIds. Use only stable referenceId values. If validation rejects it, correct the same complete packet; do not return prose or author workflow evidence.'
     case 'resource-planner':
