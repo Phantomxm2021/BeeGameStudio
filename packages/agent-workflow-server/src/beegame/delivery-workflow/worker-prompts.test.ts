@@ -568,6 +568,18 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('then the audit appendix in canonical order')
     expect(prompt).toContain('every production material in canonical order')
     expect(prompt).toContain('Define each authoritative fact once')
+    expect(prompt).toContain(
+      'Treat each section as the final decision record, not a derivation transcript',
+    )
+    expect(prompt).toContain(
+      'Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior',
+    )
+    expect(prompt).toContain(
+      'Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases',
+    )
+    expect(prompt).toContain(
+      'Production materials are canonical compact views of owned decisions and must not repeat section narrative',
+    )
     expect(prompt).not.toContain('No unresolved section decisions')
     expect(prompt).not.toContain(
       'Submit the structured result immediately after all assigned documents are mutated',

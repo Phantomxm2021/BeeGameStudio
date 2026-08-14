@@ -50,6 +50,13 @@ export type GameDocumentUpstreamProjection = {
   sectionIds: readonly string[]
 }
 
+export type GameDocumentOutputPolicy = Readonly<{
+  sectionStyle: 'final_owned_decisions'
+  productionMaterialStyle: 'canonical_compact_views'
+  workedExamples: 'one_per_distinct_boundary'
+  acceptanceScenarios: 'materially_distinct_only'
+}>
+
 export type GameDocumentContract = {
   path: FoundationDocumentPath
   discipline: string
@@ -58,7 +65,16 @@ export type GameDocumentContract = {
   productionMaterials: readonly GameDocumentProductionMaterialContract[]
   upstreamSections: readonly GameDocumentUpstreamProjection[]
   sections: readonly GameDocumentSectionContract[]
+  outputPolicy: GameDocumentOutputPolicy
 }
+
+export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
+  Object.freeze({
+    sectionStyle: 'final_owned_decisions',
+    productionMaterialStyle: 'canonical_compact_views',
+    workedExamples: 'one_per_distinct_boundary',
+    acceptanceScenarios: 'materially_distinct_only',
+  })
 
 const section = (
   sectionId: string,
@@ -193,6 +209,7 @@ const contract = (
     productionMaterials: Object.freeze([...PRODUCTION_MATERIALS[path]]),
     upstreamSections: Object.freeze([...UPSTREAM_SECTIONS[path]]),
     sections: Object.freeze([...sections]),
+    outputPolicy: GAME_DOCUMENT_OUTPUT_POLICY,
   })
 
 export const GAME_DOCUMENT_CONTRACTS = Object.freeze({

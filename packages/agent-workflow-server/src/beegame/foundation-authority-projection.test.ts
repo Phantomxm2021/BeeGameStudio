@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
@@ -56,7 +57,7 @@ describe('foundation authority projection', () => {
         ),
       )
       const serialized = canonicalFoundationAuthorityProjectionBytes(result)
-      expect(serialized).not.toContain('Owned source content for')
+      expect(serialized).toContain('Owned source content for')
       expect(serialized).not.toContain('Source materials are intentionally')
     }
   })
@@ -123,15 +124,28 @@ describe('foundation authority projection', () => {
       ).byteLength,
     )
     const serialized = canonicalFoundationAuthorityProjectionBytes(result)
-    expect(serialized).not.toContain('Owned source content for')
+    expect(serialized).toContain('Owned source content for')
     expect(serialized).not.toContain('Source materials are intentionally')
-    expect(result.sources[0]?.sections[0]).not.toHaveProperty('content')
-    expect(result.sources[0]?.sections[0]).not.toHaveProperty('contentLines')
-    expect(serialized).not.toContain('"content":')
-    expect(Buffer.byteLength(serialized)).toBeLessThan(8 * 1024)
-    expect(
-      Math.max(...serialized.split('\n').map(line => Buffer.byteLength(line))),
-    ).toBeLessThan(4096)
+    for (const source of result.sources) {
+      const sourceMarkdown = input.documents.get(source.path)!
+      for (const selected of source.sections) {
+        const exactSourceRange = sourceMarkdown
+          .split('\n')
+          .slice(
+            selected.startLine - 1,
+            selected.startLine - 1 + selected.lineCount,
+          )
+          .join('\n')
+        expect(selected.content).toBe(exactSourceRange)
+        expect(selected.digest).toBe(
+          createHash('sha256').update(exactSourceRange).digest('hex'),
+        )
+        expect(selected.content).toContain(
+          `<!-- beegame-section:${selected.sectionId} -->`,
+        )
+      }
+    }
+    expect(serialized).toContain('"content":')
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.sources.every(Object.isFrozen)).toBe(true)
     expect(result.sources.every(source => Object.isFrozen(source.sections))).toBe(true)
@@ -187,7 +201,7 @@ describe('foundation authority projection', () => {
     ).toThrow(/available upstream authority.*contract/i)
   })
 
-  test('indexes upstream authority for the active target section without proxying content', () => {
+  test('projects exact upstream authority for the active target section', () => {
     const targetPath = 'docs/TECHNICAL_DESIGN.md'
     const input = sources([
       'docs/GDD.md',
@@ -208,5 +222,12 @@ describe('foundation authority projection', () => {
     expect(projectedIds).toContain('docs/LEVEL_SCENE_DESIGN.md#scene_states')
     expect(projectedIds).toContain('docs/GDD.md#player_actions')
     expect(projectedIds).toContain('docs/BALANCE_DESIGN.md#formulas')
+    expect(
+      result.sources.every(source =>
+        source.sections.every(section =>
+          section.content.includes(`Owned source content for ${section.sectionId}.`),
+        ),
+      ),
+    ).toBe(true)
   })
 })

@@ -8,6 +8,8 @@ export type FoundationAuthoritySource = Readonly<{
     sectionId: string
     startLine: number
     lineCount: number
+    content: string
+    digest: string
   }>[]
   digest: string
 }>
@@ -89,6 +91,8 @@ export function projectFoundationAuthority(input: {
       sectionId: string
       startLine: number
       lineCount: number
+      content: string
+      digest: string
     }> = []
     for (const sectionId of source.sectionIds) {
       const section = sourceContract.sections.find(
@@ -104,11 +108,14 @@ export function projectFoundationAuthority(input: {
         .filter(line => line > markerLine)
         .sort((left, right) => left - right)[0]
       const endLine = nextBoundary ?? lines.length
+      const content = lines.slice(markerLine, endLine).join('\n')
       sections.push(
         Object.freeze({
           sectionId,
           startLine: markerLine + 1,
           lineCount: endLine - markerLine,
+          content,
+          digest: createHash('sha256').update(content).digest('hex'),
         }),
       )
     }

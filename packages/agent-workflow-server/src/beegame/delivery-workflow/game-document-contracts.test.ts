@@ -89,4 +89,15 @@ describe('complete game document contracts', () => {
       )?.format,
     ).toBe('evidence_register')
   })
+
+  test('makes every section and production material decision-dense by contract', () => {
+    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
+      expect(contract.outputPolicy).toEqual({
+        sectionStyle: 'final_owned_decisions',
+        productionMaterialStyle: 'canonical_compact_views',
+        workedExamples: 'one_per_distinct_boundary',
+        acceptanceScenarios: 'materially_distinct_only',
+      })
+    }
+  })
 })

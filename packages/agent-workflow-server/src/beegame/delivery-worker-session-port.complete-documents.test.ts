@@ -36,7 +36,7 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
-  test('persists one bounded upstream authority index without proxying content', async () => {
+  test('persists only the exact selected upstream authority as complete input', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -62,8 +62,8 @@ describe('delivery worker complete document boundary', () => {
       expect(block).not.toContain(
         'Write the complete assigned Markdown document directly',
       )
-      expect(block).toContain('navigation index')
-      expect(block).toContain('native reads remain your decision')
+      expect(block).toContain('complete selected upstream authority input')
+      expect(block).toContain('Do not reread whole upstream documents')
       expect(block).not.toContain('complete when the turn ends')
       expect(block).not.toContain('file-operation sequence')
       expect(block).not.toContain('completeDocumentContract')
@@ -90,6 +90,8 @@ describe('delivery worker complete document boundary', () => {
             sectionId?: unknown
             startLine?: unknown
             lineCount?: unknown
+            content?: unknown
+            digest?: unknown
           }>
         }) =>
           source.sections?.every(
@@ -98,13 +100,18 @@ describe('delivery worker complete document boundary', () => {
               Number.isInteger(section.startLine) &&
               Number(section.startLine) > 0 &&
               Number.isInteger(section.lineCount) &&
-              Number(section.lineCount) > 0,
+              Number(section.lineCount) > 0 &&
+              typeof section.content === 'string' &&
+              section.content.includes(
+                `Authority content for ${String(section.sectionId)}.`,
+              ) &&
+              typeof section.digest === 'string' &&
+              /^[a-f0-9]{64}$/.test(section.digest),
           ),
         ),
       ).toBe(true)
       expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
-      expect(projected.sources[0].sections[0]).not.toHaveProperty('content')
       expect(projected.sources[0].sections[0]).not.toHaveProperty('contentLines')
       expect(block).not.toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')

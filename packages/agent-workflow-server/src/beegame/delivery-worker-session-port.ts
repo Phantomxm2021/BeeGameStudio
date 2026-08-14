@@ -404,7 +404,7 @@ export async function buildDocumentAuthorAuthorityBlock(
   onProjection?.(projection)
   return [
     upstreamPaths.length
-      ? `BGS persisted a compact navigation index at ${projectionRelativePath}. It contains only approved source paths, exact line ranges and source digests, never proxied document content; native reads remain your decision.`
+      ? `BGS persisted the complete selected upstream authority input at ${projectionRelativePath}. It contains the exact contracted section bodies, source ranges and digests without summarization or rewriting. Use this projection as the upstream authority for the assignment. Do not reread whole upstream documents merely to rediscover the same selected authority; consult a source document only when a projection digest or integrity issue requires it.`
       : `This fact-owner document has no upstream document dependency. Use the confirmed brief and document contract directly.`,
     targetExists
       ? `An existing ${targetPath} is present. Inspect and replace or revise it as needed under current authority.`
@@ -1034,7 +1034,7 @@ async function initialFoundationDocumentTurnPrompt(
       ? `Calibrate the existing complete document at ${path} against only the newly available committed upstream authority. Preserve unrelated valid content and limit changes to affected authority.`
       : `Write the complete assigned document at ${path}.`,
     getGameDocumentContract(path).upstreamSections.length
-      ? `A compact navigation index is available at ${projectionPath}. It lists approved upstream ranges and digests without copying their bodies; native reads remain your decision.`
+      ? `The complete selected upstream authority input is available at ${projectionPath}. It contains the exact contracted section bodies, source ranges and digests without summarization or rewriting. Use it as the upstream authority for this assignment. Do not reread whole upstream documents merely to rediscover the same selected authority; consult a source document only for a projection digest or integrity issue.`
       : 'This document has no upstream document dependency.',
     targetExists
       ? `An existing ${path} is present. Inspect and replace or revise it as needed under current authority.`
