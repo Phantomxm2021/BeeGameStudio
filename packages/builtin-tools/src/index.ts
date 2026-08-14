@@ -17,6 +17,7 @@ export { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.j
 export { ExitPlanModeV2Tool } from './tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
 export { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
 export { FileEditTool } from './tools/FileEditTool/FileEditTool.js'
+export { MultiEditTool } from './tools/MultiEditTool/MultiEditTool.js'
 export { FileReadTool } from './tools/FileReadTool/FileReadTool.js'
 export { FileWriteTool } from './tools/FileWriteTool/FileWriteTool.js'
 export { GlobTool } from './tools/GlobTool/GlobTool.js'
