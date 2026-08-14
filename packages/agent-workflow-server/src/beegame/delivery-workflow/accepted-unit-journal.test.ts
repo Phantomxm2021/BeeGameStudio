@@ -798,6 +798,42 @@ describe('accepted workflow unit journal', () => {
     expect((await store.load())?.pendingEvents).toBeUndefined()
   })
 
+  test('binds a downstream accepted document to its completed checkpoint dispatch', () => {
+    const base = run()
+    const gdd = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const level = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const completed = completedDocumentDispatch(base, level)
+    const previous = {
+      ...base,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      foundationDraftState: {
+        completedPaths: [gdd],
+        documents: [
+          { path: gdd, status: 'committed' as const },
+          { path: level, status: 'drafting' as const, dispatch: completed },
+        ],
+      },
+    }
+    const next = {
+      ...previous,
+      foundationDraftState: {
+        completedPaths: [gdd, level],
+        documents: [
+          { path: gdd, status: 'committed' as const },
+          { path: level, status: 'committed' as const },
+        ],
+      },
+    }
+
+    expect(deriveAcceptedWorkflowUnits(previous, next)).toEqual([
+      expect.objectContaining({
+        unitId: `document:${level}`,
+        dispatchId: completed.dispatchId,
+      }),
+    ])
+  })
+
   test('freezes the completed stage card exactly once at a semantic stage boundary', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'stage-card-boundary-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')

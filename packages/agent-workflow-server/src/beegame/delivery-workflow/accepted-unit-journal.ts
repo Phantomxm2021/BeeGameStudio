@@ -66,7 +66,14 @@ function acceptedDispatchIdentity(input: {
   workerType: 'document-author' | 'resource-content-author'
   taskId: string
 }): { dispatchId: string; receiptRef: string } {
-  const dispatch = input.run.activeDispatch
+  const dispatch =
+    input.run.activeDispatch?.taskId === input.taskId
+      ? input.run.activeDispatch
+      : input.workerType === 'document-author'
+        ? input.run.foundationDraftState.documents?.find(
+            document => document.path === input.taskId,
+          )?.dispatch
+        : input.run.activeDispatch
   const request = dispatch?.request
   const expectedPhase =
     input.workerType === 'document-author'
