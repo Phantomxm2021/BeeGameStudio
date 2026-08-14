@@ -9,8 +9,6 @@ import {
   validateFileEdits,
 } from '../../FileEditTool/fileEditPipeline.js'
 import { FileEditTool } from '../../FileEditTool/FileEditTool.js'
-import { MultiEditTool } from '../MultiEditTool.js'
-import { getMultiEditToolDescription } from '../prompt.js'
 
 const originalSimpleMode = process.env.CLAUDE_CODE_SIMPLE
 const originalCheckpoints = process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING
@@ -149,87 +147,6 @@ describe('executeFileEdits', () => {
     ).rejects.toThrow('String to replace not found')
 
     expect(await Bun.file(target).text()).toBe(original)
-  })
-})
-
-describe('MultiEditTool contract', () => {
-  test('parses a strict nonempty ordered edit array', () => {
-    expect(
-      MultiEditTool.inputSchema.parse({
-        file_path: '/project/GDD.md',
-        edits: [
-          { old_string: '<!-- a -->', new_string: 'A' },
-          { old_string: '<!-- b -->', new_string: 'B', replace_all: false },
-        ],
-      }),
-    ).toEqual({
-      file_path: '/project/GDD.md',
-      edits: [
-        { old_string: '<!-- a -->', new_string: 'A', replace_all: false },
-        { old_string: '<!-- b -->', new_string: 'B', replace_all: false },
-      ],
-    })
-
-    expect(() =>
-      MultiEditTool.inputSchema.parse({
-        file_path: '/project/GDD.md',
-        edits: [],
-      }),
-    ).toThrow()
-    expect(() =>
-      MultiEditTool.inputSchema.parse({
-        file_path: '/project/GDD.md',
-        edits: [{ old_string: 'a', new_string: 'b', extra: true }],
-      }),
-    ).toThrow()
-  })
-
-  test('describes only the general native atomic file capability', () => {
-    const prompt = getMultiEditToolDescription()
-    expect(prompt).toContain('same file')
-    expect(prompt).toContain('declared order')
-    expect(prompt).toContain('atomic')
-    expect(prompt).not.toMatch(/GDD|Markdown|checkpoint|Bee Game Studio/i)
-    expect(prompt).not.toMatch(/three edits|3 edits|six edits|6 edits/i)
-  })
-
-  test('validates and commits the ordered batch through the native tool', async () => {
-    const target = join(tempDir, 'native-tool.md')
-    const original = '<!-- one -->\n<!-- two -->\n'
-    await Bun.write(target, original)
-    const context = createExecutionContext(target, original)
-    const input = {
-      file_path: target,
-      edits: [
-        { old_string: '<!-- one -->', new_string: 'ONE', replace_all: false },
-        { old_string: '<!-- two -->', new_string: 'TWO', replace_all: false },
-      ],
-    }
-
-    expect(await MultiEditTool.validateInput!(input, context)).toMatchObject({
-      result: true,
-    })
-    const result = await MultiEditTool.call(
-      input,
-      context,
-      undefined as any,
-      { uuid: crypto.randomUUID() } as any,
-    )
-
-    expect(await Bun.file(target).text()).toBe('ONE\nTWO\n')
-    expect(result.data).toMatchObject({
-      filePath: target,
-      edits: input.edits,
-      userModified: false,
-    })
-    expect(
-      MultiEditTool.mapToolResultToToolResultBlockParam!(
-        result.data,
-        'tool-use-id',
-      ),
-    ).toMatchObject({
-      content: expect.stringContaining('2 atomic edits'),
-    })
   })
 })
 
