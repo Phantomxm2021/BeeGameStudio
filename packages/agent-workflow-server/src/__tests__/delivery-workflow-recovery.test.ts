@@ -20,6 +20,7 @@ import {
 import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
+  MAX_PARALLEL_FOUNDATION_DRAFTS,
   beginParallelFoundationAuthoring,
   recordFoundationDispatch,
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
@@ -1745,7 +1746,10 @@ describe('delivery workflow recovery', () => {
     const resumed = await controller.store.load()
     expect(resumed?.foundationDraftState.completedPaths).toEqual([path])
     expect(started.map(candidate => candidate.taskId)).toEqual(
-      CANONICAL_FOUNDATION_DOCUMENTS.slice(1),
+      CANONICAL_FOUNDATION_DOCUMENTS.slice(
+        1,
+        MAX_PARALLEL_FOUNDATION_DRAFTS + 1,
+      ),
     )
     await expect(
       readAuthoredDocumentReceipt(workspace, request.dispatchId!),

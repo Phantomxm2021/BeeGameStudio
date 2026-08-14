@@ -10,6 +10,13 @@ import {
 
 const DIGEST = /^[a-f0-9]{64}$/
 
+// The selected provider stopped delivering SSE events when all seven native
+// authors started together during Chrome acceptance. Keep authoring parallel,
+// but leave connection headroom for the runtime and refill the pool whenever
+// one draft settles. This limits scheduling only; native sessions still own
+// their thinking and file-operation sequence.
+export const MAX_PARALLEL_FOUNDATION_DRAFTS = 4
+
 function checkpoint(
   state: FoundationDraftState,
   path: FoundationDocumentPath,
@@ -53,10 +60,17 @@ export function beginParallelFoundationAuthoring(
 export function readyDraftPaths(
   state: FoundationDraftState,
 ): FoundationDocumentPath[] {
-  return (state.documents ?? [])
+  const documents = state.documents ?? []
+  const availableSlots = Math.max(
+    0,
+    MAX_PARALLEL_FOUNDATION_DRAFTS -
+      documents.filter(document => document.status === 'drafting').length,
+  )
+  return documents
     .filter(document => document.path !== 'docs/GDD.md')
     .filter(document => document.status === 'pending')
     .map(document => document.path)
+    .slice(0, availableSlots)
 }
 
 export function readyCalibrationPaths(

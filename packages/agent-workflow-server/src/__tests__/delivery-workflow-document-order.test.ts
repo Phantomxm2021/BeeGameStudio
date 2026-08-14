@@ -22,6 +22,7 @@ import { repairPlanMatchesCanonicalGraph } from '../beegame/delivery-workflow/do
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import {
+  MAX_PARALLEL_FOUNDATION_DRAFTS,
   beginParallelFoundationAuthoring,
   recordFoundationDraft,
   recordFoundationDispatch,
@@ -406,7 +407,7 @@ describe('single-track document review workflow', () => {
     expect(request?.contract).not.toHaveProperty('existingDocumentPaths')
   })
 
-  test('dispatches all seven independent foundation drafts after GDD commits', async () => {
+  test('dispatches a bounded foundation draft pool after GDD commits', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-parallel-drafts-'))
     workspaces.push(workspacePath)
     const initial = createTestDeliveryRun({
@@ -434,7 +435,10 @@ describe('single-track document review workflow', () => {
     })
 
     expect(requests.map(request => request.taskId)).toEqual(
-      CANONICAL_FOUNDATION_DOCUMENTS.slice(1),
+      CANONICAL_FOUNDATION_DOCUMENTS.slice(
+        1,
+        MAX_PARALLEL_FOUNDATION_DRAFTS + 1,
+      ),
     )
     expect(
       requests.every(
@@ -714,76 +718,93 @@ describe('single-track document review workflow', () => {
     })
     expect(run.foundationDraftState.documents).toHaveLength(8)
 
-    const draftRequests: WorkerDispatchRequest[] = []
-    await startDocumentStage({
-      run,
-      workspacePath,
-      dispatcher: {
-        async dispatch(value) {
-          const request = {
-            ...value,
-            dispatchId: `draft-${draftRequests.length + 1}`,
-          }
-          draftRequests.push(request)
-          return request
-        },
-      },
-    })
-    expect(draftRequests).toHaveLength(7)
-    for (const request of draftRequests) {
-      const path = request.taskId as FoundationDocumentPath
-      const runningDispatch = {
-        dispatchId: request.dispatchId!,
-        workerType: 'document-author' as const,
-        phase: 'DOCUMENT_DRAFTING' as const,
-        taskId: path,
-        revision: request.revision,
-        status: 'running' as const,
-        request,
-        startedAt: new Date().toISOString(),
-      }
-      let state = recordFoundationDispatch(
-        run.foundationDraftState,
-        path,
-        'drafting',
-        runningDispatch,
+    const draftWaves: FoundationDocumentPath[][] = []
+    let draftSequence = 0
+    while (
+      run.foundationDraftState.documents?.some(
+        document => document.status === 'pending',
       )
-      state = {
-        ...state,
-        documents: state.documents?.map(document =>
-          document.path === path
-            ? { ...document, workerSessionId: `session:${path}` }
-            : document,
-        ),
-      }
-      await writeFile(
-        join(workspacePath, path),
-        renderTestCompleteGameDocument(
-          path,
-          completeFoundationSubmission(path),
-        ),
-      )
-      run = await completeDocumentDraft({
-        run: {
-          ...run,
-          foundationDraftState: state,
-          activeDispatch: {
-            ...runningDispatch,
-            status: 'completed',
-            finishedAt: new Date().toISOString(),
+    ) {
+      const draftRequests: WorkerDispatchRequest[] = []
+      await startDocumentStage({
+        run,
+        workspacePath,
+        dispatcher: {
+          async dispatch(value) {
+            const request = {
+              ...value,
+              dispatchId: `draft-${++draftSequence}`,
+            }
+            draftRequests.push(request)
+            return request
           },
         },
-        workspacePath,
-        terminal: {
-          workerType: 'document-author',
-          status: 'completed',
-          writtenPaths: [path],
-        },
       })
-      expect(
-        await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!),
-      ).toBeUndefined()
+      expect(draftRequests.length).toBeGreaterThan(0)
+      draftWaves.push(
+        draftRequests.map(request => request.taskId as FoundationDocumentPath),
+      )
+      for (const request of draftRequests) {
+        const path = request.taskId as FoundationDocumentPath
+        const runningDispatch = {
+          dispatchId: request.dispatchId!,
+          workerType: 'document-author' as const,
+          phase: 'DOCUMENT_DRAFTING' as const,
+          taskId: path,
+          revision: request.revision,
+          status: 'running' as const,
+          request,
+          startedAt: new Date().toISOString(),
+        }
+        let state = recordFoundationDispatch(
+          run.foundationDraftState,
+          path,
+          'drafting',
+          runningDispatch,
+        )
+        state = {
+          ...state,
+          documents: state.documents?.map(document =>
+            document.path === path
+              ? { ...document, workerSessionId: `session:${path}` }
+              : document,
+          ),
+        }
+        await writeFile(
+          join(workspacePath, path),
+          renderTestCompleteGameDocument(
+            path,
+            completeFoundationSubmission(path),
+          ),
+        )
+        run = await completeDocumentDraft({
+          run: {
+            ...run,
+            foundationDraftState: state,
+            activeDispatch: {
+              ...runningDispatch,
+              status: 'completed',
+              finishedAt: new Date().toISOString(),
+            },
+          },
+          workspacePath,
+          terminal: {
+            workerType: 'document-author',
+            status: 'completed',
+            writtenPaths: [path],
+          },
+        })
+        expect(
+          await readAuthoredDocumentReceipt(workspacePath, request.dispatchId!),
+        ).toBeUndefined()
+      }
     }
+    expect(draftWaves.map(wave => wave.length)).toEqual([
+      MAX_PARALLEL_FOUNDATION_DRAFTS,
+      CANONICAL_FOUNDATION_DOCUMENTS.length -
+        1 -
+        MAX_PARALLEL_FOUNDATION_DRAFTS,
+    ])
 
     const waves: FoundationDocumentPath[][] = []
     while (run.phase === 'DOCUMENT_DRAFTING') {

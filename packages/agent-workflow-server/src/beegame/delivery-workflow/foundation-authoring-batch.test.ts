@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  MAX_PARALLEL_FOUNDATION_DRAFTS,
   beginParallelFoundationAuthoring,
   readyCalibrationPaths,
   readyDraftPaths,
@@ -28,10 +29,44 @@ describe('parallel foundation authoring batch', () => {
     const state = beginParallelFoundationAuthoring(['docs/GDD.md'])
 
     expect(readyDraftPaths(state)).toEqual(
-      CANONICAL_FOUNDATION_DOCUMENTS.slice(1),
+      CANONICAL_FOUNDATION_DOCUMENTS.slice(
+        1,
+        MAX_PARALLEL_FOUNDATION_DRAFTS + 1,
+      ),
     )
     expect(readyCalibrationPaths(state)).toEqual([])
     expect(state.completedPaths).toEqual(['docs/GDD.md'])
+  })
+
+  test('refills a bounded draft pool as one author finishes', () => {
+    let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS.slice(
+      1,
+      MAX_PARALLEL_FOUNDATION_DRAFTS + 1,
+    ))
+      state = recordFoundationDispatch(state, path, 'drafting', {
+        dispatchId: `dispatch:${path}`,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: path,
+        revision: 'revision-1',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      })
+
+    expect(readyDraftPaths(state)).toEqual([])
+
+    state = recordFoundationDraft(
+      state,
+      CANONICAL_FOUNDATION_DOCUMENTS[1],
+      {
+        digest: 'a'.repeat(64),
+        workerSessionId: 'session:level',
+      },
+    )
+    expect(readyDraftPaths(state)).toEqual([
+      CANONICAL_FOUNDATION_DOCUMENTS[MAX_PARALLEL_FOUNDATION_DRAFTS + 1],
+    ])
   })
 
   test('releases calibration in canonical dependency waves', () => {
