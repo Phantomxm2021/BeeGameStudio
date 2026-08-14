@@ -35,6 +35,36 @@ function request(workspacePath: string, dispatchId: string) {
   } as const
 }
 
+function parallelRequest(
+  workspacePath: string,
+  dispatchId: string,
+  authoringMode: 'parallel-draft' | 'calibration',
+  resumeWorkerSessionId?: string,
+) {
+  return {
+    dispatchId,
+    runId: 'run',
+    ownerId: 'owner',
+    projectId: 'project',
+    workspacePath,
+    workerType: 'document-author',
+    phase: 'DOCUMENT_DRAFTING',
+    taskId: 'docs/LEVEL_SCENE_DESIGN.md',
+    revision: 'revision',
+    allowedPaths: ['docs/LEVEL_SCENE_DESIGN.md'],
+    contract: {
+      authoringMode,
+      documentSet: 'foundation',
+      foundationDocumentPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      upstreamDocumentPaths: ['docs/GDD.md'],
+      completeDocumentContract: getGameDocumentContract(
+        'docs/LEVEL_SCENE_DESIGN.md',
+      ),
+      ...(resumeWorkerSessionId ? { resumeWorkerSessionId } : {}),
+    },
+  } as const
+}
+
 function fakeSessions(input: {
   workspacePath: string
   body: string
@@ -105,6 +135,166 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
+  test('preserves and resumes one native session for draft calibration', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
+    const prompts: string[] = []
+    const sessionIds: string[] = []
+    const disposedSessionIds: string[] = []
+    const events: Array<Record<string, unknown>> = []
+    const states = new Map<
+      string,
+      { status: 'running' | 'stopped'; turnStatus: 'idle' | 'running' }
+    >()
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(
+        join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
+        '# Level and Scene Design\n\nDraft content.\n',
+      )
+      const nativeSessions = {
+        start: () => {
+          const id = `session-${sessionIds.length + 1}`
+          sessionIds.push(id)
+          states.set(id, { status: 'running', turnStatus: 'idle' })
+          return {
+            id,
+            status: 'running',
+            turnStatus: 'idle',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            cwd: workspacePath,
+          }
+        },
+        updateAuthToken: () => undefined,
+        get: (id: string) => {
+          const state = states.get(id)
+          return state
+            ? {
+                id,
+                ...state,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                cwd: workspacePath,
+              }
+            : undefined
+        },
+        events: () => events,
+        isWorkflowWorkerOpen: () => true,
+        waitForWorkflowWorkerIdle: async () => undefined,
+        sendWithDisplay: async (_sessionId: string, prompt: string) => {
+          prompts.push(prompt)
+          events.push({
+            type: 'result',
+            text: 'turn complete',
+            payload: {
+              type: 'result',
+              num_turns: 1,
+              usage: {
+                input_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+                output_tokens: 0,
+              },
+              permission_denials: [],
+            },
+          })
+        },
+        stop: (id: string) => {
+          const state = states.get(id)
+          if (state) state.status = 'stopped'
+        },
+        disposeWorkflowWorker: async (id: string) => {
+          disposedSessionIds.push(id)
+          states.delete(id)
+        },
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: nativeSessions as never,
+        userId: 'user',
+      })
+
+      const draft = parallelRequest(
+        workspacePath,
+        'dispatch-draft',
+        'parallel-draft',
+      )
+      const started = await port.start(draft as never)
+      await port.submit(draft.dispatchId, 'Author the independent draft.')
+      await port.waitForTerminal?.(draft.dispatchId)
+      await port.close?.(draft.dispatchId, { preserveSession: true })
+
+      const calibration = parallelRequest(
+        workspacePath,
+        'dispatch-calibration',
+        'calibration',
+        started.sessionId,
+      )
+      await port.start(calibration as never)
+      await port.submit(
+        calibration.dispatchId,
+        'Calibrate only against the newly committed upstream authority.',
+      )
+      await port.waitForTerminal?.(calibration.dispatchId)
+      await port.close?.(calibration.dispatchId)
+
+      expect(sessionIds).toHaveLength(1)
+      expect(disposedSessionIds).toEqual([started.sessionId])
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).toContain('Calibrate only')
+      expect(prompts[1]).not.toContain('rewrite the complete document')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('fails closed when a requested resume session is unavailable or busy', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-gate-'))
+    const states = new Map<
+      string,
+      { status: 'running' | 'stopped'; turnStatus: 'idle' | 'running' }
+    >([
+      ['stopped-session', { status: 'stopped', turnStatus: 'idle' }],
+      ['busy-session', { status: 'running', turnStatus: 'running' }],
+    ])
+    try {
+      const nativeSessions = {
+        start: () => {
+          throw new Error('resume must not create a replacement session')
+        },
+        get: (id: string) => {
+          const state = states.get(id)
+          return state
+            ? {
+                id,
+                ...state,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                cwd: workspacePath,
+              }
+            : undefined
+        },
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: nativeSessions as never,
+        userId: 'user',
+      })
+
+      for (const sessionId of ['unknown-session', 'stopped-session', 'busy-session'])
+        await expect(
+          port.start(
+            parallelRequest(
+              workspacePath,
+              `dispatch-${sessionId}`,
+              'calibration',
+              sessionId,
+            ) as never,
+          ),
+        ).rejects.toThrow(/resume session/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('creates a fresh native session for every document dispatch', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-sessions-'))
     const sessionIds: string[] = []

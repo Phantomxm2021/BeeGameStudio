@@ -465,6 +465,25 @@ export function createBeeGameDeliveryWorkerPort(input: {
   return {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
+      const requestedResumeSession = request.contract.resumeWorkerSessionId
+      if (
+        requestedResumeSession !== undefined &&
+        (typeof requestedResumeSession !== 'string' ||
+          !requestedResumeSession.trim())
+      )
+        throw new Error('native resume session identity is invalid')
+      const resumeWorkerSessionId =
+        typeof requestedResumeSession === 'string'
+          ? requestedResumeSession
+          : undefined
+      if (
+        resumeWorkerSessionId &&
+        (request.workerType !== 'document-author' ||
+          request.contract.authoringMode !== 'calibration')
+      )
+        throw new Error(
+          'native resume session is only valid for document calibration',
+        )
       const documentAuthorityBlock =
         request.workerType === 'document-author' &&
         request.contract.authoringMode === 'remediation'
@@ -476,7 +495,21 @@ export function createBeeGameDeliveryWorkerPort(input: {
         })
       }
       const authToken = await input.getAuthToken?.()
-      const session = input.sessions.start({
+      const resumedSession = resumeWorkerSessionId
+        ? input.sessions.get(resumeWorkerSessionId)
+        : undefined
+      if (
+        resumeWorkerSessionId &&
+        (!resumedSession ||
+          resumedSession.status !== 'running' ||
+          resumedSession.turnStatus !== 'idle' ||
+          resolve(resumedSession.cwd) !== resolve(request.workspacePath) ||
+          [...sessions.values()].includes(resumeWorkerSessionId))
+      )
+        throw new Error(
+          'native resume session is unavailable, stopped, busy, or belongs to another workspace',
+        )
+      const session = resumedSession ?? input.sessions.start({
         workspacePath: request.workspacePath,
         projectId: request.projectId,
         userId: input.userId,
@@ -525,9 +558,15 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : {}),
         ...(request.workerType === 'document-author' &&
         (request.contract.authoringMode === 'initial' ||
+          request.contract.authoringMode === 'parallel-draft' ||
           request.contract.authoringMode === 'repair-planning' ||
           request.contract.authoringMode === 'remediation')
-          ? { workflowDocumentAuthorMode: request.contract.authoringMode }
+          ? {
+              workflowDocumentAuthorMode:
+                request.contract.authoringMode === 'parallel-draft'
+                  ? ('initial' as const)
+                  : request.contract.authoringMode,
+            }
           : {}),
         ...(request.workerType === 'document-author' &&
         request.contract.authoringMode === 'repair-planning'
@@ -556,7 +595,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
-      eventOffsets.set(dispatchId, 0)
+      eventOffsets.set(
+        dispatchId,
+        resumeWorkerSessionId ? sessionEvents(session.id).length : 0,
+      )
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -686,24 +728,27 @@ export function createBeeGameDeliveryWorkerPort(input: {
         terminalEvidencePath: reason,
       })
     },
-    async close(dispatchId) {
+    async close(dispatchId, options) {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
         return
       }
       try {
-        const session = input.sessions.get(sessionId)
-        if (
-          session?.status === 'running' &&
-          typeof input.sessions.stop === 'function'
-        )
-          input.sessions.stop(sessionId)
-        await disposeWorkflowSession(sessionId)
+        if (!options?.preserveSession) {
+          const session = input.sessions.get(sessionId)
+          if (
+            session?.status === 'running' &&
+            typeof input.sessions.stop === 'function'
+          )
+            input.sessions.stop(sessionId)
+          await disposeWorkflowSession(sessionId)
+        }
       } finally {
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
+        documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
         eventOffsets.delete(dispatchId)
         documentValidationCorrections.delete(dispatchId)

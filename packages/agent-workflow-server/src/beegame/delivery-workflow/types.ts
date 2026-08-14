@@ -591,7 +591,10 @@ export type DeliveryWorkerPort = {
   ): Promise<{ sessionId: string; dispatchId: string }>
   submit(dispatchId: string, prompt: string): Promise<void>
   stop(dispatchId: string, reason: string): Promise<void>
-  close?(dispatchId: string): Promise<void>
+  close?(
+    dispatchId: string,
+    options?: { preserveSession?: boolean },
+  ): Promise<void>
   status(dispatchId: string): Promise<DispatchRecord>
   /** True while a write or Resource Library import is still in flight. */
   hasInFlightMutation?(dispatchId: string): Promise<boolean>
