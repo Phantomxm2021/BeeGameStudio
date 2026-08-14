@@ -7,6 +7,8 @@ describe('native large-file authoring guidance', () => {
 
     expect(description).toContain('Never send a complete long document')
     expect(description).toContain('small stable scaffold')
+    expect(description).toContain('3 to 6 Edit calls')
+    expect(description).toContain('Group related sections')
     expect(description).toContain('Edit tool')
     expect(description).not.toMatch(/8,?192|maximum \d+ characters|bounded append/i)
   })
