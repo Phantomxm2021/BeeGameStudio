@@ -84,9 +84,10 @@ export function shouldEnableFineGrainedToolStreaming(input: {
   explicitlyEnabled: boolean
 }): boolean {
   return (
-    input.provider === 'firstParty' &&
-    (input.explicitlyEnabled ||
-      (input.firstPartyBaseUrl && input.featureEnabled))
+    input.explicitlyEnabled ||
+    (input.provider === 'firstParty' &&
+      input.firstPartyBaseUrl &&
+      input.featureEnabled)
   )
 }
 
