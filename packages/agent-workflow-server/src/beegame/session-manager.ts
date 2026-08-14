@@ -4500,13 +4500,54 @@ export function mergeRuntimeEnv(
   runtime: RuntimeModelConfig | undefined,
   additionalEnv: Record<string, string>,
 ): Record<string, string> {
-  return {
+  const selectedEnvironment = {
     ...additionalEnv,
     ...(runtime?.env ?? {}),
-    ...(runtime?.modelType
-      ? { BEEGAME_MODEL_TYPE: runtime.modelType }
-      : {}),
   }
+  const modelType =
+    runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
+  return {
+    ...selectedEnvironment,
+    ...(modelType ? { BEEGAME_MODEL_TYPE: modelType } : {}),
+  }
+}
+
+function inferSelectedRuntimeModelType(
+  environment: Record<string, string>,
+): RuntimeModelConfig['modelType'] | undefined {
+  const candidates = new Set<RuntimeModelConfig['modelType']>()
+  if (
+    environment.ANTHROPIC_BASE_URL ||
+    environment.ANTHROPIC_AUTH_TOKEN ||
+    environment.ANTHROPIC_DEFAULT_SONNET_MODEL
+  ) {
+    candidates.add('anthropic')
+  }
+  if (
+    environment.OPENAI_BASE_URL ||
+    environment.OPENAI_API_KEY ||
+    environment.CLAUDE_CODE_USE_OPENAI
+  ) {
+    candidates.add('openai')
+  }
+  if (
+    environment.GEMINI_BASE_URL ||
+    environment.GEMINI_API_KEY ||
+    environment.CLAUDE_CODE_USE_GEMINI
+  ) {
+    candidates.add('gemini')
+  }
+  if (
+    environment.GROK_BASE_URL ||
+    environment.GROK_API_KEY ||
+    environment.CLAUDE_CODE_USE_GROK
+  ) {
+    candidates.add('grok')
+  }
+  if (candidates.size > 1) {
+    throw new Error('Selected model environment contains multiple providers')
+  }
+  return candidates.values().next().value
 }
 
 function buildRuntimeLaunchContract(
