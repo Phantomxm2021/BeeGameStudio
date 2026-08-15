@@ -83,6 +83,7 @@ import {
 } from './model-config-store'
 import { type BeeGameProjectMetadata } from './project-metadata-store'
 import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
+import { createReviewProjectCopy } from './beegame/review-project-copy'
 import { syncRuntimeSettingsToDedicatedRuntimeConfig } from './runtime-settings-store'
 import {
   discoverMcpServers,
@@ -2226,6 +2227,98 @@ export function createAgentWorkflowApp(
         )
       }
       return tracedRouteError(c, 'project.create', err)
+    }
+  })
+
+  app.post('/api/projects/:id/review-copy', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const readForbidden = requirePermission(user, 'project.read')
+    if (readForbidden) return c.json(readForbidden, 403)
+    const createForbidden = requirePermission(user, 'project.create')
+    if (createForbidden) return c.json(createForbidden, 403)
+
+    let destinationWorkspacePath: string | undefined
+    try {
+      const sourceProject = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!sourceProject?.root_path)
+        return c.json({ error: 'Project not found' }, 404)
+      const sourceWorkspacePath = await resolveSessionWorkspacePath(
+        sourceProject.root_path,
+        options.defaultWorkspacePath,
+      )
+      const snapshotPath = join(
+        sourceWorkspacePath,
+        '.beegame',
+        'workflow',
+        'run.json',
+      )
+      const snapshotMetadata = await stat(snapshotPath)
+      if (!snapshotMetadata.isFile() || snapshotMetadata.size > 2 * 1024 * 1024)
+        return c.json({ error: 'Confirmed brief snapshot is invalid' }, 400)
+      const rawSnapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as {
+        confirmedBriefContext?: unknown
+      }
+      const confirmedBriefContext =
+        typeof rawSnapshot.confirmedBriefContext === 'string'
+          ? rawSnapshot.confirmedBriefContext
+          : ''
+      if (!confirmedBriefContext.trim())
+        return c.json(
+          { error: 'Source project has no durable confirmed brief context' },
+          400,
+        )
+
+      const projectId = randomUUID()
+      const defaultWorkspacePath = resolve(
+        await getDefaultWorkspacePath({
+          defaultWorkspacePath: options.defaultWorkspacePath,
+        }),
+      )
+      destinationWorkspacePath = join(
+        getUserDashboardDataRoot(defaultWorkspacePath, user.id),
+        `review-copy--${projectId}`,
+      )
+      const copy = await createReviewProjectCopy({
+        sourceWorkspacePath,
+        destinationWorkspacePath,
+        ownerId: user.id,
+        projectId,
+        confirmedBriefContext,
+      })
+      const project = await dashboardRepository.upsertProject(c.req.raw, user, {
+        id: projectId,
+        name: `${sourceProject.name} Review Copy`,
+        root_path: copy.workspacePath,
+        created_at: Date.now(),
+        runtime_snapshot: {
+          phase_name: copy.run.phase,
+          updated_at: Date.now(),
+        },
+      })
+      return c.json(
+        { project, runId: copy.run.runId, phase: copy.run.phase },
+        201,
+      )
+    } catch (error) {
+      if (destinationWorkspacePath)
+        await rm(destinationWorkspacePath, { recursive: true, force: true }).catch(
+          () => undefined,
+        )
+      if (error instanceof ProjectQuotaExceededError)
+        return c.json(
+          {
+            error: error.message,
+            limit: error.limit,
+            projectCount: error.projectCount,
+          },
+          429,
+        )
+      return tracedRouteError(c, 'project.review-copy', error, 400)
     }
   })
 
