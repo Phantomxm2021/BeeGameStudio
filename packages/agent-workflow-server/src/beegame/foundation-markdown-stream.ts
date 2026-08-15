@@ -97,11 +97,12 @@ export async function createFoundationMarkdownStreamSink(
           fail('foundation Markdown stream text block index is missing')
           return
         }
-        if (state.textBlockStarted) {
-          fail('foundation Markdown stream contains multiple text blocks')
+        if (state.textBlockStarted && !state.textBlockClosed) {
+          fail('foundation Markdown stream contains overlapping text blocks')
           return
         }
         state.textBlockStarted = true
+        state.textBlockClosed = false
         state.textBlockIndex = index
         return
       }

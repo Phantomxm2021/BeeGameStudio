@@ -46,6 +46,79 @@ function successfulMessages(markdown: string): Record<string, unknown>[] {
 }
 
 describe('foundation Markdown stream sink', () => {
+  test('publishes ordered text blocks produced by a native max-token continuation', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-continuation-'))
+    try {
+      const markdown = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const split = Math.floor(markdown.length / 2)
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-continuation',
+        dispatchId: 'dispatch-continuation',
+        targetPath,
+        maxBytes: 512_000,
+        updatedAt: '2026-08-15T01:00:00.000+08:00',
+      })
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-1' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: markdown.slice(0, split) },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({
+          type: 'message_delta',
+          delta: { stop_reason: 'max_tokens' },
+        }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-2' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: markdown.slice(split) },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn' },
+        }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false },
+      ]) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toContain(
+        markdown,
+      )
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-continuation',
+          'dispatch-continuation',
+        ),
+        'utf8',
+      )).toBe(markdown)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('publishes ordered visible text once and keeps the body out of the receipt', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-stream-'))
     try {
