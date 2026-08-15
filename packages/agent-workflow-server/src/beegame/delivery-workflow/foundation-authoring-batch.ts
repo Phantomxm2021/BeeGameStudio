@@ -115,6 +115,31 @@ export function recordFoundationFailure(
   }))
 }
 
+export function recordFoundationHandlerFailure(
+  state: FoundationDraftState,
+  path: FoundationDocumentPath,
+  reason: string,
+  dispatch: DispatchRecord,
+): FoundationDraftState {
+  if (!reason.trim()) throw new Error('foundation failure reason is required')
+  const current = checkpoint(state, path)
+  if (current.status !== 'drafting')
+    throw new Error(`foundation document has no active dispatch: ${path}`)
+  if (
+    dispatch.taskId !== path ||
+    dispatch.workerType !== 'document-author' ||
+    dispatch.status !== 'completed' ||
+    !dispatch.terminalResult
+  )
+    throw new Error(`foundation handler failure is not replayable: ${path}`)
+  return replace(state, path, value => ({
+    ...value,
+    status: 'drafting',
+    dispatch: { ...dispatch },
+    failureReason: reason,
+  }))
+}
+
 export function recordFoundationCommit(
   state: FoundationDraftState,
   path: FoundationDocumentPath,

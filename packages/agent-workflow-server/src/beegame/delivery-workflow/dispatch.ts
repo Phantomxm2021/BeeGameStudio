@@ -26,6 +26,7 @@ import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
   recordFoundationDispatch,
   recordFoundationFailure,
+  recordFoundationHandlerFailure,
 } from './foundation-authoring-batch'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -964,11 +965,18 @@ export function createDeliveryDispatcher(options: {
         const failedCurrent = currentLocation.path
           ? {
               ...current,
-              foundationDraftState: recordFoundationFailure(
-                current.foundationDraftState,
-                currentLocation.path,
-                reason,
-              ),
+              foundationDraftState: handlerFailure
+                ? recordFoundationHandlerFailure(
+                    current.foundationDraftState,
+                    currentLocation.path,
+                    reason,
+                    completed,
+                  )
+                : recordFoundationFailure(
+                    current.foundationDraftState,
+                    currentLocation.path,
+                    reason,
+                  ),
               status: isolatedFoundationFailureStatus(current),
             }
           : { ...current, status, activeDispatch: failed }
