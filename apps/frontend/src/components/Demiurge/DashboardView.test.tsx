@@ -526,7 +526,7 @@ describe('DashboardView runtime loading', () => {
     expect(capturedRightSidebarProps?.canExportProject).toBe(false);
   });
 
-  it('keeps BeeGame progress detached from legacy workflow phase telemetry', async () => {
+  it('keeps BeeGame progress detached from legacy workflow phase telemetry without exposing status metadata', async () => {
     mockedPhaseInfo = {
       current_phase: 1,
       phase_name: 'brief',
@@ -539,12 +539,12 @@ describe('DashboardView runtime loading', () => {
 
     expect(capturedRightSidebarProps?.progress).toBeLessThan(20);
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('需要处理')).toBeInTheDocument();
+    expect(screen.queryByText('需要处理')).not.toBeInTheDocument();
     expect(screen.queryByText('构建方案')).not.toBeInTheDocument();
     expect(screen.queryByText('构建方案 · 0%')).not.toBeInTheDocument();
   });
 
-  it('passes BeeGame turn state labels to the live preview header', async () => {
+  it('keeps BeeGame turn state labels out of the project usage panel', async () => {
     mockedPhaseInfo = {
       current_phase: 3,
       phase_name: 'implementation',
@@ -571,7 +571,7 @@ describe('DashboardView runtime loading', () => {
     expect(screen.queryByTestId('top-bar')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('构建中')).toBeInTheDocument();
+    expect(screen.queryByText('构建中')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
   });
@@ -590,13 +590,13 @@ describe('DashboardView runtime loading', () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('Agent 状态')).toBeInTheDocument();
-    expect(screen.getByText('需要处理')).toBeInTheDocument();
+    expect(screen.queryByText('Agent 状态')).not.toBeInTheDocument();
+    expect(screen.queryByText('需要处理')).not.toBeInTheDocument();
     expect(screen.queryByText('未通过')).not.toBeInTheDocument();
     expect(screen.queryByText('就绪')).not.toBeInTheDocument();
   });
 
-  it('localizes BeeGame turn state labels in the live preview header', async () => {
+  it('does not mix localized turn state labels into project accounting', async () => {
     mockedPhaseInfo = {
       current_phase: 3,
       phase_name: 'implementation',
@@ -617,24 +617,24 @@ describe('DashboardView runtime loading', () => {
     await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('构建中')).toBeInTheDocument();
+    expect(screen.queryByText('构建中')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 0%')).not.toBeInTheDocument();
   });
 
-  it('shows project token accounting from the durable billing summary', async () => {
-    mockedTokenUsage = {
-      proj_1: { prompt_tokens: 8_000, completion_tokens: 1_999, total_tokens: 9_999 },
-    };
+  it('shows only live input, combined cached input, output, and billed credit', async () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
-      context: {
-        token_budget: {
-          prompt_tokens: 120,
-          completion_tokens: 30,
-          cache_read_tokens: 500,
-          cache_creation_tokens: 50,
-          total_tokens: 700,
+      workflow: {
+        runId: 'run-four-metrics',
+        status: 'running',
+        phase: 'DOCUMENT_DRAFTING',
+        usage: {
+          input_tokens: 1_234,
+          cache_read_tokens: 56,
+          cache_creation_tokens: 7,
+          completion_tokens: 89,
+          total_tokens: 1_386,
         },
       },
     };
@@ -656,15 +656,17 @@ describe('DashboardView runtime loading', () => {
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
     expect(within(hint).getByText('1,234')).toBeInTheDocument();
-    expect(within(hint).getByText('56')).toBeInTheDocument();
-    expect(within(hint).getByText('7')).toBeInTheDocument();
+    expect(within(hint).getByText('63')).toBeInTheDocument();
     expect(within(hint).getByText('89')).toBeInTheDocument();
-    expect(within(hint).getByText('1,386')).toBeInTheDocument();
-    expect(within(hint).getByText('2,000')).toBeInTheDocument();
-    expect(within(hint).getByText('新增输入 Tokens')).toBeInTheDocument();
-    expect(within(hint).getByText('缓存读取 Tokens')).toBeInTheDocument();
-    expect(within(hint).getByText('处理总量（含缓存）')).toBeInTheDocument();
-    expect(within(hint).getByText('计权消耗')).toBeInTheDocument();
+    expect(within(hint).getByText('2')).toBeInTheDocument();
+    expect(within(hint).getByText('输入')).toBeInTheDocument();
+    expect(within(hint).getByText('缓存输入')).toBeInTheDocument();
+    expect(within(hint).getByText('输出')).toBeInTheDocument();
+    expect(within(hint).getByText('Credit')).toBeInTheDocument();
+    expect(within(hint).queryByText('平台')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('Agent 状态')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('处理总量（含缓存）')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('计权消耗')).not.toBeInTheDocument();
   });
 
   it('shows the live durable workflow usage ahead of a trailing billing summary', async () => {
@@ -702,8 +704,9 @@ describe('DashboardView runtime loading', () => {
     expect(within(hint).getByText('4,530,369')).toBeInTheDocument();
     expect(within(hint).getByText('36,931,943')).toBeInTheDocument();
     expect(within(hint).getByText('569,805')).toBeInTheDocument();
-    expect(within(hint).getByText('42,032,117')).toBeInTheDocument();
-    expect(within(hint).getByText('35,097,910')).toBeInTheDocument();
+    expect(within(hint).getByText('895')).toBeInTheDocument();
+    expect(within(hint).queryByText('42,032,117')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('35,097,910')).not.toBeInTheDocument();
   });
 
   it('does not use the runtime transcript snapshot as project accounting authority', async () => {
@@ -724,10 +727,12 @@ describe('DashboardView runtime loading', () => {
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
     expect(within(hint).getByText('80,000')).toBeInTheDocument();
-    expect(within(hint).getByText('25,000')).toBeInTheDocument();
-    expect(within(hint).getByText('5,000')).toBeInTheDocument();
+    expect(within(hint).getByText('30,000')).toBeInTheDocument();
     expect(within(hint).getByText('15,000')).toBeInTheDocument();
-    expect(within(hint).getByText('125,000')).toBeInTheDocument();
+    expect(within(hint).getByText('12')).toBeInTheDocument();
+    expect(within(hint).queryByText('25,000')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('5,000')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('125,000')).not.toBeInTheDocument();
     expect(within(hint).queryByText('254,542')).not.toBeInTheDocument();
     expect(within(hint).queryByText('6,424,792')).not.toBeInTheDocument();
   });
@@ -776,15 +781,19 @@ describe('DashboardView runtime loading', () => {
 
     expect(screen.getByTestId('beegame-project-hint')).toHaveClass('absolute', 'right-0', 'top-[calc(100%+0.75rem)]');
     expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('left-5');
-    expect(screen.getByText('平台')).toBeInTheDocument();
-    expect(screen.getByText('Web')).toBeInTheDocument();
-    expect(screen.getByText('新增输入 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('缓存读取 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('缓存创建 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
-    expect(screen.getByText('处理总量（含缓存）')).toBeInTheDocument();
-    expect(screen.getByText('计权消耗')).toBeInTheDocument();
-    expect(screen.getByText('Agent 状态')).toBeInTheDocument();
+    expect(screen.getByText('输入')).toBeInTheDocument();
+    expect(screen.getByText('缓存输入')).toBeInTheDocument();
+    expect(screen.getByText('输出')).toBeInTheDocument();
+    expect(screen.getByText('Credit')).toBeInTheDocument();
+    expect(screen.queryByText('平台')).not.toBeInTheDocument();
+    expect(screen.queryByText('Web')).not.toBeInTheDocument();
+    expect(screen.queryByText('新增输入 Tokens')).not.toBeInTheDocument();
+    expect(screen.queryByText('缓存读取 Tokens')).not.toBeInTheDocument();
+    expect(screen.queryByText('缓存创建 Tokens')).not.toBeInTheDocument();
+    expect(screen.queryByText('输出 Tokens')).not.toBeInTheDocument();
+    expect(screen.queryByText('处理总量（含缓存）')).not.toBeInTheDocument();
+    expect(screen.queryByText('计权消耗')).not.toBeInTheDocument();
+    expect(screen.queryByText('Agent 状态')).not.toBeInTheDocument();
     expect(screen.queryByText('部署就绪')).not.toBeInTheDocument();
     expect(screen.queryByText('文档审查')).not.toBeInTheDocument();
     expect(screen.queryByText('实现审计')).not.toBeInTheDocument();
@@ -802,7 +811,7 @@ describe('DashboardView runtime loading', () => {
     expect(syncStatus.querySelector('svg')).not.toBeNull();
   });
 
-  it('uses deployment permission and project target without a frontend delivery state machine', async () => {
+  it('uses deployment permission without exposing project target in accounting', async () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       project_target: { platform: 'native', runtime: 'custom-engine' },
@@ -812,7 +821,7 @@ describe('DashboardView runtime loading', () => {
 
     expect(screen.getByRole('button', { name: '发布游戏' })).toBeEnabled();
     await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-    expect(screen.getByText('custom-engine')).toBeInTheDocument();
+    expect(screen.queryByText('custom-engine')).not.toBeInTheDocument();
     expect(screen.queryByText('Web')).not.toBeInTheDocument();
   });
 

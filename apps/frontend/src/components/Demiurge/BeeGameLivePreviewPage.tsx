@@ -147,14 +147,12 @@ export function BeeGameLivePreviewPage({
   lang,
   projectName,
   status,
-  phaseLabel,
   credits,
   accountCreditBalance,
   isSyncing,
   isInteractionLocked = false,
   isWorkspaceBusy = false,
   buildReport,
-  projectTarget,
   tokenUsage,
   deployments = [],
   previewRefreshNonce = 0,
@@ -365,39 +363,22 @@ export function BeeGameLivePreviewPage({
                   className="absolute -top-1.5 right-2 h-3 w-3 rotate-45 border-l border-t border-zinc-800 bg-zinc-950"
                   aria-hidden="true"
                 />
-                {projectTarget ? <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} /> : null}
-                {credits ? (
-                  <ProjectHintRow label={labels.credits} value={formatCreditAmount(credits.consumedCredits)} />
-                ) : null}
-                <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                 <ProjectHintRow
-                  label={labels.freshInputTokens || 'Fresh Input'}
-                  value={formatTokenCount(projectTokenCounts.freshInput)}
+                  label={labels.freshInputTokens || 'Input'}
+                  value={formatTokenCount(projectTokenCounts.input)}
                 />
                 <ProjectHintRow
-                  label={labels.cacheReadTokens || 'Cache Read'}
-                  value={formatTokenCount(projectTokenCounts.cacheRead)}
+                  label={labels.cacheReadTokens || 'Cached Input'}
+                  value={formatTokenCount(projectTokenCounts.cachedInput)}
                 />
-                {projectTokenCounts.cacheCreation > 0 ? (
-                  <ProjectHintRow
-                    label={labels.cacheCreationTokens || 'Cache Creation'}
-                    value={formatTokenCount(projectTokenCounts.cacheCreation)}
-                  />
-                ) : null}
                 <ProjectHintRow
-                  label={labels.outputTokens || 'Output Tokens'}
+                  label={labels.outputTokens || 'Output'}
                   value={formatTokenCount(projectTokenCounts.output)}
                 />
                 <ProjectHintRow
-                  label={labels.rawProcessedTokens || 'Raw Processed'}
-                  value={formatTokenCount(projectTokenCounts.rawProcessed)}
+                  label={labels.credits || 'Credit'}
+                  value={formatCreditAmount(credits?.consumedCredits ?? 0)}
                 />
-                {credits?.weightedTokens !== undefined ? (
-                  <ProjectHintRow
-                    label={labels.weightedConsumption || 'Weighted Consumption'}
-                    value={formatTokenCount(credits.weightedTokens)}
-                  />
-                ) : null}
               </div>
             ) : null}
           </div>
@@ -883,21 +864,20 @@ function formatCreditAmount(value: number): string {
 }
 
 function normalizeProjectTokenUsage(usage?: TokenUsage | null): {
-  freshInput: number;
-  cacheRead: number;
-  cacheCreation: number;
+  input: number;
+  cachedInput: number;
   output: number;
-  rawProcessed: number;
 } {
-  const freshInput = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) || 0;
+  const input = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) || 0;
   const combinedCached = Number(usage?.cached_input_tokens ?? 0) || 0;
   const explicitCacheRead = Number(usage?.cache_read_tokens ?? 0) || 0;
   const cacheCreation = Number(usage?.cache_creation_tokens ?? 0) || 0;
-  const cacheRead = explicitCacheRead || Math.max(0, combinedCached - cacheCreation);
+  const cachedInput =
+    explicitCacheRead > 0 || cacheCreation > 0
+      ? explicitCacheRead + cacheCreation
+      : combinedCached;
   const output = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0) || 0;
-  const rawProcessed =
-    Number(usage?.total_tokens ?? 0) || freshInput + cacheRead + cacheCreation + output;
-  return { freshInput, cacheRead, cacheCreation, output, rawProcessed };
+  return { input, cachedInput, output };
 }
 
 function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
