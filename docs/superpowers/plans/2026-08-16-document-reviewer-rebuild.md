@@ -637,34 +637,27 @@ git commit -m "feat: display project-local review reports"
 
 ---
 
-### Task 9: Prove Complete Removal and Full Workflow Behavior
+### Task 9: Prove Runtime Removal and Full Workflow Behavior
 
 **Files:**
-- Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/document-review-removal.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/native-workflow-result-tools.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts`
 - Modify: affected backend integration and idea-to-complete tests.
 - Delete: `docs/superpowers/plans/2026-08-05-comprehensive-review-packet-consolidation.md`
 - Delete: `docs/superpowers/plans/2026-08-08-workflow-empty-terminal-recovery.md`
 
 **Interfaces:**
 - Consumes: final replacement system.
-- Produces: a static no-legacy gate and full automated workflow evidence.
+- Produces: runtime rejection of retired contracts and full automated workflow evidence.
 
-- [ ] **Step 1: Add a static removal test**
+- [ ] **Step 1: Add runtime legacy-rejection tests**
 
-Scan production source and fail if any retired symbol remains:
-
-```ts
-const retired = [
-  'SubmitDocumentReviewPacket',
-  'DOCUMENT_REVIEW_CHECK_PACKETS',
-  'GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA',
-  'referenceIndex',
-  'acceptedSemanticResult',
-  'reviewMode: \'closure\'',
-]
-for (const token of retired)
-  expect(productionText).not.toContain(token)
-```
+Assert the production terminal parser rejects an old packet terminal, the
+native tool catalog has no document-review submission tool, and persisted old
+cycle/check/finding state is migrated to a new pending report run rather than
+executed. These tests exercise public runtime boundaries; they do not grep
+source text.
 
 - [ ] **Step 2: Add full simulated workflow tests**
 
@@ -682,6 +675,15 @@ Run: `bun run typecheck`
 Run from `apps/frontend`: `bun run test:run`
 
 Run: `git diff --check`
+
+Run the following as an explicit removal audit, not as a test:
+
+```bash
+rg -n "SubmitDocumentReviewPacket|DOCUMENT_REVIEW_CHECK_PACKETS|GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA|acceptedSemanticResult" packages/agent-workflow-server/src apps/frontend/src
+```
+
+Expected: no production-code matches. Historical comments in retained evidence
+documents are outside this command's scope.
 
 - [ ] **Step 4: Delete obsolete Reviewer documents and commit**
 
