@@ -3056,6 +3056,122 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.usage?.total_tokens).toBe(70)
   })
 
+  test('persists usage for a running nested Reviewer role dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-usage-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-usage',
+      projectId: 'project-review-usage',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      documentRevision: 'a'.repeat(64),
+    })
+    const reviewRun = createDocumentReviewRun({
+      scope: 'foundation',
+      revision: initial.revision.document,
+    })
+    reviewRun.reports[0].status = 'running'
+    reviewRun.reports[0].dispatch = {
+      dispatchId: 'dispatch-review-role',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: initial.revision.document,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    }
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentReviewState: {
+        ...initial.documentReviewState,
+        activeRun: reviewRun,
+      },
+    })
+
+    const persisted = await store.addWorkflowUsage(
+      initial.runId,
+      {
+        input_tokens: 10,
+        cache_read_tokens: 20,
+        cache_creation_tokens: 0,
+        completion_tokens: 5,
+        total_tokens: 35,
+      },
+      'dispatch-review-role',
+    )
+
+    expect(persisted?.usage?.total_tokens).toBe(35)
+  })
+
+  test('retry restores an accepted final review after downstream routing failed', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-route-retry-'))
+    const ownerId = 'owner-review-route-retry'
+    const store = createRunStore(workspace, ownerId)
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-route-retry',
+      projectId: 'project-review-route-retry',
+      ownerId,
+    })
+    const documentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const review = createDocumentReviewRun({
+      scope: 'foundation',
+      revision: documentRevision,
+      attempt: 1,
+    })
+    for (const report of review.reports.filter(value => value.role !== 'final')) {
+      const bytes = `# ${report.role} review\n`
+      await mkdir(join(workspace, report.path, '..'), { recursive: true })
+      await writeFile(join(workspace, report.path), bytes)
+      report.status = 'completed'
+      report.digest = createHash('sha256').update(bytes).digest('hex')
+    }
+    const final = review.reports.find(report => report.role === 'final')!
+    const finalBytes = '# Accepted final review\n'
+    const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
+    await mkdir(join(workspace, final.path, '..'), { recursive: true })
+    await writeFile(join(workspace, final.path), finalBytes)
+    final.status = 'failed'
+    final.digest = finalDigest
+    final.failureReason = 'downstream routing failed'
+    review.status = 'failed'
+    review.finalReportPath = final.path
+    review.finalReportDigest = finalDigest
+    review.verdict = 'NEEDS_REVISION'
+    review.affectedPaths = ['docs/GDD.md']
+    review.failureReason = 'downstream routing failed'
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'needs_action',
+      revision: { ...initial.revision, document: documentRevision },
+      blockedReason: 'downstream routing failed',
+      documentReviewState: {
+        ...initial.documentReviewState,
+        activeRun: review,
+      },
+    })
+
+    const retried = await retryRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(retried.status).toBe('running')
+    expect(retried.documentReviewState.activeRun).toMatchObject({
+      status: 'completed',
+      failureReason: undefined,
+    })
+    expect(
+      retried.documentReviewState.activeRun?.reports.find(
+        report => report.role === 'final',
+      ),
+    ).toMatchObject({ status: 'completed', failureReason: undefined })
+  })
+
   test('does not let a stale snapshot move cumulative usage below the journal high water mark', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-high-water-'))
     const store = createRunStore(workspace, 'owner-1')

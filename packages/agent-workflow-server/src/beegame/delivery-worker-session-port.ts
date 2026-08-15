@@ -193,7 +193,11 @@ export async function buildDocumentAuthorAuthorityBlock(
   if (request.workerType !== 'document-author') return ''
   if (request.contract.authoringMode === 'remediation') {
     const targetPath = request.contract.foundationDocumentPath
-    const reviewReportPath = request.contract.reviewReportPath
+    const reviewReportPath = (
+      request.contract.remediation as
+        | { reviewReportPath?: unknown }
+        | undefined
+    )?.reviewReportPath
     if (
       typeof targetPath !== 'string' ||
       !CANONICAL_FOUNDATION_DOCUMENTS.includes(targetPath as never) ||

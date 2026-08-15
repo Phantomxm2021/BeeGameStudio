@@ -384,7 +384,22 @@ export function createDeliveryWorkflowController(input: {
       if (acceptedRun.status === 'completed')
         next = routeCompletedDocumentReview({ run: next, review: acceptedRun })
       next = await persist(next, 'document.review.report.accepted')
-      await resumeUnlocked(next)
+      try {
+        await resumeUnlocked(next)
+      } catch (error) {
+        const latest = await store.load()
+        if (latest?.runId === next.runId && latest.status === 'needs_action')
+          return
+        const reason = error instanceof Error ? error.message : String(error)
+        await persist(
+          {
+            ...next,
+            status: 'needs_action',
+            blockedReason: reason,
+          },
+          'document.review.routing.failed',
+        )
+      }
       return
     }
     if (

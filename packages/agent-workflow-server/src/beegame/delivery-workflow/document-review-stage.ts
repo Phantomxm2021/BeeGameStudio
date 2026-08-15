@@ -309,14 +309,26 @@ export async function recoverDocumentReviewRun(input: {
       reports.push({ role: report.role, path: report.path, status: 'pending' })
       continue
     }
-    if (report.status !== 'completed' || !report.digest) {
+    const isAcceptedFinal =
+      report.role === 'final' &&
+      report.path === input.run.finalReportPath &&
+      report.digest === input.run.finalReportDigest &&
+      Boolean(input.run.verdict && input.run.affectedPaths)
+    if (
+      (report.status !== 'completed' && !isAcceptedFinal) ||
+      !report.digest
+    ) {
       reports.push({ ...report })
       continue
     }
     try {
       const bytes = await readFile(resolve(input.workspacePath, report.path))
       if (createHash('sha256').update(bytes).digest('hex') === report.digest) {
-        reports.push({ ...report })
+        reports.push({
+          ...report,
+          status: 'completed',
+          failureReason: undefined,
+        })
         continue
       }
     } catch {
@@ -335,6 +347,8 @@ export async function recoverDocumentReviewRun(input: {
     ...input.run,
     status: final?.status === 'completed' ? 'completed' : 'running',
     reports: recovered,
+    failureReason:
+      final?.status === 'completed' ? undefined : input.run.failureReason,
     ...(final?.status === 'completed'
       ? {}
       : {

@@ -1103,6 +1103,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           ? run.activeDispatch
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
+            )?.dispatch ??
+            run.documentReviewState.activeRun?.reports.find(
+              report => report.dispatch?.dispatchId === dispatchId,
             )?.dispatch
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'

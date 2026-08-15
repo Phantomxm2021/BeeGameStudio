@@ -36,6 +36,7 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
+import { recoverDocumentReviewRun } from './document-review-stage'
 
 export {
   inspectWorkflowSnapshot,
@@ -819,6 +820,43 @@ function reviewRetryIsLocked(run: DeliveryRun): boolean {
   )
 }
 
+async function restoreAcceptedReviewAfterRoutingFailure(input: {
+  run: DeliveryRun
+  workspacePath?: string
+}): Promise<DeliveryRun | undefined> {
+  const review = input.run.documentReviewState.activeRun
+  if (
+    input.run.phase !== 'DOCUMENT_DRAFTING' ||
+    !input.workspacePath ||
+    review?.status !== 'failed' ||
+    !review.finalReportPath ||
+    !review.finalReportDigest ||
+    !review.verdict ||
+    !review.affectedPaths
+  )
+    return undefined
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  if (documentRevision !== review.revision) return undefined
+  const recovered = await recoverDocumentReviewRun({
+    run: review,
+    workspacePath: input.workspacePath,
+    currentRevision: documentRevision,
+  })
+  if (recovered.status !== 'completed') return undefined
+  return {
+    ...input.run,
+    activeDispatch: undefined,
+    blockedReason: undefined,
+    documentReviewState: {
+      ...input.run.documentReviewState,
+      activeRun: recovered,
+    },
+  }
+}
+
 async function unlockReviewForChangedRevision(input: {
   run: DeliveryRun
   workspacePath?: string
@@ -1010,22 +1048,30 @@ export async function retryRun(input: {
         })
     if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
       return acquired.run
+    const restoredAcceptedReview =
+      !restoredHandoff && !changedReview
+        ? await restoreAcceptedReviewAfterRoutingFailure({
+            run: acquired.run,
+            workspacePath: input.workspacePath,
+          })
+        : undefined
     const resourceRefresh =
       !restoredHandoff &&
       !changedReview &&
+      !restoredAcceptedReview &&
       input.workspacePath &&
       shouldRefreshProvisionalResourceInventory(
         acquired.run,
         auditAssetContract(input.workspacePath),
       )
-    const retryBaseRun = resourceRefresh
+    const retryBaseRun = restoredAcceptedReview ?? (resourceRefresh
       ? {
           ...acquired.run,
           resourceProductionState: {
             currentTask: 'RESOURCE_INVENTORY' as const,
           },
         }
-      : acquired.run
+      : acquired.run)
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =
