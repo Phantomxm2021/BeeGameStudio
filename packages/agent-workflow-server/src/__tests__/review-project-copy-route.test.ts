@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createAgentWorkflowApp } from '../app'
+import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
@@ -30,12 +31,26 @@ async function fixture() {
     }),
     'utf8',
   )
+  let workflowWorkerStarts = 0
+  const runner: BeeGameSessionRunner = {
+    start: async input => {
+      if (input.workflowWorker) workflowWorkerStarts += 1
+      return {
+        submit: async ({ signal }) =>
+          new Promise<void>(resolve => {
+            signal.addEventListener('abort', () => resolve(), { once: true })
+          }),
+        stop: () => undefined,
+      }
+    },
+  }
   const app = createAgentWorkflowApp({
     currentUser: { id: ownerId, role: 'owner' },
     dashboardDataRoot: join(root, 'dashboard'),
     defaultWorkspacePath: projectsRoot,
     modelConfigStore: false,
     skillsConfig: false,
+    sessionRunner: runner,
   })
   const created = await app.request('/api/projects', {
     method: 'POST',
@@ -48,7 +63,25 @@ async function fixture() {
     }),
   })
   expect(created.status).toBe(200)
-  return { app, ownerId, projectId, sourceWorkspace }
+  const modelConfig = await app.request('/api/model-configs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Review copy model',
+      provider: 'openai-compatible',
+      apiKey: 'test-api-key',
+      models: { balanced: 'test-model' },
+      isDefault: true,
+    }),
+  })
+  expect(modelConfig.status).toBe(200)
+  return {
+    app,
+    ownerId,
+    projectId,
+    sourceWorkspace,
+    workflowWorkerStarts: () => workflowWorkerStarts,
+  }
 }
 
 afterEach(async () => {
@@ -57,7 +90,13 @@ afterEach(async () => {
 
 describe('POST /api/projects/:projectId/review-copy', () => {
   test('creates an owned current-schema review project from old snapshot bytes', async () => {
-    const { app, ownerId, projectId, sourceWorkspace } = await fixture()
+    const {
+      app,
+      ownerId,
+      projectId,
+      sourceWorkspace,
+      workflowWorkerStarts,
+    } = await fixture()
 
     const response = await app.request(`/api/projects/${projectId}/review-copy`, {
       method: 'POST',
@@ -75,12 +114,21 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     expect(payload.project.id).not.toBe(projectId)
     expect(payload.project.root_path).not.toBe(sourceWorkspace)
     expect(payload.phase).toBe('DOCUMENT_REVIEW')
+    expect(workflowWorkerStarts()).toBe(3)
     const copiedStore = createRunStore(payload.project.root_path, ownerId)
     expect(await copiedStore.load()).toMatchObject({
       runId: payload.runId,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       confirmedBriefContext: 'The durable confirmed source brief.',
+      documentReviewState: {
+        activeRun: {
+          status: 'running',
+          reports: expect.arrayContaining([
+            expect.objectContaining({ status: 'running' }),
+          ]),
+        },
+      },
     })
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       expect(await readFile(join(payload.project.root_path, path))).toEqual(

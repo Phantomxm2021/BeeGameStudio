@@ -2238,6 +2238,7 @@ export function createAgentWorkflowApp(
     if (createForbidden) return c.json(createForbidden, 403)
 
     let destinationWorkspacePath: string | undefined
+    let registeredProjectId: string | undefined
     try {
       const sourceProject = await getOwnedProjectMetadata(
         c.req.raw,
@@ -2274,6 +2275,16 @@ export function createAgentWorkflowApp(
         )
 
       const projectId = randomUUID()
+      const modelConfigId = await resolveDefaultModelConfigId(
+        c.req.raw,
+        user,
+        undefined,
+        (request, requestUser, id) =>
+          dashboardRepository.modelConfigExists(request, requestUser, id),
+        (request, requestUser) =>
+          dashboardRepository.listModelConfigs(request, requestUser),
+      )
+      if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
       const defaultWorkspacePath = resolve(
         await getDefaultWorkspacePath({
           defaultWorkspacePath: options.defaultWorkspacePath,
@@ -2297,14 +2308,28 @@ export function createAgentWorkflowApp(
         created_at: Date.now(),
         runtime_snapshot: {
           phase_name: copy.run.phase,
+          ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
           updated_at: Date.now(),
         },
       })
+      registeredProjectId = projectId
+      const workflow = await startBeeGameDeliveryWorkflow({
+        request: c.req.raw,
+        user,
+        projectId,
+        workspacePath: copy.workspacePath,
+        briefContext: confirmedBriefContext,
+        ...(modelConfigId ? { modelConfigId } : {}),
+      })
       return c.json(
-        { project, runId: copy.run.runId, phase: copy.run.phase },
+        { project, runId: workflow.runId, phase: workflow.phase },
         201,
       )
     } catch (error) {
+      if (registeredProjectId)
+        await dashboardRepository
+          .deleteProject(c.req.raw, user, registeredProjectId)
+          .catch(() => undefined)
       if (destinationWorkspacePath)
         await rm(destinationWorkspacePath, { recursive: true, force: true }).catch(
           () => undefined,
