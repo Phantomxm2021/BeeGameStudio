@@ -197,10 +197,15 @@ export function createDeliveryWorkflowController(input: {
     const foundationCheckpoint = run?.foundationDraftState.documents?.find(
       document => document.dispatch?.dispatchId === record.dispatchId,
     )
+    const reviewCheckpoint =
+      run?.documentReviewState.activeRun?.reports.find(
+        report => report.dispatch?.dispatchId === record.dispatchId,
+      )
     if (
       !run ||
       (run.activeDispatch?.dispatchId !== record.dispatchId &&
-        !foundationCheckpoint)
+        !foundationCheckpoint &&
+        !reviewCheckpoint)
     )
       return
     let next: DeliveryRun = foundationCheckpoint
