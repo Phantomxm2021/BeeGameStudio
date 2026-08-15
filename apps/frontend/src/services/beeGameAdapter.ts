@@ -365,6 +365,17 @@ export const beeGameAdapter = {
     return { ok: true }
   },
 
+  async createReviewCopy(projectId: string): Promise<{
+    project: Project
+    runId: string
+    phase: string
+  }> {
+    return postJson(
+      `/api/projects/${encodeURIComponent(projectId)}/review-copy`,
+      {},
+    )
+  },
+
   async sendMessage(data: {
     content: string
     project_id: string

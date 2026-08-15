@@ -539,6 +539,9 @@ export const api = {
    */
   deleteProject: (projectId: string) => beeGameAdapter.deleteProject(projectId),
 
+  createReviewCopy: (projectId: string) =>
+    beeGameAdapter.createReviewCopy(projectId),
+
   getCurrentUser: (): Promise<BeeGameCurrentUser> => getBeeGameCurrentUser(),
 
   /**

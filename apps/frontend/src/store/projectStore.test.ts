@@ -7,6 +7,7 @@ const {
   getProjectRuntimeState,
   getProjects,
   openProject,
+  createReviewCopy,
   chatActions,
   updateTokenUsage,
 } = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const {
   getProjectRuntimeState: vi.fn(),
   getProjects: vi.fn(),
   openProject: vi.fn(),
+  createReviewCopy: vi.fn(),
   chatActions: {
     clearMessages: vi.fn(),
     addMessage: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('../services/api', async () => {
       getProjectRuntimeState,
       getProjects,
       openProject,
+      createReviewCopy,
     },
   }
 })
@@ -66,6 +69,7 @@ describe('projectStore pending review normalization', () => {
     }))
     openProject.mockReset()
     openProject.mockResolvedValue({})
+    createReviewCopy.mockReset()
     chatActions.clearMessages.mockReset()
     chatActions.addMessage.mockReset()
     updateTokenUsage.mockReset()
@@ -92,6 +96,25 @@ describe('projectStore pending review normalization', () => {
       showToastSuccess: null,
     })
     useProjectStore.persist.clearStorage()
+  })
+
+  it('inserts a created review copy once and returns it', async () => {
+    const source = { id: 'source', name: 'Source', created_at: 1 }
+    const copy = { id: 'copy', name: 'Source Review Copy', created_at: 2 }
+    useProjectStore.setState({ projects: [source] })
+    createReviewCopy.mockResolvedValue({
+      project: copy,
+      runId: 'run-copy',
+      phase: 'DOCUMENT_REVIEW',
+    })
+
+    await expect(
+      useProjectStore.getState().createReviewCopy('source'),
+    ).resolves.toEqual(copy)
+    expect(useProjectStore.getState().projects).toEqual([copy, source])
+
+    await useProjectStore.getState().createReviewCopy('source')
+    expect(useProjectStore.getState().projects).toEqual([copy, source])
   })
 
   it('persists the last active project id while a cloud session is active for validated restoration', () => {

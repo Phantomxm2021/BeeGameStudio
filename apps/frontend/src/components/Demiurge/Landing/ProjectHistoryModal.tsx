@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Clock, CopyPlus, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
@@ -35,11 +35,12 @@ const MENU_MARGIN = 12;
 const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
-  const { projects, isLoading, deleteProject } = useProjectStore();
+  const { projects, isLoading, deleteProject, createReviewCopy } = useProjectStore();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [creatingReviewCopyId, setCreatingReviewCopyId] = useState<string | null>(null);
   const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
   const t = useCommonText(lang);
   const text = useBeeGameText(lang);
@@ -70,6 +71,23 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
       return;
     }
     setConfirmingDeleteId(id);
+  };
+
+  const handleCreateReviewCopy = async (event: React.MouseEvent, id: string) => {
+    event.stopPropagation();
+    if (creatingReviewCopyId || deletingProjectId) return;
+    setCreatingReviewCopyId(id);
+    closeMenu();
+    try {
+      const project = await createReviewCopy(id);
+      onSelectProject(project.id);
+      onClose();
+    } catch {
+      // The source row remains available; the shared API error toast retains
+      // the backend's original failure reason.
+    } finally {
+      setCreatingReviewCopyId(current => (current === id ? null : current));
+    }
   };
 
   const toggleMenu = (event: React.MouseEvent<HTMLButtonElement>, id: string) => {
@@ -192,23 +210,25 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               const displayName = getProjectDisplayName(project, text.untitledProject);
               const creditSummary = creditSummaries[project.id];
               const isDeleting = deletingProjectId === project.id;
+              const isCreatingReviewCopy = creatingReviewCopyId === project.id;
+              const isPending = isDeleting || isCreatingReviewCopy;
               return (
-                <div key={project.id} className="relative" aria-busy={isDeleting || undefined}>
+                <div key={project.id} className="relative" aria-busy={isPending || undefined}>
                   <div
                     role="button"
                     tabIndex={0}
                     onClick={() => {
-                      if (!isDeleting) onSelectProject(project.id);
+                      if (!isPending) onSelectProject(project.id);
                     }}
                     onKeyDown={event => {
-                      if (isDeleting) return;
+                      if (isPending) return;
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         onSelectProject(project.id);
                       }
                     }}
                     className={`flex w-full items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-white/35 ${
-                      isDeleting
+                      isPending
                         ? 'cursor-wait opacity-70'
                         : 'cursor-pointer hover:translate-x-1 hover:border-white/20 hover:bg-white/[0.075]'
                     }`}
@@ -231,10 +251,10 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         )}
                       </span>
                     </div>
-                    {isDeleting ? (
+                    {isPending ? (
                       <span
                         role="status"
-                        aria-label={text.deletingProject}
+                        aria-label={isDeleting ? text.deletingProject : text.creatingReviewCopy}
                         className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-300"
                       >
                         <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -264,6 +284,14 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               onPointerDown={event => event.stopPropagation()}
               className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
             >
+              <button
+                type="button"
+                onClick={event => handleCreateReviewCopy(event, activeProject.id)}
+                className="type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <CopyPlus className="h-3.5 w-3.5" />
+                {text.createReviewCopy}
+              </button>
               <button
                 type="button"
                 onClick={event => handleDelete(event, activeProject.id)}

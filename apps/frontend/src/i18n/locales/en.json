@@ -800,6 +800,8 @@
     "deleteProject": "Delete Project",
     "confirmDelete": "Confirm Delete",
     "deletingProject": "Deleting project",
+    "createReviewCopy": "Create Review Copy",
+    "creatingReviewCopy": "Creating review copy",
     "artifactDownloadFailed": "Download failed. Please try again later.",
     "artifactPreviewFailed": "Failed to load artifact content. Please try downloading instead.",
     "paused": "Paused",

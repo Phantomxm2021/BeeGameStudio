@@ -800,6 +800,8 @@
     "deleteProject": "删除项目",
     "confirmDelete": "确认删除",
     "deletingProject": "正在删除项目",
+    "createReviewCopy": "创建审查副本",
+    "creatingReviewCopy": "正在创建审查副本",
     "artifactDownloadFailed": "下载失败，请稍后重试。",
     "artifactPreviewFailed": "无法读取交付物内容，请尝试下载。",
     "paused": "已暂停",

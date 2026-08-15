@@ -3068,6 +3068,31 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
   });
 
+  it('creates review copies through the project-scoped endpoint', async () => {
+    const payload = {
+      project: {
+        id: 'copy-1',
+        name: 'Source Review Copy',
+        root_path: '/tmp/review-copy',
+        created_at: 2,
+      },
+      runId: 'review-run',
+      phase: 'DOCUMENT_REVIEW',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/projects/source-1/review-copy' && init?.method === 'POST'
+        ? jsonResponse(payload, 201)
+        : jsonResponse({ error: 'not found' }, 404),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.createReviewCopy('source-1')).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/source-1/review-copy',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('treats an already-missing BeeGame session workspace as deleted locally', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
