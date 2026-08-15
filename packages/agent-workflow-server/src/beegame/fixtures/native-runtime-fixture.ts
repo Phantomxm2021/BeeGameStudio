@@ -45,6 +45,15 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
+    if (content === 'visible-markdown-without-stop-reason') {
+      process.stdout.write(
+        `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '# Visible Markdown' }], stop_reason: null } })}\n`,
+      )
+      process.stdout.write(
+        `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '# Visible Markdown', stop_reason: '', session_id: '550e8400-e29b-41d4-a716-446655440000', usage: { input_tokens: 0, output_tokens: 0 } })}\n`,
+      )
+      continue
+    }
     if (content === 'permission') {
       process.stdout.write(
         `${JSON.stringify({

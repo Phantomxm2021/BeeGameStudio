@@ -246,10 +246,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     }
     if (
       this.sessionInput.workflowMarkdownStreamContract &&
-      isIncompleteMarkdownStreamResult(message)
+      isMissingVisibleMarkdownResult(message)
     ) {
       const error = new Error(
-        'Bee Game Studio native model response ended without visible Markdown or a valid stop reason',
+        'Bee Game Studio native model response ended without visible Markdown',
       )
       this.observability.finishTurn({ outcome: 'error', error })
       await this.observability.flush()
@@ -432,13 +432,10 @@ function isErrorResult(message: Record<string, unknown>): boolean {
     (typeof message.subtype === 'string' && message.subtype !== 'success')
 }
 
-function isIncompleteMarkdownStreamResult(
+function isMissingVisibleMarkdownResult(
   message: Record<string, unknown>,
 ): boolean {
-  return (
-    stringField(message, 'stop_reason') !== 'end_turn' ||
-    stringField(message, 'result').trim().length === 0
-  )
+  return stringField(message, 'result').trim().length === 0
 }
 
 function nativeErrorDetail(message: Record<string, unknown>): string {

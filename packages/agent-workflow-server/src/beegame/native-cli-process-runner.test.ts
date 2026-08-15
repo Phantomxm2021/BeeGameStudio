@@ -279,8 +279,21 @@ describe('native CLI process runner', () => {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow(
-      'native model response ended without visible Markdown or a valid stop reason',
+      'native model response ended without visible Markdown',
     )
+    runtime.dispose?.()
+  })
+
+  test('accepts visible Markdown when provider stop metadata is missing', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    await expect(
+      runtime.submit({
+        prompt: 'visible-markdown-without-stop-reason',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).resolves.toBeUndefined()
     runtime.dispose?.()
   })
 
