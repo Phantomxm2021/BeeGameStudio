@@ -835,6 +835,109 @@ describe('accepted workflow unit journal', () => {
     ])
   })
 
+  test('journals an out-of-order parallel document when its checkpoint commits', () => {
+    const base = run()
+    const gdd = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const level = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const art = 'docs/ART_DIRECTION.md' as const
+    const completed = completedDocumentDispatch(base, art, 'parallel-draft')
+    const previous = {
+      ...base,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      foundationDraftState: {
+        completedPaths: [gdd, level],
+        documents: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          status:
+            path === gdd || path === level
+              ? ('committed' as const)
+              : path === art
+                ? ('drafting' as const)
+                : ('pending' as const),
+          ...(path === art ? { dispatch: completed } : {}),
+        })),
+      },
+    }
+    const next = {
+      ...previous,
+      foundationDraftState: {
+        ...previous.foundationDraftState,
+        documents: previous.foundationDraftState.documents.map(document =>
+          document.path === art
+            ? { path: art, status: 'committed' as const }
+            : document,
+        ),
+      },
+    }
+
+    expect(deriveAcceptedWorkflowUnits(previous, next)).toEqual([
+      expect.objectContaining({
+        unitId: `document:${art}`,
+        dispatchId: completed.dispatchId,
+        predecessorUnitIds: [`document:${level}`],
+      }),
+    ])
+  })
+
+  test('journals only the checkpoint that closes a committed-prefix gap', () => {
+    const base = run()
+    const gdd = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const level = CANONICAL_FOUNDATION_DOCUMENTS[1]
+    const balance = CANONICAL_FOUNDATION_DOCUMENTS[2]
+    const technical = CANONICAL_FOUNDATION_DOCUMENTS[3]
+    const alreadyCommitted = new Set<FoundationDocumentPath>([
+      gdd,
+      level,
+      balance,
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/AUDIO_DESIGN.md',
+    ])
+    const completed = completedDocumentDispatch(
+      base,
+      technical,
+      'parallel-draft',
+    )
+    const previous = {
+      ...base,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      foundationDraftState: {
+        completedPaths: [gdd, level, balance],
+        documents: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          status:
+            path === technical
+              ? ('drafting' as const)
+              : alreadyCommitted.has(path)
+                ? ('committed' as const)
+                : ('pending' as const),
+          ...(path === technical ? { dispatch: completed } : {}),
+        })),
+      },
+    }
+    const next = {
+      ...previous,
+      foundationDraftState: {
+        completedPaths: CANONICAL_FOUNDATION_DOCUMENTS.slice(0, 7),
+        documents: previous.foundationDraftState.documents.map(document =>
+          document.path === technical
+            ? { path: technical, status: 'committed' as const }
+            : document,
+        ),
+      },
+    }
+
+    expect(deriveAcceptedWorkflowUnits(previous, next)).toEqual([
+      expect.objectContaining({
+        unitId: `document:${technical}`,
+        dispatchId: completed.dispatchId,
+        predecessorUnitIds: [`document:${balance}`],
+      }),
+    ])
+  })
+
   test('freezes the completed stage card exactly once at a semantic stage boundary', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'stage-card-boundary-'))
     const store = createRunStore(workspace, 'accepted-unit-owner')

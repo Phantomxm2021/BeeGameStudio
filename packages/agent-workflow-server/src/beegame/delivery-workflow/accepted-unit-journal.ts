@@ -36,11 +36,9 @@ function unit(
   return { eventSchemaVersion: 1, ...value }
 }
 
-function priorDocumentUnitId(
-  paths: readonly string[],
-  index: number,
-): string[] {
-  return index > 0 ? [`document:${paths[index - 1]}`] : []
+function lastAcceptedDocumentUnitId(paths: readonly string[]): string[] {
+  const path = paths.at(-1)
+  return path ? [`document:${path}`] : []
 }
 
 function reviewUnitId(id: DocumentReviewCheckId): string {
@@ -315,16 +313,24 @@ export function deriveAcceptedWorkflowUnits(
   next: DeliveryRun,
 ): AcceptedWorkflowUnit[] {
   const units: AcceptedWorkflowUnit[] = []
-  const previousDocuments = previous.foundationDraftState.completedPaths
-  const acceptedDocuments = next.foundationDraftState.completedPaths.slice(
-    previousDocuments.length,
-  )
+  const previousCheckpoints = previous.foundationDraftState.documents
+  const nextCheckpoints = next.foundationDraftState.documents
+  const acceptedDocuments = previousCheckpoints && nextCheckpoints
+    ? nextCheckpoints
+        .filter(document => document.status === 'committed')
+        .filter(document =>
+          previousCheckpoints.find(candidate => candidate.path === document.path)
+            ?.status !== 'committed',
+        )
+        .map(document => document.path)
+    : next.foundationDraftState.completedPaths.slice(
+        previous.foundationDraftState.completedPaths.length,
+      )
   if (acceptedDocuments.length > 1)
     throw new Error(
       'accepted document transition contains more than one dispatch-backed unit',
     )
   for (const path of acceptedDocuments) {
-    const index = next.foundationDraftState.completedPaths.indexOf(path)
     const identity = acceptedDispatchIdentity({
       run: previous,
       workerType: 'document-author',
@@ -335,9 +341,8 @@ export function deriveAcceptedWorkflowUnits(
         unitId: `document:${path}`,
         kind: 'document',
         phase: next.phase,
-        predecessorUnitIds: priorDocumentUnitId(
-          next.foundationDraftState.completedPaths,
-          index,
+        predecessorUnitIds: lastAcceptedDocumentUnitId(
+          previous.foundationDraftState.completedPaths,
         ),
         inputRevision: next.revision.document,
         dependencyDigests: {},
