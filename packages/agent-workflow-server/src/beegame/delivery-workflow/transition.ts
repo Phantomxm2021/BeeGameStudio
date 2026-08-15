@@ -1,5 +1,6 @@
 import { parseDeliveryRun } from './schema'
 import { openDocumentReviewFindings } from './document-review-findings'
+import { retryFoundationFailures } from './foundation-authoring-batch'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -567,6 +568,14 @@ export function transitionDeliveryRun(
       next = {
         ...run,
         status: 'running',
+        ...(run.phase === 'DOCUMENT_DRAFTING' &&
+        run.foundationDraftState.documents
+          ? {
+              foundationDraftState: retryFoundationFailures(
+                run.foundationDraftState,
+              ),
+            }
+          : {}),
         ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
           ? {
               activeTaskId: undefined,

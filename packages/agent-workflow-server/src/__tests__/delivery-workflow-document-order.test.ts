@@ -24,8 +24,11 @@ import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/c
 import {
   MAX_PARALLEL_FOUNDATION_DRAFTS,
   beginParallelFoundationAuthoring,
+  recordFoundationCommit,
   recordFoundationDispatch,
+  recordFoundationFailure,
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
+import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import {
   computeDocumentRevision,
@@ -154,6 +157,60 @@ afterEach(async () => {
 })
 
 describe('single-track document review workflow', () => {
+  test('explicit retry makes failed parallel foundation documents schedulable again', () => {
+    let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    state = recordFoundationCommit(
+      recordFoundationDispatch(state, 'docs/LEVEL_SCENE_DESIGN.md', 'drafting', {
+        dispatchId: 'dispatch-level',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/LEVEL_SCENE_DESIGN.md',
+        revision: 'revision-1',
+        status: 'running',
+        startedAt: '2026-08-15T00:00:00.000Z',
+      }),
+      'docs/LEVEL_SCENE_DESIGN.md',
+    )
+    state = recordFoundationFailure(
+      recordFoundationDispatch(state, 'docs/BALANCE_DESIGN.md', 'drafting', {
+        dispatchId: 'dispatch-balance',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/BALANCE_DESIGN.md',
+        revision: 'revision-1',
+        status: 'running',
+        startedAt: '2026-08-15T00:00:00.000Z',
+      }),
+      'docs/BALANCE_DESIGN.md',
+      'stream receipt missing',
+    )
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-retry',
+      projectId: 'project-foundation-retry',
+      ownerId: 'owner-foundation-retry',
+      documentRevision: 'revision-1',
+      foundationDraftComplete: false,
+    })
+
+    const retried = transitionDeliveryRun(
+      {
+        ...initial,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'needs_action',
+        foundationDraftState: state,
+      },
+      { type: 'retry' },
+    )
+
+    expect(retried.status).toBe('running')
+    expect(retried.foundationDraftState.documents?.find(document =>
+      document.path === 'docs/BALANCE_DESIGN.md')).toEqual({
+      path: 'docs/BALANCE_DESIGN.md',
+      status: 'pending',
+    })
+  })
+
   test('groups shared repair subjects and derives owner dependencies', () => {
     const groups = deriveFoundationRepairGroups([
       reviewFinding({

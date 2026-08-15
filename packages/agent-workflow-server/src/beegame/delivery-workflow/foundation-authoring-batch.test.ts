@@ -6,6 +6,7 @@ import {
   recordFoundationCommit,
   recordFoundationDispatch,
   recordFoundationFailure,
+  retryFoundationFailures,
 } from './foundation-authoring-batch'
 import type { FoundationDocumentPath, FoundationDraftState } from './types'
 
@@ -114,5 +115,37 @@ describe('parallel foundation authoring batch', () => {
       failureReason: 'provider stopped',
     })
     expect(failed.documents?.[2]?.status).toBe('pending')
+  })
+
+  test('returns failed documents to the native scheduling queue on explicit retry', () => {
+    let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    state = dispatchAndCommit(state, 'docs/LEVEL_SCENE_DESIGN.md')
+    state = recordFoundationFailure(
+      recordFoundationDispatch(
+        state,
+        'docs/BALANCE_DESIGN.md',
+        'drafting',
+        {
+          dispatchId: 'dispatch-balance',
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          taskId: 'docs/BALANCE_DESIGN.md',
+          revision: 'revision-1',
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        },
+      ),
+      'docs/BALANCE_DESIGN.md',
+      'stream receipt missing',
+    )
+
+    const retried = retryFoundationFailures(state)
+
+    expect(retried.documents?.find(document =>
+      document.path === 'docs/BALANCE_DESIGN.md')).toEqual({
+      path: 'docs/BALANCE_DESIGN.md',
+      status: 'pending',
+    })
+    expect(readyDraftPaths(retried)).toContain('docs/BALANCE_DESIGN.md')
   })
 })

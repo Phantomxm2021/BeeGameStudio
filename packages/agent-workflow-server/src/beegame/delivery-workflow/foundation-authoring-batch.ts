@@ -130,6 +130,22 @@ export function recordFoundationCommit(
   }))
 }
 
+export function retryFoundationFailures(
+  state: FoundationDraftState,
+): FoundationDraftState {
+  if (!state.documents) return state
+  const documents = state.documents.map(document =>
+    document.status === 'needs_action'
+      ? {
+          path: document.path,
+          status: 'pending' as const,
+        }
+      : { ...document },
+  )
+  const next = { ...state, documents }
+  return { ...next, completedPaths: foundationCommittedPrefix(next) }
+}
+
 export function foundationCommittedPrefix(
   state: FoundationDraftState,
 ): FoundationDocumentPath[] {
