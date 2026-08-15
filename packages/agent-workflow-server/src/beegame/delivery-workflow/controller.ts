@@ -937,6 +937,15 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
+    const replayableReview =
+      run.documentReviewState.activeRun?.reports.find(
+        report =>
+          report.status !== 'completed' && report.dispatch?.terminalResult,
+      )?.dispatch
+    if (replayableReview) {
+      await dispatcher.replayTerminal(replayableReview, handleTerminalUnlocked)
+      return
+    }
     if (run.activeDispatch?.terminalResult) {
       // resumeUnlocked already owns the controller serialization lane. Reuse
       // the canonical terminal handler directly instead of queueing behind

@@ -116,5 +116,78 @@ describe('document review controller terminal reconciliation', () => {
     expect(
       started.map(request => request.contract.reviewRole).sort(),
     ).toEqual(['experience', 'gameplay', 'presentation', 'technical'])
+
+    const beforeRestart = (await store.load())!
+    const technical = beforeRestart.documentReviewState.activeRun!.reports.find(
+      report => report.role === 'technical',
+    )!
+    await mkdir(dirname(join(workspacePath, technical.path)), {
+      recursive: true,
+    })
+    await writeFile(
+      join(workspacePath, technical.path),
+      '# Technical review\n',
+      'utf8',
+    )
+    await store.save({
+      ...beforeRestart,
+      documentReviewState: {
+        ...beforeRestart.documentReviewState,
+        activeRun: {
+          ...beforeRestart.documentReviewState.activeRun!,
+          reports: beforeRestart.documentReviewState.activeRun!.reports.map(
+            report =>
+              report.role === 'technical'
+                ? {
+                    ...report,
+                    dispatch: {
+                      ...report.dispatch!,
+                      status: 'completed' as const,
+                      terminalResult: {
+                        workerType: 'document-reviewer',
+                        status: 'completed',
+                        revision,
+                        scope: 'foundation',
+                        role: 'technical',
+                        reportPaths: [technical.path],
+                      },
+                      finishedAt: new Date().toISOString(),
+                    },
+                  }
+                : report,
+          ),
+        },
+      },
+    })
+    const restarted: WorkerDispatchRequest[] = []
+    const restartedController = createDeliveryWorkflowController({
+      workspacePath,
+      ownerId: run.ownerId,
+      workerPort: {
+        async start(request) {
+          restarted.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await restartedController.resume((await store.load())!)
+
+    expect(
+      (await store.load())?.documentReviewState.activeRun?.reports.find(
+        report => report.role === 'technical',
+      ),
+    ).toMatchObject({ status: 'completed' })
+    expect(restarted.map(request => request.contract.reviewRole)).toEqual([
+      'production',
+    ])
   })
 })
