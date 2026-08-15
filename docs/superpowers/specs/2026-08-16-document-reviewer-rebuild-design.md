@@ -91,9 +91,11 @@ Foundation review launches five independent native Reviewer sessions:
 | Presentation | `GDD.md`, `UI_UX_SPEC.md`, `AUDIO_DESIGN.md` | state feedback and UI/audio consistency |
 | Production | `ART_DIRECTION.md`, `AUDIO_DESIGN.md`, `ASSET_PLAN.md` | production scope, deliverables, provenance, licensing and resource closure |
 
-Each session receives one role, a fixed source allowlist and one fixed output
-path. It independently reads the source files and authors one Markdown report.
-Bee Game Studio does not summarize source documents or create report content.
+Each session receives one role, a fixed source allowlist and one project-local
+staging output path. It independently reads the source files and authors one
+Markdown report. After validation, Bee Game Studio atomically renames the
+staged bytes to the immutable revision path; it never creates or edits report
+content.
 
 Specialist reports use a human-readable contract:
 
@@ -147,6 +149,7 @@ Every result belongs to the reviewed game project:
 
 ```text
 <workspacePath>/.beegame/reviews/<scope>/<revision>/
+  .staging/<dispatchId>/
   parts/
     gameplay.md
     technical.md
@@ -235,8 +238,11 @@ reference IDs, closure modes or accepted-check inheritance.
 ## Permissions and integrity
 
 - Source documents are readable but not writable by Reviewer sessions.
-- A specialist can write only its assigned part report.
-- The Final Reviewer can write only `review.md` and `decision.json`.
+- A specialist writes only its assigned project-local staging report; the
+  service atomically renames the validated bytes to `parts/<role>.md`.
+- The Final Reviewer writes only staged `review.md` and `decision.json`; the
+  service validates both and atomically renames each file before persisting the
+  completion receipt.
 - Every path is resolved below the active `<workspacePath>`.
 - The service records source revision before dispatch and verifies it before
   accepting each result.
