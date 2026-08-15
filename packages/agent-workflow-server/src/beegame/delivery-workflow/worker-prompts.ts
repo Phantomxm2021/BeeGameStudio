@@ -6,7 +6,7 @@ import {
 } from './types'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
-  'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later marker. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
+  'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const initialFoundationAuthor =
@@ -134,7 +134,6 @@ function formatContract(request: WorkerDispatchRequest): string {
                 headingPrefix: '# ',
               },
               executiveSummary: {
-                marker: '<!-- beegame-executive-summary -->',
                 heading: '## Executive Summary',
               },
               sections: Array.isArray(sections)
@@ -142,21 +141,17 @@ function formatContract(request: WorkerDispatchRequest): string {
                     const section = value as Record<string, unknown>
                     return {
                       ...section,
-                      marker: `<!-- beegame-section:${section.sectionId} -->`,
                       heading: `## ${section.title}`,
                     }
                   })
                 : sections,
               productionMaterials: {
-                marker: '<!-- beegame-production-materials -->',
                 heading: '## Production Materials',
                 entries: Array.isArray(productionMaterials)
                   ? productionMaterials.map(value => {
                       const material = value as Record<string, unknown>
-                      const { materialId, ...materialContract } = material
                       return {
-                        ...materialContract,
-                        marker: `<!-- beegame-material:${materialId} -->`,
+                        ...material,
                         heading: `### ${material.title}`,
                       }
                     })
@@ -452,7 +447,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Write the complete canonical Markdown body without YAML front matter. BGS performs the mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
+                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
               ].join(' ')
             : request.contract.authoringMode === 'repair-planning'
             ? [
@@ -466,7 +461,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : request.contract.authoringMode === 'initial'
               ? [
                   `This is one complete human development discipline assignment. Return exactly the complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
-                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title; emit the executive-summary marker only after that title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter: BGS injects document_id, version and updated_at deterministically. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
+                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter or beegame protocol comments. BGS injects document_id, version and updated_at deterministically. BGS injects all beegame protocol comments after the turn. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
                   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
                   'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
                   DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,

@@ -3,10 +3,77 @@ import {
   completeTestSubmission,
   renderTestCompleteGameDocument,
 } from '../__tests__/complete-game-document-fixture'
-import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
+import {
+  normalizeCompleteGameDocumentProtocol,
+  validateCompleteGameDocumentMarkdown,
+} from './complete-game-document'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 
 describe('native complete game document validation', () => {
+  test('injects service-owned protocol markers into marker-free canonical Markdown', () => {
+    const path = 'docs/ASSET_PLAN.md'
+    const canonical = renderTestCompleteGameDocument(
+      path,
+      completeTestSubmission(path),
+    ).replace(/<!-- beegame-audit-appendix -->[^]*$/, '')
+    const markerFree = canonical.replace(
+      /^<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+) -->\n/gm,
+      '',
+    )
+
+    expect(normalizeCompleteGameDocumentProtocol(path, markerFree)).toBe(
+      canonical.trimEnd() + '\n',
+    )
+  })
+
+  test('normalizes existing protocol markers idempotently', () => {
+    const path = 'docs/GDD.md'
+    const canonical = renderTestCompleteGameDocument(
+      path,
+      completeTestSubmission(path),
+    ).replace(/<!-- beegame-audit-appendix -->[^]*$/, '')
+
+    const once = normalizeCompleteGameDocumentProtocol(path, canonical)
+    expect(normalizeCompleteGameDocumentProtocol(path, once)).toBe(once)
+  })
+
+  test('rejects missing, duplicate, reordered, and fenced canonical headings before marker injection', () => {
+    const path = 'docs/GDD.md'
+    const markerFree = renderTestCompleteGameDocument(
+      path,
+      completeTestSubmission(path),
+    )
+      .replace(/<!-- beegame-audit-appendix -->[^]*$/, '')
+      .replace(
+        /^<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+) -->\n/gm,
+        '',
+      )
+    const first = '## Vision and Product Promise'
+    const second = '## Player Experience and Design Pillars'
+
+    expect(() =>
+      normalizeCompleteGameDocumentProtocol(path, markerFree.replace(first, '')),
+    ).toThrow(/heading|structure|section/i)
+    expect(() =>
+      normalizeCompleteGameDocumentProtocol(
+        path,
+        markerFree.replace(first, `${first}\n${first}`),
+      ),
+    ).toThrow(/heading|structure|section/i)
+    expect(() =>
+      normalizeCompleteGameDocumentProtocol(
+        path,
+        markerFree.replace(first, '__FIRST__').replace(second, first).replace('__FIRST__', second),
+      ),
+    ).toThrow(/order|structure|section/i)
+    expect(() =>
+      normalizeCompleteGameDocumentProtocol(
+        path,
+        markerFree.replace(first, `\`\`\`text\n${first}\n\`\`\``),
+      ),
+    ).toThrow(/heading|structure|section/i)
+  })
+
   test('accepts every complete canonical Markdown document written on disk', () => {
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       const markdown = renderTestCompleteGameDocument(

@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
-  validateCompleteGameDocumentMarkdown,
+  normalizeCompleteGameDocumentProtocol,
 } from './complete-game-document'
 import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
@@ -293,7 +293,7 @@ function canonicalizeAuthoredDocument(
     lines[0] === '---' && lines[4] === '---'
       ? lines.slice(5).join('\n')
       : markdown
-  const validatedBody = validateCompleteGameDocumentMarkdown(path, body)
+  const validatedBody = normalizeCompleteGameDocumentProtocol(path, body)
   return [
     '---',
     `document_id: ${expectedDocumentId}`,

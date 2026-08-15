@@ -108,6 +108,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('## Executive Summary')
     expect(prompt).toContain('Do not author YAML front matter')
     expect(prompt).toContain('BGS injects document_id, version and updated_at')
+    expect(prompt).toContain('BGS injects all beegame protocol comments')
+    expect(prompt).not.toContain('<!-- beegame-')
     expect(prompt).toContain('Do not add an Audit Appendix')
     expect(prompt).not.toContain('handwrite protocol markers')
     for (const material of completeDocumentContract.productionMaterials)
@@ -564,6 +566,8 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain(
       'BGS injects document_id, version and updated_at deterministically',
     )
+    expect(prompt).toContain('BGS injects all beegame protocol comments')
+    expect(prompt).not.toContain('<!-- beegame-')
     expect(prompt).toContain('BGS injects document_id, version and updated_at')
     expect(prompt).not.toContain('updated_at set to')
     expect(prompt).toContain('complete human development discipline')
