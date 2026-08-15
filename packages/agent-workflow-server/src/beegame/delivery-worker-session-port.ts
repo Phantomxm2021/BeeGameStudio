@@ -886,6 +886,18 @@ export function createBeeGameDeliveryWorkerPort(input: {
             if (isStreamedFoundationAuthoringTurn(request)) {
               if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
                 await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+              const drainedFailure = [
+                ...sessionEvents(sessionId).slice(
+                  eventOffsets.get(dispatchId) ?? 0,
+                ),
+              ]
+                .reverse()
+                .find(event => event.type === 'turn.failed')
+              if (drainedFailure)
+                throw new Error(
+                  drainedFailure.text ||
+                    'document author stream commit failed',
+                )
               const receipt = await readAuthoredDocumentReceipt(
                 request.workspacePath,
                 dispatchId,

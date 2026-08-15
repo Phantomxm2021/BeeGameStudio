@@ -418,11 +418,9 @@ describe('native initial document authoring', () => {
       expect(prompts[0]).toContain('Do not call tools')
       expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
       expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
+      expect(prompts[0]).toContain('BGS injects all beegame protocol comments')
+      expect(prompts[0]).not.toContain('<!-- beegame-')
       for (const protocolLiteral of [
-        '<!-- beegame-executive-summary -->',
-        '<!-- beegame-section:vision -->',
-        '<!-- beegame-production-materials -->',
-        '<!-- beegame-material:product-gameplay-overview -->',
         '## Production Materials',
         '### Product and Gameplay Overview',
       ])
@@ -482,6 +480,77 @@ describe('native initial document authoring', () => {
     }
   })
 
+  test('reports the authoritative commit failure appended while draining the native turn', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-drain-failure-'))
+    const events: Array<Record<string, unknown>> = []
+    let failureAppended = false
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const sessions = {
+        start: () => ({
+          id: 'session-drain-failure',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          cwd: workspacePath,
+        }),
+        updateAuthToken: () => undefined,
+        get: () => ({
+          id: 'session-drain-failure',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          cwd: workspacePath,
+        }),
+        events: () => events,
+        isWorkflowWorkerOpen: () => true,
+        waitForWorkflowWorkerIdle: async () => {
+          if (!failureAppended) {
+            failureAppended = true
+            events.push({
+              type: 'turn.failed',
+              text: 'complete game document canonical heading must appear exactly once: ## Asset Inventory Table',
+            })
+          }
+        },
+        sendWithDisplay: async () => {
+          events.push({
+            type: 'result',
+            text: 'native response completed',
+            payload: {
+              type: 'result',
+              usage: {
+                input_tokens: 1,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+                output_tokens: 1,
+              },
+              permission_denials: [],
+            },
+          })
+        },
+        stop: () => undefined,
+        disposeWorkflowWorker: async () => undefined,
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: sessions as never,
+        userId: 'user',
+      })
+
+      await port.start(request(workspacePath, 'dispatch-drain-failure') as never)
+      await port.submit('dispatch-drain-failure', 'complete document prompt')
+      await expect(
+        port.waitForTerminal?.('dispatch-drain-failure'),
+      ).rejects.toThrow(
+        'complete game document canonical heading must appear exactly once: ## Asset Inventory Table',
+      )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('fails once without a hidden correction turn', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-correction-'))
     const prompts: string[] = []
@@ -493,8 +562,8 @@ describe('native initial document authoring', () => {
         completeTestSubmission('docs/GDD.md'),
       )
       const incompleteBody = completeBody.replace(
-        '<!-- beegame-material:product-gameplay-overview -->',
-        '',
+        '### Product and Gameplay Overview',
+        '### Renamed Product Overview',
       )
       const port = createBeeGameDeliveryWorkerPort({
         sessions: fakeSessions({
@@ -512,7 +581,7 @@ describe('native initial document authoring', () => {
       await port.submit('dispatch-correction', 'original complete document prompt')
       await expect(
         port.waitForTerminal?.('dispatch-correction'),
-      ).rejects.toThrow(/production materials/i)
+      ).rejects.toThrow(/canonical heading/i)
 
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
