@@ -111,8 +111,6 @@ const WORKFLOW_STATUS: Record<string, WorkflowCardStatus> = {
 
 const WORKFLOW_RECOVERY_UNIT_KINDS: readonly WorkflowRecoveryUnitKind[] = [
   'document',
-  'review-check',
-  'checklist',
   'resource-inventory',
   'resource-content',
   'resource-gate',
@@ -137,9 +135,7 @@ const normalizeWorkflowMessage = (value: unknown): string | undefined => {
 const WORKFLOW_SUBSTAGES: readonly WorkflowCardSubstage[] = [
   'INITIAL_DRAFTING',
   'INITIAL_REVIEW',
-  'REPAIR_PLANNING',
   'REPAIRING',
-  'CLOSURE_REVIEW',
   'CHECKLIST_DRAFTING',
   'CHECKLIST_REVIEW',
 ]
@@ -209,6 +205,68 @@ const normalizeWorkflowTasks = (
   })
 }
 
+const normalizeDocumentReview = (
+  value: unknown,
+): WorkflowCardPayload['documentReview'] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const source = value as Record<string, unknown>
+  const reports = Array.isArray(source.reports)
+    ? source.reports.flatMap(report => {
+        if (!report || typeof report !== 'object' || Array.isArray(report))
+          return []
+        const item = report as Record<string, unknown>
+        const role = trimString(item.role)
+        const path = trimString(item.path)
+        const status = trimString(item.status)
+        if (
+          !role ||
+          !path ||
+          !['pending', 'running', 'completed', 'failed'].includes(status)
+        )
+          return []
+        return [
+          {
+            role,
+            path,
+            status: status as 'pending' | 'running' | 'completed' | 'failed',
+            failureReason:
+              trimString(item.failureReason ?? item.failure_reason) ||
+              undefined,
+          },
+        ]
+      })
+    : []
+  const scope = trimString(source.scope)
+  const status = trimString(source.status)
+  const verdict = trimString(source.verdict)
+  return {
+    scope: ['foundation', 'checklist', 'complete'].includes(scope)
+      ? (scope as 'foundation' | 'checklist' | 'complete')
+      : undefined,
+    status: ['pending', 'running', 'completed', 'failed'].includes(status)
+      ? (status as 'pending' | 'running' | 'completed' | 'failed')
+      : undefined,
+    attempt: finiteNumber(source.attempt),
+    verdict:
+      verdict === 'READY' || verdict === 'NEEDS_REVISION' ? verdict : undefined,
+    affectedPaths: Array.isArray(source.affectedPaths)
+      ? source.affectedPaths.flatMap(path =>
+          typeof path === 'string' && path.trim() ? [path.trim()] : [],
+        )
+      : undefined,
+    finalReportPath:
+      trimString(source.finalReportPath ?? source.final_report_path) ||
+      undefined,
+    finalReportMarkdown:
+      trimString(source.finalReportMarkdown ?? source.final_report_markdown) ||
+      undefined,
+    failureReason:
+      trimString(source.failureReason ?? source.failure_reason) || undefined,
+    reports,
+  }
+}
+
 const normalizeWorkflowBlock = (
   value: unknown,
 ): WorkflowCardStageSnapshot['block'] | undefined => {
@@ -254,8 +312,6 @@ const normalizeWorkflowCardFields = (
       ? convergencePassValue
       : undefined
   const substage = trimString(source.substage)
-  const reviewMode = trimString(source.reviewMode ?? source.review_mode)
-  const reviewTarget = trimString(source.reviewTarget ?? source.review_target)
   const executionStatus = WORKFLOW_EXECUTION_STATUSES.includes(
     rawThinking as (typeof WORKFLOW_EXECUTION_STATUSES)[number],
   )
@@ -279,16 +335,9 @@ const normalizeWorkflowCardFields = (
     convergencePass,
     documentStep:
       trimString(source.documentStep ?? source.document_step) || undefined,
-    reviewMode:
-      reviewMode === 'initial' || reviewMode === 'closure'
-        ? reviewMode
-        : undefined,
-    reviewTarget:
-      reviewTarget === 'foundation' ||
-      reviewTarget === 'checklist' ||
-      reviewTarget === 'resource'
-        ? reviewTarget
-        : undefined,
+    documentReview: normalizeDocumentReview(
+      source.documentReview ?? source.document_review,
+    ),
     worker:
       trimString(
         source.worker ??

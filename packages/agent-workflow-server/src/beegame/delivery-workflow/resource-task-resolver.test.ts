@@ -21,7 +21,7 @@ import {
 import { retryRun, shouldRefreshProvisionalResourceInventory } from './recovery'
 import { createRunStore } from './run-store'
 import { resolveResourceProductionTask } from './resource-task-resolver'
-import type { DeliveryRun, DocumentReviewFindingSubject } from './types'
+import type { DeliveryRun } from './types'
 
 const roots: string[] = []
 const TEST_ACQUISITION_PROFILE = {
@@ -40,18 +40,7 @@ afterEach(async () => {
 
 describe('resource production task resolver', () => {
   test('projects only cited authority documents for resource content repair', () => {
-    expect(
-      resourceContentAuthorityPaths([
-        {
-          evidence: [
-            { path: 'systemDeliveryContract', anchor: '/content' },
-            { path: 'docs/TECHNICAL_DESIGN.md', anchor: '## 2' },
-            { path: 'assets/content/scene-definitions.yaml', anchor: '/data' },
-          ],
-        },
-      ]),
-    ).toEqual(['docs/TECHNICAL_DESIGN.md'])
-    expect(resourceContentAuthorityPaths(undefined)).toHaveLength(6)
+    expect(resourceContentAuthorityPaths()).toHaveLength(6)
   })
 
   test('derives the four tasks only from canonical artifacts and receipts', async () => {
@@ -129,7 +118,7 @@ describe('resource production task resolver', () => {
         run: inventoryRun,
         workspacePath: workspace,
       }),
-    ).resolves.toMatchObject({ task: 'RESOURCE_INVENTORY' })
+    ).resolves.toMatchObject({ task: 'RESOURCE_PLAN' })
 
     await expect(
       resolveResourceProductionTask({
@@ -173,23 +162,9 @@ describe('resource production task resolver', () => {
       }),
       phase: 'RESOURCE_PREPARATION' as const,
     }
-    run.documentReviewState.activeCycle!.findings.push({
-      findingId: 'resource-content-finding',
-      checkId: 'resource_content_consistency',
-      severity: 'blocking',
-      owner: 'resource',
-      evidence: [{ path: 'assets/content/world.json', anchor: '$.data' }],
-      subjects: [
-        {
-          path: 'assets/content/world.json',
-          anchor: '$.data',
-          contentId: 'world-content',
-        },
-      ],
-      observation: 'Content requires repair.',
-      blockingImpact: 'Content is not ready.',
-      requiredOutcome: 'Repair the content subject.',
-    })
+    run.documentReviewState.activeRun!.affectedPaths!.push(
+      'assets/content/world.json',
+    )
     let request: unknown
     await startResourcePreparation({
       run,
@@ -205,7 +180,11 @@ describe('resource production task resolver', () => {
       workerType: 'resource-planner',
       contract: {
         remediation: {
-          findings: [{ findingId: 'resource-finding' }],
+          reviewReportPath: expect.stringContaining('/review.md'),
+          affectedPaths: [
+            'assets/asset-manifest.json',
+            'assets/content/world.json',
+          ],
         },
       },
     })
@@ -512,39 +491,22 @@ async function runWithReceipt(workspace: string): Promise<DeliveryRun> {
 
 function withResourceFinding(
   run: DeliveryRun,
-  subject: DocumentReviewFindingSubject,
+  subject: { path: string; [key: string]: unknown },
 ): DeliveryRun {
   return {
     ...run,
     documentReviewState: {
       ...run.documentReviewState,
-      activeCycle: {
-        cycleId: 'resource-cycle',
-        originScope: 'complete',
+      activeRun: {
         scope: 'complete',
-        mode: 'initial',
-        sourceRevision: 'source-resource-revision',
-        requiredCheckIds: ['resource_content_consistency'],
-        completedCheckIds: ['resource_content_consistency'],
-        checks: [],
-        checkEvidenceDigests: {},
-        findings: [
-          {
-            findingId: 'resource-finding',
-            checkId: 'resource_content_consistency',
-            severity: 'blocking',
-            owner: 'resource',
-            evidence: [{ path: subject.path, anchor: subject.anchor }],
-            subjects: [subject],
-            observation: 'Canonical resource output requires repair.',
-            blockingImpact: 'Delivery cannot proceed.',
-            requiredOutcome: 'Repair the canonical subject.',
-          },
-        ],
-        activeTarget: 'resource',
-        acceptedSemanticResult: true,
-        changedPaths: [],
-        sourceArtifactDigests: {},
+        revision: 'a'.repeat(64),
+        status: 'completed',
+        reports: [],
+        finalReportPath: `.beegame/reviews/complete/${'a'.repeat(64)}/review.md`,
+        finalReportDigest: 'b'.repeat(64),
+        verdict: 'NEEDS_REVISION',
+        affectedPaths: [subject.path],
+        attempt: 1,
       },
     },
   }

@@ -36,11 +36,7 @@ const FOUNDATION_ROLE_PATHS = {
     'docs/LEVEL_SCENE_DESIGN.md',
     'docs/BALANCE_DESIGN.md',
   ],
-  technical: [
-    'docs/GDD.md',
-    'docs/TECHNICAL_DESIGN.md',
-    'docs/ASSET_PLAN.md',
-  ],
+  technical: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
   experience: ['docs/GDD.md', 'docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
   presentation: ['docs/GDD.md', 'docs/UI_UX_SPEC.md', 'docs/AUDIO_DESIGN.md'],
   production: [
@@ -161,7 +157,8 @@ export function finalReviewAssignment(input: {
 }): DocumentReviewAssignment {
   if (
     input.specialists.some(
-      assignment => assignment.scope !== input.scope || assignment.role === 'final',
+      assignment =>
+        assignment.scope !== input.scope || assignment.role === 'final',
     )
   )
     throw new Error('final review specialists do not match the active scope')

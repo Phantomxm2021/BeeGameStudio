@@ -27,7 +27,9 @@ describe('resource-content worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('complete and production-usable when the turn ends')
+    expect(prompt).toContain(
+      'complete and production-usable when the turn ends',
+    )
     expect(prompt).toContain('human development discipline')
     for (const section of completeDocumentContract.sections)
       expect(prompt).toContain(`"sectionId":"${section.sectionId}"`)
@@ -41,7 +43,9 @@ describe('resource-content worker prompts', () => {
       'one contract section per native file operation',
     )
     expect(prompt).not.toContain('12 KiB')
-    expect(prompt).not.toContain('four to six bounded native Write/Edit operations')
+    expect(prompt).not.toContain(
+      'four to six bounded native Write/Edit operations',
+    )
     expect(prompt).not.toContain('efficiency guidance, not a tool restriction')
     expect(prompt).not.toContain(
       'Do not buffer the complete document inside one file-tool argument',
@@ -74,22 +78,34 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('every Edit must')
     expect(prompt).not.toContain('Finish only the active bounded group')
     expect(prompt).not.toContain("Bee Game Studio's normal workflow")
-    expect(prompt).toContain('BGS writes those results to workflow audit metadata')
+    expect(prompt).toContain(
+      'BGS writes those results to workflow audit metadata',
+    )
     expect(prompt).not.toContain('CommitCanonicalDocument')
     expect(prompt).not.toContain('document_parts_prepared')
-    expect(prompt).not.toContain('Do not write or edit the assigned path directly')
+    expect(prompt).not.toContain(
+      'Do not write or edit the assigned path directly',
+    )
     expect(prompt).toContain('Do not claim verified license')
     expect(prompt).not.toContain('choose the operation count, size, and order')
-    expect(prompt).not.toContain('Save meaningful progress during long authoring work')
+    expect(prompt).not.toContain(
+      'Save meaningful progress during long authoring work',
+    )
     expect(prompt).not.toContain('one custom payload')
     expect(prompt).not.toContain(
       'End each bounded turn normally after its write succeeds',
     )
-    expect(prompt).not.toContain('one final lightweight structural verification')
+    expect(prompt).not.toContain(
+      'one final lightweight structural verification',
+    )
     expect(prompt).not.toContain('Read all authorized upstream sections')
     expect(prompt).not.toContain('one batched tool round')
-    expect(prompt).not.toContain('BGS mechanically inspects any existing target')
-    expect(prompt).not.toContain('do not independently reread or reclassify the target')
+    expect(prompt).not.toContain(
+      'BGS mechanically inspects any existing target',
+    )
+    expect(prompt).not.toContain(
+      'do not independently reread or reclassify the target',
+    )
     expect(prompt).not.toContain('without an intermediate completion message')
     expect(prompt).toContain(
       'Prefer production-dense tables and matrices over repeated narrative',
@@ -165,49 +181,49 @@ describe('resource-content worker prompts', () => {
 
   test('returns a downstream draft as one text-only Markdown stream', () => {
     const prompt = buildWorkerPrompt({
-          runId: 'run',
-          ownerId: 'owner',
-          projectId: 'project',
-          workspacePath: '/workspace',
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          taskId: 'docs/BALANCE_DESIGN.md',
-          revision: 'revision',
-          allowedPaths: ['docs/BALANCE_DESIGN.md'],
-          contract: {
-            documentSet: 'foundation',
-            authoringMode: 'parallel-draft',
-            foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-            availableUpstreamPaths: ['docs/GDD.md'],
-            completeDocumentContract: getGameDocumentContract(
-              'docs/BALANCE_DESIGN.md',
-            ),
-          },
-        })
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: 'docs/BALANCE_DESIGN.md',
+      revision: 'revision',
+      allowedPaths: ['docs/BALANCE_DESIGN.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'parallel-draft',
+        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+        availableUpstreamPaths: ['docs/GDD.md'],
+        completeDocumentContract: getGameDocumentContract(
+          'docs/BALANCE_DESIGN.md',
+        ),
+      },
+    })
 
-      expect(prompt).toContain('complete raw Markdown body')
-      expect(prompt).toContain('Do not call tools')
-      expect(prompt).toContain('genuinely unavailable upstream decisions')
-      expect(prompt).toContain(
-        'Treat each section as the final decision record, not a derivation transcript',
-      )
-      expect(prompt).toContain(
-        'Production materials are canonical compact views of owned decisions and must not repeat section narrative',
-      )
-      expect(prompt).toContain(
-        'Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior',
-      )
-      expect(prompt).toContain(
-        'Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases',
-      )
-      expect(prompt).not.toContain('checkpoint count')
-      expect(prompt).not.toContain('forced Edit')
-      expect(prompt).not.toContain('API retry')
-      expect(prompt).not.toContain('watchdog')
-      expect(prompt).not.toContain('whole-file grep')
-      expect(prompt).not.toContain('byte count check')
-      expect(prompt).not.toContain('docs/UI_UX_SPEC.md')
-      expect(prompt).not.toContain('calibrat')
+    expect(prompt).toContain('complete raw Markdown body')
+    expect(prompt).toContain('Do not call tools')
+    expect(prompt).toContain('genuinely unavailable upstream decisions')
+    expect(prompt).toContain(
+      'Treat each section as the final decision record, not a derivation transcript',
+    )
+    expect(prompt).toContain(
+      'Production materials are canonical compact views of owned decisions and must not repeat section narrative',
+    )
+    expect(prompt).toContain(
+      'Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior',
+    )
+    expect(prompt).toContain(
+      'Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases',
+    )
+    expect(prompt).not.toContain('checkpoint count')
+    expect(prompt).not.toContain('forced Edit')
+    expect(prompt).not.toContain('API retry')
+    expect(prompt).not.toContain('watchdog')
+    expect(prompt).not.toContain('whole-file grep')
+    expect(prompt).not.toContain('byte count check')
+    expect(prompt).not.toContain('docs/UI_UX_SPEC.md')
+    expect(prompt).not.toContain('calibrat')
   })
 
   test('instructs one JSON/YAML resource lane', () => {
@@ -304,200 +320,30 @@ describe('resource-content worker prompts', () => {
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
       revision: 'revision',
-      contract: { reviewScope: 'foundation', reviewMode: 'initial' },
-    })
-    expect(reviewerPrompt).toContain('technical_feasibility')
-    expect(reviewerPrompt).toContain(
-      'never a runtime/source substitute or second loader',
-    )
-    expect(reviewerPrompt).toContain(
-      'project documents that agree with each other but conflict with systemDeliveryContract',
-    )
-    expect(reviewerPrompt).toContain(
-      'fulfills may contain only exact current Manifest requirement IDs',
-    )
-    expect(reviewerPrompt).toContain(
-      'never request document names, headings, prose labels or invented duty IDs',
-    )
-    expect(reviewerPrompt).toContain(
-      'referenceId values from contract.referenceIndex.references',
-    )
-    expect(reviewerPrompt).toContain('never submit subjectOwner')
-    expect(reviewerPrompt).toContain('service derives ownership')
-    expect(reviewerPrompt).toContain('cannot be resource repair subjects')
-    expect(reviewerPrompt).toContain(
-      'exactly one accepted SubmitDocumentReviewPacket',
-    )
-    expect(reviewerPrompt).toContain('a rejected call accepts nothing')
-    expect(reviewerPrompt).toContain(
-      'Put each check auditable reasoning directly into its criterion derivations',
-    )
-    expect(reviewerPrompt).toContain('produce a separate transcript')
-    expect(reviewerPrompt).toContain(
-      'evidence and subjects may reference only artifacts listed for that check',
-    )
-    expect(reviewerPrompt).toContain(
-      'A subject is current content that violates authority',
-    )
-    expect(reviewerPrompt).toContain(
-      'reject repeated authority prose within one document',
-    )
-  })
-
-  test('requires structured strategy, economy, numeric and pacing derivations', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
-      contract: { reviewScope: 'foundation', reviewMode: 'initial' },
-    })
-    expect(prompt).toContain('gameplay_strategy_viability')
-    expect(prompt).toContain('economy_progression_integrity')
-    expect(prompt).toContain('numeric_balance_feasibility')
-    expect(prompt).toContain('pacing_difficulty_coherence')
-    expect(prompt).toContain('level_scene_design_integrity')
-    expect(prompt).toContain('spatial_gameplay_support')
-    expect(prompt).toContain('scene_state_completeness')
-    expect(prompt).toContain('Use only cited document facts')
-    expect(prompt).toContain('not final feel or empirical balance')
-    expect(prompt).toContain(
-      'Each assessment contains exactly criterion, status, evidence, derivation and conclusion',
-    )
-    expect(prompt).toContain(
-      'Every evidence or subject entry contains exactly referenceId',
-    )
-    expect(prompt).toContain(
-      'result, note, copied paths and copied anchors are invalid',
-    )
-  })
-
-  test('keeps immutable review context before the active-check suffix', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
       contract: {
         reviewScope: 'foundation',
-        reviewMode: 'initial',
-        reviewAuthority: {
-          confirmedBriefContext: '{"idea":"defend"}',
-          confirmedBriefDigest: 'brief-digest',
+        reviewRole: 'technical',
+        assignment: {
+          sourcePaths: ['/workspace/docs/TECHNICAL_DESIGN.md'],
+          verificationSourcePaths: ['/workspace/docs/GDD.md'],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/staging/technical.md',
+          ],
         },
-        reviewArtifacts: [
-          { path: 'docs/GDD.md', content: '# Rules\nStable body' },
-        ],
-        referenceIndex: {
-          references: [{ referenceId: 'ref-1', path: 'docs/GDD.md' }],
-        },
-        currentCheckIds: ['brief_alignment'],
-        criteriaByCheck: { brief_alignment: [] },
-        priorFindings: [],
+        allowedAffectedPaths: ['docs/TECHNICAL_DESIGN.md'],
       },
     })
-    const staticStart = prompt.indexOf('--- BEGIN REVIEW STATIC CONTRACT ---')
-    const artifactStart = prompt.indexOf(
-      '--- BEGIN REVIEW ARTIFACT docs/GDD.md ---',
+    expect(reviewerPrompt).toContain(
+      'single specialist role named by contract.reviewRole',
     )
-    const referenceStart = prompt.indexOf(
-      '--- BEGIN REVIEW REFERENCE INDEX ---',
+    expect(reviewerPrompt).toContain('/workspace/docs/TECHNICAL_DESIGN.md')
+    expect(reviewerPrompt).toContain('/workspace/docs/GDD.md')
+    expect(reviewerPrompt).toContain(
+      'one human-readable Markdown specialist report',
     )
-    const activeStart = prompt.indexOf('--- BEGIN REVIEW ACTIVE PACKET ---')
-    expect(staticStart).toBeGreaterThan(-1)
-    expect(artifactStart).toBeGreaterThan(staticStart)
-    expect(referenceStart).toBeGreaterThan(artifactStart)
-    expect(activeStart).toBeGreaterThan(referenceStart)
-    expect(prompt.slice(staticStart, activeStart)).not.toContain(
-      '"currentCheckIds"',
-    )
-    expect(prompt.slice(activeStart)).toContain('brief_alignment')
-    expect(prompt.slice(activeStart)).toContain('"criteriaByCheck"')
-    expect(prompt).toContain('"confirmedBriefContext":{"idea":"defend"}')
-  })
-
-  test('projects only relevant open findings into the active Reviewer packet', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
-      contract: {
-        reviewScope: 'foundation',
-        reviewMode: 'closure',
-        reviewAuthority: {
-          confirmedBriefContext: '{"idea":"defend"}',
-          confirmedBriefDigest: 'brief-digest',
-        },
-        reviewArtifacts: [
-          { path: 'docs/GDD.md', content: '# Rules\nStable body' },
-        ],
-        referenceIndex: { references: [] },
-        currentCheckIds: ['brief_alignment'],
-        criteriaByCheck: { brief_alignment: [] },
-        artifactPathsByCheck: {
-          brief_alignment: ['docs/GDD.md'],
-        },
-        priorFindings: [
-          {
-            findingId: 'visible-open',
-            checkId: 'brief_alignment',
-            open: true,
-            subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
-          },
-          {
-            findingId: 'hidden-closed',
-            checkId: 'brief_alignment',
-            open: false,
-            subjects: [{ path: 'docs/GDD.md', anchor: 'Rules' }],
-          },
-          {
-            findingId: 'hidden-unrelated',
-            checkId: 'resource_semantic_fitness',
-            open: true,
-            subjects: [
-              { path: 'assets/asset-manifest.json', anchor: '/requirements' },
-            ],
-          },
-        ],
-      },
-    })
-    expect(prompt).toContain('visible-open')
-    expect(prompt).not.toContain('hidden-closed')
-    expect(prompt).not.toContain('hidden-unrelated')
-  })
-
-  test('routes complete-review defects to the artifact owner without duplicate findings', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
-      contract: { reviewScope: 'complete', reviewMode: 'initial' },
-    })
-    expect(prompt).toContain(
-      'every defect whose repair target is the Manifest or JSON/YAML content belongs to',
-    )
-    expect(prompt).toContain(
-      'Do not duplicate one content or resource defect under a foundation check',
-    )
-    expect(prompt).toContain(
-      'reject acquisition profiles that encode composition or runtime duties as source-intrinsic capabilities',
-    )
-    expect(prompt).toContain(
-      'three additions in two serial packets: resource_semantic_fitness, then content_structure_fitness with resource_content_consistency',
+    expect(reviewerPrompt).not.toContain('SubmitDocumentReviewPacket')
+    expect(reviewerPrompt).toContain(
+      'Do not produce JSON, a finding packet, criteria arrays',
     )
   })
 
@@ -562,7 +408,9 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(prompt).toContain('raw Markdown body for docs/GDD.md')
-    expect(prompt).toContain('Markdown body is the sole human document authority')
+    expect(prompt).toContain(
+      'Markdown body is the sole human document authority',
+    )
     expect(prompt).toContain(
       'BGS injects document_id, version and updated_at deterministically',
     )
@@ -633,31 +481,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Do not simulate builds or waves')
   })
 
-  test('separates read-only repair planning from one-document owner repair', () => {
-    const planningPrompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'repair-planning',
-        repairPlanTask: {
-          groups: [{ findings: [{ findingId: 'finding' }], dependsOn: [] }],
-        },
-        systemDeliveryContract: buildSystemDeliveryContract(),
-      },
-    })
-    expect(planningPrompt).toContain('contract.repairPlanTask.groups')
-    expect(planningPrompt).toContain('dependsOn')
-    expect(planningPrompt).not.toContain('single accepted finding')
-    expect(planningPrompt).toContain('complete ordered repair graph')
-    expect(planningPrompt).toContain('SubmitDocumentRepairPlan exactly once')
-    expect(planningPrompt).toContain('do not write or mutate project files')
-
+  test('routes report-driven remediation to one document owner', () => {
     const ownerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -671,17 +495,20 @@ describe('resource-content worker prompts', () => {
         documentSet: 'foundation',
         authoringMode: 'remediation',
         foundationDocumentPath: 'docs/GDD.md',
-        repairTask: { groups: [], findings: [] },
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+        remediation: {
+          reviewReportPath: '.beegame/reviews/foundation/revision/review.md',
+          affectedPaths: ['docs/GDD.md'],
+          sourceRevision: 'revision',
+        },
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(ownerPrompt).toContain('Repair exactly docs/GDD.md')
-    expect(ownerPrompt).toContain('locked repair decision')
-    expect(ownerPrompt).not.toContain(
-      'write the complete revised Markdown document directly',
-    )
+    expect(ownerPrompt).toContain('contract.remediation.reviewReportPath')
+    expect(ownerPrompt).toContain('revise only docs/GDD.md')
+    expect(ownerPrompt).toContain('preserve unrelated approved content')
     expect(ownerPrompt).toContain(
-      'The assigned Markdown file must be complete when the turn ends',
+      'Ensure the assigned Markdown document at docs/GDD.md is complete',
     )
     expect(ownerPrompt).toContain(
       'The native runtime owns the file-operation sequence',

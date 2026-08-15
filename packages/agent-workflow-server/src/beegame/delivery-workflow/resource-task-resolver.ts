@@ -2,8 +2,6 @@ import { auditAssetContract } from '../asset-contract-audit'
 import { readBeeGameAssetManifest } from '../asset-contracts'
 import { computeResourceInventoryRevision } from './revision'
 import type {
-  DocumentReviewCycle,
-  DocumentReviewFinding,
   DeliveryRun,
   ResourceInventoryReceipt,
   ResourceProductionTask,
@@ -69,65 +67,35 @@ const RESOURCE_TASK_ORDER: readonly ResourceProductionTask[] = [
   'RESOURCE_GATE',
 ]
 
-export function resourceFindingTargetTask(
-  finding: DocumentReviewFinding,
-): Exclude<ResourceProductionTask, 'RESOURCE_GATE'> {
-  let hasContentSubject = false
-  let hasInventorySubject = false
-  let hasPlanSubject = false
-  for (const subject of finding.subjects) {
-    const path = subject.path.replaceAll('\\', '/')
-    if (subject.contentId || path.startsWith('assets/content/')) {
-      hasContentSubject = true
-      continue
-    }
-    if (
-      subject.resourceId ||
-      path.startsWith('assets/runtime/') ||
-      path.startsWith('assets/generated/')
-    ) {
-      hasInventorySubject = true
-      continue
-    }
-    if (path === 'assets/asset-manifest.json') {
-      hasPlanSubject = true
-    }
-  }
-  if (hasInventorySubject) return 'RESOURCE_INVENTORY'
-  if (hasPlanSubject) return 'RESOURCE_PLAN'
-  if (hasContentSubject) return 'RESOURCE_CONTENT'
-  throw new Error(
-    `accepted resource finding ${finding.findingId} does not identify a canonical resource subject`,
-  )
-}
-
-export function resourceRemediationFindingsForTask(
-  cycle: DocumentReviewCycle | undefined,
-  task: Exclude<ResourceProductionTask, 'RESOURCE_GATE'>,
-): DocumentReviewFinding[] {
-  return (cycle?.findings ?? []).filter(
-    finding => finding.owner === 'resource' && resourceFindingTargetTask(finding) === task,
-  )
-}
-
 function resourceRemediationTask(
   run: DeliveryRun,
 ): ResourceProductionTask | undefined {
-  const cycle = run.documentReviewState.activeCycle
+  const review = run.documentReviewState.activeRun
   if (
-    !cycle?.acceptedSemanticResult ||
-    cycle.activeTarget !== 'resource' ||
+    review?.scope !== 'complete' ||
+    review.verdict !== 'NEEDS_REVISION' ||
     run.resourceProductionState.currentTask === 'RESOURCE_GATE'
   )
     return undefined
   const cursor = run.resourceProductionState.currentTask
   const targetTasks = new Set(
-    cycle.findings
-      .filter(finding => finding.owner === 'resource')
-      .map(resourceFindingTargetTask),
+    (review.affectedPaths ?? []).flatMap(path => {
+      const normalized = path.replaceAll('\\', '/')
+      if (normalized === 'assets/asset-manifest.json')
+        return ['RESOURCE_PLAN' as const]
+      if (
+        normalized.startsWith('assets/runtime/') ||
+        normalized.startsWith('assets/generated/')
+      )
+        return ['RESOURCE_INVENTORY' as const]
+      if (normalized.startsWith('assets/content/'))
+        return ['RESOURCE_CONTENT' as const]
+      return []
+    }),
   )
   const cursorIndex = RESOURCE_TASK_ORDER.indexOf(cursor)
-  if (cursorIndex < 0) throw new Error(`unknown resource task cursor: ${cursor}`)
+  if (cursorIndex < 0)
+    throw new Error(`unknown resource task cursor: ${cursor}`)
   for (const task of RESOURCE_TASK_ORDER.slice(cursorIndex)) {
     if (task === 'RESOURCE_GATE') continue
     if (targetTasks.has(task)) return task

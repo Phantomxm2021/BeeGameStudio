@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import type { DeliveryRun, WorkflowEvent } from './types'
 import { transitionDeliveryRun } from './transition'
+import { DELIVERY_PROGRESS_STAGES } from './display-progress'
 import {
   activeElapsedWithinStage,
   freezePreviousStageCard,
@@ -276,13 +277,14 @@ describe('workflow stage card history', () => {
 })
 
 function frozenEvent(
-  phaseIndex: number,
+  eventIndex: number,
   stageId: 'BRIEF_CONFIRMED' | 'DOCUMENT_DRAFTING' | 'IMPLEMENTATION',
   overrides: Record<string, unknown> = {},
 ): WorkflowEvent {
-  const createdAt = `2026-08-06T00:00:0${Math.min(phaseIndex, 9)}.000Z`
+  const phaseIndex = DELIVERY_PROGRESS_STAGES.indexOf(stageId) + 1
+  const createdAt = `2026-08-06T00:00:0${Math.min(eventIndex, 9)}.000Z`
   return {
-    eventId: `event-${phaseIndex}-${String(overrides.message ?? 'base')}`,
+    eventId: `event-${eventIndex}-${String(overrides.message ?? 'base')}`,
     runId: 'run-stage-history',
     type: 'phase.entered',
     phase: stageId,
@@ -295,7 +297,7 @@ function frozenEvent(
     stageSnapshot: {
       stageId,
       phaseIndex,
-      phaseCount: 11,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
       status: 'completed',
       currentPhase: stageId,
       tasks: [],

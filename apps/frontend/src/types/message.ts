@@ -51,11 +51,26 @@ export interface WorkflowCardTask {
 export type WorkflowCardSubstage =
   | 'INITIAL_DRAFTING'
   | 'INITIAL_REVIEW'
-  | 'REPAIR_PLANNING'
   | 'REPAIRING'
-  | 'CLOSURE_REVIEW'
   | 'CHECKLIST_DRAFTING'
   | 'CHECKLIST_REVIEW'
+
+export interface WorkflowDocumentReviewDisplay {
+  scope?: 'foundation' | 'checklist' | 'complete'
+  status?: 'pending' | 'running' | 'completed' | 'failed'
+  attempt?: number
+  verdict?: 'READY' | 'NEEDS_REVISION'
+  affectedPaths?: string[]
+  finalReportPath?: string
+  finalReportMarkdown?: string
+  failureReason?: string
+  reports: Array<{
+    role: string
+    path: string
+    status: 'pending' | 'running' | 'completed' | 'failed'
+    failureReason?: string
+  }>
+}
 
 export interface WorkflowCardStageSnapshot {
   stageId: string
@@ -67,8 +82,7 @@ export interface WorkflowCardStageSnapshot {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  reviewMode?: 'initial' | 'closure'
-  reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  documentReview?: WorkflowDocumentReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string
@@ -94,8 +108,6 @@ export type WorkflowCardAction = 'resume' | 'retry'
 
 export type WorkflowRecoveryUnitKind =
   | 'document'
-  | 'review-check'
-  | 'checklist'
   | 'resource-inventory'
   | 'resource-content'
   | 'resource-gate'
@@ -114,8 +126,7 @@ export interface WorkflowCardPayload {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  reviewMode?: 'initial' | 'closure'
-  reviewTarget?: 'foundation' | 'checklist' | 'resource'
+  documentReview?: WorkflowDocumentReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string

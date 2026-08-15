@@ -1,11 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import type {
-  WorkflowCardAction,
-  WorkflowCardPayload,
-  WorkflowCardStageSnapshot,
-} from '../../types/message';
+import type { WorkflowCardAction, WorkflowCardPayload, WorkflowCardStageSnapshot } from '../../types/message';
 import { WorkflowStageCard } from './WorkflowStageCard';
 import { useWorkflowCardDeck } from './useWorkflowCardDeck';
 
@@ -19,8 +15,7 @@ const adaptLegacyWorkflow = (workflow: WorkflowCardPayload): WorkflowCardStageSn
   substage: workflow.substage,
   convergencePass: workflow.convergencePass,
   documentStep: workflow.documentStep,
-  reviewMode: workflow.reviewMode,
-  reviewTarget: workflow.reviewTarget,
+  documentReview: workflow.documentReview,
   worker: workflow.worker,
   thinking: workflow.thinking,
   executionStatus: workflow.executionStatus,
@@ -45,7 +40,10 @@ export function WorkflowCard({
   onAction?: (action: WorkflowCardAction) => Promise<void> | void;
 }) {
   const stageSnapshots = useMemo<readonly WorkflowCardStageSnapshot[]>(
-    () => (workflow.stageSnapshots && workflow.stageSnapshots.length > 0 ? workflow.stageSnapshots : [adaptLegacyWorkflow(workflow)]),
+    () =>
+      workflow.stageSnapshots && workflow.stageSnapshots.length > 0
+        ? workflow.stageSnapshots
+        : [adaptLegacyWorkflow(workflow)],
     [workflow],
   );
   const {
@@ -62,7 +60,8 @@ export function WorkflowCard({
   } = useWorkflowCardDeck(stageSnapshots);
   const framerReducedMotion = useReducedMotion();
   const reducedMotion = Boolean(framerReducedMotion || prefersReducedMotion);
-  const selectedSnapshot = stageSnapshots.find(snapshot => snapshot.stageId === selectedStageId) || stageSnapshots.at(-1);
+  const selectedSnapshot =
+    stageSnapshots.find(snapshot => snapshot.stageId === selectedStageId) || stageSnapshots.at(-1);
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key === 'ArrowLeft' && canSelectPrevious) {
@@ -79,15 +78,9 @@ export function WorkflowCard({
   const isDeck = stageSnapshots.length > 1;
   const stackLayers = useMemo(() => {
     if (!isDeck || selectedIndex < 0) return [];
-    const previous = stageSnapshots
-      .slice(0, selectedIndex)
-      .reverse()
-      .slice(0, 2);
+    const previous = stageSnapshots.slice(0, selectedIndex).reverse().slice(0, 2);
     if (previous.length >= 2) return previous;
-    return [
-      ...previous,
-      ...stageSnapshots.slice(selectedIndex + 1, selectedIndex + 1 + (2 - previous.length)),
-    ];
+    return [...previous, ...stageSnapshots.slice(selectedIndex + 1, selectedIndex + 1 + (2 - previous.length))];
   }, [isDeck, selectedIndex, stageSnapshots]);
   const frontTransition = useMemo(
     () =>

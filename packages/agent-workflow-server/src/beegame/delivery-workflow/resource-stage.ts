@@ -18,10 +18,7 @@ import {
   computeResourceContentDigest,
   computeResourceRevision,
 } from './revision'
-import {
-  resourceRemediationFindingsForTask,
-  resolveResourceProductionTask,
-} from './resource-task-resolver'
+import { resolveResourceProductionTask } from './resource-task-resolver'
 import { transitionDeliveryRun } from './transition'
 import {
   type DeliveryRun,
@@ -43,25 +40,8 @@ const RESOURCE_CONTENT_AUTHORITY_PATHS = [
   'docs/AUDIO_DESIGN.md',
 ] as const
 
-export function resourceContentAuthorityPaths(
-  findings:
-    | Pick<
-        NonNullable<
-          NonNullable<
-            DeliveryRun['documentReviewState']['activeCycle']
-          >['findings']
-        >[number],
-        'evidence'
-      >[]
-    | undefined,
-): string[] {
-  if (!findings) return [...RESOURCE_CONTENT_AUTHORITY_PATHS]
-  const citedPaths = new Set(
-    findings.flatMap(finding =>
-      finding.evidence.map(reference => reference.path),
-    ),
-  )
-  return RESOURCE_CONTENT_AUTHORITY_PATHS.filter(path => citedPaths.has(path))
+export function resourceContentAuthorityPaths(): string[] {
+  return [...RESOURCE_CONTENT_AUTHORITY_PATHS]
 }
 
 export async function resourceContentReceiptMatchesWorkspace(
@@ -113,17 +93,13 @@ export async function startResourcePreparation(input: {
       'resource gate is deterministic and cannot dispatch a worker',
     )
 
-  const reviewCycle = input.run.documentReviewState.activeCycle
+  const review = input.run.documentReviewState.activeRun
   const remediation =
-    reviewCycle?.acceptedSemanticResult &&
-    reviewCycle.activeTarget === 'resource'
+    review?.scope === 'complete' && review.verdict === 'NEEDS_REVISION'
       ? {
-          kind: 'document_review',
-          cycleId: reviewCycle.cycleId,
-          findings: resourceRemediationFindingsForTask(
-            reviewCycle,
-            resolution.task,
-          ),
+          reviewReportPath: review.finalReportPath,
+          affectedPaths: review.affectedPaths,
+          sourceRevision: review.revision,
         }
       : undefined
   const common = {
@@ -173,9 +149,11 @@ export async function startResourcePreparation(input: {
   const assetAudit = auditAssetContract(input.workspacePath)
   const contentAudit = assetAudit.content
   const repairPaths = new Set(
-    remediation?.findings.flatMap(finding =>
-      finding.subjects.map(subject => subject.path.replaceAll('\\', '/')),
-    ) ?? [],
+    remediation?.affectedPaths
+      ? remediation.affectedPaths
+          .map(path => path.replaceAll('\\', '/'))
+          .filter(path => path.startsWith('assets/content/'))
+      : [],
   )
   for (const path of contentAudit.invalidPaths) repairPaths.add(path)
   if (contentAudit.hasGlobalIssues) {
@@ -183,7 +161,9 @@ export async function startResourcePreparation(input: {
       if (file.kind === 'resource-registry') repairPaths.add(file.path)
     }
     if (!contentAudit.files.length && !contentAudit.invalidPaths.length)
-      repairPaths.add(`${BEEGAME_RESOURCE_ROOTS.content}/resource-registry.json`)
+      repairPaths.add(
+        `${BEEGAME_RESOURCE_ROOTS.content}/resource-registry.json`,
+      )
   }
   return input.dispatcher.dispatch({
     ...common,
@@ -208,7 +188,7 @@ export async function startResourcePreparation(input: {
         input.workspacePath,
         '',
       ),
-      authorityPaths: [...resourceContentAuthorityPaths(remediation?.findings)],
+      authorityPaths: resourceContentAuthorityPaths(),
       repairPaths: [...repairPaths],
       currentContentIssues: contentAudit.issues,
       ...(remediation ? { remediation } : {}),

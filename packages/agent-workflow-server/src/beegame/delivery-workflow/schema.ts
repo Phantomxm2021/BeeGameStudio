@@ -1,17 +1,7 @@
 import { z } from 'zod/v4'
-import { documentReviewCheckSchema } from './document-review-check-schema'
-import { openDocumentReviewFindings } from './document-review-findings'
-import {
-  deriveFoundationRepairGroups,
-  repairPlanMatchesCanonicalGraph,
-} from './document-repair-graph'
 import type {
   AtomicTask,
   AcceptedWorkflowUnit,
-  DocumentReviewApproval,
-  DocumentReviewCheck,
-  DocumentReviewCycle,
-  DocumentReviewFinding,
   DocumentReviewState,
   DeliveryPhase,
   DeliveryRun,
@@ -27,11 +17,7 @@ import type {
 } from './types'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
-  CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   DELIVERY_RUN_SCHEMA_VERSION,
-  DOCUMENT_REVIEW_CHECK_IDS,
-  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
 
@@ -209,322 +195,90 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   })
   .strict()
 
-const documentReviewCheckIdSchema = z.enum(DOCUMENT_REVIEW_CHECK_IDS)
-
-export const persistedDocumentReviewCheckSchema: z.ZodType<DocumentReviewCheck> =
-  documentReviewCheckSchema
-
-export const persistedDocumentReviewFindingSchema: z.ZodType<DocumentReviewFinding> =
-  z
-    .object({
-      findingId: z.string().min(1),
-      checkId: documentReviewCheckIdSchema,
-      severity: z.literal('blocking'),
-      owner: z.enum(['foundation', 'checklist', 'resource']),
-      regressionPaths: z.array(z.string().min(1)).min(1).optional(),
-      evidence: z
-        .array(
-          z
-            .object({
-              path: z.string().min(1),
-              anchor: z.string().min(1),
-            })
-            .strict(),
-        )
-        .min(1),
-      subjects: z
-        .array(
-          z
-            .object({
-              path: z.string().min(1),
-              anchor: z.string().min(1),
-              requirementId: z.string().min(1).optional(),
-              resourceId: z.string().min(1).optional(),
-              contentId: z.string().min(1).optional(),
-            })
-            .strict(),
-        )
-        .min(1),
-      observation: z.string().min(1),
-      blockingImpact: z.string().min(1),
-      requiredOutcome: z.string().min(1),
-    })
-    .strict()
-
-const checkEvidenceDigestsSchema = z.record(
-  z.string(),
-  z.record(z.string(), z.string().min(1)),
-)
-
-const documentReviewApprovalSchema: z.ZodType<DocumentReviewApproval> = z
+const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
   .object({
-    scope: z.enum(['foundation', 'checklist', 'complete']),
-    revision: z.string().min(1),
-    checks: z.array(persistedDocumentReviewCheckSchema).min(1),
-    checkEvidenceDigests: checkEvidenceDigestsSchema,
-    evidencePath: z.string().min(1),
-    approvedAt: z.string().datetime(),
-  })
-  .strict()
-  .superRefine((approval, context) => {
-    const expected =
-      approval.scope === 'foundation'
-        ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-        : approval.scope === 'checklist'
-          ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
-          : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
-    const ids = approval.checks.map(check => check.id)
-    if (
-      ids.length !== expected.length ||
-      new Set(ids).size !== expected.length ||
-      expected.some(id => !ids.includes(id)) ||
-      approval.checks.some(check => check.status !== 'pass')
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['checks'],
-        message:
-          'document review approval requires the exact passing check set',
-      })
-  })
-
-const documentReviewCycleSchema: z.ZodType<DocumentReviewCycle> = z
-  .object({
-    cycleId: z.string().min(1),
-    parentCycleId: z.string().min(1).optional(),
-    originScope: z.enum(['foundation', 'checklist', 'complete']),
-    scope: z.enum(['foundation', 'checklist', 'complete']),
-    mode: z.enum(['initial', 'closure']),
-    sourceRevision: z.string().min(1),
-    requiredCheckIds: z.array(documentReviewCheckIdSchema).min(1),
-    completedCheckIds: z.array(documentReviewCheckIdSchema),
-    checks: z.array(persistedDocumentReviewCheckSchema),
-    checkEvidenceDigests: checkEvidenceDigestsSchema,
-    findings: z.array(persistedDocumentReviewFindingSchema),
-    activeTarget: z.enum(['foundation', 'checklist', 'resource']).optional(),
-    acceptedSemanticResult: z.boolean(),
-    changedPaths: z.array(z.string().min(1)),
-    sourceArtifactDigests: z.record(z.string(), z.string().min(1)),
-    repairPlan: z
+    activeRun: z
       .object({
-        groups: z
-          .array(
-            z
-              .object({
-                groupId: z.string().trim().min(1),
-                findingIds: z.array(z.string().trim().min(1)).min(1),
-                groupDecision: z.string().trim().min(1),
-                pathDecisions: z
-                  .array(
-                    z
-                      .object({
-                        path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-                        decision: z.string().trim().min(1),
-                      })
-                      .strict(),
-                  )
-                  .min(1),
-                dependsOn: z.array(z.string().trim().min(1)),
-              })
-              .strict(),
-          )
-          .min(1),
-        completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+        scope: z.enum(['foundation', 'checklist', 'complete']),
+        revision: z.string().regex(/^[a-f0-9]{64}$/u),
+        status: z.enum(['pending', 'running', 'completed', 'failed']),
+        reports: z.array(
+          z
+            .object({
+              role: z.string().min(1),
+              path: z.string().min(1),
+              digest: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/u)
+                .optional(),
+              status: z.enum(['pending', 'running', 'completed', 'failed']),
+              dispatch: dispatchRecordSchema.optional(),
+              failureReason: z.string().min(1).optional(),
+            })
+            .strict(),
+        ),
+        finalReportPath: z.string().min(1).optional(),
+        finalReportDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .optional(),
+        verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
+        affectedPaths: z.array(z.string().min(1)).optional(),
+        remediatedPaths: z.array(z.string().min(1)).optional(),
+        attempt: z.number().int().positive(),
+        approvedFoundationRevision: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .optional(),
+        failureReason: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
-    evidencePath: z.string().min(1).optional(),
-  })
-  .strict()
-  .superRefine((cycle, context) => {
-    const canonicalCheckIds =
-      cycle.scope === 'foundation'
-        ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-        : cycle.scope === 'checklist'
-          ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
-          : COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
-    const canonicalRequiredSubset = canonicalCheckIds.filter(id =>
-      cycle.requiredCheckIds.includes(id),
-    )
-    if (
-      new Set(cycle.requiredCheckIds).size !== cycle.requiredCheckIds.length ||
-      canonicalRequiredSubset.length !== cycle.requiredCheckIds.length ||
-      canonicalRequiredSubset.some(
-        (id, index) => id !== cycle.requiredCheckIds[index],
-      ) ||
-      (cycle.mode === 'initial' &&
-        cycle.requiredCheckIds.length !== canonicalCheckIds.length)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['requiredCheckIds'],
-        message:
-          'document review required checks must be the canonical ordered set or closure subset',
-      })
-    const completedPrefix = cycle.requiredCheckIds.slice(
-      0,
-      cycle.completedCheckIds.length,
-    )
-    if (
-      completedPrefix.length !== cycle.completedCheckIds.length ||
-      completedPrefix.some(
-        (id, index) => id !== cycle.completedCheckIds[index],
-      ) ||
-      cycle.acceptedSemanticResult !==
-        (cycle.completedCheckIds.length === cycle.requiredCheckIds.length) ||
-      cycle.completedCheckIds.some(
-        id => !cycle.checks.some(check => check.id === id),
-      )
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['completedCheckIds'],
-        message:
-          'document review completed checks must be the required-order prefix',
-      })
-    if (
-      cycle.mode === 'initial' &&
-      (cycle.originScope !== cycle.scope ||
-        cycle.parentCycleId ||
-        (!cycle.acceptedSemanticResult && cycle.activeTarget) ||
-        cycle.changedPaths.length > 0)
-    )
-      context.addIssue({
-        code: 'custom',
-        message: 'initial document review cycle has closure-only state',
-      })
-    if (
-      cycle.mode === 'closure' &&
-      (!cycle.parentCycleId || !cycle.activeTarget)
-    )
-      context.addIssue({
-        code: 'custom',
-        message: 'closure document review cycle requires parent and target',
-      })
-    const findingIds = cycle.findings.map(finding => finding.findingId)
-    if (new Set(findingIds).size !== findingIds.length)
-      context.addIssue({
-        code: 'custom',
-        path: ['findings'],
-        message: 'document review finding ledger IDs must be unique',
-      })
-    const findingById = new Map(
-      cycle.findings.map(finding => [finding.findingId, finding]),
-    )
-    if (
-      cycle.checks.some(check =>
-        check.findingIds.some(
-          findingId => findingById.get(findingId)?.checkId !== check.id,
-        ),
-      )
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['checks'],
-        message:
-          'document review check finding IDs must resolve to their canonical ledger owner',
-      })
-    if (cycle.repairPlan) {
-      if (!cycle.acceptedSemanticResult || cycle.activeTarget !== 'foundation')
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan'],
-          message:
-            'foundation repair plan requires one accepted active foundation finding ledger',
-        })
-      const foundationFindings = openDocumentReviewFindings(cycle).filter(
-        finding => finding.owner === 'foundation',
-      )
-      let derivedRepairGroups: ReturnType<typeof deriveFoundationRepairGroups> =
-        []
-      let repairGraphDerived = true
-      try {
-        derivedRepairGroups = deriveFoundationRepairGroups(foundationFindings)
-      } catch {
-        repairGraphDerived = false
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'groups'],
-          message: 'foundation repair findings must have canonical subjects',
-        })
-      }
-      if (
-        repairGraphDerived &&
-        !repairPlanMatchesCanonicalGraph(
-          cycle.repairPlan.groups,
-          derivedRepairGroups,
-        )
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'groups'],
-          message:
-            'repair plan must be the stable canonical repair-graph prefix',
-        })
-      if (
-        cycle.repairPlan.groups.length < derivedRepairGroups.length &&
-        cycle.repairPlan.completedPaths.length > 0
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'completedPaths'],
-          message:
-            'document repair cannot start before every finding has a decision',
-        })
-      const repairPaths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-        cycle.repairPlan!.groups.some(group =>
-          group.pathDecisions.some(pathDecision => pathDecision.path === path),
-        ),
-      )
-      const completedPrefix = repairPaths.slice(
-        0,
-        cycle.repairPlan.completedPaths.length,
-      )
-      if (
-        completedPrefix.length !== cycle.repairPlan.completedPaths.length ||
-        completedPrefix.some(
-          (path, index) => path !== cycle.repairPlan!.completedPaths[index],
-        )
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['repairPlan', 'completedPaths'],
-          message:
-            'repair plan completed paths must be the canonical owner-order prefix',
-        })
-    }
-  })
-
-const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
-  .object({
-    foundationApproval: documentReviewApprovalSchema.optional(),
-    checklistApproval: documentReviewApprovalSchema.optional(),
-    comprehensiveApproval: documentReviewApprovalSchema.optional(),
-    activeCycle: documentReviewCycleSchema.optional(),
-    repairPasses: z
+    approvals: z
       .object({
-        foundation: z.number().int().min(0),
-        checklist: z.number().int().min(0),
-        resource: z.number().int().min(0),
+        foundation: z
+          .object({
+            scope: z.literal('foundation'),
+            revision: z.string().regex(/^[a-f0-9]{64}$/u),
+            reportPath: z.string().min(1),
+            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+            approvedAt: z.string().datetime(),
+          })
+          .strict()
+          .optional(),
+        checklist: z
+          .object({
+            scope: z.literal('checklist'),
+            revision: z.string().regex(/^[a-f0-9]{64}$/u),
+            reportPath: z.string().min(1),
+            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+            approvedAt: z.string().datetime(),
+          })
+          .strict()
+          .optional(),
+        complete: z
+          .object({
+            scope: z.literal('complete'),
+            revision: z.string().regex(/^[a-f0-9]{64}$/u),
+            reportPath: z.string().min(1),
+            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+            approvedAt: z.string().datetime(),
+          })
+          .strict()
+          .optional(),
       })
-      .strict(),
+      .strict()
+      .default({}),
+    attempts: z
+      .object({
+        foundation: z.number().int().nonnegative(),
+        checklist: z.number().int().nonnegative(),
+        complete: z.number().int().nonnegative(),
+      })
+      .strict()
+      .default({ foundation: 0, checklist: 0, complete: 0 }),
   })
   .strict()
-  .superRefine((state, context) => {
-    const approvals = [
-      ['foundationApproval', state.foundationApproval, 'foundation'],
-      ['checklistApproval', state.checklistApproval, 'checklist'],
-      ['comprehensiveApproval', state.comprehensiveApproval, 'complete'],
-    ] as const
-    for (const [path, approval, scope] of approvals)
-      if (approval && approval.scope !== scope)
-        context.addIssue({
-          code: 'custom',
-          path: [path, 'scope'],
-          message: `${path} must use ${scope} scope`,
-        })
-  })
-
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
@@ -642,32 +396,6 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
         receiptRef: z.string().min(1),
         payload: z
           .object({ path: z.string().min(1), revision: z.string().min(1) })
-          .strict(),
-      })
-      .strict(),
-    z
-      .object({
-        ...acceptedWorkflowUnitBase,
-        kind: z.literal('review-check'),
-        payload: z
-          .object({
-            check: persistedDocumentReviewCheckSchema,
-            findings: z.array(persistedDocumentReviewFindingSchema),
-            dependencyDigests: checkEvidenceDigestsSchema,
-          })
-          .strict(),
-      })
-      .strict(),
-    z
-      .object({
-        ...acceptedWorkflowUnitBase,
-        kind: z.literal('checklist'),
-        payload: z
-          .object({
-            revision: z.string().min(1),
-            evidencePath: z.string().min(1),
-            checkIds: z.array(z.string().min(1)).min(1),
-          })
           .strict(),
       })
       .strict(),
@@ -867,7 +595,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       run.phase === 'ACCEPTANCE' ||
       run.phase === 'DELIVERY' ||
       (run.phase === 'DOCUMENT_DRAFTING' &&
-        run.documentReviewState.activeCycle?.acceptedSemanticResult === true)
+        run.documentReviewState.activeRun?.verdict === 'NEEDS_REVISION')
     if (
       requiresCompletedFoundation &&
       run.foundationDraftState.completedPaths.length !==
@@ -881,15 +609,16 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       })
 
     const requiresFrozenChecklistApproval =
-      run.phase === 'RESOURCE_PREPARATION' ||
-      run.phase === 'ATOMIC_TASK_PLANNING' ||
-      run.phase === 'IMPLEMENTATION' ||
-      run.phase === 'IMPLEMENTATION_AUDIT' ||
-      run.phase === 'ACCEPTANCE' ||
-      run.phase === 'DELIVERY' ||
-      (run.phase === 'DOCUMENT_REVIEW' &&
-        run.documentStep === 'COMPREHENSIVE_REVIEW')
-    const checklistApproval = run.documentReviewState.checklistApproval
+      run.status !== 'completed' &&
+      (run.phase === 'RESOURCE_PREPARATION' ||
+        run.phase === 'ATOMIC_TASK_PLANNING' ||
+        run.phase === 'IMPLEMENTATION' ||
+        run.phase === 'IMPLEMENTATION_AUDIT' ||
+        run.phase === 'ACCEPTANCE' ||
+        run.phase === 'DELIVERY' ||
+        (run.phase === 'DOCUMENT_REVIEW' &&
+          run.documentStep === 'COMPREHENSIVE_REVIEW'))
+    const checklistApproval = run.documentReviewState.approvals.checklist
     if (
       requiresFrozenChecklistApproval &&
       (!checklistApproval ||
@@ -897,7 +626,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     )
       context.addIssue({
         code: 'custom',
-        path: ['documentReviewState', 'checklistApproval'],
+        path: ['documentReviewState', 'approvals', 'checklist'],
         message:
           'resource and downstream phases require the frozen current checklist approval',
       })

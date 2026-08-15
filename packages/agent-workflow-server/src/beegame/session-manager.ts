@@ -35,8 +35,6 @@ import type {
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
-import type { DocumentReviewSubmissionContract } from './delivery-workflow/document-review-input'
-import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
 import type { ResourceContentCommitContract } from './native-resource-content-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
@@ -263,10 +261,8 @@ export type BeeGameSessionRunnerStartInput = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
+  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
-  workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
@@ -330,7 +326,6 @@ export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   /** User-confirmed context exposed read-only to platform contract tools. */
   confirmedBriefContext?: string
-  workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -392,13 +387,11 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
+  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
@@ -481,7 +474,10 @@ function resourceWorkerActivityMessage(
   record: SessionRecord,
   event: BeeGameEvent,
 ): string | undefined {
-  if (record.workflowWorkerType !== 'resource-curator' || event.type !== 'tool.started')
+  if (
+    record.workflowWorkerType !== 'resource-curator' ||
+    event.type !== 'tool.started'
+  )
     return undefined
   if (event.payload?.toolName === 'CommitResourceInventory') {
     return record.language === 'zh-TW'
@@ -566,13 +562,11 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowDocumentReviewContract?: DocumentReviewSubmissionContract
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  workflowDocumentAuthorMode?: 'initial' | 'repair-planning' | 'remediation'
-  workflowDocumentRepairPlanContract?: DocumentRepairPlanSubmissionContract
+  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
 
@@ -634,9 +628,7 @@ export class BeeGameSessionManager {
     if (!configuredDataRoot) {
       throw new Error('BeeGame session data root is required')
     }
-    this.dashboardDataRoot = resolveExistingPath(
-      configuredDataRoot,
-    )
+    this.dashboardDataRoot = resolveExistingPath(configuredDataRoot)
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
@@ -708,14 +700,11 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
-      ...(input.workflowDocumentReviewContract
-        ? {
-            workflowDocumentReviewContract:
-              input.workflowDocumentReviewContract,
-          }
-        : {}),
       ...(input.workflowMarkdownStreamContract
-        ? { workflowMarkdownStreamContract: input.workflowMarkdownStreamContract }
+        ? {
+            workflowMarkdownStreamContract:
+              input.workflowMarkdownStreamContract,
+          }
         : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
@@ -728,12 +717,6 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
-        : {}),
-      ...(input.workflowDocumentRepairPlanContract
-        ? {
-            workflowDocumentRepairPlanContract:
-              input.workflowDocumentRepairPlanContract,
-          }
         : {}),
       ...(input.workflowResourceContentCommitContract
         ? {
@@ -1406,61 +1389,48 @@ export class BeeGameSessionManager {
             selectedEnvironment,
             env,
           ),
-            ...(this.resourceSelectionConfig &&
-            env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
-            (!record.workflowWorker ||
-              record.workflowWorkerType === 'resource-curator')
-              ? { resourceSelectionConfig: this.resourceSelectionConfig }
-              : {}),
-            ...(record.language ? { language: record.language } : {}),
-            ...(record.workflowWorker ? { workflowWorker: true } : {}),
-            ...(record.workflowWorkerType
-              ? { workflowWorkerType: record.workflowWorkerType }
-              : {}),
-            ...(record.workflowDispatchId
-              ? { workflowDispatchId: record.workflowDispatchId }
-              : {}),
-            ...(record.workflowDocumentReviewContract
-              ? {
-                  workflowDocumentReviewContract:
-                    record.workflowDocumentReviewContract,
-                }
-              : {}),
-            ...(record.workflowMarkdownStreamContract
-              ? {
-                  workflowMarkdownStreamContract:
-                    record.workflowMarkdownStreamContract,
-                }
-              : {}),
-            ...(record.workflowAllowedPaths
-              ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
-              : {}),
-            ...(record.workflowProtectedPaths
-              ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
-              : {}),
-            ...(record.workflowReadOnlyPaths
-              ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
-              : {}),
-            ...(record.workflowDocumentAuthorMode
-              ? {
-                  workflowDocumentAuthorMode: record.workflowDocumentAuthorMode,
-                }
-              : {}),
-            ...(record.workflowDocumentRepairPlanContract
-              ? {
-                  workflowDocumentRepairPlanContract:
-                    record.workflowDocumentRepairPlanContract,
-                }
-              : {}),
-            ...(record.workflowResourceContentCommitContract
-              ? {
-                  workflowResourceContentCommitContract:
-                    record.workflowResourceContentCommitContract,
-                }
-              : {}),
-            requestPermission: request =>
-              this.requestPermission(record, request),
-          }))
+          ...(this.resourceSelectionConfig &&
+          env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
+          (!record.workflowWorker ||
+            record.workflowWorkerType === 'resource-curator')
+            ? { resourceSelectionConfig: this.resourceSelectionConfig }
+            : {}),
+          ...(record.language ? { language: record.language } : {}),
+          ...(record.workflowWorker ? { workflowWorker: true } : {}),
+          ...(record.workflowWorkerType
+            ? { workflowWorkerType: record.workflowWorkerType }
+            : {}),
+          ...(record.workflowDispatchId
+            ? { workflowDispatchId: record.workflowDispatchId }
+            : {}),
+          ...(record.workflowMarkdownStreamContract
+            ? {
+                workflowMarkdownStreamContract:
+                  record.workflowMarkdownStreamContract,
+              }
+            : {}),
+          ...(record.workflowAllowedPaths
+            ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
+            : {}),
+          ...(record.workflowProtectedPaths
+            ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
+            : {}),
+          ...(record.workflowReadOnlyPaths
+            ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
+            : {}),
+          ...(record.workflowDocumentAuthorMode
+            ? {
+                workflowDocumentAuthorMode: record.workflowDocumentAuthorMode,
+              }
+            : {}),
+          ...(record.workflowResourceContentCommitContract
+            ? {
+                workflowResourceContentCommitContract:
+                  record.workflowResourceContentCommitContract,
+              }
+            : {}),
+          requestPermission: request => this.requestPermission(record, request),
+        }))
       record.runner = runner
       await this.submitToRunner(
         record,
@@ -1573,12 +1543,6 @@ export class BeeGameSessionManager {
       prompt,
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }
-        : {}),
-      ...(record.workflowDocumentReviewContract
-        ? {
-            workflowDocumentReviewContract:
-              record.workflowDocumentReviewContract,
-          }
         : {}),
       signal,
       onMessage: message => {
@@ -1878,20 +1842,15 @@ export class BeeGameSessionManager {
       return Promise.resolve({ ...authority, scope: 'once' })
     }
     if (authorizeProjectWorkspaceFileMutation(record, request)) {
-      this.append(
-        record,
-        'permission.resolved',
-        `${request.toolName}: allow`,
-        {
-          type: 'permission.resolved',
-          toolUseID: request.toolUseID,
-          toolName: request.toolName,
-          decision: 'allow',
-          scope: 'once',
-          autoApproved: true,
-          reason: 'project_workspace_file_mutation',
-        },
-      )
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: 'project_workspace_file_mutation',
+      })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
     }
     return new Promise(resolve => {
@@ -1974,13 +1933,13 @@ export class BeeGameSessionManager {
       )
         ? (resourceActivityMessage ?? '')
         : record.workflowWorkerType === 'document-author'
-          ? documentActivityMessage ??
+          ? (documentActivityMessage ??
             (event.type === 'assistant.message'
               ? sanitizeWorkflowDisplayMessage(event.text)
-              : '')
-        : event.type === 'assistant.message'
-          ? sanitizeWorkflowDisplayMessage(event.text)
-          : ''
+              : ''))
+          : event.type === 'assistant.message'
+            ? sanitizeWorkflowDisplayMessage(event.text)
+            : ''
       // Initial authoring already has one durable taskId. Keep that authority
       // stable while the worker reads upstream documents instead of projecting
       // transient Read events as a different active task.
@@ -4410,9 +4369,7 @@ function trackStreamingToolUse(
   if (toolUseId && toolName) record.streamingToolUses.set(toolUseId, toolName)
 }
 
-function mapStreamingToolInputActivity(
-  message: DashboardSDKMessage,
-): {
+function mapStreamingToolInputActivity(message: DashboardSDKMessage): {
   type: 'tool.progress'
   text: string
   payload: DashboardSDKMessage
@@ -4539,8 +4496,8 @@ function buildRuntimeEnv(
   selectedEnvironment: Record<string, string>,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(selectedEnvironment).filter(
-      ([key]) => RUNTIME_MODEL_ENV_KEYS.has(key),
+    Object.entries(selectedEnvironment).filter(([key]) =>
+      RUNTIME_MODEL_ENV_KEYS.has(key),
     ),
   )
 }
@@ -4613,9 +4570,7 @@ function buildRuntimeLaunchContract(
     selectedEnvironmentKeys: Object.keys(selectedEnvironment).sort(),
     forwardedEnvironmentKeys: Object.keys(forwardedEnvironment).sort(),
     endpointClass: classifyRuntimeEndpoint(endpoint),
-    configDirectoryConfigured: Boolean(
-      forwardedEnvironment.BEEGAME_CONFIG_DIR,
-    ),
+    configDirectoryConfigured: Boolean(forwardedEnvironment.BEEGAME_CONFIG_DIR),
     credentialConfigured: Boolean(
       forwardedEnvironment.ANTHROPIC_AUTH_TOKEN ||
         forwardedEnvironment.OPENAI_API_KEY ||

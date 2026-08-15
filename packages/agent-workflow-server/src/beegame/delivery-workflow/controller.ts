@@ -13,16 +13,16 @@ import {
   createChangeRequest,
 } from './change-request'
 import {
-  beginResourceDocumentReviewClosure,
-  buildDocumentReviewDispatch,
   completeDocumentDraft,
-  createInitialDocumentReviewCycle,
-  documentReviewerDispatchMatchesActivePacket,
-  reconcileDocumentReview,
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
-import { assertReviewAuthority } from './document-review-input'
+import {
+  acceptDocumentReviewTerminal,
+  buildDocumentReviewDispatches,
+  createDocumentReviewRun,
+  routeCompletedDocumentReview,
+} from './document-review-stage'
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
@@ -49,7 +49,10 @@ import {
   startImplementationAudit,
 } from './validation-stage'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import { CANONICAL_DOCUMENT_ARTIFACTS } from './types'
+import {
+  CANONICAL_DOCUMENT_ARTIFACTS,
+  CANONICAL_FOUNDATION_DOCUMENTS,
+} from './types'
 import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
@@ -66,6 +69,24 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
+import { relative } from 'node:path'
+
+function reviewSourcePaths(
+  workspacePath: string,
+  dispatches: ReturnType<typeof buildDocumentReviewDispatches>,
+): string[] {
+  return [
+    ...new Set(
+      dispatches
+        .flatMap(item => [
+          ...item.assignment.sourcePaths,
+          ...item.assignment.verificationSourcePaths,
+        ])
+        .map(path => relative(workspacePath, path).replaceAll('\\', '/'))
+        .filter(path => path.startsWith('docs/') || path.startsWith('assets/')),
+    ),
+  ].sort()
+}
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
@@ -258,7 +279,8 @@ export function createDeliveryWorkflowController(input: {
         documentReviewState:
           result.classification === 'documents_required'
             ? {
-                repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+                approvals: {},
+                attempts: { foundation: 0, checklist: 0, complete: 0 },
               }
             : next.documentReviewState,
         foundationDraftState:
@@ -339,41 +361,24 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (result.workerType === 'document-reviewer') {
-      const reviewScope =
-        request?.contract.reviewScope === 'foundation'
-          ? 'foundation'
-          : request?.contract.reviewScope === 'checklist'
-            ? 'checklist'
-            : 'complete'
-      const currentReviewRevision =
-        reviewScope !== 'complete'
-          ? await computeDocumentRevision(
-              input.workspacePath,
-              next.confirmedBriefDigest,
-            )
-          : await computeResourceRevision(
-              input.workspacePath,
-              next.revision.document,
-            )
-      next = await reconcileDocumentReview({
-        run: { ...next, phase: 'DOCUMENT_REVIEW' },
+      const activeRun = next.documentReviewState.activeRun
+      if (!activeRun)
+        throw new Error('document review terminal has no active review run')
+      const acceptedRun = await acceptDocumentReviewTerminal({
+        run: activeRun,
         workspacePath: input.workspacePath,
         terminal: result,
-        currentDocumentRevision: currentReviewRevision,
-        scope: reviewScope,
       })
-      next = await persist(
-        next,
-        reviewScope === 'foundation'
-          ? 'document.foundation.review.reconciled'
-          : reviewScope === 'checklist'
-            ? 'document.checklist.review.reconciled'
-            : 'document.review.reconciled',
-      )
-      // The persisted phase/documentStep is the durable handoff marker. Use
-      // the same resume path for every next-stage transition so a process
-      // interruption between the persist and dispatch can be recovered by a
-      // later ensureProgress call.
+      next = {
+        ...next,
+        documentReviewState: {
+          ...next.documentReviewState,
+          activeRun: acceptedRun,
+        },
+      }
+      if (acceptedRun.status === 'completed')
+        next = routeCompletedDocumentReview({ run: next, review: acceptedRun })
+      next = await persist(next, 'document.review.report.accepted')
       await resumeUnlocked(next)
       return
     }
@@ -394,22 +399,6 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
       })
-      if (
-        next.status === 'running' &&
-        next.phase === 'DOCUMENT_REVIEW' &&
-        next.documentReviewState.activeCycle?.acceptedSemanticResult &&
-        next.documentReviewState.activeCycle.activeTarget === 'resource'
-      ) {
-        if (!next.revision.resource)
-          throw new Error(
-            'resource review closure requires the completed resource revision',
-          )
-        next = await beginResourceDocumentReviewClosure({
-          run: next,
-          workspacePath: input.workspacePath,
-          currentRevision: next.revision.resource,
-        })
-      }
       next = await persist(
         next,
         next.phase === 'RESOURCE_PREPARATION' && next.status === 'running'
@@ -807,7 +796,7 @@ export function createDeliveryWorkflowController(input: {
   }
 
   function comprehensiveReviewMissing(run: DeliveryRun): boolean {
-    const approval = run.documentReviewState.comprehensiveApproval
+    const approval = run.documentReviewState.approvals?.complete
     return (
       !run.revision.resource ||
       !approval ||
@@ -856,7 +845,8 @@ export function createDeliveryWorkflowController(input: {
       tasks: [],
       evidence: {},
       documentReviewState: {
-        repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+        approvals: {},
+        attempts: { foundation: 0, checklist: 0, complete: 0 },
       },
       foundationDraftState: { completedPaths: [] },
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
@@ -943,21 +933,6 @@ export function createDeliveryWorkflowController(input: {
       }
     }
     if (run.activeDispatch?.terminalResult) {
-      if (
-        !documentReviewerDispatchMatchesActivePacket(run, run.activeDispatch)
-      ) {
-        const refreshed = await persist(
-          {
-            ...run,
-            activeDispatch: undefined,
-            blockedReason: undefined,
-          },
-          'document.review.stale_terminal_discarded',
-          { dispatchId: run.activeDispatch.dispatchId },
-        )
-        await resumeUnlocked(refreshed)
-        return
-      }
       // resumeUnlocked already owns the controller serialization lane. Reuse
       // the canonical terminal handler directly instead of queueing behind
       // ourselves through handleTerminal.
@@ -1006,8 +981,9 @@ export function createDeliveryWorkflowController(input: {
       } else {
         if (
           run.documentStep === 'COMPREHENSIVE_REVIEW' &&
-          (run.documentReviewState.checklistApproval?.scope !== 'checklist' ||
-            run.documentReviewState.checklistApproval.revision !==
+          (run.documentReviewState.approvals?.checklist?.scope !==
+            'checklist' ||
+            run.documentReviewState.approvals.checklist.revision !==
               run.revision.document)
         ) {
           await persist(
@@ -1040,25 +1016,6 @@ export function createDeliveryWorkflowController(input: {
             return
           }
         }
-        try {
-          assertReviewAuthority({
-            confirmedBriefContext: run.confirmedBriefContext,
-            confirmedBriefDigest: run.confirmedBriefDigest,
-          })
-        } catch (error) {
-          await persist(
-            {
-              ...run,
-              status: 'needs_action',
-              blockedReason:
-                error instanceof Error
-                  ? error.message
-                  : 'document review authority is invalid',
-            },
-            'document.review.authority.invalid',
-          )
-          return
-        }
         const reviewScope =
           run.documentStep === 'FOUNDATION_REVIEW'
             ? 'foundation'
@@ -1076,42 +1033,113 @@ export function createDeliveryWorkflowController(input: {
                 run.confirmedBriefDigest,
               )
         let reviewRun = run
-        if (!reviewRun.documentReviewState.activeCycle) {
-          reviewRun = await createInitialDocumentReviewCycle({
-            run: reviewRun,
-            workspacePath: input.workspacePath,
+        const activeRun = reviewRun.documentReviewState.activeRun
+        if (
+          !activeRun ||
+          activeRun.scope !== reviewScope ||
+          activeRun.revision !== reviewRevision
+        ) {
+          const attempt =
+            (reviewRun.documentReviewState.attempts?.[reviewScope] ?? 0) + 1
+          const created = createDocumentReviewRun({
             scope: reviewScope,
             revision: reviewRevision,
+            attempt,
+            ...(reviewScope === 'checklist'
+              ? {
+                  approvedFoundationRevision:
+                    reviewRun.documentReviewState.approvals?.foundation
+                      ?.revision,
+                }
+              : {}),
           })
-          reviewRun = await persist(reviewRun, 'document.review.cycle.created')
+          reviewRun = await persist(
+            {
+              ...reviewRun,
+              documentReviewState: {
+                ...reviewRun.documentReviewState,
+                activeRun: created,
+                attempts: {
+                  foundation:
+                    reviewRun.documentReviewState.attempts?.foundation ?? 0,
+                  checklist:
+                    reviewRun.documentReviewState.attempts?.checklist ?? 0,
+                  complete:
+                    reviewRun.documentReviewState.attempts?.complete ?? 0,
+                  [reviewScope]: attempt,
+                },
+              },
+            },
+            'document.review.run.created',
+          )
         }
-        const cycle = reviewRun.documentReviewState.activeCycle
-        if (!cycle || cycle.acceptedSemanticResult) {
-          const blocked = {
-            ...reviewRun,
-            status: 'needs_action' as const,
-            blockedReason:
-              'document review cycle has already accepted its unique semantic result',
-          }
-          await persist(blocked, 'document.review.redispatch.rejected')
-          return
-        }
-        if (cycle.sourceRevision !== reviewRevision) {
-          const blocked = {
-            ...reviewRun,
-            status: 'needs_action' as const,
-            blockedReason:
-              'canonical artifacts changed after the document review cycle was frozen',
-          }
-          await persist(blocked, 'document.review.revision.changed')
-          return
-        }
-        reviewRun = await persist(reviewRun, 'document.review.semantic.started')
-        await dispatcher.dispatch(
-          await buildDocumentReviewDispatch({
-            run: reviewRun,
-            workspacePath: input.workspacePath,
-          }),
+        const pending = buildDocumentReviewDispatches({
+          run: reviewRun.documentReviewState.activeRun!,
+          workspacePath: input.workspacePath,
+          revisionVerification:
+            reviewScope === 'complete'
+              ? {
+                  kind: 'resource',
+                  confirmedBriefDigest: reviewRun.confirmedBriefDigest,
+                  prerequisiteReports: reviewRun.documentReviewState.approvals
+                    ?.checklist
+                    ? [
+                        {
+                          path: reviewRun.documentReviewState.approvals.checklist
+                            .reportPath,
+                          digest:
+                            reviewRun.documentReviewState.approvals.checklist
+                              .reportDigest,
+                        },
+                      ]
+                    : [],
+                }
+              : {
+                  kind: 'document',
+                  confirmedBriefDigest: reviewRun.confirmedBriefDigest,
+                  prerequisiteReports:
+                    reviewScope === 'checklist' &&
+                    reviewRun.documentReviewState.approvals?.foundation
+                      ? [
+                          {
+                            path: reviewRun.documentReviewState.approvals
+                              .foundation.reportPath,
+                            digest:
+                              reviewRun.documentReviewState.approvals.foundation
+                                .reportDigest,
+                          },
+                        ]
+                      : [],
+                },
+        })
+        const allowedAffectedPaths =
+          reviewScope === 'foundation'
+            ? [...CANONICAL_FOUNDATION_DOCUMENTS]
+            : reviewScope === 'checklist'
+              ? ['docs/acceptance/gameplay-checklist.md']
+              : reviewSourcePaths(input.workspacePath, pending)
+        await Promise.all(
+          pending.map(item =>
+            dispatcher.dispatch({
+              runId: reviewRun.runId,
+              ownerId: reviewRun.ownerId,
+              projectId: reviewRun.projectId,
+              workspacePath: input.workspacePath,
+              workerType: 'document-reviewer',
+              phase: 'DOCUMENT_REVIEW',
+              taskId: `review:${reviewScope}:${item.assignment.role}:${reviewRun.documentReviewState.activeRun!.attempt}`,
+              revision: reviewRevision,
+              allowedPaths: item.assignment.stagingOutputPaths,
+              protectedPaths: [
+                ...item.assignment.sourcePaths,
+                ...item.assignment.verificationSourcePaths,
+              ],
+              contract: {
+                ...item.contract,
+                allowedAffectedPaths,
+              },
+            }),
+          ),
         )
       }
       return
@@ -1129,24 +1157,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
       })
       if (reconciledResources) {
-        let reconciled = reconciledResources
-        if (
-          reconciled.phase === 'DOCUMENT_REVIEW' &&
-          reconciled.documentReviewState.activeCycle?.acceptedSemanticResult &&
-          reconciled.documentReviewState.activeCycle.activeTarget === 'resource'
-        ) {
-          if (!reconciled.revision.resource)
-            throw new Error(
-              'resource review closure requires the completed resource revision',
-            )
-          reconciled = await beginResourceDocumentReviewClosure({
-            run: reconciled,
-            workspacePath: input.workspacePath,
-            currentRevision: reconciled.revision.resource,
-          })
-        }
         const saved = await persist(
-          reconciled,
+          reconciledResources,
           'resource.preparation.reconciled',
         )
         await resumeUnlocked(saved)

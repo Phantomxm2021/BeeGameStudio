@@ -122,28 +122,26 @@ describe('parallel foundation authoring batch', () => {
     let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
     state = dispatchAndCommit(state, 'docs/LEVEL_SCENE_DESIGN.md')
     state = recordFoundationFailure(
-      recordFoundationDispatch(
-        state,
-        'docs/BALANCE_DESIGN.md',
-        'drafting',
-        {
-          dispatchId: 'dispatch-balance',
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          taskId: 'docs/BALANCE_DESIGN.md',
-          revision: 'revision-1',
-          status: 'running',
-          startedAt: new Date().toISOString(),
-        },
-      ),
+      recordFoundationDispatch(state, 'docs/BALANCE_DESIGN.md', 'drafting', {
+        dispatchId: 'dispatch-balance',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/BALANCE_DESIGN.md',
+        revision: 'revision-1',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      }),
       'docs/BALANCE_DESIGN.md',
       'stream receipt missing',
     )
 
     const retried = retryFoundationFailures(state)
 
-    expect(retried.documents?.find(document =>
-      document.path === 'docs/BALANCE_DESIGN.md')).toEqual({
+    expect(
+      retried.documents?.find(
+        document => document.path === 'docs/BALANCE_DESIGN.md',
+      ),
+    ).toEqual({
       path: 'docs/BALANCE_DESIGN.md',
       status: 'pending',
     })

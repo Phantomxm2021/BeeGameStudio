@@ -349,7 +349,8 @@ export function createInitialDeliveryRun(input: {
     tasks: [],
     evidence: {},
     documentReviewState: {
-      repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+      approvals: {},
+      attempts: { foundation: 0, checklist: 0, complete: 0 },
     },
     foundationDraftState: { completedPaths: [] },
     resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
@@ -1107,10 +1108,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
         run.status === 'stopped' && usageDispatch?.status === 'interrupted'
-      if (
-        !usageDispatch ||
-        (!acceptsRunningUsage && !acceptsStoppedTailUsage)
-      )
+      if (!usageDispatch || (!acceptsRunningUsage && !acceptsStoppedTailUsage))
         return null
       const events = await readEventsUnlocked()
       const journalUsage = journalUsageHighWater(events)

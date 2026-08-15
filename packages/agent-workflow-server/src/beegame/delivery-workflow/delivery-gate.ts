@@ -33,7 +33,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
   }
   if (
     !run.revision.resource ||
-    run.documentReviewState.comprehensiveApproval?.revision !==
+    run.documentReviewState.approvals.complete?.revision !==
       run.revision.resource
   ) {
     return {
@@ -55,12 +55,22 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed implementation-audit evidence.'],
     }
   }
+  const completeApproval = run.documentReviewState.approvals.complete
+  let reviewReportCurrent = false
+  if (completeApproval) {
+    try {
+      const bytes = await readFile(
+        resolve(input.workspacePath, completeApproval.reportPath),
+      )
+      reviewReportCurrent =
+        createHash('sha256').update(bytes).digest('hex') ===
+        completeApproval.reportDigest
+    } catch {
+      reviewReportCurrent = false
+    }
+  }
   if (
-    !run.documentReviewState.comprehensiveApproval?.evidencePath ||
-    !isWorkflowEvidenceFile(
-      input.workspacePath,
-      run.documentReviewState.comprehensiveApproval.evidencePath,
-    ) ||
+    !reviewReportCurrent ||
     !run.evidence.resourcePreparation.path ||
     !isWorkflowEvidenceFile(
       input.workspacePath,
@@ -124,3 +134,6 @@ export async function evaluateWorkflowDeliveryGate(input: {
   }
   return { allowed: true, issues: [] }
 }
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'

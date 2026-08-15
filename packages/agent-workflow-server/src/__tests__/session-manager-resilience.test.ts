@@ -145,7 +145,9 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       (await readAuthoredDocumentReceipt(workspacePath, 'dispatch-1'))?.status,
     ).toBe('committed')
-    expect(manager.events(session.id).some(event => event.type === 'turn.completed')).toBe(true)
+    expect(
+      manager.events(session.id).some(event => event.type === 'turn.completed'),
+    ).toBe(true)
     await manager.dispose()
   })
 
@@ -405,8 +407,8 @@ describe('BeeGame session runtime resilience', () => {
               index: 0,
               content_block: {
                 type: 'tool_use',
-                id: 'review-terminal-1',
-                name: 'SubmitDocumentReviewPacket',
+                id: 'plan-terminal-1',
+                name: 'SubmitAtomicTaskPlan',
                 input: {},
               },
             },
@@ -418,8 +420,8 @@ describe('BeeGame session runtime resilience', () => {
               content: [
                 {
                   type: 'tool_use',
-                  id: 'review-terminal-1',
-                  name: 'SubmitDocumentReviewPacket',
+                  id: 'plan-terminal-1',
+                  name: 'SubmitAtomicTaskPlan',
                   input: {},
                 },
               ],
@@ -431,7 +433,7 @@ describe('BeeGame session runtime resilience', () => {
               content: [
                 {
                   type: 'tool_result',
-                  tool_use_id: 'review-terminal-1',
+                  tool_use_id: 'plan-terminal-1',
                   content: 'accepted',
                 },
               ],
@@ -448,33 +450,22 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'atomic-task-planner',
     })
 
-    const send = manager.send(session.id, 'review documents')
+    const send = manager.send(session.id, 'plan implementation tasks')
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (
-        manager.hasInFlightToolSubmission(
-          session.id,
-          'SubmitDocumentReviewPacket',
-        )
-      )
+      if (manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'))
         break
       await new Promise(resolve => setTimeout(resolve, 2))
     }
     expect(
-      manager.hasInFlightToolSubmission(
-        session.id,
-        'SubmitDocumentReviewPacket',
-      ),
+      manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'),
     ).toBe(true)
     releaseStream()
     await send
     expect(
-      manager.hasInFlightToolSubmission(
-        session.id,
-        'SubmitDocumentReviewPacket',
-      ),
+      manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'),
     ).toBe(false)
   })
 
@@ -751,19 +742,15 @@ describe('BeeGame session runtime resilience', () => {
         }
       },
     }
-    const manager = new BeeGameSessionManager(
-      runner,
-      root,
-      async () => ({
-        ANTHROPIC_BASE_URL: 'https://provider.example',
-        ANTHROPIC_AUTH_TOKEN: 'provider-token',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
-        BEEGAME_CONFIG_DIR: '/bgs/config',
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-        FEATURE_BASH_CLASSIFIER: '0',
-        NPM_CONFIG_USERCONFIG: '/bgs/npmrc',
-      }),
-    )
+    const manager = new BeeGameSessionManager(runner, root, async () => ({
+      ANTHROPIC_BASE_URL: 'https://provider.example',
+      ANTHROPIC_AUTH_TOKEN: 'provider-token',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-model',
+      BEEGAME_CONFIG_DIR: '/bgs/config',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      FEATURE_BASH_CLASSIFIER: '0',
+      NPM_CONFIG_USERCONFIG: '/bgs/npmrc',
+    }))
     const session = manager.start({ workspacePath, userId: 'user-1' })
 
     await manager.send(session.id, 'run the task')
@@ -1064,20 +1051,24 @@ describe('BeeGame session runtime resilience', () => {
 
     const turn = manager.send(session.id, 'author the document')
     let active = await store.load()
-    for (let attempt = 0; attempt < 400 && active?.thinking !== 'working'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 400 && active?.thinking !== 'working';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 5))
       active = await store.load()
     }
 
     expect(
-      manager
-        .events(session.id)
-        .some(event => event.type === 'tool.progress'),
+      manager.events(session.id).some(event => event.type === 'tool.progress'),
     ).toBe(true)
-    expect(active?.activeDispatch).toEqual(expect.objectContaining({
-      dispatchId: 'dispatch-document-input',
-      status: 'running',
-    }))
+    expect(active?.activeDispatch).toEqual(
+      expect.objectContaining({
+        dispatchId: 'dispatch-document-input',
+        status: 'running',
+      }),
+    )
     expect(active?.thinking).toBe('working')
     expect(active?.currentMessage).toBe('正在准备文档写入…')
     expect(active?.lastProgressAt).toBe(startedAt)

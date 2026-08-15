@@ -12,21 +12,11 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
-  parseAndValidateDocumentReviewPacketSubmission,
-  projectDocumentReviewReference,
-  REVIEW_AUTHORITY_ARTIFACT_PATH,
-  type DocumentReviewArtifact,
-  type DocumentReviewSubmissionContract,
-} from './delivery-workflow/document-review-input'
-import { SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH } from './delivery-workflow/system-delivery-contract'
-import {
   CANONICAL_ASSET_MANIFEST,
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   type DeliveryWorkerPort,
   type DispatchRecord,
-  type DocumentReviewCheckId,
   type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
@@ -36,15 +26,21 @@ import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   documentAuthorTerminalSchema,
-  documentRepairPlanSubmissionSchemaForContract,
   documentReviewerTerminalSchema,
   implementationAuditorTerminalSchema,
   questionAnswerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import type { DocumentRepairPlanSubmissionContract } from './delivery-workflow/worker-contracts'
-import { readAcceptanceChecklistIds } from './document-readiness-audit'
+import {
+  acceptFinalReport,
+  acceptSpecialistReport,
+  type DocumentReviewScope,
+} from './delivery-workflow/document-review-report'
+import type {
+  DocumentReviewAssignment,
+  DocumentReviewRole,
+} from './delivery-workflow/document-review-topology'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -65,161 +61,123 @@ import {
 } from './foundation-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { readAuthoredDocumentReceipt } from './authored-document-receipt'
+import { computeCurrentDocumentReviewRevision } from './delivery-workflow/document-review-stage'
 
 const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
-function reviewerSubmissionContract(
-  request: WorkerDispatchRequest,
-): DocumentReviewSubmissionContract | undefined {
+function reviewerAssignmentContract(request: WorkerDispatchRequest):
+  | {
+      assignment: DocumentReviewAssignment
+      revisionVerification:
+        | {
+            kind: 'document'
+            confirmedBriefDigest: string
+            prerequisiteReports: Array<{ path: string; digest: string }>
+          }
+        | {
+            kind: 'resource'
+            confirmedBriefDigest: string
+            prerequisiteReports: Array<{ path: string; digest: string }>
+          }
+      partDigests: Record<string, string>
+      allowedAffectedPaths: string[]
+    }
+  | undefined {
   if (request.workerType !== 'document-reviewer') return undefined
-  const scope = request.contract.reviewScope
-  const mode = request.contract.reviewMode
-  const authority = request.contract.reviewAuthority
-  const reviewArtifacts = request.contract.reviewArtifacts
-  const requiredCheckIds = request.contract.requiredCheckIds
-  const currentCheckIds = request.contract.currentCheckIds
+  const assignment = request.contract.assignment
+  const revisionVerification = request.contract.revisionVerification
+  const partDigests = request.contract.partDigests
+  const allowedAffectedPaths = request.contract.allowedAffectedPaths
+  if (
+    !assignment ||
+    typeof assignment !== 'object' ||
+    Array.isArray(assignment) ||
+    !revisionVerification ||
+    typeof revisionVerification !== 'object' ||
+    Array.isArray(revisionVerification) ||
+    !partDigests ||
+    typeof partDigests !== 'object' ||
+    Array.isArray(partDigests) ||
+    !Array.isArray(allowedAffectedPaths)
+  )
+    throw new Error('document reviewer report contract is invalid')
+  const revisionRecord = revisionVerification as Record<string, unknown>
+  const prerequisiteReports = revisionRecord.prerequisiteReports
+  if (
+    (revisionRecord.kind !== 'document' && revisionRecord.kind !== 'resource') ||
+    typeof revisionRecord.confirmedBriefDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(revisionRecord.confirmedBriefDigest) ||
+    !Array.isArray(prerequisiteReports) ||
+    prerequisiteReports.some(value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return true
+      const report = value as Record<string, unknown>
+      return (
+        typeof report.path !== 'string' ||
+        typeof report.digest !== 'string' ||
+        !/^[a-f0-9]{64}$/u.test(report.digest)
+      )
+    })
+  )
+    throw new Error('document reviewer revision verification is invalid')
+  const record = assignment as Record<string, unknown>
+  const scope = record.scope
+  const role = record.role
+  const pathKeys = [
+    'sourcePaths',
+    'stagingOutputPaths',
+    'committedOutputPaths',
+    'verificationSourcePaths',
+  ] as const
   if (
     (scope !== 'foundation' && scope !== 'checklist' && scope !== 'complete') ||
-    (mode !== 'initial' && mode !== 'closure') ||
-    !authority ||
-    typeof authority !== 'object' ||
-    Array.isArray(authority) ||
-    !Array.isArray(reviewArtifacts) ||
-    !Array.isArray(requiredCheckIds) ||
-    !Array.isArray(currentCheckIds) ||
-    currentCheckIds.length === 0 ||
-    currentCheckIds.some(
-      checkId =>
-        typeof checkId !== 'string' || !requiredCheckIds.includes(checkId),
+    typeof role !== 'string' ||
+    pathKeys.some(
+      key =>
+        !Array.isArray(record[key]) ||
+        (record[key] as unknown[]).some(path => typeof path !== 'string'),
+    ) ||
+    allowedAffectedPaths.some(path => typeof path !== 'string') ||
+    Object.values(partDigests).some(
+      digest => typeof digest !== 'string' || !/^[a-f0-9]{64}$/u.test(digest),
     )
   )
-    throw new Error('document reviewer submission contract is invalid')
-  const confirmedBriefContext = (authority as Record<string, unknown>)
-    .confirmedBriefContext
-  if (typeof confirmedBriefContext !== 'string' || !confirmedBriefContext)
-    throw new Error('document reviewer submission authority is invalid')
-  const artifacts: DocumentReviewArtifact[] = [
-    { path: REVIEW_AUTHORITY_ARTIFACT_PATH, content: confirmedBriefContext },
-    ...(reviewArtifacts as DocumentReviewArtifact[]),
-  ]
-  const priorFindings = Array.isArray(request.contract.priorFindings)
-    ? request.contract.priorFindings.flatMap(finding => {
-        if (!finding || typeof finding !== 'object' || Array.isArray(finding))
-          return []
-        const record = finding as Record<string, unknown>
-        return typeof record.findingId === 'string' &&
-          typeof record.checkId === 'string' &&
-          typeof record.requiredOutcome === 'string' &&
-          typeof record.open === 'boolean' &&
-          COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS.includes(
-            record.checkId as never,
-          ) &&
-          (record.owner === 'foundation' ||
-            record.owner === 'checklist' ||
-            record.owner === 'resource')
-          ? [
-              {
-                findingId: record.findingId,
-                checkId: record.checkId as DocumentReviewCheckId,
-                owner: record.owner as 'foundation' | 'checklist' | 'resource',
-                open: record.open,
-                requiredOutcome: record.requiredOutcome,
-                ...(Array.isArray(record.evidence)
-                  ? { evidence: record.evidence }
-                  : {}),
-                ...(Array.isArray(record.subjects)
-                  ? { subjects: record.subjects }
-                  : {}),
-                ...(typeof record.observation === 'string'
-                  ? { observation: record.observation }
-                  : {}),
-                ...(typeof record.blockingImpact === 'string'
-                  ? { blockingImpact: record.blockingImpact }
-                  : {}),
-              },
-            ]
-          : []
-      })
-    : undefined
-  const activeTarget = request.contract.activeTarget
+    throw new Error('document reviewer report assignment is invalid')
   return {
-    scope,
-    mode,
-    requiredCheckIds: requiredCheckIds as DocumentReviewCheckId[],
-    currentCheckIds: currentCheckIds as DocumentReviewCheckId[],
-    artifacts,
-    ...(activeTarget === 'foundation' ||
-    activeTarget === 'checklist' ||
-    activeTarget === 'resource'
-      ? { activeTarget }
-      : {}),
-    ...(priorFindings ? { priorFindings } : {}),
-    ...(Array.isArray(request.contract.changedPaths)
-      ? {
-          changedPaths: request.contract.changedPaths.filter(
-            (path): path is string => typeof path === 'string',
-          ),
+    assignment: {
+      scope: scope as DocumentReviewScope,
+      role: role as DocumentReviewRole,
+      sourcePaths: record.sourcePaths as string[],
+      stagingOutputPaths: record.stagingOutputPaths as string[],
+      committedOutputPaths: record.committedOutputPaths as string[],
+      verificationSourcePaths: record.verificationSourcePaths as string[],
+    },
+    revisionVerification: {
+      kind: revisionRecord.kind,
+      confirmedBriefDigest: revisionRecord.confirmedBriefDigest,
+      prerequisiteReports: prerequisiteReports.map(value => ({
+        path: (value as Record<string, unknown>).path as string,
+        digest: (value as Record<string, unknown>).digest as string,
+      })),
+    } as
+      | {
+          kind: 'document'
+          confirmedBriefDigest: string
+          prerequisiteReports: Array<{ path: string; digest: string }>
         }
-      : {}),
-  }
-}
-
-function repairPlanSubmissionContract(
-  request: WorkerDispatchRequest,
-): DocumentRepairPlanSubmissionContract | undefined {
-  if (
-    request.workerType !== 'document-author' ||
-    request.contract.authoringMode !== 'repair-planning'
-  )
-    return undefined
-  const task = request.contract.repairPlanTask
-  const groups =
-    task && typeof task === 'object' && !Array.isArray(task)
-      ? (task as { groups?: unknown }).groups
-      : undefined
-  if (!Array.isArray(groups) || groups.length === 0)
-    throw new Error('document repair plan contract is invalid')
-  return {
-    groups: groups.map(group => {
-      if (!group || typeof group !== 'object' || Array.isArray(group))
-        throw new Error('document repair plan group contract is invalid')
-      const { subjectPaths, candidatePaths } = group as Record<string, unknown>
-      if (
-        !Array.isArray(subjectPaths) ||
-        subjectPaths.length === 0 ||
-        !Array.isArray(candidatePaths) ||
-        candidatePaths.length === 0 ||
-        new Set(subjectPaths).size !== subjectPaths.length ||
-        new Set(candidatePaths).size !== candidatePaths.length ||
-        subjectPaths.some(
-          path =>
-            typeof path !== 'string' ||
-            !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-        ) ||
-        candidatePaths.some(
-          path =>
-            typeof path !== 'string' ||
-            !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-        ) ||
-        subjectPaths.some(path => !candidatePaths.includes(path))
-      )
-        throw new Error('document repair plan path contract is invalid')
-      return {
-        subjectPaths:
-          subjectPaths as DocumentRepairPlanSubmissionContract['groups'][number]['subjectPaths'],
-        candidatePaths:
-          candidatePaths as DocumentRepairPlanSubmissionContract['groups'][number]['candidatePaths'],
-      }
-    }),
+      | {
+          kind: 'resource'
+          confirmedBriefDigest: string
+          prerequisiteReports: Array<{ path: string; digest: string }>
+        },
+    partDigests: partDigests as Record<string, string>,
+    allowedAffectedPaths: allowedAffectedPaths as string[],
   }
 }
 
 function taskTypeForWorker(
   workerType: WorkerDispatchRequest['workerType'],
-  documentAuthorMode?: unknown,
 ): 'edit_turn' | 'agent_turn' {
-  return (workerType === 'document-author' &&
-    documentAuthorMode !== 'repair-planning') ||
+  return workerType === 'document-author' ||
     workerType === 'resource-planner' ||
     workerType === 'resource-curator' ||
     workerType === 'resource-content-author' ||
@@ -233,70 +191,24 @@ export async function buildDocumentAuthorAuthorityBlock(
   onProjection?: (projection: FoundationAuthorityProjection) => void,
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
-  if (request.contract.authoringMode === 'repair-planning') {
-    const repairPlanTask = request.contract.repairPlanTask
-    if (
-      !repairPlanTask ||
-      typeof repairPlanTask !== 'object' ||
-      Array.isArray(repairPlanTask)
-    )
-      throw new Error('document repair plan task is invalid')
-    const authorityReferences = (repairPlanTask as Record<string, unknown>)
-      .authorityReferences
-    const groups = (repairPlanTask as Record<string, unknown>).groups
-    if (!Array.isArray(groups) || groups.length === 0)
-      throw new Error('document repair plan groups are invalid')
-    if (
-      !Array.isArray(authorityReferences) ||
-      authorityReferences.length === 0 ||
-      authorityReferences.some(reference => {
-        if (
-          !reference ||
-          typeof reference !== 'object' ||
-          Array.isArray(reference)
-        )
-          return true
-        const { path, anchor, content } = reference as Record<string, unknown>
-        return (
-          typeof path !== 'string' ||
-          typeof anchor !== 'string' ||
-          typeof content !== 'string' ||
-          content.length === 0 ||
-          (!CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never) &&
-            path !== SYSTEM_DELIVERY_CONTRACT_ARTIFACT_PATH)
-        )
-      })
-    )
-      throw new Error(
-        'document repair decision authority references are invalid',
-      )
-    const references = authorityReferences as Array<{
-      path: string
-      anchor: string
-      content: string
-    }>
-    const sections = references
-    return [
-      'The workflow service projected the complete ordered accepted finding groups and their frozen subject/evidence plus bounded candidate authority below. Act only as the Repair Lead: lock one internally consistent minimum group decision and its necessary coordinated path decisions. Do not write project files, reopen review, or expand scope.',
-      ...sections.map(
-        section =>
-          `--- BEGIN REPAIR AUTHORITY: ${section.path} ${section.anchor} ---\n${section.content}\n--- END REPAIR AUTHORITY: ${section.path} ${section.anchor} ---`,
-      ),
-    ].join('\n\n')
-  }
   if (request.contract.authoringMode === 'remediation') {
     const targetPath = request.contract.foundationDocumentPath
+    const reviewReportPath = request.contract.reviewReportPath
     if (
       typeof targetPath !== 'string' ||
-      !CANONICAL_FOUNDATION_DOCUMENTS.includes(targetPath as never)
+      !CANONICAL_FOUNDATION_DOCUMENTS.includes(targetPath as never) ||
+      typeof reviewReportPath !== 'string' ||
+      !reviewReportPath.startsWith('.beegame/reviews/') ||
+      reviewReportPath.split('/').includes('..')
     )
-      throw new Error('document repair owner target is invalid')
-    const content = await readFile(
-      resolve(request.workspacePath, targetPath),
-      'utf8',
-    )
+      throw new Error('document remediation authority is invalid')
+    const [content, reviewReport] = await Promise.all([
+      readFile(resolve(request.workspacePath, targetPath), 'utf8'),
+      readFile(resolve(request.workspacePath, reviewReportPath), 'utf8'),
+    ])
     return [
-      `The workflow service projected the current repair target ${targetPath} below. Apply only the locked decisions in contract.repairTask and preserve unrelated content. The assigned Markdown file must be complete when the turn ends. The native runtime owns the file-operation sequence. Do not reopen the review decision.`,
+      `The workflow service projected the accepted final review report and current repair target ${targetPath} below. Resolve only report items that affect this owned path, preserve unrelated content, and keep the assigned Markdown file complete. Do not reinterpret or expand the review scope.`,
+      `--- BEGIN ACCEPTED REVIEW REPORT: ${reviewReportPath} ---\n${reviewReport}\n--- END ACCEPTED REVIEW REPORT: ${reviewReportPath} ---`,
       `--- BEGIN CANONICAL REPAIR TARGET: ${targetPath} ---\n${content}\n--- END CANONICAL REPAIR TARGET: ${targetPath} ---`,
     ].join('\n\n')
   }
@@ -370,7 +282,9 @@ export async function buildDocumentAuthorAuthorityBlock(
   if (
     request.contract.authoringMode === 'initial' &&
     (upstreamPaths.length !== expectedUpstreamPaths.length ||
-      expectedUpstreamPaths.some((path, index) => upstreamPaths[index] !== path))
+      expectedUpstreamPaths.some(
+        (path, index) => upstreamPaths[index] !== path,
+      ))
   )
     throw new Error(
       'initial document upstream authority does not match its contract',
@@ -383,9 +297,7 @@ export async function buildDocumentAuthorAuthorityBlock(
     else throw error
   }
   await Promise.all(
-    upstreamPaths.map(path =>
-      access(resolve(request.workspacePath, path)),
-    ),
+    upstreamPaths.map(path => access(resolve(request.workspacePath, path))),
   )
   const dispatchId = request.dispatchId
   if (
@@ -402,7 +314,10 @@ export async function buildDocumentAuthorAuthorityBlock(
       'initial document authority projection requires a dispatch identity',
     )
   const projectionRelativePath = foundationProjectionRelativePath(dispatchId)
-  const projection = await persistFoundationAuthorityIndex({ ...request, dispatchId })
+  const projection = await persistFoundationAuthorityIndex({
+    ...request,
+    dispatchId,
+  })
   onProjection?.(projection)
   return [
     upstreamPaths.length
@@ -483,6 +398,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request.contract.authoringMode === 'remediation'
           ? await buildDocumentAuthorAuthorityBlock(request)
           : ''
+      const reviewContract = reviewerAssignmentContract(request)
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -509,37 +425,40 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        ...(request.workerType === 'document-reviewer'
-          ? {
-              workflowDocumentReviewContract:
-                reviewerSubmissionContract(request),
-            }
-          : {}),
-        workflowAllowedPaths: request.allowedPaths ?? [],
+        workflowAllowedPaths:
+          reviewContract?.assignment.stagingOutputPaths ??
+          request.allowedPaths ??
+          [],
         ...(request.workerType !== 'resource-content-author' &&
         request.protectedPaths
           ? { workflowProtectedPaths: [...request.protectedPaths] }
           : {}),
-        ...(request.workerType === 'resource-content-author'
+        ...(reviewContract
           ? {
               workflowReadOnlyPaths: [
-                ...(Array.isArray(request.contract.authorityPaths)
-                  ? request.contract.authorityPaths.filter(
-                      (path): path is string => typeof path === 'string',
-                    )
-                  : []),
-                ...(Array.isArray(request.contract.repairPaths)
-                  ? request.contract.repairPaths.filter(
-                      (path): path is string => typeof path === 'string',
-                    )
-                  : []),
+                ...reviewContract.assignment.sourcePaths,
+                ...reviewContract.assignment.verificationSourcePaths,
               ],
             }
-          : {}),
+          : request.workerType === 'resource-content-author'
+            ? {
+                workflowReadOnlyPaths: [
+                  ...(Array.isArray(request.contract.authorityPaths)
+                    ? request.contract.authorityPaths.filter(
+                        (path): path is string => typeof path === 'string',
+                      )
+                    : []),
+                  ...(Array.isArray(request.contract.repairPaths)
+                    ? request.contract.repairPaths.filter(
+                        (path): path is string => typeof path === 'string',
+                      )
+                    : []),
+                ],
+              }
+            : {}),
         ...(request.workerType === 'document-author' &&
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft' ||
-          request.contract.authoringMode === 'repair-planning' ||
           request.contract.authoringMode === 'remediation')
           ? {
               workflowDocumentAuthorMode:
@@ -558,13 +477,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
                   .foundationDocumentPath as FoundationDocumentPath,
                 maxBytes: FOUNDATION_MARKDOWN_STREAM_MAX_BYTES,
               },
-            }
-          : {}),
-        ...(request.workerType === 'document-author' &&
-        request.contract.authoringMode === 'repair-planning'
-          ? {
-              workflowDocumentRepairPlanContract:
-                repairPlanSubmissionContract(request),
             }
           : {}),
         ...(request.workerType === 'resource-content-author'
@@ -587,10 +499,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
-      eventOffsets.set(
-        dispatchId,
-        0,
-      )
+      eventOffsets.set(dispatchId, 0)
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -608,22 +517,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const authToken = await input.getAuthToken?.()
       input.sessions.updateAuthToken(sessionId, authToken)
       const request = requests.get(dispatchId)
-      const reviewAuthority =
-        request?.workerType === 'document-reviewer' &&
-        request.contract.reviewAuthority &&
-        typeof request.contract.reviewAuthority === 'object' &&
-        !Array.isArray(request.contract.reviewAuthority)
-          ? (request.contract.reviewAuthority as Record<string, unknown>)
-          : undefined
       const confirmedBriefContext =
         request?.workerType === 'document-reviewer'
-          ? typeof reviewAuthority?.confirmedBriefContext === 'string'
-            ? reviewAuthority.confirmedBriefContext
-            : undefined
+          ? undefined
           : (input.confirmedBriefContext ??
             (await input.getConfirmedBriefContext?.()))
-      if (request?.workerType === 'document-reviewer' && !confirmedBriefContext)
-        throw new Error('document reviewer authority is missing')
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
@@ -639,8 +537,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : '')
       const nativeToolAutonomyInstruction =
         request && request.workerType !== 'document-author'
-        ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
-        : ''
+          ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
+          : ''
       const atomicTaskEvidenceInstruction =
         request?.workerType === 'atomic-task-planner'
           ? 'Submit the complete plan through SubmitAtomicTaskPlan exactly once. The workflow service persists the accepted plan as canonical evidence.'
@@ -658,7 +556,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'document-author'
           ? ''
           : request?.workerType === 'document-reviewer'
-            ? 'Submit the active ordered check packet through SubmitDocumentReviewPacket exactly once. Use stable referenceId values; the workflow atomically persists all packet checks in the single review ledger and derives the final verdict.'
+            ? 'Write only the contracted project-local review report files and end the turn normally. File bytes are the only completion authority.'
             : request?.workerType === 'change-impact-analyzer'
               ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
               : request?.workerType === 'question-answerer'
@@ -690,7 +588,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
       await input.sessions.sendWithDisplay(sessionId, workerPrompt, {
         taskType: taskTypeForWorker(
           records.get(dispatchId)?.workerType ?? 'question-answerer',
-          request?.contract.authoringMode,
         ),
         displayKind: 'workflow_worker',
         ...(confirmedBriefContext && request?.workerType !== 'document-reviewer'
@@ -884,7 +781,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
             if (!targetPath)
               throw new Error('document author target is missing')
             if (isStreamedFoundationAuthoringTurn(request)) {
-              if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              if (
+                typeof input.sessions.waitForWorkflowWorkerIdle === 'function'
+              )
                 await input.sessions.waitForWorkflowWorkerIdle(sessionId)
               const drainedFailure = [
                 ...sessionEvents(sessionId).slice(
@@ -895,8 +794,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 .find(event => event.type === 'turn.failed')
               if (drainedFailure)
                 throw new Error(
-                  drainedFailure.text ||
-                    'document author stream commit failed',
+                  drainedFailure.text || 'document author stream commit failed',
                 )
               const receipt = await readAuthoredDocumentReceipt(
                 request.workspacePath,
@@ -975,10 +873,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
 }
 
 function isCanonicalDocumentAuthor(request: WorkerDispatchRequest): boolean {
-  return (
-    request.workerType === 'document-author' &&
-    request.contract.authoringMode !== 'repair-planning'
-  )
+  return request.workerType === 'document-author'
 }
 
 function isFoundationDocumentAuthoringTurn(
@@ -1037,7 +932,9 @@ async function persistFoundationAuthorityIndex(
   request: WorkerDispatchRequest,
 ): Promise<FoundationAuthorityProjection> {
   if (!isFoundationDocumentAuthoringTurn(request))
-    throw new Error('foundation authority index requires a document authoring turn')
+    throw new Error(
+      'foundation authority index requires a document authoring turn',
+    )
   const targetPath = request.contract.foundationDocumentPath as never
   const contract = getGameDocumentContract(targetPath)
   const availableUpstreamPaths = Array.isArray(
@@ -1053,10 +950,10 @@ async function persistFoundationAuthorityIndex(
     contract.upstreamSections
       .filter(source => availableUpstreamPaths.includes(source.path))
       .map(async source => {
-      documents.set(
-        source.path,
-        await readFile(resolve(request.workspacePath, source.path), 'utf8'),
-      )
+        documents.set(
+          source.path,
+          await readFile(resolve(request.workspacePath, source.path), 'utf8'),
+        )
       }),
   )
   const projection = projectFoundationAuthority({
@@ -1107,11 +1004,9 @@ function structuredSubmissionToolName(
 ): string | undefined {
   switch (request.workerType) {
     case 'document-author':
-      return request.contract.authoringMode === 'repair-planning'
-        ? 'SubmitDocumentRepairPlan'
-        : undefined
+      return undefined
     case 'document-reviewer':
-      return 'SubmitDocumentReviewPacket'
+      return undefined
     case 'atomic-task-planner':
       return 'SubmitAtomicTaskPlan'
     case 'implementation-worker':
@@ -1170,7 +1065,9 @@ async function createDeterministicStructuredTerminal(input: {
 }) {
   switch (input.request.workerType) {
     case 'document-author':
-      return createDeterministicDocumentAuthorTerminal(input)
+      throw new Error(
+        'canonical document completion must use its commit receipt',
+      )
     case 'document-reviewer':
       return createDeterministicDocumentReviewTerminal(input)
     case 'atomic-task-planner':
@@ -1254,99 +1151,53 @@ async function writeCanonicalTerminalEvidence(input: {
   )
 }
 
-function createDeterministicDocumentAuthorTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  if (input.request.contract.authoringMode === 'repair-planning') {
-    const contract = repairPlanSubmissionContract(input.request)
-    if (!contract) throw new Error('document repair plan contract is missing')
-    const candidates = completedToolInputs(
-      input.events,
-      'SubmitDocumentRepairPlan',
-    )
-    const errors: string[] = []
-    for (const candidate of candidates) {
-      try {
-        const repairPlan =
-          documentRepairPlanSubmissionSchemaForContract(contract).parse(
-            candidate,
-          )
-        return documentAuthorTerminalSchema.parse({
-          workerType: 'document-author',
-          status: 'completed',
-          writtenPaths: [],
-          resolvedFindingIds: [],
-          repairPlan,
-        })
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error))
-      }
-    }
-    throw new Error(
-      errors.length
-        ? `document repair plan does not match the active contract: ${errors.join('; ')}`
-        : 'worker terminal result is missing a valid SubmitDocumentRepairPlan call',
-    )
-  }
-  throw new Error('canonical document completion must use its commit receipt')
-}
-
 async function createDeterministicDocumentReviewTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const candidates = completedToolInputs(
-    input.events,
-    'SubmitDocumentReviewPacket',
-  )
-  const errors: string[] = []
-  for (const candidate of candidates) {
-    try {
-      const contract = reviewerSubmissionContract(input.request)
-      if (!contract)
-        throw new Error('document reviewer submission contract is missing')
-      const normalized = parseAndValidateDocumentReviewPacketSubmission({
-        contract,
-        submission: candidate,
-      })
-      const scope = contract.scope
-      const findings = normalized.findings
-      const evidencePath = `.beegame/workflow/evidence/document-review-${scope}-${input.request.dispatchId}.json`
-      const terminal = documentReviewerTerminalSchema.parse({
-        workerType: 'document-reviewer',
-        revision: input.request.revision,
-        verdict: normalized.checks.every(check => check.status === 'pass')
-          ? 'READY'
-          : 'NEEDS_REVISION',
-        checks: normalized.checks,
-        checklistIds:
-          scope === 'foundation'
-            ? []
-            : await readAcceptanceChecklistIds(input.request.workspacePath),
-        findings,
-        evidencePath,
-        rejectedSubmissionCount: failedToolCount(
-          input.events,
-          'SubmitDocumentReviewPacket',
-        ),
-      })
-      return terminal
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
-    }
+  const contract = reviewerAssignmentContract(input.request)
+  if (!contract) throw new Error('document reviewer report contract is missing')
+  const { assignment } = contract
+  const currentRevision = await computeCurrentDocumentReviewRevision({
+    workspacePath: input.request.workspacePath,
+    verification: contract.revisionVerification,
+  })
+  if (assignment.role === 'final') {
+    const accepted = await acceptFinalReport({
+      assignment,
+      workspacePath: input.request.workspacePath,
+      revision: input.request.revision,
+      currentRevision,
+      allowedAffectedPaths: contract.allowedAffectedPaths,
+      partDigests: contract.partDigests,
+    })
+    return documentReviewerTerminalSchema.parse({
+      workerType: 'document-reviewer',
+      status: 'completed',
+      revision: input.request.revision,
+      scope: assignment.scope,
+      role: assignment.role,
+      reportPaths: assignment.committedOutputPaths.map(path =>
+        relative(input.request.workspacePath, path).split('\\').join('/'),
+      ),
+      verdict: accepted.decision.verdict,
+      affectedPaths: accepted.decision.affectedPaths,
+    })
   }
-  const rejectedOutput = lastFailedToolOutput(
-    input.events,
-    'SubmitDocumentReviewPacket',
-  )
-  throw new Error(
-    errors.length
-      ? `document review result does not match the active contract: ${errors.join('; ')}`
-      : rejectedOutput
-        ? `document review submission rejected: ${rejectedOutput}`
-        : 'worker terminal result is missing a valid SubmitDocumentReviewPacket call',
-  )
+  const accepted = await acceptSpecialistReport({
+    assignment,
+    workspacePath: input.request.workspacePath,
+    revision: input.request.revision,
+    currentRevision,
+  })
+  return documentReviewerTerminalSchema.parse({
+    workerType: 'document-reviewer',
+    status: 'completed',
+    revision: input.request.revision,
+    scope: assignment.scope,
+    role: assignment.role,
+    reportPaths: [accepted.path],
+  })
 }
 
 async function createDeterministicChangeImpactTerminal(input: {

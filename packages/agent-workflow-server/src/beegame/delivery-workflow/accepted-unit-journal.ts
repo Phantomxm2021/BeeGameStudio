@@ -1,10 +1,4 @@
-import type {
-  AcceptedWorkflowUnit,
-  DeliveryRun,
-  DocumentReviewCheckId,
-} from './types'
-
-const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
+import type { AcceptedWorkflowUnit, DeliveryRun } from './types'
 
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
@@ -17,19 +11,6 @@ function stableValue(value: unknown): string {
     .join(',')}}`
 }
 
-function approvalIdentity(
-  approval: DeliveryRun['documentReviewState']['checklistApproval'],
-): string | undefined {
-  if (!approval) return undefined
-  return stableValue({
-    scope: approval.scope,
-    revision: approval.revision,
-    evidencePath: approval.evidencePath,
-    checks: approval.checks,
-    checkEvidenceDigests: approval.checkEvidenceDigests,
-  })
-}
-
 function unit(
   value: Omit<AcceptedWorkflowUnit, 'eventSchemaVersion'>,
 ): AcceptedWorkflowUnit {
@@ -39,24 +20,6 @@ function unit(
 function lastAcceptedDocumentUnitId(paths: readonly string[]): string[] {
   const path = paths.at(-1)
   return path ? [`document:${path}`] : []
-}
-
-function reviewUnitId(id: DocumentReviewCheckId): string {
-  return `review:${id}`
-}
-
-function priorApprovalCheckIds(
-  previous: DeliveryRun,
-): Set<DocumentReviewCheckId> {
-  const accepted = new Set<DocumentReviewCheckId>()
-  const approvals = [
-    previous.documentReviewState.foundationApproval,
-    previous.documentReviewState.checklistApproval,
-    previous.documentReviewState.comprehensiveApproval,
-  ] as const
-  for (const approval of approvals)
-    for (const check of approval?.checks ?? []) accepted.add(check.id)
-  return accepted
 }
 
 function acceptedDispatchIdentity(input: {
@@ -133,109 +96,6 @@ function acceptedDispatchIdentity(input: {
   }
 }
 
-function acceptedReviewUnits(
-  previous: DeliveryRun,
-  next: DeliveryRun,
-): AcceptedWorkflowUnit[] {
-  const before = previous.documentReviewState.activeCycle
-  const after = next.documentReviewState.activeCycle
-  const approval = [
-    [
-      previous.documentReviewState.foundationApproval,
-      next.documentReviewState.foundationApproval,
-    ],
-    [
-      previous.documentReviewState.checklistApproval,
-      next.documentReviewState.checklistApproval,
-    ],
-    [
-      previous.documentReviewState.comprehensiveApproval,
-      next.documentReviewState.comprehensiveApproval,
-    ],
-  ].find(
-    ([previousApproval, nextApproval]) =>
-      approvalIdentity(previousApproval) !== approvalIdentity(nextApproval),
-  )?.[1]
-  const completedCheckIds =
-    after?.completedCheckIds ?? approval?.checks.map(check => check.id)
-  const sourceRevision = after?.sourceRevision ?? approval?.revision
-  if (!completedCheckIds || !sourceRevision) return []
-  const completedBefore = new Set<DocumentReviewCheckId>([
-    ...(before?.completedCheckIds ?? []),
-    ...priorApprovalCheckIds(previous),
-  ])
-  const checks = new Map(
-    (after?.checks ?? approval?.checks ?? []).map(check => [check.id, check]),
-  )
-  const findingsByCheckId = new Map<DocumentReviewCheckId, unknown[]>(
-    completedCheckIds.map(id => [id, []]),
-  )
-  for (const finding of after?.findings ?? [])
-    findingsByCheckId.get(finding.checkId)?.push(finding)
-
-  return completedCheckIds
-    .filter(id => !completedBefore.has(id))
-    .map(id => {
-      const check = checks.get(id)
-      if (!check) return undefined
-      const priorCompleted = completedCheckIds.indexOf(id)
-      const predecessor =
-        priorCompleted > 0
-          ? [reviewUnitId(completedCheckIds[priorCompleted - 1])]
-          : []
-      const dependencyDigests =
-        after?.checkEvidenceDigests[id] ??
-        approval?.checkEvidenceDigests[id] ??
-        {}
-      return unit({
-        unitId: reviewUnitId(id),
-        kind: 'review-check',
-        phase: next.phase,
-        predecessorUnitIds: predecessor,
-        inputRevision: sourceRevision,
-        dependencyDigests,
-        acceptedAt: next.updatedAt,
-        payload: {
-          check,
-          findings: findingsByCheckId.get(id) ?? [],
-          dependencyDigests: { [id]: dependencyDigests },
-        },
-      })
-    })
-    .filter((candidate): candidate is AcceptedWorkflowUnit =>
-      Boolean(candidate),
-    )
-}
-
-function acceptedChecklistUnit(
-  previous: DeliveryRun,
-  next: DeliveryRun,
-): AcceptedWorkflowUnit[] {
-  const before = previous.documentReviewState.checklistApproval
-  const approval = next.documentReviewState.checklistApproval
-  if (!approval || approvalIdentity(before) === approvalIdentity(approval))
-    return []
-  const dependencyDigests =
-    approval.checkEvidenceDigests.checklist_traceability ?? {}
-  return [
-    unit({
-      unitId: `checklist:${CHECKLIST_PATH}`,
-      kind: 'checklist',
-      phase: next.phase,
-      predecessorUnitIds: ['review:checklist_traceability'],
-      inputRevision: approval.revision,
-      dependencyDigests,
-      receiptRef: approval.evidencePath,
-      acceptedAt: approval.approvedAt,
-      payload: {
-        revision: approval.revision,
-        evidencePath: approval.evidencePath,
-        checkIds: approval.checks.map(check => check.id),
-      },
-    }),
-  ]
-}
-
 function acceptedResourceUnits(
   previous: DeliveryRun,
   next: DeliveryRun,
@@ -252,7 +112,7 @@ function acceptedResourceUnits(
         unitId: 'resource:inventory',
         kind: 'resource-inventory',
         phase: next.phase,
-        predecessorUnitIds: [`checklist:${CHECKLIST_PATH}`],
+        predecessorUnitIds: [],
         inputRevision: after.inventoryReceipt.revision,
         dependencyDigests: {},
         acceptedAt: after.inventoryReceipt.acceptedAt,
@@ -315,17 +175,20 @@ export function deriveAcceptedWorkflowUnits(
   const units: AcceptedWorkflowUnit[] = []
   const previousCheckpoints = previous.foundationDraftState.documents
   const nextCheckpoints = next.foundationDraftState.documents
-  const acceptedDocuments = previousCheckpoints && nextCheckpoints
-    ? nextCheckpoints
-        .filter(document => document.status === 'committed')
-        .filter(document =>
-          previousCheckpoints.find(candidate => candidate.path === document.path)
-            ?.status !== 'committed',
+  const acceptedDocuments =
+    previousCheckpoints && nextCheckpoints
+      ? nextCheckpoints
+          .filter(document => document.status === 'committed')
+          .filter(
+            document =>
+              previousCheckpoints.find(
+                candidate => candidate.path === document.path,
+              )?.status !== 'committed',
+          )
+          .map(document => document.path)
+      : next.foundationDraftState.completedPaths.slice(
+          previous.foundationDraftState.completedPaths.length,
         )
-        .map(document => document.path)
-    : next.foundationDraftState.completedPaths.slice(
-        previous.foundationDraftState.completedPaths.length,
-      )
   if (acceptedDocuments.length > 1)
     throw new Error(
       'accepted document transition contains more than one dispatch-backed unit',
@@ -352,8 +215,6 @@ export function deriveAcceptedWorkflowUnits(
       }),
     )
   }
-  units.push(...acceptedReviewUnits(previous, next))
-  units.push(...acceptedChecklistUnit(previous, next))
   units.push(...acceptedResourceUnits(previous, next))
 
   if (previous.tasks.length === 0 && next.tasks.length > 0)
@@ -362,7 +223,7 @@ export function deriveAcceptedWorkflowUnits(
         unitId: 'plan:atomic',
         kind: 'atomic-plan',
         phase: next.phase,
-        predecessorUnitIds: ['review:resource_content_consistency'],
+        predecessorUnitIds: ['resource:gate'],
         inputRevision: next.revision.resource ?? next.revision.document,
         dependencyDigests: {},
         acceptedAt: next.updatedAt,

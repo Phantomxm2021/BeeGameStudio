@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createHash, randomUUID } from 'node:crypto'
-import { realpathSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -202,11 +202,9 @@ import {
   projectWorkflowStageCardHistory,
   type WorkflowStageCardSnapshot,
 } from './beegame/delivery-workflow/workflow-stage-card-history'
-import { openDocumentReviewFindings } from './beegame/delivery-workflow/document-review-findings'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
-  projectReviewFindingDisplayItems,
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
@@ -223,7 +221,9 @@ function getResourceSemanticModelOutputTokens(itemCount: number): number {
   )
 }
 
-function buildResourceSemanticCuratorSystemPrompt(curatorRevision: string): string {
+function buildResourceSemanticCuratorSystemPrompt(
+  curatorRevision: string,
+): string {
   return [
     'Classify every inspected resource in one batch for the BeeGame Resource Library.',
     'Submit exactly one call to the required structured submission tool and do not emit markdown, explanation, or code fence text.',
@@ -418,8 +418,7 @@ export async function stopWorkflowDispatchById(input: {
   fallbackStop: (dispatchId: string, reason: string) => Promise<unknown>
 }): Promise<void> {
   const disposed = await input.disposeWorkflowDispatch(input.dispatchId)
-  if (disposed === 0)
-    await input.fallbackStop(input.dispatchId, input.reason)
+  if (disposed === 0) await input.fallbackStop(input.dispatchId, input.reason)
 }
 
 export function createWorkflowDispatchStopBridge(input: {
@@ -535,7 +534,10 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const serviceFetch = createTLSAwareFetch()
-  const supabaseStore = createSupabaseDashboardStoreFromEnv(process.env, serviceFetch)
+  const supabaseStore = createSupabaseDashboardStoreFromEnv(
+    process.env,
+    serviceFetch,
+  )
   const supabaseRuntimeEnvClient = supabaseStore
     ? createSupabaseRuntimeEnvClientFromEnv(serviceFetch)
     : undefined
@@ -543,7 +545,9 @@ export function createAgentWorkflowApp(
     options.invitationService === false
       ? undefined
       : (options.invitationService ?? createInvitationServiceFromEnv())
-  const configuredUserResolver = createConfiguredUserResolver(process.env, { fetchImpl: serviceFetch })
+  const configuredUserResolver = createConfiguredUserResolver(process.env, {
+    fetchImpl: serviceFetch,
+  })
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
     sessionStorePath: options.sessionStorePath,
     isOriginAllowed: origin => Boolean(resolveApiCorsOrigin(origin)),
@@ -610,7 +614,10 @@ export function createAgentWorkflowApp(
     dashboardDataRoot,
     supabaseStore,
     supabaseRuntimeEnvClient,
-    remoteUsageBilling: createRemoteUsageBillingClient(billingConfig, serviceFetch),
+    remoteUsageBilling: createRemoteUsageBillingClient(
+      billingConfig,
+      serviceFetch,
+    ),
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
@@ -1179,81 +1186,168 @@ export function createAgentWorkflowApp(
 
   app.post('/api/internal/resource-semantic-curation', async c => {
     const serviceToken = options.resourceSelectionRuntimeConfig?.serviceToken
-    if (!serviceToken || c.req.header('x-beegame-resource-service-token') !== serviceToken) {
+    if (
+      !serviceToken ||
+      c.req.header('x-beegame-resource-service-token') !== serviceToken
+    ) {
       return c.json({ error: 'Unauthorized' }, 401)
     }
     try {
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
-      if (!isObject(body)) return c.json({ error: 'Invalid semantic curation request' }, 400)
-      const ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
-      const modelConfigId = typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
+      if (!isObject(body))
+        return c.json({ error: 'Invalid semantic curation request' }, 400)
+      const ownerId =
+        typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
+      const modelConfigId =
+        typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
       const modelType = parseResourceSemanticModelType(body.modelType)
       const runtimeEnv = parseResourceSemanticRuntimeEnv(body.runtimeEnv)
       const packId = typeof body.packId === 'string' ? body.packId.trim() : ''
       const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
-      const batchId = typeof body.batchId === 'string' ? body.batchId.trim() : ''
-      const curatorRevision = typeof body.curatorRevision === 'string' ? body.curatorRevision.trim() : ''
+      const batchId =
+        typeof body.batchId === 'string' ? body.batchId.trim() : ''
+      const curatorRevision =
+        typeof body.curatorRevision === 'string'
+          ? body.curatorRevision.trim()
+          : ''
       const items = parseResourceSemanticBatchItems(body.items)
-      if (!ownerId || !modelConfigId || !modelType || !runtimeEnv || !packId || !jobId || !batchId || !curatorRevision || !items.length || items.length > 8) return c.json({ error: 'Resource semantic model identity, batch identity, curator revision, provider, and runtime are required' }, 400)
+      if (
+        !ownerId ||
+        !modelConfigId ||
+        !modelType ||
+        !runtimeEnv ||
+        !packId ||
+        !jobId ||
+        !batchId ||
+        !curatorRevision ||
+        !items.length ||
+        items.length > 8
+      )
+        return c.json(
+          {
+            error:
+              'Resource semantic model identity, batch identity, curator revision, provider, and runtime are required',
+          },
+          400,
+        )
       let visualInput: ResourceSemanticVisualInput
       try {
         visualInput = parseResourceSemanticVisualInput(body.visualInput)
-        assertResourceSemanticVisualInput(visualInput, new Set(items.map(item => item.elementId)))
+        assertResourceSemanticVisualInput(
+          visualInput,
+          new Set(items.map(item => item.elementId)),
+        )
       } catch (error) {
-        return c.json({ error: error instanceof Error ? error.message : 'Resource semantic visual input is invalid' }, 400)
+        return c.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Resource semantic visual input is invalid',
+          },
+          400,
+        )
       }
-      const visualInputSummary = visualInput.mode === 'individual'
-        ? { mode: visualInput.mode, images: visualInput.images.map(image => ({ elementId: image.elementId })) }
-        : { mode: visualInput.mode, cells: visualInput.cells }
-      const visualImageBlocks = visualInput.mode === 'individual'
-        ? visualInput.images.map(image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 } }))
-        : [{ type: 'image' as const, source: { type: 'base64' as const, media_type: visualInput.image.mediaType, data: visualInput.image.dataBase64 } }]
+      const visualInputSummary =
+        visualInput.mode === 'individual'
+          ? {
+              mode: visualInput.mode,
+              images: visualInput.images.map(image => ({
+                elementId: image.elementId,
+              })),
+            }
+          : { mode: visualInput.mode, cells: visualInput.cells }
+      const visualImageBlocks =
+        visualInput.mode === 'individual'
+          ? visualInput.images.map(image => ({
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: image.mediaType,
+                data: image.dataBase64,
+              },
+            }))
+          : [
+              {
+                type: 'image' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: visualInput.image.mediaType,
+                  data: visualInput.image.dataBase64,
+                },
+              },
+            ]
       let modelUsage: BeeGameModelUsage | undefined
       let creditsMicro = 0
-      const usageRecorder = billingConfig.mode === 'remote'
-        ? createUsageRecorder({
-          sessionId: jobId,
-          record: input => dashboardRepository.recordUsageForUser(ownerId, input),
-          debit: input => dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
-          onSettled: result => { creditsMicro = result.creditsMicro },
-        })
-        : undefined
+      const usageRecorder =
+        billingConfig.mode === 'remote'
+          ? createUsageRecorder({
+              sessionId: jobId,
+              record: input =>
+                dashboardRepository.recordUsageForUser(ownerId, input),
+              debit: input =>
+                dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
+              onSettled: result => {
+                creditsMicro = result.creditsMicro
+              },
+            })
+          : undefined
       const querySource = `beegame_resource_semantic_curation:${jobId}:${batchId}`
-      const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
-        cwd: dashboardDataRoot,
-        modelType,
-        runtimeEnv,
-        systemPrompt: buildResourceSemanticCuratorSystemPrompt(curatorRevision),
-        structuredOutput: {
-          name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
-          description: 'Submit the complete canonical semantic decision batch.',
-          inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
-        },
-        maxTokens: getResourceSemanticModelOutputTokens(items.length),
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: JSON.stringify({ items: items.map(item => ({ elementId: item.elementId, projection: item.projection })), visualInput: visualInputSummary }) },
-            ...visualImageBlocks,
+      const content = await generateBeeGameModelWithUsage(
+        modelRuntimeHost,
+        {
+          cwd: dashboardDataRoot,
+          modelType,
+          runtimeEnv,
+          systemPrompt:
+            buildResourceSemanticCuratorSystemPrompt(curatorRevision),
+          structuredOutput: {
+            name: RESOURCE_SEMANTIC_MODEL_TOOL_NAME,
+            description:
+              'Submit the complete canonical semantic decision batch.',
+            inputSchema: RESOURCE_SEMANTIC_MODEL_OUTPUT_SCHEMA,
+          },
+          maxTokens: getResourceSemanticModelOutputTokens(items.length),
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    items: items.map(item => ({
+                      elementId: item.elementId,
+                      projection: item.projection,
+                    })),
+                    visualInput: visualInputSummary,
+                  }),
+                },
+                ...visualImageBlocks,
+              ],
+            },
           ],
-        }],
-        querySource,
-      }, async (usage, source) => {
-        modelUsage = usage
-        if (usageRecorder) await usageRecorder(usage, source)
-      }, billingConfig.mode === 'remote')
+          querySource,
+        },
+        async (usage, source) => {
+          modelUsage = usage
+          if (usageRecorder) await usageRecorder(usage, source)
+        },
+        billingConfig.mode === 'remote',
+      )
       return c.json({
         content,
-        ...(modelUsage ? {
-          usage: {
-            inputTokens: modelUsage.input_tokens,
-            cacheReadTokens: modelUsage.cache_read_tokens,
-            cacheCreationTokens: modelUsage.cache_creation_tokens,
-            outputTokens: modelUsage.output_tokens,
-            totalTokens: modelUsage.total_tokens,
-            creditsMicro,
-          },
-        } : {}),
+        ...(modelUsage
+          ? {
+              usage: {
+                inputTokens: modelUsage.input_tokens,
+                cacheReadTokens: modelUsage.cache_read_tokens,
+                cacheCreationTokens: modelUsage.cache_creation_tokens,
+                outputTokens: modelUsage.output_tokens,
+                totalTokens: modelUsage.total_tokens,
+                creditsMicro,
+              },
+            }
+          : {}),
       })
     } catch (error) {
       return resourceSemanticCurationRouteError(c, error)
@@ -3977,34 +4071,40 @@ function resourceSemanticCurationRouteError(
   error: unknown,
 ): Response {
   const traceId = randomUUID()
-  const stage = error instanceof BeeGameUsageBillingError
-    ? error.stage
-    : error instanceof BeeGameModelRuntimeError
+  const stage =
+    error instanceof BeeGameUsageBillingError
       ? error.stage
-      : 'model_request'
-  const message = error instanceof Error && error.message.trim()
-    ? error.message
-    : 'Resource semantic runtime failed'
-  const upstreamTraceId = error instanceof BeeGameUsageBillingError
-    ? error.traceId
-    : undefined
+      : error instanceof BeeGameModelRuntimeError
+        ? error.stage
+        : 'model_request'
+  const message =
+    error instanceof Error && error.message.trim()
+      ? error.message
+      : 'Resource semantic runtime failed'
+  const upstreamTraceId =
+    error instanceof BeeGameUsageBillingError ? error.traceId : undefined
   console.warn('[BeeGame] resource semantic curation failed', {
     traceId,
     ...(upstreamTraceId ? { upstreamTraceId } : {}),
     stage,
     cause: error instanceof Error ? error.name : 'unknown_error',
     causeMessage: message,
-    ...(process.env.NODE_ENV !== 'production' && error instanceof Error && error.stack
+    ...(process.env.NODE_ENV !== 'production' &&
+    error instanceof Error &&
+    error.stack
       ? { causeStack: error.stack }
       : {}),
   })
-  return c.json({
-    error: 'Resource semantic runtime failed',
-    code: 'resource_semantic_runtime_failed',
-    stage,
-    message,
-    traceId,
-  }, 502)
+  return c.json(
+    {
+      error: 'Resource semantic runtime failed',
+      code: 'resource_semantic_runtime_failed',
+      stage,
+      message,
+      traceId,
+    },
+    502,
+  )
 }
 
 function tracedRouteResponse(
@@ -5095,8 +5195,7 @@ async function getBeeGameProjectRuntimeState(input: {
   const workflowSnapshot = await readBeeGameWorkflowSnapshot(
     sessionRef.workspacePath,
     input.user.id,
-    dispatch =>
-      input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
+    dispatch => input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
   )
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
@@ -5619,8 +5718,6 @@ type LastProvenWorkflowSummary = {
   lastProvenUnitId: string
   lastProvenUnitKind:
     | 'document'
-    | 'review-check'
-    | 'checklist'
     | 'resource-inventory'
     | 'resource-content'
     | 'resource-gate'
@@ -5643,9 +5740,7 @@ function lastProvenWorkflowSummary(
     const itemId =
       unit.kind === 'document'
         ? (unit.payload as { path: string }).path
-        : unit.kind === 'review-check'
-          ? (unit.payload as { check: { id: string } }).check.id
-          : undefined
+        : undefined
     return {
       lastProvenPhase: unit.phase,
       lastProvenUnitId: unit.unitId,
@@ -5755,15 +5850,89 @@ function workflowNextAction(
     return workflow.recoverable === true ? 'resume' : undefined
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'resume'
-  const acceptedReviewIsBounded =
-    workflow.phase === 'DOCUMENT_REVIEW' &&
-    isObject(workflow.documentReviewState) &&
-    isObject(workflow.documentReviewState.activeCycle) &&
-    workflow.documentReviewState.activeCycle.acceptedSemanticResult === true
-  if (status === 'needs_action' && acceptedReviewIsBounded) return undefined
   if (status === 'needs_action' || status === 'blocked' || status === 'failed')
     return 'retry'
   return undefined
+}
+
+function documentReviewForDisplay(
+  workflow: JsonObject,
+  workspacePath?: string,
+): JsonObject | undefined {
+  const state = isObject(workflow.documentReviewState)
+    ? workflow.documentReviewState
+    : undefined
+  const run = isObject(state?.activeRun) ? state.activeRun : undefined
+  if (!run) return undefined
+  const reports = Array.isArray(run.reports)
+    ? run.reports.flatMap(report => {
+        if (
+          !isObject(report) ||
+          typeof report.role !== 'string' ||
+          typeof report.path !== 'string' ||
+          typeof report.status !== 'string'
+        )
+          return []
+        return [
+          {
+            role: report.role,
+            path: report.path,
+            status: report.status,
+            ...(typeof report.failureReason === 'string'
+              ? { failureReason: report.failureReason }
+              : {}),
+          },
+        ]
+      })
+    : []
+  const finalReportPath =
+    typeof run.finalReportPath === 'string' ? run.finalReportPath : undefined
+  const finalReportDigest =
+    typeof run.finalReportDigest === 'string'
+      ? run.finalReportDigest
+      : undefined
+  let finalReportMarkdown: string | undefined
+  let reportIntegrityFailure: string | undefined
+  if (workspacePath && finalReportPath) {
+    const workspace = resolve(workspacePath)
+    const absolute = resolve(workspace, finalReportPath)
+    const child = relative(workspace, absolute)
+    if (child && !child.startsWith('..') && !isAbsolute(child)) {
+      try {
+        const bytes = readFileSync(absolute)
+        if (
+          !finalReportDigest ||
+          createHash('sha256').update(bytes).digest('hex') !== finalReportDigest
+        )
+          reportIntegrityFailure =
+            'document review report bytes no longer match the accepted digest'
+        else finalReportMarkdown = bytes.toString('utf8')
+      } catch {
+        reportIntegrityFailure = 'document review report is unavailable'
+      }
+    }
+  }
+  return {
+    ...(typeof run.scope === 'string' ? { scope: run.scope } : {}),
+    ...(typeof run.status === 'string' ? { status: run.status } : {}),
+    ...(typeof run.attempt === 'number' ? { attempt: run.attempt } : {}),
+    reports,
+    ...(typeof run.verdict === 'string' ? { verdict: run.verdict } : {}),
+    ...(Array.isArray(run.affectedPaths)
+      ? {
+          affectedPaths: run.affectedPaths.filter(
+            (path): path is string => typeof path === 'string',
+          ),
+        }
+      : {}),
+    ...(finalReportPath ? { finalReportPath } : {}),
+    ...(finalReportMarkdown ? { finalReportMarkdown } : {}),
+    ...(reportIntegrityFailure
+      ? { failureReason: reportIntegrityFailure }
+      : typeof run.failureReason === 'string'
+      ? { failureReason: run.failureReason }
+      : {}),
+  }
 }
 
 function workflowViewForDisplay(
@@ -5798,6 +5967,43 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
+  const review = documentReviewForDisplay(workflow, workspacePath)
+  const activeReviewRun =
+    isObject(workflow.documentReviewState) &&
+    isObject(workflow.documentReviewState.activeRun)
+      ? workflow.documentReviewState.activeRun
+      : undefined
+  const reviewReports = Array.isArray(activeReviewRun?.reports)
+    ? activeReviewRun.reports.flatMap(report =>
+        isObject(report) &&
+        typeof report.role === 'string' &&
+        (report.status === 'pending' ||
+          report.status === 'running' ||
+          report.status === 'completed' ||
+          report.status === 'failed')
+          ? [
+              {
+                role: report.role,
+                status: report.status as
+                  | 'pending'
+                  | 'running'
+                  | 'completed'
+                  | 'failed',
+              },
+            ]
+          : [],
+      )
+    : undefined
+  const remediationPaths = Array.isArray(activeReviewRun?.affectedPaths)
+    ? activeReviewRun.affectedPaths.filter(
+        (path): path is string => typeof path === 'string',
+      )
+    : undefined
+  const remediatedPaths = Array.isArray(activeReviewRun?.remediatedPaths)
+    ? activeReviewRun.remediatedPaths.filter(
+        (path): path is string => typeof path === 'string',
+      )
+    : undefined
   const displayTasks =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -5823,8 +6029,6 @@ function workflowViewForDisplay(
                     ![
                       'pending',
                       'drafting',
-                      'drafted',
-                      'calibrating',
                       'committed',
                       'needs_action',
                     ].includes(String(document.status))
@@ -5833,13 +6037,11 @@ function workflowViewForDisplay(
                   return [
                     {
                       path: document.path,
-                      status: document.status as Parameters<
-                        typeof projectDocumentDisplayTasks
-                      >[0]['foundationDocuments'] extends Array<infer Value>
-                        ? Value extends { status: infer Status }
-                          ? Status
-                          : never
-                        : never,
+                      status: document.status as
+                        | 'pending'
+                        | 'drafting'
+                        | 'committed'
+                        | 'needs_action',
                     },
                   ]
                 })
@@ -5852,82 +6054,9 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
-          ...(isObject(workflow.documentReviewState) &&
-          isObject(workflow.documentReviewState.activeCycle)
-            ? {
-                reviewCheckIds: Array.isArray(
-                  workflow.documentReviewState.activeCycle.requiredCheckIds,
-                )
-                  ? (workflow.documentReviewState.activeCycle.requiredCheckIds.filter(
-                      (id): id is string => typeof id === 'string',
-                    ) as Parameters<
-                      typeof projectDocumentDisplayTasks
-                    >[0]['reviewCheckIds'])
-                  : undefined,
-                reviewCompletedCheckIds: Array.isArray(
-                  workflow.documentReviewState.activeCycle.completedCheckIds,
-                )
-                  ? (workflow.documentReviewState.activeCycle.completedCheckIds.filter(
-                      (id): id is string => typeof id === 'string',
-                    ) as Parameters<
-                      typeof projectDocumentDisplayTasks
-                    >[0]['reviewCompletedCheckIds'])
-                  : undefined,
-                reviewPacketSetComplete:
-                  workflow.documentReviewState.activeCycle
-                    .acceptedSemanticResult === true,
-                reviewTarget:
-                  workflow.documentReviewState.activeCycle.activeTarget ===
-                    'foundation' ||
-                  workflow.documentReviewState.activeCycle.activeTarget ===
-                    'checklist' ||
-                  workflow.documentReviewState.activeCycle.activeTarget ===
-                    'resource'
-                    ? workflow.documentReviewState.activeCycle.activeTarget
-                    : undefined,
-                repairPlan:
-                  isObject(
-                    workflow.documentReviewState.activeCycle.repairPlan,
-                  ) &&
-                  Array.isArray(
-                    workflow.documentReviewState.activeCycle.repairPlan.groups,
-                  ) &&
-                  Array.isArray(
-                    workflow.documentReviewState.activeCycle.repairPlan
-                      .completedPaths,
-                  )
-                    ? {
-                        groups:
-                          workflow.documentReviewState.activeCycle.repairPlan.groups.flatMap(
-                            group =>
-                              isObject(group) &&
-                              Array.isArray(group.pathDecisions)
-                                ? [
-                                    {
-                                      paths: group.pathDecisions.flatMap(
-                                        pathDecision =>
-                                          isObject(pathDecision) &&
-                                          typeof pathDecision.path === 'string'
-                                            ? [pathDecision.path]
-                                            : [],
-                                      ),
-                                    },
-                                  ]
-                                : [],
-                          ),
-                        completedPaths:
-                          workflow.documentReviewState.activeCycle.repairPlan.completedPaths.filter(
-                            (path): path is string => typeof path === 'string',
-                          ),
-                      }
-                    : undefined,
-                reviewFindings: projectReviewFindingDisplayItems(
-                  openDocumentReviewFindings(
-                    workflow.documentReviewState.activeCycle,
-                  ),
-                ),
-              }
-            : {}),
+          reviewReports,
+          remediationPaths,
+          remediatedPaths,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
@@ -5937,22 +6066,6 @@ function workflowViewForDisplay(
             thinking: workflowThinkingStatus(workflow),
             activeDispatch: workflow.activeDispatch,
             resourceProductionTask: resourceProductionTaskForDisplay(workflow),
-            ...(isObject(workflow.documentReviewState) &&
-            isObject(workflow.documentReviewState.activeCycle)
-              ? {
-                  reviewTarget:
-                    workflow.documentReviewState.activeCycle.activeTarget ===
-                    'resource'
-                      ? 'resource'
-                      : undefined,
-                  reviewFindings: projectReviewFindingDisplayItems(
-                    openDocumentReviewFindings(
-                      workflow.documentReviewState.activeCycle,
-                    ),
-                    'resource',
-                  ),
-                }
-              : {}),
           })
         : atomicDisplayTasks
   const completedTaskCount = displayTasks.filter(
@@ -5986,7 +6099,7 @@ function workflowViewForDisplay(
         ),
       )
     : {}
-  const stageSnapshots = workflowStageSnapshotsForDisplay(workflow)
+  const stageSnapshots = workflowStageSnapshotsForDisplay(workflow, review)
   return {
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
@@ -5995,20 +6108,7 @@ function workflowViewForDisplay(
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
       : {}),
-    ...(isObject(workflow.documentReviewState) &&
-    isObject(workflow.documentReviewState.activeCycle)
-      ? {
-          reviewMode:
-            typeof workflow.documentReviewState.activeCycle.mode === 'string'
-              ? workflow.documentReviewState.activeCycle.mode
-              : undefined,
-          reviewTarget:
-            typeof workflow.documentReviewState.activeCycle.activeTarget ===
-            'string'
-              ? workflow.documentReviewState.activeCycle.activeTarget
-              : undefined,
-        }
-      : {}),
+    ...(review ? { documentReview: review } : {}),
     tasks: displayTasks,
     evidence,
     ...(typeof workflow.activeTaskId === 'string'
@@ -6073,6 +6173,7 @@ function workflowViewForDisplay(
 
 function workflowStageSnapshotsForDisplay(
   workflow: JsonObject,
+  documentReview?: JsonObject,
 ): JsonObject[] | undefined {
   if (!Array.isArray(workflow.stageSnapshots)) return undefined
   const currentProgress = projectDeliveryProgress(workflow)
@@ -6121,13 +6222,8 @@ function workflowStageSnapshotsForDisplay(
       ...(snapshot.convergencePass
         ? { convergencePass: snapshot.convergencePass }
         : {}),
-      ...(snapshot.documentStep
-        ? { documentStep: snapshot.documentStep }
-        : {}),
-      ...(snapshot.reviewMode ? { reviewMode: snapshot.reviewMode } : {}),
-      ...(snapshot.reviewTarget
-        ? { reviewTarget: snapshot.reviewTarget }
-        : {}),
+      ...(snapshot.documentStep ? { documentStep: snapshot.documentStep } : {}),
+      ...(isLive && documentReview ? { documentReview } : {}),
       ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
       ...(snapshot.worker ? { worker: snapshot.worker } : {}),
       ...(snapshot.message
@@ -6144,9 +6240,7 @@ function workflowStageSnapshotsForDisplay(
       totalTaskCount: snapshot.totalTaskCount,
       createdAt: snapshot.createdAt,
       updatedAt: snapshot.updatedAt,
-      ...(snapshot.completedAt
-        ? { completedAt: snapshot.completedAt }
-        : {}),
+      ...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),
       elapsedMs: snapshot.elapsedMs,
       ...(snapshot.activeSince ? { activeSince: snapshot.activeSince } : {}),
       ...(block ? { block } : {}),
@@ -8141,11 +8235,18 @@ function getDocumentLanguageName(language: BeeGameSessionLanguage): string {
   return names[language]
 }
 
-function parseResourceSemanticRuntimeEnv(value: unknown): Record<string, string> | undefined {
+function parseResourceSemanticRuntimeEnv(
+  value: unknown,
+): Record<string, string> | undefined {
   if (!isObject(value)) return undefined
   const runtimeEnv: Record<string, string> = {}
   for (const [key, raw] of Object.entries(value)) {
-    if (!RESOURCE_MODEL_RUNTIME_KEYS.has(key) || typeof raw !== 'string' || !raw.trim()) continue
+    if (
+      !RESOURCE_MODEL_RUNTIME_KEYS.has(key) ||
+      typeof raw !== 'string' ||
+      !raw.trim()
+    )
+      continue
     runtimeEnv[key] = raw
   }
   return Object.keys(runtimeEnv).length ? runtimeEnv : undefined
@@ -8157,46 +8258,95 @@ type ResourceSemanticBatchItemInput = {
   projection: Record<string, unknown>
 }
 
-function parseResourceSemanticBatchItems(value: unknown): ResourceSemanticBatchItemInput[] {
+function parseResourceSemanticBatchItems(
+  value: unknown,
+): ResourceSemanticBatchItemInput[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 8) return []
   const items: ResourceSemanticBatchItemInput[] = []
   for (const raw of value) {
     if (!isObject(raw)) return []
-    const elementId = typeof raw.elementId === 'string' ? raw.elementId.trim() : ''
-    const attempt = typeof raw.attempt === 'number' && Number.isSafeInteger(raw.attempt) && raw.attempt > 0 ? raw.attempt : 0
-    if (!elementId || !attempt || !isObject(raw.projection) || raw.projection.elementId !== elementId) return []
+    const elementId =
+      typeof raw.elementId === 'string' ? raw.elementId.trim() : ''
+    const attempt =
+      typeof raw.attempt === 'number' &&
+      Number.isSafeInteger(raw.attempt) &&
+      raw.attempt > 0
+        ? raw.attempt
+        : 0
+    if (
+      !elementId ||
+      !attempt ||
+      !isObject(raw.projection) ||
+      raw.projection.elementId !== elementId
+    )
+      return []
     if (items.some(item => item.elementId === elementId)) return []
     items.push({ elementId, attempt, projection: raw.projection })
   }
   return items
 }
 
-function parseResourceSemanticVisualInput(value: unknown): ResourceSemanticVisualInput {
-  if (!isObject(value) || (value.mode !== 'individual' && value.mode !== 'atlas')) {
+function parseResourceSemanticVisualInput(
+  value: unknown,
+): ResourceSemanticVisualInput {
+  if (
+    !isObject(value) ||
+    (value.mode !== 'individual' && value.mode !== 'atlas')
+  ) {
     throw new Error('Resource semantic visual input mode is required')
   }
   if (value.mode === 'individual') {
-    if (!Array.isArray(value.images) || value.images.length < 1 || value.images.length > 2) {
-      throw new Error('Resource semantic individual visual input requires one or two images')
+    if (
+      !Array.isArray(value.images) ||
+      value.images.length < 1 ||
+      value.images.length > 2
+    ) {
+      throw new Error(
+        'Resource semantic individual visual input requires one or two images',
+      )
     }
     return {
       mode: 'individual',
       images: value.images.map((raw, index) => {
-        if (!isObject(raw) || typeof raw.elementId !== 'string' || !raw.elementId.trim() || raw.mediaType !== 'image/jpeg' || typeof raw.dataBase64 !== 'string' || !raw.dataBase64.trim()) {
-          throw new Error(`Resource semantic individual image ${index + 1} is invalid`)
+        if (
+          !isObject(raw) ||
+          typeof raw.elementId !== 'string' ||
+          !raw.elementId.trim() ||
+          raw.mediaType !== 'image/jpeg' ||
+          typeof raw.dataBase64 !== 'string' ||
+          !raw.dataBase64.trim()
+        ) {
+          throw new Error(
+            `Resource semantic individual image ${index + 1} is invalid`,
+          )
         }
-        return { elementId: raw.elementId.trim(), mediaType: 'image/jpeg', dataBase64: raw.dataBase64 }
+        return {
+          elementId: raw.elementId.trim(),
+          mediaType: 'image/jpeg',
+          dataBase64: raw.dataBase64,
+        }
       }),
     }
   }
-  if (!isObject(value.image) || value.image.mediaType !== 'image/jpeg' || typeof value.image.dataBase64 !== 'string' || !value.image.dataBase64.trim() || !Array.isArray(value.cells)) {
+  if (
+    !isObject(value.image) ||
+    value.image.mediaType !== 'image/jpeg' ||
+    typeof value.image.dataBase64 !== 'string' ||
+    !value.image.dataBase64.trim() ||
+    !Array.isArray(value.cells)
+  ) {
     throw new Error('Resource semantic Atlas visual input is invalid')
   }
   return {
     mode: 'atlas',
     image: { mediaType: 'image/jpeg', dataBase64: value.image.dataBase64 },
     cells: value.cells.map((raw, index) => {
-      if (!isObject(raw) || raw.ordinal !== index || typeof raw.elementId !== 'string' || !raw.elementId.trim()) {
+      if (
+        !isObject(raw) ||
+        raw.ordinal !== index ||
+        typeof raw.elementId !== 'string' ||
+        !raw.elementId.trim()
+      ) {
         throw new Error(`Resource semantic Atlas cell ${index + 1} is invalid`)
       }
       return { ordinal: index, elementId: raw.elementId.trim() }
@@ -8204,8 +8354,13 @@ function parseResourceSemanticVisualInput(value: unknown): ResourceSemanticVisua
   }
 }
 
-function parseResourceSemanticModelType(value: unknown): RuntimeModelConfig['modelType'] | undefined {
-  return value === 'anthropic' || value === 'openai' || value === 'gemini' || value === 'grok'
+function parseResourceSemanticModelType(
+  value: unknown,
+): RuntimeModelConfig['modelType'] | undefined {
+  return value === 'anthropic' ||
+    value === 'openai' ||
+    value === 'gemini' ||
+    value === 'grok'
     ? value
     : undefined
 }

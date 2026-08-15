@@ -1,11 +1,5 @@
 import { createHash } from 'node:crypto'
-import {
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  rename,
-} from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import type { DocumentReviewAssignment } from './document-review-topology'
@@ -137,7 +131,10 @@ function safeProjectPath(path: string): boolean {
   )
 }
 
-function assertCurrentRevision(revision: string, currentRevision: string): void {
+function assertCurrentRevision(
+  revision: string,
+  currentRevision: string,
+): void {
   assertRevision(revision)
   assertRevision(currentRevision)
   if (revision !== currentRevision)
@@ -151,7 +148,8 @@ function assertWorkspacePath(workspacePath: string, path: string): void {
 
 async function readMarkdownReport(path: string): Promise<Buffer> {
   const file = await lstat(path)
-  if (!file.isFile()) throw new Error('document review report is not a regular file')
+  if (!file.isFile())
+    throw new Error('document review report is not a regular file')
   const bytes = await readFile(path)
   let text: string
   try {
@@ -178,7 +176,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function persistStagedFile(stagedPath: string, committedPath: string): Promise<void> {
+async function persistStagedFile(
+  stagedPath: string,
+  committedPath: string,
+): Promise<void> {
   if (await pathExists(committedPath))
     throw new Error('document review report is already committed')
   await mkdir(dirname(committedPath), { recursive: true })
@@ -210,9 +211,14 @@ function assertAssignment(input: {
     ...input.assignment.committedOutputPaths,
   ])
     assertWorkspacePath(input.workspacePath, path)
-  const sourcePaths = new Set(input.assignment.sourcePaths.map(path => resolve(path)))
+  const sourcePaths = new Set(
+    input.assignment.sourcePaths.map(path => resolve(path)),
+  )
   if (
-    [...input.assignment.stagingOutputPaths, ...input.assignment.committedOutputPaths]
+    [
+      ...input.assignment.stagingOutputPaths,
+      ...input.assignment.committedOutputPaths,
+    ]
       .map(path => resolve(path))
       .some(path => sourcePaths.has(path))
   )
@@ -273,7 +279,9 @@ export async function acceptReviewDecision(input: {
   }
 }
 
-async function readReviewDecision(path: string): Promise<DocumentReviewDecision> {
+async function readReviewDecision(
+  path: string,
+): Promise<DocumentReviewDecision> {
   return documentReviewDecisionSchema.parse(
     JSON.parse(await readFile(path, 'utf8')),
   )
@@ -334,13 +342,18 @@ export async function acceptFinalReport(input: {
   )
   if (
     Object.keys(input.partDigests).length !== expectedPartPaths.length ||
-    expectedPartPaths.some(path => !digestSchema.safeParse(input.partDigests[path]).success)
+    expectedPartPaths.some(
+      path => !digestSchema.safeParse(input.partDigests[path]).success,
+    )
   )
     throw new Error('document review part digest contract does not match')
   for (const sourcePath of input.assignment.sourcePaths) {
     const bytes = await readMarkdownReport(sourcePath)
     const path = projectRelativePath(input.workspacePath, sourcePath)
-    if (createHash('sha256').update(bytes).digest('hex') !== input.partDigests[path])
+    if (
+      createHash('sha256').update(bytes).digest('hex') !==
+      input.partDigests[path]
+    )
       throw new Error('document review part report changed before final review')
   }
 

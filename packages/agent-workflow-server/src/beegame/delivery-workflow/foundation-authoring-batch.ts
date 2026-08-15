@@ -20,7 +20,8 @@ function checkpoint(
   path: FoundationDocumentPath,
 ): FoundationDocumentCheckpoint {
   const value = state.documents?.find(document => document.path === path)
-  if (!value) throw new Error(`foundation document is not in the batch: ${path}`)
+  if (!value)
+    throw new Error(`foundation document is not in the batch: ${path}`)
   return value
 }
 
@@ -146,7 +147,9 @@ export function recordFoundationCommit(
 ): FoundationDraftState {
   const current = checkpoint(state, path)
   if (current.status !== 'drafting')
-    throw new Error(`foundation document must be drafting before commit: ${path}`)
+    throw new Error(
+      `foundation document must be drafting before commit: ${path}`,
+    )
   return replace(state, path, value => ({
     ...value,
     status: 'committed',

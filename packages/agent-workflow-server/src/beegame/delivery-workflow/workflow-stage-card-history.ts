@@ -8,15 +8,12 @@ import { DELIVERY_PHASES } from './schema'
 import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
-  projectReviewFindingDisplayItems,
   type DocumentDisplayTask,
 } from './document-display-tasks'
-import { openDocumentReviewFindings } from './document-review-findings'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 import type {
   DeliveryRun,
   DeliveryRunStatus,
-  DocumentReviewCheckId,
   DocumentWorkflowStep,
   ResourceProductionTask,
   WorkflowEvent,
@@ -40,8 +37,6 @@ export type WorkflowStageCardSnapshot = {
   substage?: DeliveryProgressSubstage
   convergencePass?: number
   documentStep?: string
-  reviewMode?: 'initial' | 'closure'
-  reviewTarget?: 'foundation' | 'checklist' | 'resource'
   thinking?: 'working' | 'waiting' | 'idle'
   worker?: string
   message?: string
@@ -163,9 +158,7 @@ export function isWorkflowStageCardSnapshot(
     ![
       'INITIAL_DRAFTING',
       'INITIAL_REVIEW',
-      'REPAIR_PLANNING',
       'REPAIRING',
-      'CLOSURE_REVIEW',
       'CHECKLIST_DRAFTING',
       'CHECKLIST_REVIEW',
     ].includes(value.substage as DeliveryProgressSubstage)
@@ -181,19 +174,6 @@ export function isWorkflowStageCardSnapshot(
   if (
     value.documentStep !== undefined &&
     (typeof value.documentStep !== 'string' || !value.documentStep.trim())
-  )
-    return false
-  if (
-    value.reviewMode !== undefined &&
-    value.reviewMode !== 'initial' &&
-    value.reviewMode !== 'closure'
-  )
-    return false
-  if (
-    value.reviewTarget !== undefined &&
-    value.reviewTarget !== 'foundation' &&
-    value.reviewTarget !== 'checklist' &&
-    value.reviewTarget !== 'resource'
   )
     return false
   if (
@@ -344,63 +324,10 @@ function workflowThinking(run: DeliveryRun): 'working' | 'waiting' | 'idle' {
   if (run.status !== 'running') return 'idle'
   return run.activeDispatch?.status === 'running' ? 'working' : 'waiting'
 }
-
-function reviewCycle(run: DeliveryRun): Record<string, unknown> | undefined {
-  return isRecord(run.documentReviewState?.activeCycle)
-    ? run.documentReviewState.activeCycle
-    : undefined
-}
-
-function reviewCheckIds(
-  cycle: Record<string, unknown>,
-): DocumentReviewCheckId[] {
-  if (!Array.isArray(cycle.requiredCheckIds)) return []
-  return cycle.requiredCheckIds.filter(
-    (id): id is DocumentReviewCheckId => typeof id === 'string',
-  )
-}
-
-function reviewCompletedCheckIds(
-  cycle: Record<string, unknown>,
-): DocumentReviewCheckId[] {
-  if (!Array.isArray(cycle.completedCheckIds)) return []
-  return cycle.completedCheckIds.filter(
-    (id): id is DocumentReviewCheckId => typeof id === 'string',
-  )
-}
-
-function reviewRepairPlan(
-  cycle: Record<string, unknown>,
-):
-  | { groups: Array<{ paths: string[] }>; completedPaths: string[] }
-  | undefined {
-  const raw = cycle.repairPlan
-  if (!isRecord(raw) || !Array.isArray(raw.groups)) return undefined
-  const groups = raw.groups.flatMap(group => {
-    if (!isRecord(group) || !Array.isArray(group.pathDecisions)) return []
-    return [
-      {
-        paths: group.pathDecisions.flatMap(pathDecision =>
-          isRecord(pathDecision) && typeof pathDecision.path === 'string'
-            ? [pathDecision.path]
-            : [],
-        ),
-      },
-    ]
-  })
-  const completedPaths = Array.isArray(raw.completedPaths)
-    ? raw.completedPaths.filter(
-        (path): path is string => typeof path === 'string',
-      )
-    : []
-  return { groups, completedPaths }
-}
-
 function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
-  const cycle = reviewCycle(run)
   const input: Parameters<typeof projectDocumentDisplayTasks>[0] = {
     workspacePath,
     currentItemId: run.currentItemId,
@@ -412,21 +339,6 @@ function documentTasks(
     documentStep: run.documentStep as DocumentWorkflowStep | undefined,
     workflowStatus: run.status,
     thinking: workflowThinking(run),
-  }
-  if (cycle) {
-    input.reviewCheckIds = reviewCheckIds(cycle)
-    input.reviewCompletedCheckIds = reviewCompletedCheckIds(cycle)
-    input.reviewPacketSetComplete = cycle.acceptedSemanticResult === true
-    input.reviewTarget =
-      cycle.activeTarget === 'foundation' ||
-      cycle.activeTarget === 'checklist' ||
-      cycle.activeTarget === 'resource'
-        ? cycle.activeTarget
-        : undefined
-    input.repairPlan = reviewRepairPlan(cycle)
-    input.reviewFindings = projectReviewFindingDisplayItems(
-      openDocumentReviewFindings(cycle),
-    )
   }
   return projectDocumentDisplayTasks(input)
 }
@@ -447,7 +359,6 @@ function resourceTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
-  const cycle = reviewCycle(run)
   return projectAssetDisplayTasks({
     workspacePath,
     phase: 'RESOURCE_PREPARATION',
@@ -455,18 +366,6 @@ function resourceTasks(
     thinking: workflowThinking(run),
     activeDispatch: run.activeDispatch,
     resourceProductionTask: resourceTask(run),
-    ...(cycle
-      ? {
-          reviewTarget:
-            cycle.activeTarget === 'resource'
-              ? ('resource' as const)
-              : undefined,
-          reviewFindings: projectReviewFindingDisplayItems(
-            openDocumentReviewFindings(cycle),
-            'resource',
-          ),
-        }
-      : {}),
   })
 }
 
@@ -572,7 +471,6 @@ export function projectCurrentStageCard(input: {
   const progress = projectDeliveryProgress(asWorkflowRecord(input.run))
   if (!progress) return undefined
   const run = input.run
-  const cycle = reviewCycle(run)
   const documentPhase =
     run.phase === 'DOCUMENT_DRAFTING' || run.phase === 'DOCUMENT_REVIEW'
   const tasks = documentPhase
@@ -581,9 +479,10 @@ export function projectCurrentStageCard(input: {
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
       : atomicTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
-  const message = run.status === 'running' && run.currentMessage
-    ? sanitizeWorkflowDisplayMessage(run.currentMessage)
-    : ''
+  const message =
+    run.status === 'running' && run.currentMessage
+      ? sanitizeWorkflowDisplayMessage(run.currentMessage)
+      : ''
   const blockedReason = stringValue(
     run.blockedReason ?? run.activeDispatch?.failureReason,
   )
@@ -603,14 +502,6 @@ export function projectCurrentStageCard(input: {
       ? { convergencePass: progress.convergencePass }
       : {}),
     ...(run.documentStep ? { documentStep: run.documentStep } : {}),
-    ...(cycle?.mode === 'initial' || cycle?.mode === 'closure'
-      ? { reviewMode: cycle.mode }
-      : {}),
-    ...(cycle?.activeTarget === 'foundation' ||
-    cycle?.activeTarget === 'checklist' ||
-    cycle?.activeTarget === 'resource'
-      ? { reviewTarget: cycle.activeTarget }
-      : {}),
     thinking: workflowThinking(run),
     ...(run.activeDispatch?.workerType
       ? { worker: run.activeDispatch.workerType }

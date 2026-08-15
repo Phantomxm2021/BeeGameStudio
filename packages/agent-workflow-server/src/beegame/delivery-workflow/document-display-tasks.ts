@@ -4,11 +4,9 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
-  DOCUMENT_REVIEW_CHECK_PACKETS,
   RESOURCE_PRODUCTION_TASKS,
   type ResourceProductionTask,
   type DocumentWorkflowStep,
-  type DocumentReviewCheckId,
 } from './types'
 
 export type DocumentDisplayTask = {
@@ -19,39 +17,6 @@ export type DocumentDisplayTask = {
   operation: 'write' | 'review' | 'produce'
 }
 
-export type ReviewFindingDisplayItem = {
-  id: string
-  title: string
-  owner: 'foundation' | 'checklist' | 'resource'
-}
-
-export function projectReviewFindingDisplayItems(
-  value: unknown,
-  owner?: ReviewFindingDisplayItem['owner'],
-): ReviewFindingDisplayItem[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap(finding => {
-    const record = objectValue(finding)
-    const findingOwner = record?.owner
-    if (
-      typeof record?.findingId !== 'string' ||
-      typeof record.requiredOutcome !== 'string' ||
-      (findingOwner !== 'foundation' &&
-        findingOwner !== 'checklist' &&
-        findingOwner !== 'resource') ||
-      (owner && findingOwner !== owner)
-    )
-      return []
-    return [
-      {
-        id: record.findingId,
-        title: record.requiredOutcome,
-        owner: findingOwner,
-      },
-    ]
-  })
-}
-
 export type AssetDisplayTaskInput = {
   workspacePath: string
   phase: 'RESOURCE_PREPARATION'
@@ -59,12 +24,6 @@ export type AssetDisplayTaskInput = {
   thinking?: string
   activeDispatch?: unknown
   resourceProductionTask: ResourceProductionTask
-  reviewTarget?: 'foundation' | 'checklist' | 'resource'
-  reviewFindings?: Array<{
-    id: string
-    title: string
-    owner: 'foundation' | 'checklist' | 'resource'
-  }>
 }
 
 export type DocumentDisplayTaskInput = {
@@ -73,28 +32,17 @@ export type DocumentDisplayTaskInput = {
   foundationDraftCompletedPaths?: string[]
   foundationDocuments?: Array<{
     path: string
-    status:
-      | 'pending'
-      | 'drafting'
-      | 'committed'
-      | 'needs_action'
+    status: 'pending' | 'drafting' | 'committed' | 'needs_action'
   }>
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
-  reviewCheckIds?: DocumentReviewCheckId[]
-  reviewCompletedCheckIds?: DocumentReviewCheckId[]
-  reviewPacketSetComplete?: boolean
-  reviewTarget?: 'foundation' | 'checklist' | 'resource'
-  repairPlan?: {
-    groups: Array<{ paths: string[] }>
-    completedPaths: string[]
-  }
-  reviewFindings?: Array<{
-    id: string
-    title: string
-    owner: 'foundation' | 'checklist' | 'resource'
+  reviewReports?: Array<{
+    role: string
+    status: 'pending' | 'running' | 'completed' | 'failed'
   }>
+  remediationPaths?: string[]
+  remediatedPaths?: string[]
 }
 
 /**
@@ -144,98 +92,35 @@ export function projectDocumentDisplayTasks(
       .map(document => [document.path, document.status]),
   )
 
-  if (operation === 'review' && input.reviewCheckIds?.length) {
-    const completed = new Set(input.reviewCompletedCheckIds ?? [])
-    const firstIncompleteCheckId = input.reviewCheckIds.find(
-      id => !completed.has(id),
-    )
-    const activeCheckIds = new Set(
-      (
-        DOCUMENT_REVIEW_CHECK_PACKETS.find(packet =>
-          firstIncompleteCheckId
-            ? packet.includes(firstIncompleteCheckId)
-            : false,
-        ) ?? []
-      ).filter(
-        checkId =>
-          input.reviewCheckIds!.includes(checkId) && !completed.has(checkId),
-      ),
-    )
-    return input.reviewCheckIds.map(id => ({
-      id,
-      title: id,
+  if (operation === 'review' && input.reviewReports?.length)
+    return input.reviewReports.map(report => ({
+      id: report.role,
+      title: report.role,
       status:
-        input.reviewPacketSetComplete || completed.has(id)
-          ? 'completed'
-          : activeCheckIds.has(id) && active
-            ? 'running'
-            : activeCheckIds.has(id) && workflowStopped(input.workflowStatus)
-              ? 'stopped'
-              : activeCheckIds.has(id) && input.workflowStatus === 'failed'
-                ? 'failed'
-                : 'pending',
+        report.status === 'running' && workflowStopped(input.workflowStatus)
+          ? 'stopped'
+          : report.status,
       attempt: 0,
       operation: 'review',
     }))
-  }
 
-  if (operation === 'write' && input.reviewPacketSetComplete) {
-    if (input.reviewTarget === 'foundation') {
-      if (!input.repairPlan)
-        return [
-          {
-            id: 'foundation-repair-plan',
-            title: '制定文档修订方案',
-            status: active
-              ? 'running'
-              : workflowStopped(input.workflowStatus)
-                ? 'stopped'
-                : workflowFailed(input.workflowStatus)
-                  ? 'failed'
-                  : 'pending',
-            attempt: 0,
-            operation: 'review',
-          },
-        ]
-      const completed = new Set(input.repairPlan.completedPaths)
-      const paths = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
-        input.repairPlan!.groups.some(group => group.paths.includes(path)),
-      )
-      return paths.map(path => ({
-        id: path,
-        title: path,
-        status: completed.has(path)
-          ? 'completed'
-          : active && currentItemId === path
-            ? 'running'
-            : workflowStopped(input.workflowStatus) && currentItemId === path
-              ? 'stopped'
-              : workflowFailed(input.workflowStatus) && currentItemId === path
-                ? 'failed'
-                : 'pending',
-        attempt: 0,
-        operation: 'write',
-      }))
-    }
-    const currentOwnerFindings = input.reviewTarget
-      ? (input.reviewFindings ?? []).filter(
-          finding => finding.owner === input.reviewTarget,
-        )
-      : (input.reviewFindings ?? [])
-    if (currentOwnerFindings.length)
-      return currentOwnerFindings.map(finding => ({
-        id: finding.id,
-        title: finding.title,
-        status: active
+  if (operation === 'write' && input.remediationPaths?.length) {
+    const completed = new Set(input.remediatedPaths ?? [])
+    return input.remediationPaths.map(path => ({
+      id: path,
+      title: path,
+      status: completed.has(path)
+        ? 'completed'
+        : active && currentItemId === path
           ? 'running'
-          : workflowStopped(input.workflowStatus)
+          : workflowStopped(input.workflowStatus) && currentItemId === path
             ? 'stopped'
-            : workflowFailed(input.workflowStatus)
+            : workflowFailed(input.workflowStatus) && currentItemId === path
               ? 'failed'
               : 'pending',
-        attempt: 0,
-        operation: 'write',
-      }))
+      attempt: 0,
+      operation: 'write',
+    }))
   }
 
   return documentPaths.map(path => {

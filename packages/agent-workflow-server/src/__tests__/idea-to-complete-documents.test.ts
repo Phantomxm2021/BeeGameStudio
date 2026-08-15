@@ -19,6 +19,7 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import { recordFoundationDispatch } from '../beegame/delivery-workflow/foundation-authoring-batch'
 
 function completeSubmission(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -62,7 +63,9 @@ function completeSubmission(
           },
     ),
     auditAppendix: {
-      acceptanceCriteria: ['The document is complete, inspectable, and implementation-ready.'],
+      acceptanceCriteria: [
+        'The document is complete, inspectable, and implementation-ready.',
+      ],
       upstreamReferences: [],
       risks: [],
       openDecisions: [],
@@ -75,9 +78,9 @@ describe('idea to complete game documents', () => {
 
   afterEach(async () => {
     await Promise.all(
-      workspaces.splice(0).map(path =>
-        rm(path, { recursive: true, force: true }),
-      ),
+      workspaces
+        .splice(0)
+        .map(path => rm(path, { recursive: true, force: true })),
     )
   })
 
@@ -87,7 +90,8 @@ describe('idea to complete game documents', () => {
     const confirmedBriefContext = JSON.stringify({
       kind: 'confirmed_build_brief',
       productAuthority: {
-        intent: 'A complete game product ready for multidisciplinary production.',
+        intent:
+          'A complete game product ready for multidisciplinary production.',
         constraints: ['Remain platform-neutral until a target is approved.'],
       },
     })
@@ -102,73 +106,101 @@ describe('idea to complete game documents', () => {
       documentStep: 'FOUNDATION_DRAFTING',
     }
 
-    for (const [documentIndex, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
-      let request: WorkerDispatchRequest | undefined
+    let documentIndex = 0
+    while (run.phase === 'DOCUMENT_DRAFTING') {
+      const requests: WorkerDispatchRequest[] = []
       await startDocumentStage({
         run,
         workspacePath,
         dispatcher: {
           async dispatch(value) {
-            request = value
+            requests.push(value)
             return value
           },
         },
       })
-      expect(request?.contract.confirmedBriefContext).toBe(
-        confirmedBriefContext,
-      )
-      const documentContract = getGameDocumentContract(path)
-      expect(request?.contract.completeDocumentContract).toEqual(
-        documentContract,
-      )
-
-      const dispatchId = `complete-document-${documentIndex}`
-      const submission = completeSubmission(path)
-      await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(
-        join(workspacePath, path),
-        withTestDocumentMetadata(
+      expect(requests.length).toBeGreaterThan(0)
+      const dispatches = requests.map(request => {
+        const path =
+          request.taskId as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
+        const now = new Date().toISOString()
+        return {
           path,
-          renderTestCompleteGameDocument(path, submission),
-        ),
-      )
-      await commitAuthoredFoundationDocument({
-        workspacePath,
-        dispatchId,
-        targetPath: path,
-      })
-
-      const now = new Date().toISOString()
-      run = await completeDocumentDraft({
-        run: {
-          ...run,
-          activeDispatch: {
-            dispatchId,
-            workerType: 'document-author',
+          request,
+          dispatch: {
+            dispatchId: `complete-document-${documentIndex++}`,
+            workerType: 'document-author' as const,
             phase: run.phase,
+            taskId: path,
             revision: run.revision.document,
-            status: 'completed',
+            status: 'running' as const,
             request,
             startedAt: now,
-            finishedAt: now,
           },
-        },
-        workspacePath,
-        terminal: {
-          workerType: 'document-author',
-          status: 'completed',
-          writtenPaths: [path],
-          resolvedFindingIds: [],
-        },
-        documentSet: 'foundation',
+        }
       })
-      expect(run.blockedReason).toBeUndefined()
+      if (run.foundationDraftState.documents)
+        for (const item of dispatches)
+          run = {
+            ...run,
+            foundationDraftState: recordFoundationDispatch(
+              run.foundationDraftState,
+              item.path,
+              'drafting',
+              item.dispatch,
+            ),
+          }
+
+      for (const item of dispatches) {
+        expect(item.request.contract.confirmedBriefContext).toBe(
+          confirmedBriefContext,
+        )
+        expect(item.request.contract.completeDocumentContract).toEqual(
+          getGameDocumentContract(item.path),
+        )
+        await mkdir(join(workspacePath, 'docs'), { recursive: true })
+        await writeFile(
+          join(workspacePath, item.path),
+          withTestDocumentMetadata(
+            item.path,
+            renderTestCompleteGameDocument(
+              item.path,
+              completeSubmission(item.path),
+            ),
+          ),
+        )
+        await commitAuthoredFoundationDocument({
+          workspacePath,
+          dispatchId: item.dispatch.dispatchId,
+          targetPath: item.path,
+        })
+        const finishedAt = new Date().toISOString()
+        run = await completeDocumentDraft({
+          run: {
+            ...run,
+            activeDispatch: {
+              ...item.dispatch,
+              status: 'completed',
+              finishedAt,
+            },
+          },
+          workspacePath,
+          terminal: {
+            workerType: 'document-author',
+            status: 'completed',
+            writtenPaths: [item.path],
+            resolvedFindingIds: [],
+          },
+          documentSet: 'foundation',
+        })
+        expect(run.blockedReason).toBeUndefined()
+      }
     }
 
     expect(run.phase).toBe('DOCUMENT_REVIEW')
-    expect(run.foundationDraftState.completedPaths).toEqual(
-      [...CANONICAL_FOUNDATION_DOCUMENTS],
-    )
+    expect(run.foundationDraftState.completedPaths).toEqual([
+      ...CANONICAL_FOUNDATION_DOCUMENTS,
+    ])
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       const content = await readFile(join(workspacePath, path), 'utf8')
       for (const section of getGameDocumentContract(path).sections)
@@ -179,12 +211,17 @@ describe('idea to complete game documents', () => {
   })
 
   test('does not advance past an invalid complete foundation document', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'invalid-idea-document-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'invalid-idea-document-'),
+    )
     workspaces.push(workspacePath)
     const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
     const contract = getGameDocumentContract(path)
     const submission = completeSubmission(path)
-    const renderedLines = renderTestCompleteGameDocument(path, submission).split('\n')
+    const renderedLines = renderTestCompleteGameDocument(
+      path,
+      submission,
+    ).split('\n')
     renderedLines.shift()
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
     await writeFile(

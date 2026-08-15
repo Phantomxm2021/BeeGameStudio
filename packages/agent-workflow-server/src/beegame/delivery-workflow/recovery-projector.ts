@@ -6,12 +6,8 @@ import {
   computeResourceContentRootDigest,
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import {
-  artifactsForDocumentReviewCheck,
-  documentReviewArtifactDigests,
-  readDocumentReviewArtifacts,
-} from './document-review-input'
-import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './document-repair-graph'
+import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
+import { createDocumentReviewRun } from './document-review-stage'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -34,18 +30,10 @@ import {
 } from './run-store'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
-  CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-  COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
-  COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
-  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
+  DELIVERY_RUN_SCHEMA_VERSION,
   type AcceptedWorkflowUnit,
   type AtomicTask,
   type DeliveryRun,
-  type DocumentReviewApproval,
-  type DocumentReviewCheck,
-  type DocumentReviewCheckId,
-  type DocumentReviewFinding,
-  type DocumentReviewScope,
   type Revision,
   type WorkflowEvent,
   type WorkflowUnitAcceptedEvent,
@@ -55,8 +43,6 @@ import {
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
 
-const CHECKLIST_UNIT_ID =
-  'checklist:docs/acceptance/gameplay-checklist.md' as const
 const RESOURCE_INVENTORY_UNIT_ID = 'resource:inventory' as const
 const RESOURCE_CONTENT_UNIT_ID = 'resource:content' as const
 const RESOURCE_GATE_UNIT_ID = 'resource:gate' as const
@@ -132,39 +118,16 @@ function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function reviewUnitId(checkId: DocumentReviewCheckId): string {
-  return `review:${checkId}`
-}
-
 function documentUnitId(path: string): string {
   return `document:${path}`
 }
 
-const FOUNDATION_REVIEW_UNIT_IDS =
-  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(reviewUnitId)
-const COMPREHENSIVE_ADDITIONAL_UNIT_IDS =
-  COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS.map(reviewUnitId)
-const CURRENT_REVIEW_UNIT_IDS = new Set([
-  ...FOUNDATION_REVIEW_UNIT_IDS,
-  ...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS.map(reviewUnitId),
-  ...COMPREHENSIVE_ADDITIONAL_UNIT_IDS,
-])
-const CURRENT_REVIEW_CHECK_IDS = new Set<DocumentReviewCheckId>([
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  ...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-  ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
-])
-
 function fixedUnitIds(): string[] {
   return [
     ...CANONICAL_FOUNDATION_DOCUMENTS.map(documentUnitId),
-    ...FOUNDATION_REVIEW_UNIT_IDS,
-    ...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS.map(reviewUnitId),
-    CHECKLIST_UNIT_ID,
     RESOURCE_INVENTORY_UNIT_ID,
     RESOURCE_CONTENT_UNIT_ID,
     RESOURCE_GATE_UNIT_ID,
-    ...COMPREHENSIVE_ADDITIONAL_UNIT_IDS,
     ATOMIC_PLAN_UNIT_ID,
   ]
 }
@@ -177,24 +140,11 @@ function expectedFixedPredecessors(unitId: string): string[] | undefined {
     return documentIndex === 0
       ? []
       : [documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS[documentIndex - 1]!)]
-  const foundationIndex = FOUNDATION_REVIEW_UNIT_IDS.indexOf(unitId)
-  if (foundationIndex >= 0)
-    return foundationIndex === 0
-      ? []
-      : [FOUNDATION_REVIEW_UNIT_IDS[foundationIndex - 1]!]
-  if (unitId === reviewUnitId('checklist_traceability')) return []
-  if (unitId === CHECKLIST_UNIT_ID)
-    return [reviewUnitId('checklist_traceability')]
-  if (unitId === RESOURCE_INVENTORY_UNIT_ID) return [CHECKLIST_UNIT_ID]
+  if (unitId === RESOURCE_INVENTORY_UNIT_ID)
+    return [documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!)]
   if (unitId === RESOURCE_CONTENT_UNIT_ID) return [RESOURCE_INVENTORY_UNIT_ID]
   if (unitId === RESOURCE_GATE_UNIT_ID) return [RESOURCE_CONTENT_UNIT_ID]
-  const comprehensiveIndex = COMPREHENSIVE_ADDITIONAL_UNIT_IDS.indexOf(unitId)
-  if (comprehensiveIndex >= 0)
-    return comprehensiveIndex === 0
-      ? [FOUNDATION_REVIEW_UNIT_IDS.at(-1)!]
-      : [COMPREHENSIVE_ADDITIONAL_UNIT_IDS[comprehensiveIndex - 1]!]
-  if (unitId === ATOMIC_PLAN_UNIT_ID)
-    return [COMPREHENSIVE_ADDITIONAL_UNIT_IDS.at(-1)!]
+  if (unitId === ATOMIC_PLAN_UNIT_ID) return [RESOURCE_GATE_UNIT_ID]
   return undefined
 }
 
@@ -205,8 +155,6 @@ function expectedKind(
     CANONICAL_FOUNDATION_DOCUMENTS.some(path => documentUnitId(path) === unitId)
   )
     return 'document'
-  if (CURRENT_REVIEW_UNIT_IDS.has(unitId)) return 'review-check'
-  if (unitId === CHECKLIST_UNIT_ID) return 'checklist'
   if (unitId === RESOURCE_INVENTORY_UNIT_ID) return 'resource-inventory'
   if (unitId === RESOURCE_CONTENT_UNIT_ID) return 'resource-content'
   if (unitId === RESOURCE_GATE_UNIT_ID) return 'resource-gate'
@@ -226,16 +174,6 @@ function acceptedUnitPayload(unit: AcceptedWorkflowUnit) {
   return payload
 }
 
-function reviewCheckFromUnit(unit: AcceptedWorkflowUnit): DocumentReviewCheck {
-  return acceptedUnitPayload(unit).check as DocumentReviewCheck
-}
-
-function reviewFindingsFromUnit(
-  unit: AcceptedWorkflowUnit,
-): DocumentReviewFinding[] {
-  return acceptedUnitPayload(unit).findings as DocumentReviewFinding[]
-}
-
 function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
   const payload = acceptedUnitPayload(unit)
   if (unit.kind === 'document') {
@@ -251,31 +189,6 @@ function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
       recoveryError(
         'recovery_checkpoint_conflict',
         `document checkpoint ${unit.unitId} has contradictory identity`,
-      )
-  } else if (unit.kind === 'review-check') {
-    const check = record(payload.check)
-    const checkId = check?.id as DocumentReviewCheckId
-    if (reviewUnitId(checkId) !== unit.unitId)
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        `review checkpoint ${unit.unitId} has contradictory identity`,
-      )
-    if (
-      stableValue(payload.dependencyDigests) !==
-      stableValue({ [checkId]: unit.dependencyDigests })
-    )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        `review checkpoint ${unit.unitId} has contradictory dependency digests`,
-      )
-  } else if (unit.kind === 'checklist') {
-    if (
-      unit.unitId !== CHECKLIST_UNIT_ID ||
-      payload.revision !== unit.inputRevision
-    )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'Checklist checkpoint has contradictory revision identity',
       )
   } else if (unit.kind === 'resource-content') {
     const expectedReceiptRef = unit.dispatchId
@@ -504,109 +417,6 @@ function snapshotTimestamp(snapshot: Record<string, unknown>): string {
   )
 }
 
-function historicalReviewFacts(input: {
-  snapshot: Record<string, unknown>
-  proofs: Map<string, ProvenUnit>
-  revision: Revision
-}): void {
-  const state = record(input.snapshot.documentReviewState)
-  if (!state) return
-  const activeCycle = record(state.activeCycle)
-  const approvals = [
-    record(state.foundationApproval),
-    record(state.checklistApproval),
-    record(state.comprehensiveApproval),
-  ].filter((value): value is Record<string, unknown> => Boolean(value))
-  const completedIds = new Set<string>()
-  for (const id of stringArray(activeCycle?.completedCheckIds) ?? [])
-    completedIds.add(id)
-  for (const approval of approvals)
-    for (const check of Array.isArray(approval.checks) ? approval.checks : []) {
-      const id = stringValue(record(check)?.id)
-      if (id) completedIds.add(id)
-    }
-  for (const id of completedIds)
-    if (!CURRENT_REVIEW_CHECK_IDS.has(id as DocumentReviewCheckId))
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        `snapshot contains unknown completed review unit ${id}`,
-      )
-
-  const checks = new Map<string, unknown>()
-  const digests = new Map<string, Record<string, string>>()
-  const acceptedAtById = new Map<string, string>()
-  const findingsById = new Map<string, unknown[]>()
-  if (activeCycle) {
-    for (const check of Array.isArray(activeCycle.checks)
-      ? activeCycle.checks
-      : []) {
-      const id = stringValue(record(check)?.id)
-      if (id) checks.set(id, check)
-    }
-    const digestRecord = record(activeCycle.checkEvidenceDigests)
-    for (const id of completedIds) {
-      const value = record(digestRecord?.[id])
-      if (value) digests.set(id, value as Record<string, string>)
-    }
-    for (const finding of Array.isArray(activeCycle.findings)
-      ? activeCycle.findings
-      : []) {
-      const id = stringValue(record(finding)?.checkId)
-      if (id) findingsById.set(id, [...(findingsById.get(id) ?? []), finding])
-    }
-  }
-  for (const approval of approvals) {
-    const acceptedAt =
-      stringValue(approval.approvedAt) ?? snapshotTimestamp(input.snapshot)
-    const digestRecord = record(approval.checkEvidenceDigests)
-    for (const check of Array.isArray(approval.checks) ? approval.checks : []) {
-      const id = stringValue(record(check)?.id)
-      if (!id) continue
-      if (!checks.has(id)) checks.set(id, check)
-      const value = record(digestRecord?.[id])
-      if (value && !digests.has(id))
-        digests.set(id, value as Record<string, string>)
-      acceptedAtById.set(id, acceptedAt)
-    }
-  }
-
-  for (const id of completedIds) {
-    const unitId = reviewUnitId(id as DocumentReviewCheckId)
-    const check = checks.get(id)
-    if (!check)
-      recoveryError(
-        'recovery_checkpoint_missing',
-        `snapshot has no accepted terminal for ${unitId}`,
-      )
-    const dependencyDigests = digests.get(id) ?? {}
-    const currentUnit = acceptedWorkflowUnitSchema.safeParse({
-      eventSchemaVersion: 1,
-      unitId,
-      kind: 'review-check',
-      phase: 'DOCUMENT_REVIEW',
-      predecessorUnitIds: expectedFixedPredecessors(unitId) ?? [],
-      inputRevision:
-        id === 'checklist_traceability' ||
-        FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.includes(id as never)
-          ? input.revision.document
-          : (input.revision.resource ?? input.revision.document),
-      dependencyDigests,
-      acceptedAt: acceptedAtById.get(id) ?? snapshotTimestamp(input.snapshot),
-      payload: {
-        check,
-        findings: findingsById.get(id) ?? [],
-        dependencyDigests: { [id]: dependencyDigests },
-      },
-    })
-    if (!currentUnit.success)
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        `historical review checkpoint ${unitId} is invalid`,
-      )
-    assertSnapshotClaimMatchesJournal(input.proofs, currentUnit.data)
-  }
-}
-
 async function historicalDocumentFacts(input: {
   snapshot: Record<string, unknown>
   proofs: Map<string, ProvenUnit>
@@ -647,7 +457,9 @@ function historicalResourceFacts(input: {
       unitId: RESOURCE_INVENTORY_UNIT_ID,
       kind: 'resource-inventory',
       phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: [CHECKLIST_UNIT_ID],
+      predecessorUnitIds: [
+        documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!),
+      ],
       inputRevision: inventory.revision,
       dependencyDigests: {},
       acceptedAt: inventory.acceptedAt,
@@ -687,37 +499,6 @@ function historicalResourceFacts(input: {
         'snapshot-passed Resource Gate has no accepted journal event',
       )
   }
-}
-
-function historicalChecklistFact(input: {
-  snapshot: Record<string, unknown>
-  proofs: Map<string, ProvenUnit>
-}): void {
-  if (input.proofs.has(CHECKLIST_UNIT_ID)) return
-  const approval = record(
-    record(input.snapshot.documentReviewState)?.checklistApproval,
-  )
-  if (!approval) return
-  const reviewProof = input.proofs.get(reviewUnitId('checklist_traceability'))
-  if (!reviewProof) return
-  assertSnapshotClaimMatchesJournal(input.proofs, {
-    eventSchemaVersion: 1,
-    unitId: CHECKLIST_UNIT_ID,
-    kind: 'checklist',
-    phase: 'DOCUMENT_REVIEW',
-    predecessorUnitIds: [reviewUnitId('checklist_traceability')],
-    inputRevision: approval.revision as string,
-    dependencyDigests: reviewProof.unit.dependencyDigests,
-    receiptRef: approval.evidencePath as string,
-    acceptedAt: approval.approvedAt as string,
-    payload: {
-      revision: approval.revision,
-      evidencePath: approval.evidencePath,
-      checkIds: (approval.checks as Array<Record<string, unknown>>).map(
-        check => check.id,
-      ),
-    },
-  })
 }
 
 function reconcileSourceRevision(input: {
@@ -1113,17 +894,6 @@ function assertCurrentUnitGraph(input: {
   return input.graph.slice(0, prefixLength)
 }
 
-function reviewScope(checkId: DocumentReviewCheckId): DocumentReviewScope {
-  if (checkId === 'checklist_traceability') return 'checklist'
-  if (
-    COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS.includes(
-      checkId as never,
-    )
-  )
-    return 'complete'
-  return 'foundation'
-}
-
 async function validateAcceptedArtifacts(input: {
   units: AcceptedWorkflowUnit[]
   workspacePath: string
@@ -1131,21 +901,6 @@ async function validateAcceptedArtifacts(input: {
   confirmedBriefDigest: string
   documentRevision: string
 }): Promise<void> {
-  const artifactsByScope = new Map<
-    DocumentReviewScope,
-    ReturnType<typeof readDocumentReviewArtifacts>
-  >()
-  const artifactsForScope = (scope: DocumentReviewScope) => {
-    let pending = artifactsByScope.get(scope)
-    if (!pending) {
-      pending = readDocumentReviewArtifacts(input.workspacePath, scope, {
-        confirmedBriefContext: input.confirmedBriefContext,
-        confirmedBriefDigest: input.confirmedBriefDigest,
-      })
-      artifactsByScope.set(scope, pending)
-    }
-    return pending
-  }
   const finalAcceptedDocument = input.units
     .filter(unit => unit.kind === 'document')
     .at(-1)
@@ -1162,9 +917,7 @@ async function validateAcceptedArtifacts(input: {
           'recovery_checkpoint_conflict',
           `accepted document checkpoint ${unit.unitId} has no exact dispatch receipt identity`,
         )
-      let receipt: Awaited<
-        ReturnType<typeof readAuthoredDocumentReceipt>
-      >
+      let receipt: Awaited<ReturnType<typeof readAuthoredDocumentReceipt>>
       try {
         receipt = await readAuthoredDocumentReceipt(
           input.workspacePath,
@@ -1215,34 +968,6 @@ async function validateAcceptedArtifacts(input: {
         'recovery_artifact_digest_mismatch',
         'final accepted document proof contradicts the current document revision',
       )
-    if (unit.kind === 'review-check') {
-      if (Object.keys(unit.dependencyDigests).length === 0)
-        recoveryError(
-          'recovery_checkpoint_missing',
-          `accepted review checkpoint ${unit.unitId} has no dependency proof`,
-        )
-      const check = reviewCheckFromUnit(unit)
-      let current: Record<string, string>
-      try {
-        current = documentReviewArtifactDigests(
-          artifactsForDocumentReviewCheck(
-            await artifactsForScope(reviewScope(check.id)),
-            check.id,
-          ),
-        )
-      } catch {
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          `current artifacts for ${unit.unitId} cannot be verified`,
-        )
-      }
-      if (stableValue(unit.dependencyDigests) !== stableValue(current))
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          `accepted dependencies changed after ${unit.unitId}`,
-        )
-      continue
-    }
     if (unit.kind === 'resource-inventory') {
       if (
         unit.inputRevision !==
@@ -1323,26 +1048,6 @@ async function validateAcceptedArtifacts(input: {
         recoveryError(
           'recovery_artifact_digest_mismatch',
           'canonical resource revision changed after Resource Gate acceptance',
-        )
-      continue
-    }
-    if (unit.kind === 'checklist') {
-      const reviewProof = input.units.find(
-        candidate =>
-          candidate.unitId === reviewUnitId('checklist_traceability'),
-      )
-      if (!reviewProof)
-        recoveryError(
-          'recovery_checkpoint_missing',
-          'accepted Checklist has no accepted review dependency',
-        )
-      if (
-        stableValue(unit.dependencyDigests) !==
-        stableValue(reviewProof.dependencyDigests)
-      )
-        recoveryError(
-          'recovery_checkpoint_conflict',
-          'accepted Checklist contradicts its review dependency proof',
         )
       continue
     }
@@ -1468,21 +1173,15 @@ function rawActiveUnitId(input: {
       )
     return documentUnitId(currentItemId)
   }
-  const cycle = record(record(snapshot.documentReviewState)?.activeCycle)
-  const completed = new Set(stringArray(cycle?.completedCheckIds) ?? [])
-  if (snapshot.phase === 'DOCUMENT_REVIEW' && cycle) {
-    const required = (stringArray(cycle.requiredCheckIds) ?? []).filter(id =>
-      CURRENT_REVIEW_CHECK_IDS.has(id as DocumentReviewCheckId),
-    )
-    const next = required.find(id => !completed.has(id))
-    if (next) return reviewUnitId(next as DocumentReviewCheckId)
-  }
-  const contract = record(record(dispatch?.request)?.contract)
-  const currentChecks = (stringArray(contract?.currentCheckIds) ?? []).filter(
-    id => CURRENT_REVIEW_CHECK_IDS.has(id as DocumentReviewCheckId),
+  const reviewRun = record(record(snapshot.documentReviewState)?.activeRun)
+  const reviewScope = stringValue(reviewRun?.scope)
+  if (
+    snapshot.phase === 'DOCUMENT_REVIEW' &&
+    (reviewScope === 'foundation' ||
+      reviewScope === 'checklist' ||
+      reviewScope === 'complete')
   )
-  if (currentChecks[0])
-    return reviewUnitId(currentChecks[0] as DocumentReviewCheckId)
+    return `document-review:${reviewScope}`
   const activeTaskId = stringValue(snapshot.activeTaskId)
   if (activeTaskId) return `implementation:${activeTaskId}`
   const resourceTask = stringValue(
@@ -1527,42 +1226,6 @@ function timestampFromSnapshot(
   return value && Number.isFinite(Date.parse(value)) ? value : undefined
 }
 
-function acceptedReviewUnits(
-  replayedUnitIds: string[],
-  proofs: Map<string, ProvenUnit>,
-  ids: readonly DocumentReviewCheckId[],
-): AcceptedWorkflowUnit[] {
-  const replayed = new Set(replayedUnitIds)
-  return ids.flatMap(id => {
-    const unitId = reviewUnitId(id)
-    const proof = proofs.get(unitId)
-    return replayed.has(unitId) && proof ? [proof.unit] : []
-  })
-}
-
-function approvalFromReviewUnits(input: {
-  scope: DocumentReviewScope
-  revision: string
-  units: AcceptedWorkflowUnit[]
-  evidencePath?: string
-  approvedAt?: string
-}): DocumentReviewApproval | undefined {
-  if (!input.evidencePath || !input.approvedAt) return undefined
-  return {
-    scope: input.scope,
-    revision: input.revision,
-    checks: input.units.map(reviewCheckFromUnit),
-    checkEvidenceDigests: Object.fromEntries(
-      input.units.map(unit => [
-        reviewCheckFromUnit(unit).id,
-        unit.dependencyDigests,
-      ]),
-    ),
-    evidencePath: input.evidencePath,
-    approvedAt: input.approvedAt,
-  }
-}
-
 function buildProjectionRun(input: {
   snapshot?: Record<string, unknown>
   acceptedEvents: WorkflowUnitAcceptedEvent[]
@@ -1572,7 +1235,6 @@ function buildProjectionRun(input: {
   activeUnitId?: string
   revision: Revision
   tasks: AtomicTask[]
-  activeSourceArtifactDigests?: Record<string, string>
   ownerId: string
   projectId: string
   confirmedBriefContext: string
@@ -1600,43 +1262,6 @@ function buildProjectionRun(input: {
   const documents = CANONICAL_FOUNDATION_DOCUMENTS.filter(path =>
     replayed.has(documentUnitId(path)),
   )
-  const foundationUnits = acceptedReviewUnits(
-    input.replayedUnitIds,
-    input.proofs,
-    FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  )
-  const checklistUnits = acceptedReviewUnits(
-    input.replayedUnitIds,
-    input.proofs,
-    CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-  )
-  const comprehensiveUnits = acceptedReviewUnits(
-    input.replayedUnitIds,
-    input.proofs,
-    COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS,
-  )
-  const checklistProof = replayed.has(CHECKLIST_UNIT_ID)
-    ? input.proofs.get(CHECKLIST_UNIT_ID)?.unit
-    : undefined
-  const checklistPayload = checklistProof
-    ? acceptedUnitPayload(checklistProof)
-    : undefined
-  const checklistApproval = checklistProof
-    ? approvalFromReviewUnits({
-        scope: 'checklist',
-        revision: checklistProof.inputRevision,
-        units: checklistUnits,
-        evidencePath:
-          checklistProof.receiptRef ??
-          stringValue(checklistPayload?.evidencePath),
-        approvedAt: checklistProof.acceptedAt,
-      })
-    : undefined
-  if (checklistProof && !checklistApproval)
-    recoveryError(
-      'recovery_checkpoint_missing',
-      'accepted Checklist has no canonical approval receipt',
-    )
 
   const inventory = replayed.has(RESOURCE_INVENTORY_UNIT_ID)
     ? input.proofs.get(RESOURCE_INVENTORY_UNIT_ID)?.unit
@@ -1669,41 +1294,39 @@ function buildProjectionRun(input: {
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
   const activeUnitId = input.activeUnitId
+  const reviewScope = activeUnitId?.startsWith('document-review:')
+    ? activeUnitId.slice('document-review:'.length)
+    : undefined
+  if (reviewScope === 'checklist' || reviewScope === 'complete')
+    recoveryError(
+      'recovery_checkpoint_missing',
+      `recovery cannot prove prerequisite approvals for the active ${reviewScope} review; restart from the last intact snapshot`,
+    )
   if (activeUnitId?.startsWith('document:')) {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
     currentItemId = activeUnitId.slice('document:'.length)
-  } else if (FOUNDATION_REVIEW_UNIT_IDS.includes(activeUnitId ?? '')) {
+  } else if (reviewScope === 'foundation') {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
-    currentItemId = activeUnitId?.slice('review:'.length)
-  } else if (
-    activeUnitId === reviewUnitId('checklist_traceability') ||
-    activeUnitId === CHECKLIST_UNIT_ID
-  ) {
+  } else if (reviewScope === 'checklist') {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'CHECKLIST_REVIEW'
-    currentItemId =
-      activeUnitId === CHECKLIST_UNIT_ID
-        ? 'docs/acceptance/gameplay-checklist.md'
-        : 'checklist_traceability'
-  } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
-    phase = 'RESOURCE_PREPARATION'
-    resourceTask = 'RESOURCE_INVENTORY'
-  } else if (activeUnitId === RESOURCE_CONTENT_UNIT_ID) {
-    phase = 'RESOURCE_PREPARATION'
-    resourceTask = 'RESOURCE_CONTENT'
-  } else if (activeUnitId === RESOURCE_GATE_UNIT_ID) {
-    phase = 'RESOURCE_PREPARATION'
-    resourceTask = 'RESOURCE_GATE'
-  } else if (COMPREHENSIVE_ADDITIONAL_UNIT_IDS.includes(activeUnitId ?? '')) {
+  } else if (reviewScope === 'complete') {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'COMPREHENSIVE_REVIEW'
-    currentItemId = activeUnitId?.slice('review:'.length)
-    resourceTask = 'RESOURCE_GATE'
+  } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
+  } else if (activeUnitId === RESOURCE_CONTENT_UNIT_ID) {
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
+  } else if (activeUnitId === RESOURCE_GATE_UNIT_ID) {
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
   } else if (activeUnitId === ATOMIC_PLAN_UNIT_ID) {
-    phase = 'ATOMIC_TASK_PLANNING'
-    resourceTask = 'RESOURCE_GATE'
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
   } else if (
     input.tasks.some(task => `implementation:${task.id}` === activeUnitId)
   ) {
@@ -1717,82 +1340,6 @@ function buildProjectionRun(input: {
     resourceTask = 'RESOURCE_GATE'
   }
 
-  const activeReviewIds =
-    documentStep === 'FOUNDATION_REVIEW'
-      ? FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS
-      : documentStep === 'CHECKLIST_REVIEW'
-        ? CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS
-        : documentStep === 'COMPREHENSIVE_REVIEW'
-          ? COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS
-          : undefined
-  const activeReviewUnits = activeReviewIds
-    ? acceptedReviewUnits(input.replayedUnitIds, input.proofs, activeReviewIds)
-    : []
-  const sourceArtifactDigests =
-    input.activeSourceArtifactDigests ??
-    (Object.assign(
-      {},
-      ...activeReviewUnits.map(unit => unit.dependencyDigests),
-    ) as Record<string, string>)
-  const activeCycle = activeReviewIds
-    ? {
-        cycleId:
-          stringValue(
-            record(record(input.snapshot?.documentReviewState)?.activeCycle)
-              ?.cycleId,
-          ) ?? `${runId}:recovered-review`,
-        originScope:
-          documentStep === 'FOUNDATION_REVIEW'
-            ? ('foundation' as const)
-            : documentStep === 'CHECKLIST_REVIEW'
-              ? ('checklist' as const)
-              : ('complete' as const),
-        scope:
-          documentStep === 'FOUNDATION_REVIEW'
-            ? ('foundation' as const)
-            : documentStep === 'CHECKLIST_REVIEW'
-              ? ('checklist' as const)
-              : ('complete' as const),
-        mode: 'initial' as const,
-        sourceRevision:
-          documentStep === 'COMPREHENSIVE_REVIEW'
-            ? (input.revision.resource ?? input.revision.document)
-            : input.revision.document,
-        requiredCheckIds: [...activeReviewIds],
-        completedCheckIds: activeReviewUnits.map(
-          unit => reviewCheckFromUnit(unit).id,
-        ),
-        checks: activeReviewUnits.map(reviewCheckFromUnit),
-        checkEvidenceDigests: Object.fromEntries(
-          activeReviewUnits.map(unit => [
-            reviewCheckFromUnit(unit).id,
-            unit.dependencyDigests,
-          ]),
-        ),
-        findings: activeReviewUnits.flatMap(reviewFindingsFromUnit),
-        acceptedSemanticResult: false,
-        changedPaths: [],
-        sourceArtifactDigests,
-      }
-    : undefined
-
-  const rawRepairPasses = record(
-    record(input.snapshot?.documentReviewState)?.repairPasses,
-  )
-  const repairPasses = {
-    foundation:
-      typeof rawRepairPasses?.foundation === 'number'
-        ? rawRepairPasses.foundation
-        : 0,
-    checklist:
-      typeof rawRepairPasses?.checklist === 'number'
-        ? rawRepairPasses.checklist
-        : 0,
-    resource:
-      typeof rawRepairPasses?.resource === 'number'
-        ? rawRepairPasses.resource
-        : 0,
-  }
   const snapshotCreatedAt = timestampFromSnapshot(input.snapshot, 'createdAt')
   const createdAt = input.journalMetadata.createdAt
   const updatedAt =
@@ -1903,11 +1450,43 @@ function buildProjectionRun(input: {
           }
         : {}),
     },
-    documentReviewState: {
-      repairPasses,
-      ...(checklistApproval ? { checklistApproval } : {}),
-      ...(activeCycle ? { activeCycle } : {}),
-    },
+    documentReviewState: (() => {
+      const rawReviewState = record(input.snapshot?.documentReviewState)
+      const scope =
+        reviewScope === 'foundation' ||
+        reviewScope === 'checklist' ||
+        reviewScope === 'complete'
+          ? reviewScope
+          : undefined
+      const rawActiveRun = record(rawReviewState?.activeRun)
+      const rawAttempt = rawActiveRun?.attempt
+      const attempt =
+        typeof rawAttempt === 'number' &&
+        Number.isInteger(rawAttempt) &&
+        rawAttempt > 0
+          ? rawAttempt
+          : 1
+      const attempts = { foundation: 0, checklist: 0, complete: 0 }
+      if (!scope) return { approvals: {}, attempts }
+      const revision =
+        scope === 'complete'
+          ? input.revision.resource
+          : input.revision.document
+      if (!revision)
+        recoveryError(
+          'recovery_checkpoint_missing',
+          `recovery cannot prove the ${scope} review revision`,
+        )
+      return {
+        approvals: {},
+        attempts: { ...attempts, [scope]: attempt },
+        activeRun: createDocumentReviewRun({
+          scope,
+          revision,
+          attempt,
+        }),
+      }
+    })(),
     foundationDraftState: { completedPaths: documents },
     resourceProductionState: {
       currentTask: resourceTask,
@@ -2012,6 +1591,18 @@ export async function projectExactResumeRun(input: {
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,
   })
+  const snapshotVersion = snapshot?.schemaVersion
+  if (
+    snapshot &&
+    typeof snapshotVersion === 'number' &&
+    Number.isInteger(snapshotVersion) &&
+    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
+  ) {
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      `workflow snapshot schema version ${snapshotVersion} is obsolete; start a new workflow with schema version ${DELIVERY_RUN_SCHEMA_VERSION}`,
+    )
+  }
   const acceptedEvents = parseAcceptedEvents({
     events: input.events,
     ownerId: input.ownerId,
@@ -2041,8 +1632,6 @@ export async function projectExactResumeRun(input: {
       snapshot,
       proofs,
     })
-    historicalReviewFacts({ snapshot, proofs, revision })
-    historicalChecklistFact({ snapshot, proofs })
     historicalResourceFacts({ snapshot, proofs, revision })
   }
   assertRawCompletedClaimsHaveAcceptedProof({ snapshot, proofs })
@@ -2061,7 +1650,12 @@ export async function projectExactResumeRun(input: {
     tasks,
     journal: acceptedEvents,
   })
-  const activeUnitId = graph[replayedUnitIds.length]
+  const graphActiveUnitId = graph[replayedUnitIds.length]
+  const activeUnitId =
+    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
+    !proofs.has(RESOURCE_INVENTORY_UNIT_ID)
+      ? 'document-review:foundation'
+      : graphActiveUnitId
   const rawProofInspection =
     input.receiptReconciliation?.sourceInspection ?? input.inspection
   const rawProofActiveUnitId = proveExactRawActiveUnitId({
@@ -2114,27 +1708,6 @@ export async function projectExactResumeRun(input: {
       'recovery_checkpoint_missing',
       'snapshot has no durable identity for the exact unfinished unit',
     )
-  const activeReviewScope = FOUNDATION_REVIEW_UNIT_IDS.includes(
-    activeUnitId ?? '',
-  )
-    ? ('foundation' as const)
-    : activeUnitId === reviewUnitId('checklist_traceability')
-      ? ('checklist' as const)
-      : COMPREHENSIVE_ADDITIONAL_UNIT_IDS.includes(activeUnitId ?? '')
-        ? ('complete' as const)
-        : undefined
-  const activeSourceArtifactDigests = activeReviewScope
-    ? documentReviewArtifactDigests(
-        await readDocumentReviewArtifacts(
-          input.workspacePath,
-          activeReviewScope,
-          {
-            confirmedBriefContext: input.confirmedBriefContext,
-            confirmedBriefDigest: sha256(input.confirmedBriefContext),
-          },
-        ),
-      )
-    : undefined
   const run = buildProjectionRun({
     snapshot,
     acceptedEvents,
@@ -2144,7 +1717,6 @@ export async function projectExactResumeRun(input: {
     activeUnitId,
     revision,
     tasks,
-    ...(activeSourceArtifactDigests ? { activeSourceArtifactDigests } : {}),
     ownerId: input.ownerId,
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,

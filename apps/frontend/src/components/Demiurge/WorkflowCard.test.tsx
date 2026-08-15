@@ -17,6 +17,48 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
+  it('renders the persisted final Reviewer report and affected paths', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'review-report-run',
+          status: 'blocked',
+          currentPhase: 'DOCUMENT_REVIEW',
+          documentReview: {
+            scope: 'foundation',
+            status: 'completed',
+            attempt: 3,
+            verdict: 'NEEDS_REVISION',
+            affectedPaths: ['docs/GDD.md'],
+            finalReportPath: '.beegame/reviews/foundation/revision/review.md',
+            finalReportMarkdown: '# Final review\n\nThe economy rule is not implementable.',
+            reports: [
+              {
+                role: 'gameplay',
+                path: '.beegame/reviews/foundation/revision/parts/gameplay.md',
+                status: 'completed',
+              },
+              {
+                role: 'technical',
+                path: '.beegame/reviews/foundation/revision/parts/technical.md',
+                status: 'failed',
+                failureReason: 'provider stream ended before the report committed',
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('NEEDS_REVISION')).toBeInTheDocument();
+    expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getByText('The economy rule is not implementable.')).toBeInTheDocument();
+    expect(screen.getByText('gameplay · 已完成')).toBeInTheDocument();
+    expect(
+      screen.getByText('provider stream ended before the report committed'),
+    ).toBeInTheDocument();
+  });
+
   it('renders a stage deck with navigation and only exposes the latest action', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     render(
@@ -124,7 +166,7 @@ describe('WorkflowCard', () => {
       />,
     );
 
-    expect(screen.getByText('基础文档初审')).toBeInTheDocument();
+    expect(screen.getByText('基础文档审计')).toBeInTheDocument();
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-icon', 'grip');
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
@@ -164,81 +206,6 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('已停止')).toBeInTheDocument();
     expect(screen.getByLabelText('任务状态：已停止')).toHaveAttribute('data-task-icon', 'task-stopped');
     expect(screen.queryByText('编写失败')).not.toBeInTheDocument();
-  });
-
-  it('renders Closure Review and repair ownership from durable review state', () => {
-    const { rerender } = render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_closure',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          documentStep: 'FOUNDATION_REVIEW',
-          reviewMode: 'closure',
-          reviewTarget: 'foundation',
-          phaseIndex: 4,
-          phaseCount: 11,
-          substage: 'CLOSURE_REVIEW',
-          convergencePass: 2,
-          tasks: [
-            {
-              id: 'brief_alignment',
-              title: 'brief_alignment',
-              status: 'running',
-              operation: 'review',
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('基础文档收敛')).toBeInTheDocument();
-    expect(screen.getByText('第 2 轮 · Closure Review')).toBeInTheDocument();
-    expect(screen.getByText('审计：简报一致性')).toBeInTheDocument();
-
-    rerender(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_repair',
-          status: 'running',
-          currentPhase: 'DOCUMENT_DRAFTING',
-          documentStep: 'FOUNDATION_DRAFTING',
-          reviewMode: 'initial',
-          reviewTarget: 'foundation',
-          phaseIndex: 4,
-          phaseCount: 11,
-          substage: 'REPAIR_PLANNING',
-          convergencePass: 1,
-        }}
-      />,
-    );
-    expect(screen.getByText('基础文档收敛')).toBeInTheDocument();
-    expect(screen.getByText('第 1 轮 · 制定修订方案')).toBeInTheDocument();
-  });
-
-  it('renders fixed game-design review tasks as user-facing labels', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_design_review',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          tasks: [
-            { id: 'strategy', title: 'gameplay_strategy_viability', status: 'completed', operation: 'review' },
-            { id: 'economy', title: 'economy_progression_integrity', status: 'completed', operation: 'review' },
-            { id: 'numeric', title: 'numeric_balance_feasibility', status: 'running', operation: 'review' },
-            { id: 'pacing', title: 'pacing_difficulty_coherence', status: 'pending', operation: 'review' },
-            { id: 'level-scene', title: 'level_scene_design_integrity', status: 'pending', operation: 'review' },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('审计：策略可行性')).toBeInTheDocument();
-    expect(screen.getByText('审计：经济与成长闭环')).toBeInTheDocument();
-    expect(screen.getByText('审计：数值可行性')).toBeInTheDocument();
-    expect(screen.getByText('审计：节奏与难度一致性')).toBeInTheDocument();
-    expect(screen.getByText('审计：关卡与场景完整性')).toBeInTheDocument();
   });
 
   it('renders the balance and level-scene foundation documents', () => {
@@ -298,10 +265,9 @@ describe('WorkflowCard', () => {
           runId: 'run_recovery',
           status: 'blocked',
           recoverable: true,
-          lastProvenPhase: 'DOCUMENT_REVIEW',
-          lastProvenUnitId: 'review:resource_semantic_fitness',
-          lastProvenUnitKind: 'review-check',
-          lastProvenItemId: 'resource_semantic_fitness',
+          lastProvenPhase: 'RESOURCE_PREPARATION',
+          lastProvenUnitId: 'resource:content',
+          lastProvenUnitKind: 'resource-content',
           thinking: '{"issues":[{"code":"invalid_type"}]}',
           block: { message: 'ZodError: internal diagnostic payload' },
           nextAction: 'resume',
@@ -311,10 +277,10 @@ describe('WorkflowCard', () => {
     );
 
     expect(screen.getByText('工作流需要恢复')).toBeInTheDocument();
-    expect(screen.getByText(/资源语义适配/)).toBeInTheDocument();
+    expect(screen.getByText(/资源内容/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
     expect(screen.queryByText(/invalid_type|ZodError|internal diagnostic payload/)).not.toBeInTheDocument();
-    expect(screen.queryByText('review:resource_semantic_fitness')).not.toBeInTheDocument();
+    expect(screen.queryByText('resource:content')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await waitFor(() => expect(onAction).toHaveBeenCalledTimes(1));
@@ -341,8 +307,6 @@ describe('WorkflowCard', () => {
 
   it.each([
     ['document', 'docs/GDD.md', '游戏设计文档 GDD'],
-    ['review-check', 'resource_semantic_fitness', '资源语义适配'],
-    ['checklist', undefined, 'Gameplay Checklist'],
     ['resource-inventory', undefined, '资源清单'],
     ['resource-content', undefined, '资源内容'],
     ['resource-gate', undefined, '资源准入审计'],

@@ -81,7 +81,9 @@ describe('bounded document review topology', () => {
     ])
     expect(
       assignments.some(value =>
-        value.sourcePaths.includes(resolve(workspacePath, CANONICAL_ASSET_MANIFEST)),
+        value.sourcePaths.includes(
+          resolve(workspacePath, CANONICAL_ASSET_MANIFEST),
+        ),
       ),
     ).toBe(true)
     expect(assignments.every(value => value.sourcePaths.length <= 3)).toBe(true)

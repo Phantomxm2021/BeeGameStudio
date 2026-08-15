@@ -23,9 +23,9 @@ const revision = 'a'.repeat(64)
 
 afterEach(async () => {
   await Promise.all(
-    workspaces.splice(0).map(path =>
-      rm(path, { recursive: true, force: true }),
-    ),
+    workspaces
+      .splice(0)
+      .map(path => rm(path, { recursive: true, force: true })),
   )
 })
 
@@ -73,12 +73,12 @@ describe('project-local document review reports', () => {
   test('places committed and staged reports under the active project revision', async () => {
     const workspacePath = await workspace()
 
-    expect(
-      reviewRevisionDirectory(workspacePath, 'foundation', revision),
-    ).toBe(
+    expect(reviewRevisionDirectory(workspacePath, 'foundation', revision)).toBe(
       join(workspacePath, '.beegame', 'reviews', 'foundation', revision),
     )
-    expect(reviewPartPath(workspacePath, 'foundation', revision, 'gameplay')).toBe(
+    expect(
+      reviewPartPath(workspacePath, 'foundation', revision, 'gameplay'),
+    ).toBe(
       join(
         workspacePath,
         '.beegame',

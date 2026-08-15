@@ -1,5 +1,4 @@
 import { parseDeliveryRun } from './schema'
-import { openDocumentReviewFindings } from './document-review-findings'
 import { retryFoundationFailures } from './foundation-authoring-batch'
 import type {
   AtomicTask,
@@ -115,31 +114,6 @@ function assertTaskGraph(tasks: AtomicTask[]): void {
 export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
   parseDeliveryRun(run)
   assertTaskGraph(run.tasks)
-  const activeReviewCycle = run.documentReviewState.activeCycle
-  if (
-    activeReviewCycle?.acceptedSemanticResult &&
-    activeReviewCycle.activeTarget === 'resource' &&
-    run.phase !== 'RESOURCE_PREPARATION' &&
-    run.phase !== 'DOCUMENT_REVIEW'
-  ) {
-    throw new WorkflowTransitionError(
-      'invariant_violation',
-      'accepted resource review findings must remain in Resource Production or Closure Review',
-    )
-  }
-  if (
-    run.phase === 'RESOURCE_PREPARATION' &&
-    activeReviewCycle?.acceptedSemanticResult &&
-    activeReviewCycle.activeTarget === 'resource' &&
-    !openDocumentReviewFindings(activeReviewCycle).some(
-      finding => finding.owner === 'resource',
-    )
-  ) {
-    throw new WorkflowTransitionError(
-      'invariant_violation',
-      'accepted resource review authority requires at least one resource finding',
-    )
-  }
   if (
     run.activeTaskId &&
     !run.tasks.some(task => task.id === run.activeTaskId)
@@ -205,27 +179,19 @@ function requireEvidence(
 
 function enterResourcePreparation(
   run: DeliveryRun,
-  options: {
-    reason?: string
-    repairPasses?: DeliveryRun['documentReviewState']['repairPasses']
-  } = {},
+  options: { reason?: string } = {},
 ): DeliveryRun {
+  const checklistApproval = run.documentReviewState.approvals.checklist
   if (
-    run.documentReviewState.checklistApproval?.scope !== 'checklist' ||
-    run.documentReviewState.checklistApproval.revision !==
-      run.revision.document ||
-    run.documentReviewState.checklistApproval.checks.some(
-      check => check.status !== 'pass',
-    )
+    checklistApproval?.scope !== 'checklist' ||
+    checklistApproval.revision !== run.revision.document
   )
     throw new Error(
       'resource preparation requires the frozen checklist approval',
     )
-  const activeCycle = run.documentReviewState.activeCycle
-  const preserveReviewCycle = Boolean(
-    activeCycle?.acceptedSemanticResult &&
-      activeCycle.activeTarget === 'resource',
-  )
+  const preserveReviewRun =
+    run.documentReviewState.activeRun?.scope === 'complete' &&
+    run.documentReviewState.activeRun.verdict === 'NEEDS_REVISION'
   return {
     ...run,
     phase: 'RESOURCE_PREPARATION',
@@ -241,7 +207,7 @@ function enterResourcePreparation(
     },
     tasks: [],
     evidence: {},
-    resourceProductionState: preserveReviewCycle
+    resourceProductionState: preserveReviewRun
       ? {
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_PLAN',
@@ -250,9 +216,13 @@ function enterResourcePreparation(
       : { currentTask: 'RESOURCE_PLAN' },
     documentReviewState: {
       ...run.documentReviewState,
-      comprehensiveApproval: undefined,
-      activeCycle: preserveReviewCycle ? activeCycle : undefined,
-      ...(options.repairPasses ? { repairPasses: options.repairPasses } : {}),
+      approvals: {
+        ...run.documentReviewState.approvals,
+        complete: undefined,
+      },
+      activeRun: preserveReviewRun
+        ? run.documentReviewState.activeRun
+        : undefined,
     },
     updatedAt: timestamp(),
   }
@@ -273,7 +243,8 @@ export function transitionDeliveryRun(
         documentStep: 'FOUNDATION_DRAFTING',
         foundationDraftState: { completedPaths: [] },
         documentReviewState: {
-          repairPasses: { foundation: 0, checklist: 0, resource: 0 },
+          approvals: {},
+          attempts: { foundation: 0, checklist: 0, complete: 0 },
         },
         updatedAt: timestamp(),
       }
@@ -311,29 +282,15 @@ export function transitionDeliveryRun(
       break
     }
     case 'resource_review_remediation_required': {
-      const activeCycle = run.documentReviewState.activeCycle
+      const activeReview = run.documentReviewState.activeRun
       if (
-        !activeCycle?.acceptedSemanticResult ||
-        activeCycle.activeTarget !== 'resource'
+        activeReview?.scope !== 'complete' ||
+        activeReview.verdict !== 'NEEDS_REVISION'
       )
         fail(
-          'resource review remediation requires an accepted resource finding batch',
+          'resource review remediation requires an accepted complete review report',
         )
-      if (
-        !openDocumentReviewFindings(activeCycle).some(
-          finding => finding.owner === 'resource',
-        )
-      )
-        fail(
-          'resource review remediation requires at least one resource finding',
-        )
-      const completedPasses = run.documentReviewState.repairPasses.resource
-      next = enterResourcePreparation(run, {
-        repairPasses: {
-          ...run.documentReviewState.repairPasses,
-          resource: completedPasses + 1,
-        },
-      })
+      next = enterResourcePreparation(run)
       break
     }
     case 'tasks_planned':
@@ -345,7 +302,7 @@ export function transitionDeliveryRun(
       )
         fail('task planning requires passed resource-content evidence')
       if (
-        run.documentReviewState.comprehensiveApproval?.revision !==
+        run.documentReviewState.approvals.complete?.revision !==
         run.revision.resource
       )
         fail('task planning requires current comprehensive review approval')
@@ -574,6 +531,29 @@ export function transitionDeliveryRun(
               foundationDraftState: retryFoundationFailures(
                 run.foundationDraftState,
               ),
+            }
+          : {}),
+        ...(run.phase === 'DOCUMENT_REVIEW' &&
+        run.documentReviewState.activeRun
+          ? {
+              documentReviewState: {
+                ...run.documentReviewState,
+                activeRun: {
+                  ...run.documentReviewState.activeRun,
+                  status: 'running' as const,
+                  failureReason: undefined,
+                  reports: run.documentReviewState.activeRun.reports.map(
+                    report =>
+                      report.status === 'failed'
+                        ? {
+                            ...report,
+                            status: 'pending' as const,
+                            failureReason: undefined,
+                          }
+                        : report,
+                  ),
+                },
+              },
             }
           : {}),
         ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId

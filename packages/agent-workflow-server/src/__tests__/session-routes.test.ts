@@ -39,6 +39,7 @@ import {
   type WorkflowEvent,
 } from '../beegame/delivery-workflow/types'
 import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
+import { createDocumentReviewRun } from '../beegame/delivery-workflow/document-review-stage'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -63,14 +64,16 @@ function completeTestFoundationDocument(
             materialId: material.materialId,
             title: material.title,
             format: material.format,
-            entries: [{
-              evidenceId: `${material.materialId}.pending`,
-              category: 'search_direction' as const,
-              displayName: 'Pending reference direction',
-              purpose: 'Record a production need before source selection.',
-              state: 'source_not_selected' as const,
-              evidenceRefs: [],
-            }],
+            entries: [
+              {
+                evidenceId: `${material.materialId}.pending`,
+                category: 'search_direction' as const,
+                displayName: 'Pending reference direction',
+                purpose: 'Record a production need before source selection.',
+                state: 'source_not_selected' as const,
+                evidenceRefs: [],
+              },
+            ],
           }
         : {
             materialId: material.materialId,
@@ -659,14 +662,17 @@ describe('delivery workflow session continuation', () => {
         }),
       })
       expect(modelConfigResponse.status).toBe(200)
-      const removedLegacyCreateResponse = await app.request('/api/beegame-sessions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          workspacePath: join(projectsRoot, 'client-selected-workspace'),
-        }),
-      })
+      const removedLegacyCreateResponse = await app.request(
+        '/api/beegame-sessions',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            workspacePath: join(projectsRoot, 'client-selected-workspace'),
+          }),
+        },
+      )
       expect(removedLegacyCreateResponse.status).toBe(404)
       const sessionResponse = await app.request(
         `/api/projects/${encodeURIComponent(projectId)}/session/ensure`,
@@ -687,9 +693,11 @@ describe('delivery workflow session continuation', () => {
         status: 200,
         error: undefined,
       })
-      const session = ((await sessionResponse.json()) as {
-        session: { id: string }
-      }).session
+      const session = (
+        (await sessionResponse.json()) as {
+          session: { id: string }
+        }
+      ).session
 
       const brief = JSON.stringify({
         kind: 'confirmed_build_brief',
@@ -773,7 +781,7 @@ describe('delivery workflow session continuation', () => {
       })
       expect(workflowWorkerStarts).toBe(1)
       expect(await store.load()).toMatchObject({
-        schemaVersion: 13,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
         runId: 'session-continue-run',
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
@@ -1155,10 +1163,35 @@ describe('delivery workflow session continuation', () => {
       projectId,
       ownerId,
     })
+    const reviewRevision = 'a'.repeat(64)
+    const reportPath = `.beegame/reviews/foundation/${reviewRevision}/review.md`
+    const reportMarkdown =
+      '# Foundation Review\n\nReady for checklist authoring.'
+    await mkdir(
+      join(workspace, '.beegame', 'reviews', 'foundation', reviewRevision),
+      { recursive: true },
+    )
+    await writeFile(join(workspace, reportPath), reportMarkdown)
     const run: DeliveryRun = {
       ...baseRun,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
+      documentReviewState: {
+        ...baseRun.documentReviewState,
+        activeRun: {
+          ...createDocumentReviewRun({
+            scope: 'foundation',
+            revision: reviewRevision,
+          }),
+          status: 'completed',
+          verdict: 'READY',
+          affectedPaths: [],
+          finalReportPath: reportPath,
+          finalReportDigest: createHash('sha256')
+            .update(reportMarkdown)
+            .digest('hex'),
+        },
+      },
       currentMessage: 'live stage status',
       blockedReason: 'current-only recovery detail',
       usage: {
@@ -1184,6 +1217,27 @@ describe('delivery workflow session continuation', () => {
     }
     expect(response.status).toBe(200)
     const workflow = payload.workflow as Record<string, unknown>
+    expect(workflow.documentReview).toMatchObject({
+      scope: 'foundation',
+      verdict: 'READY',
+      finalReportPath: reportPath,
+      finalReportMarkdown: reportMarkdown,
+    })
+    await writeFile(join(workspace, reportPath), '# tampered\n')
+    const tamperedResponse = await app.request(
+      `/api/projects/${projectId}/workflow`,
+    )
+    const tamperedPayload = (await tamperedResponse.json()) as {
+      workflow?: Record<string, unknown>
+    }
+    expect(
+      (tamperedPayload.workflow?.documentReview as Record<string, unknown>)
+        .finalReportMarkdown,
+    ).toBeUndefined()
+    expect(tamperedPayload.workflow?.documentReview).toMatchObject({
+      failureReason:
+        'document review report bytes no longer match the accepted digest',
+    })
     const cards = workflow.stageSnapshots as Array<Record<string, unknown>>
     expect(cards.map(card => card.phaseIndex)).toEqual([1, 2, 3])
     expect(cards[0]).toMatchObject({
@@ -1216,9 +1270,9 @@ describe('delivery workflow session continuation', () => {
       workflow?: Record<string, unknown>
     }
     expect(runtimeResponse.status).toBe(200)
-    expect(
-      (runtimePayload.workflow?.stageSnapshots as unknown[]).length,
-    ).toBe(3)
+    expect((runtimePayload.workflow?.stageSnapshots as unknown[]).length).toBe(
+      3,
+    )
 
     const legacyRun = { ...run, runId: 'legacy-stage-history-run' }
     const legacyWorkspace = join(projectsRoot, 'users', ownerId, 'legacy')
@@ -1269,7 +1323,7 @@ function frozenStageEvent(
     stageSnapshot: {
       stageId: phase,
       phaseIndex,
-      phaseCount: 11,
+      phaseCount: 9,
       status: 'completed',
       currentPhase: phase,
       message: 'frozen stage status',

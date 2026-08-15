@@ -16,9 +16,9 @@ describe('complete game document contracts', () => {
       expect(contract.path).toBe(path)
       expect(contract.outputPolicy.targetMaximumUtf8Bytes).toBe(48_000)
       expect(contract.sections.length).toBeGreaterThanOrEqual(8)
-      expect(new Set(contract.sections.map(section => section.sectionId)).size).toBe(
-        contract.sections.length,
-      )
+      expect(
+        new Set(contract.sections.map(section => section.sectionId)).size,
+      ).toBe(contract.sections.length)
       expect(
         contract.sections.every(
           section =>
@@ -36,7 +36,9 @@ describe('complete game document contracts', () => {
         contract.sections.flatMap(section => section.responsibilityIds),
       ),
     )
-    expect([...covered].sort()).toEqual([...GAME_DOCUMENT_RESPONSIBILITIES].sort())
+    expect([...covered].sort()).toEqual(
+      [...GAME_DOCUMENT_RESPONSIBILITIES].sort(),
+    )
   })
 
   test('keeps upstream authority inside the canonical dependency prefix', () => {
@@ -58,9 +60,12 @@ describe('complete game document contracts', () => {
       ).toBe(contract.productionMaterials.length)
       expect(
         contract.productionMaterials.every(item =>
-          ['markdown_table', 'mermaid', 'inline_svg', 'evidence_register'].includes(
-            item.format,
-          ),
+          [
+            'markdown_table',
+            'mermaid',
+            'inline_svg',
+            'evidence_register',
+          ].includes(item.format),
         ),
       ).toBe(true)
       expect(contract.upstreamSections.map(item => item.path)).toEqual([

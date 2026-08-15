@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { relative, resolve } from 'node:path'
-import type { DispatchRecord } from './types'
+import { relative, resolve, sep } from 'node:path'
+import type {
+  DeliveryRun,
+  DocumentReviewReportState,
+  DocumentReviewRun,
+} from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
   documentReviewAssignments,
   finalReviewAssignment,
@@ -12,36 +17,16 @@ import type {
   DocumentReviewScope,
   DocumentReviewVerdict,
 } from './document-review-report'
+import { computeDocumentRevision, computeResourceRevision } from './revision'
 
-export type DocumentReviewReportState = {
-  role: DocumentReviewRole
-  path: string
-  digest?: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  dispatch?: DispatchRecord
-  failureReason?: string
-}
-
-export type DocumentReviewRun = {
-  scope: DocumentReviewScope
-  revision: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  reports: DocumentReviewReportState[]
-  finalReportPath?: string
-  finalReportDigest?: string
-  verdict?: DocumentReviewVerdict
-  affectedPaths?: string[]
-  attempt: number
-  approvedFoundationRevision?: string
-  failureReason?: string
-}
+export type { DocumentReviewReportState, DocumentReviewRun } from './types'
 
 export type DocumentReviewTerminal = {
   workerType: 'document-reviewer'
   status: 'completed'
   revision: string
   scope: DocumentReviewScope
-  role: DocumentReviewRole
+  role: string
   reportPaths: string[]
   verdict?: DocumentReviewVerdict
   affectedPaths?: string[]
@@ -54,9 +39,46 @@ export type DocumentReviewDispatch = {
     reviewScope: DocumentReviewScope
     reviewRole: DocumentReviewRole
     assignment: DocumentReviewAssignment
-    currentRevision: string
+    revisionVerification:
+      | {
+          kind: 'document'
+          confirmedBriefDigest: string
+          prerequisiteReports: Array<{ path: string; digest: string }>
+        }
+      | {
+          kind: 'resource'
+          confirmedBriefDigest: string
+          prerequisiteReports: Array<{ path: string; digest: string }>
+        }
     partDigests: Record<string, string>
   }
+}
+
+export async function computeCurrentDocumentReviewRevision(input: {
+  workspacePath: string
+  verification: DocumentReviewDispatch['contract']['revisionVerification']
+}): Promise<string> {
+  const workspaceRoot = resolve(input.workspacePath)
+  for (const report of input.verification.prerequisiteReports) {
+    const absolutePath = resolve(workspaceRoot, report.path)
+    if (
+      absolutePath !== workspaceRoot &&
+      !absolutePath.startsWith(`${workspaceRoot}${sep}`)
+    )
+      throw new Error('document review prerequisite report escapes the project')
+    const digest = createHash('sha256')
+      .update(await readFile(absolutePath))
+      .digest('hex')
+    if (digest !== report.digest)
+      throw new Error('document review prerequisite report changed')
+  }
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.verification.confirmedBriefDigest,
+  )
+  return input.verification.kind === 'document'
+    ? documentRevision
+    : computeResourceRevision(input.workspacePath, documentRevision)
 }
 
 function projectPath(workspacePath: string, path: string): string {
@@ -120,10 +142,24 @@ export function createDocumentReviewRun(input: {
 export function buildDocumentReviewDispatches(input: {
   run: DocumentReviewRun
   workspacePath: string
+  revisionVerification:
+    | {
+        kind: 'document'
+        confirmedBriefDigest: string
+        prerequisiteReports: Array<{ path: string; digest: string }>
+      }
+    | {
+        kind: 'resource'
+        confirmedBriefDigest: string
+        prerequisiteReports: Array<{ path: string; digest: string }>
+      }
 }): DocumentReviewDispatch[] {
-  if (input.run.status === 'completed' || input.run.status === 'failed') return []
+  if (input.run.status === 'completed' || input.run.status === 'failed')
+    return []
   const specialists = assignmentsForRun(input.run, input.workspacePath)
-  const stateByRole = new Map(input.run.reports.map(report => [report.role, report]))
+  const stateByRole = new Map(
+    input.run.reports.map(report => [report.role, report]),
+  )
   const incompleteSpecialists = specialists.filter(
     assignment => stateByRole.get(assignment.role)?.status !== 'completed',
   )
@@ -136,9 +172,18 @@ export function buildDocumentReviewDispatches(input: {
         ).length,
     )
     return incompleteSpecialists
-      .filter(assignment => stateByRole.get(assignment.role)?.status === 'pending')
+      .filter(
+        assignment => stateByRole.get(assignment.role)?.status === 'pending',
+      )
       .slice(0, capacity)
-      .map(assignment => dispatchFor(input.run, assignment, {}))
+      .map(assignment =>
+        dispatchFor(
+          input.run,
+          assignment,
+          {},
+          input.revisionVerification,
+        ),
+      )
   }
 
   const finalState = stateByRole.get('final')
@@ -157,13 +202,21 @@ export function buildDocumentReviewDispatches(input: {
       return [state.path, state.digest]
     }),
   )
-  return [dispatchFor(input.run, final, partDigests)]
+  return [
+    dispatchFor(
+      input.run,
+      final,
+      partDigests,
+      input.revisionVerification,
+    ),
+  ]
 }
 
 function dispatchFor(
   run: DocumentReviewRun,
   assignment: DocumentReviewAssignment,
   partDigests: Record<string, string>,
+  revisionVerification: DocumentReviewDispatch['contract']['revisionVerification'],
 ): DocumentReviewDispatch {
   return {
     idempotencyKey: `${run.scope}:${run.revision}:${assignment.role}:${run.attempt}`,
@@ -172,7 +225,7 @@ function dispatchFor(
       reviewScope: run.scope,
       reviewRole: assignment.role,
       assignment,
-      currentRevision: run.revision,
+      revisionVerification,
       partDigests,
     },
   }
@@ -201,13 +254,20 @@ export async function acceptDocumentReviewTerminal(input: {
     terminal.reportPaths.length !== expectedPaths.length ||
     terminal.reportPaths.some((path, index) => path !== expectedPaths[index])
   )
-    throw new Error('document review terminal paths do not match the assignment')
+    throw new Error(
+      'document review terminal paths do not match the assignment',
+    )
 
   const bytes = await readFile(resolve(input.workspacePath, report.path))
   const digest = createHash('sha256').update(bytes).digest('hex')
   const reports = run.reports.map(value =>
     value.role === report.role
-      ? { ...value, status: 'completed' as const, digest, failureReason: undefined }
+      ? {
+          ...value,
+          status: 'completed' as const,
+          digest,
+          failureReason: undefined,
+        }
       : value,
   )
   if (terminal.role === 'final') {
@@ -283,5 +343,99 @@ export async function recoverDocumentReviewRun(input: {
           verdict: undefined,
           affectedPaths: undefined,
         }),
+  }
+}
+
+export function routeCompletedDocumentReview(input: {
+  run: DeliveryRun
+  review: DocumentReviewRun
+  now?: string
+}): DeliveryRun {
+  const { run, review } = input
+  if (
+    review.status !== 'completed' ||
+    !review.verdict ||
+    !review.finalReportPath ||
+    !review.finalReportDigest
+  )
+    throw new Error('document review routing requires a completed final report')
+  if (review.verdict === 'NEEDS_REVISION') {
+    if (review.attempt >= 3)
+      return {
+        ...run,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep:
+          review.scope === 'foundation'
+            ? 'FOUNDATION_REVIEW'
+            : review.scope === 'checklist'
+              ? 'CHECKLIST_REVIEW'
+              : 'COMPREHENSIVE_REVIEW',
+        status: 'needs_action',
+        blockedReason: `document review stopped after three consecutive reviews requiring revision; see ${review.finalReportPath}`,
+        documentReviewState: {
+          ...run.documentReviewState,
+          activeRun: review,
+        },
+      }
+    const affected = new Set(review.affectedPaths ?? [])
+    const ownsFoundationPath = CANONICAL_FOUNDATION_DOCUMENTS.some(path =>
+      affected.has(path),
+    )
+    const ownsChecklistPath = affected.has(
+      'docs/acceptance/gameplay-checklist.md',
+    )
+    const ownsResourcePath = [...affected].some(path =>
+      path.startsWith('assets/'),
+    )
+    if (!ownsFoundationPath && !ownsChecklistPath && !ownsResourcePath)
+      throw new Error('document review decision has no routable affected path')
+    return {
+      ...run,
+      phase: ownsFoundationPath
+        ? 'DOCUMENT_DRAFTING'
+        : ownsChecklistPath
+          ? 'DOCUMENT_REVIEW'
+          : 'RESOURCE_PREPARATION',
+      documentStep:
+        ownsChecklistPath && !ownsFoundationPath
+          ? 'CHECKLIST_DRAFTING'
+          : undefined,
+      status: 'running',
+      blockedReason: undefined,
+      documentReviewState: {
+        ...run.documentReviewState,
+        activeRun: { ...review, remediatedPaths: [] },
+      },
+    }
+  }
+  const approval = {
+    scope: review.scope,
+    revision: review.revision,
+    reportPath: review.finalReportPath,
+    reportDigest: review.finalReportDigest,
+    approvedAt: input.now ?? new Date().toISOString(),
+  }
+  return {
+    ...run,
+    phase:
+      review.scope === 'foundation'
+        ? 'DOCUMENT_REVIEW'
+        : review.scope === 'checklist'
+          ? 'RESOURCE_PREPARATION'
+          : 'ATOMIC_TASK_PLANNING',
+    documentStep:
+      review.scope === 'foundation' ? 'CHECKLIST_DRAFTING' : undefined,
+    status: 'running',
+    blockedReason: undefined,
+    documentReviewState: {
+      ...run.documentReviewState,
+      // Keep the latest completed run as display authority. The controller
+      // replaces it when the next scope/revision starts; it is never replayed.
+      activeRun: review,
+      approvals: {
+        ...(run.documentReviewState.approvals ?? {}),
+        [review.scope]: approval,
+      },
+    },
   }
 }

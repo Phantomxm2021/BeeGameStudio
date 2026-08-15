@@ -7,7 +7,6 @@ import {
   computeResourceRevision,
   computeWorkspaceRevision,
 } from './revision'
-import { restoreAcceptedReviewRemediationHandoff } from './document-stage'
 import {
   auditAssetContract,
   type AssetContractAudit,
@@ -16,7 +15,6 @@ import {
   DELIVERY_RUN_SCHEMA_VERSION,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENT_IDS,
-  FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
   type AcceptedWorkflowUnit,
   type DeliveryRun,
   type DispatchRecord,
@@ -331,20 +329,16 @@ async function reconcileActiveCanonicalReceipt(input: {
         : {
             phase: 'DOCUMENT_REVIEW',
             documentStep: 'FOUNDATION_REVIEW',
-            currentItemId: FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[0],
             documentReviewState: {
               ...documentReviewState,
-              activeCycle: {
-                requiredCheckIds: [...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS],
-                completedCheckIds: [],
-              },
+              activeRun: undefined,
             },
           }),
       updatedAt: acceptedAt,
     }
     const activeUnitId = nextPath
       ? `document:${nextPath}`
-      : `review:${FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS[0]}`
+      : 'document-review:foundation'
     if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
       return {
         inspection: { ...input.inspection, parsedValue },
@@ -737,7 +731,6 @@ async function restoreCanonicalDocumentCommit(
     !workspacePath ||
     !dispatch ||
     dispatch.workerType !== 'document-author' ||
-    dispatch.request?.contract.authoringMode === 'repair-planning' ||
     dispatch.terminalResult
   )
     return run
@@ -820,12 +813,9 @@ async function restoreResourceContentCommit(
 }
 
 function reviewRetryIsLocked(run: DeliveryRun): boolean {
-  const cycle = run.documentReviewState.activeCycle
   return Boolean(
     run.phase === 'DOCUMENT_REVIEW' &&
-      run.documentStep !== 'CHECKLIST_DRAFTING' &&
-      cycle &&
-      cycle.acceptedSemanticResult,
+      run.documentReviewState.activeRun?.status === 'completed',
   )
 }
 
@@ -833,18 +823,18 @@ async function unlockReviewForChangedRevision(input: {
   run: DeliveryRun
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
-  const cycle = input.run.documentReviewState.activeCycle
-  if (!cycle || !input.workspacePath || !reviewRetryIsLocked(input.run))
+  const review = input.run.documentReviewState.activeRun
+  if (!review || !input.workspacePath || !reviewRetryIsLocked(input.run))
     return undefined
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
   )
   const currentRevision =
-    cycle.scope !== 'complete'
+    review.scope !== 'complete'
       ? documentRevision
       : await computeResourceRevision(input.workspacePath, documentRevision)
-  if (currentRevision === cycle.sourceRevision) return undefined
+  if (currentRevision === review.revision) return undefined
   return {
     ...input.run,
     status: 'running',
@@ -852,31 +842,27 @@ async function unlockReviewForChangedRevision(input: {
     revision: {
       ...input.run.revision,
       document: documentRevision,
-      ...(cycle.scope === 'complete' ? { resource: currentRevision } : {}),
+      ...(review.scope === 'complete' ? { resource: currentRevision } : {}),
       implementation: undefined,
     },
     tasks: [],
     evidence:
-      cycle.scope !== 'complete'
+      review.scope !== 'complete'
         ? {}
         : {
             resourcePreparation: input.run.evidence.resourcePreparation,
           },
     documentReviewState: {
       ...input.run.documentReviewState,
-      ...(cycle.scope === 'foundation'
-        ? {
-            foundationApproval: undefined,
-            checklistApproval: undefined,
-            comprehensiveApproval: undefined,
-          }
-        : cycle.scope === 'checklist'
-          ? {
-              checklistApproval: undefined,
-              comprehensiveApproval: undefined,
-            }
-          : { comprehensiveApproval: undefined }),
-      activeCycle: undefined,
+      approvals:
+        review.scope === 'foundation'
+          ? {}
+          : review.scope === 'checklist'
+            ? {
+                foundation: input.run.documentReviewState.approvals?.foundation,
+              }
+            : input.run.documentReviewState.approvals,
+      activeRun: undefined,
     },
     updatedAt: new Date().toISOString(),
   }
@@ -943,9 +929,7 @@ export async function resumeRun(input: {
       input.store,
     )
     if (acquired.run.status === 'completed') return acquired.run
-    const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
-      acquired.run,
-    )
+    const restoredHandoff = undefined
     const retryable =
       acquired.run.status === 'needs_action' ||
       acquired.run.status === 'blocked' ||
@@ -1017,9 +1001,7 @@ export async function retryRun(input: {
       !acquired.run.activeDispatch?.terminalResult
     )
       return acquired.run
-    const restoredHandoff = restoreAcceptedReviewRemediationHandoff(
-      acquired.run,
-    )
+    const restoredHandoff = undefined
     const changedReview = restoredHandoff
       ? undefined
       : await unlockReviewForChangedRevision({

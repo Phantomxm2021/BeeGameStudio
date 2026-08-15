@@ -1,4 +1,4 @@
-import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './document-repair-graph'
+import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
 import type { FoundationDocumentPath } from './types'
 
 export const GAME_DOCUMENT_RESPONSIBILITIES = [

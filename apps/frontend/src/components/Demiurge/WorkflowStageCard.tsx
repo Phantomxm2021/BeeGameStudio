@@ -82,22 +82,6 @@ const documentTitle: Record<string, string> = {
   'docs/ASSET_PLAN.md': '资产计划',
   'docs/acceptance/gameplay-checklist.md': 'Gameplay Checklist',
   'assets/asset-manifest.json': 'Asset Manifest',
-  brief_alignment: '简报一致性',
-  cross_document_consistency: '跨文档一致性',
-  gameplay_completeness: '玩法完整性',
-  gameplay_strategy_viability: '策略可行性',
-  economy_progression_integrity: '经济与成长闭环',
-  numeric_balance_feasibility: '数值可行性',
-  pacing_difficulty_coherence: '节奏与难度一致性',
-  level_scene_design_integrity: '关卡与场景完整性',
-  technical_feasibility: '技术可行性',
-  art_direction_coherence: '美术方向一致性',
-  ui_audio_consistency: 'UI 与音频一致性',
-  acceptance_observability: '验收可观测性',
-  checklist_traceability: 'Checklist 可追踪性',
-  resource_semantic_fitness: '资源语义适配',
-  content_structure_fitness: '内容结构适配',
-  resource_content_consistency: '资源与内容一致性',
 };
 
 const displayTaskTitle = (task: WorkflowCardTask): string => {
@@ -111,10 +95,7 @@ const displayTaskTitle = (task: WorkflowCardTask): string => {
 const displayRecoveryUnitTitle = (kind?: WorkflowRecoveryUnitKind, itemId?: string): string | undefined => {
   switch (kind) {
     case 'document':
-    case 'review-check':
       return itemId ? documentTitle[itemId] : undefined;
-    case 'checklist':
-      return 'Gameplay Checklist';
     case 'resource-inventory':
       return '资源清单';
     case 'resource-content':
@@ -334,7 +315,9 @@ const WorkflowStatusIcon = ({ status }: { status: WorkflowCardStageSnapshot['sta
         />
       );
     case 'failed':
-      return <AutoPlayStatusIcon Icon={XIcon} {...props} className={`${props.className} text-rose-400`} data-icon="x" />;
+      return (
+        <AutoPlayStatusIcon Icon={XIcon} {...props} className={`${props.className} text-rose-400`} data-icon="x" />
+      );
     case 'cancelled':
       return (
         <AutoPlayStatusIcon
@@ -411,31 +394,21 @@ export function WorkflowStageCard({
     Number(snapshot.phaseIndex) > 0 &&
     Number(snapshot.phaseCount) >= Number(snapshot.phaseIndex);
   const convergingFoundation = snapshot.phaseIndex === 4;
-  const foundationContext =
-    convergingFoundation || snapshot.reviewTarget === 'foundation' || snapshot.documentStep === 'FOUNDATION_REVIEW';
   const convergenceTitle = convergingFoundation ? '基础文档收敛' : '完整交付收敛';
   const substageTitle =
     snapshot.substage === 'INITIAL_DRAFTING'
       ? '基础文档编写'
       : snapshot.substage === 'INITIAL_REVIEW'
-        ? foundationContext
-          ? '基础文档初审'
-          : '完整交付初审'
-        : snapshot.substage === 'REPAIR_PLANNING'
-          ? '制定修订方案'
-          : snapshot.substage === 'REPAIRING'
-            ? snapshot.reviewTarget === 'foundation'
-              ? '修订基础文档'
-              : snapshot.reviewTarget === 'checklist'
-                ? '修订验收清单'
-                : '修订资源与内容合同'
-            : snapshot.substage === 'CLOSURE_REVIEW'
-              ? 'Closure Review'
-              : snapshot.substage === 'CHECKLIST_DRAFTING'
-                ? '编写验收清单'
-                : snapshot.substage === 'CHECKLIST_REVIEW'
-                  ? '审计验收清单'
-                  : undefined;
+        ? snapshot.documentStep === 'COMPREHENSIVE_REVIEW'
+          ? '完整交付审计'
+          : '基础文档审计'
+        : snapshot.substage === 'REPAIRING'
+          ? '修订审计影响路径'
+          : snapshot.substage === 'CHECKLIST_DRAFTING'
+            ? '编写验收清单'
+            : snapshot.substage === 'CHECKLIST_REVIEW'
+              ? '审计验收清单'
+              : undefined;
   const stageTitle = isRecoverable
     ? '工作流需要恢复'
     : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex))
@@ -548,7 +521,9 @@ export function WorkflowStageCard({
                       className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-rose-400/20 bg-zinc-950/95 p-3 text-xs leading-5 text-rose-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                     >
                       <p>{failureMessage}</p>
-                      {snapshot.block.nextAction ? <p className="mt-1 text-rose-200/70">下一步：{snapshot.block.nextAction}</p> : null}
+                      {snapshot.block.nextAction ? (
+                        <p className="mt-1 text-rose-200/70">下一步：{snapshot.block.nextAction}</p>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
@@ -568,16 +543,44 @@ export function WorkflowStageCard({
                     h1: props => <h1 className="mb-2 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
                     h2: props => <h2 className="mb-2 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
                     h3: props => <h3 className="mb-1 text-xs font-semibold leading-5 text-zinc-100" {...props} />,
-                    ul: props => <ul className="my-2 ml-4 list-disc space-y-1 text-xs leading-5 text-zinc-300" {...props} />,
-                    ol: props => <ol className="my-2 ml-4 list-decimal space-y-1 text-xs leading-5 text-zinc-300" {...props} />,
+                    ul: props => (
+                      <ul className="my-2 ml-4 list-disc space-y-1 text-xs leading-5 text-zinc-300" {...props} />
+                    ),
+                    ol: props => (
+                      <ol className="my-2 ml-4 list-decimal space-y-1 text-xs leading-5 text-zinc-300" {...props} />
+                    ),
                     li: props => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
-                    blockquote: props => <blockquote className="my-2 border-l-2 border-white/15 pl-3 text-xs leading-5 text-zinc-400" {...props} />,
-                    a: props => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-2 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
+                    blockquote: props => (
+                      <blockquote
+                        className="my-2 border-l-2 border-white/15 pl-3 text-xs leading-5 text-zinc-400"
+                        {...props}
+                      />
+                    ),
+                    a: props => (
+                      <a
+                        className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-2 hover:text-emerald-200"
+                        target="_blank"
+                        rel="noreferrer"
+                        {...props}
+                      />
+                    ),
                     strong: props => <strong className="font-semibold text-zinc-100" {...props} />,
-                    pre: props => <pre className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-zinc-950 p-2 text-xs leading-5 text-zinc-200" {...props} />,
-                    code: props => <code className="rounded bg-white/[0.06] px-1 py-0.5 text-xs text-zinc-200" {...props} />,
+                    pre: props => (
+                      <pre
+                        className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-zinc-950 p-2 text-xs leading-5 text-zinc-200"
+                        {...props}
+                      />
+                    ),
+                    code: props => (
+                      <code className="rounded bg-white/[0.06] px-1 py-0.5 text-xs text-zinc-200" {...props} />
+                    ),
                     table: props => <table className="my-2 block max-w-full overflow-x-auto text-xs" {...props} />,
-                    th: props => <th className="border border-white/10 px-2 py-1 text-left font-semibold text-zinc-200" {...props} />,
+                    th: props => (
+                      <th
+                        className="border border-white/10 px-2 py-1 text-left font-semibold text-zinc-200"
+                        {...props}
+                      />
+                    ),
                     td: props => <td className="border border-white/10 px-2 py-1 text-zinc-300" {...props} />,
                   }}
                 >
@@ -587,9 +590,69 @@ export function WorkflowStageCard({
             </div>
             {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
 
+            {snapshot.documentReview ? (
+              <div
+                data-testid="workflow-review-report"
+                className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {snapshot.documentReview.verdict ? (
+                    <span
+                      className={snapshot.documentReview.verdict === 'READY' ? 'text-emerald-300' : 'text-amber-300'}
+                    >
+                      {snapshot.documentReview.verdict}
+                    </span>
+                  ) : null}
+                  {snapshot.documentReview.attempt ? (
+                    <span className="text-zinc-500">第 {snapshot.documentReview.attempt} 轮</span>
+                  ) : null}
+                </div>
+                {snapshot.documentReview.reports.length ? (
+                  <ul className="mt-2 space-y-1 text-xs text-zinc-400">
+                    {snapshot.documentReview.reports.map(report => (
+                      <li key={`${report.role}:${report.path}`}>
+                        <span>
+                          {report.role} · {report.status === 'completed' ? '已完成' : report.status}
+                        </span>
+                        {report.failureReason ? (
+                          <p className="mt-0.5 text-rose-300">{report.failureReason}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {snapshot.documentReview.affectedPaths?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {snapshot.documentReview.affectedPaths.map(path => (
+                      <span key={path} className="rounded-full bg-white/[0.06] px-2 py-1 text-[11px] text-zinc-300">
+                        {documentTitle[path] || path}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {snapshot.documentReview.finalReportMarkdown ? (
+                  <div className="mt-3 max-h-72 overflow-y-auto border-t border-white/10 pt-3 text-xs text-zinc-300">
+                    <MarkdownErrorBoundary
+                      messageId={`workflow-review-${runId}-${snapshot.stageId}`}
+                      rawContent={snapshot.documentReview.finalReportMarkdown}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                        {snapshot.documentReview.finalReportMarkdown}
+                      </ReactMarkdown>
+                    </MarkdownErrorBoundary>
+                  </div>
+                ) : null}
+                {snapshot.documentReview.failureReason ? (
+                  <p className="mt-2 text-xs text-rose-300">{snapshot.documentReview.failureReason}</p>
+                ) : null}
+              </div>
+            ) : null}
+
             {tasks.length > 0 ? (
               <div className="mt-4">
-                <p className="mb-2 pl-3 text-[10px] tabular-nums text-zinc-600">任务 {completedCount} / {totalCount}</p>
+                <p className="mb-2 pl-3 text-[10px] tabular-nums text-zinc-600">
+                  任务 {completedCount} / {totalCount}
+                </p>
                 <ul
                   data-testid="workflow-card-task-region"
                   className={`scrollbar-premium space-y-2 pl-3 pr-1 ${tasks.length > 12 ? 'scroll-fade scroll-fade-y scroll-fade-6 max-h-[17.5rem] overflow-y-auto overscroll-contain' : ''}`}
@@ -609,7 +672,9 @@ export function WorkflowStageCard({
                         >
                           {displayTaskTitle(task)}
                         </p>
-                        {task.failureReason ? <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p> : null}
+                        {task.failureReason ? (
+                          <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p>
+                        ) : null}
                       </div>
                       <span
                         className={
@@ -628,7 +693,11 @@ export function WorkflowStageCard({
               </div>
             ) : null}
 
-            {actionError ? <p role="alert" className="mt-3 text-xs text-rose-300">{actionError}</p> : null}
+            {actionError ? (
+              <p role="alert" className="mt-3 text-xs text-rose-300">
+                {actionError}
+              </p>
+            ) : null}
             <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
               <span className="text-[11px] tabular-nums text-zinc-500">{formatDuration(elapsed)}</span>
               {isLatest && nextAction && onAction ? (

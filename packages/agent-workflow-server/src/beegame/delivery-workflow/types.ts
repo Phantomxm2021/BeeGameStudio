@@ -140,230 +140,47 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS = [
-  'brief_alignment',
-  'cross_document_consistency',
-  'gameplay_completeness',
-  'gameplay_strategy_viability',
-  'economy_progression_integrity',
-  'numeric_balance_feasibility',
-  'pacing_difficulty_coherence',
-  'level_scene_design_integrity',
-  'technical_feasibility',
-  'art_direction_coherence',
-  'ui_audio_consistency',
-  'acceptance_observability',
-] as const
-
-export const FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS = [
-  ['brief_alignment', 'cross_document_consistency', 'gameplay_completeness'],
-  ['gameplay_strategy_viability', 'economy_progression_integrity'],
-  ['numeric_balance_feasibility', 'pacing_difficulty_coherence'],
-  [
-    'level_scene_design_integrity',
-    'technical_feasibility',
-    'art_direction_coherence',
-    'ui_audio_consistency',
-  ],
-  ['acceptance_observability'],
-] as const satisfies readonly (readonly FoundationDocumentReviewCheckId[])[]
-
-export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS = [
-  'resource_semantic_fitness',
-  'content_structure_fitness',
-  'resource_content_consistency',
-] as const
-
-export const COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_PACKETS = [
-  ['resource_semantic_fitness'],
-  ['content_structure_fitness', 'resource_content_consistency'],
-] as const satisfies readonly (readonly ComprehensiveDocumentReviewAdditionalCheckId[])[]
-
-export const CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS = [
-  'checklist_traceability',
-] as const
-
-export const DOCUMENT_REVIEW_CHECK_PACKETS: readonly (readonly DocumentReviewCheckId[])[] =
-  [
-    ...FOUNDATION_DOCUMENT_REVIEW_CHECK_PACKETS,
-    CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-    ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_PACKETS,
-  ]
-
-export const COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS = [
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
-] as const
-
-export const DOCUMENT_REVIEW_CHECK_IDS = [
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS,
-  ...CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS,
-  ...COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS,
-] as const
-
 export type DocumentReviewScope = 'foundation' | 'checklist' | 'complete'
-export type DocumentReviewMode = 'initial' | 'closure'
-export type FoundationDocumentReviewCheckId =
-  (typeof FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS)[number]
-export type ComprehensiveDocumentReviewAdditionalCheckId =
-  (typeof COMPREHENSIVE_DOCUMENT_REVIEW_ADDITIONAL_CHECK_IDS)[number]
-export type ComprehensiveDocumentReviewCheckId =
-  (typeof COMPREHENSIVE_DOCUMENT_REVIEW_CHECK_IDS)[number]
-export type ChecklistDocumentReviewCheckId =
-  (typeof CHECKLIST_DOCUMENT_REVIEW_CHECK_IDS)[number]
-export type DocumentReviewCheckId =
-  | FoundationDocumentReviewCheckId
-  | ChecklistDocumentReviewCheckId
-  | ComprehensiveDocumentReviewCheckId
-
-export const DOCUMENT_REVIEW_OWNER_BY_CHECK_ID = Object.fromEntries([
-  ...FOUNDATION_DOCUMENT_REVIEW_CHECK_IDS.map(
-    id => [id, 'foundation'] as const,
-  ),
-  ['checklist_traceability', 'checklist'] as const,
-  ['resource_semantic_fitness', 'resource'] as const,
-  ['content_structure_fitness', 'resource'] as const,
-  ['resource_content_consistency', 'resource'] as const,
-]) as Record<DocumentReviewCheckId, 'foundation' | 'checklist' | 'resource'>
-
-export const GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA = {
-  gameplay_strategy_viability: [
-    'meaningful_choices',
-    'dominant_strategy_risk',
-    'counterplay_and_recovery',
-  ],
-  economy_progression_integrity: [
-    'sources_and_sinks',
-    'affordability_and_growth',
-    'exploit_and_deadlock',
-  ],
-  numeric_balance_feasibility: [
-    'outcome_bounds',
-    'relative_value',
-    'formula_consistency',
-  ],
-  pacing_difficulty_coherence: [
-    'pressure_curve',
-    'capability_curve',
-    'spike_and_recovery',
-  ],
-  level_scene_design_integrity: [
-    'spatial_gameplay_support',
-    'level_progression_coherence',
-    'scene_state_completeness',
-  ],
-} as const satisfies Partial<Record<DocumentReviewCheckId, readonly string[]>>
-
-export type GameDesignDocumentReviewCheckId =
-  keyof typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA
-export const GAME_DESIGN_DOCUMENT_REVIEW_CHECK_IDS = Object.keys(
-  GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA,
-) as GameDesignDocumentReviewCheckId[]
-export type DocumentReviewCriterionId =
-  (typeof GAME_DESIGN_DOCUMENT_REVIEW_CRITERIA)[GameDesignDocumentReviewCheckId][number]
-
-export type DocumentReviewAssessment = {
-  criterion: DocumentReviewCriterionId
-  status: 'pass' | 'block'
-  evidence: Array<{ path: string; anchor: string }>
-  derivation: string
-  conclusion: string
+export type DocumentReviewState = {
+  activeRun?: DocumentReviewRun
+  approvals: Partial<Record<DocumentReviewScope, DocumentReviewReportApproval>>
+  attempts: Record<DocumentReviewScope, number>
 }
 
-export type DocumentReviewCheck = {
-  id: DocumentReviewCheckId
-  status: 'pass' | 'block'
-  conclusion: string
-  evidence: Array<{ path: string; anchor: string }>
-  findingIds: string[]
-  assessments: DocumentReviewAssessment[]
-}
-
-export type DocumentReviewFindingSubject = {
+export type DocumentReviewReportState = {
+  role: string
   path: string
-  anchor: string
-  requirementId?: string
-  resourceId?: string
-  contentId?: string
+  digest?: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  dispatch?: DispatchRecord
+  failureReason?: string
 }
 
-export type DocumentReviewEvidence = { path: string; anchor: string }
-
-export type DocumentReviewFinding = {
-  findingId: string
-  checkId: DocumentReviewCheckId
-  severity: 'blocking'
-  owner: 'foundation' | 'checklist' | 'resource'
-  regressionPaths?: string[]
-  evidence: DocumentReviewEvidence[]
-  subjects: DocumentReviewFindingSubject[]
-  observation: string
-  blockingImpact: string
-  requiredOutcome: string
-}
-
-export type DocumentReviewApproval = {
+export type DocumentReviewRun = {
   scope: DocumentReviewScope
   revision: string
-  checks: DocumentReviewCheck[]
-  checkEvidenceDigests: Record<string, Record<string, string>>
-  evidencePath: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  reports: DocumentReviewReportState[]
+  finalReportPath?: string
+  finalReportDigest?: string
+  verdict?: 'READY' | 'NEEDS_REVISION'
+  affectedPaths?: string[]
+  /** Canonical owner paths committed during the current report-driven repair. */
+  remediatedPaths?: string[]
+  attempt: number
+  approvedFoundationRevision?: string
+  failureReason?: string
+}
+
+export type DocumentReviewReportApproval = {
+  scope: DocumentReviewScope
+  revision: string
+  reportPath: string
+  reportDigest: string
   approvedAt: string
 }
 
-export type DocumentRepairGroup = {
-  groupId: string
-  findingIds: string[]
-  groupDecision: string
-  pathDecisions: Array<{
-    path: FoundationDocumentPath
-    decision: string
-  }>
-  dependsOn: string[]
-}
-
-export type DocumentRepairPlan = {
-  groups: DocumentRepairGroup[]
-  /** Durable owner-task cursor; paths occur in canonical owner order. */
-  completedPaths: FoundationDocumentPath[]
-}
-
-export type DocumentReviewCycle = {
-  cycleId: string
-  parentCycleId?: string
-  /** Scope of the Initial Review that created this finding ledger. */
-  originScope: DocumentReviewScope
-  scope: DocumentReviewScope
-  mode: DocumentReviewMode
-  sourceRevision: string
-  requiredCheckIds: DocumentReviewCheckId[]
-  /** Ordered cursor, including any digest-verified inherited approval prefix. */
-  completedCheckIds: DocumentReviewCheckId[]
-  checks: DocumentReviewCheck[]
-  checkEvidenceDigests: Record<string, Record<string, string>>
-  findings: DocumentReviewFinding[]
-  activeTarget?: 'foundation' | 'checklist' | 'resource'
-  acceptedSemanticResult: boolean
-  changedPaths: string[]
-  sourceArtifactDigests: Record<string, string>
-  /** Sole execution plan for the accepted foundation finding ledger. */
-  repairPlan?: DocumentRepairPlan
-  evidencePath?: string
-}
-
-export type DocumentReviewState = {
-  foundationApproval?: DocumentReviewApproval
-  checklistApproval?: DocumentReviewApproval
-  comprehensiveApproval?: DocumentReviewApproval
-  activeCycle?: DocumentReviewCycle
-  repairPasses: {
-    foundation: number
-    checklist: number
-    resource: number
-  }
-}
-
-export const DELIVERY_RUN_SCHEMA_VERSION = 15 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 16 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -465,8 +282,6 @@ export type AcceptedWorkflowUnit = {
   unitId: string
   kind:
     | 'document'
-    | 'review-check'
-    | 'checklist'
     | 'resource-inventory'
     | 'resource-content'
     | 'resource-gate'

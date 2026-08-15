@@ -1,299 +1,65 @@
 import { describe, expect, it } from 'bun:test'
-import { reconcileCurrentResourcePreparation } from '../beegame/delivery-workflow/resource-stage'
-import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
-import {
-  assertDeliveryRunInvariants,
-  transitionDeliveryRun,
-} from '../beegame/delivery-workflow/transition'
-import {
-  createAcceptedComprehensiveReview,
-  createTestDeliveryRun,
-} from './delivery-workflow-test-helpers'
+import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 
 describe('canonical resource-content workflow', () => {
-  it('moves directly from resource preparation to comprehensive review', () => {
+  it('moves passed resources directly to complete document review', () => {
     const run = {
       ...createTestDeliveryRun({
-        runId: 'run-resource-content',
-        projectId: 'project-resource-content',
-        ownerId: 'owner-resource-content',
-        documentRevision: 'docs',
-        workspaceRevision: 'workspace',
+        runId: 'resource-review',
+        projectId: 'project',
+        ownerId: 'owner',
+        documentRevision: 'a'.repeat(64),
         checklistApproved: true,
       }),
       phase: 'RESOURCE_PREPARATION' as const,
-      documentStep: undefined,
     }
+
     const next = transitionDeliveryRun(run, {
       type: 'resource_preparation_ready',
-      resourceRevision: 'resources',
+      resourceRevision: 'b'.repeat(64),
       evidence: {
         path: '.beegame/workflow/evidence/resources.json',
         kind: 'resource_preparation',
-        revision: 'resources',
+        revision: 'b'.repeat(64),
         status: 'passed',
         observedAt: new Date().toISOString(),
       },
     })
+
     expect(next).toMatchObject({
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'COMPREHENSIVE_REVIEW',
     })
   })
 
-  it('does not reconcile ready files across an accepted resource finding batch', async () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-resource-review-remediation',
-      projectId: 'project-resource-review-remediation',
-      ownerId: 'owner-resource-review-remediation',
-      documentRevision: 'docs',
-      workspaceRevision: 'workspace',
-      checklistApproved: true,
-    })
+  it('rejects task planning without the current complete report approval', () => {
     const run = {
-      ...initial,
-      phase: 'RESOURCE_PREPARATION' as const,
-      documentStep: undefined,
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeCycle: {
-          cycleId: 'resource-review-cycle',
-          originScope: 'complete' as const,
-          scope: 'complete' as const,
-          mode: 'initial' as const,
-          sourceRevision: 'resources',
-          requiredCheckIds: ['resource_content_consistency' as const],
-          completedCheckIds: ['resource_content_consistency' as const],
-          checks: [
-            {
-              id: 'resource_content_consistency' as const,
-              status: 'block' as const,
-              conclusion: 'Resource remediation is required.',
-              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-              findingIds: ['resource-review-finding'],
-              assessments: [],
-            },
-          ],
-          checkEvidenceDigests: {},
-          findings: [
-            {
-              findingId: 'resource-review-finding',
-              checkId: 'resource_content_consistency' as const,
-              severity: 'blocking' as const,
-              owner: 'resource' as const,
-              evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-              subjects: [
-                {
-                  path: 'assets/asset-manifest.json',
-                  anchor: '/requirements/0',
-                  requirementId: 'resource-review-requirement',
-                },
-              ],
-              observation: 'The resource contract is incomplete.',
-              blockingImpact: 'The resource cannot be loaded.',
-              requiredOutcome:
-                'The resource is loadable through the canonical path.',
-            },
-          ],
-          activeTarget: 'resource' as const,
-          acceptedSemanticResult: true,
-          changedPaths: [],
-          sourceArtifactDigests: {},
+      ...createTestDeliveryRun({
+        runId: 'resource-gate',
+        projectId: 'project',
+        ownerId: 'owner',
+        checklistApproved: true,
+      }),
+      phase: 'ATOMIC_TASK_PLANNING' as const,
+      revision: {
+        document: 'a'.repeat(64),
+        resource: 'b'.repeat(64),
+        workspace: 'c'.repeat(64),
+      },
+      evidence: {
+        resourcePreparation: {
+          path: '.beegame/workflow/evidence/resources.json',
+          kind: 'resource_preparation' as const,
+          revision: 'b'.repeat(64),
+          status: 'passed' as const,
+          observedAt: new Date().toISOString(),
         },
       },
     }
 
-    expect(
-      await reconcileCurrentResourcePreparation({
-        run,
-        workspacePath: '/workspace-is-not-read',
-      }),
-    ).toBeUndefined()
-  })
-
-  it('preserves the sole accepted resource finding batch when resources are invalidated', () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-resource-review-invalidation',
-      projectId: 'project-resource-review-invalidation',
-      ownerId: 'owner-resource-review-invalidation',
-      documentRevision: 'docs',
-      workspaceRevision: 'workspace',
-    })
-    const activeCycle = {
-      cycleId: 'resource-review-cycle',
-      parentCycleId: 'resource-review-parent-cycle',
-      originScope: 'complete' as const,
-      scope: 'complete' as const,
-      mode: 'closure' as const,
-      sourceRevision: 'resources',
-      requiredCheckIds: ['resource_content_consistency' as const],
-      completedCheckIds: ['resource_content_consistency' as const],
-      checks: [
-        {
-          id: 'resource_content_consistency' as const,
-          status: 'block' as const,
-          conclusion: 'Resource remediation is required.',
-          evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-          findingIds: ['resource-format-gap'],
-          assessments: [],
-        },
-      ],
-      checkEvidenceDigests: {},
-      findings: [
-        {
-          findingId: 'resource-format-gap',
-          checkId: 'resource_content_consistency' as const,
-          severity: 'blocking' as const,
-          owner: 'resource' as const,
-          evidence: [{ path: 'assets/asset-manifest.json', anchor: '$' }],
-          subjects: [
-            {
-              path: 'assets/asset-manifest.json',
-              anchor: '/resources/0',
-              resourceId: 'resource-1',
-            },
-          ],
-          observation:
-            'The registered material cannot satisfy its loading contract.',
-          blockingImpact:
-            'Implementation cannot load the approved resource role.',
-          requiredOutcome:
-            'The same resource role is loadable through the canonical path.',
-        },
-      ],
-      activeTarget: 'resource' as const,
-      acceptedSemanticResult: true,
-      changedPaths: [],
-      sourceArtifactDigests: {},
-    }
-    const invalidated = transitionDeliveryRun(
-      {
-        ...initial,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'COMPREHENSIVE_REVIEW',
-        revision: {
-          ...initial.revision,
-          resource: 'resources',
-          implementation: 'implementation',
-        },
-        documentReviewState: {
-          ...initial.documentReviewState,
-          checklistApproval: {
-            scope: 'checklist',
-            revision: initial.revision.document,
-            checks: [
-              {
-                id: 'checklist_traceability',
-                status: 'pass',
-                conclusion: 'Checklist is approved.',
-                evidence: [
-                  {
-                    path: 'docs/acceptance/gameplay-checklist.md',
-                    anchor: 'Acceptance',
-                  },
-                ],
-                findingIds: [],
-                assessments: [],
-              },
-            ],
-            checkEvidenceDigests: {},
-            evidencePath: '.beegame/workflow/evidence/checklist.json',
-            approvedAt: new Date().toISOString(),
-          },
-          activeCycle,
-        },
-      },
-      {
-        type: 'resource_preparation_required',
-        reason: 'resource inventory changed',
-      },
-    )
-
-    expect(invalidated).toMatchObject({
-      phase: 'RESOURCE_PREPARATION',
-      status: 'running',
-      documentReviewState: {
-        activeCycle: {
-          cycleId: activeCycle.cycleId,
-          findings: [{ findingId: 'resource-format-gap' }],
-        },
-      },
-    })
-    expect(invalidated.revision.resource).toBeUndefined()
-    expect(invalidated.revision.implementation).toBeUndefined()
-  })
-
-  it('rejects downstream planning while accepted resource findings still await closure', () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-unclosed-resource-review',
-      projectId: 'project-unclosed-resource-review',
-      ownerId: 'owner-unclosed-resource-review',
-      checklistApproved: true,
-    })
-
     expect(() =>
-      assertDeliveryRunInvariants({
-        ...initial,
-        phase: 'ATOMIC_TASK_PLANNING',
-        documentReviewState: {
-          ...initial.documentReviewState,
-          activeCycle: {
-            cycleId: 'unclosed-resource-cycle',
-            originScope: 'complete',
-            scope: 'complete',
-            mode: 'initial',
-            sourceRevision: 'resource-revision',
-            ...createAcceptedComprehensiveReview(),
-            checkEvidenceDigests: {},
-            findings: [],
-            activeTarget: 'resource',
-            acceptedSemanticResult: true,
-            changedPaths: [],
-            sourceArtifactDigests: {},
-          },
-        },
-      }),
-    ).toThrow(
-      'accepted resource review findings must remain in Resource Production or Closure Review',
-    )
-  })
-
-  it('rejects empty accepted resource authority instead of falling back to Resource Production retry', () => {
-    const initial = createTestDeliveryRun({
-      runId: 'run-empty-resource-authority',
-      projectId: 'project-empty-resource-authority',
-      ownerId: 'owner-empty-resource-authority',
-      checklistApproved: true,
-    })
-
-    expect(() =>
-      assertDeliveryRunInvariants({
-        ...initial,
-        phase: 'RESOURCE_PREPARATION',
-        documentReviewState: {
-          ...initial.documentReviewState,
-          repairPasses: {
-            ...initial.documentReviewState.repairPasses,
-            resource: 1,
-          },
-          activeCycle: {
-            cycleId: 'empty-resource-cycle',
-            originScope: 'complete',
-            scope: 'complete',
-            mode: 'initial',
-            sourceRevision: 'resource-revision',
-            ...createAcceptedComprehensiveReview(),
-            checkEvidenceDigests: {},
-            findings: [],
-            activeTarget: 'resource',
-            acceptedSemanticResult: true,
-            changedPaths: [],
-            sourceArtifactDigests: {},
-          },
-        },
-      }),
-    ).toThrow(
-      'accepted resource review authority requires at least one resource finding',
-    )
+      transitionDeliveryRun(run, { type: 'tasks_planned', tasks: [] }),
+    ).toThrow('current comprehensive review approval')
   })
 })
