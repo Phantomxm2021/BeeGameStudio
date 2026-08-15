@@ -281,6 +281,13 @@ git commit -m "feat: accept immutable review reports"
 
 ### Task 4: Replace Reviewer Prompt and Terminal Transport
 
+> **Execution-order correction:** Do not activate this task before the pure
+> Review Run orchestrator in Task 5 exists. The old workflow currently depends
+> on the old terminal, while the new file-derived terminal depends on the new
+> run/assignment state. Implement Task 5 first as an unreferenced pure module,
+> then execute Tasks 4 and 6 as one cutover. This prevents both a deliberately
+> broken intermediate production path and a forbidden dual runnable path.
+
 **Files:**
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.test.ts`
@@ -361,6 +368,11 @@ git commit -m "refactor: deliver reviewer results as project reports"
 ---
 
 ### Task 5: Build the Minimal Review Run Orchestrator
+
+> **Isolation rule:** First define `DocumentReviewRun` inside
+> `document-review-stage.ts` and test dispatch/accept/recovery without importing
+> it from the live workflow state. Move the type into `types.ts` and migrate the
+> persisted schema only during the Tasks 4/6 cutover.
 
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/document-review-stage.ts`
