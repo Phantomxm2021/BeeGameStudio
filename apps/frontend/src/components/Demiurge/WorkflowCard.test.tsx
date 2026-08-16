@@ -17,7 +17,7 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the persisted final Reviewer report and affected paths', () => {
+  it('renders the actionable Foundation conflict list without raw JSON or Markdown', () => {
     render(
       <WorkflowCard
         workflow={{
@@ -30,8 +30,25 @@ describe('WorkflowCard', () => {
             attempt: 3,
             verdict: 'NEEDS_REVISION',
             affectedPaths: ['docs/GDD.md'],
-            finalReportPath: '.beegame/reviews/foundation/revision/review.md',
-            finalReportMarkdown: '# Final review\n\nThe economy rule is not implementable.',
+            finalReportPath: '.beegame/reviews/foundation/revision/review.json',
+            conflictCount: 1,
+            priorConflictStatus: [],
+            conflicts: [{
+              id: 'B1',
+              title: 'Economy rule is not implementable',
+              problem: 'The reward owner and consumer use incompatible units.',
+              requiredOutcome: 'Use one integer reward unit.',
+              evidence: [{
+                path: 'docs/GDD.md',
+                location: 'Reward outcome',
+                observed: 'Rewards are expressed as a percentage.',
+              }],
+              changes: [{
+                path: 'docs/GDD.md',
+                action: 'Define rewards as integer currency units.',
+              }],
+              acceptance: ['All reward values use integer currency units.'],
+            }],
             elapsedMs: 20_000,
             usage: {
               input_tokens: 220,
@@ -56,7 +73,17 @@ describe('WorkflowCard', () => {
 
     expect(screen.getByText('NEEDS_REVISION')).toBeInTheDocument();
     expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
-    expect(screen.getByText('The economy rule is not implementable.')).toBeInTheDocument();
+    expect(screen.getByText('1 个待修冲突')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('B1 · Economy rule is not implementable'));
+    expect(screen.getByText('问题')).toBeInTheDocument();
+    expect(screen.getByText('The reward owner and consumer use incompatible units.')).toBeInTheDocument();
+    expect(screen.getByText('修改')).toBeInTheDocument();
+    expect(screen.getByText(/Define rewards as integer currency units/)).toBeInTheDocument();
+    expect(screen.getByText('证据')).toBeInTheDocument();
+    expect(screen.getByText(/Rewards are expressed as a percentage/)).toBeInTheDocument();
+    expect(screen.getByText('验收')).toBeInTheDocument();
+    expect(screen.getByText('All reward values use integer currency units.')).toBeInTheDocument();
+    expect(screen.queryByText(/"version":2/)).not.toBeInTheDocument();
     expect(screen.getByText('基础文档审计 · 已完成')).toBeInTheDocument();
     expect(screen.getByText('输入 120')).toBeInTheDocument();
     expect(screen.getByText('缓存输入 340')).toBeInTheDocument();

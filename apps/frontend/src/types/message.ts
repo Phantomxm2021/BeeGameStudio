@@ -69,6 +69,27 @@ export interface WorkflowDocumentReviewDisplay {
   affectedPaths?: string[]
   finalReportPath?: string
   finalReportMarkdown?: string
+  conflictCount?: number
+  priorConflictStatus?: Array<{
+    id: string
+    status: 'closed' | 'open'
+  }>
+  conflicts?: Array<{
+    id: string
+    title: string
+    problem: string
+    requiredOutcome: string
+    evidence: Array<{
+      path: string
+      location: string
+      observed: string
+    }>
+    changes: Array<{
+      path: string
+      action: string
+    }>
+    acceptance: string[]
+  }>
   failureReason?: string
   elapsedMs?: number
   usage?: WorkflowReviewerUsage

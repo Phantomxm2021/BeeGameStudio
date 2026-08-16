@@ -673,6 +673,59 @@ export function WorkflowStageCard({
                     ))}
                   </div>
                 ) : null}
+                {snapshot.documentReview.scope === 'foundation' && snapshot.documentReview.conflicts ? (
+                  <div className="mt-3 border-t border-white/10 pt-3 text-xs">
+                    <p className="font-medium text-amber-200">
+                      {snapshot.documentReview.conflictCount ?? snapshot.documentReview.conflicts.length} 个待修冲突
+                    </p>
+                    {snapshot.documentReview.conflicts.length ? (
+                      <div className="mt-2 space-y-2">
+                        {snapshot.documentReview.conflicts.map(conflict => (
+                          <details key={conflict.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                            <summary className="cursor-pointer font-medium text-zinc-200">
+                              {conflict.id} · {conflict.title}
+                            </summary>
+                            <div className="mt-3 space-y-3 text-zinc-400">
+                              <section>
+                                <p className="font-medium text-zinc-200">问题</p>
+                                <p className="mt-1">{conflict.problem}</p>
+                                <p className="mt-1 text-zinc-300">目标：{conflict.requiredOutcome}</p>
+                              </section>
+                              <section>
+                                <p className="font-medium text-zinc-200">修改</p>
+                                <ul className="mt-1 space-y-1">
+                                  {conflict.changes.map(change => (
+                                    <li key={`${conflict.id}:change:${change.path}`}>
+                                      {documentTitle[change.path] || change.path}：{change.action}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                              <section>
+                                <p className="font-medium text-zinc-200">证据</p>
+                                <ul className="mt-1 space-y-1">
+                                  {conflict.evidence.map((evidence, index) => (
+                                    <li key={`${conflict.id}:evidence:${evidence.path}:${index}`}>
+                                      {documentTitle[evidence.path] || evidence.path} · {evidence.location}：{evidence.observed}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                              <section>
+                                <p className="font-medium text-zinc-200">验收</p>
+                                <ul className="mt-1 list-disc space-y-1 pl-4">
+                                  {conflict.acceptance.map((condition, index) => (
+                                    <li key={`${conflict.id}:acceptance:${index}`}>{condition}</li>
+                                  ))}
+                                </ul>
+                              </section>
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {snapshot.documentReview.finalReportMarkdown ? (
                   <div className="mt-3 max-h-72 overflow-y-auto border-t border-white/10 pt-3 text-xs text-zinc-300">
                     <MarkdownErrorBoundary

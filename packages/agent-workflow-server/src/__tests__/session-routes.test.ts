@@ -1164,14 +1164,41 @@ describe('delivery workflow session continuation', () => {
       ownerId,
     })
     const reviewRevision = 'a'.repeat(64)
-    const reportPath = `.beegame/reviews/foundation/${reviewRevision}/review.md`
-    const reportMarkdown =
-      '# Foundation Review\n\nReady for checklist authoring.'
+    const reportPath = `.beegame/reviews/foundation/${reviewRevision}/review.json`
+    const reportJson = `${JSON.stringify({
+      version: 2,
+      scope: 'foundation',
+      revision: reviewRevision,
+      verdict: 'NEEDS_REVISION',
+      priorConflictStatus: [],
+      conflicts: [
+        {
+          id: 'B1',
+          title: 'Economy result is not implementable',
+          problem: 'The reward owner and consumer use incompatible units.',
+          evidence: [
+            {
+              path: 'docs/GDD.md',
+              location: 'Reward outcome',
+              observed: 'Rewards are expressed as a percentage.',
+            },
+          ],
+          requiredOutcome: 'Use one integer reward unit.',
+          changes: [
+            {
+              path: 'docs/GDD.md',
+              action: 'Define rewards as integer currency units.',
+            },
+          ],
+          acceptance: ['All reward values use integer currency units.'],
+        },
+      ],
+    })}\n`
     await mkdir(
       join(workspace, '.beegame', 'reviews', 'foundation', reviewRevision),
       { recursive: true },
     )
-    await writeFile(join(workspace, reportPath), reportMarkdown)
+    await writeFile(join(workspace, reportPath), reportJson)
     const run: DeliveryRun = {
       ...baseRun,
       phase: 'DOCUMENT_REVIEW',
@@ -1218,11 +1245,11 @@ describe('delivery workflow session continuation', () => {
               : report,
           ),
           status: 'completed',
-          verdict: 'READY',
-          affectedPaths: [],
+          verdict: 'NEEDS_REVISION',
+          affectedPaths: ['docs/GDD.md'],
           finalReportPath: reportPath,
           finalReportDigest: createHash('sha256')
-            .update(reportMarkdown)
+            .update(reportJson)
             .digest('hex'),
         },
       },
@@ -1253,9 +1280,19 @@ describe('delivery workflow session continuation', () => {
     const workflow = payload.workflow as Record<string, unknown>
     expect(workflow.documentReview).toMatchObject({
       scope: 'foundation',
-      verdict: 'READY',
+      verdict: 'NEEDS_REVISION',
       finalReportPath: reportPath,
-      finalReportMarkdown: reportMarkdown,
+      conflictCount: 1,
+      affectedPaths: ['docs/GDD.md'],
+      priorConflictStatus: [],
+      conflicts: [
+        {
+          id: 'B1',
+          title: 'Economy result is not implementable',
+          problem: 'The reward owner and consumer use incompatible units.',
+          requiredOutcome: 'Use one integer reward unit.',
+        },
+      ],
       elapsedMs: 10_000,
       usage: {
         input_tokens: 120,
@@ -1263,6 +1300,7 @@ describe('delivery workflow session continuation', () => {
         completion_tokens: 56,
       },
     })
+    expect(workflow.documentReview).not.toHaveProperty('finalReportMarkdown')
     expect(
       (workflow.documentReview as { reports: Array<Record<string, unknown>> })
         .reports[0],

@@ -209,6 +209,11 @@ import {
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
+import {
+  foundationReviewAffectedPaths,
+  foundationReviewPath,
+  foundationReviewSchema,
+} from './beegame/delivery-workflow/foundation-review'
 
 type JsonObject = Record<string, unknown>
 
@@ -6060,6 +6065,7 @@ function documentReviewForDisplay(
       ? run.finalReportDigest
       : undefined
   let finalReportMarkdown: string | undefined
+  let foundationReviewProjection: JsonObject | undefined
   let reportIntegrityFailure: string | undefined
   if (workspacePath && finalReportPath) {
     const workspace = resolve(workspacePath)
@@ -6074,9 +6080,33 @@ function documentReviewForDisplay(
         )
           reportIntegrityFailure =
             'document review report bytes no longer match the accepted digest'
-        else finalReportMarkdown = bytes.toString('utf8')
+        else if (run.scope === 'foundation') {
+          const review = foundationReviewSchema.parse(
+            JSON.parse(bytes.toString('utf8')),
+          )
+          const affectedPaths = foundationReviewAffectedPaths(review)
+          if (
+            absolute !==
+              foundationReviewPath(workspacePath, review.revision) ||
+            review.revision !== run.revision ||
+            review.verdict !== run.verdict ||
+            JSON.stringify(affectedPaths) !==
+              JSON.stringify(run.affectedPaths ?? [])
+          )
+            reportIntegrityFailure =
+              'document review JSON does not match the accepted workflow state'
+          else
+            foundationReviewProjection = {
+              conflictCount: review.conflicts.length,
+              priorConflictStatus: review.priorConflictStatus,
+              conflicts: review.conflicts,
+            }
+        } else finalReportMarkdown = bytes.toString('utf8')
       } catch {
-        reportIntegrityFailure = 'document review report is unavailable'
+        reportIntegrityFailure =
+          run.scope === 'foundation'
+            ? 'document review JSON is unavailable or invalid'
+            : 'document review report is unavailable'
       }
     }
   }
@@ -6096,6 +6126,7 @@ function documentReviewForDisplay(
         }
       : {}),
     ...(finalReportPath ? { finalReportPath } : {}),
+    ...(foundationReviewProjection ?? {}),
     ...(finalReportMarkdown ? { finalReportMarkdown } : {}),
     ...(reportIntegrityFailure
       ? { failureReason: reportIntegrityFailure }
