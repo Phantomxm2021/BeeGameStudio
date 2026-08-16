@@ -373,7 +373,41 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
     expect(finalReviewerPrompt).toContain('deduplicate')
-    expect(finalReviewerPrompt).toContain('one canonical version 2 review.json')
+    expect(finalReviewerPrompt).toContain('sole canonical version 2 review.json')
+    expect(finalReviewerPrompt).toContain('accepted evidence packets')
+    expect(finalReviewerPrompt).toContain(
+      'verify cited source bytes with targeted reads',
+    )
+    expect(finalReviewerPrompt).toContain('launch another Agent or task')
+
+    const specialistPrompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'initial',
+        reviewRole: 'contract-specialist',
+        assignment: {
+          sourcePaths: ['/workspace/docs/GDD.md'],
+          verificationSourcePaths: [],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/contract.json',
+          ],
+        },
+      },
+    })
+    expect(specialistPrompt).toContain(
+      'write one bounded Foundation review evidence packet',
+    )
+    expect(specialistPrompt).toContain('do not decide the final verdict')
+    expect(specialistPrompt).toContain('do not modify canonical documents')
+    expect(specialistPrompt).not.toContain('Write one human-readable Markdown')
+    expect(specialistPrompt).not.toContain('TaskOutput')
 
     const repeatReviewerPrompt = buildWorkerPrompt({
       runId: 'run',

@@ -62,6 +62,38 @@ export const documentReviewerTerminalSchema = base
       })
   })
 
+export const foundationReviewWorkerTerminalSchema = z
+  .object({
+    workerType: z.literal('document-reviewer'),
+    status: z.literal('completed'),
+    revision: z.string().regex(/^[a-f0-9]{64}$/u),
+    mode: z.enum(['initial', 'verification']),
+    role: z.enum(['contract-specialist', 'integration-specialist', 'final']),
+    reportPath: z.string().min(1),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.mode === 'verification' && value.role !== 'final')
+      context.addIssue({
+        code: 'custom',
+        path: ['role'],
+        message: 'Foundation verification permits only the final Reviewer',
+      })
+    const root = `.beegame/reviews/foundation/${value.revision}`
+    const expected =
+      value.role === 'contract-specialist'
+        ? `${root}/parts/contract.json`
+        : value.role === 'integration-specialist'
+          ? `${root}/parts/integration.json`
+          : `${root}/review.json`
+    if (value.reportPath !== expected)
+      context.addIssue({
+        code: 'custom',
+        path: ['reportPath'],
+        message: 'Foundation Reviewer report path does not match its role',
+      })
+  })
+
 const resourceTaskMetricsSchema = z
   .object({
     catalogPayloadBytes: z.number().int().nonnegative(),
