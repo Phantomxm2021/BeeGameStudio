@@ -155,6 +155,70 @@ export async function readAuthoredDocumentReceipt(
   return parsed
 }
 
+/**
+ * Commit only the service-owned metadata of an accepted remediation. The
+ * document author owns the Markdown body; BGS owns version and updated_at.
+ */
+export async function commitRemediatedDocumentMetadata(input: {
+  workspacePath: string
+  targetPath: string
+  previousVersion: string
+  previousUpdatedAt: string
+  updatedAt?: string
+}): Promise<void> {
+  const previousParts = input.previousVersion.split('.').map(Number)
+  if (
+    previousParts.length !== 3 ||
+    previousParts.some((part, index) =>
+      !Number.isInteger(part) ||
+      part < 0 ||
+      String(part) !== input.previousVersion.split('.')[index]
+    )
+  )
+    throw new Error('remediated document previous version is invalid')
+  const previousTimestamp = Date.parse(input.previousUpdatedAt)
+  if (!Number.isFinite(previousTimestamp))
+    throw new Error('remediated document previous updated_at is invalid')
+  const updatedAt =
+    input.updatedAt ??
+    new Date(Math.max(Date.now(), previousTimestamp + 1)).toISOString()
+  if (
+    !Number.isFinite(Date.parse(updatedAt)) ||
+    Date.parse(updatedAt) <= previousTimestamp
+  )
+    throw new Error('remediated document updated_at must advance')
+
+  const target = resolve(input.workspacePath, input.targetPath)
+  const workspaceRoot = `${resolve(input.workspacePath)}/`
+  if (!target.startsWith(workspaceRoot))
+    throw new Error('remediated document path escapes the workspace')
+  const lines = (await readFile(target, 'utf8')).split('\n')
+  if (lines[0]?.trim() !== '---')
+    throw new Error('remediated document front matter is missing')
+  const closingIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === '---',
+  )
+  if (closingIndex < 1)
+    throw new Error('remediated document front matter is invalid')
+  let versionCount = 0
+  let updatedAtCount = 0
+  const nextVersion = `${previousParts[0]}.${previousParts[1]}.${previousParts[2]! + 1}`
+  for (let index = 1; index < closingIndex; index += 1) {
+    const field = lines[index]!.slice(0, lines[index]!.indexOf(':')).trim()
+    if (field === 'version') {
+      lines[index] = `version: ${nextVersion}`
+      versionCount += 1
+    }
+    if (field === 'updated_at') {
+      lines[index] = `updated_at: ${updatedAt}`
+      updatedAtCount += 1
+    }
+  }
+  if (versionCount !== 1 || updatedAtCount !== 1)
+    throw new Error('remediated document service metadata is invalid')
+  await durableWrite(target, lines.join('\n'))
+}
+
 export async function reconcileAuthoredDocumentReceipt(input: {
   workspacePath: string
   dispatchId: string

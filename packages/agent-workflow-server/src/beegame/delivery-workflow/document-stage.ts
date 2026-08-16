@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import {
+  commitRemediatedDocumentMetadata,
   commitAuthoredFoundationDocument,
   readAuthoredDocumentReceipt,
 } from '../authored-document-receipt'
@@ -361,15 +362,6 @@ export async function completeDocumentDraft(input: {
   if (documentSet === 'foundation' && !remediation)
     return completeInitialFoundationDocumentDraft(input)
 
-  const readiness = input.audit
-    ? input.audit(input.workspacePath, {
-        includeChecklist: documentSet === 'checklist',
-        includeAssetManifest: false,
-      })
-    : await defaultAudit(input.workspacePath, {
-        includeChecklist: documentSet === 'checklist',
-        includeAssetManifest: false,
-      })
   const allowedPaths = new Set(
     documentSet === 'checklist'
       ? [CHECKLIST_PATH]
@@ -383,6 +375,60 @@ export async function completeDocumentDraft(input: {
       !allowedPaths.has(normalized as never)
     )
   })
+  const resolvedFindingIssue =
+    (input.terminal.resolvedFindingIds?.length ?? 0) > 0
+      ? 'canonical document commit cannot declare finding closure'
+      : undefined
+  const missingRemediationIssue =
+    remediation && input.terminal.writtenPaths.length === 0
+      ? 'document remediation completed without changing a canonical artifact'
+      : undefined
+  const metadataCommitIssues: string[] = []
+  const previousMetadata = input.run.activeDispatch?.request?.contract
+    .previousDocumentMetadata
+  if (
+    remediation &&
+    outOfScope.length === 0 &&
+    !resolvedFindingIssue &&
+    !missingRemediationIssue &&
+    previousMetadata &&
+    typeof previousMetadata === 'object' &&
+    !Array.isArray(previousMetadata)
+  ) {
+    for (const path of input.terminal.writtenPaths) {
+      const previous = (previousMetadata as Record<string, unknown>)[path]
+      if (!previous || typeof previous !== 'object' || Array.isArray(previous))
+        continue
+      const previousVersion = (previous as Record<string, unknown>).version
+      const previousUpdatedAt = (previous as Record<string, unknown>).updatedAt
+      if (
+        typeof previousVersion !== 'string' ||
+        typeof previousUpdatedAt !== 'string'
+      )
+        continue
+      try {
+        await commitRemediatedDocumentMetadata({
+          workspacePath: input.workspacePath,
+          targetPath: path,
+          previousVersion,
+          previousUpdatedAt,
+        })
+      } catch (error) {
+        metadataCommitIssues.push(
+          `${path}: ${error instanceof Error ? error.message : 'service-owned metadata commit failed'}`,
+        )
+      }
+    }
+  }
+  const readiness = input.audit
+    ? input.audit(input.workspacePath, {
+        includeChecklist: documentSet === 'checklist',
+        includeAssetManifest: false,
+      })
+    : await defaultAudit(input.workspacePath, {
+        includeChecklist: documentSet === 'checklist',
+        includeAssetManifest: false,
+      })
   const metadataIssues = documentMetadataIssues({
     workspacePath: input.workspacePath,
     writtenPaths: input.terminal.writtenPaths,
@@ -401,12 +447,9 @@ export async function completeDocumentDraft(input: {
           `document author wrote outside the document scope: ${outOfScope.join(', ')}`,
         ]
       : []),
-    ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
-      ? ['canonical document commit cannot declare finding closure']
-      : []),
-    ...(remediation && input.terminal.writtenPaths.length === 0
-      ? ['document remediation completed without changing a canonical artifact']
-      : []),
+    ...(resolvedFindingIssue ? [resolvedFindingIssue] : []),
+    ...(missingRemediationIssue ? [missingRemediationIssue] : []),
+    ...metadataCommitIssues,
     ...metadataIssues,
   ]
   let updated: DeliveryRun = {
@@ -416,7 +459,7 @@ export async function completeDocumentDraft(input: {
       document: documentRevision,
       workspace: workspaceRevision,
     },
-    activeDispatch: undefined,
+    activeDispatch: issues.length ? input.run.activeDispatch : undefined,
     status: issues.length ? 'needs_action' : input.run.status,
     blockedReason: issues.length ? issues.join('; ') : undefined,
     updatedAt: new Date().toISOString(),
