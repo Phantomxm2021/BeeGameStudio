@@ -606,7 +606,10 @@ export async function completeDocumentDraft(input: {
             : 'FOUNDATION_REVIEW',
       documentReviewState: {
         ...updated.documentReviewState,
-        activeRun: undefined,
+        activeRun:
+          remediation.scope === 'foundation'
+            ? { ...remediation, remediatedPaths }
+            : undefined,
       },
     }
   }

@@ -225,6 +225,10 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
           .string()
           .regex(/^[a-f0-9]{64}$/u)
           .optional(),
+        priorReviewDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .optional(),
         verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
         affectedPaths: z.array(z.string().min(1)).optional(),
         remediatedPaths: z.array(z.string().min(1)).optional(),

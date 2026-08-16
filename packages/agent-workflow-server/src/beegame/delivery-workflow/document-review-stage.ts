@@ -313,6 +313,9 @@ export async function acceptDocumentReviewTerminal(input: {
       reports,
       finalReportPath: foundationReview.path,
       finalReportDigest: foundationReview.digest,
+      ...(foundationReview.review.priorReviewDigest
+        ? { priorReviewDigest: foundationReview.review.priorReviewDigest }
+        : {}),
       verdict: foundationReview.review.verdict,
       affectedPaths: [...foundationReview.affectedPaths],
       failureReason: undefined,
@@ -438,16 +441,30 @@ export function routeCompletedDocumentReview(input: {
   )
     throw new Error('document review routing requires a completed final report')
   if (review.verdict === 'NEEDS_REVISION') {
-    if (review.attempt >= 3 && !input.allowRetryAfterLimit)
+    if (review.scope === 'foundation' && review.priorReviewDigest)
+      return {
+        ...run,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: `Foundation verification still requires revision; see ${review.finalReportPath}`,
+        documentReviewState: {
+          ...run.documentReviewState,
+          activeRun: review,
+        },
+      }
+    if (
+      review.scope !== 'foundation' &&
+      review.attempt >= 3 &&
+      !input.allowRetryAfterLimit
+    )
       return {
         ...run,
         phase: 'DOCUMENT_REVIEW',
         documentStep:
-          review.scope === 'foundation'
-            ? 'FOUNDATION_REVIEW'
-            : review.scope === 'checklist'
-              ? 'CHECKLIST_REVIEW'
-              : 'COMPREHENSIVE_REVIEW',
+          review.scope === 'checklist'
+            ? 'CHECKLIST_REVIEW'
+            : 'COMPREHENSIVE_REVIEW',
         status: 'needs_action',
         blockedReason: `document review stopped after three consecutive reviews requiring revision; see ${review.finalReportPath}`,
         documentReviewState: {

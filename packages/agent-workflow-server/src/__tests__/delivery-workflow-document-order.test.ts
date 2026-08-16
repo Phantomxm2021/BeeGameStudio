@@ -210,4 +210,43 @@ describe('report-based document review order', () => {
       await rm(workspacePath, { recursive: true, force: true })
     }
   })
+
+  test('retains the accepted initial review as authority for one verification', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'review-verification-authority-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(join(workspacePath, 'docs/GDD.md'), '# Updated GDD\n')
+      const { run, review } = reviewedRun('foundation')
+      const needsRevision = {
+        ...review,
+        verdict: 'NEEDS_REVISION' as const,
+        affectedPaths: ['docs/GDD.md'],
+      }
+      const blocked = routeCompletedDocumentReview({
+        run,
+        review: needsRevision,
+      })
+
+      const completed = await completeDocumentDraft({
+        run: blocked,
+        workspacePath,
+        audit: () => ({ valid: true, issues: [] }),
+        terminal: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: ['docs/GDD.md'],
+          resolvedFindingIds: [],
+        },
+      })
+
+      expect(completed.phase).toBe('DOCUMENT_REVIEW')
+      expect(completed.documentStep).toBe('FOUNDATION_REVIEW')
+      expect(completed.documentReviewState.activeRun).toEqual({
+        ...needsRevision,
+        remediatedPaths: ['docs/GDD.md'],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
 })

@@ -522,6 +522,16 @@ export function transitionDeliveryRun(
         )
       )
         fail('retry task must be a failed task')
+      if (
+        run.phase === 'DOCUMENT_REVIEW' &&
+        run.documentReviewState.activeRun?.scope === 'foundation' &&
+        run.documentReviewState.activeRun.status === 'completed' &&
+        run.documentReviewState.activeRun.verdict === 'NEEDS_REVISION' &&
+        run.documentReviewState.activeRun.priorReviewDigest
+      )
+        fail(
+          'Foundation verification is final; resolve the remaining conflicts manually before starting a new workflow run',
+        )
       next = {
         ...run,
         status: 'running',

@@ -514,7 +514,7 @@ describe('document review run', () => {
     expect(routed.blockedReason).toBeUndefined()
   })
 
-  test('stops after the third consecutive NEEDS_REVISION report', () => {
+  test('stops after one verification review still requires revision', () => {
     const run = createTestDeliveryRun({
       runId: 'review-limit-run',
       projectId: 'review-limit-project',
@@ -522,10 +522,11 @@ describe('document review run', () => {
       foundationDraftComplete: true,
     })
     const review = {
-      ...createDocumentReviewRun({ scope: 'foundation', revision, attempt: 3 }),
+      ...createDocumentReviewRun({ scope: 'foundation', revision, attempt: 2 }),
       status: 'completed' as const,
-      finalReportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
       finalReportDigest: 'f'.repeat(64),
+      priorReviewDigest: 'e'.repeat(64),
       verdict: 'NEEDS_REVISION' as const,
       affectedPaths: ['docs/GDD.md'],
     }
@@ -535,6 +536,40 @@ describe('document review run', () => {
     expect(routed.status).toBe('needs_action')
     expect(routed.phase).toBe('DOCUMENT_REVIEW')
     expect(routed.documentReviewState.activeRun).toEqual(review)
-    expect(routed.blockedReason).toContain('three consecutive reviews')
+    expect(routed.blockedReason).toContain('verification still requires revision')
+  })
+
+  test('does not treat dispatch retries as additional semantic review cycles', () => {
+    const run = createTestDeliveryRun({
+      runId: 'review-verification-retry-run',
+      projectId: 'review-verification-retry-project',
+      ownerId: 'review-verification-retry-owner',
+      foundationDraftComplete: true,
+    })
+    const review = {
+      ...createDocumentReviewRun({ scope: 'foundation', revision, attempt: 7 }),
+      status: 'completed' as const,
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+      finalReportDigest: 'f'.repeat(64),
+      priorReviewDigest: 'e'.repeat(64),
+      verdict: 'NEEDS_REVISION' as const,
+      affectedPaths: ['docs/GDD.md'],
+    }
+
+    expect(() =>
+      transitionDeliveryRun(
+        {
+          ...run,
+          phase: 'DOCUMENT_REVIEW',
+          documentStep: 'FOUNDATION_REVIEW',
+          status: 'needs_action',
+          documentReviewState: {
+            ...run.documentReviewState,
+            activeRun: review,
+          },
+        },
+        { type: 'retry' },
+      ),
+    ).toThrow('Foundation verification is final')
   })
 })
