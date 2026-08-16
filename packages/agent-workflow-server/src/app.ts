@@ -5979,7 +5979,7 @@ function workflowNextAction(
   return undefined
 }
 
-function documentReviewForDisplay(
+function foundationReviewForDisplay(
   workflow: JsonObject,
   workspacePath?: string,
 ): JsonObject | undefined {
@@ -5988,7 +5988,7 @@ function documentReviewForDisplay(
     : undefined
   const run = state
   if (!run) return undefined
-  const reports: JsonObject[] = Array.isArray(run.reports)
+  const roles: JsonObject[] = Array.isArray(run.reports)
     ? run.reports.flatMap(report => {
         if (
           !isObject(report) ||
@@ -6014,7 +6014,6 @@ function documentReviewForDisplay(
         return [
           {
             role: report.role,
-            path: report.path,
             status: report.status,
             ...(typeof report.failureReason === 'string'
               ? { failureReason: report.failureReason }
@@ -6028,41 +6027,10 @@ function documentReviewForDisplay(
         ]
       })
     : []
-  const reportsWithUsage = reports.filter(report => isObject(report.usage))
-  const reviewUsage = reportsWithUsage.length
-    ? reportsWithUsage.reduce<{
-        input_tokens: number
-        cache_read_tokens: number
-        completion_tokens: number
-      }>(
-        (total, report) => {
-          const usage = report.usage as JsonObject
-          total.input_tokens += Number(usage.input_tokens)
-          total.cache_read_tokens += Number(usage.cache_read_tokens)
-          total.completion_tokens += Number(usage.completion_tokens)
-          return total
-        },
-        { input_tokens: 0, cache_read_tokens: 0, completion_tokens: 0 },
-      )
-    : undefined
-  const reviewTimes = Array.isArray(run.reports)
-    ? run.reports.flatMap(report => {
-        if (!isObject(report) || !isObject(report.dispatch)) return []
-        const startedAt = Date.parse(String(report.dispatch.startedAt ?? ''))
-        const finishedAt = Date.parse(String(report.dispatch.finishedAt ?? ''))
-        return Number.isFinite(startedAt) && Number.isFinite(finishedAt)
-          ? [{ startedAt, finishedAt }]
-          : []
-      })
-    : []
-  const elapsedMs = reviewTimes.length
-    ? Math.max(...reviewTimes.map(value => value.finishedAt)) -
-      Math.min(...reviewTimes.map(value => value.startedAt))
-    : undefined
   const remediationState = isObject(workflow.foundationRemediationState)
     ? workflow.foundationRemediationState
     : undefined
-  const remediationLanes = Array.isArray(remediationState?.lanes) &&
+  const lanes = Array.isArray(remediationState?.lanes) &&
     remediationState.lanes.length === FOUNDATION_REMEDIATION_LANES.length &&
     remediationState.lanes.every((lane, index) => {
       const expected = FOUNDATION_REMEDIATION_LANES[index]
@@ -6136,8 +6104,6 @@ function documentReviewForDisplay(
               'document review JSON does not match the accepted workflow state'
           else
             foundationReviewProjection = {
-              conflictCount: review.conflicts.length,
-              priorConflictStatus: review.priorConflictStatus,
               conflicts: review.conflicts,
             }
         }
@@ -6147,16 +6113,13 @@ function documentReviewForDisplay(
     }
   }
   return {
-    scope: 'foundation',
+    ...(typeof run.mode === 'string' ? { mode: run.mode } : {}),
+    ...(typeof run.revision === 'string' ? { revision: run.revision } : {}),
     ...(typeof run.status === 'string' ? { status: run.status } : {}),
-    ...(typeof run.attempt === 'number' ? { attempt: run.attempt } : {}),
-    reports,
-    ...(reviewUsage ? { usage: reviewUsage } : {}),
-    ...(elapsedMs !== undefined ? { elapsedMs: Math.max(0, elapsedMs) } : {}),
+    roles,
     ...(typeof run.verdict === 'string' ? { verdict: run.verdict } : {}),
-    ...(finalReportPath ? { finalReportPath } : {}),
     ...(foundationReviewProjection ?? {}),
-    ...(remediationLanes ? { remediationLanes } : {}),
+    ...(lanes ? { lanes } : {}),
     ...(reportIntegrityFailure
       ? { failureReason: reportIntegrityFailure }
       : typeof run.failureReason === 'string'
@@ -6197,7 +6160,7 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const review = documentReviewForDisplay(workflow, workspacePath)
+  const review = foundationReviewForDisplay(workflow, workspacePath)
   const activeReviewRun = isObject(workflow.foundationReviewState)
     ? workflow.foundationReviewState
     : undefined
@@ -6324,7 +6287,7 @@ function workflowViewForDisplay(
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
       : {}),
-    ...(review ? { documentReview: review } : {}),
+    ...(review ? { foundationReview: review } : {}),
     tasks: displayTasks,
     evidence,
     ...(typeof workflow.activeTaskId === 'string'
@@ -6389,7 +6352,7 @@ function workflowViewForDisplay(
 
 function workflowStageSnapshotsForDisplay(
   workflow: JsonObject,
-  documentReview?: JsonObject,
+  foundationReview?: JsonObject,
 ): JsonObject[] | undefined {
   if (!Array.isArray(workflow.stageSnapshots)) return undefined
   const currentProgress = projectDeliveryProgress(workflow)
@@ -6439,7 +6402,7 @@ function workflowStageSnapshotsForDisplay(
         ? { convergencePass: snapshot.convergencePass }
         : {}),
       ...(snapshot.documentStep ? { documentStep: snapshot.documentStep } : {}),
-      ...(isLive && documentReview ? { documentReview } : {}),
+      ...(isLive && foundationReview ? { foundationReview } : {}),
       ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
       ...(snapshot.worker ? { worker: snapshot.worker } : {}),
       ...(snapshot.message

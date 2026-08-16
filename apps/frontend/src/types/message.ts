@@ -60,18 +60,11 @@ export interface WorkflowReviewerUsage {
   completion_tokens: number
 }
 
-export interface WorkflowDocumentReviewDisplay {
-  scope?: 'foundation'
+export interface WorkflowFoundationReviewDisplay {
+  mode: 'initial' | 'verification'
+  revision: string
   status?: 'pending' | 'running' | 'completed' | 'failed'
-  attempt?: number
   verdict?: 'READY' | 'NEEDS_REVISION'
-  affectedPaths?: string[]
-  finalReportPath?: string
-  conflictCount?: number
-  priorConflictStatus?: Array<{
-    id: string
-    status: 'closed' | 'open'
-  }>
   conflicts?: Array<{
     id: string
     title: string
@@ -88,7 +81,7 @@ export interface WorkflowDocumentReviewDisplay {
     }>
     acceptance: string[]
   }>
-  remediationLanes?: Array<{
+  lanes?: Array<{
     id: 'core-design' | 'technical-assets' | 'presentation'
     status: 'not_required' | 'pending' | 'running' | 'completed' | 'failed'
     affectedPaths: string[]
@@ -96,11 +89,8 @@ export interface WorkflowDocumentReviewDisplay {
     durationMs?: number
   }>
   failureReason?: string
-  elapsedMs?: number
-  usage?: WorkflowReviewerUsage
-  reports: Array<{
-    role: string
-    path: string
+  roles: Array<{
+    role: 'contract-specialist' | 'integration-specialist' | 'final'
     status: 'pending' | 'running' | 'completed' | 'failed'
     failureReason?: string
     durationMs?: number
@@ -118,7 +108,7 @@ export interface WorkflowCardStageSnapshot {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  documentReview?: WorkflowDocumentReviewDisplay
+  foundationReview?: WorkflowFoundationReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string
@@ -162,7 +152,7 @@ export interface WorkflowCardPayload {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  documentReview?: WorkflowDocumentReviewDisplay
+  foundationReview?: WorkflowFoundationReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string

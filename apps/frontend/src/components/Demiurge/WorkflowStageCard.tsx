@@ -58,8 +58,17 @@ const stageLabel: Record<string, string> = {
 };
 
 const reviewRoleLabel: Record<string, string> = {
+  'contract-specialist': '契约完整性证据',
+  'integration-specialist': '跨文档集成证据',
   final: '最终汇总',
 };
+
+const reviewStatusLabel = {
+  pending: '等待中',
+  running: '执行中',
+  completed: '已完成',
+  failed: '失败',
+} as const;
 
 const remediationLaneLabel = {
   'core-design': '核心设计',
@@ -605,31 +614,31 @@ export function WorkflowStageCard({
             </div>
             {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
 
-            {snapshot.documentReview ? (
+            {snapshot.foundationReview ? (
               <div
                 data-testid="workflow-review-report"
                 className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3"
               >
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  {snapshot.documentReview.verdict ? (
+                  {snapshot.foundationReview.verdict ? (
                     <span
-                      className={snapshot.documentReview.verdict === 'READY' ? 'text-emerald-300' : 'text-amber-300'}
+                      className={snapshot.foundationReview.verdict === 'READY' ? 'text-emerald-300' : 'text-amber-300'}
                     >
-                      {snapshot.documentReview.verdict}
+                      {snapshot.foundationReview.verdict}
                     </span>
                   ) : null}
-                  {snapshot.documentReview.attempt ? (
-                    <span className="text-zinc-500">第 {snapshot.documentReview.attempt} 轮</span>
-                  ) : null}
+                  <span className="text-zinc-500">
+                    {snapshot.foundationReview.mode === 'verification' ? '独立验证' : '初次审计'}
+                  </span>
                 </div>
-                {snapshot.documentReview.reports.length ? (
+                {snapshot.foundationReview.roles.length ? (
                   <ul className="mt-2 space-y-1 text-xs text-zinc-400">
-                    {snapshot.documentReview.reports.map(report => (
-                      <li key={`${report.role}:${report.path}`}>
+                    {snapshot.foundationReview.roles.map(report => (
+                      <li key={report.role}>
                         <span>
-                          {snapshot.documentReview.scope === 'foundation' && report.role === 'final'
-                            ? '基础文档审计'
-                            : reviewRoleLabel[report.role] || report.role} · {report.status === 'completed' ? '已完成' : report.status}
+                          {report.role === 'final'
+                            ? snapshot.foundationReview?.mode === 'verification' ? '独立验证' : '冲突综合'
+                            : reviewRoleLabel[report.role] || report.role} · {reviewStatusLabel[report.status]}
                         </span>
                         {report.usage || report.durationMs !== undefined ? (
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] tabular-nums text-zinc-500">
@@ -652,40 +661,14 @@ export function WorkflowStageCard({
                     ))}
                   </ul>
                 ) : null}
-                {snapshot.documentReview.usage || snapshot.documentReview.elapsedMs !== undefined ? (
-                  <div className="mt-3 border-t border-white/10 pt-2 text-[11px] tabular-nums text-zinc-400">
-                    <p className="font-medium text-zinc-300">审计合计</p>
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                      {snapshot.documentReview.usage ? (
-                        <>
-                          <span>输入 {formatTokenCount(snapshot.documentReview.usage.input_tokens)}</span>
-                          <span>缓存输入 {formatTokenCount(snapshot.documentReview.usage.cache_read_tokens)}</span>
-                          <span>输出 {formatTokenCount(snapshot.documentReview.usage.completion_tokens)}</span>
-                        </>
-                      ) : null}
-                      {snapshot.documentReview.elapsedMs !== undefined ? (
-                        <span>墙钟 {formatDuration(snapshot.documentReview.elapsedMs)}</span>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-                {snapshot.documentReview.affectedPaths?.length ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {snapshot.documentReview.affectedPaths.map(path => (
-                      <span key={path} className="rounded-full bg-white/[0.06] px-2 py-1 text-[11px] text-zinc-300">
-                        {documentTitle[path] || path}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {snapshot.documentReview.scope === 'foundation' && snapshot.documentReview.conflicts ? (
+                {snapshot.foundationReview.conflicts ? (
                   <div className="mt-3 border-t border-white/10 pt-3 text-xs">
                     <p className="font-medium text-amber-200">
-                      {snapshot.documentReview.conflictCount ?? snapshot.documentReview.conflicts.length} 个待修冲突
+                      {snapshot.foundationReview.conflicts.length} 个待修冲突
                     </p>
-                    {snapshot.documentReview.conflicts.length ? (
+                    {snapshot.foundationReview.conflicts.length ? (
                       <div className="mt-2 space-y-2">
-                        {snapshot.documentReview.conflicts.map(conflict => (
+                        {snapshot.foundationReview.conflicts.map(conflict => (
                           <details key={conflict.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
                             <summary className="cursor-pointer font-medium text-zinc-200">
                               {conflict.id} · {conflict.title}
@@ -731,11 +714,11 @@ export function WorkflowStageCard({
                     ) : null}
                   </div>
                 ) : null}
-                {snapshot.documentReview.remediationLanes?.length ? (
+                {snapshot.foundationReview.lanes?.length ? (
                   <div data-testid="workflow-remediation-lanes" className="mt-3 border-t border-white/10 pt-3 text-xs">
                     <p className="font-medium text-zinc-200">并行修订</p>
                     <ul className="mt-2 space-y-2">
-                      {snapshot.documentReview.remediationLanes.map(lane => (
+                      {snapshot.foundationReview.lanes.map(lane => (
                         <li key={lane.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="font-medium text-zinc-200">{remediationLaneLabel[lane.id]}</span>
@@ -761,8 +744,8 @@ export function WorkflowStageCard({
                     </ul>
                   </div>
                 ) : null}
-                {snapshot.documentReview.failureReason ? (
-                  <p className="mt-2 text-xs text-rose-300">{snapshot.documentReview.failureReason}</p>
+                {snapshot.foundationReview.failureReason ? (
+                  <p className="mt-2 text-xs text-rose-300">{snapshot.foundationReview.failureReason}</p>
                 ) : null}
               </div>
             ) : null}

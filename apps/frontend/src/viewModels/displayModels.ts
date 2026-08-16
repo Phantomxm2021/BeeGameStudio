@@ -228,30 +228,27 @@ const normalizeWorkflowTasks = (
   })
 }
 
-const normalizeDocumentReview = (
+const normalizeFoundationReview = (
   value: unknown,
-): WorkflowCardPayload['documentReview'] => {
+): WorkflowCardPayload['foundationReview'] => {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return undefined
   const source = value as Record<string, unknown>
-  const reports = Array.isArray(source.reports)
-    ? source.reports.flatMap(report => {
+  const roles = Array.isArray(source.roles)
+    ? source.roles.flatMap(report => {
         if (!report || typeof report !== 'object' || Array.isArray(report))
           return []
         const item = report as Record<string, unknown>
         const role = trimString(item.role)
-        const path = trimString(item.path)
         const status = trimString(item.status)
         if (
-          !role ||
-          !path ||
+          !['contract-specialist', 'integration-specialist', 'final'].includes(role) ||
           !['pending', 'running', 'completed', 'failed'].includes(status)
         )
           return []
         return [
           {
-            role,
-            path,
+            role: role as 'contract-specialist' | 'integration-specialist' | 'final',
             status: status as 'pending' | 'running' | 'completed' | 'failed',
             failureReason:
               trimString(item.failureReason ?? item.failure_reason) ||
@@ -262,7 +259,10 @@ const normalizeDocumentReview = (
         ]
       })
     : []
-  const scope = trimString(source.scope)
+  const mode = trimString(source.mode)
+  const revision = trimString(source.revision)
+  if ((mode !== 'initial' && mode !== 'verification') || !revision)
+    return undefined
   const status = trimString(source.status)
   const verdict = trimString(source.verdict)
   const laneIds = ['core-design', 'technical-assets', 'presentation'] as const
@@ -273,11 +273,7 @@ const normalizeDocumentReview = (
     'completed',
     'failed',
   ] as const
-  const rawLanes = Array.isArray(source.remediationLanes)
-    ? source.remediationLanes
-    : Array.isArray(source.remediation_lanes)
-      ? source.remediation_lanes
-      : []
+  const rawLanes = Array.isArray(source.lanes) ? source.lanes : []
   const remediationLanes = laneIds.flatMap(id => {
     const matches = rawLanes.filter(lane => {
       if (!lane || typeof lane !== 'object' || Array.isArray(lane)) return false
@@ -352,46 +348,18 @@ const normalizeDocumentReview = (
       })
     : undefined
   return {
-    scope: ['foundation', 'checklist', 'complete'].includes(scope)
-      ? (scope as 'foundation' | 'checklist' | 'complete')
-      : undefined,
+    mode,
+    revision,
     status: ['pending', 'running', 'completed', 'failed'].includes(status)
       ? (status as 'pending' | 'running' | 'completed' | 'failed')
       : undefined,
-    attempt: finiteNumber(source.attempt),
     verdict:
       verdict === 'READY' || verdict === 'NEEDS_REVISION' ? verdict : undefined,
-    affectedPaths: Array.isArray(source.affectedPaths)
-      ? source.affectedPaths.flatMap(path =>
-          typeof path === 'string' && path.trim() ? [path.trim()] : [],
-        )
-      : undefined,
-    finalReportPath:
-      trimString(source.finalReportPath ?? source.final_report_path) ||
-      undefined,
-    finalReportMarkdown:
-      trimString(source.finalReportMarkdown ?? source.final_report_markdown) ||
-      undefined,
     failureReason:
       trimString(source.failureReason ?? source.failure_reason) || undefined,
-    elapsedMs: finiteNumber(source.elapsedMs ?? source.elapsed_ms),
-    usage: normalizeReviewerUsage(source.usage),
-    conflictCount: finiteNumber(source.conflictCount ?? source.conflict_count),
-    priorConflictStatus: Array.isArray(source.priorConflictStatus)
-      ? source.priorConflictStatus.flatMap(value => {
-          if (!value || typeof value !== 'object' || Array.isArray(value))
-            return []
-          const item = value as Record<string, unknown>
-          const id = trimString(item.id)
-          const priorStatus = trimString(item.status)
-          return id && (priorStatus === 'closed' || priorStatus === 'open')
-            ? [{ id, status: priorStatus }]
-            : []
-        })
-      : undefined,
     conflicts,
-    remediationLanes: remediationLanes.length ? remediationLanes : undefined,
-    reports,
+    lanes: remediationLanes.length ? remediationLanes : undefined,
+    roles,
   }
 }
 
@@ -463,9 +431,7 @@ const normalizeWorkflowCardFields = (
     convergencePass,
     documentStep:
       trimString(source.documentStep ?? source.document_step) || undefined,
-    documentReview: normalizeDocumentReview(
-      source.documentReview ?? source.document_review,
-    ),
+    foundationReview: normalizeFoundationReview(source.foundationReview),
     worker:
       trimString(
         source.worker ??

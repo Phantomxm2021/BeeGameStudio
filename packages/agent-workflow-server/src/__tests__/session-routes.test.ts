@@ -1321,12 +1321,10 @@ describe('delivery workflow session continuation', () => {
     }
     expect(response.status).toBe(200)
     const workflow = payload.workflow as Record<string, unknown>
-    expect(workflow.documentReview).toMatchObject({
-      scope: 'foundation',
+    expect(workflow.foundationReview).toMatchObject({
+      mode: 'initial',
+      revision: reviewRevision,
       verdict: 'NEEDS_REVISION',
-      finalReportPath: reportPath,
-      conflictCount: 1,
-      priorConflictStatus: [],
       conflicts: [
         {
           id: 'B1',
@@ -1335,13 +1333,7 @@ describe('delivery workflow session continuation', () => {
           requiredOutcome: 'Use one integer reward unit.',
         },
       ],
-      elapsedMs: 20_000,
-      usage: {
-        input_tokens: 220,
-        cache_read_tokens: 640,
-        completion_tokens: 96,
-      },
-      remediationLanes: [
+      lanes: [
         {
           id: 'core-design',
           status: 'pending',
@@ -1361,10 +1353,12 @@ describe('delivery workflow session continuation', () => {
         },
       ],
     })
-    expect(workflow.documentReview).not.toHaveProperty('finalReportMarkdown')
+    expect(workflow.foundationReview).not.toHaveProperty('finalReportMarkdown')
+    expect(workflow.foundationReview).not.toHaveProperty('finalReportPath')
+    expect(workflow).not.toHaveProperty('documentReview')
     expect(
-      (workflow.documentReview as { reports: Array<Record<string, unknown>> })
-        .reports[0],
+      (workflow.foundationReview as { roles: Array<Record<string, unknown>> })
+        .roles[0],
     ).toMatchObject({
       durationMs: 10_000,
       usage: {
@@ -1373,6 +1367,10 @@ describe('delivery workflow session continuation', () => {
         completion_tokens: 56,
       },
     })
+    expect(
+      (workflow.foundationReview as { roles: Array<Record<string, unknown>> })
+        .roles[0],
+    ).not.toHaveProperty('path')
     await writeFile(join(workspace, reportPath), '# tampered\n')
     const tamperedResponse = await app.request(
       `/api/projects/${projectId}/workflow`,
@@ -1381,10 +1379,10 @@ describe('delivery workflow session continuation', () => {
       workflow?: Record<string, unknown>
     }
     expect(
-      (tamperedPayload.workflow?.documentReview as Record<string, unknown>)
-        .finalReportMarkdown,
+      (tamperedPayload.workflow?.foundationReview as Record<string, unknown>)
+        .conflicts,
     ).toBeUndefined()
-    expect(tamperedPayload.workflow?.documentReview).toMatchObject({
+    expect(tamperedPayload.workflow?.foundationReview).toMatchObject({
       failureReason:
         'document review report bytes no longer match the accepted digest',
     })

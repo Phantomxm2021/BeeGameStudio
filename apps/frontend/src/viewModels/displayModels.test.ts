@@ -48,15 +48,11 @@ describe('displayModels', () => {
         phaseCount: 9,
         substage: 'INITIAL_REVIEW',
         convergencePass: 2,
-        documentReview: {
-          scope: 'complete',
+        foundationReview: {
+          mode: 'verification',
+          revision: 'a'.repeat(64),
           status: 'completed',
-          attempt: 2,
           verdict: 'NEEDS_REVISION',
-          affectedPaths: ['docs/GDD.md'],
-          finalReportPath: '.beegame/reviews/complete/revision/review.md',
-          conflictCount: 1,
-          priorConflictStatus: [],
           conflicts: [
             {
               id: 'B1',
@@ -76,8 +72,8 @@ describe('displayModels', () => {
               acceptance: ['Only integer rewards remain.'],
             },
           ],
-          reports: [],
-          remediationLanes: [
+          roles: [],
+          lanes: [
             {
               id: 'core-design',
               status: 'running',
@@ -129,15 +125,11 @@ describe('displayModels', () => {
         phaseCount: 9,
         substage: 'INITIAL_REVIEW',
         convergencePass: 2,
-        documentReview: {
-          scope: 'complete',
+        foundationReview: {
+          mode: 'verification',
+          revision: 'a'.repeat(64),
           status: 'completed',
-          attempt: 2,
           verdict: 'NEEDS_REVISION',
-          affectedPaths: ['docs/GDD.md'],
-          finalReportPath: '.beegame/reviews/complete/revision/review.md',
-          conflictCount: 1,
-          priorConflictStatus: [],
           conflicts: [
             {
               id: 'B1',
@@ -157,8 +149,8 @@ describe('displayModels', () => {
               acceptance: ['Only integer rewards remain.'],
             },
           ],
-          reports: [],
-          remediationLanes: [
+          roles: [],
+          lanes: [
             {
               id: 'core-design',
               status: 'running',
@@ -236,20 +228,13 @@ describe('displayModels', () => {
             substage: 'INITIAL_REVIEW',
             convergencePass: 2,
             documentStep: 'FOUNDATION_REVIEW',
-            documentReview: {
-              scope: 'foundation',
+            foundationReview: {
+              mode: 'initial',
+              revision: 'a'.repeat(64),
               status: 'running',
-              attempt: 2,
-              elapsedMs: 20_000,
-              usage: {
-                input_tokens: 220,
-                cache_read_tokens: 640,
-                completion_tokens: 96,
-              },
-              reports: [
+              roles: [
                 {
                   role: 'contract-specialist',
-                  path: 'parts/contract-specialist.json',
                   status: 'running',
                   durationMs: 10_000,
                   usage: {
@@ -328,20 +313,13 @@ describe('displayModels', () => {
         substage: 'INITIAL_REVIEW',
         convergencePass: 2,
         documentStep: 'FOUNDATION_REVIEW',
-        documentReview: {
-          scope: 'foundation',
+        foundationReview: {
+          mode: 'initial',
+          revision: 'a'.repeat(64),
           status: 'running',
-          attempt: 2,
-          elapsedMs: 20_000,
-          usage: {
-            input_tokens: 220,
-            cache_read_tokens: 640,
-            completion_tokens: 96,
-          },
-          reports: [
+          roles: [
             {
               role: 'contract-specialist',
-              path: 'parts/contract-specialist.json',
               status: 'running',
               durationMs: 10_000,
               usage: {

@@ -24,15 +24,11 @@ describe('WorkflowCard', () => {
           runId: 'review-report-run',
           status: 'blocked',
           currentPhase: 'DOCUMENT_REVIEW',
-          documentReview: {
-            scope: 'foundation',
+          foundationReview: {
+            mode: 'verification',
+            revision: 'a'.repeat(64),
             status: 'completed',
-            attempt: 3,
             verdict: 'NEEDS_REVISION',
-            affectedPaths: ['docs/GDD.md'],
-            finalReportPath: '.beegame/reviews/foundation/revision/review.json',
-            conflictCount: 1,
-            priorConflictStatus: [],
             conflicts: [{
               id: 'B1',
               title: 'Economy rule is not implementable',
@@ -49,15 +45,8 @@ describe('WorkflowCard', () => {
               }],
               acceptance: ['All reward values use integer currency units.'],
             }],
-            elapsedMs: 20_000,
-            usage: {
-              input_tokens: 220,
-              cache_read_tokens: 640,
-              completion_tokens: 96,
-            },
-            reports: [{
+            roles: [{
               role: 'final',
-              path: '.beegame/reviews/foundation/revision/review.json',
               status: 'completed',
               durationMs: 10_000,
               usage: {
@@ -66,7 +55,7 @@ describe('WorkflowCard', () => {
                 completion_tokens: 56,
               },
             }],
-            remediationLanes: [
+            lanes: [
               {
                 id: 'core-design',
                 status: 'running',
@@ -103,16 +92,11 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('验收')).toBeInTheDocument();
     expect(screen.getByText('All reward values use integer currency units.')).toBeInTheDocument();
     expect(screen.queryByText(/"version":2/)).not.toBeInTheDocument();
-    expect(screen.getByText('基础文档审计 · 已完成')).toBeInTheDocument();
+    expect(screen.getByText('独立验证 · 已完成')).toBeInTheDocument();
     expect(screen.getByText('输入 120')).toBeInTheDocument();
     expect(screen.getByText('缓存输入 340')).toBeInTheDocument();
     expect(screen.getByText('输出 56')).toBeInTheDocument();
     expect(screen.getByText('耗时 00:00:10')).toBeInTheDocument();
-    expect(screen.getByText('审计合计')).toBeInTheDocument();
-    expect(screen.getByText('输入 220')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入 640')).toBeInTheDocument();
-    expect(screen.getByText('输出 96')).toBeInTheDocument();
-    expect(screen.getByText('墙钟 00:00:20')).toBeInTheDocument();
     expect(screen.getByText('核心设计')).toBeInTheDocument();
     expect(screen.getByText('技术与资产')).toBeInTheDocument();
     expect(screen.getByText('表现层')).toBeInTheDocument();
@@ -122,6 +106,41 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('00:00:12')).toBeInTheDocument();
     expect(screen.queryByText('review.md')).not.toBeInTheDocument();
     expect(screen.queryByText('foundation-contract-specialist')).not.toBeInTheDocument();
+  });
+
+  it('shows concurrent specialist failures as separate durable rows', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'review-failures',
+          status: 'blocked',
+          currentPhase: 'DOCUMENT_REVIEW',
+          foundationReview: {
+            mode: 'initial',
+            revision: 'b'.repeat(64),
+            status: 'failed',
+            roles: [
+              {
+                role: 'contract-specialist',
+                status: 'failed',
+                failureReason: '契约证据包写入失败',
+              },
+              {
+                role: 'integration-specialist',
+                status: 'failed',
+                failureReason: '集成证据包格式无效',
+              },
+              { role: 'final', status: 'pending' },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/契约完整性证据 · 失败/)).toBeInTheDocument();
+    expect(screen.getByText(/跨文档集成证据 · 失败/)).toBeInTheDocument();
+    expect(screen.getByText('契约证据包写入失败')).toBeInTheDocument();
+    expect(screen.getByText('集成证据包格式无效')).toBeInTheDocument();
   });
 
   it('renders a stage deck with navigation and only exposes the latest action', async () => {
