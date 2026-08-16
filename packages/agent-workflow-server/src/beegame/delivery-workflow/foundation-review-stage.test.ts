@@ -220,6 +220,19 @@ describe('foundation review lane dispatch barrier', () => {
       digest: 'e'.repeat(64),
     })
     expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
+    expect(dispatches[0].assignment.sourcePaths).toEqual([
+      resolve(root, '.beegame/reviews/foundation/prior/review.json'),
+    ])
+    expect(dispatches[0].assignment.verificationSourcePaths).toEqual([
+      resolve(root, 'docs/GDD.md'),
+      resolve(
+        root,
+        `.beegame/reviews/foundation/${revision}/projections/core-design.json`,
+      ),
+    ])
+    expect(dispatches[0].assignment.verificationSourcePaths).not.toContain(
+      resolve(root, 'docs/AUDIO_DESIGN.md'),
+    )
   })
 
   test('accepts three lane packets and one synthesis only for the current revision', async () => {

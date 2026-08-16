@@ -377,6 +377,7 @@ export function createDeliveryWorkflowController(input: {
             next.confirmedBriefDigest,
           ),
           terminal: result,
+          remediationState: next.foundationRemediationState,
         })
         next = { ...next, foundationReviewState: acceptedState }
         if (acceptedState.status === 'completed') {

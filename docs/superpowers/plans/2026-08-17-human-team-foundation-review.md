@@ -223,19 +223,19 @@ git commit -m "refactor: route foundation review through document lanes"
 - Starts only affected repair lanes.
 - Verification receives prior review, accepted receipts, modified paths, and directly dependent contract sections, not all eight full documents.
 
-- [ ] **Step 1: Write RED repair/verification scope tests**
+- [x] **Step 1: Write RED repair/verification scope tests**
 
 Assert affected lanes launch concurrently, unaffected lanes stay
 `not_required`, write paths are disjoint, sibling receipts survive retry, and
 verification starts only after the receipt barrier without unrelated documents.
 
-- [ ] **Step 2: Implement targeted verification and run GREEN**
+- [x] **Step 2: Implement targeted verification and run GREEN**
 
 Verification checks every prior conflict and direct dependency, preserves open
 IDs, writes one canonical review, and stops at `needs_action` rather than
 starting initial reviewers or a second repair cycle.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-remediation.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts

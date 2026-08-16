@@ -61,6 +61,11 @@ export type FoundationReviewDispatch = {
     confirmedBriefDigest: string
     packetDigests: Partial<Record<FoundationDocumentLaneId, string>>
     projection?: { path: string; digest: string; byteLength: number }
+    verificationProjections?: Array<{
+      path: string
+      digest: string
+      byteLength: number
+    }>
     priorReview?: { path: string; digest: string }
     remediationReceipts?: Array<{
       laneId: string
@@ -149,6 +154,9 @@ export async function buildFoundationReviewDispatches(input: {
     roles.map(async role => {
       const taskId = `review:foundation:${role}:${state.attempt}`
       let projection: FoundationReviewDispatch['contract']['projection']
+      let verificationProjections:
+        | FoundationReviewDispatch['contract']['verificationProjections']
+        | undefined
       let sourcePaths: string[]
       let verificationSourcePaths: string[]
       let stagingPath: string
@@ -183,12 +191,31 @@ export async function buildFoundationReviewDispatches(input: {
                 ),
               )
             : [resolve(input.workspacePath, state.priorReviewPath!)]
-        verificationSourcePaths =
-          role === 'verification'
-            ? CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
-                resolve(input.workspacePath, path),
-              )
-            : []
+        if (role === 'verification') {
+          const activeLanes = input.remediationState!.lanes.filter(
+            lane => lane.status === 'completed',
+          )
+          verificationProjections = await Promise.all(
+            activeLanes.map(lane =>
+              writeFoundationReviewProjection({
+                workspacePath: input.workspacePath,
+                revision: state.revision,
+                laneId: lane.id,
+              }),
+            ),
+          )
+          const affected = new Set(
+            activeLanes.flatMap(lane => lane.affectedPaths),
+          )
+          verificationSourcePaths = [
+            ...CANONICAL_FOUNDATION_DOCUMENTS.filter(path => affected.has(path)).map(
+              path => resolve(input.workspacePath, path),
+            ),
+            ...verificationProjections.map(item =>
+              resolve(input.workspacePath, item.path),
+            ),
+          ]
+        } else verificationSourcePaths = []
         stagingPath = foundationReviewStagingPath(
           input.workspacePath,
           state.revision,
@@ -217,6 +244,7 @@ export async function buildFoundationReviewDispatches(input: {
           confirmedBriefDigest: input.confirmedBriefDigest,
           packetDigests,
           ...(projection ? { projection } : {}),
+          ...(verificationProjections ? { verificationProjections } : {}),
           ...(state.mode === 'verification'
             ? {
                 priorReview: {
@@ -237,6 +265,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
   workspacePath: string
   currentRevision: string
   terminal: unknown
+  remediationState?: FoundationRemediationState
 }): Promise<FoundationReviewState> {
   const state = assertFoundationReviewState(input.state)
   const terminal = foundationReviewWorkerTerminalSchema.parse(input.terminal)
@@ -300,6 +329,19 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
           expectedDigest: state.priorReviewDigest!,
         })
       : undefined
+  if (terminal.role === 'verification') {
+    verificationReceipts({
+      state,
+      remediationState: input.remediationState,
+    })
+    for (const lane of input.remediationState!.lanes)
+      if (lane.status === 'completed')
+        await writeFoundationReviewProjection({
+          workspacePath: input.workspacePath,
+          revision: state.revision,
+          laneId: lane.id,
+        })
+  }
   const accepted = await acceptFoundationReview({
     workspacePath: input.workspacePath,
     revision: state.revision,

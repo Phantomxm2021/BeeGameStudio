@@ -112,6 +112,7 @@ function formatContract(request: WorkerDispatchRequest): string {
       assignment: request.contract.assignment,
       packetDigests: request.contract.packetDigests,
       projection: request.contract.projection,
+      verificationProjections: request.contract.verificationProjections,
       remediationReceipts: request.contract.remediationReceipts,
       allowedAffectedPaths: request.contract.allowedAffectedPaths,
     })
