@@ -6161,30 +6161,6 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const review = foundationReviewForDisplay(workflow, workspacePath)
-  const activeReviewRun = isObject(workflow.foundationReviewState)
-    ? workflow.foundationReviewState
-    : undefined
-  const reviewReports = Array.isArray(activeReviewRun?.reports)
-    ? activeReviewRun.reports.flatMap(report =>
-        isObject(report) &&
-        typeof report.role === 'string' &&
-        (report.status === 'pending' ||
-          report.status === 'running' ||
-          report.status === 'completed' ||
-          report.status === 'failed')
-          ? [
-              {
-                role: report.role,
-                status: report.status as
-                  | 'pending'
-                  | 'running'
-                  | 'completed'
-                  | 'failed',
-              },
-            ]
-          : [],
-      )
-    : undefined
   const displayTasks =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -6235,7 +6211,6 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
-          reviewReports,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({

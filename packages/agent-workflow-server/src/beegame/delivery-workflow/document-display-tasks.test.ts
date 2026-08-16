@@ -59,41 +59,14 @@ describe('workflow display tasks', () => {
     ])
   })
 
-  test('projects Reviewer roles instead of retired checks and packets', async () => {
+  test('does not duplicate Foundation Reviewer roles as generic document tasks', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
       documentStep: 'FOUNDATION_REVIEW',
       workflowStatus: 'running',
       thinking: 'working',
-      reviewReports: [
-        { role: 'contract-specialist', status: 'completed' },
-        { role: 'integration-specialist', status: 'running' },
-        { role: 'final', status: 'pending' },
-      ],
     })
-    expect(tasks).toEqual([
-      {
-        id: 'contract-specialist',
-        title: 'contract-specialist',
-        status: 'completed',
-        attempt: 0,
-        operation: 'review',
-      },
-      {
-        id: 'integration-specialist',
-        title: 'integration-specialist',
-        status: 'running',
-        attempt: 0,
-        operation: 'review',
-      },
-      {
-        id: 'final',
-        title: 'final',
-        status: 'pending',
-        attempt: 0,
-        operation: 'review',
-      },
-    ])
+    expect(tasks).toEqual([])
   })
 
 })

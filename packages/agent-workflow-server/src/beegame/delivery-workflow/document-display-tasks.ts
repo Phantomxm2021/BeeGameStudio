@@ -37,10 +37,6 @@ export type DocumentDisplayTaskInput = {
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
-  reviewReports?: Array<{
-    role: string
-    status: 'pending' | 'running' | 'completed' | 'failed'
-  }>
 }
 
 /**
@@ -52,6 +48,7 @@ export type DocumentDisplayTaskInput = {
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
+  if (input.documentStep === 'FOUNDATION_REVIEW') return []
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,
@@ -64,8 +61,7 @@ export function projectDocumentDisplayTasks(
     : undefined
   const active =
     input.workflowStatus === 'running' && input.thinking === 'working'
-  const operation =
-    input.documentStep === 'FOUNDATION_REVIEW' ? 'review' : 'write'
+  const operation = 'write' as const
   const documentPaths =
     input.documentStep === 'CHECKLIST_DRAFTING'
       ? [CANONICAL_PROJECT_DOCUMENTS[CANONICAL_PROJECT_DOCUMENTS.length - 1]]
@@ -82,18 +78,6 @@ export function projectDocumentDisplayTasks(
       )
       .map(document => [document.path, document.status]),
   )
-
-  if (operation === 'review' && input.reviewReports?.length)
-    return input.reviewReports.map(report => ({
-      id: report.role,
-      title: report.role,
-      status:
-        report.status === 'running' && workflowStopped(input.workflowStatus)
-          ? 'stopped'
-          : report.status,
-      attempt: 0,
-      operation: 'review',
-    }))
 
   return documentPaths.map(path => {
     const parallelStatus = parallelDocuments.get(path)
@@ -141,17 +125,13 @@ export function projectDocumentDisplayTasks(
         ? 'running'
         : isStopped
           ? 'stopped'
-          : operation === 'review'
-            ? isFailed
-              ? 'failed'
-              : 'pending'
-            : isFailed
-              ? 'failed'
-              : input.documentStep === 'FOUNDATION_DRAFTING'
-                ? committedPaths.has(path)
-                  ? 'completed'
-                  : 'pending'
-                : exists
+          : isFailed
+            ? 'failed'
+            : input.documentStep === 'FOUNDATION_DRAFTING'
+              ? committedPaths.has(path)
+                ? 'completed'
+                : 'pending'
+              : exists
                   ? 'completed'
                   : 'pending',
       attempt: 0,
