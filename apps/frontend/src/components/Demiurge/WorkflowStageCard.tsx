@@ -63,6 +63,20 @@ const reviewRoleLabel: Record<string, string> = {
   final: '最终汇总',
 };
 
+const remediationLaneLabel = {
+  'core-design': '核心设计',
+  'technical-assets': '技术与资产',
+  presentation: '表现层',
+} as const;
+
+const remediationLaneStatusLabel = {
+  not_required: '无需修订',
+  pending: '等待修订',
+  running: '修订中',
+  completed: '已完成',
+  failed: '失败',
+} as const;
+
 const workerLabel: Record<string, string> = {
   'document-author': 'Document Author',
   'document-reviewer': 'Document Reviewer',
@@ -721,6 +735,36 @@ export function WorkflowStageCard({
                         ))}
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+                {snapshot.documentReview.remediationLanes?.length ? (
+                  <div data-testid="workflow-remediation-lanes" className="mt-3 border-t border-white/10 pt-3 text-xs">
+                    <p className="font-medium text-zinc-200">并行修订</p>
+                    <ul className="mt-2 space-y-2">
+                      {snapshot.documentReview.remediationLanes.map(lane => (
+                        <li key={lane.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-medium text-zinc-200">{remediationLaneLabel[lane.id]}</span>
+                            <span className={lane.status === 'failed' ? 'text-rose-300' : lane.status === 'completed' ? 'text-emerald-300' : 'text-zinc-400'}>
+                              {remediationLaneStatusLabel[lane.status]}
+                            </span>
+                          </div>
+                          {lane.affectedPaths.length ? (
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-zinc-400">
+                              {lane.affectedPaths.map(path => (
+                                <span key={path}>{documentTitle[path] || path}</span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {lane.durationMs !== undefined ? (
+                            <p className="mt-1 text-[11px] tabular-nums text-zinc-500">{formatDuration(lane.durationMs)}</p>
+                          ) : null}
+                          {lane.failureReason ? (
+                            <p className="mt-1 text-rose-300">{lane.failureReason}</p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
                 {snapshot.documentReview.finalReportMarkdown ? (

@@ -90,6 +90,13 @@ export interface WorkflowDocumentReviewDisplay {
     }>
     acceptance: string[]
   }>
+  remediationLanes?: Array<{
+    id: 'core-design' | 'technical-assets' | 'presentation'
+    status: 'not_required' | 'pending' | 'running' | 'completed' | 'failed'
+    affectedPaths: string[]
+    failureReason?: string
+    durationMs?: number
+  }>
   failureReason?: string
   elapsedMs?: number
   usage?: WorkflowReviewerUsage

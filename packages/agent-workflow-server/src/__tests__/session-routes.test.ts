@@ -1253,6 +1253,51 @@ describe('delivery workflow session continuation', () => {
             .digest('hex'),
         },
       },
+      foundationRemediationState: {
+        reviewPath: reportPath,
+        reviewDigest: createHash('sha256').update(reportJson).digest('hex'),
+        sourceRevision: reviewRevision,
+        lanes: [
+          {
+            id: 'core-design',
+            ownedPaths: [
+              'docs/GDD.md',
+              'docs/LEVEL_SCENE_DESIGN.md',
+              'docs/BALANCE_DESIGN.md',
+            ],
+            affectedPaths: ['docs/GDD.md'],
+            status: 'pending',
+          },
+          {
+            id: 'technical-assets',
+            ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+            affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+            status: 'failed',
+            failureReason: '技术修订写入失败',
+            dispatch: {
+              dispatchId: 'foundation-remediation-technical-assets',
+              taskId: 'foundation-remediation:technical-assets',
+              workerType: 'document-author',
+              phase: 'DOCUMENT_DRAFTING',
+              revision: reviewRevision,
+              status: 'failed',
+              startedAt: '2026-08-06T00:00:00.000Z',
+              finishedAt: '2026-08-06T00:00:12.000Z',
+              failureReason: '技术修订写入失败',
+            },
+          },
+          {
+            id: 'presentation',
+            ownedPaths: [
+              'docs/ART_DIRECTION.md',
+              'docs/UI_UX_SPEC.md',
+              'docs/AUDIO_DESIGN.md',
+            ],
+            affectedPaths: [],
+            status: 'not_required',
+          },
+        ],
+      },
       currentMessage: 'live stage status',
       blockedReason: 'current-only recovery detail',
       usage: {
@@ -1299,6 +1344,25 @@ describe('delivery workflow session continuation', () => {
         cache_read_tokens: 340,
         completion_tokens: 56,
       },
+      remediationLanes: [
+        {
+          id: 'core-design',
+          status: 'pending',
+          affectedPaths: ['docs/GDD.md'],
+        },
+        {
+          id: 'technical-assets',
+          status: 'failed',
+          affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+          failureReason: '技术修订写入失败',
+          durationMs: 12_000,
+        },
+        {
+          id: 'presentation',
+          status: 'not_required',
+          affectedPaths: [],
+        },
+      ],
     })
     expect(workflow.documentReview).not.toHaveProperty('finalReportMarkdown')
     expect(

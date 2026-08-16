@@ -66,13 +66,32 @@ describe('WorkflowCard', () => {
                 completion_tokens: 56,
               },
             }],
+            remediationLanes: [
+              {
+                id: 'core-design',
+                status: 'running',
+                affectedPaths: ['docs/GDD.md'],
+                durationMs: 12_000,
+              },
+              {
+                id: 'technical-assets',
+                status: 'failed',
+                affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+                failureReason: '技术修订写入失败',
+              },
+              {
+                id: 'presentation',
+                status: 'not_required',
+                affectedPaths: [],
+              },
+            ],
           },
         }}
       />,
     );
 
     expect(screen.getByText('NEEDS_REVISION')).toBeInTheDocument();
-    expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getAllByText('游戏设计文档 GDD').length).toBeGreaterThan(0);
     expect(screen.getByText('1 个待修冲突')).toBeInTheDocument();
     fireEvent.click(screen.getByText('B1 · Economy rule is not implementable'));
     expect(screen.getByText('问题')).toBeInTheDocument();
@@ -94,6 +113,15 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('缓存输入 640')).toBeInTheDocument();
     expect(screen.getByText('输出 96')).toBeInTheDocument();
     expect(screen.getByText('墙钟 00:00:20')).toBeInTheDocument();
+    expect(screen.getByText('核心设计')).toBeInTheDocument();
+    expect(screen.getByText('技术与资产')).toBeInTheDocument();
+    expect(screen.getByText('表现层')).toBeInTheDocument();
+    expect(screen.getByText('修订中')).toBeInTheDocument();
+    expect(screen.getByText('无需修订')).toBeInTheDocument();
+    expect(screen.getByText('技术修订写入失败')).toBeInTheDocument();
+    expect(screen.getByText('00:00:12')).toBeInTheDocument();
+    expect(screen.queryByText('review.md')).not.toBeInTheDocument();
+    expect(screen.queryByText('foundation-contract-specialist')).not.toBeInTheDocument();
   });
 
   it('renders a stage deck with navigation and only exposes the latest action', async () => {

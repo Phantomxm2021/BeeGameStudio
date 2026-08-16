@@ -55,7 +55,52 @@ describe('displayModels', () => {
           verdict: 'NEEDS_REVISION',
           affectedPaths: ['docs/GDD.md'],
           finalReportPath: '.beegame/reviews/complete/revision/review.md',
+          conflictCount: 1,
+          priorConflictStatus: [],
+          conflicts: [
+            {
+              id: 'B1',
+              title: 'Conflicting reward unit',
+              problem: 'Two units are used.',
+              requiredOutcome: 'Use one unit.',
+              evidence: [
+                {
+                  path: 'docs/GDD.md',
+                  location: 'Rewards',
+                  observed: 'Percent and integer are both present.',
+                },
+              ],
+              changes: [
+                { path: 'docs/GDD.md', action: 'Use integer rewards.' },
+              ],
+              acceptance: ['Only integer rewards remain.'],
+            },
+          ],
           reports: [],
+          remediationLanes: [
+            {
+              id: 'core-design',
+              status: 'running',
+              affectedPaths: ['docs/GDD.md'],
+              durationMs: 12000,
+            },
+            {
+              id: 'technical-assets',
+              status: 'failed',
+              affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+              failureReason: '技术修订失败',
+            },
+            {
+              id: 'presentation',
+              status: 'not_required',
+              affectedPaths: [],
+            },
+            {
+              id: 'unknown-lane',
+              status: 'running',
+              affectedPaths: ['docs/ART_DIRECTION.md'],
+            },
+          ],
         },
         startedAt: '2026-07-30T10:00:00.000Z',
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
@@ -91,7 +136,47 @@ describe('displayModels', () => {
           verdict: 'NEEDS_REVISION',
           affectedPaths: ['docs/GDD.md'],
           finalReportPath: '.beegame/reviews/complete/revision/review.md',
+          conflictCount: 1,
+          priorConflictStatus: [],
+          conflicts: [
+            {
+              id: 'B1',
+              title: 'Conflicting reward unit',
+              problem: 'Two units are used.',
+              requiredOutcome: 'Use one unit.',
+              evidence: [
+                {
+                  path: 'docs/GDD.md',
+                  location: 'Rewards',
+                  observed: 'Percent and integer are both present.',
+                },
+              ],
+              changes: [
+                { path: 'docs/GDD.md', action: 'Use integer rewards.' },
+              ],
+              acceptance: ['Only integer rewards remain.'],
+            },
+          ],
           reports: [],
+          remediationLanes: [
+            {
+              id: 'core-design',
+              status: 'running',
+              affectedPaths: ['docs/GDD.md'],
+              durationMs: 12000,
+            },
+            {
+              id: 'technical-assets',
+              status: 'failed',
+              affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+              failureReason: '技术修订失败',
+            },
+            {
+              id: 'presentation',
+              status: 'not_required',
+              affectedPaths: [],
+            },
+          ],
         },
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },

@@ -266,6 +266,92 @@ const normalizeDocumentReview = (
   const scope = trimString(source.scope)
   const status = trimString(source.status)
   const verdict = trimString(source.verdict)
+  const laneIds = ['core-design', 'technical-assets', 'presentation'] as const
+  const laneStatuses = [
+    'not_required',
+    'pending',
+    'running',
+    'completed',
+    'failed',
+  ] as const
+  const rawLanes = Array.isArray(source.remediationLanes)
+    ? source.remediationLanes
+    : Array.isArray(source.remediation_lanes)
+      ? source.remediation_lanes
+      : []
+  const remediationLanes = laneIds.flatMap(id => {
+    const matches = rawLanes.filter(lane => {
+      if (!lane || typeof lane !== 'object' || Array.isArray(lane)) return false
+      return trimString((lane as Record<string, unknown>).id) === id
+    })
+    if (matches.length !== 1) return []
+    const lane = matches[0] as Record<string, unknown>
+    const laneStatus = trimString(lane.status)
+    if (
+      !laneStatuses.includes(laneStatus as (typeof laneStatuses)[number]) ||
+      !Array.isArray(lane.affectedPaths) ||
+      lane.affectedPaths.some(
+        path => typeof path !== 'string' || !path.trim(),
+      )
+    )
+      return []
+    const durationMs = finiteNumber(lane.durationMs ?? lane.duration_ms)
+    if (durationMs !== undefined && durationMs < 0) return []
+    return [
+      {
+        id,
+        status: laneStatus as (typeof laneStatuses)[number],
+        affectedPaths: lane.affectedPaths.map(path => String(path).trim()),
+        failureReason:
+          trimString(lane.failureReason ?? lane.failure_reason) || undefined,
+        durationMs,
+      },
+    ]
+  })
+  const conflicts = Array.isArray(source.conflicts)
+    ? source.conflicts.flatMap(conflict => {
+        if (!conflict || typeof conflict !== 'object' || Array.isArray(conflict))
+          return []
+        const item = conflict as Record<string, unknown>
+        const id = trimString(item.id)
+        const title = trimString(item.title)
+        const problem = trimString(item.problem)
+        const requiredOutcome = trimString(item.requiredOutcome)
+        const evidence = Array.isArray(item.evidence)
+          ? item.evidence.flatMap(value => {
+              if (!value || typeof value !== 'object' || Array.isArray(value))
+                return []
+              const entry = value as Record<string, unknown>
+              const path = trimString(entry.path)
+              const location = trimString(entry.location)
+              const observed = trimString(entry.observed)
+              return path && location && observed
+                ? [{ path, location, observed }]
+                : []
+            })
+          : []
+        const changes = Array.isArray(item.changes)
+          ? item.changes.flatMap(value => {
+              if (!value || typeof value !== 'object' || Array.isArray(value))
+                return []
+              const entry = value as Record<string, unknown>
+              const path = trimString(entry.path)
+              const action = trimString(entry.action)
+              return path && action ? [{ path, action }] : []
+            })
+          : []
+        const acceptance = Array.isArray(item.acceptance)
+          ? item.acceptance.flatMap(value => {
+              const condition = trimString(value)
+              return condition ? [condition] : []
+            })
+          : []
+        return id && title && problem && requiredOutcome && evidence.length &&
+          changes.length && acceptance.length
+          ? [{ id, title, problem, requiredOutcome, evidence, changes, acceptance }]
+          : []
+      })
+    : undefined
   return {
     scope: ['foundation', 'checklist', 'complete'].includes(scope)
       ? (scope as 'foundation' | 'checklist' | 'complete')
@@ -291,6 +377,21 @@ const normalizeDocumentReview = (
       trimString(source.failureReason ?? source.failure_reason) || undefined,
     elapsedMs: finiteNumber(source.elapsedMs ?? source.elapsed_ms),
     usage: normalizeReviewerUsage(source.usage),
+    conflictCount: finiteNumber(source.conflictCount ?? source.conflict_count),
+    priorConflictStatus: Array.isArray(source.priorConflictStatus)
+      ? source.priorConflictStatus.flatMap(value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value))
+            return []
+          const item = value as Record<string, unknown>
+          const id = trimString(item.id)
+          const priorStatus = trimString(item.status)
+          return id && (priorStatus === 'closed' || priorStatus === 'open')
+            ? [{ id, status: priorStatus }]
+            : []
+        })
+      : undefined,
+    conflicts,
+    remediationLanes: remediationLanes.length ? remediationLanes : undefined,
     reports,
   }
 }

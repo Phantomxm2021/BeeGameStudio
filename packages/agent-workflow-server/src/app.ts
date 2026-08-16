@@ -214,6 +214,7 @@ import {
   foundationReviewPath,
   foundationReviewSchema,
 } from './beegame/delivery-workflow/foundation-review'
+import { FOUNDATION_REMEDIATION_LANES } from './beegame/delivery-workflow/foundation-remediation'
 
 type JsonObject = Record<string, unknown>
 
@@ -6058,6 +6059,48 @@ function documentReviewForDisplay(
     ? Math.max(...reviewTimes.map(value => value.finishedAt)) -
       Math.min(...reviewTimes.map(value => value.startedAt))
     : undefined
+  const remediationState = isObject(workflow.foundationRemediationState)
+    ? workflow.foundationRemediationState
+    : undefined
+  const remediationLanes = Array.isArray(remediationState?.lanes) &&
+    remediationState.lanes.length === FOUNDATION_REMEDIATION_LANES.length &&
+    remediationState.lanes.every((lane, index) => {
+      const expected = FOUNDATION_REMEDIATION_LANES[index]
+      return (
+        isObject(lane) &&
+        lane.id === expected?.id &&
+        Array.isArray(lane.affectedPaths) &&
+        lane.affectedPaths.every(path => typeof path === 'string') &&
+        ['not_required', 'pending', 'running', 'completed', 'failed'].includes(
+          String(lane.status),
+        )
+      )
+    })
+    ? remediationState.lanes.map(laneValue => {
+        const lane = laneValue as JsonObject
+        const dispatch = isObject(lane.dispatch) ? lane.dispatch : undefined
+        const receipt = isObject(lane.receipt) ? lane.receipt : undefined
+        const startedAt = Date.parse(String(dispatch?.startedAt ?? ''))
+        const finishedAt = Date.parse(
+          String(dispatch?.finishedAt ?? receipt?.committedAt ?? ''),
+        )
+        const durationMs =
+          Number.isFinite(startedAt) &&
+          Number.isFinite(finishedAt) &&
+          finishedAt >= startedAt
+            ? finishedAt - startedAt
+            : undefined
+        return {
+          id: lane.id,
+          status: lane.status,
+          affectedPaths: lane.affectedPaths,
+          ...(typeof lane.failureReason === 'string'
+            ? { failureReason: lane.failureReason }
+            : {}),
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        }
+      })
+    : undefined
   const finalReportPath =
     typeof run.finalReportPath === 'string' ? run.finalReportPath : undefined
   const finalReportDigest =
@@ -6127,6 +6170,7 @@ function documentReviewForDisplay(
       : {}),
     ...(finalReportPath ? { finalReportPath } : {}),
     ...(foundationReviewProjection ?? {}),
+    ...(remediationLanes ? { remediationLanes } : {}),
     ...(finalReportMarkdown ? { finalReportMarkdown } : {}),
     ...(reportIntegrityFailure
       ? { failureReason: reportIntegrityFailure }
