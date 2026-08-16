@@ -7,6 +7,13 @@ import {
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
+function hasPriorReviewSource(request: WorkerDispatchRequest): boolean {
+  const assignment = request.contract.assignment as
+    | Record<string, unknown>
+    | undefined
+  return Array.isArray(assignment?.sourcePaths) && assignment.sourcePaths.length > 0
+}
+
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
@@ -337,6 +344,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               : [
                   'This is one accepted report-driven remediation. Modify only the assigned canonical foundation document.',
                   `Read ${String((request.contract.remediation as Record<string, unknown> | undefined)?.reviewReportPath)} and resolve only outcomes affecting ${String(request.contract.foundationDocumentPath)}. Preserve unrelated approved authority and do not reinterpret or rewrite the review report.`,
+                  'For each accepted outcome, locate every owned occurrence of the affected authority, state, formula, count, budget or derived reference in this document before editing. Before completion, perform one targeted closure check against those same occurrences and the report outcome. Do not launch a broad new review or rewrite unrelated sections.',
                 ].join(' '),
       ].join(' ')
     case 'document-reviewer':
@@ -345,7 +353,18 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Write only the exact paths in contract.assignment.stagingOutputPaths. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
         request.contract.reviewRole === 'final'
           ? request.contract.reviewScope === 'foundation'
-            ? 'Review all eight canonical foundation documents directly as one connected production contract. Write one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, and one preservation list. Cover gameplay and balance authority, level execution, technical feasibility, player-facing art/UI/audio coherence, asset production, ownership, delivery evidence, redundancy and human/agent usability. Read each assigned canonical document once unless exact evidence needs a targeted reread. Do not reproduce source sections or add a second recap of the finding registers. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
+            ? [
+                'Review all eight canonical foundation documents directly as one connected production contract.',
+                'Before choosing a verdict, run one fixed coverage pass in this order: (1) authority, enumeration and cardinality; (2) state and outcome totality; (3) arithmetic, units, formulas and budgets; (4) owner-to-consumer references and duplicated facts; (5) runtime, production, asset and acceptance constraints; (6) player-facing art, UI, audio and accessibility mappings; (7) unresolved assumptions and external dependencies; (8) redundancy and human/agent usability. In review.md, include one compact Coverage evidence section that records the result of every dimension; a generic claim that coverage passed is insufficient.',
+                'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
+                'Write one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, and one preservation list. Every blocking finding must name every canonical document whose bytes must change, not only the upstream owner; decision.json affectedPaths must equal the union of those paths. Mentioning a downstream contradiction without routing its owning path is invalid.',
+                ...(hasPriorReviewSource(request)
+                  ? [
+                      'The assignment sourcePaths contain the prior accepted review as read-only review history, not current product authority. First classify every prior blocker as resolved, regressed, or still open, then run the complete fixed coverage pass. Any newly blocking issue must state which coverage dimension owns it and why it was absent from the prior coverage evidence.',
+                    ]
+                  : []),
+                'Read each assigned canonical document once unless exact evidence needs a targeted reread. Do not reproduce source sections or add a second recap of the finding registers. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.',
+              ].join(' ')
             : 'Consolidate the committed specialist Markdown reports into one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, explicit specialist disagreements, and one preservation list. Verify cited evidence against the supplied read-only verification paths only when needed. Do not restate each specialist report before the consolidated result. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
           : `${reviewerResponsibility(String(request.contract.reviewRole))} Write one human-readable Markdown specialist report with reviewed scope and verdict, one blocking-finding table, one non-blocking-finding table, and a concise list of load-bearing contracts confirmed correct. Use one finding row per distinct defect with owner path, exact evidence location, defect, downstream impact, and required outcome. Include only calculations or proof needed to support a finding. Do not reproduce source sections, repeat a finding in prose, or add a second summary of the tables. If none block delivery, say so explicitly. Do not produce JSON, a finding packet, criteria arrays, reference IDs, or a server-facing summary.`,
         'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',

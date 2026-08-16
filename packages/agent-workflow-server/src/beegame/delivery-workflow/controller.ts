@@ -1064,6 +1064,17 @@ export function createDeliveryWorkflowController(input: {
               )
         let reviewRun = run
         const activeRun = reviewRun.documentReviewState.activeRun
+        const previousReport =
+          activeRun?.scope === reviewScope &&
+          activeRun.status === 'completed' &&
+          activeRun.verdict === 'NEEDS_REVISION' &&
+          activeRun.finalReportPath &&
+          activeRun.finalReportDigest
+            ? {
+                path: activeRun.finalReportPath,
+                digest: activeRun.finalReportDigest,
+              }
+            : undefined
         if (
           !activeRun ||
           activeRun.scope !== reviewScope ||
@@ -1111,6 +1122,7 @@ export function createDeliveryWorkflowController(input: {
         const pending = buildDocumentReviewDispatches({
           run: reviewRun.documentReviewState.activeRun!,
           workspacePath: input.workspacePath,
+          previousReport,
           revisionVerification:
             reviewScope === 'complete'
               ? {
@@ -1133,7 +1145,9 @@ export function createDeliveryWorkflowController(input: {
                   kind: 'document',
                   confirmedBriefDigest: reviewRun.confirmedBriefDigest,
                   prerequisiteReports:
-                    reviewScope === 'checklist' &&
+                    reviewScope === 'foundation' && previousReport
+                      ? [previousReport]
+                      : reviewScope === 'checklist' &&
                     reviewRun.documentReviewState.approvals?.foundation
                       ? [
                           {

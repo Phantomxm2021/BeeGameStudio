@@ -377,7 +377,47 @@ describe('resource-content worker prompts', () => {
     })
     expect(finalReviewerPrompt).toContain('Review all eight canonical foundation documents directly')
     expect(finalReviewerPrompt).toContain('one deduplicated owner-grouped blocking register')
+    expect(finalReviewerPrompt).toContain('fixed coverage pass')
+    expect(finalReviewerPrompt).toContain('authority, enumeration and cardinality')
+    expect(finalReviewerPrompt).toContain('state and outcome totality')
+    expect(finalReviewerPrompt).toContain('arithmetic, units, formulas and budgets')
+    expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
+    expect(finalReviewerPrompt).toContain('permits incompatible implementations')
+    expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
+    expect(finalReviewerPrompt).toContain('affectedPaths must equal the union')
     expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
+
+    const repeatReviewerPrompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      taskId: 'review:foundation:final:5',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewRole: 'final',
+        assignment: {
+          sourcePaths: [
+            '/workspace/.beegame/reviews/foundation/old/review.md',
+          ],
+          verificationSourcePaths: [
+            '/workspace/docs/GDD.md',
+            '/workspace/docs/TECHNICAL_DESIGN.md',
+          ],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/staging/review.md',
+            '/workspace/.beegame/reviews/staging/decision.json',
+          ],
+        },
+        allowedAffectedPaths: ['docs/GDD.md'],
+      },
+    })
+    expect(repeatReviewerPrompt).toContain('prior accepted review')
+    expect(repeatReviewerPrompt).toContain('resolved, regressed, or still open')
+    expect(repeatReviewerPrompt).toContain('why it was absent from the prior coverage evidence')
   })
 
   test('keeps resource remediation inside the same Curator task', () => {
@@ -538,6 +578,9 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(ownerPrompt).toContain('contract.remediation.reviewReportPath')
+    expect(ownerPrompt).toContain('locate every owned occurrence')
+    expect(ownerPrompt).toContain('targeted closure check')
+    expect(ownerPrompt).toContain('Do not launch a broad new review')
     expect(ownerPrompt).toContain('revise only docs/GDD.md')
     expect(ownerPrompt).toContain('preserve unrelated approved content')
     expect(ownerPrompt).toContain(

@@ -163,6 +163,7 @@ export function createDocumentReviewRun(input: {
 export function buildDocumentReviewDispatches(input: {
   run: DocumentReviewRun
   workspacePath: string
+  previousReport?: { path: string; digest: string }
   revisionVerification:
     | {
         kind: 'document'
@@ -214,6 +215,7 @@ export function buildDocumentReviewDispatches(input: {
     workspacePath: input.workspacePath,
     revision: input.run.revision,
     specialists,
+    previousReportPath: input.previousReport?.path,
   })
   const partDigests = Object.fromEntries(
     specialists.map(assignment => {

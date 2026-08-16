@@ -147,6 +147,36 @@ describe('document review run', () => {
     expect(dispatches[0].assignment.verificationSourcePaths).toHaveLength(8)
   })
 
+  test('carries the byte-bound previous report into a repeated Foundation review', async () => {
+    const workspacePath = await workspace()
+    const previousReport = {
+      path: `.beegame/reviews/foundation/${'c'.repeat(64)}/review.md`,
+      digest: 'd'.repeat(64),
+    }
+    const run = createDocumentReviewRun({
+      scope: 'foundation',
+      revision,
+      attempt: 2,
+    })
+
+    const dispatches = buildDocumentReviewDispatches({
+      run,
+      workspacePath,
+      previousReport,
+      revisionVerification: {
+        ...revisionVerification,
+        prerequisiteReports: [previousReport],
+      },
+    })
+
+    expect(dispatches[0].assignment.sourcePaths).toEqual([
+      join(workspacePath, previousReport.path),
+    ])
+    expect(dispatches[0].contract.revisionVerification.prerequisiteReports).toEqual([
+      previousReport,
+    ])
+  })
+
   test('dispatches the complete final Reviewer only after specialists commit', async () => {
     const workspacePath = await workspace()
     let run = createDocumentReviewRun({ scope: 'complete', revision })

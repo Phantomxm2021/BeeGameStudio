@@ -132,6 +132,7 @@ export function finalReviewAssignment(input: {
   workspacePath: string
   revision: string
   specialists: readonly DocumentReviewAssignment[]
+  previousReportPath?: string
 }): DocumentReviewAssignment {
   if (
     input.specialists.some(
@@ -140,9 +141,12 @@ export function finalReviewAssignment(input: {
     )
   )
     throw new Error('final review specialists do not match the active scope')
-  const sourcePaths = input.specialists.flatMap(
-    assignment => assignment.committedOutputPaths,
-  )
+  const sourcePaths = [
+    ...(input.previousReportPath
+      ? [resolve(input.workspacePath, input.previousReportPath)]
+      : []),
+    ...input.specialists.flatMap(assignment => assignment.committedOutputPaths),
+  ]
   const verificationSourcePaths =
     input.scope === 'foundation' && input.specialists.length === 0
       ? CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
