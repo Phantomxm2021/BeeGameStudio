@@ -262,6 +262,19 @@ function reviewerContractPaths(request: WorkerDispatchRequest): string[] {
   ].filter((path): path is string => typeof path === 'string')
 }
 
+function reviewerResponsibility(role: string): string {
+  switch (role) {
+    case 'core-systems':
+      return 'Review gameplay authority, level execution, balance mathematics, technical feasibility, ownership boundaries, and verification contracts as one connected production system.'
+    case 'player-experience':
+      return 'Review player-facing flow, spatial experience, visual direction, interaction and accessibility, and audio feedback as one coherent experience contract.'
+    case 'production-delivery':
+      return 'Review implementation boundaries, asset and audio production obligations, delivery ownership, licensing, runtime formats, and acceptance evidence as one executable production contract.'
+    default:
+      return 'Review only the responsibility and evidence assigned by contract.reviewRole.'
+  }
+}
+
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
@@ -331,8 +344,8 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Act as the single specialist role named by contract.reviewRole. Read only contract.assignment.sourcePaths and contract.assignment.verificationSourcePaths.',
         'Write only the exact paths in contract.assignment.stagingOutputPaths. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
         request.contract.reviewRole === 'final'
-          ? 'Consolidate the committed specialist Markdown reports into one complete review.md. Verify cited evidence against the supplied read-only verification paths when needed. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
-          : 'Write one human-readable Markdown specialist report. State reviewed responsibility, evidence with exact project paths and headings or JSON pointers, blocking defects, consequences, and required outcomes. If none block delivery, say so explicitly. Do not produce JSON, a finding packet, criteria arrays, reference IDs, or a server-facing summary.',
+          ? 'Consolidate the committed specialist Markdown reports into one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, explicit specialist disagreements, and one preservation list. Verify cited evidence against the supplied read-only verification paths only when needed. Do not restate each specialist report before the consolidated result. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
+          : `${reviewerResponsibility(String(request.contract.reviewRole))} Write one human-readable Markdown specialist report with reviewed scope and verdict, one blocking-finding table, one non-blocking-finding table, and a concise list of load-bearing contracts confirmed correct. Use one finding row per distinct defect with owner path, exact evidence location, defect, downstream impact, and required outcome. Include only calculations or proof needed to support a finding. Do not reproduce source sections, repeat a finding in prose, or add a second summary of the tables. If none block delivery, say so explicitly. Do not produce JSON, a finding packet, criteria arrays, reference IDs, or a server-facing summary.`,
         'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',
       ].join(' ')
     case 'resource-planner':

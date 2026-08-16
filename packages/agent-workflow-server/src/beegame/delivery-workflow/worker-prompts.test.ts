@@ -322,7 +322,7 @@ describe('resource-content worker prompts', () => {
       revision: 'revision',
       contract: {
         reviewScope: 'foundation',
-        reviewRole: 'technical',
+        reviewRole: 'core-systems',
         assignment: {
           sourcePaths: ['/workspace/docs/TECHNICAL_DESIGN.md'],
           verificationSourcePaths: ['/workspace/docs/GDD.md'],
@@ -344,6 +344,39 @@ describe('resource-content worker prompts', () => {
     expect(reviewerPrompt).not.toContain('SubmitDocumentReviewPacket')
     expect(reviewerPrompt).toContain(
       'Do not produce JSON, a finding packet, criteria arrays',
+    )
+    expect(reviewerPrompt).toContain('one finding row')
+    expect(reviewerPrompt).toContain('owner path')
+    expect(reviewerPrompt).toContain('required outcome')
+    expect(reviewerPrompt).toContain('Do not reproduce source sections')
+
+    const finalReviewerPrompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewRole: 'final',
+        assignment: {
+          sourcePaths: ['/workspace/.beegame/reviews/core-systems.md'],
+          verificationSourcePaths: ['/workspace/docs/GDD.md'],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/staging/review.md',
+            '/workspace/.beegame/reviews/staging/decision.json',
+          ],
+        },
+        allowedAffectedPaths: ['docs/GDD.md'],
+      },
+    })
+    expect(finalReviewerPrompt).toContain(
+      'deduplicated owner-grouped blocking register',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'Do not restate each specialist report',
     )
   })
 

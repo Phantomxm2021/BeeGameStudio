@@ -193,7 +193,7 @@ describe('project-local document review reports', () => {
     await mkdir(dirname(assignment.stagingOutputPaths[0]), { recursive: true })
     await writeFile(
       assignment.stagingOutputPaths[0],
-      '# Gameplay review\n\nNo blocking findings.\n',
+      '# Core systems review\n\nNo blocking findings.\n',
       'utf8',
     )
 
@@ -205,10 +205,10 @@ describe('project-local document review reports', () => {
     })
 
     expect(accepted).toEqual({
-      role: 'gameplay',
+      role: 'core-systems',
       path: relative(workspacePath, assignment.committedOutputPaths[0]),
       digest: createHash('sha256')
-        .update('# Gameplay review\n\nNo blocking findings.\n')
+        .update('# Core systems review\n\nNo blocking findings.\n')
         .digest('hex'),
     })
   })
