@@ -60,6 +60,45 @@ export type FoundationDraftState = {
   documents?: FoundationDocumentCheckpoint[]
 }
 
+export type FoundationRemediationLaneId =
+  | 'core-design'
+  | 'technical-assets'
+  | 'presentation'
+
+export type FoundationRemediationLaneStatus =
+  | 'not_required'
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+
+export type FoundationRemediationReceipt = {
+  reviewDigest: string
+  sourceRevision: string
+  ownedPaths: FoundationDocumentPath[]
+  beforeDigests: Record<string, string>
+  afterDigests: Record<string, string>
+  committedAt: string
+}
+
+export type FoundationRemediationLane = {
+  id: FoundationRemediationLaneId
+  ownedPaths: FoundationDocumentPath[]
+  affectedPaths: FoundationDocumentPath[]
+  status: FoundationRemediationLaneStatus
+  dispatch?: DispatchRecord
+  receipt?: FoundationRemediationReceipt
+  failureReason?: string
+}
+
+export type FoundationRemediationState = {
+  reviewPath: string
+  reviewDigest: string
+  sourceRevision: string
+  lanes: FoundationRemediationLane[]
+  resultingRevision?: string
+}
+
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
   ...CANONICAL_PROJECT_DOCUMENTS,
 ] as const
@@ -186,7 +225,7 @@ export type DocumentReviewReportApproval = {
   approvedAt: string
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 20 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 21 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -370,6 +409,8 @@ export type DeliveryRun = {
   documentReviewState: DocumentReviewState
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
+  /** Exact parallel repair lanes derived from one accepted Foundation review. */
+  foundationRemediationState?: FoundationRemediationState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage

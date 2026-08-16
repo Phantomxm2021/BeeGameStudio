@@ -8,6 +8,7 @@ import type {
   DispatchRecord,
   EvidenceRef,
   FoundationDraftState,
+  FoundationRemediationState,
   Revision,
   TasksPlannedEvent,
   TaskVerification,
@@ -15,6 +16,7 @@ import type {
   WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
+import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
@@ -343,6 +345,135 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
     }
   })
 
+const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = z
+  .object({
+    reviewPath: z.string().min(1),
+    reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    lanes: z.array(
+      z
+        .object({
+          id: z.enum(['core-design', 'technical-assets', 'presentation']),
+          ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+          affectedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+          status: z.enum([
+            'not_required',
+            'pending',
+            'running',
+            'completed',
+            'failed',
+          ]),
+          dispatch: dispatchRecordSchema.optional(),
+          receipt: z
+            .object({
+              reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+              sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+              ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+              beforeDigests: z.record(
+                z.string().min(1),
+                z.string().regex(/^[a-f0-9]{64}$/u),
+              ),
+              afterDigests: z.record(
+                z.string().min(1),
+                z.string().regex(/^[a-f0-9]{64}$/u),
+              ),
+              committedAt: z.string().datetime(),
+            })
+            .strict()
+            .optional(),
+          failureReason: z.string().min(1).optional(),
+        })
+        .strict(),
+    ),
+    resultingRevision: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+  })
+  .strict()
+  .superRefine((state, context) => {
+    if (
+      state.lanes.length !== FOUNDATION_REMEDIATION_LANES.length ||
+      state.lanes.some((lane, index) => {
+        const expected = FOUNDATION_REMEDIATION_LANES[index]
+        return (
+          !expected ||
+          lane.id !== expected.id ||
+          JSON.stringify(lane.ownedPaths) !==
+            JSON.stringify(expected.ownedPaths)
+        )
+      })
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['lanes'],
+        message: 'foundation remediation lanes must use canonical definitions',
+      })
+    for (const [index, lane] of state.lanes.entries()) {
+      const expectedAffected = lane.ownedPaths.filter(path =>
+        lane.affectedPaths.includes(path),
+      )
+      if (
+        JSON.stringify(lane.affectedPaths) !== JSON.stringify(expectedAffected)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'affectedPaths'],
+          message:
+            'foundation remediation affected paths must be unique canonical owned paths',
+        })
+      if (
+        (lane.status === 'not_required') !==
+        (lane.affectedPaths.length === 0)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'status'],
+          message:
+            'foundation remediation not-required state must match empty affected paths',
+        })
+      if (
+        lane.status === 'not_required' &&
+        (lane.dispatch || lane.receipt || lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'not-required remediation lane cannot contain execution state',
+        })
+      if (lane.status === 'completed' && !lane.receipt)
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'receipt'],
+          message: 'completed remediation lane requires one receipt',
+        })
+      if (lane.receipt) {
+        if (
+          lane.receipt.reviewDigest !== state.reviewDigest ||
+          lane.receipt.sourceRevision !== state.sourceRevision ||
+          JSON.stringify(lane.receipt.ownedPaths) !==
+            JSON.stringify(lane.ownedPaths)
+        )
+          context.addIssue({
+            code: 'custom',
+            path: ['lanes', index, 'receipt'],
+            message:
+              'foundation remediation receipt must match its review and lane authority',
+          })
+        const expectedKeys = [...lane.ownedPaths].sort()
+        if (
+          JSON.stringify(Object.keys(lane.receipt.beforeDigests).sort()) !==
+            JSON.stringify(expectedKeys) ||
+          JSON.stringify(Object.keys(lane.receipt.afterDigests).sort()) !==
+            JSON.stringify(expectedKeys)
+        )
+          context.addIssue({
+            code: 'custom',
+            path: ['lanes', index, 'receipt'],
+            message:
+              'foundation remediation receipt must cover every owned path digest',
+          })
+      }
+    }
+  })
+
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   .object({
     eventId: z.string().min(1),
@@ -580,6 +711,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .strict(),
     documentReviewState: documentReviewStateSchema,
     foundationDraftState: foundationDraftStateSchema,
+    foundationRemediationState: foundationRemediationStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
