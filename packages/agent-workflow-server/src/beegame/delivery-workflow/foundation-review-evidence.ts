@@ -53,6 +53,10 @@ function assertRole(value: FoundationReviewSpecialistRole): void {
   specialistRoleSchema.parse(value)
 }
 
+function roleFileName(role: FoundationReviewSpecialistRole): string {
+  return role === 'contract-specialist' ? 'contract.json' : 'integration.json'
+}
+
 function reviewDirectory(workspacePath: string, revision: string): string {
   assertDigest(revision)
   return resolve(
@@ -70,7 +74,11 @@ export function foundationReviewEvidencePath(
   role: FoundationReviewSpecialistRole,
 ): string {
   assertRole(role)
-  return resolve(reviewDirectory(workspacePath, revision), 'evidence', `${role}.json`)
+  return resolve(
+    reviewDirectory(workspacePath, revision),
+    'parts',
+    roleFileName(role),
+  )
 }
 
 export function foundationReviewEvidenceStagingPath(
@@ -82,8 +90,8 @@ export function foundationReviewEvidenceStagingPath(
   return resolve(
     reviewDirectory(workspacePath, revision),
     '.staging',
-    'evidence',
-    `${role}.json`,
+    'parts',
+    roleFileName(role),
   )
 }
 

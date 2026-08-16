@@ -73,8 +73,8 @@ describe('foundation review specialist evidence', () => {
         'reviews',
         'foundation',
         revision,
-        'evidence',
-        'contract-specialist.json',
+        'parts',
+        'contract.json',
       ),
     )
     expect(() =>
@@ -110,7 +110,7 @@ describe('foundation review specialist evidence', () => {
       ),
     )
     expect(accepted.path).toBe(
-      `.beegame/reviews/foundation/${revision}/evidence/contract-specialist.json`,
+      `.beegame/reviews/foundation/${revision}/parts/contract.json`,
     )
     expect(accepted.digest).toBe(
       createHash('sha256').update(committedBytes).digest('hex'),
