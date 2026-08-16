@@ -400,6 +400,7 @@ export function routeCompletedDocumentReview(input: {
   run: DeliveryRun
   review: DocumentReviewRun
   now?: string
+  allowRetryAfterLimit?: boolean
 }): DeliveryRun {
   const { run, review } = input
   if (
@@ -410,7 +411,7 @@ export function routeCompletedDocumentReview(input: {
   )
     throw new Error('document review routing requires a completed final report')
   if (review.verdict === 'NEEDS_REVISION') {
-    if (review.attempt >= 3)
+    if (review.attempt >= 3 && !input.allowRetryAfterLimit)
       return {
         ...run,
         phase: 'DOCUMENT_REVIEW',

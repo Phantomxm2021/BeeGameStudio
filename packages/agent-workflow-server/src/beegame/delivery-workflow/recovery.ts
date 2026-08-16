@@ -36,7 +36,10 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { recoverDocumentReviewRun } from './document-review-stage'
+import {
+  recoverDocumentReviewRun,
+  routeCompletedDocumentReview,
+} from './document-review-stage'
 
 export {
   inspectWorkflowSnapshot,
@@ -906,6 +909,50 @@ async function unlockReviewForChangedRevision(input: {
   }
 }
 
+async function acknowledgeCompletedReviewRemediation(input: {
+  run: DeliveryRun
+  workspacePath?: string
+}): Promise<DeliveryRun | undefined> {
+  const review = input.run.documentReviewState.activeRun
+  if (
+    input.run.status !== 'needs_action' ||
+    !input.workspacePath ||
+    review?.status !== 'completed' ||
+    review.verdict !== 'NEEDS_REVISION'
+  )
+    return undefined
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const currentRevision =
+    review.scope === 'complete'
+      ? await computeResourceRevision(input.workspacePath, documentRevision)
+      : documentRevision
+  if (currentRevision !== review.revision) return undefined
+  const recovered = await recoverDocumentReviewRun({
+    run: review,
+    workspacePath: input.workspacePath,
+    currentRevision,
+  })
+  if (recovered.status !== 'completed')
+    return {
+      ...input.run,
+      status: 'running',
+      blockedReason: undefined,
+      documentReviewState: {
+        ...input.run.documentReviewState,
+        activeRun: recovered,
+      },
+      updatedAt: new Date().toISOString(),
+    }
+  return routeCompletedDocumentReview({
+    run: input.run,
+    review: recovered,
+    allowRetryAfterLimit: true,
+  })
+}
+
 export async function reconcileRunOnStartup(input: {
   store: RunStore
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
@@ -1046,10 +1093,22 @@ export async function retryRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
+    const acknowledgedReview =
+      !restoredHandoff && !changedReview
+        ? await acknowledgeCompletedReviewRemediation({
+            run: acquired.run,
+            workspacePath: input.workspacePath,
+          })
+        : undefined
+    if (
+      reviewRetryIsLocked(acquired.run) &&
+      !restoredHandoff &&
+      !changedReview &&
+      !acknowledgedReview
+    )
       return acquired.run
     const restoredAcceptedReview =
-      !restoredHandoff && !changedReview
+      !restoredHandoff && !changedReview && !acknowledgedReview
         ? await restoreAcceptedReviewAfterRoutingFailure({
             run: acquired.run,
             workspacePath: input.workspacePath,
@@ -1077,6 +1136,7 @@ export async function retryRun(input: {
     const resumed =
       restoredHandoff ??
       changedReview ??
+      acknowledgedReview ??
       transitionDeliveryRun(
         {
           ...retryBaseRun,

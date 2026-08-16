@@ -3172,6 +3172,70 @@ describe('delivery workflow recovery', () => {
     ).toMatchObject({ status: 'completed', failureReason: undefined })
   })
 
+  test('explicit retry acknowledges the third completed review and resumes its remediation', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-retry-'))
+    const ownerId = 'owner-review-limit-retry'
+    const store = createRunStore(workspace, ownerId)
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-limit-retry',
+      projectId: 'project-review-limit-retry',
+      ownerId,
+    })
+    const documentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const review = createDocumentReviewRun({
+      scope: 'foundation',
+      revision: documentRevision,
+      attempt: 3,
+    })
+    const final = review.reports.find(report => report.role === 'final')!
+    const finalBytes = '# Third final review\n'
+    const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
+    await mkdir(join(workspace, final.path, '..'), { recursive: true })
+    await writeFile(join(workspace, final.path), finalBytes)
+    final.status = 'completed'
+    final.digest = finalDigest
+    review.status = 'completed'
+    review.finalReportPath = final.path
+    review.finalReportDigest = finalDigest
+    review.verdict = 'NEEDS_REVISION'
+    review.affectedPaths = ['docs/UI_UX_SPEC.md']
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      revision: { ...initial.revision, document: documentRevision },
+      blockedReason: 'document review stopped after three consecutive reviews',
+      documentReviewState: {
+        ...initial.documentReviewState,
+        activeRun: review,
+        attempts: { ...initial.documentReviewState.attempts, foundation: 3 },
+      },
+    })
+
+    const retried = await retryRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(retried).toMatchObject({
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'running',
+      blockedReason: undefined,
+    })
+    expect(retried.documentReviewState.activeRun).toMatchObject({
+      status: 'completed',
+      verdict: 'NEEDS_REVISION',
+      affectedPaths: ['docs/UI_UX_SPEC.md'],
+      remediatedPaths: [],
+      attempt: 3,
+    })
+  })
+
   test('does not let a stale snapshot move cumulative usage below the journal high water mark', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-high-water-'))
     const store = createRunStore(workspace, 'owner-1')
