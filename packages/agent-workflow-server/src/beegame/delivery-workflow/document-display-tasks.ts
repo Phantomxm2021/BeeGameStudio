@@ -41,8 +41,6 @@ export type DocumentDisplayTaskInput = {
     role: string
     status: 'pending' | 'running' | 'completed' | 'failed'
   }>
-  remediationPaths?: string[]
-  remediatedPaths?: string[]
 }
 
 /**
@@ -103,30 +101,6 @@ export function projectDocumentDisplayTasks(
       attempt: 0,
       operation: 'review',
     }))
-
-  if (operation === 'write' && input.remediationPaths?.length) {
-    const completed = new Set(input.remediatedPaths ?? [])
-    const remediationComplete = input.remediationPaths.every(path =>
-      completed.has(path),
-    )
-    const remediationActive =
-      input.currentItemId === 'foundation-remediation'
-    return [{
-      id: 'foundation-remediation',
-      title: `Resolve Foundation review (${input.remediationPaths.length} documents)`,
-      status: remediationComplete
-        ? 'completed'
-        : active && remediationActive
-          ? 'running'
-          : workflowStopped(input.workflowStatus) && remediationActive
-            ? 'stopped'
-            : workflowFailed(input.workflowStatus) && remediationActive
-              ? 'failed'
-              : 'pending',
-      attempt: 0,
-      operation: 'write',
-    }]
-  }
 
   return documentPaths.map(path => {
     const parallelStatus = parallelDocuments.get(path)

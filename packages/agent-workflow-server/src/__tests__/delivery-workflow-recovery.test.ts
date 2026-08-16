@@ -2800,6 +2800,25 @@ describe('delivery workflow recovery', () => {
       ),
     ).toEqual(['running', 'running', 'running'])
 
+    const runningCoreLane = (await store.load())?.foundationRemediationState
+      ?.lanes[0]
+    const usageResult = await store.addWorkflowUsage(
+      initial.runId,
+      {
+        input_tokens: 10,
+        cache_read_tokens: 20,
+        cache_creation_tokens: 0,
+        completion_tokens: 5,
+        total_tokens: 35,
+      },
+      runningCoreLane!.dispatch!.dispatchId,
+    )
+    expect(usageResult?.usage?.total_tokens).toBe(35)
+    expect(
+      usageResult?.foundationRemediationState?.lanes[0]?.dispatch?.usage
+        ?.total_tokens,
+    ).toBe(35)
+
   })
 
   test('waits for every required remediation receipt before Foundation verification', async () => {

@@ -6239,16 +6239,6 @@ function workflowViewForDisplay(
           : [],
       )
     : undefined
-  const remediationPaths = Array.isArray(activeReviewRun?.affectedPaths)
-    ? activeReviewRun.affectedPaths.filter(
-        (path): path is string => typeof path === 'string',
-      )
-    : undefined
-  const remediatedPaths = Array.isArray(activeReviewRun?.remediatedPaths)
-    ? activeReviewRun.remediatedPaths.filter(
-        (path): path is string => typeof path === 'string',
-      )
-    : undefined
   const displayTasks =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -6300,8 +6290,6 @@ function workflowViewForDisplay(
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
           reviewReports,
-          remediationPaths,
-          remediatedPaths,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
