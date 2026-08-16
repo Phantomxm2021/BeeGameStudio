@@ -182,7 +182,7 @@ export type DocumentReviewReportApproval = {
   approvedAt: string
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 17 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 18 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -259,6 +259,8 @@ export type DispatchRecord = {
   terminalResult?: Record<string, unknown>
   /** Cumulative run usage captured before this worker starts. */
   startingUsage?: WorkflowUsage
+  /** Usage attributed only to this dispatch, including concurrent lanes. */
+  usage?: WorkflowUsage
   startedAt: string
   finishedAt?: string
 }

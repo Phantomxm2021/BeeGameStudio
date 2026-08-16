@@ -175,6 +175,7 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     request: workerDispatchRequestSchema.optional(),
     terminalResult: z.record(z.string(), z.unknown()).optional(),
     startingUsage: workflowUsageSchema.optional(),
+    usage: workflowUsageSchema.optional(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime().optional(),
   })

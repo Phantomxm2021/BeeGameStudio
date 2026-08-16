@@ -281,7 +281,6 @@ function reviewerPerformance(input: {
   dispatch: DispatchRecord
   request: WorkerDispatchRequest | undefined
   result: WorkerTerminalResult
-  currentUsage: WorkflowUsage | undefined
   finishedAt: string
 }):
   | {
@@ -307,7 +306,7 @@ function reviewerPerformance(input: {
       Number.isFinite(startedAt) && Number.isFinite(finishedAt)
         ? Math.max(0, finishedAt - startedAt)
         : 0,
-    usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
+    usage: usageSnapshot(input.dispatch.usage),
     reportPaths: input.result.reportPaths,
   }
 }
@@ -964,7 +963,6 @@ export function createDeliveryDispatcher(options: {
       dispatch: location.record,
       request,
       result,
-      currentUsage: run.usage,
       finishedAt,
     })
     const updatedWithDispatch = location.path

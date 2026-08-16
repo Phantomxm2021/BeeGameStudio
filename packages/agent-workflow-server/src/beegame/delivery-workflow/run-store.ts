@@ -247,6 +247,44 @@ function addUsage(
   }
 }
 
+function withDispatchUsage(
+  run: DeliveryRun,
+  dispatchId: string,
+  usage: WorkflowUsage,
+): DeliveryRun {
+  const update = (dispatch: DispatchRecord | undefined) =>
+    dispatch?.dispatchId === dispatchId ? { ...dispatch, usage } : dispatch
+  return {
+    ...run,
+    activeDispatch: update(run.activeDispatch),
+    foundationDraftState: {
+      ...run.foundationDraftState,
+      ...(run.foundationDraftState.documents
+        ? {
+            documents: run.foundationDraftState.documents.map(document => ({
+              ...document,
+              dispatch: update(document.dispatch),
+            })),
+          }
+        : {}),
+    },
+    documentReviewState: {
+      ...run.documentReviewState,
+      ...(run.documentReviewState.activeRun
+        ? {
+            activeRun: {
+              ...run.documentReviewState.activeRun,
+              reports: run.documentReviewState.activeRun.reports.map(report => ({
+                ...report,
+                dispatch: update(report.dispatch),
+              })),
+            },
+          }
+        : {}),
+    },
+  }
+}
+
 function journalUsageHighWater(
   events: readonly WorkflowEvent[],
 ): WorkflowUsage | undefined {
@@ -1115,8 +1153,14 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         return null
       const events = await readEventsUnlocked()
       const journalUsage = journalUsageHighWater(events)
+      const dispatchUsage = addUsage(usageDispatch.usage, delta)
+      const runWithDispatchUsage = withDispatchUsage(
+        run,
+        dispatchId,
+        dispatchUsage,
+      )
       const next = {
-        ...run,
+        ...runWithDispatchUsage,
         usage: addUsage(mergeUsage(run.usage, journalUsage), delta),
       }
       return persistCommitUnlocked(
@@ -1128,6 +1172,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           status: next.status,
           revision: next.revision,
           usage: next.usage,
+          dispatchId,
+          dispatchUsage,
         },
         [],
         run,

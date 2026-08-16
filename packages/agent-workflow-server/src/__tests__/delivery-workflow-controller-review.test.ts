@@ -206,6 +206,9 @@ describe('document review controller terminal reconciliation', () => {
     const coreSystems = started.find(
       request => request.contract.reviewRole === 'core-systems',
     )!
+    const playerExperienceDispatch = started.find(
+      request => request.contract.reviewRole === 'player-experience',
+    )!
     const reportPath = review.reports.find(
       report => report.role === 'core-systems',
     )!
@@ -222,6 +225,17 @@ describe('document review controller terminal reconciliation', () => {
         total_tokens: 516,
       },
       coreSystems.dispatchId!,
+    )
+    await store.addWorkflowUsage(
+      run.runId,
+      {
+        input_tokens: 100,
+        cache_read_tokens: 300,
+        cache_creation_tokens: 4,
+        completion_tokens: 40,
+        total_tokens: 444,
+      },
+      playerExperienceDispatch.dispatchId!,
     )
 
     await controller.dispatcher.completeDispatch(coreSystems.dispatchId!, {
