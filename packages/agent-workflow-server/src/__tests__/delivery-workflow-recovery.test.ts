@@ -21,7 +21,7 @@ import {
   completeDocumentDraft,
   completeFoundationRemediationLane,
 } from '../beegame/delivery-workflow/document-stage'
-import { createDocumentReviewRun } from '../beegame/delivery-workflow/document-review-stage'
+import { createFoundationReviewState } from '../beegame/delivery-workflow/foundation-review-state'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
   beginParallelFoundationAuthoring,
@@ -642,14 +642,6 @@ async function createWorkerRecoveryRun(input: {
     workspaceRevision,
     checklistApproved: true,
   })
-  const checklistApproval = initial.documentReviewState.approvals.checklist!
-  const comprehensiveApproval = resourceRevision
-    ? {
-        scope: 'complete' as const,
-        revision: resourceRevision,
-        approvedAt: RECOVERY_ACCEPTED_AT,
-      }
-    : undefined
   const task = matrixAtomicTask()
   const resourcePreparation = resourceRevision
     ? {
@@ -666,23 +658,6 @@ async function createWorkerRecoveryRun(input: {
       document: documentRevision,
       workspace: workspaceRevision,
       ...(resourceRevision ? { resource: resourceRevision } : {}),
-    },
-    documentReviewState: {
-      ...initial.documentReviewState,
-      approvals: {
-        checklist: checklistApproval,
-        ...(comprehensiveApproval
-          ? {
-              complete: {
-                scope: 'complete' as const,
-                revision: comprehensiveApproval.revision,
-                reportPath: `.beegame/reviews/complete/${comprehensiveApproval.revision}/review.md`,
-                reportDigest: 'd'.repeat(64),
-                approvedAt: comprehensiveApproval.approvedAt,
-              },
-            }
-          : {}),
-      },
     },
     evidence: resourcePreparation ? { resourcePreparation } : {},
     resourceProductionState: {
@@ -721,10 +696,6 @@ async function createWorkerRecoveryRun(input: {
       phase: 'DOCUMENT_DRAFTING',
       documentStep: 'FOUNDATION_DRAFTING',
       foundationDraftState: { completedPaths: [] },
-      documentReviewState: {
-        approvals: {},
-        attempts: { foundation: 0, checklist: 0, complete: 0 },
-      },
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
@@ -733,10 +704,11 @@ async function createWorkerRecoveryRun(input: {
       ...common,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      documentReviewState: {
-        approvals: {},
-        attempts: { foundation: 0, checklist: 0, complete: 0 },
-      },
+      foundationReviewState: createFoundationReviewState({
+        mode: 'initial',
+        revision: documentRevision,
+        attempt: 1,
+      }),
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
@@ -1009,18 +981,6 @@ async function createStaleReviewerRecoveryFixture() {
     ...base,
     revision,
     usage,
-    documentReviewState: {
-      ...base.documentReviewState,
-      approvals: {
-        checklist: {
-          scope: 'checklist',
-          revision: documentRevision,
-          reportPath: `.beegame/reviews/checklist/${documentRevision}/review.md`,
-          reportDigest: 'c'.repeat(64),
-          approvedAt: RECOVERY_ACCEPTED_AT,
-        },
-      },
-    },
   }
   const store = createRunStore(workspacePath, RECOVERY_OWNER_ID)
   await store.commit(journalRun, {
@@ -1052,7 +1012,7 @@ async function createStaleReviewerRecoveryFixture() {
     schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
     invalidRecoveryMarker: true,
     phase: 'DOCUMENT_REVIEW' as const,
-    documentStep: 'COMPREHENSIVE_REVIEW' as const,
+    documentStep: 'FOUNDATION_REVIEW' as const,
     evidence: {
       resourcePreparation: {
         path: '.beegame/workflow/evidence/resource-gate.json',
@@ -1077,13 +1037,11 @@ async function createStaleReviewerRecoveryFixture() {
       },
       contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
     },
-    documentReviewState: {
-      ...journalRun.documentReviewState,
-      activeRun: createDocumentReviewRun({
-        scope: 'complete',
-        revision: resourceRevision,
-      }),
-    },
+    foundationReviewState: createFoundationReviewState({
+      mode: 'initial',
+      revision: documentRevision,
+      attempt: 1,
+    }),
   }
   await writeFile(
     store.paths.snapshot,
@@ -1761,7 +1719,6 @@ describe('delivery workflow recovery', () => {
           documentStep: undefined,
           currentItemId: undefined,
           evidence: {},
-          documentReviewState: fixture.snapshot.documentReviewState,
           resourceProductionState: {
             currentTask: 'RESOURCE_CONTENT',
             inventoryReceipt,
@@ -2068,7 +2025,7 @@ describe('delivery workflow recovery', () => {
     await mkdir(store.paths.directory, { recursive: true })
     const obsoleteSnapshot = JSON.stringify({
       ...initial,
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 2,
       activeDispatch: {
         retiredStateMarker: true,
       },
@@ -2077,9 +2034,66 @@ describe('delivery workflow recovery', () => {
 
     await expect(store.load()).rejects.toMatchObject({
       code: 'obsolete',
-      message: `unsupported workflow snapshot schema version ${DELIVERY_RUN_SCHEMA_VERSION - 1}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+      message: `unsupported workflow snapshot schema version ${DELIVERY_RUN_SCHEMA_VERSION - 2}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
     })
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
+  })
+
+  test('migrates schema 21 without trusting retired reviewer approval', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-21-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-21',
+      projectId: 'project-schema-21',
+      ownerId: 'owner-1',
+    })
+    const preservedEvidence = {
+      implementationAudit: {
+        path: '.beegame/evidence/implementation.json',
+        kind: 'implementation_audit' as const,
+        revision: 'a'.repeat(64),
+        status: 'passed' as const,
+        observedAt: '2026-08-17T00:00:00.000Z',
+      },
+    }
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({
+        ...initial,
+        schemaVersion: 21,
+        phase: 'DELIVERY',
+        documentStep: 'COMPREHENSIVE_REVIEW',
+        status: 'completed',
+        evidence: preservedEvidence,
+        documentReviewState: {
+          activeRun: {
+            status: 'completed',
+            verdict: 'READY',
+            finalReportPath: '.beegame/reviews/complete/review.md',
+          },
+        },
+      }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      evidence: preservedEvidence,
+      tasks: initial.tasks,
+      foundationDraftState: initial.foundationDraftState,
+      resourceProductionState: initial.resourceProductionState,
+    })
+    expect(migrated).not.toHaveProperty('documentReviewState')
+    expect(migrated).not.toHaveProperty('foundationReviewState')
+    expect(
+      JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
+    ).toMatchObject({ schemaVersion: DELIVERY_RUN_SCHEMA_VERSION })
   })
 
   test.each([
@@ -3396,9 +3410,10 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       documentRevision: 'a'.repeat(64),
     })
-    const reviewRun = createDocumentReviewRun({
-      scope: 'foundation',
+    const reviewRun = createFoundationReviewState({
+      mode: 'initial',
       revision: initial.revision.document,
+      attempt: 1,
     })
     reviewRun.reports[0].status = 'running'
     reviewRun.reports[0].dispatch = {
@@ -3412,10 +3427,7 @@ describe('delivery workflow recovery', () => {
     await store.save({
       ...initial,
       phase: 'DOCUMENT_REVIEW',
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeRun: reviewRun,
-      },
+      foundationReviewState: reviewRun,
     })
 
     const persisted = await store.addWorkflowUsage(
@@ -3433,77 +3445,6 @@ describe('delivery workflow recovery', () => {
     expect(persisted?.usage?.total_tokens).toBe(35)
   })
 
-  test('retry restores an accepted final review after downstream routing failed', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-route-retry-'))
-    const ownerId = 'owner-review-route-retry'
-    const store = createRunStore(workspace, ownerId)
-    const initial = createTestDeliveryRun({
-      runId: 'run-review-route-retry',
-      projectId: 'project-review-route-retry',
-      ownerId,
-    })
-    const documentRevision = await computeDocumentRevision(
-      workspace,
-      initial.confirmedBriefDigest,
-    )
-    const review = createDocumentReviewRun({
-      scope: 'foundation',
-      revision: documentRevision,
-      attempt: 1,
-    })
-    for (const report of review.reports.filter(value => value.role !== 'final')) {
-      const bytes = `# ${report.role} review\n`
-      await mkdir(join(workspace, report.path, '..'), { recursive: true })
-      await writeFile(join(workspace, report.path), bytes)
-      report.status = 'completed'
-      report.digest = createHash('sha256').update(bytes).digest('hex')
-    }
-    const final = review.reports.find(report => report.role === 'final')!
-    const finalBytes = foundationRecoveryReviewJson({
-      revision: documentRevision,
-    })
-    const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
-    await mkdir(join(workspace, final.path, '..'), { recursive: true })
-    await writeFile(join(workspace, final.path), finalBytes)
-    final.status = 'failed'
-    final.digest = finalDigest
-    final.failureReason = 'downstream routing failed'
-    review.status = 'failed'
-    review.finalReportPath = final.path
-    review.finalReportDigest = finalDigest
-    review.verdict = 'NEEDS_REVISION'
-    review.affectedPaths = ['docs/GDD.md']
-    review.failureReason = 'downstream routing failed'
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      status: 'needs_action',
-      revision: { ...initial.revision, document: documentRevision },
-      blockedReason: 'downstream routing failed',
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeRun: review,
-      },
-    })
-
-    const retried = await retryRun({
-      store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-
-    expect(retried.status).toBe('running')
-    expect(retried.documentReviewState.activeRun).toMatchObject({
-      status: 'completed',
-      failureReason: undefined,
-    })
-    expect(
-      retried.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'final',
-      ),
-    ).toMatchObject({ status: 'completed', failureReason: undefined })
-  })
-
   test('explicit retry cannot reopen a completed Foundation verification', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-retry-'))
     const ownerId = 'owner-review-limit-retry'
@@ -3517,10 +3458,13 @@ describe('delivery workflow recovery', () => {
       workspace,
       initial.confirmedBriefDigest,
     )
-    const review = createDocumentReviewRun({
-      scope: 'foundation',
+    const priorReviewPath = `.beegame/reviews/foundation/${documentRevision}/prior-review.json`
+    const review = createFoundationReviewState({
+      mode: 'verification',
       revision: documentRevision,
       attempt: 3,
+      priorReviewPath,
+      priorReviewDigest: 'e'.repeat(64),
     })
     const final = review.reports.find(report => report.role === 'final')!
     const priorReviewDigest = 'e'.repeat(64)
@@ -3536,9 +3480,7 @@ describe('delivery workflow recovery', () => {
     review.status = 'completed'
     review.finalReportPath = final.path
     review.finalReportDigest = finalDigest
-    review.priorReviewDigest = priorReviewDigest
     review.verdict = 'NEEDS_REVISION'
-    review.affectedPaths = ['docs/GDD.md']
     await store.save({
       ...initial,
       phase: 'DOCUMENT_REVIEW',
@@ -3546,11 +3488,7 @@ describe('delivery workflow recovery', () => {
       status: 'needs_action',
       revision: { ...initial.revision, document: documentRevision },
       blockedReason: 'Foundation verification still requires revision',
-      documentReviewState: {
-        ...initial.documentReviewState,
-        activeRun: review,
-        attempts: { ...initial.documentReviewState.attempts, foundation: 3 },
-      },
+      foundationReviewState: review,
     })
 
     const retried = await retryRun({
@@ -3564,10 +3502,9 @@ describe('delivery workflow recovery', () => {
       status: 'needs_action',
       blockedReason: 'Foundation verification still requires revision',
     })
-    expect(retried.documentReviewState.activeRun).toMatchObject({
+    expect(retried.foundationReviewState).toMatchObject({
       status: 'completed',
       verdict: 'NEEDS_REVISION',
-      affectedPaths: ['docs/GDD.md'],
       priorReviewDigest,
       attempt: 3,
     })
@@ -4576,10 +4513,6 @@ describe('delivery workflow recovery', () => {
           status: 'running',
           currentItemId: activePath,
           foundationDraftState: { completedPaths: [] },
-          documentReviewState: {
-            approvals: {},
-            attempts: { foundation: 0, checklist: 0, complete: 0 },
-          },
           resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
           evidence: {},
           activeDispatch: {

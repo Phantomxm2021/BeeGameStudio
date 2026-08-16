@@ -20,7 +20,6 @@ import { getGameDocumentContract } from '../beegame/delivery-workflow/game-docum
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { recordFoundationDispatch } from '../beegame/delivery-workflow/foundation-authoring-batch'
-import { createDocumentReviewRun } from '../beegame/delivery-workflow/document-review-stage'
 
 function completeSubmission(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -83,121 +82,6 @@ describe('idea to complete game documents', () => {
         .splice(0)
         .map(path => rm(path, { recursive: true, force: true })),
     )
-  })
-
-  test('normalizes service-owned metadata after report-driven remediation', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'remediated-document-'))
-    workspaces.push(workspacePath)
-    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
-    const dispatchId = 'remediated-gdd-author'
-    await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    await commitAuthoredFoundationDocument({
-      workspacePath,
-      dispatchId: 'initial-gdd-author',
-      targetPath: path,
-      authoredBody: renderTestCompleteGameDocument(path, completeSubmission(path)),
-      updatedAt: '2026-08-15T00:00:00.000Z',
-    })
-    const targetPath = join(workspacePath, path)
-    const remediatedBody = (await readFile(targetPath, 'utf8'))
-      .replace('version: 1.0.0', 'version: 1.1.0')
-      .replace(
-        'updated_at: 2026-08-15T00:00:00.000Z',
-        'updated_at: 2026-08-16T00:00:00.000Z',
-      )
-    await writeFile(targetPath, remediatedBody)
-
-    const review = {
-      ...createDocumentReviewRun({
-        scope: 'foundation',
-        revision: 'a'.repeat(64),
-      }),
-      status: 'completed' as const,
-      finalReportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`,
-      finalReportDigest: 'b'.repeat(64),
-      verdict: 'NEEDS_REVISION' as const,
-      affectedPaths: [path],
-      remediatedPaths: [],
-    }
-    const base = createTestDeliveryRun({
-      projectId: 'project-remediated-document',
-      ownerId: 'owner-remediated-document',
-      confirmedBriefDigest: 'c'.repeat(64),
-      foundationDraftComplete: true,
-    })
-    const request: WorkerDispatchRequest = {
-      dispatchId,
-      runId: base.runId,
-      ownerId: base.ownerId,
-      projectId: base.projectId,
-      workspacePath,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      taskId: path,
-      revision: base.revision.document,
-      allowedPaths: [path],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'remediation',
-        foundationDocumentPath: path,
-        previousDocumentMetadata: {
-          [path]: {
-            version: '1.0.0',
-            updatedAt: '2026-08-15T00:00:00.000Z',
-          },
-        },
-      },
-    }
-    const terminal = {
-      workerType: 'document-author' as const,
-      status: 'completed' as const,
-      writtenPaths: [path],
-      resolvedFindingIds: [],
-    }
-    const runWithCompletedDispatch: DeliveryRun = {
-        ...base,
-        phase: 'DOCUMENT_DRAFTING',
-        documentStep: 'FOUNDATION_DRAFTING',
-        documentReviewState: {
-          activeRun: review,
-          approvals: {},
-          attempts: { foundation: 1, checklist: 0, complete: 0 },
-        },
-        activeDispatch: {
-          dispatchId,
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          taskId: path,
-          revision: base.revision.document,
-          status: 'completed',
-          request,
-          terminalResult: terminal,
-          startedAt: '2026-08-16T00:00:00.000Z',
-          finishedAt: '2026-08-16T00:01:00.000Z',
-        },
-      }
-    const rejected = await completeDocumentDraft({
-      run: runWithCompletedDispatch,
-      workspacePath,
-      terminal,
-      audit: () => ({ valid: false, issues: ['synthetic local validation failure'] }),
-    })
-
-    expect(rejected.activeDispatch).toMatchObject({
-      dispatchId,
-      status: 'completed',
-      terminalResult: terminal,
-    })
-
-    const completed = await completeDocumentDraft({
-      run: { ...rejected, status: 'running' },
-      workspacePath,
-      terminal,
-      audit: () => ({ valid: true, issues: [] }),
-    })
-
-    expect(completed.blockedReason).toBeUndefined()
-    expect(await readFile(targetPath, 'utf8')).toContain('version: 1.0.1')
   })
 
   test('projects confirmed product authority and commits every complete discipline document', async () => {

@@ -31,7 +31,6 @@ export type DeliveryTransition =
       reason: string
     } & EvidenceEvent)
   | { type: 'resource_preparation_required'; reason?: string }
-  | { type: 'resource_review_remediation_required' }
   | { type: 'tasks_planned'; tasks: AtomicTask[] }
   | { type: 'task_started'; taskId: string; revision: string }
   | {
@@ -182,17 +181,6 @@ function enterResourcePreparation(
   run: DeliveryRun,
   options: { reason?: string } = {},
 ): DeliveryRun {
-  const checklistApproval = run.documentReviewState.approvals.checklist
-  if (
-    checklistApproval?.scope !== 'checklist' ||
-    checklistApproval.revision !== run.revision.document
-  )
-    throw new Error(
-      'resource preparation requires the frozen checklist approval',
-    )
-  const preserveReviewRun =
-    run.documentReviewState.activeRun?.scope === 'complete' &&
-    run.documentReviewState.activeRun.verdict === 'NEEDS_REVISION'
   return {
     ...run,
     phase: 'RESOURCE_PREPARATION',
@@ -208,23 +196,7 @@ function enterResourcePreparation(
     },
     tasks: [],
     evidence: {},
-    resourceProductionState: preserveReviewRun
-      ? {
-          ...run.resourceProductionState,
-          currentTask: 'RESOURCE_PLAN',
-          contentReceipt: undefined,
-        }
-      : { currentTask: 'RESOURCE_PLAN' },
-    documentReviewState: {
-      ...run.documentReviewState,
-      approvals: {
-        ...run.documentReviewState.approvals,
-        complete: undefined,
-      },
-      activeRun: preserveReviewRun
-        ? run.documentReviewState.activeRun
-        : undefined,
-    },
+    resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     updatedAt: timestamp(),
   }
 }
@@ -244,10 +216,7 @@ export function transitionDeliveryRun(
         documentStep: 'FOUNDATION_DRAFTING',
         foundationDraftState: { completedPaths: [] },
         foundationRemediationState: undefined,
-        documentReviewState: {
-          approvals: {},
-          attempts: { foundation: 0, checklist: 0, complete: 0 },
-        },
+        foundationReviewState: undefined,
         updatedAt: timestamp(),
       }
       break
@@ -257,8 +226,8 @@ export function transitionDeliveryRun(
       next = {
         ...withEvidence(run, 'resourcePreparation', event.evidence),
         revision: { ...run.revision, resource: event.resourceRevision },
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'COMPREHENSIVE_REVIEW',
+        phase: 'ATOMIC_TASK_PLANNING',
+        documentStep: undefined,
         status: 'running',
         blockedReason: undefined,
         resourceProductionState: {
@@ -283,18 +252,6 @@ export function transitionDeliveryRun(
       next = enterResourcePreparation(run, { reason: event.reason })
       break
     }
-    case 'resource_review_remediation_required': {
-      const activeReview = run.documentReviewState.activeRun
-      if (
-        activeReview?.scope !== 'complete' ||
-        activeReview.verdict !== 'NEEDS_REVISION'
-      )
-        fail(
-          'resource review remediation requires an accepted complete review report',
-        )
-      next = enterResourcePreparation(run)
-      break
-    }
     case 'tasks_planned':
       requirePhase(run, 'ATOMIC_TASK_PLANNING')
       if (
@@ -303,11 +260,6 @@ export function transitionDeliveryRun(
         run.evidence.resourcePreparation.revision !== run.revision.resource
       )
         fail('task planning requires passed resource-content evidence')
-      if (
-        run.documentReviewState.approvals.complete?.revision !==
-        run.revision.resource
-      )
-        fail('task planning requires current comprehensive review approval')
       assertTaskGraph(event.tasks)
       if (!event.tasks.length) fail('atomic task graph must not be empty')
       next = {
@@ -526,10 +478,9 @@ export function transitionDeliveryRun(
         fail('retry task must be a failed task')
       if (
         run.phase === 'DOCUMENT_REVIEW' &&
-        run.documentReviewState.activeRun?.scope === 'foundation' &&
-        run.documentReviewState.activeRun.status === 'completed' &&
-        run.documentReviewState.activeRun.verdict === 'NEEDS_REVISION' &&
-        run.documentReviewState.activeRun.priorReviewDigest
+        run.foundationReviewState?.mode === 'verification' &&
+        run.foundationReviewState.status === 'completed' &&
+        run.foundationReviewState.verdict === 'NEEDS_REVISION'
       )
         fail(
           'Foundation verification is final; resolve the remaining conflicts manually before starting a new workflow run',
@@ -554,28 +505,23 @@ export function transitionDeliveryRun(
                 ),
             }
           : {}),
-        ...(run.phase === 'DOCUMENT_REVIEW' &&
-        run.documentReviewState.activeRun
+        ...(run.phase === 'DOCUMENT_REVIEW' && run.foundationReviewState
           ? {
-              documentReviewState: {
-                ...run.documentReviewState,
-                activeRun: {
-                  ...run.documentReviewState.activeRun,
-                  status: 'running' as const,
-                  failureReason: undefined,
-                  reports: run.documentReviewState.activeRun.reports.map(
-                    report =>
-                      report.status === 'failed' ||
-                      report.dispatch?.status === 'failed'
-                        ? {
-                            ...report,
-                            status: 'pending' as const,
-                            dispatch: undefined,
-                            failureReason: undefined,
-                          }
-                        : report,
-                  ),
-                },
+              foundationReviewState: {
+                ...run.foundationReviewState,
+                status: 'running' as const,
+                failureReason: undefined,
+                reports: run.foundationReviewState.reports.map(report =>
+                  report.status === 'failed' ||
+                  report.dispatch?.status === 'failed'
+                    ? {
+                        ...report,
+                        status: 'pending' as const,
+                        dispatch: undefined,
+                        failureReason: undefined,
+                      }
+                    : report,
+                ),
               },
             }
           : {}),

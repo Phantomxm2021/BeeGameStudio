@@ -75,9 +75,10 @@ describe('createReviewProjectCopy', () => {
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
-      documentReviewState: {
-        attempts: { foundation: 1, checklist: 0, complete: 0 },
-        activeRun: { scope: 'foundation', attempt: 1, status: 'pending' },
+      foundationReviewState: {
+        mode: 'initial',
+        attempt: 1,
+        status: 'pending',
       },
     })
     expect(await digests(destination)).toEqual(before)

@@ -10,8 +10,9 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        documentReviewState: {
-          activeRun: { scope: 'foundation', attempt: 1 },
+        foundationReviewState: {
+          mode: 'initial',
+          attempt: 1,
         },
       }),
     ).toEqual({
@@ -27,13 +28,12 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
-        documentReviewState: {
-          activeRun: {
-            scope: 'foundation',
-            verdict: 'NEEDS_REVISION',
-            attempt: 2,
-          },
+        foundationReviewState: {
+          mode: 'initial',
+          verdict: 'NEEDS_REVISION',
+          attempt: 2,
         },
+        foundationRemediationState: { lanes: [] },
       }),
     ).toEqual({
       stageId: 'DOCUMENT_DRAFTING',
@@ -44,18 +44,12 @@ describe('delivery progress projection', () => {
     })
   })
 
-  test('uses checklist authoring and review substages', () => {
+  test('uses only the deterministic checklist authoring substage', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'CHECKLIST_DRAFTING',
       }),
     ).toMatchObject({ substage: 'CHECKLIST_DRAFTING' })
-    expect(
-      projectDeliveryProgress({
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_REVIEW',
-      }),
-    ).toMatchObject({ substage: 'CHECKLIST_REVIEW' })
   })
 })

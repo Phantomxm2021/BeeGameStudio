@@ -8,7 +8,7 @@ import {
   rm,
 } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
-import { createDocumentReviewRun } from './delivery-workflow/document-review-stage'
+import { createFoundationReviewState } from './delivery-workflow/foundation-review-state'
 import { computeDocumentRevision } from './delivery-workflow/revision'
 import {
   createInitialDeliveryRun,
@@ -131,15 +131,11 @@ export async function createReviewProjectCopy(input: {
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
-      documentReviewState: {
-        approvals: {},
-        attempts: { foundation: 1, checklist: 0, complete: 0 },
-        activeRun: createDocumentReviewRun({
-          scope: 'foundation',
-          revision: documentRevision,
-          attempt: 1,
-        }),
-      },
+      foundationReviewState: createFoundationReviewState({
+        mode: 'initial',
+        revision: documentRevision,
+        attempt: 1,
+      }),
     })
     const store = createRunStore(temporaryWorkspacePath, input.ownerId)
     const saved = await store.save(run)

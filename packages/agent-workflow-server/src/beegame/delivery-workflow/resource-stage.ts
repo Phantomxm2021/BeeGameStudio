@@ -93,15 +93,6 @@ export async function startResourcePreparation(input: {
       'resource gate is deterministic and cannot dispatch a worker',
     )
 
-  const review = input.run.documentReviewState.activeRun
-  const remediation =
-    review?.scope === 'complete' && review.verdict === 'NEEDS_REVISION'
-      ? {
-          reviewReportPath: review.finalReportPath,
-          affectedPaths: review.affectedPaths,
-          sourceRevision: review.revision,
-        }
-      : undefined
   const common = {
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -126,7 +117,6 @@ export async function startResourcePreparation(input: {
           'docs/ART_DIRECTION.md',
           'docs/TECHNICAL_DESIGN.md',
         ],
-        ...(remediation ? { remediation } : {}),
       },
     })
   if (resolution.task === 'RESOURCE_INVENTORY')
@@ -143,18 +133,11 @@ export async function startResourcePreparation(input: {
           'docs/ART_DIRECTION.md',
           'docs/TECHNICAL_DESIGN.md',
         ],
-        ...(remediation ? { remediation } : {}),
       },
     })
   const assetAudit = auditAssetContract(input.workspacePath)
   const contentAudit = assetAudit.content
-  const repairPaths = new Set(
-    remediation?.affectedPaths
-      ? remediation.affectedPaths
-          .map(path => path.replaceAll('\\', '/'))
-          .filter(path => path.startsWith('assets/content/'))
-      : [],
-  )
+  const repairPaths = new Set<string>()
   for (const path of contentAudit.invalidPaths) repairPaths.add(path)
   if (contentAudit.hasGlobalIssues) {
     for (const file of contentAudit.files) {
@@ -191,7 +174,6 @@ export async function startResourcePreparation(input: {
       authorityPaths: resourceContentAuthorityPaths(),
       repairPaths: [...repairPaths],
       currentContentIssues: contentAudit.issues,
-      ...(remediation ? { remediation } : {}),
     },
   })
 }

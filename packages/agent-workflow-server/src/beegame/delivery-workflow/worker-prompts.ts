@@ -362,8 +362,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Act as the single specialist role named by contract.reviewRole. Read only contract.assignment.sourcePaths and contract.assignment.verificationSourcePaths.',
         'Write only the exact paths in contract.assignment.stagingOutputPaths. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
         request.contract.reviewRole === 'final'
-          ? request.contract.reviewScope === 'foundation'
-            ? [
+          ? [
                 'Review all eight canonical foundation documents directly as one connected production contract.',
                 request.contract.reviewMode === 'verification'
                   ? 'Read the accepted prior review first, verify every prior conflict against the current canonical bytes with targeted reads, and write the sole canonical version 2 review.json. Do not launch another Agent or task.'
@@ -380,12 +379,10 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   : []),
                 'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives write authority from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
               ].join(' ')
-            : 'Consolidate the committed specialist Markdown reports into one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, explicit specialist disagreements, and one preservation list. Verify cited evidence against the supplied read-only verification paths only when needed. Do not restate each specialist report before the consolidated result. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
-          : request.contract.reviewScope === 'foundation' &&
-              (request.contract.reviewRole === 'contract-specialist' ||
-                request.contract.reviewRole === 'integration-specialist')
+          : request.contract.reviewRole === 'contract-specialist' ||
+              request.contract.reviewRole === 'integration-specialist'
             ? 'Review only the responsibility assigned by contract.reviewRole and write one bounded Foundation review evidence packet to the sole staging path. Cite exact source bytes, do not decide the final verdict, do not propose replacement prose, and do not modify canonical documents. The packet contains evidence candidates only; do not write human-readable Markdown or launch another Agent or task.'
-            : 'Review only the responsibility and evidence assigned by contract.reviewRole. Write one human-readable Markdown specialist report with reviewed scope and verdict, one blocking-finding table, one non-blocking-finding table, and a concise list of load-bearing contracts confirmed correct. Use one finding row per distinct defect with owner path, exact evidence location, defect, downstream impact, and required outcome. Include only calculations or proof needed to support a finding. Do not reproduce source sections, repeat a finding in prose, or add a second summary of the tables. If none block delivery, say so explicitly. Do not produce JSON, a finding packet, criteria arrays, reference IDs, or a server-facing summary.',
+            : 'Unsupported Foundation review role.',
         'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',
       ].join(' ')
     case 'resource-planner':

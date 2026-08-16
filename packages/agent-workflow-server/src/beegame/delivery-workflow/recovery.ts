@@ -36,10 +36,6 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import {
-  recoverDocumentReviewRun,
-  routeCompletedDocumentReview,
-} from './document-review-stage'
 
 export {
   inspectWorkflowSnapshot,
@@ -316,8 +312,6 @@ async function reconcileActiveCanonicalReceipt(input: {
       payload: { path: targetPath, revision: documentRevision },
     }
     const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[targetIndex + 1]
-    const documentReviewState =
-      snapshotRecord(snapshot.documentReviewState) ?? {}
     const parsedValue = {
       ...snapshot,
       revision,
@@ -333,10 +327,7 @@ async function reconcileActiveCanonicalReceipt(input: {
         : {
             phase: 'DOCUMENT_REVIEW',
             documentStep: 'FOUNDATION_REVIEW',
-            documentReviewState: {
-              ...documentReviewState,
-              activeRun: undefined,
-            },
+            foundationReviewState: undefined,
           }),
       updatedAt: acceptedAt,
     }
@@ -819,7 +810,9 @@ async function restoreResourceContentCommit(
 function reviewRetryIsLocked(run: DeliveryRun): boolean {
   return Boolean(
     run.phase === 'DOCUMENT_REVIEW' &&
-      run.documentReviewState.activeRun?.status === 'completed',
+      run.foundationReviewState?.mode === 'verification' &&
+      run.foundationReviewState.status === 'completed' &&
+      run.foundationReviewState.verdict === 'NEEDS_REVISION',
   )
 }
 
@@ -827,83 +820,38 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
   run: DeliveryRun
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
-  const review = input.run.documentReviewState.activeRun
-  if (
-    input.run.phase !== 'DOCUMENT_DRAFTING' ||
-    !input.workspacePath ||
-    review?.status !== 'failed' ||
-    !review.finalReportPath ||
-    !review.finalReportDigest ||
-    !review.verdict ||
-    !review.affectedPaths
-  )
-    return undefined
-  const documentRevision = await computeDocumentRevision(
-    input.workspacePath,
-    input.run.confirmedBriefDigest,
-  )
-  if (documentRevision !== review.revision) return undefined
-  const recovered = await recoverDocumentReviewRun({
-    run: review,
-    workspacePath: input.workspacePath,
-    currentRevision: documentRevision,
-  })
-  if (recovered.status !== 'completed') return undefined
-  return routeCompletedDocumentReview({
-    run: {
-      ...input.run,
-      activeDispatch: undefined,
-      blockedReason: undefined,
-    },
-    review: recovered,
-  })
+  void input
+  return undefined
 }
 
 async function unlockReviewForChangedRevision(input: {
   run: DeliveryRun
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
-  const review = input.run.documentReviewState.activeRun
-  if (!review || !input.workspacePath || !reviewRetryIsLocked(input.run))
+  const review = input.run.foundationReviewState
+  if (!review || !input.workspacePath)
     return undefined
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
   )
-  const currentRevision =
-    review.scope !== 'complete'
-      ? documentRevision
-      : await computeResourceRevision(input.workspacePath, documentRevision)
-  if (currentRevision === review.revision) return undefined
+  if (documentRevision === review.revision) return undefined
   return {
     ...input.run,
+    phase: 'DOCUMENT_REVIEW',
+    documentStep: 'FOUNDATION_REVIEW',
     status: 'running',
     blockedReason: undefined,
     revision: {
       ...input.run.revision,
       document: documentRevision,
-      ...(review.scope === 'complete' ? { resource: currentRevision } : {}),
+      resource: undefined,
       implementation: undefined,
     },
     tasks: [],
-    evidence:
-      review.scope !== 'complete'
-        ? {}
-        : {
-            resourcePreparation: input.run.evidence.resourcePreparation,
-          },
-    documentReviewState: {
-      ...input.run.documentReviewState,
-      approvals:
-        review.scope === 'foundation'
-          ? {}
-          : review.scope === 'checklist'
-            ? {
-                foundation: input.run.documentReviewState.approvals?.foundation,
-              }
-            : input.run.documentReviewState.approvals,
-      activeRun: undefined,
-    },
+    evidence: {},
+    foundationReviewState: undefined,
+    foundationRemediationState: undefined,
     updatedAt: new Date().toISOString(),
   }
 }
@@ -912,46 +860,8 @@ async function acknowledgeCompletedReviewRemediation(input: {
   run: DeliveryRun
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
-  const review = input.run.documentReviewState.activeRun
-  if (
-    input.run.status !== 'needs_action' ||
-    !input.workspacePath ||
-    review?.status !== 'completed' ||
-    review.verdict !== 'NEEDS_REVISION'
-  )
-    return undefined
-  if (review.scope === 'foundation' && review.priorReviewDigest)
-    return input.run
-  const documentRevision = await computeDocumentRevision(
-    input.workspacePath,
-    input.run.confirmedBriefDigest,
-  )
-  const currentRevision =
-    review.scope === 'complete'
-      ? await computeResourceRevision(input.workspacePath, documentRevision)
-      : documentRevision
-  if (currentRevision !== review.revision) return undefined
-  const recovered = await recoverDocumentReviewRun({
-    run: review,
-    workspacePath: input.workspacePath,
-    currentRevision,
-  })
-  if (recovered.status !== 'completed')
-    return {
-      ...input.run,
-      status: 'running',
-      blockedReason: undefined,
-      documentReviewState: {
-        ...input.run.documentReviewState,
-        activeRun: recovered,
-      },
-      updatedAt: new Date().toISOString(),
-    }
-  return routeCompletedDocumentReview({
-    run: input.run,
-    review: recovered,
-    allowRetryAfterLimit: true,
-  })
+  void input
+  return undefined
 }
 
 export async function reconcileRunOnStartup(input: {

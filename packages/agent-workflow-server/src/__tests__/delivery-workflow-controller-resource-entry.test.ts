@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
-describe('resource entry review authority', () => {
-  test('stores only project report approvals as downstream authority', () => {
+describe('resource entry authority', () => {
+  test('does not retain a second Reviewer approval state machine', () => {
     const run = createTestDeliveryRun({
       runId: 'resource-entry',
       projectId: 'project',
@@ -10,8 +10,6 @@ describe('resource entry review authority', () => {
       checklistApproved: true,
     })
 
-    expect(run.documentReviewState.approvals.checklist).toBeDefined()
-    expect(run.documentReviewState).not.toHaveProperty('activeCycle')
-    expect(run.documentReviewState).not.toHaveProperty('repairPasses')
+    expect(run).not.toHaveProperty('documentReviewState')
   })
 })

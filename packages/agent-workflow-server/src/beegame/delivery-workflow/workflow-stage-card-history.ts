@@ -160,7 +160,6 @@ export function isWorkflowStageCardSnapshot(
       'INITIAL_REVIEW',
       'REPAIRING',
       'CHECKLIST_DRAFTING',
-      'CHECKLIST_REVIEW',
     ].includes(value.substage as DeliveryProgressSubstage)
   )
     return false

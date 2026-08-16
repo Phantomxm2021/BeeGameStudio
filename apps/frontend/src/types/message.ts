@@ -53,7 +53,6 @@ export type WorkflowCardSubstage =
   | 'INITIAL_REVIEW'
   | 'REPAIRING'
   | 'CHECKLIST_DRAFTING'
-  | 'CHECKLIST_REVIEW'
 
 export interface WorkflowReviewerUsage {
   input_tokens: number
@@ -62,13 +61,12 @@ export interface WorkflowReviewerUsage {
 }
 
 export interface WorkflowDocumentReviewDisplay {
-  scope?: 'foundation' | 'checklist' | 'complete'
+  scope?: 'foundation'
   status?: 'pending' | 'running' | 'completed' | 'failed'
   attempt?: number
   verdict?: 'READY' | 'NEEDS_REVISION'
   affectedPaths?: string[]
   finalReportPath?: string
-  finalReportMarkdown?: string
   conflictCount?: number
   priorConflictStatus?: Array<{
     id: string

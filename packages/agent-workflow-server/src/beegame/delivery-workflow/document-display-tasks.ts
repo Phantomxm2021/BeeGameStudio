@@ -65,18 +65,11 @@ export function projectDocumentDisplayTasks(
   const active =
     input.workflowStatus === 'running' && input.thinking === 'working'
   const operation =
-    input.documentStep === 'FOUNDATION_REVIEW' ||
-    input.documentStep === 'CHECKLIST_REVIEW' ||
-    input.documentStep === 'COMPREHENSIVE_REVIEW'
-      ? 'review'
-      : 'write'
+    input.documentStep === 'FOUNDATION_REVIEW' ? 'review' : 'write'
   const documentPaths =
-    input.documentStep === 'CHECKLIST_DRAFTING' ||
-    input.documentStep === 'CHECKLIST_REVIEW'
+    input.documentStep === 'CHECKLIST_DRAFTING'
       ? [CANONICAL_PROJECT_DOCUMENTS[CANONICAL_PROJECT_DOCUMENTS.length - 1]]
-      : input.documentStep === 'COMPREHENSIVE_REVIEW'
-        ? canonicalReviewArtifacts
-        : CANONICAL_FOUNDATION_DOCUMENTS
+      : CANONICAL_FOUNDATION_DOCUMENTS
   const committedPaths = new Set(
     input.foundationDraftCompletedPaths?.filter(path =>
       CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),

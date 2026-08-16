@@ -89,107 +89,6 @@ describe('resource production task resolver', () => {
     })
   })
 
-  test('routes accepted resource findings by structured subject and current cursor', async () => {
-    const workspace = await createWorkspace()
-    await writePlan(workspace)
-    await writeInventory(workspace)
-    await writeContent(workspace)
-    const base = await runWithReceipt(workspace)
-
-    const contentRun = withResourceFinding(base, {
-      path: 'assets/content/world.json',
-      anchor: '$.data',
-      contentId: 'world-content',
-    })
-    await expect(
-      resolveResourceProductionTask({
-        run: contentRun,
-        workspacePath: workspace,
-      }),
-    ).resolves.toMatchObject({ task: 'RESOURCE_CONTENT' })
-
-    const inventoryRun = withResourceFinding(base, {
-      path: 'assets/asset-manifest.json',
-      anchor: '$.resources[0]',
-      resourceId: 'world-resource',
-    })
-    await expect(
-      resolveResourceProductionTask({
-        run: inventoryRun,
-        workspacePath: workspace,
-      }),
-    ).resolves.toMatchObject({ task: 'RESOURCE_PLAN' })
-
-    await expect(
-      resolveResourceProductionTask({
-        run: {
-          ...inventoryRun,
-          resourceProductionState: {
-            ...inventoryRun.resourceProductionState,
-            currentTask: 'RESOURCE_GATE',
-          },
-        },
-        workspacePath: workspace,
-      }),
-    ).resolves.toMatchObject({ task: 'RESOURCE_GATE' })
-  })
-
-  test('routes manifest requirement findings to the plan before inventory', async () => {
-    const workspace = await createWorkspace()
-    await writePlan(workspace)
-    await writeInventory(workspace)
-    await writeContent(workspace)
-    const run = withResourceFinding(await runWithReceipt(workspace), {
-      path: 'assets/asset-manifest.json',
-      anchor: '$.requirements[0].acquisition_profile',
-      requirementId: 'world.visual',
-    })
-    await expect(
-      resolveResourceProductionTask({ run, workspacePath: workspace }),
-    ).resolves.toMatchObject({ task: 'RESOURCE_PLAN' })
-  })
-
-  test('passes only the active resource repair target to its worker', async () => {
-    const workspace = await createWorkspace()
-    await writePlan(workspace)
-    await writeInventory(workspace)
-    await writeContent(workspace)
-    const run = {
-      ...withResourceFinding(await runWithReceipt(workspace), {
-        path: 'assets/asset-manifest.json',
-        anchor: '$.requirements[0].acquisition_profile',
-        requirementId: 'world.visual',
-      }),
-      phase: 'RESOURCE_PREPARATION' as const,
-    }
-    run.documentReviewState.activeRun!.affectedPaths!.push(
-      'assets/content/world.json',
-    )
-    let request: unknown
-    await startResourcePreparation({
-      run,
-      workspacePath: workspace,
-      dispatcher: {
-        async dispatch(value) {
-          request = value
-          return value
-        },
-      },
-    })
-    expect(request).toMatchObject({
-      workerType: 'resource-planner',
-      contract: {
-        remediation: {
-          reviewReportPath: expect.stringContaining('/review.md'),
-          affectedPaths: [
-            'assets/asset-manifest.json',
-            'assets/content/world.json',
-          ],
-        },
-      },
-    })
-  })
-
   test('turns a deterministic Gate failure into one retryable inventory task', async () => {
     const workspace = await createWorkspace()
     await writePlan(workspace)
@@ -484,29 +383,6 @@ async function runWithReceipt(workspace: string): Promise<DeliveryRun> {
           { requirementId: 'world.visual', resourceIds: ['world-resource'] },
         ],
         acceptedAt: new Date().toISOString(),
-      },
-    },
-  }
-}
-
-function withResourceFinding(
-  run: DeliveryRun,
-  subject: { path: string; [key: string]: unknown },
-): DeliveryRun {
-  return {
-    ...run,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeRun: {
-        scope: 'complete',
-        revision: 'a'.repeat(64),
-        status: 'completed',
-        reports: [],
-        finalReportPath: `.beegame/reviews/complete/${'a'.repeat(64)}/review.md`,
-        finalReportDigest: 'b'.repeat(64),
-        verdict: 'NEEDS_REVISION',
-        affectedPaths: [subject.path],
-        attempt: 1,
       },
     },
   }

@@ -127,8 +127,6 @@ export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
   | 'CHECKLIST_DRAFTING'
-  | 'CHECKLIST_REVIEW'
-  | 'COMPREHENSIVE_REVIEW'
 
 /**
  * `blocked` is reserved for a durable validation gate result.  Operational
@@ -179,53 +177,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export type DocumentReviewScope = 'foundation' | 'checklist' | 'complete'
-export type DocumentReviewState = {
-  activeRun?: DocumentReviewRun
-  approvals: Partial<Record<DocumentReviewScope, DocumentReviewReportApproval>>
-  attempts: Record<DocumentReviewScope, number>
-}
-
-export type DocumentReviewReportState = {
-  role: string
-  path: string
-  digest?: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  dispatch?: DispatchRecord
-  failureReason?: string
-  durationMs?: number
-  usage?: WorkflowUsage
-}
-
-export type DocumentReviewRun = {
-  scope: DocumentReviewScope
-  revision: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  reports: DocumentReviewReportState[]
-  finalReportPath?: string
-  finalReportDigest?: string
-  /** Accepted prior Foundation review path when this is the one verification review. */
-  priorReviewPath?: string
-  /** Accepted prior Foundation review digest when this is the one verification review. */
-  priorReviewDigest?: string
-  verdict?: 'READY' | 'NEEDS_REVISION'
-  affectedPaths?: string[]
-  /** Canonical owner paths committed during the current report-driven repair. */
-  remediatedPaths?: string[]
-  attempt: number
-  approvedFoundationRevision?: string
-  failureReason?: string
-}
-
-export type DocumentReviewReportApproval = {
-  scope: DocumentReviewScope
-  revision: string
-  reportPath: string
-  reportDigest: string
-  approvedAt: string
-}
-
-export const DELIVERY_RUN_SCHEMA_VERSION = 21 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 22 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -405,8 +357,7 @@ export type DeliveryRun = {
     implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
-  /** Sole owner of document review approvals, findings, retries and closure. */
-  documentReviewState: DocumentReviewState
+  foundationReviewState?: FoundationReviewState
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
   /** Exact parallel repair lanes derived from one accepted Foundation review. */
@@ -462,3 +413,4 @@ export type DeliveryWorkerPort = {
   hasInFlightTerminalSubmission?(dispatchId: string): Promise<boolean>
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }
+import type { FoundationReviewState } from './foundation-review-state'

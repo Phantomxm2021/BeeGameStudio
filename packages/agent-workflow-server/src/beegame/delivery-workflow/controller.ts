@@ -19,13 +19,11 @@ import {
   startDocumentStage,
 } from './document-stage'
 import {
-  acceptDocumentReviewTerminal,
-  buildDocumentReviewDispatches,
-  createDocumentReviewRun,
-  hasCurrentDocumentReviewTopology,
-  recoverDocumentReviewRun,
-  routeCompletedDocumentReview,
-} from './document-review-stage'
+  acceptFoundationReviewWorkerTerminal,
+  buildFoundationReviewDispatches,
+} from './foundation-review-stage'
+import { createFoundationReviewState } from './foundation-review-state'
+import { readFoundationReviewArtifact } from './foundation-review'
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
@@ -45,6 +43,7 @@ import { createRunStore, type RunStore } from './run-store'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { transitionDeliveryRun } from './transition'
 import {
+  createFoundationRemediationStateFromAuthority,
   pendingFoundationRemediationLanes,
   recordFoundationRemediationFailure,
 } from './foundation-remediation'
@@ -56,10 +55,7 @@ import {
   startImplementationAudit,
 } from './validation-stage'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import {
-  CANONICAL_DOCUMENT_ARTIFACTS,
-  CANONICAL_FOUNDATION_DOCUMENTS,
-} from './types'
+import { CANONICAL_DOCUMENT_ARTIFACTS } from './types'
 import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
@@ -76,24 +72,6 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
-import { relative } from 'node:path'
-
-function reviewSourcePaths(
-  workspacePath: string,
-  dispatches: ReturnType<typeof buildDocumentReviewDispatches>,
-): string[] {
-  return [
-    ...new Set(
-      dispatches
-        .flatMap(item => [
-          ...item.assignment.sourcePaths,
-          ...item.assignment.verificationSourcePaths,
-        ])
-        .map(path => relative(workspacePath, path).replaceAll('\\', '/'))
-        .filter(path => path.startsWith('docs/') || path.startsWith('assets/')),
-    ),
-  ].sort()
-}
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
@@ -204,10 +182,9 @@ export function createDeliveryWorkflowController(input: {
     const foundationCheckpoint = run?.foundationDraftState.documents?.find(
       document => document.dispatch?.dispatchId === record.dispatchId,
     )
-    const reviewCheckpoint =
-      run?.documentReviewState.activeRun?.reports.find(
-        report => report.dispatch?.dispatchId === record.dispatchId,
-      )
+    const reviewCheckpoint = run?.foundationReviewState?.reports.find(
+      report => report.dispatch?.dispatchId === record.dispatchId,
+    )
     const remediationCheckpoint = run?.foundationRemediationState?.lanes.find(
       lane => lane.dispatch?.dispatchId === record.dispatchId,
     )
@@ -292,13 +269,10 @@ export function createDeliveryWorkflowController(input: {
             : {
                 resourcePreparation: next.evidence.resourcePreparation,
               },
-        documentReviewState:
+        foundationReviewState:
           result.classification === 'documents_required'
-            ? {
-                approvals: {},
-                attempts: { foundation: 0, checklist: 0, complete: 0 },
-              }
-            : next.documentReviewState,
+            ? undefined
+            : next.foundationReviewState,
         foundationDraftState:
           result.classification === 'documents_required'
             ? { completedPaths: [] }
@@ -391,40 +365,59 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (result.workerType === 'document-reviewer') {
-      const activeRun = next.documentReviewState.activeRun
-      if (!activeRun)
-        throw new Error('document review terminal has no active review run')
-      const acceptedRun = await acceptDocumentReviewTerminal({
-        run: activeRun,
-        workspacePath: input.workspacePath,
-        terminal: result,
-      })
-      next = {
-        ...next,
-        documentReviewState: {
-          ...next.documentReviewState,
-          activeRun: acceptedRun,
-        },
-      }
-      if (acceptedRun.status === 'completed')
-        next = routeCompletedDocumentReview({ run: next, review: acceptedRun })
-      next = await persist(next, 'document.review.report.accepted')
-      try {
-        await resumeUnlocked(next)
-      } catch (error) {
-        const latest = await store.load()
-        if (latest?.runId === next.runId && latest.status === 'needs_action')
-          return
-        const reason = error instanceof Error ? error.message : String(error)
-        await persist(
-          {
-            ...next,
-            status: 'needs_action',
-            blockedReason: reason,
-          },
-          'document.review.routing.failed',
-        )
-      }
+      if (!('mode' in result))
+        throw new Error('Legacy document review terminals are not accepted')
+      if (!next.foundationReviewState)
+        throw new Error('Foundation review terminal has no active state')
+      const acceptedState = await acceptFoundationReviewWorkerTerminal({
+          state: next.foundationReviewState,
+          workspacePath: input.workspacePath,
+          currentRevision: await computeDocumentRevision(
+            input.workspacePath,
+            next.confirmedBriefDigest,
+          ),
+          terminal: result,
+        })
+        next = { ...next, foundationReviewState: acceptedState }
+        if (acceptedState.status === 'completed') {
+          if (acceptedState.verdict === 'READY') {
+            next = {
+              ...next,
+              phase: 'DOCUMENT_REVIEW',
+              documentStep: 'CHECKLIST_DRAFTING',
+              status: 'running',
+              blockedReason: undefined,
+            }
+          } else if (acceptedState.mode === 'verification') {
+            next = {
+              ...next,
+              status: 'needs_action',
+              blockedReason: `Foundation verification still requires revision; see ${acceptedState.finalReportPath}`,
+            }
+          } else {
+            const review = await readFoundationReviewArtifact({
+              workspacePath: input.workspacePath,
+              path: acceptedState.finalReportPath!,
+              expectedDigest: acceptedState.finalReportDigest!,
+            })
+            next = {
+              ...next,
+              phase: 'DOCUMENT_DRAFTING',
+              documentStep: undefined,
+              status: 'running',
+              foundationRemediationState:
+                createFoundationRemediationStateFromAuthority({
+                  reviewPath: review.path,
+                  reviewDigest: review.digest,
+                  sourceRevision: review.review.revision,
+                  affectedPaths: review.affectedPaths,
+                }),
+              blockedReason: undefined,
+            }
+          }
+        }
+        next = await persist(next, 'foundation.review.report.accepted')
+        if (next.status === 'running') await resumeUnlocked(next)
       return
     }
     if (
@@ -840,15 +833,6 @@ export function createDeliveryWorkflowController(input: {
     )
   }
 
-  function comprehensiveReviewMissing(run: DeliveryRun): boolean {
-    const approval = run.documentReviewState.approvals?.complete
-    return (
-      !run.revision.resource ||
-      !approval ||
-      approval.revision !== run.revision.resource
-    )
-  }
-
   async function restartResourcePreparation(
     run: DeliveryRun,
     reason: string,
@@ -889,10 +873,7 @@ export function createDeliveryWorkflowController(input: {
       },
       tasks: [],
       evidence: {},
-      documentReviewState: {
-        approvals: {},
-        attempts: { foundation: 0, checklist: 0, complete: 0 },
-      },
+      foundationReviewState: undefined,
       foundationDraftState: { completedPaths: [] },
       foundationRemediationState: undefined,
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
@@ -1038,11 +1019,9 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
-    const replayableReview =
-      run.documentReviewState.activeRun?.reports.find(
-        report =>
-          report.status !== 'completed' && report.dispatch?.terminalResult,
-      )?.dispatch
+    const replayableReview = run.foundationReviewState?.reports.find(
+      report => report.status !== 'completed' && report.dispatch?.terminalResult,
+    )?.dispatch
     if (replayableReview) {
       await dispatcher.replayTerminal(replayableReview, handleTerminalUnlocked)
       return
@@ -1094,247 +1073,88 @@ export function createDeliveryWorkflowController(input: {
           dispatcher,
         })
       } else {
-        if (
-          run.documentStep === 'COMPREHENSIVE_REVIEW' &&
-          (run.documentReviewState.approvals?.checklist?.scope !==
-            'checklist' ||
-            run.documentReviewState.approvals.checklist.revision !==
-              run.revision.document)
-        ) {
-          await persist(
-            {
-              ...run,
-              status: 'needs_action',
-              blockedReason:
-                'comprehensive review requires the frozen current checklist approval',
-            },
-            'document.checklist.approval.missing',
+        if (run.documentStep === 'FOUNDATION_REVIEW') {
+          const reviewRevision = await computeDocumentRevision(
+            input.workspacePath,
+            run.confirmedBriefDigest,
+          )
+          let reviewRun = run
+          if (
+            reviewRun.foundationRemediationState?.resultingRevision ===
+              reviewRevision &&
+            reviewRun.foundationReviewState?.mode === 'initial' &&
+            reviewRun.foundationReviewState.status === 'completed' &&
+            reviewRun.foundationReviewState.verdict === 'NEEDS_REVISION' &&
+            reviewRun.foundationReviewState.finalReportPath &&
+            reviewRun.foundationReviewState.finalReportDigest
+          ) {
+            reviewRun = await persist(
+              {
+                ...reviewRun,
+                foundationReviewState: createFoundationReviewState({
+                  mode: 'verification',
+                  revision: reviewRevision,
+                  attempt: reviewRun.foundationReviewState.attempt + 1,
+                  priorReviewPath:
+                    reviewRun.foundationReviewState.finalReportPath,
+                  priorReviewDigest:
+                    reviewRun.foundationReviewState.finalReportDigest,
+                }),
+              },
+              'foundation.review.verification.created',
+            )
+          }
+          if (
+            !reviewRun.foundationReviewState ||
+            reviewRun.foundationReviewState.revision !== reviewRevision
+          ) {
+            reviewRun = await persist(
+              {
+                ...reviewRun,
+                foundationReviewState: createFoundationReviewState({
+                  mode: 'initial',
+                  revision: reviewRevision,
+                  attempt:
+                    (reviewRun.foundationReviewState?.attempt ?? 0) + 1,
+                }),
+              },
+              'foundation.review.run.created',
+            )
+          }
+          const pending = buildFoundationReviewDispatches({
+            state: reviewRun.foundationReviewState!,
+            workspacePath: input.workspacePath,
+            confirmedBriefDigest: reviewRun.confirmedBriefDigest,
+          })
+          await Promise.all(
+            pending.map(item =>
+              dispatcher.dispatch({
+                runId: reviewRun.runId,
+                ownerId: reviewRun.ownerId,
+                projectId: reviewRun.projectId,
+                workspacePath: input.workspacePath,
+                workerType: 'document-reviewer',
+                phase: 'DOCUMENT_REVIEW',
+                taskId: item.taskId,
+                revision: reviewRevision,
+                allowedPaths: item.assignment.stagingOutputPaths,
+                protectedPaths: [
+                  ...item.assignment.sourcePaths,
+                  ...item.assignment.verificationSourcePaths,
+                ],
+                contract: item.contract,
+              }),
+            ),
           )
           return
         }
-        if (run.documentStep === 'COMPREHENSIVE_REVIEW') {
-          const resourceGateReceipt = run.evidence.resourcePreparation
-          if (
-            !run.revision.resource ||
-            resourceGateReceipt?.status !== 'passed' ||
-            resourceGateReceipt.revision !== run.revision.resource
-          ) {
-            const restored = await persist(
-              transitionDeliveryRun(run, {
-                type: 'resource_preparation_required',
-                reason:
-                  'resource preparation receipt is missing before comprehensive review',
-              }),
-              'document.review.prerequisite.restored',
-            )
-            await resumeUnlocked(restored)
-            return
-          }
-        }
-        const reviewScope =
-          run.documentStep === 'FOUNDATION_REVIEW'
-            ? 'foundation'
-            : run.documentStep === 'CHECKLIST_REVIEW'
-              ? 'checklist'
-              : 'complete'
-        const reviewRevision =
-          reviewScope === 'complete'
-            ? await computeResourceRevision(
-                input.workspacePath,
-                run.revision.document,
-              )
-            : await computeDocumentRevision(
-                input.workspacePath,
-                run.confirmedBriefDigest,
-              )
-        let reviewRun = run
-        let activeRun = reviewRun.documentReviewState.activeRun
-        if (
-          activeRun?.scope === reviewScope &&
-          activeRun.revision === reviewRevision
-        ) {
-          const recovered = await recoverDocumentReviewRun({
-            run: activeRun,
-            workspacePath: input.workspacePath,
-            currentRevision: reviewRevision,
-          })
-          if (recovered.status === 'failed') {
-            await persist(
-              {
-                ...reviewRun,
-                status: 'needs_action',
-                blockedReason:
-                  recovered.failureReason ??
-                  'Foundation review recovery failed closed',
-                documentReviewState: {
-                  ...reviewRun.documentReviewState,
-                  activeRun: recovered,
-                },
-              },
-              'document.review.recovery.failed',
-            )
-            return
-          }
-          if (recovered.status === 'completed') {
-            const routed = routeCompletedDocumentReview({
-              run: {
-                ...reviewRun,
-                documentReviewState: {
-                  ...reviewRun.documentReviewState,
-                  activeRun: recovered,
-                },
-              },
-              review: recovered,
-            })
-            const persisted = await persist(
-              routed,
-              'document.review.commit.recovered',
-            )
-            if (persisted.status === 'running') await resumeUnlocked(persisted)
-            return
-          }
-          activeRun = recovered
-          reviewRun = {
-            ...reviewRun,
-            documentReviewState: {
-              ...reviewRun.documentReviewState,
-              activeRun: recovered,
-            },
-          }
-        }
-        const previousReport =
-          activeRun?.scope === reviewScope &&
-          activeRun.priorReviewPath &&
-          activeRun.priorReviewDigest
-            ? {
-                path: activeRun.priorReviewPath,
-                digest: activeRun.priorReviewDigest,
-              }
-            : activeRun?.scope === reviewScope &&
-              activeRun.status === 'completed' &&
-              activeRun.verdict === 'NEEDS_REVISION' &&
-              activeRun.finalReportPath &&
-              activeRun.finalReportDigest
-            ? {
-                path: activeRun.finalReportPath,
-                digest: activeRun.finalReportDigest,
-              }
-            : undefined
-        if (
-          !activeRun ||
-          activeRun.scope !== reviewScope ||
-          activeRun.revision !== reviewRevision ||
-          (activeRun.status !== 'completed' &&
-            !hasCurrentDocumentReviewTopology({
-              run: activeRun,
-              workspacePath: input.workspacePath,
-            }))
-        ) {
-          const attempt =
-            (reviewRun.documentReviewState.attempts?.[reviewScope] ?? 0) + 1
-          const created = createDocumentReviewRun({
-            scope: reviewScope,
-            revision: reviewRevision,
-            attempt,
-            ...(previousReport ? { priorReview: previousReport } : {}),
-            ...(reviewScope === 'checklist'
-              ? {
-                  approvedFoundationRevision:
-                    reviewRun.documentReviewState.approvals?.foundation
-                      ?.revision,
-                }
-              : {}),
-          })
-          reviewRun = await persist(
-            {
-              ...reviewRun,
-              documentReviewState: {
-                ...reviewRun.documentReviewState,
-                activeRun: created,
-                attempts: {
-                  foundation:
-                    reviewRun.documentReviewState.attempts?.foundation ?? 0,
-                  checklist:
-                    reviewRun.documentReviewState.attempts?.checklist ?? 0,
-                  complete:
-                    reviewRun.documentReviewState.attempts?.complete ?? 0,
-                  [reviewScope]: attempt,
-                },
-              },
-            },
-            'document.review.run.created',
-          )
-        }
-        const pending = buildDocumentReviewDispatches({
-          run: reviewRun.documentReviewState.activeRun!,
-          workspacePath: input.workspacePath,
-          previousReport,
-          revisionVerification:
-            reviewScope === 'complete'
-              ? {
-                  kind: 'resource',
-                  confirmedBriefDigest: reviewRun.confirmedBriefDigest,
-                  prerequisiteReports: reviewRun.documentReviewState.approvals
-                    ?.checklist
-                    ? [
-                        {
-                          path: reviewRun.documentReviewState.approvals.checklist
-                            .reportPath,
-                          digest:
-                            reviewRun.documentReviewState.approvals.checklist
-                              .reportDigest,
-                        },
-                      ]
-                    : [],
-                }
-              : {
-                  kind: 'document',
-                  confirmedBriefDigest: reviewRun.confirmedBriefDigest,
-                  prerequisiteReports:
-                    reviewScope === 'foundation' && previousReport
-                      ? [previousReport]
-                      : reviewScope === 'checklist' &&
-                    reviewRun.documentReviewState.approvals?.foundation
-                      ? [
-                          {
-                            path: reviewRun.documentReviewState.approvals
-                              .foundation.reportPath,
-                            digest:
-                              reviewRun.documentReviewState.approvals.foundation
-                                .reportDigest,
-                          },
-                        ]
-                      : [],
-                },
-        })
-        const allowedAffectedPaths =
-          reviewScope === 'foundation'
-            ? [...CANONICAL_FOUNDATION_DOCUMENTS]
-            : reviewScope === 'checklist'
-              ? ['docs/acceptance/gameplay-checklist.md']
-              : reviewSourcePaths(input.workspacePath, pending)
-        await Promise.all(
-          pending.map(item =>
-            dispatcher.dispatch({
-              runId: reviewRun.runId,
-              ownerId: reviewRun.ownerId,
-              projectId: reviewRun.projectId,
-              workspacePath: input.workspacePath,
-              workerType: 'document-reviewer',
-              phase: 'DOCUMENT_REVIEW',
-              taskId: `review:${reviewScope}:${item.assignment.role}:${reviewRun.documentReviewState.activeRun!.attempt}`,
-              revision: reviewRevision,
-              allowedPaths: item.assignment.stagingOutputPaths,
-              protectedPaths: [
-                ...item.assignment.sourcePaths,
-                ...item.assignment.verificationSourcePaths,
-              ],
-              contract: {
-                ...item.contract,
-                allowedAffectedPaths,
-              },
-            }),
-          ),
+        await persist(
+          {
+            ...run,
+            status: 'needs_action',
+            blockedReason: `Unsupported legacy document review step: ${String(run.documentStep)}`,
+          },
+          'document.review.legacy_step.rejected',
         )
       }
       return
@@ -1379,21 +1199,6 @@ export function createDeliveryWorkflowController(input: {
           run,
           'resource preparation evidence is missing; the resource stage must be completed before task planning',
         )
-        return
-      }
-      if (comprehensiveReviewMissing(run)) {
-        const awaitingReview = await persist(
-          {
-            ...run,
-            phase: 'DOCUMENT_REVIEW',
-            documentStep: 'COMPREHENSIVE_REVIEW',
-            activeDispatch: undefined,
-            status: 'running',
-            blockedReason: undefined,
-          },
-          'comprehensive.review.required',
-        )
-        await resumeUnlocked(awaitingReview)
         return
       }
       const planningFacts = await contractFactsFor(run)

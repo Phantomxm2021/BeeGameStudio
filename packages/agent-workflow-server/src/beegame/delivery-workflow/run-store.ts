@@ -89,6 +89,45 @@ function storageReadError(path: string, error: unknown): WorkflowStoreError {
   )
 }
 
+type SnapshotMigration = {
+  value: unknown
+  migrated: boolean
+}
+
+/**
+ * Schema 21 is the sole supported migration boundary. It contained the
+ * retired Markdown Reviewer authority, so migration deliberately preserves
+ * delivery artifacts and receipts while requiring a fresh Foundation review.
+ */
+function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return { value, migrated: false }
+  const source = value as Record<string, unknown>
+  if (source.schemaVersion !== 21) return { value, migrated: false }
+  const {
+    documentReviewState: _documentReviewState,
+    foundationReviewState: _foundationReviewState,
+    activeDispatch: _activeDispatch,
+    pendingEvents: _pendingEvents,
+    completedAt: _completedAt,
+    blockedReason: _blockedReason,
+    currentItemId: _currentItemId,
+    ...preserved
+  } = source
+  return {
+    migrated: true,
+    value: {
+      ...preserved,
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      currentMessage: 'Foundation review must be re-established',
+      thinking: 'idle',
+    },
+  }
+}
+
 /** Read and classify run.json without migrating, flushing markers or rewriting it. */
 export async function inspectWorkflowSnapshot(input: {
   snapshotPath: string
@@ -114,6 +153,8 @@ export async function inspectWorkflowSnapshot(input: {
       ),
     }
   }
+  const migration = migrateWorkflowSnapshot(parsedValue)
+  parsedValue = migration.value
   const snapshotVersion =
     parsedValue &&
     typeof parsedValue === 'object' &&
@@ -268,20 +309,17 @@ function withDispatchUsage(
           }
         : {}),
     },
-    documentReviewState: {
-      ...run.documentReviewState,
-      ...(run.documentReviewState.activeRun
-        ? {
-            activeRun: {
-              ...run.documentReviewState.activeRun,
-              reports: run.documentReviewState.activeRun.reports.map(report => ({
-                ...report,
-                dispatch: update(report.dispatch),
-              })),
-            },
-          }
-        : {}),
-    },
+    ...(run.foundationReviewState
+      ? {
+          foundationReviewState: {
+            ...run.foundationReviewState,
+            reports: run.foundationReviewState.reports.map(report => ({
+              ...report,
+              dispatch: update(report.dispatch),
+            })),
+          },
+        }
+      : {}),
     ...(run.foundationRemediationState
       ? {
           foundationRemediationState: {
@@ -397,10 +435,6 @@ export function createInitialDeliveryRun(input: {
     },
     tasks: [],
     evidence: {},
-    documentReviewState: {
-      approvals: {},
-      attempts: { foundation: 0, checklist: 0, complete: 0 },
-    },
     foundationDraftState: { completedPaths: [] },
     resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     createdAt: timestamp,
@@ -629,6 +663,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       )
     }
     let run: DeliveryRun
+    const migration = migrateWorkflowSnapshot(value)
+    value = migration.value
     const snapshotVersion =
       value && typeof value === 'object' && !Array.isArray(value)
         ? (value as Record<string, unknown>).schemaVersion
@@ -662,6 +698,11 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     }
     if (run.ownerId !== ownerId)
       throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
+    if (migration.migrated)
+      await durableWrite(
+        filePaths.snapshot,
+        `${JSON.stringify(run, null, 2)}\n`,
+      )
     if (run.pendingEvents?.length) {
       // Journal replay failures are operational failures, not malformed
       // snapshots. Keep the marker so the next load can retry safely.
@@ -1153,7 +1194,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch ??
-            run.documentReviewState.activeRun?.reports.find(
+            run.foundationReviewState?.reports.find(
               report => report.dispatch?.dispatchId === dispatchId,
             )?.dispatch ??
             run.foundationRemediationState?.lanes.find(

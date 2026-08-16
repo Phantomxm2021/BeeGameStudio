@@ -29,7 +29,7 @@ type InitialRunInput = Omit<
   confirmedBriefDigest?: string
   /** Downstream fixtures default to an already completed Foundation pass. */
   foundationDraftComplete?: boolean
-  /** Resource and later phases must opt into a current frozen Checklist pass. */
+  /** Retained in fixtures; checklist completion is now a deterministic gate. */
   checklistApproved?: boolean
 }
 
@@ -62,28 +62,5 @@ export function createTestDeliveryRun(input: InitialRunInput): DeliveryRun {
           : [...CANONICAL_FOUNDATION_DOCUMENTS],
     },
     resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
-    ...(input.checklistApproved
-      ? {
-          documentReviewState: {
-            ...run.documentReviewState,
-            approvals: {
-              ...run.documentReviewState.approvals,
-              checklist: {
-                scope: 'checklist' as const,
-                revision: /^[a-f0-9]{64}$/u.test(run.revision.document)
-                  ? run.revision.document
-                  : 'a'.repeat(64),
-                reportPath: `.beegame/reviews/checklist/${
-                  /^[a-f0-9]{64}$/u.test(run.revision.document)
-                    ? run.revision.document
-                    : 'a'.repeat(64)
-                }/review.md`,
-                reportDigest: 'a'.repeat(64),
-                approvedAt: '2026-08-05T00:00:00.000Z',
-              },
-            },
-          },
-        }
-      : {}),
   }
 }

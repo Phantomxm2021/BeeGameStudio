@@ -39,7 +39,7 @@ import {
   type WorkflowEvent,
 } from '../beegame/delivery-workflow/types'
 import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
-import { createDocumentReviewRun } from '../beegame/delivery-workflow/document-review-stage'
+import { createFoundationReviewState } from '../beegame/delivery-workflow/foundation-review-state'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -1203,16 +1203,16 @@ describe('delivery workflow session continuation', () => {
       ...baseRun,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      documentReviewState: {
-        ...baseRun.documentReviewState,
-        activeRun: {
-          ...createDocumentReviewRun({
-            scope: 'foundation',
+      foundationReviewState: {
+          ...createFoundationReviewState({
+            mode: 'initial',
             revision: reviewRevision,
+            attempt: 1,
           }),
-          reports: createDocumentReviewRun({
-            scope: 'foundation',
+          reports: createFoundationReviewState({
+            mode: 'initial',
             revision: reviewRevision,
+            attempt: 1,
           }).reports.map((report, index) =>
             index < 2
               ? {
@@ -1246,12 +1246,10 @@ describe('delivery workflow session continuation', () => {
           ),
           status: 'completed',
           verdict: 'NEEDS_REVISION',
-          affectedPaths: ['docs/GDD.md'],
           finalReportPath: reportPath,
           finalReportDigest: createHash('sha256')
             .update(reportJson)
             .digest('hex'),
-        },
       },
       foundationRemediationState: {
         reviewPath: reportPath,
@@ -1328,7 +1326,6 @@ describe('delivery workflow session continuation', () => {
       verdict: 'NEEDS_REVISION',
       finalReportPath: reportPath,
       conflictCount: 1,
-      affectedPaths: ['docs/GDD.md'],
       priorConflictStatus: [],
       conflicts: [
         {
@@ -1338,11 +1335,11 @@ describe('delivery workflow session continuation', () => {
           requiredOutcome: 'Use one integer reward unit.',
         },
       ],
-      elapsedMs: 10_000,
+      elapsedMs: 20_000,
       usage: {
-        input_tokens: 120,
-        cache_read_tokens: 340,
-        completion_tokens: 56,
+        input_tokens: 220,
+        cache_read_tokens: 640,
+        completion_tokens: 96,
       },
       remediationLanes: [
         {

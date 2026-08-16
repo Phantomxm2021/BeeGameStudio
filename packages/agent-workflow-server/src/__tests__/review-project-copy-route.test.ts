@@ -114,20 +114,18 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     expect(payload.project.id).not.toBe(projectId)
     expect(payload.project.root_path).not.toBe(sourceWorkspace)
     expect(payload.phase).toBe('DOCUMENT_REVIEW')
-    expect(workflowWorkerStarts()).toBe(1)
+    expect(workflowWorkerStarts()).toBe(2)
     const copiedStore = createRunStore(payload.project.root_path, ownerId)
     expect(await copiedStore.load()).toMatchObject({
       runId: payload.runId,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       confirmedBriefContext: 'The durable confirmed source brief.',
-      documentReviewState: {
-        activeRun: {
-          status: 'running',
-          reports: expect.arrayContaining([
-            expect.objectContaining({ status: 'running' }),
-          ]),
-        },
+      foundationReviewState: {
+        status: 'running',
+        reports: expect.arrayContaining([
+          expect.objectContaining({ status: 'running' }),
+        ]),
       },
     })
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {

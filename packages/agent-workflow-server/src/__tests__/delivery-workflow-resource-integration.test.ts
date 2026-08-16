@@ -3,7 +3,7 @@ import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 
 describe('canonical resource-content workflow', () => {
-  it('moves passed resources directly to complete document review', () => {
+  it('moves passed resources directly to atomic task planning', () => {
     const run = {
       ...createTestDeliveryRun({
         runId: 'resource-review',
@@ -28,12 +28,12 @@ describe('canonical resource-content workflow', () => {
     })
 
     expect(next).toMatchObject({
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'COMPREHENSIVE_REVIEW',
+      phase: 'ATOMIC_TASK_PLANNING',
+      documentStep: undefined,
     })
   })
 
-  it('rejects task planning without the current complete report approval', () => {
+  it('plans tasks without a retired complete-review approval', () => {
     const run = {
       ...createTestDeliveryRun({
         runId: 'resource-gate',
@@ -58,8 +58,31 @@ describe('canonical resource-content workflow', () => {
       },
     }
 
-    expect(() =>
-      transitionDeliveryRun(run, { type: 'tasks_planned', tasks: [] }),
-    ).toThrow('current comprehensive review approval')
+    const next = transitionDeliveryRun(run, {
+      type: 'tasks_planned',
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Implement the first verified slice',
+          checklistIds: ['check-1'],
+          resourceIds: ['resource-1'],
+          contentIds: [],
+          dependsOn: [],
+          allowedPaths: ['src/game.ts'],
+          expectedArtifacts: ['src/game.ts'],
+          verification: [
+            {
+              kind: 'test',
+              commandOrAction: 'bun test',
+              expectedResult: 'passes',
+            },
+          ],
+          status: 'pending',
+          attempt: 0,
+          evidenceRefs: ['.beegame/workflow/evidence/resources.json'],
+        },
+      ],
+    })
+    expect(next.phase).toBe('IMPLEMENTATION')
   })
 })

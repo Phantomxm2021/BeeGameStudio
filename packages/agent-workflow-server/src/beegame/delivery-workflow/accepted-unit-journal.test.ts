@@ -14,18 +14,6 @@ describe('accepted workflow unit journal', () => {
       ...previous,
       phase: 'DOCUMENT_REVIEW' as const,
       documentStep: 'CHECKLIST_DRAFTING' as const,
-      documentReviewState: {
-        ...previous.documentReviewState,
-        approvals: {
-          foundation: {
-            scope: 'foundation' as const,
-            revision: previous.revision.document,
-            reportPath: `.beegame/reviews/foundation/${previous.revision.document}/review.json`,
-            reportDigest: 'a'.repeat(64),
-            approvedAt: previous.updatedAt,
-          },
-        },
-      },
     }
 
     expect(deriveAcceptedWorkflowUnits(previous, next)).toEqual([])

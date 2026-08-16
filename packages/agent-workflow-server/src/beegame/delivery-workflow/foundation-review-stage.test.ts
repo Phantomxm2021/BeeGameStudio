@@ -1,6 +1,14 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
+import { foundationReviewEvidenceStagingPath } from './foundation-review-evidence'
+import { foundationReviewStagingPath } from './foundation-review'
 import { createFoundationReviewState } from './foundation-review-state'
-import { buildFoundationReviewDispatches } from './foundation-review-stage'
+import {
+  acceptFoundationReviewWorkerTerminal,
+  buildFoundationReviewDispatches,
+} from './foundation-review-stage'
 
 const revision = 'a'.repeat(64)
 
@@ -95,5 +103,128 @@ describe('foundation review dispatch barrier', () => {
       path: '.beegame/reviews/foundation/prior/review.json',
       digest: 'e'.repeat(64),
     })
+  })
+
+  test('accepts specialist and final bytes only for the assigned current revision', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-stage-'))
+    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const specialistPath = foundationReviewEvidenceStagingPath(
+      workspacePath,
+      revision,
+      'contract-specialist',
+    )
+    await mkdir(dirname(specialistPath), { recursive: true })
+    await writeFile(
+      specialistPath,
+      JSON.stringify({
+        version: 1,
+        scope: 'foundation',
+        revision,
+        role: 'contract-specialist',
+        candidates: [],
+      }),
+      'utf8',
+    )
+    const afterContract = await acceptFoundationReviewWorkerTerminal({
+      state: initial,
+      workspacePath,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'contract-specialist',
+        reportPath: `.beegame/reviews/foundation/${revision}/parts/contract.json`,
+      },
+    })
+    expect(afterContract.reports[0]).toMatchObject({
+      role: 'contract-specialist',
+      status: 'completed',
+    })
+    expect(afterContract.reports[0].digest).toMatch(/^[a-f0-9]{64}$/u)
+
+    const integrationPath = foundationReviewEvidenceStagingPath(
+      workspacePath,
+      revision,
+      'integration-specialist',
+    )
+    await mkdir(dirname(integrationPath), { recursive: true })
+    await writeFile(
+      integrationPath,
+      JSON.stringify({
+        version: 1,
+        scope: 'foundation',
+        revision,
+        role: 'integration-specialist',
+        candidates: [],
+      }),
+      'utf8',
+    )
+    const readyForFinal = await acceptFoundationReviewWorkerTerminal({
+      state: afterContract,
+      workspacePath,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'integration-specialist',
+        reportPath: `.beegame/reviews/foundation/${revision}/parts/integration.json`,
+      },
+    })
+    const finalStagingPath = foundationReviewStagingPath(
+      workspacePath,
+      revision,
+      'foundation-initial-1-final',
+    )
+    await mkdir(dirname(finalStagingPath), { recursive: true })
+    await writeFile(
+      finalStagingPath,
+      JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision,
+        verdict: 'READY',
+        priorConflictStatus: [],
+        conflicts: [],
+      }),
+      'utf8',
+    )
+    const completed = await acceptFoundationReviewWorkerTerminal({
+      state: readyForFinal,
+      workspacePath,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'final',
+        reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+      },
+    })
+    expect(completed).toMatchObject({
+      status: 'completed',
+      verdict: 'READY',
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+    })
+
+    await expect(
+      acceptFoundationReviewWorkerTerminal({
+        state: initial,
+        workspacePath,
+        currentRevision: 'f'.repeat(64),
+        terminal: {
+          workerType: 'document-reviewer',
+          status: 'completed',
+          revision,
+          mode: 'initial',
+          role: 'integration-specialist',
+          reportPath: `.beegame/reviews/foundation/${revision}/parts/integration.json`,
+        },
+      }),
+    ).rejects.toThrow('canonical artifacts changed during foundation review')
   })
 })

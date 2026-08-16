@@ -137,7 +137,6 @@ const WORKFLOW_SUBSTAGES: readonly WorkflowCardSubstage[] = [
   'INITIAL_REVIEW',
   'REPAIRING',
   'CHECKLIST_DRAFTING',
-  'CHECKLIST_REVIEW',
 ]
 
 const WORKFLOW_TASK_STATUSES: readonly WorkflowCardTask['status'][] = [

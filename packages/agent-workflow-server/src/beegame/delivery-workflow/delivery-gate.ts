@@ -1,6 +1,7 @@
 import { computeResourceRevision, computeWorkspaceRevision } from './revision'
 import { createRunStore } from './run-store'
 import { isWorkflowEvidenceFile } from './evidence'
+import { readFoundationReviewArtifact } from './foundation-review'
 
 export type WorkflowDeliveryGate = {
   allowed: boolean
@@ -32,15 +33,14 @@ export async function evaluateWorkflowDeliveryGate(input: {
     }
   }
   if (
-    !run.revision.resource ||
-    run.documentReviewState.approvals.complete?.revision !==
-      run.revision.resource
+    run.foundationReviewState?.status !== 'completed' ||
+    run.foundationReviewState.verdict !== 'READY' ||
+    !run.foundationReviewState.finalReportPath ||
+    !run.foundationReviewState.finalReportDigest
   ) {
     return {
       allowed: false,
-      issues: [
-        'Current workflow has no current comprehensive review approval.',
-      ],
+      issues: ['Current workflow has no accepted Foundation review.'],
     }
   }
   if (run.evidence.resourcePreparation?.status !== 'passed') {
@@ -55,19 +55,18 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed implementation-audit evidence.'],
     }
   }
-  const completeApproval = run.documentReviewState.approvals.complete
   let reviewReportCurrent = false
-  if (completeApproval) {
-    try {
-      const bytes = await readFile(
-        resolve(input.workspacePath, completeApproval.reportPath),
-      )
-      reviewReportCurrent =
-        createHash('sha256').update(bytes).digest('hex') ===
-        completeApproval.reportDigest
-    } catch {
-      reviewReportCurrent = false
-    }
+  try {
+    const accepted = await readFoundationReviewArtifact({
+      workspacePath: input.workspacePath,
+      path: run.foundationReviewState.finalReportPath,
+      expectedDigest: run.foundationReviewState.finalReportDigest,
+    })
+    reviewReportCurrent =
+      accepted.review.revision === run.foundationReviewState.revision &&
+      accepted.review.verdict === 'READY'
+  } catch {
+    reviewReportCurrent = false
   }
   if (
     !reviewReportCurrent ||
@@ -85,7 +84,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
     return {
       allowed: false,
       issues: [
-        'Current comprehensive-review, resource-production or implementation-audit evidence file is missing or outside the project workspace.',
+        'Current Foundation-review, resource-production or implementation-audit evidence file is missing or invalid.',
       ],
     }
   }

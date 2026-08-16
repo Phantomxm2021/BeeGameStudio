@@ -233,11 +233,11 @@ describe('displayModels', () => {
             currentPhase: 'DOCUMENT_REVIEW',
             phaseIndex: 3,
             phaseCount: 9,
-            substage: 'CHECKLIST_REVIEW',
+            substage: 'INITIAL_REVIEW',
             convergencePass: 2,
-            documentStep: 'CHECKLIST_REVIEW',
+            documentStep: 'FOUNDATION_REVIEW',
             documentReview: {
-              scope: 'checklist',
+              scope: 'foundation',
               status: 'running',
               attempt: 2,
               elapsedMs: 20_000,
@@ -248,8 +248,8 @@ describe('displayModels', () => {
               },
               reports: [
                 {
-                  role: 'checklist',
-                  path: 'parts/checklist.md',
+                  role: 'contract-specialist',
+                  path: 'parts/contract-specialist.json',
                   status: 'running',
                   durationMs: 10_000,
                   usage: {
@@ -325,11 +325,11 @@ describe('displayModels', () => {
         currentPhase: 'DOCUMENT_REVIEW',
         phaseIndex: 3,
         phaseCount: 9,
-        substage: 'CHECKLIST_REVIEW',
+        substage: 'INITIAL_REVIEW',
         convergencePass: 2,
-        documentStep: 'CHECKLIST_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
         documentReview: {
-          scope: 'checklist',
+          scope: 'foundation',
           status: 'running',
           attempt: 2,
           elapsedMs: 20_000,
@@ -340,8 +340,8 @@ describe('displayModels', () => {
           },
           reports: [
             {
-              role: 'checklist',
-              path: 'parts/checklist.md',
+              role: 'contract-specialist',
+              path: 'parts/contract-specialist.json',
               status: 'running',
               durationMs: 10_000,
               usage: {

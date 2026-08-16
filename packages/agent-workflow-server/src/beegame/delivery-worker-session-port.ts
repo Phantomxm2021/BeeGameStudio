@@ -26,26 +26,14 @@ import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   documentAuthorTerminalSchema,
-  documentReviewerTerminalSchema,
+  foundationReviewWorkerTerminalSchema,
   implementationAuditorTerminalSchema,
   questionAnswerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import {
-  acceptFinalReport,
-  acceptSpecialistReport,
-  type DocumentReviewScope,
-} from './delivery-workflow/document-review-report'
-import {
-  acceptFoundationReview,
-  readFoundationReviewArtifact,
-} from './delivery-workflow/foundation-review'
+import { readFoundationReviewArtifact } from './delivery-workflow/foundation-review'
 import { FOUNDATION_REMEDIATION_LANES } from './delivery-workflow/foundation-remediation'
-import type {
-  DocumentReviewAssignment,
-  DocumentReviewRole,
-} from './delivery-workflow/document-review-topology'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -66,67 +54,32 @@ import {
 } from './foundation-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { readAuthoredDocumentReceipt } from './authored-document-receipt'
-import { computeCurrentDocumentReviewRevision } from './delivery-workflow/document-review-stage'
 
 const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
-      assignment: DocumentReviewAssignment
-      revisionVerification:
-        | {
-            kind: 'document'
-            confirmedBriefDigest: string
-            prerequisiteReports: Array<{ path: string; digest: string }>
-          }
-        | {
-            kind: 'resource'
-            confirmedBriefDigest: string
-            prerequisiteReports: Array<{ path: string; digest: string }>
-          }
-      partDigests: Record<string, string>
-      allowedAffectedPaths: string[]
+      mode: 'initial' | 'verification'
+      role: 'contract-specialist' | 'integration-specialist' | 'final'
+      assignment: {
+        sourcePaths: string[]
+        verificationSourcePaths: string[]
+        stagingOutputPaths: [string]
+        committedOutputPaths: [string]
+      }
     }
   | undefined {
   if (request.workerType !== 'document-reviewer') return undefined
   const assignment = request.contract.assignment
-  const revisionVerification = request.contract.revisionVerification
-  const partDigests = request.contract.partDigests
-  const allowedAffectedPaths = request.contract.allowedAffectedPaths
   if (
     !assignment ||
     typeof assignment !== 'object' ||
-    Array.isArray(assignment) ||
-    !revisionVerification ||
-    typeof revisionVerification !== 'object' ||
-    Array.isArray(revisionVerification) ||
-    !partDigests ||
-    typeof partDigests !== 'object' ||
-    Array.isArray(partDigests) ||
-    !Array.isArray(allowedAffectedPaths)
+    Array.isArray(assignment)
   )
-    throw new Error('document reviewer report contract is invalid')
-  const revisionRecord = revisionVerification as Record<string, unknown>
-  const prerequisiteReports = revisionRecord.prerequisiteReports
-  if (
-    (revisionRecord.kind !== 'document' && revisionRecord.kind !== 'resource') ||
-    typeof revisionRecord.confirmedBriefDigest !== 'string' ||
-    !/^[a-f0-9]{64}$/u.test(revisionRecord.confirmedBriefDigest) ||
-    !Array.isArray(prerequisiteReports) ||
-    prerequisiteReports.some(value => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return true
-      const report = value as Record<string, unknown>
-      return (
-        typeof report.path !== 'string' ||
-        typeof report.digest !== 'string' ||
-        !/^[a-f0-9]{64}$/u.test(report.digest)
-      )
-    })
-  )
-    throw new Error('document reviewer revision verification is invalid')
+    throw new Error('Foundation Reviewer assignment is invalid')
   const record = assignment as Record<string, unknown>
-  const scope = record.scope
-  const role = record.role
+  const mode = request.contract.reviewMode
+  const role = request.contract.reviewRole
   const pathKeys = [
     'sourcePaths',
     'stagingOutputPaths',
@@ -134,48 +87,30 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
     'verificationSourcePaths',
   ] as const
   if (
-    (scope !== 'foundation' && scope !== 'checklist' && scope !== 'complete') ||
-    typeof role !== 'string' ||
+    (mode !== 'initial' && mode !== 'verification') ||
+    (role !== 'contract-specialist' &&
+      role !== 'integration-specialist' &&
+      role !== 'final') ||
+    record.scope !== 'foundation' ||
+    record.role !== role ||
     pathKeys.some(
       key =>
         !Array.isArray(record[key]) ||
         (record[key] as unknown[]).some(path => typeof path !== 'string'),
     ) ||
-    allowedAffectedPaths.some(path => typeof path !== 'string') ||
-    Object.values(partDigests).some(
-      digest => typeof digest !== 'string' || !/^[a-f0-9]{64}$/u.test(digest),
-    )
+    (record.stagingOutputPaths as unknown[]).length !== 1 ||
+    (record.committedOutputPaths as unknown[]).length !== 1
   )
-    throw new Error('document reviewer report assignment is invalid')
+    throw new Error('Foundation Reviewer assignment contract is invalid')
   return {
+    mode,
+    role,
     assignment: {
-      scope: scope as DocumentReviewScope,
-      role: role as DocumentReviewRole,
       sourcePaths: record.sourcePaths as string[],
-      stagingOutputPaths: record.stagingOutputPaths as string[],
-      committedOutputPaths: record.committedOutputPaths as string[],
       verificationSourcePaths: record.verificationSourcePaths as string[],
+      stagingOutputPaths: record.stagingOutputPaths as [string],
+      committedOutputPaths: record.committedOutputPaths as [string],
     },
-    revisionVerification: {
-      kind: revisionRecord.kind,
-      confirmedBriefDigest: revisionRecord.confirmedBriefDigest,
-      prerequisiteReports: prerequisiteReports.map(value => ({
-        path: (value as Record<string, unknown>).path as string,
-        digest: (value as Record<string, unknown>).digest as string,
-      })),
-    } as
-      | {
-          kind: 'document'
-          confirmedBriefDigest: string
-          prerequisiteReports: Array<{ path: string; digest: string }>
-        }
-      | {
-          kind: 'resource'
-          confirmedBriefDigest: string
-          prerequisiteReports: Array<{ path: string; digest: string }>
-        },
-    partDigests: partDigests as Record<string, string>,
-    allowedAffectedPaths: allowedAffectedPaths as string[],
   }
 }
 
@@ -1197,79 +1132,20 @@ async function createDeterministicDocumentReviewTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const contract = reviewerAssignmentContract(input.request)
-  if (!contract) throw new Error('document reviewer report contract is missing')
-  const { assignment } = contract
-  const currentRevision = await computeCurrentDocumentReviewRevision({
-    workspacePath: input.request.workspacePath,
-    verification: contract.revisionVerification,
-  })
-  if (assignment.scope === 'foundation') {
-    const priorReference = contract.revisionVerification.prerequisiteReports[0]
-    const priorReview = priorReference
-      ? await readFoundationReviewArtifact({
-          workspacePath: input.request.workspacePath,
-          path: priorReference.path,
-          expectedDigest: priorReference.digest,
-        })
-      : undefined
-    const accepted = await acceptFoundationReview({
-      workspacePath: input.request.workspacePath,
-      revision: input.request.revision,
-      currentRevision,
-      dispatchId: 'review-final',
-      ...(priorReview
-        ? {
-            priorReview: {
-              review: priorReview.review,
-              digest: priorReview.digest,
-            },
-          }
-        : {}),
-    })
-    return documentReviewerTerminalSchema.parse({
-      workerType: 'document-reviewer',
-      status: 'completed',
-      revision: input.request.revision,
-      scope: 'foundation',
-      role: 'final',
-      reportPaths: [accepted.path],
-    })
-  }
-  if (assignment.role === 'final') {
-    const accepted = await acceptFinalReport({
-      assignment,
-      workspacePath: input.request.workspacePath,
-      revision: input.request.revision,
-      currentRevision,
-      allowedAffectedPaths: contract.allowedAffectedPaths,
-      partDigests: contract.partDigests,
-    })
-    return documentReviewerTerminalSchema.parse({
-      workerType: 'document-reviewer',
-      status: 'completed',
-      revision: input.request.revision,
-      scope: assignment.scope,
-      role: assignment.role,
-      reportPaths: assignment.committedOutputPaths.map(path =>
-        relative(input.request.workspacePath, path).split('\\').join('/'),
-      ),
-      verdict: accepted.decision.verdict,
-      affectedPaths: accepted.decision.affectedPaths,
-    })
-  }
-  const accepted = await acceptSpecialistReport({
-    assignment,
-    workspacePath: input.request.workspacePath,
-    revision: input.request.revision,
-    currentRevision,
-  })
-  return documentReviewerTerminalSchema.parse({
+  if (!contract) throw new Error('Foundation Reviewer contract is missing')
+  void input.events
+  return foundationReviewWorkerTerminalSchema.parse({
     workerType: 'document-reviewer',
     status: 'completed',
     revision: input.request.revision,
-    scope: assignment.scope,
-    role: assignment.role,
-    reportPaths: [accepted.path],
+    mode: contract.mode,
+    role: contract.role,
+    reportPath: relative(
+      input.request.workspacePath,
+      contract.assignment.committedOutputPaths[0],
+    )
+      .split('\\')
+      .join('/'),
   })
 }
 

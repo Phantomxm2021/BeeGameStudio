@@ -21,7 +21,6 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
-import { finalReviewAssignment } from '../beegame/delivery-workflow/document-review-topology'
 import { foundationReviewStagingPath } from '../beegame/delivery-workflow/foundation-review'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
@@ -1300,7 +1299,7 @@ describe('delivery worker session credentials', () => {
       const stagingPath = foundationReviewStagingPath(
         workspacePath,
         revision,
-        'review-final',
+        'foundation-initial-1-final',
       )
       await mkdir(dirname(stagingPath), { recursive: true })
       await writeFile(
@@ -1335,12 +1334,18 @@ describe('delivery worker session credentials', () => {
         sessions,
         userId: 'user-1',
       })
-      const assignment = finalReviewAssignment({
+      const assignment = {
         scope: 'foundation',
-        workspacePath,
-        revision,
-        specialists: [],
-      })
+        role: 'final',
+        sourcePaths: [],
+        verificationSourcePaths: CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+          join(workspacePath, path),
+        ),
+        stagingOutputPaths: [stagingPath],
+        committedOutputPaths: [
+          join(workspacePath, `.beegame/reviews/foundation/${revision}/review.json`),
+        ],
+      } as const
 
       await port.start({
         dispatchId: 'dispatch-foundation-review',
@@ -1353,14 +1358,12 @@ describe('delivery worker session credentials', () => {
         revision,
         allowedPaths: assignment.stagingOutputPaths,
         contract: {
+          reviewScope: 'foundation',
+          reviewMode: 'initial',
+          reviewRole: 'final',
           assignment,
-          revisionVerification: {
-            kind: 'document',
-            confirmedBriefDigest,
-            prerequisiteReports: [],
-          },
-          partDigests: {},
-          allowedAffectedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+          confirmedBriefDigest,
+          packetDigests: {},
         },
       })
 
@@ -1370,11 +1373,9 @@ describe('delivery worker session credentials', () => {
         workerType: 'document-reviewer',
         status: 'completed',
         revision,
-        scope: 'foundation',
+        mode: 'initial',
         role: 'final',
-        reportPaths: [
-          `.beegame/reviews/foundation/${revision}/review.json`,
-        ],
+        reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

@@ -5983,10 +5983,10 @@ function documentReviewForDisplay(
   workflow: JsonObject,
   workspacePath?: string,
 ): JsonObject | undefined {
-  const state = isObject(workflow.documentReviewState)
-    ? workflow.documentReviewState
+  const state = isObject(workflow.foundationReviewState)
+    ? workflow.foundationReviewState
     : undefined
-  const run = isObject(state?.activeRun) ? state.activeRun : undefined
+  const run = state
   if (!run) return undefined
   const reports: JsonObject[] = Array.isArray(run.reports)
     ? run.reports.flatMap(report => {
@@ -6107,7 +6107,6 @@ function documentReviewForDisplay(
     typeof run.finalReportDigest === 'string'
       ? run.finalReportDigest
       : undefined
-  let finalReportMarkdown: string | undefined
   let foundationReviewProjection: JsonObject | undefined
   let reportIntegrityFailure: string | undefined
   if (workspacePath && finalReportPath) {
@@ -6123,18 +6122,15 @@ function documentReviewForDisplay(
         )
           reportIntegrityFailure =
             'document review report bytes no longer match the accepted digest'
-        else if (run.scope === 'foundation') {
+        else {
           const review = foundationReviewSchema.parse(
             JSON.parse(bytes.toString('utf8')),
           )
-          const affectedPaths = foundationReviewAffectedPaths(review)
           if (
             absolute !==
               foundationReviewPath(workspacePath, review.revision) ||
             review.revision !== run.revision ||
-            review.verdict !== run.verdict ||
-            JSON.stringify(affectedPaths) !==
-              JSON.stringify(run.affectedPaths ?? [])
+            review.verdict !== run.verdict
           )
             reportIntegrityFailure =
               'document review JSON does not match the accepted workflow state'
@@ -6144,34 +6140,23 @@ function documentReviewForDisplay(
               priorConflictStatus: review.priorConflictStatus,
               conflicts: review.conflicts,
             }
-        } else finalReportMarkdown = bytes.toString('utf8')
+        }
       } catch {
-        reportIntegrityFailure =
-          run.scope === 'foundation'
-            ? 'document review JSON is unavailable or invalid'
-            : 'document review report is unavailable'
+        reportIntegrityFailure = 'document review JSON is unavailable or invalid'
       }
     }
   }
   return {
-    ...(typeof run.scope === 'string' ? { scope: run.scope } : {}),
+    scope: 'foundation',
     ...(typeof run.status === 'string' ? { status: run.status } : {}),
     ...(typeof run.attempt === 'number' ? { attempt: run.attempt } : {}),
     reports,
     ...(reviewUsage ? { usage: reviewUsage } : {}),
     ...(elapsedMs !== undefined ? { elapsedMs: Math.max(0, elapsedMs) } : {}),
     ...(typeof run.verdict === 'string' ? { verdict: run.verdict } : {}),
-    ...(Array.isArray(run.affectedPaths)
-      ? {
-          affectedPaths: run.affectedPaths.filter(
-            (path): path is string => typeof path === 'string',
-          ),
-        }
-      : {}),
     ...(finalReportPath ? { finalReportPath } : {}),
     ...(foundationReviewProjection ?? {}),
     ...(remediationLanes ? { remediationLanes } : {}),
-    ...(finalReportMarkdown ? { finalReportMarkdown } : {}),
     ...(reportIntegrityFailure
       ? { failureReason: reportIntegrityFailure }
       : typeof run.failureReason === 'string'
@@ -6213,11 +6198,9 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const review = documentReviewForDisplay(workflow, workspacePath)
-  const activeReviewRun =
-    isObject(workflow.documentReviewState) &&
-    isObject(workflow.documentReviewState.activeRun)
-      ? workflow.documentReviewState.activeRun
-      : undefined
+  const activeReviewRun = isObject(workflow.foundationReviewState)
+    ? workflow.foundationReviewState
+    : undefined
   const reviewReports = Array.isArray(activeReviewRun?.reports)
     ? activeReviewRun.reports.flatMap(report =>
         isObject(report) &&

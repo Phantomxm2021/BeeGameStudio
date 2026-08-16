@@ -2,7 +2,6 @@ import { z } from 'zod/v4'
 import type {
   AtomicTask,
   AcceptedWorkflowUnit,
-  DocumentReviewState,
   DeliveryPhase,
   DeliveryRun,
   DispatchRecord,
@@ -16,6 +15,7 @@ import type {
   WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
+import type { FoundationReviewState } from './foundation-review-state'
 import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -198,95 +198,32 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   })
   .strict()
 
-const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
+const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
   .object({
-    activeRun: z
-      .object({
-        scope: z.enum(['foundation', 'checklist', 'complete']),
-        revision: z.string().regex(/^[a-f0-9]{64}$/u),
-        status: z.enum(['pending', 'running', 'completed', 'failed']),
-        reports: z.array(
-          z
-            .object({
-              role: z.string().min(1),
-              path: z.string().min(1),
-              digest: z
-                .string()
-                .regex(/^[a-f0-9]{64}$/u)
-                .optional(),
-              status: z.enum(['pending', 'running', 'completed', 'failed']),
-              dispatch: dispatchRecordSchema.optional(),
-              failureReason: z.string().min(1).optional(),
-              durationMs: z.number().finite().nonnegative().optional(),
-              usage: workflowUsageSchema.optional(),
-            })
-            .strict(),
-        ),
-        finalReportPath: z.string().min(1).optional(),
-        finalReportDigest: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/u)
-          .optional(),
-        priorReviewPath: z.string().min(1).optional(),
-        priorReviewDigest: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/u)
-          .optional(),
-        verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
-        affectedPaths: z.array(z.string().min(1)).optional(),
-        remediatedPaths: z.array(z.string().min(1)).optional(),
-        attempt: z.number().int().positive(),
-        approvedFoundationRevision: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/u)
-          .optional(),
-        failureReason: z.string().min(1).optional(),
-      })
-      .strict()
-      .optional(),
-    approvals: z
-      .object({
-        foundation: z
-          .object({
-            scope: z.literal('foundation'),
-            revision: z.string().regex(/^[a-f0-9]{64}$/u),
-            reportPath: z.string().min(1),
-            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-            approvedAt: z.string().datetime(),
-          })
-          .strict()
-          .optional(),
-        checklist: z
-          .object({
-            scope: z.literal('checklist'),
-            revision: z.string().regex(/^[a-f0-9]{64}$/u),
-            reportPath: z.string().min(1),
-            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-            approvedAt: z.string().datetime(),
-          })
-          .strict()
-          .optional(),
-        complete: z
-          .object({
-            scope: z.literal('complete'),
-            revision: z.string().regex(/^[a-f0-9]{64}$/u),
-            reportPath: z.string().min(1),
-            reportDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-            approvedAt: z.string().datetime(),
-          })
-          .strict()
-          .optional(),
-      })
-      .strict()
-      .default({}),
-    attempts: z
-      .object({
-        foundation: z.number().int().nonnegative(),
-        checklist: z.number().int().nonnegative(),
-        complete: z.number().int().nonnegative(),
-      })
-      .strict()
-      .default({ foundation: 0, checklist: 0, complete: 0 }),
+    revision: z.string().regex(/^[a-f0-9]{64}$/u),
+    mode: z.enum(['initial', 'verification']),
+    attempt: z.number().int().positive(),
+    status: z.enum(['pending', 'running', 'completed', 'failed']),
+    reports: z.array(
+      z
+        .object({
+          role: z.enum(['contract-specialist', 'integration-specialist', 'final']),
+          path: z.string().min(1),
+          status: z.enum(['pending', 'running', 'completed', 'failed']),
+          dispatch: dispatchRecordSchema.optional(),
+          digest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+          durationMs: z.number().finite().nonnegative().optional(),
+          usage: workflowUsageSchema.optional(),
+          failureReason: z.string().min(1).optional(),
+        })
+        .strict(),
+    ),
+    priorReviewPath: z.string().min(1).optional(),
+    priorReviewDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+    finalReportPath: z.string().min(1).optional(),
+    finalReportDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+    verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
+    failureReason: z.string().min(1).optional(),
   })
   .strict()
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
@@ -515,8 +452,6 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
-        'CHECKLIST_REVIEW',
-        'COMPREHENSIVE_REVIEW',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -652,8 +587,6 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
           'FOUNDATION_DRAFTING',
           'FOUNDATION_REVIEW',
           'CHECKLIST_DRAFTING',
-          'CHECKLIST_REVIEW',
-          'COMPREHENSIVE_REVIEW',
         ])
         .optional(),
       status: z.enum(DELIVERY_RUN_STATUSES),
@@ -722,8 +655,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
-        'CHECKLIST_REVIEW',
-        'COMPREHENSIVE_REVIEW',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -739,7 +670,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
-    documentReviewState: documentReviewStateSchema,
+    foundationReviewState: foundationReviewStateSchema.optional(),
     foundationDraftState: foundationDraftStateSchema,
     foundationRemediationState: foundationRemediationStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
@@ -765,7 +696,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       run.phase === 'ACCEPTANCE' ||
       run.phase === 'DELIVERY' ||
       (run.phase === 'DOCUMENT_DRAFTING' &&
-        run.documentReviewState.activeRun?.verdict === 'NEEDS_REVISION')
+        run.foundationRemediationState !== undefined)
     if (
       requiresCompletedFoundation &&
       run.foundationDraftState.completedPaths.length !==
@@ -778,28 +709,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           'foundation review and downstream phases require all durable authoring checkpoints',
       })
 
-    const requiresFrozenChecklistApproval =
-      run.status !== 'completed' &&
-      (run.phase === 'RESOURCE_PREPARATION' ||
-        run.phase === 'ATOMIC_TASK_PLANNING' ||
-        run.phase === 'IMPLEMENTATION' ||
-        run.phase === 'IMPLEMENTATION_AUDIT' ||
-        run.phase === 'ACCEPTANCE' ||
-        run.phase === 'DELIVERY' ||
-        (run.phase === 'DOCUMENT_REVIEW' &&
-          run.documentStep === 'COMPREHENSIVE_REVIEW'))
-    const checklistApproval = run.documentReviewState.approvals.checklist
-    if (
-      requiresFrozenChecklistApproval &&
-      (!checklistApproval ||
-        checklistApproval.revision !== run.revision.document)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['documentReviewState', 'approvals', 'checklist'],
-        message:
-          'resource and downstream phases require the frozen current checklist approval',
-      })
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>

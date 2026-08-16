@@ -46,8 +46,6 @@ const stageLabel: Record<string, string> = {
   FOUNDATION_DRAFTING: '基础文档编写',
   FOUNDATION_REVIEW: '基础文档审计',
   CHECKLIST_DRAFTING: 'Gameplay Checklist 编写',
-  CHECKLIST_REVIEW: 'Gameplay Checklist 审计',
-  COMPREHENSIVE_REVIEW: '八产物综合审计',
   BRIEF_CONFIRMED: '需求确认',
   DOCUMENT_DRAFTING: '基础文档编写',
   DOCUMENT_REVIEW: '文档审计',
@@ -420,16 +418,12 @@ export function WorkflowStageCard({
     snapshot.substage === 'INITIAL_DRAFTING'
       ? '基础文档编写'
       : snapshot.substage === 'INITIAL_REVIEW'
-        ? snapshot.documentStep === 'COMPREHENSIVE_REVIEW'
-          ? '完整交付审计'
-          : '基础文档审计'
+        ? '基础文档审计'
         : snapshot.substage === 'REPAIRING'
           ? '修订审计影响路径'
           : snapshot.substage === 'CHECKLIST_DRAFTING'
             ? '编写验收清单'
-            : snapshot.substage === 'CHECKLIST_REVIEW'
-              ? '审计验收清单'
-              : undefined;
+            : undefined;
   const stageTitle = isRecoverable
     ? '工作流需要恢复'
     : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex))
@@ -765,18 +759,6 @@ export function WorkflowStageCard({
                         </li>
                       ))}
                     </ul>
-                  </div>
-                ) : null}
-                {snapshot.documentReview.finalReportMarkdown ? (
-                  <div className="mt-3 max-h-72 overflow-y-auto border-t border-white/10 pt-3 text-xs text-zinc-300">
-                    <MarkdownErrorBoundary
-                      messageId={`workflow-review-${runId}-${snapshot.stageId}`}
-                      rawContent={snapshot.documentReview.finalReportMarkdown}
-                    >
-                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                        {snapshot.documentReview.finalReportMarkdown}
-                      </ReactMarkdown>
-                    </MarkdownErrorBoundary>
                   </div>
                 ) : null}
                 {snapshot.documentReview.failureReason ? (

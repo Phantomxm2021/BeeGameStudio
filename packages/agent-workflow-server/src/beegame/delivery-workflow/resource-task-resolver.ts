@@ -21,15 +21,6 @@ export async function resolveResourceProductionTask(input: {
   if (!audit.present || !(await manifestPlanIsEstablished(input.workspacePath)))
     return { task: 'RESOURCE_PLAN', inventoryReceiptValid: false }
 
-  const remediationTask = resourceRemediationTask(input.run)
-  if (remediationTask)
-    return {
-      task: remediationTask,
-      inventoryReceiptValid: Boolean(
-        input.run.resourceProductionState.inventoryReceipt,
-      ),
-    }
-
   const inventoryRevision = await computeResourceInventoryRevision(
     input.workspacePath,
   )
@@ -58,49 +49,6 @@ export async function resolveResourceProductionTask(input: {
     inventoryRevision,
     inventoryReceiptValid: true,
   }
-}
-
-const RESOURCE_TASK_ORDER: readonly ResourceProductionTask[] = [
-  'RESOURCE_PLAN',
-  'RESOURCE_INVENTORY',
-  'RESOURCE_CONTENT',
-  'RESOURCE_GATE',
-]
-
-function resourceRemediationTask(
-  run: DeliveryRun,
-): ResourceProductionTask | undefined {
-  const review = run.documentReviewState.activeRun
-  if (
-    review?.scope !== 'complete' ||
-    review.verdict !== 'NEEDS_REVISION' ||
-    run.resourceProductionState.currentTask === 'RESOURCE_GATE'
-  )
-    return undefined
-  const cursor = run.resourceProductionState.currentTask
-  const targetTasks = new Set(
-    (review.affectedPaths ?? []).flatMap(path => {
-      const normalized = path.replaceAll('\\', '/')
-      if (normalized === 'assets/asset-manifest.json')
-        return ['RESOURCE_PLAN' as const]
-      if (
-        normalized.startsWith('assets/runtime/') ||
-        normalized.startsWith('assets/generated/')
-      )
-        return ['RESOURCE_INVENTORY' as const]
-      if (normalized.startsWith('assets/content/'))
-        return ['RESOURCE_CONTENT' as const]
-      return []
-    }),
-  )
-  const cursorIndex = RESOURCE_TASK_ORDER.indexOf(cursor)
-  if (cursorIndex < 0)
-    throw new Error(`unknown resource task cursor: ${cursor}`)
-  for (const task of RESOURCE_TASK_ORDER.slice(cursorIndex)) {
-    if (task === 'RESOURCE_GATE') continue
-    if (targetTasks.has(task)) return task
-  }
-  return undefined
 }
 
 async function manifestPlanIsEstablished(

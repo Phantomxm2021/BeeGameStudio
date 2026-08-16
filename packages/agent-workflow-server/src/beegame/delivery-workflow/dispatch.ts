@@ -107,7 +107,7 @@ function reviewerDispatch(
   run: DeliveryRun,
   role: string,
 ): DispatchRecord | undefined {
-  return run.documentReviewState.activeRun?.reports.find(
+  return run.foundationReviewState?.reports.find(
     report => report.role === role,
   )?.dispatch
 }
@@ -134,14 +134,14 @@ function dispatchLocation(
         record: lane.dispatch,
         remediationLaneId: lane.id,
       }
-  for (const report of run.documentReviewState.activeRun?.reports ?? [])
+  for (const report of run.foundationReviewState?.reports ?? [])
     if (report.dispatch?.dispatchId === dispatchId)
       return { record: report.dispatch, reviewRole: report.role }
   return undefined
 }
 
 function hasRunningReviewerDispatch(run: DeliveryRun): boolean {
-  return (run.documentReviewState.activeRun?.reports ?? []).some(
+  return (run.foundationReviewState?.reports ?? []).some(
     report => report.dispatch?.status === 'running',
   )
 }
@@ -228,17 +228,13 @@ function withReviewerDispatch(
   dispatch: DispatchRecord,
   performance?: { durationMs: number; usage: WorkflowUsage },
 ): DeliveryRun {
-  const activeRun = run.documentReviewState.activeRun
-  if (!activeRun)
-    throw new DispatchError('blocked', 'document review run is missing')
-  return {
-    ...run,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeRun: {
-        ...activeRun,
+  if (run.foundationReviewState?.reports.some(report => report.role === role))
+    return {
+      ...run,
+      foundationReviewState: {
+        ...run.foundationReviewState,
         status: 'running',
-        reports: activeRun.reports.map(report =>
+        reports: run.foundationReviewState.reports.map(report =>
           report.role === role
             ? {
                 ...report,
@@ -255,8 +251,8 @@ function withReviewerDispatch(
             : report,
         ),
       },
-    },
-  }
+    }
+  throw new DispatchError('blocked', `Foundation review role ${role} is missing`)
 }
 
 function withReviewerFailure(
@@ -265,34 +261,32 @@ function withReviewerFailure(
   dispatch: DispatchRecord,
   reason: string,
 ): DeliveryRun {
-  const activeRun = run.documentReviewState.activeRun
-  if (!activeRun) return run
-  const reports = activeRun.reports.map(report =>
-    report.role === role
-      ? {
-          ...report,
-          status: 'failed' as const,
-          dispatch,
-          failureReason: reason,
-        }
-      : report,
-  )
-  const othersRunning = reports.some(report => report.status === 'running')
-  return {
-    ...run,
-    status: othersRunning ? 'running' : 'needs_action',
-    blockedReason: othersRunning ? undefined : reason,
-    documentReviewState: {
-      ...run.documentReviewState,
-      activeRun: {
-        ...activeRun,
+  if (run.foundationReviewState?.reports.some(report => report.role === role)) {
+    const reports = run.foundationReviewState.reports.map(report =>
+      report.role === role
+        ? {
+            ...report,
+            status: 'failed' as const,
+            dispatch,
+            failureReason: reason,
+          }
+        : report,
+    )
+    const othersRunning = reports.some(report => report.status === 'running')
+    return {
+      ...run,
+      status: othersRunning ? 'running' : 'needs_action',
+      blockedReason: othersRunning ? undefined : reason,
+      foundationReviewState: {
+        ...run.foundationReviewState,
         status: 'failed',
         reports,
         failureReason: reason,
       },
-    },
-    thinking: othersRunning ? 'working' : 'idle',
+      thinking: othersRunning ? 'working' : 'idle',
+    }
   }
+  return run
 }
 
 function isolatedFoundationFailureStatus(
@@ -398,7 +392,7 @@ function reviewerPerformance(input: {
         ? Math.max(0, finishedAt - startedAt)
         : 0,
     usage: usageSnapshot(input.dispatch.usage),
-    reportPaths: input.result.reportPaths,
+    reportPaths: [input.result.reportPath],
   }
 }
 
@@ -523,28 +517,10 @@ function assertSingleResourceWorkAuthority(
   } as const
   const task = taskByWorker[request.workerType as keyof typeof taskByWorker]
   if (!task) return
-  const remediation = request.contract.remediation
-  const review = run.documentReviewState.activeRun
-  const hasAcceptedResourceAuthority = Boolean(
-    review?.scope === 'complete' && review.verdict === 'NEEDS_REVISION',
-  )
-  if (!hasAcceptedResourceAuthority) {
-    if (remediation !== undefined)
-      throw new DispatchError(
-        'blocked',
-        'resource remediation requires the active accepted document-review authority',
-      )
-    return
-  }
-  const expected = {
-    reviewReportPath: review!.finalReportPath,
-    affectedPaths: review!.affectedPaths,
-    sourceRevision: review!.revision,
-  }
-  if (!isDeepStrictEqual(remediation, expected))
+  if (request.contract.remediation !== undefined)
     throw new DispatchError(
       'blocked',
-      'resource remediation must exactly match the active accepted document-review authority',
+      'resource remediation contracts are not part of Foundation review',
     )
 }
 

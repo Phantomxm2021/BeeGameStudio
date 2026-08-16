@@ -35,33 +35,6 @@ export const documentAuthorTerminalSchema = z
   })
   .strict()
 
-export const documentReviewerTerminalSchema = base
-  .extend({
-    workerType: z.literal('document-reviewer'),
-    status: z.literal('completed'),
-    scope: z.enum(['foundation', 'checklist', 'complete']),
-    role: z.string().min(1),
-    reportPaths: z.array(z.string().min(1)).min(1).max(2),
-    verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
-    affectedPaths: z.array(z.string().min(1)).optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.scope !== 'foundation') return
-    if (value.role !== 'final' || value.reportPaths.length !== 1)
-      context.addIssue({
-        code: 'custom',
-        path: ['reportPaths'],
-        message: 'Foundation Reviewer requires one final review artifact',
-      })
-    if (value.verdict !== undefined || value.affectedPaths !== undefined)
-      context.addIssue({
-        code: 'custom',
-        path: ['verdict'],
-        message: 'Foundation routing fields come from the review artifact',
-      })
-  })
-
 export const foundationReviewWorkerTerminalSchema = z
   .object({
     workerType: z.literal('document-reviewer'),
@@ -269,7 +242,6 @@ export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
 
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
-  documentReviewerTerminalSchema,
   resourcePlannerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourceContentAuthorTerminalSchema,
@@ -281,10 +253,14 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   questionAnswerTerminalSchema,
 ])
 
-export type WorkerTerminalResult = z.infer<typeof workerTerminalSchema>
+export type WorkerTerminalResult =
+  | z.infer<typeof workerTerminalSchema>
+  | z.infer<typeof foundationReviewWorkerTerminalSchema>
 
 export function parseWorkerTerminalResult(
   value: unknown,
 ): WorkerTerminalResult {
+  const foundation = foundationReviewWorkerTerminalSchema.safeParse(value)
+  if (foundation.success) return foundation.data
   return workerTerminalSchema.parse(value)
 }

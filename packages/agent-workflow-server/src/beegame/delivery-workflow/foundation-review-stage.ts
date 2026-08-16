@@ -1,12 +1,17 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
+  acceptFoundationReviewEvidence,
   foundationReviewEvidencePath,
   foundationReviewEvidenceStagingPath,
   type FoundationReviewSpecialistRole,
 } from './foundation-review-evidence'
 import {
+  acceptFoundationReview,
   foundationReviewPath,
   foundationReviewStagingPath,
+  readFoundationReviewArtifact,
 } from './foundation-review'
 import {
   assertFoundationReviewState,
@@ -14,6 +19,9 @@ import {
   type FoundationReviewState,
 } from './foundation-review-state'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import {
+  foundationReviewWorkerTerminalSchema,
+} from './worker-contracts'
 
 const digestPattern = /^[a-f0-9]{64}$/u
 
@@ -141,5 +149,98 @@ export function buildFoundationReviewDispatches(input: {
           : {}),
       },
     }
+  })
+}
+
+export async function acceptFoundationReviewWorkerTerminal(input: {
+  state: FoundationReviewState
+  workspacePath: string
+  currentRevision: string
+  terminal: unknown
+}): Promise<FoundationReviewState> {
+  const state = assertFoundationReviewState(input.state)
+  const terminal = foundationReviewWorkerTerminalSchema.parse(input.terminal)
+  if (
+    terminal.revision !== state.revision ||
+    terminal.mode !== state.mode ||
+    terminal.revision !== input.currentRevision
+  )
+    throw new Error('canonical artifacts changed during foundation review')
+  const report = state.reports.find(candidate => candidate.role === terminal.role)
+  if (!report || terminal.reportPath !== report.path)
+    throw new Error('foundation review terminal does not match its assigned role')
+  if (report.status === 'completed')
+    throw new Error('foundation review report is already completed')
+
+  if (terminal.role !== 'final') {
+    const accepted = await acceptFoundationReviewEvidence({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      currentRevision: input.currentRevision,
+      role: terminal.role,
+    })
+    return assertFoundationReviewState({
+      ...state,
+      status: 'running',
+      reports: state.reports.map(candidate =>
+        candidate.role === terminal.role
+          ? {
+              ...candidate,
+              path: accepted.path,
+              digest: accepted.digest,
+              status: 'completed' as const,
+              failureReason: undefined,
+            }
+          : candidate,
+      ),
+      failureReason: undefined,
+    })
+  }
+
+  if (state.mode === 'initial') {
+    for (const specialist of state.reports.slice(0, 2)) {
+      if (specialist.status !== 'completed' || !specialist.digest)
+        throw new Error('foundation final review requires completed specialist packets')
+      const bytes = await readFile(resolve(input.workspacePath, specialist.path))
+      const digest = createHash('sha256').update(bytes).digest('hex')
+      if (digest !== specialist.digest)
+        throw new Error('foundation review specialist packet digest changed')
+    }
+  }
+  const priorReview =
+    state.mode === 'verification'
+      ? await readFoundationReviewArtifact({
+          workspacePath: input.workspacePath,
+          path: state.priorReviewPath!,
+          expectedDigest: state.priorReviewDigest!,
+        })
+      : undefined
+  const accepted = await acceptFoundationReview({
+    workspacePath: input.workspacePath,
+    revision: state.revision,
+    currentRevision: input.currentRevision,
+    dispatchId: `foundation-${state.mode}-${state.attempt}-final`,
+    ...(priorReview
+      ? { priorReview: { review: priorReview.review, digest: priorReview.digest } }
+      : {}),
+  })
+  return assertFoundationReviewState({
+    ...state,
+    status: 'completed',
+    reports: state.reports.map(candidate =>
+      candidate.role === 'final'
+        ? {
+            ...candidate,
+            path: accepted.path,
+            digest: accepted.digest,
+            status: 'completed' as const,
+            failureReason: undefined,
+          }
+        : candidate,
+    ),
+    finalReportPath: accepted.path,
+    finalReportDigest: accepted.digest,
+    verdict: accepted.review.verdict,
+    failureReason: undefined,
   })
 }

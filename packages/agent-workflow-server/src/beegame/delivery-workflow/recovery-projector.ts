@@ -7,7 +7,7 @@ import {
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
-import { createDocumentReviewRun } from './document-review-stage'
+import { createFoundationReviewState } from './foundation-review-state'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -1178,15 +1178,7 @@ function rawActiveUnitId(input: {
       )
     return documentUnitId(currentItemId)
   }
-  const reviewRun = record(record(snapshot.documentReviewState)?.activeRun)
-  const reviewScope = stringValue(reviewRun?.scope)
-  if (
-    snapshot.phase === 'DOCUMENT_REVIEW' &&
-    (reviewScope === 'foundation' ||
-      reviewScope === 'checklist' ||
-      reviewScope === 'complete')
-  )
-    return `document-review:${reviewScope}`
+  if (snapshot.phase === 'DOCUMENT_REVIEW') return 'document-review:foundation'
   const activeTaskId = stringValue(snapshot.activeTaskId)
   if (activeTaskId) return `implementation:${activeTaskId}`
   const resourceTask = stringValue(
@@ -1302,11 +1294,6 @@ function buildProjectionRun(input: {
   const reviewScope = activeUnitId?.startsWith('document-review:')
     ? activeUnitId.slice('document-review:'.length)
     : undefined
-  if (reviewScope === 'checklist' || reviewScope === 'complete')
-    recoveryError(
-      'recovery_checkpoint_missing',
-      `recovery cannot prove prerequisite approvals for the active ${reviewScope} review; restart from the last intact snapshot`,
-    )
   if (activeUnitId?.startsWith('document:')) {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
@@ -1314,12 +1301,6 @@ function buildProjectionRun(input: {
   } else if (reviewScope === 'foundation') {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
-  } else if (reviewScope === 'checklist') {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'CHECKLIST_REVIEW'
-  } else if (reviewScope === 'complete') {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'COMPREHENSIVE_REVIEW'
   } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
@@ -1455,59 +1436,15 @@ function buildProjectionRun(input: {
           }
         : {}),
     },
-    documentReviewState: (() => {
-      const rawReviewState = record(input.snapshot?.documentReviewState)
-      const scope =
-        reviewScope === 'foundation' ||
-        reviewScope === 'checklist' ||
-        reviewScope === 'complete'
-          ? reviewScope
-          : undefined
-      const rawActiveRun = record(rawReviewState?.activeRun)
-      const rawAttempt = rawActiveRun?.attempt
-      const attempt =
-        typeof rawAttempt === 'number' &&
-        Number.isInteger(rawAttempt) &&
-        rawAttempt > 0
-          ? rawAttempt
-          : 1
-      const attempts = { foundation: 0, checklist: 0, complete: 0 }
-      if (!scope) return { approvals: {}, attempts }
-      const revision =
-        scope === 'complete'
-          ? input.revision.resource
-          : input.revision.document
-      if (!revision)
-        recoveryError(
-          'recovery_checkpoint_missing',
-          `recovery cannot prove the ${scope} review revision`,
-        )
-      if (scope === 'foundation' && rawActiveRun) {
-        const expectedPath = `.beegame/reviews/foundation/${revision}/review.json`
-        const rawReports = rawActiveRun.reports
-        const rawFinalPath = rawActiveRun.finalReportPath
-        const currentTopology =
-          Array.isArray(rawReports) &&
-          rawReports.length === 1 &&
-          stringValue(record(rawReports[0])?.role) === 'final' &&
-          stringValue(record(rawReports[0])?.path) === expectedPath &&
-          (rawFinalPath === undefined || rawFinalPath === expectedPath)
-        if (!currentTopology)
-          recoveryError(
-            'recovery_checkpoint_missing',
-            'legacy Foundation review protocol cannot be projected; restart Foundation review from the last intact snapshot',
-          )
-      }
-      return {
-        approvals: {},
-        attempts: { ...attempts, [scope]: attempt },
-        activeRun: createDocumentReviewRun({
-          scope,
-          revision,
-          attempt,
-        }),
-      }
-    })(),
+    ...(reviewScope === 'foundation' && input.revision.document
+      ? {
+          foundationReviewState: createFoundationReviewState({
+            mode: 'initial',
+            revision: input.revision.document,
+            attempt: 1,
+          }),
+        }
+      : {}),
     foundationDraftState: { completedPaths: documents },
     resourceProductionState: {
       currentTask: resourceTask,
