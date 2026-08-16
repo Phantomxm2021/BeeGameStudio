@@ -102,6 +102,27 @@ function assignmentsForRun(
   })
 }
 
+export function hasCurrentDocumentReviewTopology(input: {
+  run: Pick<
+    DocumentReviewRun,
+    'scope' | 'revision' | 'approvedFoundationRevision' | 'reports'
+  >
+  workspacePath: string
+}): boolean {
+  const expectedRoles = [
+    ...assignmentsForRun(input.run, input.workspacePath).map(
+      assignment => assignment.role,
+    ),
+    'final',
+  ]
+  return (
+    input.run.reports.length === expectedRoles.length &&
+    input.run.reports.every(
+      (report, index) => report.role === expectedRoles[index],
+    )
+  )
+}
+
 export function createDocumentReviewRun(input: {
   scope: DocumentReviewScope
   revision: string
@@ -296,6 +317,21 @@ export async function recoverDocumentReviewRun(input: {
     return createDocumentReviewRun({
       scope: input.run.scope,
       revision: input.currentRevision,
+      attempt: input.run.attempt,
+      ...(input.run.approvedFoundationRevision
+        ? { approvedFoundationRevision: input.run.approvedFoundationRevision }
+        : {}),
+    })
+  if (
+    input.run.status !== 'completed' &&
+    !hasCurrentDocumentReviewTopology({
+      run: input.run,
+      workspacePath: input.workspacePath,
+    })
+  )
+    return createDocumentReviewRun({
+      scope: input.run.scope,
+      revision: input.run.revision,
       attempt: input.run.attempt,
       ...(input.run.approvedFoundationRevision
         ? { approvedFoundationRevision: input.run.approvedFoundationRevision }

@@ -13,7 +13,7 @@ const workspacePath = '/project'
 const revision = 'a'.repeat(64)
 
 describe('bounded document review topology', () => {
-  test('covers all foundation documents with five bounded specialist roles', () => {
+  test('covers all foundation documents with three complete review domains', () => {
     const assignments = documentReviewAssignments({
       scope: 'foundation',
       workspacePath,
@@ -21,11 +21,30 @@ describe('bounded document review topology', () => {
     })
 
     expect(assignments.map(value => value.role)).toEqual([
-      'gameplay',
-      'technical',
-      'experience',
-      'presentation',
-      'production',
+      'core-systems',
+      'player-experience',
+      'production-delivery',
+    ])
+    expect(assignments.map(value => value.sourcePaths)).toEqual([
+      [
+        resolve(workspacePath, 'docs/GDD.md'),
+        resolve(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
+        resolve(workspacePath, 'docs/BALANCE_DESIGN.md'),
+        resolve(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+      ],
+      [
+        resolve(workspacePath, 'docs/GDD.md'),
+        resolve(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
+        resolve(workspacePath, 'docs/ART_DIRECTION.md'),
+        resolve(workspacePath, 'docs/UI_UX_SPEC.md'),
+        resolve(workspacePath, 'docs/AUDIO_DESIGN.md'),
+      ],
+      [
+        resolve(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+        resolve(workspacePath, 'docs/ART_DIRECTION.md'),
+        resolve(workspacePath, 'docs/AUDIO_DESIGN.md'),
+        resolve(workspacePath, 'docs/ASSET_PLAN.md'),
+      ],
     ])
     expect(new Set(assignments.flatMap(value => value.sourcePaths))).toEqual(
       new Set(
@@ -34,7 +53,7 @@ describe('bounded document review topology', () => {
         ),
       ),
     )
-    expect(assignments.every(value => value.sourcePaths.length <= 3)).toBe(true)
+    expect(assignments.every(value => value.sourcePaths.length <= 5)).toBe(true)
     expect(
       assignments.every(value => value.stagingOutputPaths.length === 1),
     ).toBe(true)

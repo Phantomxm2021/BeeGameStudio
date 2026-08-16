@@ -9,11 +9,9 @@ import {
 import { CANONICAL_ASSET_MANIFEST } from './types'
 
 export type DocumentReviewRole =
-  | 'gameplay'
-  | 'technical'
-  | 'experience'
-  | 'presentation'
-  | 'production'
+  | 'core-systems'
+  | 'player-experience'
+  | 'production-delivery'
   | 'checklist'
   | 'complete-gameplay'
   | 'complete-technical'
@@ -31,15 +29,21 @@ export type DocumentReviewAssignment = {
 }
 
 const FOUNDATION_ROLE_PATHS = {
-  gameplay: [
+  'core-systems': [
     'docs/GDD.md',
     'docs/LEVEL_SCENE_DESIGN.md',
     'docs/BALANCE_DESIGN.md',
+    'docs/TECHNICAL_DESIGN.md',
   ],
-  technical: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-  experience: ['docs/GDD.md', 'docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
-  presentation: ['docs/GDD.md', 'docs/UI_UX_SPEC.md', 'docs/AUDIO_DESIGN.md'],
-  production: [
+  'player-experience': [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ],
+  'production-delivery': [
+    'docs/TECHNICAL_DESIGN.md',
     'docs/ART_DIRECTION.md',
     'docs/AUDIO_DESIGN.md',
     'docs/ASSET_PLAN.md',

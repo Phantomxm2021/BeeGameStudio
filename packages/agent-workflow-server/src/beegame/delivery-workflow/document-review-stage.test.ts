@@ -147,9 +147,9 @@ describe('document review run', () => {
 
     expect(dispatches).toHaveLength(3)
     expect(dispatches.map(value => value.contract.reviewRole)).toEqual([
-      'gameplay',
-      'technical',
-      'experience',
+      'core-systems',
+      'player-experience',
+      'production-delivery',
     ])
   })
 
@@ -183,7 +183,40 @@ describe('document review run', () => {
 
     expect(dispatches).toHaveLength(1)
     expect(dispatches[0].contract.reviewRole).toBe('final')
-    expect(Object.keys(dispatches[0].contract.partDigests)).toHaveLength(5)
+    expect(Object.keys(dispatches[0].contract.partDigests)).toHaveLength(3)
+  })
+
+  test('restarts an incomplete persisted five-role Foundation run on the same revision', async () => {
+    const workspacePath = await workspace()
+    const current = createDocumentReviewRun({ scope: 'foundation', revision })
+    const stale = {
+      ...current,
+      status: 'running' as const,
+      reports: [
+        { role: 'gameplay', path: 'old/gameplay.md', status: 'completed' as const, digest: 'c'.repeat(64) },
+        { role: 'technical', path: 'old/technical.md', status: 'pending' as const },
+        { role: 'experience', path: 'old/experience.md', status: 'pending' as const },
+        { role: 'presentation', path: 'old/presentation.md', status: 'pending' as const },
+        { role: 'production', path: 'old/production.md', status: 'pending' as const },
+        { role: 'final', path: 'old/review.md', status: 'pending' as const },
+      ],
+    }
+
+    const recovered = await recoverDocumentReviewRun({
+      run: stale,
+      workspacePath,
+      currentRevision: revision,
+    })
+
+    expect(recovered.revision).toBe(revision)
+    expect(recovered.attempt).toBe(stale.attempt)
+    expect(recovered.reports.map(value => value.role)).toEqual([
+      'core-systems',
+      'player-experience',
+      'production-delivery',
+      'final',
+    ])
+    expect(recovered.reports.every(value => value.status === 'pending')).toBe(true)
   })
 
   test('preserves only committed siblings whose bytes still match on recovery', async () => {
@@ -207,10 +240,11 @@ describe('document review run', () => {
     })
 
     expect(
-      recovered.reports.find(value => value.role === 'gameplay')?.status,
+      recovered.reports.find(value => value.role === 'core-systems')?.status,
     ).toBe('completed')
     expect(
-      recovered.reports.find(value => value.role === 'technical')?.status,
+      recovered.reports.find(value => value.role === 'player-experience')
+        ?.status,
     ).toBe('pending')
   })
 

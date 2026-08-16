@@ -202,44 +202,46 @@ describe('document review controller terminal reconciliation', () => {
     await controller.resume(run)
     expect(
       started.map(request => request.contract.reviewRole).sort(),
-    ).toEqual(['experience', 'gameplay', 'technical'])
-    const gameplay = started.find(
-      request => request.contract.reviewRole === 'gameplay',
+    ).toEqual(['core-systems', 'player-experience', 'production-delivery'])
+    const coreSystems = started.find(
+      request => request.contract.reviewRole === 'core-systems',
     )!
-    const reportPath = review.reports.find(report => report.role === 'gameplay')!
+    const reportPath = review.reports.find(
+      report => report.role === 'core-systems',
+    )!
       .path
     await mkdir(dirname(join(workspacePath, reportPath)), { recursive: true })
-    await writeFile(join(workspacePath, reportPath), '# Gameplay review\n', 'utf8')
+    await writeFile(join(workspacePath, reportPath), '# Core systems review\n', 'utf8')
 
-    await controller.dispatcher.completeDispatch(gameplay.dispatchId!, {
+    await controller.dispatcher.completeDispatch(coreSystems.dispatchId!, {
       workerType: 'document-reviewer',
       status: 'completed',
       revision,
       scope: 'foundation',
-      role: 'gameplay',
+      role: 'core-systems',
       reportPaths: [reportPath],
     })
 
     const progressed = await store.load()
     expect(
       progressed?.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'gameplay',
+        report => report.role === 'core-systems',
       ),
     ).toMatchObject({ status: 'completed' })
     expect(
       started.map(request => request.contract.reviewRole).sort(),
-    ).toEqual(['experience', 'gameplay', 'presentation', 'technical'])
+    ).toEqual(['core-systems', 'player-experience', 'production-delivery'])
 
     const beforeRestart = (await store.load())!
-    const technical = beforeRestart.documentReviewState.activeRun!.reports.find(
-      report => report.role === 'technical',
+    const playerExperience = beforeRestart.documentReviewState.activeRun!.reports.find(
+      report => report.role === 'player-experience',
     )!
-    await mkdir(dirname(join(workspacePath, technical.path)), {
+    await mkdir(dirname(join(workspacePath, playerExperience.path)), {
       recursive: true,
     })
     await writeFile(
-      join(workspacePath, technical.path),
-      '# Technical review\n',
+      join(workspacePath, playerExperience.path),
+      '# Player experience review\n',
       'utf8',
     )
     await store.save({
@@ -250,7 +252,7 @@ describe('document review controller terminal reconciliation', () => {
           ...beforeRestart.documentReviewState.activeRun!,
           reports: beforeRestart.documentReviewState.activeRun!.reports.map(
             report =>
-              report.role === 'technical'
+              report.role === 'player-experience'
                 ? {
                     ...report,
                     dispatch: {
@@ -261,8 +263,8 @@ describe('document review controller terminal reconciliation', () => {
                         status: 'completed',
                         revision,
                         scope: 'foundation',
-                        role: 'technical',
-                        reportPaths: [technical.path],
+                        role: 'player-experience',
+                        reportPaths: [playerExperience.path],
                       },
                       finishedAt: new Date().toISOString(),
                     },
@@ -296,11 +298,9 @@ describe('document review controller terminal reconciliation', () => {
 
     expect(
       (await store.load())?.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'technical',
+        report => report.role === 'player-experience',
       ),
     ).toMatchObject({ status: 'completed' })
-    expect(restarted.map(request => request.contract.reviewRole)).toEqual([
-      'production',
-    ])
+    expect(restarted).toEqual([])
   })
 })

@@ -21,6 +21,7 @@ import {
   acceptDocumentReviewTerminal,
   buildDocumentReviewDispatches,
   createDocumentReviewRun,
+  hasCurrentDocumentReviewTopology,
   routeCompletedDocumentReview,
 } from './document-review-stage'
 import {
@@ -1066,7 +1067,12 @@ export function createDeliveryWorkflowController(input: {
         if (
           !activeRun ||
           activeRun.scope !== reviewScope ||
-          activeRun.revision !== reviewRevision
+          activeRun.revision !== reviewRevision ||
+          (activeRun.status !== 'completed' &&
+            !hasCurrentDocumentReviewTopology({
+              run: activeRun,
+              workspacePath: input.workspacePath,
+            }))
         ) {
           const attempt =
             (reviewRun.documentReviewState.attempts?.[reviewScope] ?? 0) + 1
