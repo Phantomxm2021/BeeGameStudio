@@ -5,6 +5,10 @@ import { z } from 'zod'
 import type { DocumentReviewAssignment } from './document-review-topology'
 
 export type DocumentReviewScope = 'foundation' | 'checklist' | 'complete'
+export type MarkdownDocumentReviewScope = Exclude<
+  DocumentReviewScope,
+  'foundation'
+>
 export type DocumentReviewVerdict = 'READY' | 'NEEDS_REVISION'
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u)
@@ -12,7 +16,7 @@ const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 export const documentReviewDecisionSchema = z
   .object({
     version: z.literal(1),
-    scope: z.enum(['foundation', 'checklist', 'complete']),
+    scope: z.enum(['checklist', 'complete']),
     revision: digestSchema,
     verdict: z.enum(['READY', 'NEEDS_REVISION']),
     affectedPaths: z.array(z.string().min(1)).max(32),
@@ -55,7 +59,7 @@ function assertSegment(value: string, label: string): void {
 
 export function reviewRevisionDirectory(
   workspacePath: string,
-  scope: DocumentReviewScope,
+  scope: MarkdownDocumentReviewScope,
   revision: string,
 ): string {
   assertRevision(revision)
@@ -64,7 +68,7 @@ export function reviewRevisionDirectory(
 
 export function reviewStagingPath(
   workspacePath: string,
-  scope: DocumentReviewScope,
+  scope: MarkdownDocumentReviewScope,
   revision: string,
   dispatchId: string,
   filename: string,
@@ -83,7 +87,7 @@ export function reviewStagingPath(
 
 export function reviewPartPath(
   workspacePath: string,
-  scope: DocumentReviewScope,
+  scope: MarkdownDocumentReviewScope,
   revision: string,
   role: string,
 ): string {
@@ -97,7 +101,7 @@ export function reviewPartPath(
 
 export function reviewReportPath(
   workspacePath: string,
-  scope: DocumentReviewScope,
+  scope: MarkdownDocumentReviewScope,
   revision: string,
 ): string {
   return resolve(
@@ -108,7 +112,7 @@ export function reviewReportPath(
 
 export function reviewDecisionPath(
   workspacePath: string,
-  scope: DocumentReviewScope,
+  scope: MarkdownDocumentReviewScope,
   revision: string,
 ): string {
   return resolve(
@@ -198,6 +202,8 @@ function assertAssignment(input: {
   revision: string
   role: 'specialist' | 'final'
 }): void {
+  if (input.assignment.scope === 'foundation')
+    throw new Error('Foundation review must use the canonical JSON contract')
   if (input.assignment.scope === undefined)
     throw new Error('document review assignment has no scope')
   if (
@@ -252,7 +258,7 @@ export async function acceptSpecialistReport(input: {
 
 export async function acceptReviewDecision(input: {
   workspacePath: string
-  scope: DocumentReviewScope
+  scope: MarkdownDocumentReviewScope
   revision: string
   allowedAffectedPaths: readonly string[]
 }): Promise<{
@@ -289,7 +295,7 @@ async function readReviewDecision(
 
 function validateReviewDecision(input: {
   workspacePath: string
-  scope: DocumentReviewScope
+  scope: MarkdownDocumentReviewScope
   revision: string
   allowedAffectedPaths: readonly string[]
   decision: DocumentReviewDecision
@@ -330,6 +336,9 @@ export async function acceptFinalReport(input: {
   reportDigest: string
 }> {
   assertAssignment({ ...input, role: 'final' })
+  if (input.assignment.scope === 'foundation')
+    throw new Error('Foundation review must use the canonical JSON contract')
+  const scope = input.assignment.scope
   assertCurrentRevision(input.revision, input.currentRevision)
   if (
     input.assignment.stagingOutputPaths.length !== 2 ||
@@ -365,7 +374,7 @@ export async function acceptFinalReport(input: {
   const decision = await readReviewDecision(stagedDecisionPath)
   validateReviewDecision({
     workspacePath: input.workspacePath,
-    scope: input.assignment.scope,
+    scope,
     revision: input.revision,
     allowedAffectedPaths: input.allowedAffectedPaths,
     decision,
@@ -375,7 +384,7 @@ export async function acceptFinalReport(input: {
   await persistStagedFile(stagedDecisionPath, committedDecisionPath)
   const accepted = await acceptReviewDecision({
     workspacePath: input.workspacePath,
-    scope: input.assignment.scope,
+    scope,
     revision: input.revision,
     allowedAffectedPaths: input.allowedAffectedPaths,
   })

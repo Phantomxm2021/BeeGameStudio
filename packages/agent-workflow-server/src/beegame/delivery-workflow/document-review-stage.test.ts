@@ -61,7 +61,7 @@ describe('document review run', () => {
 
   test('rejects a changed prerequisite review report', async () => {
     const workspacePath = await workspace()
-    const reportPath = '.beegame/reviews/foundation/revision/review.md'
+    const reportPath = '.beegame/reviews/foundation/revision/review.json'
     const absolutePath = join(workspacePath, reportPath)
     await mkdir(dirname(absolutePath), { recursive: true })
     await writeFile(absolutePath, '# accepted\n', 'utf8')

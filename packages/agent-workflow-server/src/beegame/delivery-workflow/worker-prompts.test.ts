@@ -312,44 +312,6 @@ describe('resource-content worker prompts', () => {
     expect(authorPrompt).not.toContain('"allowedUpstreamPaths"')
     expect(authorPrompt).not.toContain('"upstreamSections"')
 
-    const reviewerPrompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
-      contract: {
-        reviewScope: 'foundation',
-        reviewRole: 'core-systems',
-        assignment: {
-          sourcePaths: ['/workspace/docs/TECHNICAL_DESIGN.md'],
-          verificationSourcePaths: ['/workspace/docs/GDD.md'],
-          stagingOutputPaths: [
-            '/workspace/.beegame/reviews/staging/technical.md',
-          ],
-        },
-        allowedAffectedPaths: ['docs/TECHNICAL_DESIGN.md'],
-      },
-    })
-    expect(reviewerPrompt).toContain(
-      'single specialist role named by contract.reviewRole',
-    )
-    expect(reviewerPrompt).toContain('/workspace/docs/TECHNICAL_DESIGN.md')
-    expect(reviewerPrompt).toContain('/workspace/docs/GDD.md')
-    expect(reviewerPrompt).toContain(
-      'one human-readable Markdown specialist report',
-    )
-    expect(reviewerPrompt).not.toContain('SubmitDocumentReviewPacket')
-    expect(reviewerPrompt).toContain(
-      'Do not produce JSON, a finding packet, criteria arrays',
-    )
-    expect(reviewerPrompt).toContain('one finding row')
-    expect(reviewerPrompt).toContain('owner path')
-    expect(reviewerPrompt).toContain('required outcome')
-    expect(reviewerPrompt).toContain('Do not reproduce source sections')
-
     const finalReviewerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',

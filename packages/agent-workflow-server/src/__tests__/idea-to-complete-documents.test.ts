@@ -113,7 +113,7 @@ describe('idea to complete game documents', () => {
         revision: 'a'.repeat(64),
       }),
       status: 'completed' as const,
-      finalReportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.md`,
+      finalReportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`,
       finalReportDigest: 'b'.repeat(64),
       verdict: 'NEEDS_REVISION' as const,
       affectedPaths: [path],

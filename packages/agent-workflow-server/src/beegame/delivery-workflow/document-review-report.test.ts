@@ -41,15 +41,15 @@ async function writeDecisionFixture(input: {
 }): Promise<{ reportText: string }> {
   const reportPath = reviewReportPath(
     input.workspacePath,
-    'foundation',
+    'checklist',
     revision,
   )
   const decisionPath = reviewDecisionPath(
     input.workspacePath,
-    'foundation',
+    'checklist',
     revision,
   )
-  const reportText = '# Foundation review\n\n## Blocking findings\n\nNone.\n'
+  const reportText = '# Checklist review\n\n## Blocking findings\n\nNone.\n'
   await mkdir(dirname(reportPath), { recursive: true })
   await writeFile(reportPath, reportText, 'utf8')
   await writeFile(
@@ -57,11 +57,11 @@ async function writeDecisionFixture(input: {
     `${JSON.stringify(
       input.decision ?? {
         version: 1,
-        scope: 'foundation',
+        scope: 'checklist',
         revision,
         verdict: 'READY',
         affectedPaths: [],
-        reportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+        reportPath: `.beegame/reviews/checklist/${revision}/review.md`,
       },
     )}\n`,
     'utf8',
@@ -73,17 +73,17 @@ describe('project-local document review reports', () => {
   test('places committed and staged reports under the active project revision', async () => {
     const workspacePath = await workspace()
 
-    expect(reviewRevisionDirectory(workspacePath, 'foundation', revision)).toBe(
-      join(workspacePath, '.beegame', 'reviews', 'foundation', revision),
+    expect(reviewRevisionDirectory(workspacePath, 'checklist', revision)).toBe(
+      join(workspacePath, '.beegame', 'reviews', 'checklist', revision),
     )
     expect(
-      reviewPartPath(workspacePath, 'foundation', revision, 'gameplay'),
+      reviewPartPath(workspacePath, 'checklist', revision, 'gameplay'),
     ).toBe(
       join(
         workspacePath,
         '.beegame',
         'reviews',
-        'foundation',
+        'checklist',
         revision,
         'parts',
         'gameplay.md',
@@ -92,7 +92,7 @@ describe('project-local document review reports', () => {
     expect(
       reviewStagingPath(
         workspacePath,
-        'foundation',
+        'checklist',
         revision,
         'dispatch-1',
         'gameplay.md',
@@ -102,7 +102,7 @@ describe('project-local document review reports', () => {
         workspacePath,
         '.beegame',
         'reviews',
-        'foundation',
+        'checklist',
         revision,
         '.staging',
         'dispatch-1',
@@ -117,18 +117,18 @@ describe('project-local document review reports', () => {
 
     const accepted = await acceptReviewDecision({
       workspacePath,
-      scope: 'foundation',
+      scope: 'checklist',
       revision,
       allowedAffectedPaths: ['docs/GDD.md'],
     })
 
     expect(accepted.decision).toEqual({
       version: 1,
-      scope: 'foundation',
+      scope: 'checklist',
       revision,
       verdict: 'READY',
       affectedPaths: [],
-      reportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+      reportPath: `.beegame/reviews/checklist/${revision}/review.md`,
     })
     expect(accepted.reportDigest).toBe(
       createHash('sha256').update(reportText).digest('hex'),
@@ -141,18 +141,18 @@ describe('project-local document review reports', () => {
       workspacePath,
       decision: {
         version: 1,
-        scope: 'foundation',
+        scope: 'checklist',
         revision: 'b'.repeat(64),
         verdict: 'READY',
         affectedPaths: [],
-        reportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+        reportPath: `.beegame/reviews/checklist/${revision}/review.md`,
       },
     })
 
     await expect(
       acceptReviewDecision({
         workspacePath,
-        scope: 'foundation',
+        scope: 'checklist',
         revision,
         allowedAffectedPaths: ['docs/GDD.md'],
       }),
@@ -165,18 +165,18 @@ describe('project-local document review reports', () => {
       workspacePath,
       decision: {
         version: 1,
-        scope: 'foundation',
+        scope: 'checklist',
         revision,
         verdict: 'NEEDS_REVISION',
         affectedPaths: ['../outside.md'],
-        reportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+        reportPath: `.beegame/reviews/checklist/${revision}/review.md`,
       },
     })
 
     await expect(
       acceptReviewDecision({
         workspacePath,
-        scope: 'foundation',
+        scope: 'checklist',
         revision,
         allowedAffectedPaths: ['docs/GDD.md'],
       }),
@@ -240,12 +240,12 @@ describe('project-local document review reports', () => {
   test('accepts the final report only against the contracted part digests', async () => {
     const workspacePath = await workspace()
     const specialists = documentReviewAssignments({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
     })
     const final = finalReviewAssignment({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
       specialists,
@@ -263,18 +263,18 @@ describe('project-local document review reports', () => {
     await mkdir(dirname(final.stagingOutputPaths[0]), { recursive: true })
     await writeFile(
       final.stagingOutputPaths[0],
-      '# Foundation review\n\nNo blocking findings.\n',
+      '# Complete review\n\nNo blocking findings.\n',
       'utf8',
     )
     await writeFile(
       final.stagingOutputPaths[1],
       `${JSON.stringify({
         version: 1,
-        scope: 'foundation',
+        scope: 'complete',
         revision,
         verdict: 'READY',
         affectedPaths: [],
-        reportPath: `.beegame/reviews/foundation/${revision}/review.md`,
+        reportPath: `.beegame/reviews/complete/${revision}/review.md`,
       })}\n`,
       'utf8',
     )

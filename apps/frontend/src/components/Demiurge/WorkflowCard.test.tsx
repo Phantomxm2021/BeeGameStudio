@@ -57,7 +57,7 @@ describe('WorkflowCard', () => {
             },
             reports: [{
               role: 'final',
-              path: '.beegame/reviews/foundation/revision/review.md',
+              path: '.beegame/reviews/foundation/revision/review.json',
               status: 'completed',
               durationMs: 10_000,
               usage: {

@@ -20,7 +20,7 @@ describe('accepted workflow unit journal', () => {
           foundation: {
             scope: 'foundation' as const,
             revision: previous.revision.document,
-            reportPath: `.beegame/reviews/foundation/${previous.revision.document}/review.md`,
+            reportPath: `.beegame/reviews/foundation/${previous.revision.document}/review.json`,
             reportDigest: 'a'.repeat(64),
             approvedAt: previous.updatedAt,
           },

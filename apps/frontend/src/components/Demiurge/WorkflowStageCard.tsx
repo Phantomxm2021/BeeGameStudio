@@ -60,9 +60,6 @@ const stageLabel: Record<string, string> = {
 };
 
 const reviewRoleLabel: Record<string, string> = {
-  'core-systems': '核心系统',
-  'player-experience': '玩家体验',
-  'production-delivery': '生产交付',
   final: '最终汇总',
 };
 

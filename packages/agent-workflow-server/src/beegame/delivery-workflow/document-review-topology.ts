@@ -5,6 +5,7 @@ import {
   reviewReportPath,
   reviewStagingPath,
   type DocumentReviewScope,
+  type MarkdownDocumentReviewScope,
 } from './document-review-report'
 import {
   foundationReviewPath,
@@ -16,9 +17,6 @@ import {
 } from './types'
 
 export type DocumentReviewRole =
-  | 'core-systems'
-  | 'player-experience'
-  | 'production-delivery'
   | 'checklist'
   | 'complete-gameplay'
   | 'complete-technical'
@@ -59,7 +57,7 @@ const COMPLETE_ROLE_PATHS = {
 } as const
 
 function specialistAssignment(input: {
-  scope: DocumentReviewScope
+  scope: MarkdownDocumentReviewScope
   role: Exclude<DocumentReviewRole, 'final'>
   relativeSourcePaths: readonly string[]
   workspacePath: string
@@ -108,6 +106,7 @@ export function documentReviewAssignments(input: {
     return [
       specialistAssignment({
         ...input,
+        scope: 'checklist',
         role: 'checklist',
         relativeSourcePaths: [
           'docs/acceptance/gameplay-checklist.md',
@@ -124,6 +123,7 @@ export function documentReviewAssignments(input: {
   return Object.entries(COMPLETE_ROLE_PATHS).map(([role, paths]) =>
     specialistAssignment({
       ...input,
+      scope: 'complete',
       role: role as keyof typeof COMPLETE_ROLE_PATHS,
       relativeSourcePaths: paths,
     }),
