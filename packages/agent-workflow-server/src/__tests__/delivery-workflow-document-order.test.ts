@@ -12,7 +12,10 @@ import {
   completeDocumentDraft,
   startDocumentStage,
 } from '../beegame/delivery-workflow/document-stage'
-import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type WorkerDispatchRequest,
+} from '../beegame/delivery-workflow/types'
 
 const revision = 'a'.repeat(64)
 
@@ -56,7 +59,7 @@ describe('report-based document review order', () => {
     expect(routed.documentReviewState).not.toHaveProperty('activeCycle')
   })
 
-  test('gives one coordinated remediation task only the accepted conflict paths', async () => {
+  test('dispatches affected Foundation remediation lanes concurrently with exact path ownership', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'review-coordinated-repair-'))
     try {
       const { run, review } = reviewedRun('foundation')
@@ -65,7 +68,9 @@ describe('report-based document review order', () => {
         'docs/LEVEL_SCENE_DESIGN.md',
         'docs/BALANCE_DESIGN.md',
         'docs/TECHNICAL_DESIGN.md',
+        'docs/ART_DIRECTION.md',
         'docs/UI_UX_SPEC.md',
+        'docs/ASSET_PLAN.md',
       ]
       const reviewBytes = `${JSON.stringify({
         version: 2,
@@ -99,6 +104,12 @@ describe('report-based document review order', () => {
         recursive: true,
       })
       await writeFile(join(workspacePath, review.finalReportPath), reviewBytes)
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await Promise.all(
+        CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+          writeFile(join(workspacePath, path), `# ${path}\n`),
+        ),
+      )
       const blocked = routeCompletedDocumentReview({
         run,
         review: {
@@ -108,28 +119,59 @@ describe('report-based document review order', () => {
           affectedPaths,
         },
       })
-      let dispatched: WorkerDispatchRequest | undefined
+      const dispatched: WorkerDispatchRequest[] = []
 
       await startDocumentStage({
         run: { ...blocked, status: 'running' },
         workspacePath,
         dispatcher: {
           async dispatch(request) {
-            dispatched = request
+            dispatched.push(request)
             return request
           },
         },
       })
 
-      expect(dispatched?.taskId).toBe('foundation-remediation')
-      expect(dispatched?.allowedPaths).toEqual(affectedPaths)
-      expect(dispatched?.contract.remediation).toEqual({
-        reviewPath: review.finalReportPath,
-        reviewDigest,
-        affectedPaths,
-        sourceRevision: revision,
-      })
-      expect(dispatched?.contract).not.toHaveProperty('foundationDocumentPath')
+      expect(dispatched.map(request => request.taskId)).toEqual([
+        'foundation-remediation:core-design',
+        'foundation-remediation:technical-assets',
+        'foundation-remediation:presentation',
+      ])
+      expect(dispatched.map(request => request.allowedPaths)).toEqual([
+        [
+          'docs/GDD.md',
+          'docs/LEVEL_SCENE_DESIGN.md',
+          'docs/BALANCE_DESIGN.md',
+        ],
+        ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+        ['docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
+      ])
+      expect(
+        dispatched.map(request => request.contract.remediation),
+      ).toEqual(
+        [
+          ['core-design', affectedPaths.slice(0, 3)],
+          [
+            'technical-assets',
+            ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+          ],
+          [
+            'presentation',
+            ['docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
+          ],
+        ].map(([laneId, laneAffectedPaths]) => ({
+          laneId,
+          reviewPath: review.finalReportPath,
+          reviewDigest,
+          affectedPaths: laneAffectedPaths,
+          sourceRevision: revision,
+        })),
+      )
+      expect(
+        dispatched.every(
+          request => !('foundationDocumentPath' in request.contract),
+        ),
+      ).toBe(true)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

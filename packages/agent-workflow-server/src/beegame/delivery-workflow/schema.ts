@@ -444,6 +444,36 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = 
           path: ['lanes', index, 'receipt'],
           message: 'completed remediation lane requires one receipt',
         })
+      if (lane.status === 'running' && !lane.dispatch)
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'dispatch'],
+          message: 'running remediation lane requires one dispatch',
+        })
+      if (
+        lane.status === 'pending' &&
+        (lane.dispatch || lane.receipt || lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'pending remediation lane cannot contain execution state',
+        })
+      if (
+        lane.status === 'failed' &&
+        (!lane.dispatch || !lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'failed remediation lane requires its dispatch and reason',
+        })
+      if (lane.receipt && lane.status !== 'completed')
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'receipt'],
+          message: 'only a completed remediation lane may contain a receipt',
+        })
       if (lane.receipt) {
         if (
           lane.receipt.reviewDigest !== state.reviewDigest ||

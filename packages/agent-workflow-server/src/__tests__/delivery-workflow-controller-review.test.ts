@@ -9,7 +9,10 @@ import {
   createDocumentReviewRun,
 } from '../beegame/delivery-workflow/document-review-stage'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
-import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type WorkerDispatchRequest,
+} from '../beegame/delivery-workflow/types'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 const workspaces: string[] = []
@@ -30,6 +33,12 @@ describe('document review controller terminal reconciliation', () => {
     const confirmedBriefDigest = createHash('sha256')
       .update(confirmedBriefContext)
       .digest('hex')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await Promise.all(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+        writeFile(join(workspacePath, path), `# ${path}\n`),
+      ),
+    )
     const revision = await computeCurrentDocumentReviewRevision({
       workspacePath,
       verification: {
@@ -113,6 +122,12 @@ describe('document review controller terminal reconciliation', () => {
     const confirmedBriefDigest = createHash('sha256')
       .update(confirmedBriefContext)
       .digest('hex')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await Promise.all(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+        writeFile(join(workspacePath, path), `# ${path}\n`),
+      ),
+    )
     const revision = await computeCurrentDocumentReviewRevision({
       workspacePath,
       verification: {

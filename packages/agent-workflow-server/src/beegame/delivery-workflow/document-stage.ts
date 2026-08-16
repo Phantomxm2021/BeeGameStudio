@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import {
@@ -17,9 +18,15 @@ import {
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { readFoundationReviewArtifact } from './foundation-review'
 import {
+  commitFoundationRemediationReceipt,
+  foundationRemediationReadyForVerification,
+  pendingFoundationRemediationLanes,
+} from './foundation-remediation'
+import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
   type FoundationDocumentPath,
+  type FoundationRemediationLaneId,
   type WorkerDispatchRequest,
 } from './types'
 
@@ -93,6 +100,12 @@ function readDocumentMetadata(
   } catch {
     return undefined
   }
+}
+
+function readDocumentDigest(workspacePath: string, path: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join(workspacePath, path)))
+    .digest('hex')
 }
 
 function parseSemanticVersion(
@@ -169,59 +182,68 @@ export async function startDocumentStage(input: {
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
   const review = input.run.documentReviewState.activeRun
-  if (
-    review?.scope === 'foundation' &&
-    review.status === 'completed' &&
-    review.verdict === 'NEEDS_REVISION'
-  ) {
-    if (!review.finalReportPath || !review.finalReportDigest)
-      throw new Error('foundation remediation review authority is incomplete')
+  const remediationState = input.run.foundationRemediationState
+  if (remediationState) {
     const accepted = await readFoundationReviewArtifact({
       workspacePath: input.workspacePath,
-      path: review.finalReportPath,
-      expectedDigest: review.finalReportDigest,
+      path: remediationState.reviewPath,
+      expectedDigest: remediationState.reviewDigest,
     })
-    const repairPaths = accepted.affectedPaths
-    if (!repairPaths.length)
-      throw new Error('foundation remediation has no accepted conflict paths')
+    const repairPaths = remediationState.lanes.flatMap(
+      lane => lane.affectedPaths,
+    )
     if (
-      JSON.stringify(repairPaths) !==
-      JSON.stringify(review.affectedPaths ?? [])
+      !exactStringSet(repairPaths, accepted.affectedPaths) ||
+      accepted.review.revision !== remediationState.sourceRevision
     )
       throw new Error('foundation remediation paths do not match accepted review')
-    const previousDocumentMetadata = Object.fromEntries(
-      repairPaths.flatMap(path => {
-        const metadata = readDocumentMetadata(input.workspacePath, path)
-        return metadata ? [[path, metadata]] : []
+    const pending = pendingFoundationRemediationLanes(remediationState)
+    if (!pending.length) return remediationState
+    return Promise.all(
+      pending.map(lane => {
+        const previousDocumentMetadata = Object.fromEntries(
+          lane.affectedPaths.flatMap(path => {
+            const metadata = readDocumentMetadata(input.workspacePath, path)
+            return metadata ? [[path, metadata]] : []
+          }),
+        )
+        const previousDocumentDigests = Object.fromEntries(
+          lane.ownedPaths.map(path => [
+            path,
+            readDocumentDigest(input.workspacePath, path),
+          ]),
+        )
+        return input.dispatcher.dispatch({
+          runId: input.run.runId,
+          ownerId: input.run.ownerId,
+          projectId: input.run.projectId,
+          workspacePath: input.workspacePath,
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          taskId: `foundation-remediation:${lane.id}`,
+          revision: remediationState.sourceRevision,
+          allowedPaths: [...lane.affectedPaths],
+          contract: {
+            confirmedBriefDigest: input.run.confirmedBriefDigest,
+            confirmedBriefContext: input.run.confirmedBriefContext,
+            documentSet: 'foundation',
+            systemDeliveryContract: buildSystemDeliveryContract(),
+            authoringMode: 'remediation',
+            remediation: {
+              laneId: lane.id,
+              reviewPath: accepted.path,
+              reviewDigest: accepted.digest,
+              affectedPaths: [...lane.affectedPaths],
+              sourceRevision: remediationState.sourceRevision,
+            },
+            previousDocumentDigests,
+            ...(Object.keys(previousDocumentMetadata).length
+              ? { previousDocumentMetadata }
+              : {}),
+          },
+        })
       }),
     )
-    return input.dispatcher.dispatch({
-      runId: input.run.runId,
-      ownerId: input.run.ownerId,
-      projectId: input.run.projectId,
-      workspacePath: input.workspacePath,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      taskId: 'foundation-remediation',
-      revision: input.run.revision.document,
-      allowedPaths: [...repairPaths],
-      contract: {
-        confirmedBriefDigest: input.run.confirmedBriefDigest,
-        confirmedBriefContext: input.run.confirmedBriefContext,
-        documentSet: 'foundation',
-        systemDeliveryContract: buildSystemDeliveryContract(),
-        authoringMode: 'remediation',
-        remediation: {
-          reviewPath: accepted.path,
-          reviewDigest: accepted.digest,
-          affectedPaths: [...repairPaths],
-          sourceRevision: review.revision,
-        },
-        ...(Object.keys(previousDocumentMetadata).length
-          ? { previousDocumentMetadata }
-          : {}),
-      },
-    })
   }
   if (input.run.foundationDraftState.documents) {
     const pendingDrafts = readyDraftPaths(input.run.foundationDraftState)
@@ -260,6 +282,12 @@ export async function startDocumentStage(input: {
     if (hasUnsettledDraft) return input.run.foundationDraftState
     return input.run.foundationDraftState
   }
+  if (
+    review?.scope === 'foundation' &&
+    review.status === 'completed' &&
+    review.verdict === 'NEEDS_REVISION'
+  )
+    throw new Error('foundation remediation lane state is missing')
   const repairPaths =
     review?.status === 'completed' && review.verdict === 'NEEDS_REVISION'
       ? (review.affectedPaths?.filter(path =>
@@ -394,6 +422,170 @@ export async function startChecklistDraftStage(input: {
         : {}),
     },
   })
+}
+
+export async function completeFoundationRemediationLane(input: {
+  run: DeliveryRun
+  workspacePath: string
+  terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
+  audit?: ReadinessAudit
+}): Promise<DeliveryRun> {
+  const state = input.run.foundationRemediationState
+  const dispatch = state?.lanes.find(
+    lane => lane.dispatch?.dispatchId === input.run.activeDispatch?.dispatchId,
+  )?.dispatch ?? input.run.activeDispatch
+  const remediation = dispatch?.request?.contract.remediation as
+    | { laneId?: unknown }
+    | undefined
+  const laneId = remediation?.laneId
+  if (
+    !state ||
+    typeof laneId !== 'string' ||
+    !['core-design', 'technical-assets', 'presentation'].includes(laneId) ||
+    !dispatch
+  )
+    throw new Error('foundation remediation terminal has no lane authority')
+  const lane = state.lanes.find(candidate => candidate.id === laneId)
+  if (!lane || lane.status !== 'running')
+    throw new Error('foundation remediation lane is not running')
+  const accepted = await readFoundationReviewArtifact({
+    workspacePath: input.workspacePath,
+    path: state.reviewPath,
+    expectedDigest: state.reviewDigest,
+  })
+  if (
+    accepted.review.revision !== state.sourceRevision ||
+    !exactStringSet(
+      accepted.affectedPaths,
+      state.lanes.flatMap(candidate => candidate.affectedPaths),
+    )
+  )
+    throw new Error('foundation remediation review authority changed')
+  const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
+    path.split('\\').join('/'),
+  )
+  if (!exactStringSet(normalizedWrittenPaths, lane.affectedPaths))
+    throw new Error('mutation paths do not match the lane assignment')
+  if ((input.terminal.resolvedFindingIds?.length ?? 0) > 0)
+    throw new Error('document remediation cannot declare finding closure')
+  const previousMetadata = dispatch.request?.contract.previousDocumentMetadata
+  if (
+    previousMetadata &&
+    typeof previousMetadata === 'object' &&
+    !Array.isArray(previousMetadata)
+  )
+    for (const path of lane.affectedPaths) {
+      const previous = (previousMetadata as Record<string, unknown>)[path]
+      if (!previous || typeof previous !== 'object' || Array.isArray(previous))
+        continue
+      const version = (previous as Record<string, unknown>).version
+      const updatedAt = (previous as Record<string, unknown>).updatedAt
+      if (typeof version === 'string' && typeof updatedAt === 'string')
+        await commitRemediatedDocumentMetadata({
+          workspacePath: input.workspacePath,
+          targetPath: path,
+          previousVersion: version,
+          previousUpdatedAt: updatedAt,
+        })
+    }
+  const contentIssues = lane.affectedPaths.flatMap(path =>
+    completeFoundationDocumentIssues(input.workspacePath, path),
+  )
+  const metadataIssues = documentMetadataIssues({
+    workspacePath: input.workspacePath,
+    writtenPaths: [...lane.affectedPaths],
+    previous: previousMetadata,
+  })
+  if (contentIssues.length || metadataIssues.length)
+    throw new Error([...contentIssues, ...metadataIssues].join('; '))
+  const beforeDigests = dispatch.request?.contract.previousDocumentDigests
+  if (
+    !beforeDigests ||
+    typeof beforeDigests !== 'object' ||
+    Array.isArray(beforeDigests)
+  )
+    throw new Error('foundation remediation before digests are missing')
+  const afterDigests = Object.fromEntries(
+    lane.ownedPaths.map(path => [
+      path,
+      readDocumentDigest(input.workspacePath, path),
+    ]),
+  )
+  for (const path of lane.ownedPaths) {
+    const before = (beforeDigests as Record<string, unknown>)[path]
+    const after = afterDigests[path]
+    if (typeof before !== 'string' || !/^[a-f0-9]{64}$/u.test(before))
+      throw new Error('foundation remediation before digests are invalid')
+    if (!lane.affectedPaths.includes(path) && before !== after)
+      throw new Error(`foundation remediation changed an unassigned path: ${path}`)
+    if (lane.affectedPaths.includes(path) && before === after)
+      throw new Error(`foundation remediation did not change assigned path: ${path}`)
+  }
+  const nextState = commitFoundationRemediationReceipt(state, {
+    laneId: laneId as FoundationRemediationLaneId,
+    dispatchId: dispatch.dispatchId,
+    writtenPaths: [...lane.affectedPaths],
+    beforeDigests: beforeDigests as Record<string, string>,
+    afterDigests,
+    committedAt: new Date().toISOString(),
+  })
+  if (!foundationRemediationReadyForVerification(nextState))
+    return {
+      ...input.run,
+      activeDispatch: undefined,
+      foundationRemediationState: nextState,
+      status: 'running',
+      blockedReason: undefined,
+      updatedAt: new Date().toISOString(),
+    }
+  for (const completedLane of nextState.lanes) {
+    if (completedLane.status === 'not_required') continue
+    if (!completedLane.receipt)
+      throw new Error('foundation remediation receipt is missing')
+    for (const path of completedLane.ownedPaths)
+      if (
+        readDocumentDigest(input.workspacePath, path) !==
+        completedLane.receipt.afterDigests[path]
+      )
+        throw new Error(
+          `foundation remediation receipt no longer matches current bytes: ${path}`,
+        )
+  }
+  const readiness = input.audit
+    ? input.audit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+        requireCompleteFoundation: true,
+      })
+    : await defaultAudit(input.workspacePath, {
+        includeChecklist: false,
+        includeAssetManifest: false,
+        requireCompleteFoundation: true,
+      })
+  if (!readiness.valid) throw new Error(readiness.issues.join('; '))
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  return {
+    ...input.run,
+    activeDispatch: undefined,
+    phase: 'DOCUMENT_REVIEW',
+    documentStep: 'FOUNDATION_REVIEW',
+    foundationRemediationState: {
+      ...nextState,
+      resultingRevision: documentRevision,
+    },
+    revision: {
+      ...input.run.revision,
+      document: documentRevision,
+      workspace: workspaceRevision,
+    },
+    status: 'running',
+    blockedReason: undefined,
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 export async function completeDocumentDraft(input: {

@@ -14,6 +14,7 @@ import {
 } from './change-request'
 import {
   completeDocumentDraft,
+  completeFoundationRemediationLane,
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
@@ -43,6 +44,10 @@ import {
 import { createRunStore, type RunStore } from './run-store'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { transitionDeliveryRun } from './transition'
+import {
+  pendingFoundationRemediationLanes,
+  recordFoundationRemediationFailure,
+} from './foundation-remediation'
 import {
   enterImplementationAudit,
   reconcileAcceptance,
@@ -203,14 +208,18 @@ export function createDeliveryWorkflowController(input: {
       run?.documentReviewState.activeRun?.reports.find(
         report => report.dispatch?.dispatchId === record.dispatchId,
       )
+    const remediationCheckpoint = run?.foundationRemediationState?.lanes.find(
+      lane => lane.dispatch?.dispatchId === record.dispatchId,
+    )
     if (
       !run ||
       (run.activeDispatch?.dispatchId !== record.dispatchId &&
         !foundationCheckpoint &&
+        !remediationCheckpoint &&
         !reviewCheckpoint)
     )
       return
-    let next: DeliveryRun = foundationCheckpoint
+    let next: DeliveryRun = foundationCheckpoint || remediationCheckpoint
       ? { ...run, activeDispatch: record }
       : { ...run, activeDispatch: undefined }
     if (result.workerType === 'change-impact-analyzer') {
@@ -294,6 +303,10 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? { completedPaths: [] }
             : next.foundationDraftState,
+        foundationRemediationState:
+          result.classification === 'documents_required'
+            ? undefined
+            : next.foundationRemediationState,
         resourceProductionState:
           result.classification === 'documents_required'
             ? { currentTask: 'RESOURCE_PLAN' }
@@ -338,19 +351,29 @@ export function createDeliveryWorkflowController(input: {
         request?.contract.documentSet === 'checklist'
           ? 'checklist'
           : 'foundation'
-      next = await completeDocumentDraft({
-        run: {
-          ...next,
-          activeDispatch: record,
-          phase:
-            documentSet === 'checklist'
-              ? 'DOCUMENT_REVIEW'
-              : 'DOCUMENT_DRAFTING',
-        },
-        workspacePath: input.workspacePath,
-        terminal: result,
-        documentSet,
-      })
+      next = remediationCheckpoint
+        ? await completeFoundationRemediationLane({
+            run: {
+              ...next,
+              activeDispatch: record,
+              phase: 'DOCUMENT_DRAFTING',
+            },
+            workspacePath: input.workspacePath,
+            terminal: result,
+          })
+        : await completeDocumentDraft({
+            run: {
+              ...next,
+              activeDispatch: record,
+              phase:
+                documentSet === 'checklist'
+                  ? 'DOCUMENT_REVIEW'
+                  : 'DOCUMENT_DRAFTING',
+            },
+            workspacePath: input.workspacePath,
+            terminal: result,
+            documentSet,
+          })
       if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
@@ -871,6 +894,7 @@ export function createDeliveryWorkflowController(input: {
         attempts: { foundation: 0, checklist: 0, complete: 0 },
       },
       foundationDraftState: { completedPaths: [] },
+      foundationRemediationState: undefined,
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -906,6 +930,66 @@ export function createDeliveryWorkflowController(input: {
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
+    if (
+      run.phase === 'DOCUMENT_DRAFTING' &&
+      run.foundationRemediationState
+    ) {
+      const replayable = run.foundationRemediationState.lanes.find(
+        lane => lane.status !== 'completed' && lane.dispatch?.terminalResult,
+      )?.dispatch
+      if (replayable) {
+        await dispatcher.replayTerminal(replayable, handleTerminalUnlocked)
+        return
+      }
+      const runningLanes = run.foundationRemediationState.lanes.filter(
+        lane => lane.dispatch?.status === 'running',
+      )
+      if (runningLanes.length) {
+        const unavailable = [] as typeof runningLanes
+        for (const lane of runningLanes) {
+          const isOpen = await dispatcher
+            .workerIsOpen(lane.dispatch!.dispatchId)
+            .catch(() => false)
+          if (!isOpen) unavailable.push(lane)
+        }
+        if (!unavailable.length) {
+          if (
+            pendingFoundationRemediationLanes(
+              run.foundationRemediationState,
+            ).length
+          )
+            await startDocumentStage({
+              run,
+              workspacePath: input.workspacePath,
+              dispatcher,
+            })
+          return
+        }
+        let foundationRemediationState = run.foundationRemediationState
+        for (const lane of unavailable)
+          foundationRemediationState = recordFoundationRemediationFailure(
+            foundationRemediationState,
+            lane.id,
+            'preserved native remediation session is unavailable',
+          )
+        const stillRunning = foundationRemediationState.lanes.some(
+          lane => lane.dispatch?.status === 'running',
+        )
+        const recovered = await persist(
+          {
+            ...run,
+            foundationRemediationState,
+            status: stillRunning ? 'running' : 'needs_action',
+            blockedReason: stillRunning
+              ? undefined
+              : 'one or more preserved native remediation sessions are unavailable',
+          },
+          'document.remediation.session_unavailable',
+        )
+        if (recovered.status === 'running') await resumeUnlocked(recovered)
+        return
+      }
+    }
     if (
       run.phase === 'DOCUMENT_DRAFTING' &&
       run.foundationDraftState.documents
@@ -1436,9 +1520,14 @@ export function createDeliveryWorkflowController(input: {
   ): Promise<unknown> {
     if (
       run.status === 'running' &&
-      run.activeDispatch &&
-      (run.activeDispatch.status === 'running' ||
-        Boolean(run.activeDispatch.terminalResult))
+      ((run.activeDispatch &&
+        (run.activeDispatch.status === 'running' ||
+          Boolean(run.activeDispatch.terminalResult))) ||
+        run.foundationRemediationState?.lanes.some(
+          lane =>
+            lane.dispatch?.status === 'running' ||
+            Boolean(lane.dispatch?.terminalResult && !lane.receipt),
+        ))
     ) {
       throw new Error(
         'A workflow worker result is still being reconciled; wait for the current phase to settle before submitting another change.',

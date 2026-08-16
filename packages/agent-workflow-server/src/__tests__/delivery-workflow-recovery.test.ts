@@ -17,13 +17,20 @@ import {
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
-import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
+import {
+  completeDocumentDraft,
+  completeFoundationRemediationLane,
+} from '../beegame/delivery-workflow/document-stage'
 import { createDocumentReviewRun } from '../beegame/delivery-workflow/document-review-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
   beginParallelFoundationAuthoring,
   recordFoundationDispatch,
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
+import {
+  createFoundationRemediationStateFromAuthority,
+  recordFoundationRemediationDispatch,
+} from '../beegame/delivery-workflow/foundation-remediation'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
@@ -32,6 +39,7 @@ import {
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import { proveExactRawActiveUnitId } from '../beegame/delivery-workflow/recovery-projector'
 import {
   createTestDeliveryRun,
   withTestDocumentMetadata,
@@ -2706,6 +2714,272 @@ describe('delivery workflow recovery', () => {
         ).rejects.toThrow('dispatch is not active')
     }
     expect(closed).toHaveLength(paths.length)
+  })
+
+  test('keeps one durable dispatch slot per Foundation remediation lane', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-remediation-parallel-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const revision = 'a'.repeat(64)
+    const initial = createTestDeliveryRun({
+      runId: 'run-remediation-parallel',
+      projectId: 'project-remediation-parallel',
+      ownerId: 'owner-1',
+      documentRevision: revision,
+    })
+    const foundationRemediationState =
+      createFoundationRemediationStateFromAuthority({
+        reviewPath: `.beegame/reviews/foundation/${revision}/review.json`,
+        reviewDigest: 'b'.repeat(64),
+        sourceRevision: revision,
+        affectedPaths: [
+          'docs/GDD.md',
+          'docs/TECHNICAL_DESIGN.md',
+          'docs/UI_UX_SPEC.md',
+        ],
+      })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: undefined,
+      foundationRemediationState,
+    })
+    const started: string[] = []
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          started.push(request.taskId!)
+          return {
+            sessionId: `session:${request.taskId}`,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    for (const lane of foundationRemediationState.lanes.filter(
+      candidate => candidate.status === 'pending',
+    ))
+      await dispatcher.dispatch({
+        runId: initial.runId,
+        ownerId: initial.ownerId,
+        projectId: initial.projectId,
+        workspacePath: workspace,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: `foundation-remediation:${lane.id}`,
+        revision,
+        allowedPaths: [...lane.affectedPaths],
+        contract: {
+          authoringMode: 'remediation',
+          documentSet: 'foundation',
+          remediation: {
+            laneId: lane.id,
+            reviewPath: foundationRemediationState.reviewPath,
+            reviewDigest: foundationRemediationState.reviewDigest,
+            sourceRevision: revision,
+            affectedPaths: [...lane.affectedPaths],
+          },
+        },
+      })
+
+    expect(started).toEqual([
+      'foundation-remediation:core-design',
+      'foundation-remediation:technical-assets',
+      'foundation-remediation:presentation',
+    ])
+    expect((await store.load())?.activeDispatch).toBeUndefined()
+    expect(
+      (await store.load())?.foundationRemediationState?.lanes.map(
+        lane => lane.status,
+      ),
+    ).toEqual(['running', 'running', 'running'])
+
+  })
+
+  test('waits for every required remediation receipt before Foundation verification', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-remediation-barrier-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = 'a'.repeat(64)
+    const reviewPath = `.beegame/reviews/foundation/${revision}/review.json`
+    const reviewBytes = `${JSON.stringify({
+      version: 2,
+      scope: 'foundation',
+      revision,
+      verdict: 'NEEDS_REVISION',
+      priorConflictStatus: [],
+      conflicts: [
+        {
+          id: 'B1',
+          title: 'Lane authority mismatch',
+          problem: 'Core design and presentation disagree.',
+          evidence: [
+            {
+              path: 'docs/GDD.md',
+              location: 'Core loop',
+              observed: 'The terms differ.',
+            },
+          ],
+          requiredOutcome: 'Use one term.',
+          changes: [
+            { path: 'docs/GDD.md', action: 'Use the shared term.' },
+            { path: 'docs/UI_UX_SPEC.md', action: 'Use the shared term.' },
+          ],
+          acceptance: ['Both documents use the shared term.'],
+        },
+      ],
+    })}\n`
+    await mkdir(join(workspace, '.beegame/reviews/foundation', revision), {
+      recursive: true,
+    })
+    await writeFile(join(workspace, reviewPath), reviewBytes)
+    const reviewDigest = createHash('sha256').update(reviewBytes).digest('hex')
+    let run: DeliveryRun = {
+      ...createTestDeliveryRun({
+        runId: 'run-remediation-barrier',
+        projectId: 'project-remediation-barrier',
+        ownerId: 'owner-1',
+        documentRevision: revision,
+      }),
+      phase: 'DOCUMENT_DRAFTING',
+      foundationRemediationState:
+        createFoundationRemediationStateFromAuthority({
+          reviewPath,
+          reviewDigest,
+          sourceRevision: revision,
+          affectedPaths: ['docs/GDD.md', 'docs/UI_UX_SPEC.md'],
+        }),
+    }
+
+    for (const laneId of ['core-design', 'presentation'] as const) {
+      const lane = run.foundationRemediationState!.lanes.find(
+        candidate => candidate.id === laneId,
+      )!
+      const beforeDigests = Object.fromEntries(
+        await Promise.all(
+          lane.ownedPaths.map(async path => [
+            path,
+            createHash('sha256')
+              .update(await readFile(join(workspace, path)))
+              .digest('hex'),
+          ]),
+        ),
+      )
+      const dispatch = {
+        dispatchId: `dispatch-${laneId}`,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: `foundation-remediation:${laneId}`,
+        revision,
+        status: 'running' as const,
+        startedAt: '2026-08-16T00:00:00.000Z',
+        request: {
+          runId: run.runId,
+          ownerId: run.ownerId,
+          projectId: run.projectId,
+          workspacePath: workspace,
+          workerType: 'document-author' as const,
+          phase: 'DOCUMENT_DRAFTING' as const,
+          taskId: `foundation-remediation:${laneId}`,
+          revision,
+          allowedPaths: [...lane.affectedPaths],
+          contract: {
+            authoringMode: 'remediation',
+            remediation: {
+              laneId,
+              affectedPaths: [...lane.affectedPaths],
+            },
+            previousDocumentDigests: beforeDigests,
+          },
+        },
+      }
+      run = {
+        ...run,
+        activeDispatch: dispatch,
+        foundationRemediationState: recordFoundationRemediationDispatch(
+          run.foundationRemediationState!,
+          laneId,
+          dispatch,
+        ),
+      }
+      for (const path of lane.affectedPaths)
+        await writeFile(
+          join(workspace, path),
+          `${await readFile(join(workspace, path), 'utf8')}\n`,
+        )
+      if (laneId === 'presentation') {
+        const siblingPath = join(workspace, 'docs/LEVEL_SCENE_DESIGN.md')
+        const stableSibling = await readFile(siblingPath)
+        await writeFile(siblingPath, Buffer.concat([stableSibling, Buffer.from('\n')]))
+        await expect(
+          completeFoundationRemediationLane({
+            run,
+            workspacePath: workspace,
+            audit: () => ({ valid: true, issues: [] }),
+            terminal: {
+              workerType: 'document-author',
+              status: 'completed',
+              writtenPaths: [...lane.affectedPaths],
+              resolvedFindingIds: [],
+            },
+          }),
+        ).rejects.toThrow(
+          'foundation remediation receipt no longer matches current bytes',
+        )
+        await writeFile(siblingPath, stableSibling)
+      }
+      run = await completeFoundationRemediationLane({
+        run,
+        workspacePath: workspace,
+        audit: () => ({ valid: true, issues: [] }),
+        terminal: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: [...lane.affectedPaths],
+          resolvedFindingIds: [],
+        },
+      })
+      if (laneId === 'core-design') {
+        expect(run.phase).toBe('DOCUMENT_DRAFTING')
+        expect(run.foundationRemediationState?.lanes[0]?.status).toBe(
+          'completed',
+        )
+      }
+    }
+
+    expect(run.phase).toBe('DOCUMENT_REVIEW')
+    expect(run.documentStep).toBe('FOUNDATION_REVIEW')
+    expect(run.foundationRemediationState?.resultingRevision).toBe(
+      run.revision.document,
+    )
+  })
+
+  test('fails closed instead of dropping remediation lanes during damaged snapshot projection', () => {
+    expect(() =>
+      proveExactRawActiveUnitId({
+        inspection: {
+          rawText: '{}',
+          digest: 'a'.repeat(64),
+          parsedValue: {
+            phase: 'DOCUMENT_DRAFTING',
+            foundationRemediationState: { lanes: [] },
+          },
+        },
+        workspacePath: '/workspace',
+        ownerId: 'owner-1',
+        projectId: 'project-1',
+        confirmedBriefContext: 'confirmed brief',
+      }),
+    ).toThrow(
+      'parallel Foundation remediation requires its intact persisted snapshot',
+    )
   })
 
   test('isolates one invalid foundation terminal while another author keeps running', async () => {

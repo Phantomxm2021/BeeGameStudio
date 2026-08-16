@@ -2,10 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import type { FoundationReview } from './foundation-review'
 import {
+  commitFoundationRemediationReceipt,
   createFoundationRemediationState,
   FOUNDATION_REMEDIATION_LANES,
+  foundationRemediationReadyForVerification,
+  pendingFoundationRemediationLanes,
+  recordFoundationRemediationDispatch,
+  recordFoundationRemediationFailure,
+  retryFoundationRemediationFailures,
 } from './foundation-remediation'
 import { parseDeliveryRun } from './schema'
+import type { DispatchRecord } from './types'
 
 const digest = (value: string) => value.repeat(64)
 
@@ -93,6 +100,18 @@ describe('foundation remediation lanes', () => {
       parseDeliveryRun({ ...run, foundationRemediationState: impossible }),
     ).toThrow('completed remediation lane requires one receipt')
 
+    const runningWithoutDispatch = structuredClone(state)
+    runningWithoutDispatch.lanes[0] = {
+      ...runningWithoutDispatch.lanes[0],
+      status: 'running',
+    }
+    expect(() =>
+      parseDeliveryRun({
+        ...run,
+        foundationRemediationState: runningWithoutDispatch,
+      }),
+    ).toThrow('running remediation lane requires one dispatch')
+
     const duplicated = structuredClone(state)
     duplicated.lanes[1] = {
       ...duplicated.lanes[1],
@@ -135,6 +154,78 @@ describe('foundation remediation lanes', () => {
       }),
     ).toThrow()
   })
+
+  test('preserves completed siblings while retrying only a failed lane behind the receipt barrier', () => {
+    const sourceRevision = digest('a')
+    const state = createFoundationRemediationState({
+      reviewPath: `.beegame/reviews/foundation/${sourceRevision}/review.json`,
+      reviewDigest: digest('b'),
+      review: review(sourceRevision, ['docs/GDD.md', 'docs/UI_UX_SPEC.md']),
+    })
+    const coreDispatch = dispatch('core-design')
+    const presentationDispatch = dispatch('presentation')
+    let updated = recordFoundationRemediationDispatch(
+      state,
+      'core-design',
+      coreDispatch,
+    )
+    updated = recordFoundationRemediationDispatch(
+      updated,
+      'presentation',
+      presentationDispatch,
+    )
+
+    updated = commitFoundationRemediationReceipt(updated, {
+      laneId: 'core-design',
+      dispatchId: coreDispatch.dispatchId,
+      writtenPaths: ['docs/GDD.md'],
+      beforeDigests: ownedDigests('core-design', 'c'),
+      afterDigests: ownedDigests('core-design', 'd'),
+      committedAt: '2026-08-16T00:00:00.000Z',
+    })
+    updated = recordFoundationRemediationFailure(
+      updated,
+      'presentation',
+      'provider disconnected',
+    )
+
+    expect(foundationRemediationReadyForVerification(updated)).toBe(false)
+    const retried = retryFoundationRemediationFailures(updated)
+    expect(retried.lanes.map(lane => lane.status)).toEqual([
+      'completed',
+      'not_required',
+      'pending',
+    ])
+    expect(retried.lanes[0]?.receipt).toEqual(updated.lanes[0]?.receipt)
+    expect(pendingFoundationRemediationLanes(retried).map(lane => lane.id)).toEqual([
+      'presentation',
+    ])
+
+    const redispatched = recordFoundationRemediationDispatch(
+      retried,
+      'presentation',
+      presentationDispatch,
+    )
+    const completed = commitFoundationRemediationReceipt(redispatched, {
+      laneId: 'presentation',
+      dispatchId: presentationDispatch.dispatchId,
+      writtenPaths: ['docs/UI_UX_SPEC.md'],
+      beforeDigests: ownedDigests('presentation', 'e'),
+      afterDigests: ownedDigests('presentation', 'f'),
+      committedAt: '2026-08-16T00:01:00.000Z',
+    })
+    expect(foundationRemediationReadyForVerification(completed)).toBe(true)
+    expect(() =>
+      commitFoundationRemediationReceipt(redispatched, {
+        laneId: 'presentation',
+        dispatchId: presentationDispatch.dispatchId,
+        writtenPaths: ['docs/AUDIO_DESIGN.md'],
+        beforeDigests: ownedDigests('presentation', 'e'),
+        afterDigests: ownedDigests('presentation', 'f'),
+        committedAt: '2026-08-16T00:01:00.000Z',
+      }),
+    ).toThrow('mutation paths do not match the lane assignment')
+  })
 })
 
 function foundationRemediationLanesAreFrozen(): boolean {
@@ -144,4 +235,24 @@ function foundationRemediationLanesAreFrozen(): boolean {
       lane => Object.isFrozen(lane) && Object.isFrozen(lane.ownedPaths),
     )
   )
+}
+
+function dispatch(laneId: 'core-design' | 'presentation'): DispatchRecord {
+  return {
+    dispatchId: `dispatch-${laneId}`,
+    workerType: 'document-author',
+    phase: 'DOCUMENT_DRAFTING',
+    taskId: `foundation-remediation:${laneId}`,
+    revision: digest('a'),
+    status: 'running',
+    startedAt: '2026-08-16T00:00:00.000Z',
+  }
+}
+
+function ownedDigests(
+  laneId: 'core-design' | 'presentation',
+  value: string,
+): Record<string, string> {
+  const lane = FOUNDATION_REMEDIATION_LANES.find(entry => entry.id === laneId)!
+  return Object.fromEntries(lane.ownedPaths.map(path => [path, digest(value)]))
 }

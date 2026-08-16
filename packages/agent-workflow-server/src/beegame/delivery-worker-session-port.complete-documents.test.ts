@@ -90,14 +90,15 @@ describe('delivery worker complete document boundary', () => {
         runId: 'run-remediation-authority',
         workerType: 'document-author',
         workspacePath,
-        allowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+        allowedPaths: ['docs/GDD.md'],
         contract: {
           authoringMode: 'remediation',
           documentSet: 'foundation',
           remediation: {
+            laneId: 'core-design',
             reviewPath,
             reviewDigest,
-            affectedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+            affectedPaths: ['docs/GDD.md'],
             sourceRevision: revision,
           },
         },

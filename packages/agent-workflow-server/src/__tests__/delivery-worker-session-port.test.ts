@@ -815,7 +815,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('derives every completed native edit path for coordinated foundation remediation', async () => {
+  test('derives every completed native edit path for one Foundation remediation lane', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-coordinated-remediation-'),
     )
@@ -831,7 +831,7 @@ describe('delivery worker session credentials', () => {
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
     try {
-      const writtenPaths = ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md']
+      const writtenPaths = ['docs/GDD.md']
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       for (const path of writtenPaths)
         await writeFile(join(workspacePath, path), `# Updated ${path}\n`)
@@ -882,6 +882,7 @@ describe('delivery worker session credentials', () => {
           authoringMode: 'remediation',
           documentSet: 'foundation',
           remediation: {
+            laneId: 'core-design',
             reviewPath,
             reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
             affectedPaths: writtenPaths,

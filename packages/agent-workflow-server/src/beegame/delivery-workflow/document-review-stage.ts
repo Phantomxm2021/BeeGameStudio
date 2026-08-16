@@ -22,6 +22,7 @@ import {
   foundationReviewPath,
   readFoundationReviewArtifact,
 } from './foundation-review'
+import { createFoundationRemediationStateFromAuthority } from './foundation-remediation'
 
 export type { DocumentReviewReportState, DocumentReviewRun } from './types'
 
@@ -658,6 +659,17 @@ export function routeCompletedDocumentReview(input: {
         ...run.documentReviewState,
         activeRun: { ...review, remediatedPaths: [] },
       },
+      ...(review.scope === 'foundation'
+        ? {
+            foundationRemediationState:
+              createFoundationRemediationStateFromAuthority({
+                reviewPath: review.finalReportPath,
+                reviewDigest: review.finalReportDigest,
+                sourceRevision: review.revision,
+                affectedPaths: review.affectedPaths ?? [],
+              }),
+          }
+        : {}),
     }
   }
   const approval = {

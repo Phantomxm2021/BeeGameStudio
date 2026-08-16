@@ -41,6 +41,7 @@ import {
   acceptFoundationReview,
   readFoundationReviewArtifact,
 } from './delivery-workflow/foundation-review'
+import { FOUNDATION_REMEDIATION_LANES } from './delivery-workflow/foundation-remediation'
 import type {
   DocumentReviewAssignment,
   DocumentReviewRole,
@@ -202,7 +203,12 @@ export async function buildDocumentAuthorAuthorityBlock(
     const reviewPath = remediation?.reviewPath
     const reviewDigest = remediation?.reviewDigest
     const affectedPaths = remediation?.affectedPaths
+    const laneId = remediation?.laneId
+    const lane = FOUNDATION_REMEDIATION_LANES.find(
+      candidate => candidate.id === laneId,
+    )
     if (
+      !lane ||
       typeof reviewPath !== 'string' ||
       typeof reviewDigest !== 'string' ||
       !Array.isArray(affectedPaths) ||
@@ -220,13 +226,17 @@ export async function buildDocumentAuthorAuthorityBlock(
       path: reviewPath,
       expectedDigest: reviewDigest,
     })
+    const expectedLanePaths = lane.ownedPaths.filter(path =>
+      accepted.affectedPaths.includes(path),
+    )
     if (
-      JSON.stringify(accepted.affectedPaths) !== JSON.stringify(affectedPaths)
+      JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths)
     )
       throw new Error('document remediation paths do not match accepted review')
     return [
-      'The workflow service projected one accepted Foundation conflict list and the exact authorized repair paths below. Read only the current bytes needed for each listed conflict with native tools, coordinate every listed change across the complete path set in one turn, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
-      `Authorized repair paths: ${JSON.stringify(accepted.affectedPaths)}`,
+      'The workflow service projected one accepted Foundation conflict list and this lane\'s exact authorized repair paths below. Read only the current bytes needed for the conflicts assigned to these paths, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
+      `Remediation lane: ${lane.id}`,
+      `Authorized repair paths: ${JSON.stringify(expectedLanePaths)}`,
       `--- BEGIN ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(accepted.review, null, 2)}\n--- END ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---`,
     ].join('\n\n')
   }

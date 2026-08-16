@@ -1,5 +1,6 @@
 import { parseDeliveryRun } from './schema'
 import { retryFoundationFailures } from './foundation-authoring-batch'
+import { retryFoundationRemediationFailures } from './foundation-remediation'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -242,6 +243,7 @@ export function transitionDeliveryRun(
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
         foundationDraftState: { completedPaths: [] },
+        foundationRemediationState: undefined,
         documentReviewState: {
           approvals: {},
           attempts: { foundation: 0, checklist: 0, complete: 0 },
@@ -541,6 +543,15 @@ export function transitionDeliveryRun(
               foundationDraftState: retryFoundationFailures(
                 run.foundationDraftState,
               ),
+            }
+          : {}),
+        ...(run.phase === 'DOCUMENT_DRAFTING' &&
+        run.foundationRemediationState
+          ? {
+              foundationRemediationState:
+                retryFoundationRemediationFailures(
+                  run.foundationRemediationState,
+                ),
             }
           : {}),
         ...(run.phase === 'DOCUMENT_REVIEW' &&

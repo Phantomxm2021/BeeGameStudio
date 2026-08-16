@@ -849,15 +849,14 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
     currentRevision: documentRevision,
   })
   if (recovered.status !== 'completed') return undefined
-  return {
-    ...input.run,
-    activeDispatch: undefined,
-    blockedReason: undefined,
-    documentReviewState: {
-      ...input.run.documentReviewState,
-      activeRun: recovered,
+  return routeCompletedDocumentReview({
+    run: {
+      ...input.run,
+      activeDispatch: undefined,
+      blockedReason: undefined,
     },
-  }
+    review: recovered,
+  })
 }
 
 async function unlockReviewForChangedRevision(input: {
@@ -1139,6 +1138,7 @@ export async function retryRun(input: {
       restoredHandoff ??
       changedReview ??
       acknowledgedReview ??
+      restoredAcceptedReview ??
       transitionDeliveryRun(
         {
           ...retryBaseRun,
