@@ -5,12 +5,6 @@ export type NativeBackgroundTaskLaunch = {
   outputFile: string
 }
 
-export type NativeCompletedTaskOutput = {
-  taskId: string
-  status: 'completed' | 'failed' | 'stopped' | 'killed'
-  result?: string
-}
-
 type NativeBackgroundTaskUsage = {
   inputTokens: number
   outputTokens: number
@@ -58,36 +52,6 @@ function firstToken(value: string): string {
     }
   }
   return value
-}
-
-/**
- * Reads the structured result emitted by Bee Game Studio's native TaskOutput tool.
- * The caller must still link the opaque task id to an observed Agent dispatch;
- * this function does not infer task ownership or workflow meaning.
- */
-export function parseNativeCompletedTaskOutput(
-  payload: unknown,
-): NativeCompletedTaskOutput | undefined {
-  if (!isRecord(payload) || payload.toolName !== 'TaskOutput') return undefined
-  const nativeTaskResult = isRecord(payload.nativeTaskResult)
-    ? payload.nativeTaskResult
-    : undefined
-  if (!nativeTaskResult) return undefined
-  const taskId = stringValue(nativeTaskResult.taskId)
-  const status = stringValue(nativeTaskResult.status)
-  if (
-    !taskId ||
-    (status !== 'completed' &&
-      status !== 'failed' &&
-      status !== 'stopped' &&
-      status !== 'killed')
-  ) return undefined
-  const result = stringValue(nativeTaskResult.result)
-  return {
-    taskId,
-    status,
-    ...(result ? { result } : {}),
-  }
 }
 
 /** Reads accounting from a completed native subagent JSONL transcript. */

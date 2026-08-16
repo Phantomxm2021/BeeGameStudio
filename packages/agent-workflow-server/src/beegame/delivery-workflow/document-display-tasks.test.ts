@@ -66,22 +66,22 @@ describe('workflow display tasks', () => {
       workflowStatus: 'running',
       thinking: 'working',
       reviewReports: [
-        { role: 'brief-and-gameplay', status: 'completed' },
-        { role: 'cross-document-consistency', status: 'running' },
+        { role: 'contract-specialist', status: 'completed' },
+        { role: 'integration-specialist', status: 'running' },
         { role: 'final', status: 'pending' },
       ],
     })
     expect(tasks).toEqual([
       {
-        id: 'brief-and-gameplay',
-        title: 'brief-and-gameplay',
+        id: 'contract-specialist',
+        title: 'contract-specialist',
         status: 'completed',
         attempt: 0,
         operation: 'review',
       },
       {
-        id: 'cross-document-consistency',
-        title: 'cross-document-consistency',
+        id: 'integration-specialist',
+        title: 'integration-specialist',
         status: 'running',
         attempt: 0,
         operation: 'review',

@@ -3948,7 +3948,7 @@ describe('delivery workflow recovery', () => {
         workerType: 'document-reviewer',
         contract: {
           reviewScope: 'foundation',
-          reviewRole: 'brief-and-gameplay',
+          reviewRole: 'contract-specialist',
           attempt: 1,
         },
       },
@@ -3962,12 +3962,12 @@ describe('delivery workflow recovery', () => {
       },
       1,
     )
-    const comprehensiveReviewer = dispatcher.idempotencyKey(
+    const finalReviewer = dispatcher.idempotencyKey(
       {
         ...shared,
         workerType: 'document-reviewer',
         contract: {
-          reviewScope: 'complete',
+          reviewScope: 'foundation',
           reviewRole: 'final',
           attempt: 1,
         },
@@ -3976,7 +3976,7 @@ describe('delivery workflow recovery', () => {
     )
 
     expect(checklistAuthor).not.toBe(reviewer)
-    expect(comprehensiveReviewer).not.toBe(reviewer)
+    expect(finalReviewer).not.toBe(reviewer)
     expect(
       dispatcher.idempotencyKey(
         {
@@ -3984,7 +3984,7 @@ describe('delivery workflow recovery', () => {
           workerType: 'document-reviewer',
           contract: {
             reviewScope: 'foundation',
-            reviewRole: 'cross-document-consistency',
+            reviewRole: 'integration-specialist',
             attempt: 1,
           },
         },

@@ -1356,7 +1356,7 @@ describe('delivery worker session credentials', () => {
         workerType: 'document-reviewer',
         phase: 'DOCUMENT_REVIEW',
         revision,
-        allowedPaths: assignment.stagingOutputPaths,
+        allowedPaths: [...assignment.stagingOutputPaths],
         contract: {
           reviewScope: 'foundation',
           reviewMode: 'initial',

@@ -428,3 +428,27 @@ state machine are retained.
   no dual execution track exists.
 - The design adds no native-core modification, example-specific behavior,
   feature flag, MVP path, placeholder, or automatic semantic repair loop.
+
+## Automated Cutover Evidence
+
+Recorded on 2026-08-17 after the atomic Reviewer cutover:
+
+- The backend suite passed 571 tests across 95 files with 2,117 assertions,
+  one explicitly retired calibration test skipped, and zero failures.
+- The focused Dashboard suite passed all 54 tests across
+  `WorkflowCard.test.tsx` and `useWorkflowCardDeck.test.tsx`.
+- Repository TypeScript checking and `git diff --check` passed.
+- The retired Markdown review report, stage, topology, controller-review, and
+  their dedicated tests were deleted rather than kept behind compatibility
+  routing.
+- Remaining historical `documentReviewState`, old phase, and Markdown report
+  names occur only in the schema-21 migration fixture that proves destructive
+  cutover, or in negative assertions proving the new prompts and UI exclude
+  them.
+- Generic native `TaskOutput` telemetry remains solely for passive usage
+  accounting of unrelated native background Agents. Foundation Reviewer
+  prompts, dispatch, evidence acceptance, synthesis, remediation, and
+  verification have no `Agent`, `Task`, or `TaskOutput` execution path.
+
+Chrome/Web acceptance and its live duration/token/credit evidence are recorded
+separately after the automated gate is committed.
