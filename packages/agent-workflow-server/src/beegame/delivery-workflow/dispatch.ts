@@ -141,6 +141,7 @@ function withReviewerDispatch(
   run: DeliveryRun,
   role: string,
   dispatch: DispatchRecord,
+  performance?: { durationMs: number; usage: WorkflowUsage },
 ): DeliveryRun {
   const activeRun = run.documentReviewState.activeRun
   if (!activeRun)
@@ -159,6 +160,12 @@ function withReviewerDispatch(
                 status: 'running',
                 dispatch,
                 failureReason: undefined,
+                ...(performance
+                  ? {
+                      durationMs: performance.durationMs,
+                      usage: performance.usage,
+                    }
+                  : {}),
               }
             : report,
         ),
@@ -276,7 +283,15 @@ function reviewerPerformance(input: {
   result: WorkerTerminalResult
   currentUsage: WorkflowUsage | undefined
   finishedAt: string
-}): Record<string, unknown> | undefined {
+}):
+  | {
+      scope: string
+      role: string
+      durationMs: number
+      usage: WorkflowUsage
+      reportPaths: string[]
+    }
+  | undefined {
   if (
     input.result.workerType !== 'document-reviewer' ||
     input.request?.workerType !== 'document-reviewer'
@@ -286,8 +301,8 @@ function reviewerPerformance(input: {
   const startedAt = Date.parse(input.dispatch.startedAt)
   const finishedAt = Date.parse(input.finishedAt)
   return {
-    scope: contract.reviewScope,
-    role: contract.reviewRole,
+    scope: String(contract.reviewScope),
+    role: String(contract.reviewRole),
     durationMs:
       Number.isFinite(startedAt) && Number.isFinite(finishedAt)
         ? Math.max(0, finishedAt - startedAt)
@@ -945,10 +960,17 @@ export function createDeliveryDispatcher(options: {
       terminalResult: result as unknown as Record<string, unknown>,
       finishedAt,
     })
+    const performance = reviewerPerformance({
+      dispatch: location.record,
+      request,
+      result,
+      currentUsage: run.usage,
+      finishedAt,
+    })
     const updatedWithDispatch = location.path
       ? withFoundationDispatch(run, location.path, completed)
       : location.reviewRole
-        ? withReviewerDispatch(run, location.reviewRole, completed)
+        ? withReviewerDispatch(run, location.reviewRole, completed, performance)
         : { ...run, activeDispatch: completed }
     const updated = {
       ...updatedWithDispatch,
@@ -958,13 +980,6 @@ export function createDeliveryDispatcher(options: {
           ? ('working' as const)
           : ('idle' as const),
     }
-    const performance = reviewerPerformance({
-      dispatch: location.record,
-      request,
-      result,
-      currentUsage: run.usage,
-      finishedAt,
-    })
     const resourcePerformance = resourceTaskPerformance({
       dispatch: location.record,
       request,

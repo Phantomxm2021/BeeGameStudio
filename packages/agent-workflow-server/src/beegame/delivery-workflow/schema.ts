@@ -214,6 +214,8 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
               status: z.enum(['pending', 'running', 'completed', 'failed']),
               dispatch: dispatchRecordSchema.optional(),
               failureReason: z.string().min(1).optional(),
+              durationMs: z.number().finite().nonnegative().optional(),
+              usage: workflowUsageSchema.optional(),
             })
             .strict(),
         ),

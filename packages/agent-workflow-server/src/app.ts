@@ -5982,7 +5982,7 @@ function documentReviewForDisplay(
     : undefined
   const run = isObject(state?.activeRun) ? state.activeRun : undefined
   if (!run) return undefined
-  const reports = Array.isArray(run.reports)
+  const reports: JsonObject[] = Array.isArray(run.reports)
     ? run.reports.flatMap(report => {
         if (
           !isObject(report) ||
@@ -5991,6 +5991,20 @@ function documentReviewForDisplay(
           typeof report.status !== 'string'
         )
           return []
+        const reportUsage = isObject(report.usage)
+          ? {
+              input_tokens: Number(report.usage.input_tokens),
+              cache_read_tokens: Number(report.usage.cache_read_tokens),
+              completion_tokens: Number(report.usage.completion_tokens),
+            }
+          : undefined
+        const validUsage =
+          reportUsage &&
+          Object.values(reportUsage).every(
+            value => Number.isFinite(value) && value >= 0,
+          )
+            ? reportUsage
+            : undefined
         return [
           {
             role: report.role,
@@ -5999,10 +6013,46 @@ function documentReviewForDisplay(
             ...(typeof report.failureReason === 'string'
               ? { failureReason: report.failureReason }
               : {}),
+            ...(Number.isFinite(Number(report.durationMs)) &&
+            Number(report.durationMs) >= 0
+              ? { durationMs: Number(report.durationMs) }
+              : {}),
+            ...(validUsage ? { usage: validUsage } : {}),
           },
         ]
       })
     : []
+  const reportsWithUsage = reports.filter(report => isObject(report.usage))
+  const reviewUsage = reportsWithUsage.length
+    ? reportsWithUsage.reduce<{
+        input_tokens: number
+        cache_read_tokens: number
+        completion_tokens: number
+      }>(
+        (total, report) => {
+          const usage = report.usage as JsonObject
+          total.input_tokens += Number(usage.input_tokens)
+          total.cache_read_tokens += Number(usage.cache_read_tokens)
+          total.completion_tokens += Number(usage.completion_tokens)
+          return total
+        },
+        { input_tokens: 0, cache_read_tokens: 0, completion_tokens: 0 },
+      )
+    : undefined
+  const reviewTimes = Array.isArray(run.reports)
+    ? run.reports.flatMap(report => {
+        if (!isObject(report) || !isObject(report.dispatch)) return []
+        const startedAt = Date.parse(String(report.dispatch.startedAt ?? ''))
+        const finishedAt = Date.parse(String(report.dispatch.finishedAt ?? ''))
+        return Number.isFinite(startedAt) && Number.isFinite(finishedAt)
+          ? [{ startedAt, finishedAt }]
+          : []
+      })
+    : []
+  const elapsedMs = reviewTimes.length
+    ? Math.max(...reviewTimes.map(value => value.finishedAt)) -
+      Math.min(...reviewTimes.map(value => value.startedAt))
+    : undefined
   const finalReportPath =
     typeof run.finalReportPath === 'string' ? run.finalReportPath : undefined
   const finalReportDigest =
@@ -6035,6 +6085,8 @@ function documentReviewForDisplay(
     ...(typeof run.status === 'string' ? { status: run.status } : {}),
     ...(typeof run.attempt === 'number' ? { attempt: run.attempt } : {}),
     reports,
+    ...(reviewUsage ? { usage: reviewUsage } : {}),
+    ...(elapsedMs !== undefined ? { elapsedMs: Math.max(0, elapsedMs) } : {}),
     ...(typeof run.verdict === 'string' ? { verdict: run.verdict } : {}),
     ...(Array.isArray(run.affectedPaths)
       ? {

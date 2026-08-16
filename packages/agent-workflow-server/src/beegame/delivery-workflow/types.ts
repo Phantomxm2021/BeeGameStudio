@@ -154,6 +154,8 @@ export type DocumentReviewReportState = {
   status: 'pending' | 'running' | 'completed' | 'failed'
   dispatch?: DispatchRecord
   failureReason?: string
+  durationMs?: number
+  usage?: WorkflowUsage
 }
 
 export type DocumentReviewRun = {
@@ -180,7 +182,7 @@ export type DocumentReviewReportApproval = {
   approvedAt: string
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 16 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 17 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

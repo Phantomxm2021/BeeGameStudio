@@ -1183,6 +1183,40 @@ describe('delivery workflow session continuation', () => {
             scope: 'foundation',
             revision: reviewRevision,
           }),
+          reports: createDocumentReviewRun({
+            scope: 'foundation',
+            revision: reviewRevision,
+          }).reports.map((report, index) =>
+            index < 2
+              ? {
+                  ...report,
+                  status: 'completed' as const,
+                  durationMs: index === 0 ? 10_000 : 15_000,
+                  usage: {
+                    input_tokens: index === 0 ? 120 : 100,
+                    cache_read_tokens: index === 0 ? 340 : 300,
+                    cache_creation_tokens: index === 0 ? 3 : 4,
+                    completion_tokens: index === 0 ? 56 : 40,
+                    total_tokens: index === 0 ? 519 : 444,
+                  },
+                  dispatch: {
+                    dispatchId: `review-display-${index}`,
+                    workerType: 'document-reviewer' as const,
+                    phase: 'DOCUMENT_REVIEW' as const,
+                    revision: reviewRevision,
+                    status: 'completed' as const,
+                    startedAt:
+                      index === 0
+                        ? '2026-08-06T00:00:00.000Z'
+                        : '2026-08-06T00:00:05.000Z',
+                    finishedAt:
+                      index === 0
+                        ? '2026-08-06T00:00:10.000Z'
+                        : '2026-08-06T00:00:20.000Z',
+                  },
+                }
+              : report,
+          ),
           status: 'completed',
           verdict: 'READY',
           affectedPaths: [],
@@ -1222,6 +1256,23 @@ describe('delivery workflow session continuation', () => {
       verdict: 'READY',
       finalReportPath: reportPath,
       finalReportMarkdown: reportMarkdown,
+      elapsedMs: 20_000,
+      usage: {
+        input_tokens: 220,
+        cache_read_tokens: 640,
+        completion_tokens: 96,
+      },
+    })
+    expect(
+      (workflow.documentReview as { reports: Array<Record<string, unknown>> })
+        .reports[0],
+    ).toMatchObject({
+      durationMs: 10_000,
+      usage: {
+        input_tokens: 120,
+        cache_read_tokens: 340,
+        completion_tokens: 56,
+      },
     })
     await writeFile(join(workspace, reportPath), '# tampered\n')
     const tamperedResponse = await app.request(

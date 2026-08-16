@@ -212,6 +212,17 @@ describe('document review controller terminal reconciliation', () => {
       .path
     await mkdir(dirname(join(workspacePath, reportPath)), { recursive: true })
     await writeFile(join(workspacePath, reportPath), '# Core systems review\n', 'utf8')
+    await store.addWorkflowUsage(
+      run.runId,
+      {
+        input_tokens: 120,
+        cache_read_tokens: 340,
+        cache_creation_tokens: 0,
+        completion_tokens: 56,
+        total_tokens: 516,
+      },
+      coreSystems.dispatchId!,
+    )
 
     await controller.dispatcher.completeDispatch(coreSystems.dispatchId!, {
       workerType: 'document-reviewer',
@@ -227,7 +238,21 @@ describe('document review controller terminal reconciliation', () => {
       progressed?.documentReviewState.activeRun?.reports.find(
         report => report.role === 'core-systems',
       ),
-    ).toMatchObject({ status: 'completed' })
+    ).toMatchObject({
+      status: 'completed',
+      usage: {
+        input_tokens: 120,
+        cache_read_tokens: 340,
+        cache_creation_tokens: 0,
+        completion_tokens: 56,
+        total_tokens: 516,
+      },
+    })
+    expect(
+      progressed?.documentReviewState.activeRun?.reports.find(
+        report => report.role === 'core-systems',
+      )?.durationMs,
+    ).toBeGreaterThanOrEqual(0)
     expect(
       started.map(request => request.contract.reviewRole).sort(),
     ).toEqual(['core-systems', 'player-experience', 'production-delivery'])
