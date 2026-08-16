@@ -544,10 +544,12 @@ export function transitionDeliveryRun(
                   failureReason: undefined,
                   reports: run.documentReviewState.activeRun.reports.map(
                     report =>
-                      report.status === 'failed'
+                      report.status === 'failed' ||
+                      report.dispatch?.status === 'failed'
                         ? {
                             ...report,
                             status: 'pending' as const,
+                            dispatch: undefined,
                             failureReason: undefined,
                           }
                         : report,

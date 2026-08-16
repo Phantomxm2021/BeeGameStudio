@@ -130,6 +130,50 @@ describe('document review run', () => {
     })
   })
 
+  test('retry clears a failed dispatch recorded before its Reviewer role failed', () => {
+    const activeRun = createDocumentReviewRun({ scope: 'foundation', revision })
+    activeRun.status = 'failed'
+    activeRun.failureReason = 'delivery run is no longer running'
+    activeRun.reports[0].status = 'pending'
+    activeRun.reports[0].dispatch = {
+      dispatchId: 'failed-dispatch',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      taskId: 'review:foundation:final:5',
+      revision,
+      status: 'failed',
+      failureReason: 'delivery run is no longer running',
+      startedAt: '2026-08-16T00:00:00.000Z',
+    } as never
+    const run = createTestDeliveryRun({
+      runId: 'review-interrupted-run',
+      projectId: 'review-interrupted-project',
+      ownerId: 'review-interrupted-owner',
+      foundationDraftComplete: true,
+    })
+
+    const retried = transitionDeliveryRun(
+      {
+        ...run,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        documentReviewState: {
+          approvals: {},
+          attempts: { foundation: 5, checklist: 0, complete: 0 },
+          activeRun,
+        },
+      },
+      { type: 'retry' },
+    )
+
+    expect(retried.documentReviewState.activeRun?.reports[0]).toMatchObject({
+      status: 'pending',
+      dispatch: undefined,
+      failureReason: undefined,
+    })
+  })
+
   test('dispatches one direct Foundation Reviewer over all canonical documents', async () => {
     const workspacePath = await workspace()
     const run = createDocumentReviewRun({ scope: 'foundation', revision })
