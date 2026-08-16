@@ -5,12 +5,63 @@ import { describe, expect, test } from 'bun:test'
 import { foundationReviewEvidenceStagingPath } from './foundation-review-evidence'
 import { foundationReviewStagingPath } from './foundation-review'
 import { createFoundationReviewState } from './foundation-review-state'
+import type { FoundationRemediationState } from './types'
 import {
   acceptFoundationReviewWorkerTerminal,
   buildFoundationReviewDispatches,
 } from './foundation-review-stage'
 
 const revision = 'a'.repeat(64)
+
+function completedRemediationState(): FoundationRemediationState {
+  const ownedPaths = [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ] as const
+  return {
+    reviewPath: '.beegame/reviews/foundation/prior/review.json',
+    reviewDigest: 'e'.repeat(64),
+    sourceRevision: 'f'.repeat(64),
+    resultingRevision: revision,
+    lanes: [
+      {
+        id: 'core-design',
+        ownedPaths: [...ownedPaths],
+        affectedPaths: ['docs/GDD.md'],
+        status: 'completed',
+        receipt: {
+          reviewDigest: 'e'.repeat(64),
+          sourceRevision: 'f'.repeat(64),
+          ownedPaths: [...ownedPaths],
+          beforeDigests: Object.fromEntries(
+            ownedPaths.map(path => [path, '1'.repeat(64)]),
+          ),
+          afterDigests: Object.fromEntries(
+            ownedPaths.map(path => [path, '2'.repeat(64)]),
+          ),
+          committedAt: '2026-08-17T00:00:00.000Z',
+        },
+      },
+      {
+        id: 'technical-assets',
+        ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+        affectedPaths: [],
+        status: 'not_required',
+      },
+      {
+        id: 'presentation',
+        ownedPaths: [
+          'docs/ART_DIRECTION.md',
+          'docs/UI_UX_SPEC.md',
+          'docs/AUDIO_DESIGN.md',
+        ],
+        affectedPaths: [],
+        status: 'not_required',
+      },
+    ],
+  }
+}
 
 function completedSpecialists() {
   const state = createFoundationReviewState({ mode: 'initial', revision })
@@ -84,6 +135,33 @@ describe('foundation review dispatch barrier', () => {
     })
   })
 
+  test('resumes only the pending specialist while preserving its accepted sibling', () => {
+    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const resumed = {
+      ...initial,
+      status: 'running' as const,
+      reports: initial.reports.map(report =>
+        report.role === 'contract-specialist'
+          ? {
+              ...report,
+              status: 'completed' as const,
+              digest: 'b'.repeat(64),
+            }
+          : report,
+      ),
+    }
+
+    const dispatches = buildFoundationReviewDispatches({
+      state: resumed,
+      workspacePath: '/workspace',
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+
+    expect(dispatches.map(dispatch => dispatch.role)).toEqual([
+      'integration-specialist',
+    ])
+  })
+
   test('dispatches verification as one standalone final reviewer', () => {
     const state = createFoundationReviewState({
       mode: 'verification',
@@ -96,6 +174,7 @@ describe('foundation review dispatch barrier', () => {
       state,
       workspacePath: '/workspace',
       confirmedBriefDigest: 'd'.repeat(64),
+      remediationState: completedRemediationState(),
     })
     expect(dispatches.map(dispatch => dispatch.role)).toEqual(['final'])
     expect(dispatches[0].contract.reviewMode).toBe('verification')
@@ -103,6 +182,10 @@ describe('foundation review dispatch barrier', () => {
       path: '.beegame/reviews/foundation/prior/review.json',
       digest: 'e'.repeat(64),
     })
+    expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
+    expect(dispatches[0].contract.remediationReceipts?.[0]?.laneId).toBe(
+      'core-design',
+    )
   })
 
   test('accepts specialist and final bytes only for the assigned current revision', async () => {

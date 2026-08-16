@@ -1125,6 +1125,7 @@ export function createDeliveryWorkflowController(input: {
             state: reviewRun.foundationReviewState!,
             workspacePath: input.workspacePath,
             confirmedBriefDigest: reviewRun.confirmedBriefDigest,
+            remediationState: reviewRun.foundationRemediationState,
           })
           await Promise.all(
             pending.map(item =>

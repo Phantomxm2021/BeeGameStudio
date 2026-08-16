@@ -39,6 +39,7 @@ import {
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { proveExactRawActiveUnitId } from '../beegame/delivery-workflow/recovery-projector'
 import {
   createTestDeliveryRun,
@@ -3508,6 +3509,68 @@ describe('delivery workflow recovery', () => {
       priorReviewDigest,
       attempt: 3,
     })
+  })
+
+  test('explicit retry resets only failed Foundation review work', () => {
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-role-retry',
+      projectId: 'project-review-role-retry',
+      ownerId: 'owner-review-role-retry',
+      documentRevision: 'a'.repeat(64),
+    })
+    const review = createFoundationReviewState({
+      mode: 'initial',
+      revision: 'a'.repeat(64),
+    })
+    review.status = 'failed'
+    review.failureReason = 'integration specialist failed'
+    review.reports[0] = {
+      ...review.reports[0],
+      status: 'completed',
+      digest: 'b'.repeat(64),
+    }
+    review.reports[1] = {
+      ...review.reports[1],
+      status: 'failed',
+      failureReason: 'integration specialist failed',
+      dispatch: {
+        dispatchId: 'integration-failed',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        taskId: 'review:foundation:integration-specialist:1',
+        revision: 'a'.repeat(64),
+        status: 'failed',
+        startedAt: '2026-08-17T00:00:00.000Z',
+        finishedAt: '2026-08-17T00:01:00.000Z',
+        failureReason: 'integration specialist failed',
+      },
+    }
+    const retried = transitionDeliveryRun(
+      {
+        ...initial,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: 'integration specialist failed',
+        foundationReviewState: review,
+      },
+      { type: 'retry' },
+    )
+
+    expect(retried.foundationReviewState?.reports).toEqual([
+      expect.objectContaining({
+        role: 'contract-specialist',
+        status: 'completed',
+        digest: 'b'.repeat(64),
+      }),
+      expect.objectContaining({
+        role: 'integration-specialist',
+        status: 'pending',
+        dispatch: undefined,
+        failureReason: undefined,
+      }),
+      expect.objectContaining({ role: 'final', status: 'pending' }),
+    ])
   })
 
   test('does not let a stale snapshot move cumulative usage below the journal high water mark', async () => {

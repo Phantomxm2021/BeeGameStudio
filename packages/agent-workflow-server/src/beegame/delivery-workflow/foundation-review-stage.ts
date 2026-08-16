@@ -18,7 +18,11 @@ import {
   type FoundationReviewRole,
   type FoundationReviewState,
 } from './foundation-review-state'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { foundationRemediationReadyForVerification } from './foundation-remediation'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationRemediationState,
+} from './types'
 import {
   foundationReviewWorkerTerminalSchema,
 } from './worker-contracts'
@@ -47,6 +51,10 @@ export type FoundationReviewDispatch = {
     confirmedBriefDigest: string
     packetDigests: Partial<Record<FoundationReviewSpecialistRole, string>>
     priorReview?: { path: string; digest: string }
+    remediationReceipts?: Array<{
+      laneId: string
+      receipt: NonNullable<FoundationRemediationState['lanes'][number]['receipt']>
+    }>
   }
 }
 
@@ -62,6 +70,7 @@ export function buildFoundationReviewDispatches(input: {
   state: FoundationReviewState
   workspacePath: string
   confirmedBriefDigest: string
+  remediationState?: FoundationRemediationState
 }): FoundationReviewDispatch[] {
   const state = assertFoundationReviewState(input.state)
   if (!digestPattern.test(input.confirmedBriefDigest))
@@ -74,14 +83,15 @@ export function buildFoundationReviewDispatches(input: {
     roles = reportIsDispatchable(state, 'final') ? ['final'] : []
   } else {
     const specialists = state.reports.slice(0, 2)
-    if (specialists.every(report => report.status === 'pending' && !report.dispatch))
-      roles = specialists.map(report => report.role)
-    else if (
+    if (
       specialists.every(report => report.status === 'completed' && report.digest) &&
       reportIsDispatchable(state, 'final')
     )
       roles = ['final']
-    else roles = []
+    else
+      roles = specialists
+        .filter(report => reportIsDispatchable(state, report.role))
+        .map(report => report.role)
   }
 
   const packetDigests = Object.fromEntries(
@@ -94,6 +104,32 @@ export function buildFoundationReviewDispatches(input: {
       )
       .map(report => [report.role, report.digest]),
   ) as Partial<Record<FoundationReviewSpecialistRole, string>>
+  const remediationReceipts =
+    state.mode === 'verification'
+      ? (() => {
+          const remediation = input.remediationState
+          if (
+            !remediation ||
+            remediation.reviewDigest !== state.priorReviewDigest ||
+            remediation.resultingRevision !== state.revision ||
+            !foundationRemediationReadyForVerification(remediation)
+          )
+            throw new Error(
+              'foundation verification requires the completed remediation receipt barrier',
+            )
+          return remediation.lanes.flatMap(lane =>
+            lane.status === 'not_required'
+              ? []
+              : lane.receipt
+                ? [{ laneId: lane.id, receipt: lane.receipt }]
+                : (() => {
+                    throw new Error(
+                      `foundation verification receipt is missing: ${lane.id}`,
+                    )
+                  })(),
+          )
+        })()
+      : undefined
 
   return roles.map(role => {
     const taskId = `review:foundation:${role}:${state.attempt}`
@@ -145,6 +181,7 @@ export function buildFoundationReviewDispatches(input: {
                 path: state.priorReviewPath!,
                 digest: state.priorReviewDigest!,
               },
+              remediationReceipts,
             }
           : {}),
       },
