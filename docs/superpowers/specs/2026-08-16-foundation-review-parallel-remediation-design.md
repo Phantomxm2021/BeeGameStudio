@@ -172,7 +172,9 @@ Foundation remediation state persists:
 - each lane's status, dispatch ID, owned paths, receipt, and exact failure;
 - the resulting Foundation revision after all required lanes complete.
 
-Required lane states are `pending`, `running`, `completed`, and `failed`.
+Lane states are `not_required`, `pending`, `running`, `completed`, and `failed`.
+An unaffected lane is persisted as `not_required`; it has no dispatch or
+receipt and does not participate in the completion barrier.
 
 Routing rules:
 
