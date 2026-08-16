@@ -70,6 +70,34 @@ import { computeCurrentDocumentReviewRevision } from './delivery-workflow/docume
 
 const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
+const FOUNDATION_REVIEWER_AGENT_DEFINITIONS = {
+  'foundation-contract-specialist': {
+    description:
+      'Read-only specialist for authority, cardinality, state, formula, budget, ownership and reference consistency across the eight foundation documents.',
+    tools: ['Read', 'Grep', 'Glob'],
+    prompt:
+      'Inspect only the assigned Foundation Reviewer source paths. Find implementation-blocking contradictions or missing authority in enumerations, states, formulas, units, budgets, ownership and cross-document references. Return concise advisory findings with exact path and location to the parent Reviewer. Do not modify files, write a report, decide the final verdict or repeat correct content.',
+  },
+  'foundation-integration-specialist': {
+    description:
+      'Read-only specialist for runtime, production, asset, presentation, accessibility, dependency and delivery integration across the eight foundation documents.',
+    tools: ['Read', 'Grep', 'Glob'],
+    prompt:
+      'Inspect only the assigned Foundation Reviewer source paths. Find implementation-blocking integration gaps across technical delivery, production feasibility, assets, art, UI/UX, audio, accessibility, assumptions and external dependencies. Return concise advisory findings with exact path and location to the parent Reviewer. Do not modify files, write a report, decide the final verdict or repeat correct content.',
+  },
+} satisfies Record<
+  string,
+  { description: string; tools: string[]; prompt: string }
+>
+
+function foundationReviewerAgentDefinitions(request: WorkerDispatchRequest) {
+  return request.workerType === 'document-reviewer' &&
+    request.contract.reviewScope === 'foundation' &&
+    request.contract.reviewRole === 'final'
+    ? FOUNDATION_REVIEWER_AGENT_DEFINITIONS
+    : undefined
+}
+
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
       assignment: DocumentReviewAssignment
@@ -484,6 +512,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ],
               }
             : {}),
+        ...(foundationReviewerAgentDefinitions(request)
+          ? {
+              workflowAgentDefinitions:
+                foundationReviewerAgentDefinitions(request),
+            }
+          : {}),
         ...(request.workerType === 'document-author' &&
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft' ||

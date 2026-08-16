@@ -261,6 +261,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  workflowAgentDefinitions?: Record<string, BeeGameWorkflowAgentDefinition>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
@@ -270,6 +271,12 @@ export type BeeGameSessionRunnerStartInput = {
   requestPermission?(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
+}
+
+export type BeeGameWorkflowAgentDefinition = {
+  description: string
+  tools: string[]
+  prompt: string
 }
 
 export type RuntimeLaunchContract = {
@@ -391,6 +398,7 @@ type SessionRecord = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  workflowAgentDefinitions?: Record<string, BeeGameWorkflowAgentDefinition>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   atomicTaskPlannerEvidenceWriteGranted?: boolean
@@ -566,6 +574,7 @@ export type StartBeeGameSessionInput = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  workflowAgentDefinitions?: Record<string, BeeGameWorkflowAgentDefinition>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
@@ -714,6 +723,9 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowReadOnlyPaths
         ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
+        : {}),
+      ...(input.workflowAgentDefinitions
+        ? { workflowAgentDefinitions: input.workflowAgentDefinitions }
         : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
@@ -1417,6 +1429,9 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowReadOnlyPaths
             ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
+            : {}),
+          ...(record.workflowAgentDefinitions
+            ? { workflowAgentDefinitions: record.workflowAgentDefinitions }
             : {}),
           ...(record.workflowDocumentAuthorMode
             ? {

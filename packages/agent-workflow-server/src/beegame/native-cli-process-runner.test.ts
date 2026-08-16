@@ -143,6 +143,30 @@ describe('native CLI process runner', () => {
     ).toBe(false)
   })
 
+  test('passes workflow agent definitions through the native agents argument', () => {
+    const workflowAgentDefinitions = {
+      'foundation-contract-specialist': {
+        description: 'Checks contract consistency.',
+        tools: ['Read', 'Grep', 'Glob'],
+        prompt: 'Inspect the assigned foundation documents without modifying files.',
+      },
+    }
+    const command = nativeRuntimeCommand({
+      sessionId: 'foundation-reviewer',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-reviewer',
+      workflowAgentDefinitions,
+    })
+
+    const argument = command.find(value => value.startsWith('--agents='))
+    expect(argument).toBe(`--agents=${JSON.stringify(workflowAgentDefinitions)}`)
+    expect(argument).not.toContain('Write')
+    expect(argument).not.toContain('Edit')
+    expect(argument).not.toContain('Bash')
+  })
+
   test('disables native tools only for a foundation Markdown stream turn', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_stream_author',

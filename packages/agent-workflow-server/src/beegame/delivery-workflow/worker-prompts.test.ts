@@ -368,6 +368,12 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('one non-blocking register')
     expect(finalReviewerPrompt).not.toContain('one preservation list')
     expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
+    expect(finalReviewerPrompt).toContain('foundation-contract-specialist')
+    expect(finalReviewerPrompt).toContain('foundation-integration-specialist')
+    expect(finalReviewerPrompt).toContain('launch both specialists concurrently')
+    expect(finalReviewerPrompt).toContain('advisory evidence')
+    expect(finalReviewerPrompt).toContain('deduplicate')
+    expect(finalReviewerPrompt).toContain('one canonical version 2 review.json')
 
     const repeatReviewerPrompt = buildWorkerPrompt({
       runId: 'run',

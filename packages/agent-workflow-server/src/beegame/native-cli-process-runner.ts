@@ -61,6 +61,9 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
+    ...(input.workflowAgentDefinitions
+      ? [`--agents=${JSON.stringify(input.workflowAgentDefinitions)}`]
+      : []),
     ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
