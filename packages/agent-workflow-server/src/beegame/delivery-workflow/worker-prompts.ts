@@ -313,7 +313,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           : request.contract.authoringMode === 'initial' ||
               request.contract.authoringMode === 'parallel-draft'
             ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
-            : `Read the accepted review at contract.remediation.reviewReportPath and revise only ${String(request.contract.foundationDocumentPath)}. Satisfy the report outcomes that apply to this owned path, preserve unrelated approved content, and leave the complete Markdown file committed when the turn ends.`,
+            : 'Use the accepted Foundation review JSON and current target bytes projected by the workflow service. Apply every conflict change across exactly contract.remediation.affectedPaths in one coordinated turn, preserve unrelated approved content, and leave every authorized Markdown document complete when the turn ends.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
@@ -364,9 +364,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
               : [
-                  'This is one accepted report-driven remediation. Modify only the assigned canonical foundation document.',
-                  `Read ${String((request.contract.remediation as Record<string, unknown> | undefined)?.reviewReportPath)} and resolve only outcomes affecting ${String(request.contract.foundationDocumentPath)}. Preserve unrelated approved authority and do not reinterpret or rewrite the review report.`,
-                  'For each accepted outcome, locate every owned occurrence of the affected authority, state, formula, count, budget or derived reference in this document before editing. Before completion, perform one targeted closure check against those same occurrences and the report outcome. Do not launch a broad new review or rewrite unrelated sections.',
+                  'This is one accepted report-driven Foundation remediation. Modify exactly the canonical documents in contract.remediation.affectedPaths and no others.',
+                  'Use the projected review JSON as the complete conflict list. Apply every conflict changes[].action to its named path so the shared requiredOutcome and all acceptance conditions hold across documents. Preserve unrelated approved authority; do not reinterpret, rewrite, summarize or expand the review.',
+                  'For each accepted conflict, locate only the cited and directly dependent occurrences of the affected authority, state, formula, count, budget or reference before editing. Perform one targeted closure check against that conflict after editing. Do not launch a broad new review.',
                 ].join(' '),
       ].join(' ')
     case 'document-reviewer':
@@ -454,6 +454,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft')
         ? ''
+        : request.contract.authoringMode === 'remediation' &&
+            request.contract.documentSet === 'foundation'
+          ? 'Ensure every Markdown document in contract.remediation.affectedPaths is complete and committed, then end the turn normally. The native runtime owns the file-operation sequence.'
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`

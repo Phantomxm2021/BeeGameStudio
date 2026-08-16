@@ -96,19 +96,24 @@ describe('workflow display tasks', () => {
     ])
   })
 
-  test('projects only report-affected paths during remediation', async () => {
+  test('projects one coordinated task for all report-affected paths', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
-      currentItemId: 'docs/TECHNICAL_DESIGN.md',
+      currentItemId: 'foundation-remediation',
       documentStep: 'FOUNDATION_DRAFTING',
       workflowStatus: 'running',
       thinking: 'working',
       remediationPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
-      remediatedPaths: ['docs/GDD.md'],
+      remediatedPaths: [],
     })
-    expect(tasks.map(task => [task.id, task.status])).toEqual([
-      ['docs/GDD.md', 'completed'],
-      ['docs/TECHNICAL_DESIGN.md', 'running'],
+    expect(tasks).toEqual([
+      {
+        id: 'foundation-remediation',
+        title: 'Resolve Foundation review (2 documents)',
+        status: 'running',
+        attempt: 0,
+        operation: 'write',
+      },
     ])
   })
 })

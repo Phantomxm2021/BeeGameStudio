@@ -573,7 +573,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Do not simulate builds or waves')
   })
 
-  test('routes report-driven remediation to one document owner', () => {
+  test('routes one accepted conflict list to one coordinated remediation Agent', () => {
     const ownerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -582,28 +582,27 @@ describe('resource-content worker prompts', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: 'revision',
-      allowedPaths: ['docs/GDD.md'],
+      allowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
       contract: {
         documentSet: 'foundation',
         authoringMode: 'remediation',
-        foundationDocumentPath: 'docs/GDD.md',
-        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
         remediation: {
-          reviewReportPath: '.beegame/reviews/foundation/revision/review.md',
-          affectedPaths: ['docs/GDD.md'],
+          reviewPath: '.beegame/reviews/foundation/revision/review.json',
+          reviewDigest: 'a'.repeat(64),
+          affectedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
           sourceRevision: 'revision',
         },
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(ownerPrompt).toContain('contract.remediation.reviewReportPath')
-    expect(ownerPrompt).toContain('locate every owned occurrence')
+    expect(ownerPrompt).toContain('one coordinated turn')
+    expect(ownerPrompt).toContain('every conflict changes[].action')
+    expect(ownerPrompt).toContain('contract.remediation.affectedPaths')
     expect(ownerPrompt).toContain('targeted closure check')
     expect(ownerPrompt).toContain('Do not launch a broad new review')
-    expect(ownerPrompt).toContain('revise only docs/GDD.md')
     expect(ownerPrompt).toContain('preserve unrelated approved content')
     expect(ownerPrompt).toContain(
-      'Ensure the assigned Markdown document at docs/GDD.md is complete',
+      'Ensure every Markdown document in contract.remediation.affectedPaths is complete',
     )
     expect(ownerPrompt).toContain(
       'The native runtime owns the file-operation sequence',
@@ -611,6 +610,7 @@ describe('resource-content worker prompts', () => {
     expect(ownerPrompt).toContain('end the turn normally')
     expect(ownerPrompt).not.toContain('verify its final bytes')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
+    expect(ownerPrompt).not.toContain('foundationDocumentPath')
   })
 
   test('keeps the checklist minimal and scenario-level', () => {

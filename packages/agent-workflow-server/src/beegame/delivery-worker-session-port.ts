@@ -196,28 +196,47 @@ export async function buildDocumentAuthorAuthorityBlock(
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
   if (request.contract.authoringMode === 'remediation') {
-    const targetPath = request.contract.foundationDocumentPath
-    const reviewReportPath = (
-      request.contract.remediation as
-        | { reviewReportPath?: unknown }
-        | undefined
-    )?.reviewReportPath
+    const remediation = request.contract.remediation as
+      | Record<string, unknown>
+      | undefined
+    const reviewPath = remediation?.reviewPath
+    const reviewDigest = remediation?.reviewDigest
+    const affectedPaths = remediation?.affectedPaths
     if (
-      typeof targetPath !== 'string' ||
-      !CANONICAL_FOUNDATION_DOCUMENTS.includes(targetPath as never) ||
-      typeof reviewReportPath !== 'string' ||
-      !reviewReportPath.startsWith('.beegame/reviews/') ||
-      reviewReportPath.split('/').includes('..')
+      typeof reviewPath !== 'string' ||
+      typeof reviewDigest !== 'string' ||
+      !Array.isArray(affectedPaths) ||
+      affectedPaths.some(
+        path =>
+          typeof path !== 'string' ||
+          !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+      ) ||
+      !request.allowedPaths ||
+      JSON.stringify(request.allowedPaths) !== JSON.stringify(affectedPaths)
     )
       throw new Error('document remediation authority is invalid')
-    const [content, reviewReport] = await Promise.all([
-      readFile(resolve(request.workspacePath, targetPath), 'utf8'),
-      readFile(resolve(request.workspacePath, reviewReportPath), 'utf8'),
-    ])
+    const accepted = await readFoundationReviewArtifact({
+      workspacePath: request.workspacePath,
+      path: reviewPath,
+      expectedDigest: reviewDigest,
+    })
+    if (
+      JSON.stringify(accepted.affectedPaths) !== JSON.stringify(affectedPaths)
+    )
+      throw new Error('document remediation paths do not match accepted review')
+    const targets = await Promise.all(
+      accepted.affectedPaths.map(async path => ({
+        path,
+        content: await readFile(resolve(request.workspacePath, path), 'utf8'),
+      })),
+    )
     return [
-      `The workflow service projected the accepted final review report and current repair target ${targetPath} below. Resolve only report items that affect this owned path, preserve unrelated content, and keep the assigned Markdown file complete. Do not reinterpret or expand the review scope.`,
-      `--- BEGIN ACCEPTED REVIEW REPORT: ${reviewReportPath} ---\n${reviewReport}\n--- END ACCEPTED REVIEW REPORT: ${reviewReportPath} ---`,
-      `--- BEGIN CANONICAL REPAIR TARGET: ${targetPath} ---\n${content}\n--- END CANONICAL REPAIR TARGET: ${targetPath} ---`,
+      'The workflow service projected one accepted Foundation conflict list and every authorized repair target below. Coordinate every listed change across the complete path set in one turn, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
+      `--- BEGIN ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(accepted.review, null, 2)}\n--- END ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---`,
+      ...targets.map(
+        target =>
+          `--- BEGIN CANONICAL REPAIR TARGET: ${target.path} ---\n${target.content}\n--- END CANONICAL REPAIR TARGET: ${target.path} ---`,
+      ),
     ].join('\n\n')
   }
   if (

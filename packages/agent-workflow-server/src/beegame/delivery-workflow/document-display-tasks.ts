@@ -106,21 +106,26 @@ export function projectDocumentDisplayTasks(
 
   if (operation === 'write' && input.remediationPaths?.length) {
     const completed = new Set(input.remediatedPaths ?? [])
-    return input.remediationPaths.map(path => ({
-      id: path,
-      title: path,
-      status: completed.has(path)
+    const remediationComplete = input.remediationPaths.every(path =>
+      completed.has(path),
+    )
+    const remediationActive =
+      input.currentItemId === 'foundation-remediation'
+    return [{
+      id: 'foundation-remediation',
+      title: `Resolve Foundation review (${input.remediationPaths.length} documents)`,
+      status: remediationComplete
         ? 'completed'
-        : active && currentItemId === path
+        : active && remediationActive
           ? 'running'
-          : workflowStopped(input.workflowStatus) && currentItemId === path
+          : workflowStopped(input.workflowStatus) && remediationActive
             ? 'stopped'
-            : workflowFailed(input.workflowStatus) && currentItemId === path
+            : workflowFailed(input.workflowStatus) && remediationActive
               ? 'failed'
               : 'pending',
       attempt: 0,
       operation: 'write',
-    }))
+    }]
   }
 
   return documentPaths.map(path => {

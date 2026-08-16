@@ -15,6 +15,7 @@ import {
   readyDraftPaths,
 } from './foundation-authoring-batch'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
+import { readFoundationReviewArtifact } from './foundation-review'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
@@ -167,6 +168,61 @@ export async function startDocumentStage(input: {
     )
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
+  const review = input.run.documentReviewState.activeRun
+  if (
+    review?.scope === 'foundation' &&
+    review.status === 'completed' &&
+    review.verdict === 'NEEDS_REVISION'
+  ) {
+    if (!review.finalReportPath || !review.finalReportDigest)
+      throw new Error('foundation remediation review authority is incomplete')
+    const accepted = await readFoundationReviewArtifact({
+      workspacePath: input.workspacePath,
+      path: review.finalReportPath,
+      expectedDigest: review.finalReportDigest,
+    })
+    const repairPaths = accepted.affectedPaths
+    if (!repairPaths.length)
+      throw new Error('foundation remediation has no accepted conflict paths')
+    if (
+      JSON.stringify(repairPaths) !==
+      JSON.stringify(review.affectedPaths ?? [])
+    )
+      throw new Error('foundation remediation paths do not match accepted review')
+    const previousDocumentMetadata = Object.fromEntries(
+      repairPaths.flatMap(path => {
+        const metadata = readDocumentMetadata(input.workspacePath, path)
+        return metadata ? [[path, metadata]] : []
+      }),
+    )
+    return input.dispatcher.dispatch({
+      runId: input.run.runId,
+      ownerId: input.run.ownerId,
+      projectId: input.run.projectId,
+      workspacePath: input.workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: 'foundation-remediation',
+      revision: input.run.revision.document,
+      allowedPaths: [...repairPaths],
+      contract: {
+        confirmedBriefDigest: input.run.confirmedBriefDigest,
+        confirmedBriefContext: input.run.confirmedBriefContext,
+        documentSet: 'foundation',
+        systemDeliveryContract: buildSystemDeliveryContract(),
+        authoringMode: 'remediation',
+        remediation: {
+          reviewPath: accepted.path,
+          reviewDigest: accepted.digest,
+          affectedPaths: [...repairPaths],
+          sourceRevision: review.revision,
+        },
+        ...(Object.keys(previousDocumentMetadata).length
+          ? { previousDocumentMetadata }
+          : {}),
+      },
+    })
+  }
   if (input.run.foundationDraftState.documents) {
     const pendingDrafts = readyDraftPaths(input.run.foundationDraftState)
     if (pendingDrafts.length) {
@@ -204,7 +260,6 @@ export async function startDocumentStage(input: {
     if (hasUnsettledDraft) return input.run.foundationDraftState
     return input.run.foundationDraftState
   }
-  const review = input.run.documentReviewState.activeRun
   const repairPaths =
     review?.status === 'completed' && review.verdict === 'NEEDS_REVISION'
       ? (review.affectedPaths?.filter(path =>
@@ -362,10 +417,20 @@ export async function completeDocumentDraft(input: {
   if (documentSet === 'foundation' && !remediation)
     return completeInitialFoundationDocumentDraft(input)
 
+  const expectedFoundationRepairPaths =
+    documentSet === 'foundation' && remediation?.scope === 'foundation'
+      ? (remediation.affectedPaths?.filter(path =>
+          CANONICAL_FOUNDATION_DOCUMENTS.includes(
+            path as FoundationDocumentPath,
+          ),
+        ) ?? [])
+      : []
   const allowedPaths = new Set(
     documentSet === 'checklist'
       ? [CHECKLIST_PATH]
-      : CANONICAL_FOUNDATION_DOCUMENTS,
+      : expectedFoundationRepairPaths.length
+        ? expectedFoundationRepairPaths
+        : CANONICAL_FOUNDATION_DOCUMENTS,
   )
   const outOfScope = input.terminal.writtenPaths.filter(path => {
     const normalized = path.split('\\').join('/')
@@ -382,6 +447,17 @@ export async function completeDocumentDraft(input: {
   const missingRemediationIssue =
     remediation && input.terminal.writtenPaths.length === 0
       ? 'document remediation completed without changing a canonical artifact'
+      : undefined
+  const normalizedWrittenPathSet = new Set(
+    input.terminal.writtenPaths.map(path => path.split('\\').join('/')),
+  )
+  const incompleteFoundationRemediationIssue =
+    expectedFoundationRepairPaths.length &&
+    (normalizedWrittenPathSet.size !== expectedFoundationRepairPaths.length ||
+      expectedFoundationRepairPaths.some(
+        path => !normalizedWrittenPathSet.has(path),
+      ))
+      ? `coordinated foundation remediation must commit exactly: ${expectedFoundationRepairPaths.join(', ')}`
       : undefined
   const metadataCommitIssues: string[] = []
   const previousMetadata = input.run.activeDispatch?.request?.contract
@@ -449,6 +525,9 @@ export async function completeDocumentDraft(input: {
       : []),
     ...(resolvedFindingIssue ? [resolvedFindingIssue] : []),
     ...(missingRemediationIssue ? [missingRemediationIssue] : []),
+    ...(incompleteFoundationRemediationIssue
+      ? [incompleteFoundationRemediationIssue]
+      : []),
     ...metadataCommitIssues,
     ...metadataIssues,
   ]

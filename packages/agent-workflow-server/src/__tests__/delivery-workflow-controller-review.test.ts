@@ -100,10 +100,9 @@ describe('document review controller terminal reconciliation', () => {
     await mkdir(dirname(join(workspacePath, finalReport.path)), {
       recursive: true,
     })
-    await writeFile(join(workspacePath, finalReport.path), '# Final review\n')
     await writeFile(
-      join(workspacePath, finalReport.path.replace(/review\.md$/u, 'decision.json')),
-      '{}\n',
+      join(workspacePath, finalReport.path),
+      foundationNeedsRevisionJson(revision),
     )
 
     await controller.dispatcher.completeDispatch(finalRequest.dispatchId!, {
@@ -112,12 +111,7 @@ describe('document review controller terminal reconciliation', () => {
       revision,
       scope: 'foundation',
       role: 'final',
-      reportPaths: [
-        finalReport.path,
-        finalReport.path.replace(/review\.md$/u, 'decision.json'),
-      ],
-      verdict: 'NEEDS_REVISION',
-      affectedPaths: ['docs/GDD.md'],
+      reportPaths: [finalReport.path],
     })
 
     const persisted = await store.load()
@@ -211,10 +205,9 @@ describe('document review controller terminal reconciliation', () => {
     )!
       .path
     await mkdir(dirname(join(workspacePath, reportPath)), { recursive: true })
-    await writeFile(join(workspacePath, reportPath), '# Foundation review\n', 'utf8')
     await writeFile(
-      join(workspacePath, reportPath.replace(/review\.md$/u, 'decision.json')),
-      '{}\n',
+      join(workspacePath, reportPath),
+      foundationNeedsRevisionJson(revision),
       'utf8',
     )
     await store.addWorkflowUsage(
@@ -235,12 +228,7 @@ describe('document review controller terminal reconciliation', () => {
       revision,
       scope: 'foundation',
       role: 'final',
-      reportPaths: [
-        reportPath,
-        reportPath.replace(/review\.md$/u, 'decision.json'),
-      ],
-      verdict: 'NEEDS_REVISION',
-      affectedPaths: ['docs/GDD.md'],
+      reportPaths: [reportPath],
     })
 
     const progressed = await store.load()
@@ -265,3 +253,35 @@ describe('document review controller terminal reconciliation', () => {
     ).toBeGreaterThanOrEqual(0)
   })
 })
+
+function foundationNeedsRevisionJson(revision: string): string {
+  return `${JSON.stringify({
+    version: 2,
+    scope: 'foundation',
+    revision,
+    verdict: 'NEEDS_REVISION',
+    priorConflictStatus: [],
+    conflicts: [
+      {
+        id: 'B1',
+        title: 'Gameplay authority is incomplete',
+        problem: 'The gameplay outcome cannot be verified.',
+        evidence: [
+          {
+            path: 'docs/GDD.md',
+            location: 'Core loop',
+            observed: 'No observable completion outcome is defined.',
+          },
+        ],
+        requiredOutcome: 'Define one observable completion outcome.',
+        changes: [
+          {
+            path: 'docs/GDD.md',
+            action: 'Define the observable completion outcome.',
+          },
+        ],
+        acceptance: ['The completion outcome is observable and testable.'],
+      },
+    ],
+  })}\n`
+}
