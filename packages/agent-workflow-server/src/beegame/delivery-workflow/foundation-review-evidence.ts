@@ -45,6 +45,46 @@ export type FoundationReviewEvidencePacket = z.infer<
   typeof foundationReviewEvidenceSchema
 >
 
+const SPECIALIST_FOCUS: Record<FoundationReviewSpecialistRole, string> = {
+  'contract-specialist':
+    'Review authority, enumeration, cardinality, state and outcome totality, arithmetic, units, formulas, budgets, duplicate facts and owner-to-consumer references.',
+  'integration-specialist':
+    'Review runtime and production closure, asset ownership, art, UI, audio and accessibility mappings, unresolved assumptions, external dependencies and implementer usability.',
+}
+
+export function foundationReviewEvidenceContractInstruction(input: {
+  revision: string
+  role: FoundationReviewSpecialistRole
+}): string {
+  assertRole(input.role)
+  const shape = JSON.stringify({
+    version: 1,
+    scope: 'foundation',
+    revision: input.revision,
+    role: input.role,
+    candidates: [
+      {
+        title: '<specific defect>',
+        problem: '<why the delivered contract is not implementable or verifiable>',
+        evidence: [
+          {
+            path: '<assigned canonical relative path>',
+            location: '<heading, table row or stable locator>',
+            observed: '<bounded exact observation from source bytes>',
+          },
+        ],
+        blockingReason: '<specific incompatible outcome or missing acceptance proof>',
+      },
+    ],
+  })
+  return [
+    SPECIALIST_FOCUS[input.role],
+    `Write exactly one JSON object with this exact shape and fixed identity: ${shape}`,
+    'The object may contain only version, scope, revision, role and candidates. Each candidate may contain only title, problem, evidence and blockingReason. Each evidence item may contain only path, location and observed. Use at most 32 candidates; candidates may be empty when no defect is proven.',
+    'Read only the assigned canonical source paths. Do not inspect .beegame workflow state or Bee Game Studio source code, and do not search for or infer the protocol. Write the JSON object once to the sole staging output path. Do not emit prose, modify source documents, decide the final verdict or launch another Agent or task.',
+  ].join(' ')
+}
+
 function assertDigest(value: string): void {
   digestSchema.parse(value)
 }

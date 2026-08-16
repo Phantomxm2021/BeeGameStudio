@@ -4,6 +4,7 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 import { foundationReviewOutputContractInstruction } from './foundation-review'
+import { foundationReviewEvidenceContractInstruction } from './foundation-review-evidence'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
@@ -381,7 +382,13 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               ].join(' ')
           : request.contract.reviewRole === 'contract-specialist' ||
               request.contract.reviewRole === 'integration-specialist'
-            ? 'Review only the responsibility assigned by contract.reviewRole and write one bounded Foundation review evidence packet to the sole staging path. Cite exact source bytes, do not decide the final verdict, do not propose replacement prose, and do not modify canonical documents. The packet contains evidence candidates only; do not write human-readable Markdown or launch another Agent or task.'
+            ? [
+                'Review only the responsibility assigned by contract.reviewRole and write one bounded Foundation review evidence packet to the sole staging path. Cite exact source bytes, do not decide the final verdict, do not propose replacement prose, and do not modify canonical documents.',
+                foundationReviewEvidenceContractInstruction({
+                  revision: request.revision,
+                  role: request.contract.reviewRole,
+                }),
+              ].join(' ')
             : 'Unsupported Foundation review role.',
         'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',
       ].join(' ')

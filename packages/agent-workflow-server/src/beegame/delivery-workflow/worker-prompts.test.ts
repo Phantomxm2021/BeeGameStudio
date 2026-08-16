@@ -406,8 +406,52 @@ describe('resource-content worker prompts', () => {
     )
     expect(specialistPrompt).toContain('do not decide the final verdict')
     expect(specialistPrompt).toContain('do not modify canonical documents')
+    expect(specialistPrompt).toContain(
+      'authority, enumeration, cardinality, state and outcome totality',
+    )
+    expect(specialistPrompt).toContain('"version":1')
+    expect(specialistPrompt).toContain('"scope":"foundation"')
+    expect(specialistPrompt).toContain('"role":"contract-specialist"')
+    expect(specialistPrompt).toContain(
+      'title, problem, evidence and blockingReason',
+    )
+    expect(specialistPrompt).toContain(
+      'path, location and observed',
+    )
+    expect(specialistPrompt).toContain('at most 32 candidates')
+    expect(specialistPrompt).toContain(
+      'Do not inspect .beegame workflow state or Bee Game Studio source code',
+    )
     expect(specialistPrompt).not.toContain('Write one human-readable Markdown')
     expect(specialistPrompt).not.toContain('TaskOutput')
+
+    const integrationSpecialistPrompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'initial',
+        reviewRole: 'integration-specialist',
+        assignment: {
+          sourcePaths: ['/workspace/docs/GDD.md'],
+          verificationSourcePaths: [],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/integration.json',
+          ],
+        },
+      },
+    })
+    expect(integrationSpecialistPrompt).toContain(
+      'runtime and production closure, asset ownership, art, UI, audio and accessibility mappings',
+    )
+    expect(integrationSpecialistPrompt).toContain(
+      '"role":"integration-specialist"',
+    )
 
     const repeatReviewerPrompt = buildWorkerPrompt({
       runId: 'run',
