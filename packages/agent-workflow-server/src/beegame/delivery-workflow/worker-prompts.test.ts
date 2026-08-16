@@ -368,15 +368,13 @@ describe('resource-content worker prompts', () => {
             '/workspace/docs/TECHNICAL_DESIGN.md',
           ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/staging/review.md',
-            '/workspace/.beegame/reviews/staging/decision.json',
+            '/workspace/.beegame/reviews/staging/review.json',
           ],
         },
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
     expect(finalReviewerPrompt).toContain('Review all eight canonical foundation documents directly')
-    expect(finalReviewerPrompt).toContain('one deduplicated owner-grouped blocking register')
     expect(finalReviewerPrompt).toContain('fixed coverage pass')
     expect(finalReviewerPrompt).toContain('authority, enumeration and cardinality')
     expect(finalReviewerPrompt).toContain('state and outcome totality')
@@ -384,7 +382,15 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
     expect(finalReviewerPrompt).toContain('permits incompatible implementations')
     expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
-    expect(finalReviewerPrompt).toContain('affectedPaths must equal the union')
+    expect(finalReviewerPrompt).toContain('one JSON object')
+    expect(finalReviewerPrompt).toContain('priorConflictStatus')
+    expect(finalReviewerPrompt).toContain('requiredOutcome')
+    expect(finalReviewerPrompt).toContain('changes')
+    expect(finalReviewerPrompt).toContain('acceptance')
+    expect(finalReviewerPrompt).not.toContain('review.md')
+    expect(finalReviewerPrompt).not.toContain('decision.json')
+    expect(finalReviewerPrompt).not.toContain('one non-blocking register')
+    expect(finalReviewerPrompt).not.toContain('one preservation list')
     expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
 
     const repeatReviewerPrompt = buildWorkerPrompt({
@@ -399,25 +405,38 @@ describe('resource-content worker prompts', () => {
       contract: {
         reviewScope: 'foundation',
         reviewRole: 'final',
+        revisionVerification: {
+          prerequisiteReports: [
+            {
+              path: '.beegame/reviews/foundation/old/review.json',
+              digest: 'a'.repeat(64),
+            },
+          ],
+        },
         assignment: {
           sourcePaths: [
-            '/workspace/.beegame/reviews/foundation/old/review.md',
+            '/workspace/.beegame/reviews/foundation/old/review.json',
           ],
           verificationSourcePaths: [
             '/workspace/docs/GDD.md',
             '/workspace/docs/TECHNICAL_DESIGN.md',
           ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/staging/review.md',
-            '/workspace/.beegame/reviews/staging/decision.json',
+            '/workspace/.beegame/reviews/staging/review.json',
           ],
         },
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
     expect(repeatReviewerPrompt).toContain('prior accepted review')
-    expect(repeatReviewerPrompt).toContain('resolved, regressed, or still open')
-    expect(repeatReviewerPrompt).toContain('why it was absent from the prior coverage evidence')
+    expect(repeatReviewerPrompt).toContain('priorConflictStatus')
+    expect(repeatReviewerPrompt).toContain(
+      `"priorReviewDigest":"${'a'.repeat(64)}"`,
+    )
+    expect(repeatReviewerPrompt).toContain(
+      'Every open prior conflict must retain the same ID',
+    )
+    expect(repeatReviewerPrompt).toContain('New conflicts use new IDs')
   })
 
   test('keeps resource remediation inside the same Curator task', () => {

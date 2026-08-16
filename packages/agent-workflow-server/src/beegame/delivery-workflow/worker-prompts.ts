@@ -100,14 +100,36 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
-  if (request.workerType === 'document-reviewer')
+  if (request.workerType === 'document-reviewer') {
+    const verification = request.contract.revisionVerification
+    const verificationRecord =
+      verification &&
+      typeof verification === 'object' &&
+      !Array.isArray(verification)
+        ? (verification as Record<string, unknown>)
+        : undefined
+    const prerequisiteReports = verificationRecord?.prerequisiteReports
+    const priorReport =
+      Array.isArray(prerequisiteReports) && prerequisiteReports.length === 1
+        ? prerequisiteReports[0]
+        : undefined
+    const priorReportRecord =
+      priorReport && typeof priorReport === 'object' && !Array.isArray(priorReport)
+        ? (priorReport as Record<string, unknown>)
+        : undefined
+    const priorReviewDigest =
+      typeof priorReportRecord?.digest === 'string'
+        ? priorReportRecord.digest
+        : undefined
     return JSON.stringify({
       reviewScope: request.contract.reviewScope,
       reviewRole: request.contract.reviewRole,
+      ...(priorReviewDigest ? { priorReviewDigest } : {}),
       assignment: request.contract.assignment,
       partDigests: request.contract.partDigests,
       allowedAffectedPaths: request.contract.allowedAffectedPaths,
     })
+  }
   const {
     confirmedBriefContext: _confirmedBriefContext,
     ...contractWithoutDuplicatedBrief
@@ -355,15 +377,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           ? request.contract.reviewScope === 'foundation'
             ? [
                 'Review all eight canonical foundation documents directly as one connected production contract.',
-                'Before choosing a verdict, run one fixed coverage pass in this order: (1) authority, enumeration and cardinality; (2) state and outcome totality; (3) arithmetic, units, formulas and budgets; (4) owner-to-consumer references and duplicated facts; (5) runtime, production, asset and acceptance constraints; (6) player-facing art, UI, audio and accessibility mappings; (7) unresolved assumptions and external dependencies; (8) redundancy and human/agent usability. In review.md, include one compact Coverage evidence section that records the result of every dimension; a generic claim that coverage passed is insufficient.',
+                'Before choosing a verdict, run one fixed coverage pass in this order: (1) authority, enumeration and cardinality; (2) state and outcome totality; (3) arithmetic, units, formulas and budgets; (4) owner-to-consumer references and duplicated facts; (5) runtime, production, asset and acceptance constraints; (6) player-facing art, UI, audio and accessibility mappings; (7) unresolved assumptions and external dependencies; (8) redundancy and human/agent usability. Keep the checking process internal; do not emit coverage prose or a checklist self-attestation.',
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-                'Write one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, and one preservation list. Every blocking finding must name every canonical document whose bytes must change, not only the upstream owner; decision.json affectedPaths must equal the union of those paths. Mentioning a downstream contradiction without routing its owning path is invalid.',
+                'Write exactly one JSON object to the sole contract.assignment.stagingOutputPaths entry. The object must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not write Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
+                'Each conflict must tell the repair Agent what is wrong, the exact evidence location, every canonical path whose bytes must change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose.',
                 ...(hasPriorReviewSource(request)
                   ? [
-                      'The assignment sourcePaths contain the prior accepted review as read-only review history, not current product authority. First classify every prior blocker as resolved, regressed, or still open, then run the complete fixed coverage pass. Any newly blocking issue must state which coverage dimension owns it and why it was absent from the prior coverage evidence.',
+                      'The assignment sourcePaths contain the prior accepted review JSON as byte-bound read-only verification input, not current product authority. Set output priorReviewDigest exactly to contract.priorReviewDigest and account for every prior conflict in priorConflictStatus. Every open prior conflict must retain the same ID in conflicts; every closed prior conflict must be absent. New conflicts use new IDs.',
                     ]
                   : []),
-                'Read each assigned canonical document once unless exact evidence needs a targeted reread. Do not reproduce source sections or add a second recap of the finding registers. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.',
+                'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives write authority from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
               ].join(' ')
             : 'Consolidate the committed specialist Markdown reports into one complete review.md containing one verdict, one deduplicated owner-grouped blocking register, one non-blocking register, explicit specialist disagreements, and one preservation list. Verify cited evidence against the supplied read-only verification paths only when needed. Do not restate each specialist report before the consolidated result. Write decision.json with exactly version, scope, revision, verdict, affectedPaths and reportPath. READY requires affectedPaths: []; NEEDS_REVISION requires only the exact canonical project paths that must change.'
           : `${reviewerResponsibility(String(request.contract.reviewRole))} Write one human-readable Markdown specialist report with reviewed scope and verdict, one blocking-finding table, one non-blocking-finding table, and a concise list of load-bearing contracts confirmed correct. Use one finding row per distinct defect with owner path, exact evidence location, defect, downstream impact, and required outcome. Include only calculations or proof needed to support a finding. Do not reproduce source sections, repeat a finding in prose, or add a second summary of the tables. If none block delivery, say so explicitly. Do not produce JSON, a finding packet, criteria arrays, reference IDs, or a server-facing summary.`,

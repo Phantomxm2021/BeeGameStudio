@@ -31,6 +31,18 @@ describe('bounded document review topology', () => {
     expect(final.verificationSourcePaths).toEqual(
       CANONICAL_FOUNDATION_DOCUMENTS.map(path => resolve(workspacePath, path)),
     )
+    expect(final.stagingOutputPaths).toEqual([
+      resolve(
+        workspacePath,
+        `.beegame/reviews/foundation/${revision}/.staging/review-final/review.json`,
+      ),
+    ])
+    expect(final.committedOutputPaths).toEqual([
+      resolve(
+        workspacePath,
+        `.beegame/reviews/foundation/${revision}/review.json`,
+      ),
+    ])
   })
 
   test('uses one bounded checklist review against its accepted foundation authority', () => {
@@ -49,7 +61,7 @@ describe('bounded document review topology', () => {
         resolve(workspacePath, 'docs/GDD.md'),
         resolve(
           workspacePath,
-          `.beegame/reviews/foundation/${revision}/review.md`,
+          `.beegame/reviews/foundation/${revision}/review.json`,
         ),
       ],
     })

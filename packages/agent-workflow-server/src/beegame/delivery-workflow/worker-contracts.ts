@@ -46,6 +46,21 @@ export const documentReviewerTerminalSchema = base
     affectedPaths: z.array(z.string().min(1)).optional(),
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.scope !== 'foundation') return
+    if (value.role !== 'final' || value.reportPaths.length !== 1)
+      context.addIssue({
+        code: 'custom',
+        path: ['reportPaths'],
+        message: 'Foundation Reviewer requires one final review artifact',
+      })
+    if (value.verdict !== undefined || value.affectedPaths !== undefined)
+      context.addIssue({
+        code: 'custom',
+        path: ['verdict'],
+        message: 'Foundation routing fields come from the review artifact',
+      })
+  })
 
 const resourceTaskMetricsSchema = z
   .object({

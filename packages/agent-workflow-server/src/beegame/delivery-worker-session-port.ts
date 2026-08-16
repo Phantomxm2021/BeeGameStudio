@@ -37,6 +37,10 @@ import {
   acceptSpecialistReport,
   type DocumentReviewScope,
 } from './delivery-workflow/document-review-report'
+import {
+  acceptFoundationReview,
+  readFoundationReviewArtifact,
+} from './delivery-workflow/foundation-review'
 import type {
   DocumentReviewAssignment,
   DocumentReviewRole,
@@ -1166,6 +1170,38 @@ async function createDeterministicDocumentReviewTerminal(input: {
     workspacePath: input.request.workspacePath,
     verification: contract.revisionVerification,
   })
+  if (assignment.scope === 'foundation') {
+    const priorReference = contract.revisionVerification.prerequisiteReports[0]
+    const priorReview = priorReference
+      ? await readFoundationReviewArtifact({
+          workspacePath: input.request.workspacePath,
+          path: priorReference.path,
+          expectedDigest: priorReference.digest,
+        })
+      : undefined
+    const accepted = await acceptFoundationReview({
+      workspacePath: input.request.workspacePath,
+      revision: input.request.revision,
+      currentRevision,
+      dispatchId: 'review-final',
+      ...(priorReview
+        ? {
+            priorReview: {
+              review: priorReview.review,
+              digest: priorReview.digest,
+            },
+          }
+        : {}),
+    })
+    return documentReviewerTerminalSchema.parse({
+      workerType: 'document-reviewer',
+      status: 'completed',
+      revision: input.request.revision,
+      scope: 'foundation',
+      role: 'final',
+      reportPaths: [accepted.path],
+    })
+  }
   if (assignment.role === 'final') {
     const accepted = await acceptFinalReport({
       assignment,

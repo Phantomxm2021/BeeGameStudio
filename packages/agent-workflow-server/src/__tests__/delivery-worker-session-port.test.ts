@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   buildDocumentAuthorAuthorityBlock,
   createBeeGameDeliveryWorkerPort,
@@ -14,11 +14,15 @@ import type { BeeGameSessionManager } from '../beegame/session-manager'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
+  computeDocumentRevision,
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
+import { finalReviewAssignment } from '../beegame/delivery-workflow/document-review-topology'
+import { foundationReviewStagingPath } from '../beegame/delivery-workflow/foundation-review'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
 describe('delivery worker session credentials', () => {
   test('accepts only the planner resource-plan terminal contract', async () => {
@@ -1171,6 +1175,100 @@ describe('delivery worker session credentials', () => {
     await expect(
       port.waitForTerminal?.('dispatch-resource-rejected-parallel'),
     ).rejects.toThrow('model turn ended after rejected calls')
+  })
+
+  test('accepts one canonical foundation review JSON and derives its terminal', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-foundation-review-terminal-'),
+    )
+    const confirmedBriefDigest = 'b'.repeat(64)
+    try {
+      const revision = await computeDocumentRevision(
+        workspacePath,
+        confirmedBriefDigest,
+      )
+      const stagingPath = foundationReviewStagingPath(
+        workspacePath,
+        revision,
+        'review-final',
+      )
+      await mkdir(dirname(stagingPath), { recursive: true })
+      await writeFile(
+        stagingPath,
+        `${JSON.stringify({
+          version: 2,
+          scope: 'foundation',
+          revision,
+          verdict: 'READY',
+          priorConflictStatus: [],
+          conflicts: [],
+        })}\n`,
+        'utf8',
+      )
+      const events = [
+        {
+          id: 'foundation-review-result',
+          type: 'result' as const,
+          text: 'completed',
+          createdAt: new Date(),
+        },
+      ]
+      const sessions = {
+        start() {
+          return { id: 'session-foundation-reviewer' }
+        },
+        events() {
+          return events
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions,
+        userId: 'user-1',
+      })
+      const assignment = finalReviewAssignment({
+        scope: 'foundation',
+        workspacePath,
+        revision,
+        specialists: [],
+      })
+
+      await port.start({
+        dispatchId: 'dispatch-foundation-review',
+        runId: 'run-foundation-review',
+        ownerId: 'user-1',
+        projectId: 'project-foundation-review',
+        workspacePath,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision,
+        allowedPaths: assignment.stagingOutputPaths,
+        contract: {
+          assignment,
+          revisionVerification: {
+            kind: 'document',
+            confirmedBriefDigest,
+            prerequisiteReports: [],
+          },
+          partDigests: {},
+          allowedAffectedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        },
+      })
+
+      expect(
+        await port.waitForTerminal!('dispatch-foundation-review'),
+      ).toEqual({
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        scope: 'foundation',
+        role: 'final',
+        reportPaths: [
+          `.beegame/reviews/foundation/${revision}/review.json`,
+        ],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
   })
 })
 

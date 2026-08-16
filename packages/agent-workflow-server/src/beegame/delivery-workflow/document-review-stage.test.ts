@@ -13,6 +13,10 @@ import {
 } from './document-review-stage'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import { transitionDeliveryRun } from './transition'
+import {
+  acceptFoundationReview,
+  foundationReviewStagingPath,
+} from './foundation-review'
 
 const revision = 'a'.repeat(64)
 const revisionVerification = {
@@ -189,12 +193,16 @@ describe('document review run', () => {
     expect(dispatches[0].contract.partDigests).toEqual({})
     expect(dispatches[0].assignment.sourcePaths).toEqual([])
     expect(dispatches[0].assignment.verificationSourcePaths).toHaveLength(8)
+    expect(dispatches[0].assignment.stagingOutputPaths).toHaveLength(1)
+    expect(dispatches[0].assignment.stagingOutputPaths[0]).toEndWith(
+      '/review.json',
+    )
   })
 
   test('carries the byte-bound previous report into a repeated Foundation review', async () => {
     const workspacePath = await workspace()
     const previousReport = {
-      path: `.beegame/reviews/foundation/${'c'.repeat(64)}/review.md`,
+      path: `.beegame/reviews/foundation/${'c'.repeat(64)}/review.json`,
       digest: 'd'.repeat(64),
     }
     const run = createDocumentReviewRun({
@@ -219,6 +227,77 @@ describe('document review run', () => {
     expect(dispatches[0].contract.revisionVerification.prerequisiteReports).toEqual([
       previousReport,
     ])
+  })
+
+  test('derives a completed Foundation decision from committed review json', async () => {
+    const workspacePath = await workspace()
+    const run = createDocumentReviewRun({ scope: 'foundation', revision })
+    const stagedPath = foundationReviewStagingPath(
+      workspacePath,
+      revision,
+      'review-final',
+    )
+    await mkdir(dirname(stagedPath), { recursive: true })
+    await writeFile(
+      stagedPath,
+      JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision,
+        verdict: 'NEEDS_REVISION',
+        priorConflictStatus: [],
+        conflicts: [
+          {
+            id: 'B1',
+            title: 'State mismatch',
+            problem: 'The terminal state is not defined consistently.',
+            evidence: [
+              {
+                path: 'docs/GDD.md',
+                location: 'State register',
+                observed: 'UNFINISHED is absent.',
+              },
+            ],
+            requiredOutcome: 'Use one complete terminal state.',
+            changes: [
+              {
+                path: 'docs/GDD.md',
+                action: 'Define UNFINISHED and its transitions.',
+              },
+            ],
+            acceptance: ['The state register contains UNFINISHED.'],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const accepted = await acceptFoundationReview({
+      workspacePath,
+      revision,
+      currentRevision: revision,
+      dispatchId: 'review-final',
+    })
+
+    const completed = await acceptDocumentReviewTerminal({
+      run,
+      workspacePath,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        scope: 'foundation',
+        role: 'final',
+        reportPaths: [accepted.path],
+      },
+    })
+
+    expect(completed).toMatchObject({
+      status: 'completed',
+      verdict: 'NEEDS_REVISION',
+      affectedPaths: ['docs/GDD.md'],
+      finalReportPath: accepted.path,
+      finalReportDigest: accepted.digest,
+    })
   })
 
   test('dispatches the complete final Reviewer only after specialists commit', async () => {

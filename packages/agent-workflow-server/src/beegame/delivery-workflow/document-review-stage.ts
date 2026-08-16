@@ -18,6 +18,7 @@ import type {
   DocumentReviewVerdict,
 } from './document-review-report'
 import { computeDocumentRevision, computeResourceRevision } from './revision'
+import { readFoundationReviewArtifact } from './foundation-review'
 
 export type { DocumentReviewReportState, DocumentReviewRun } from './types'
 
@@ -270,7 +271,9 @@ export async function acceptDocumentReviewTerminal(input: {
   const report = run.reports.find(value => value.role === terminal.role)
   if (!report) throw new Error('document review terminal role is not assigned')
   const expectedPaths =
-    terminal.role === 'final'
+    terminal.scope === 'foundation'
+      ? [report.path]
+      : terminal.role === 'final'
       ? [report.path, report.path.replace(/review\.md$/u, 'decision.json')]
       : [report.path]
   if (
@@ -281,8 +284,18 @@ export async function acceptDocumentReviewTerminal(input: {
       'document review terminal paths do not match the assignment',
     )
 
-  const bytes = await readFile(resolve(input.workspacePath, report.path))
-  const digest = createHash('sha256').update(bytes).digest('hex')
+  const foundationReview =
+    terminal.scope === 'foundation'
+      ? await readFoundationReviewArtifact({
+          workspacePath: input.workspacePath,
+          path: report.path,
+        })
+      : undefined
+  const digest = foundationReview
+    ? foundationReview.digest
+    : createHash('sha256')
+        .update(await readFile(resolve(input.workspacePath, report.path)))
+        .digest('hex')
   const reports = run.reports.map(value =>
     value.role === report.role
       ? {
@@ -293,7 +306,19 @@ export async function acceptDocumentReviewTerminal(input: {
         }
       : value,
   )
-  if (terminal.role === 'final') {
+  if (foundationReview) {
+    return {
+      ...run,
+      status: 'completed',
+      reports,
+      finalReportPath: foundationReview.path,
+      finalReportDigest: foundationReview.digest,
+      verdict: foundationReview.review.verdict,
+      affectedPaths: [...foundationReview.affectedPaths],
+      failureReason: undefined,
+    }
+  }
+  if (terminal.scope !== 'foundation' && terminal.role === 'final') {
     if (!terminal.verdict || !terminal.affectedPaths)
       throw new Error('final document review terminal has no decision')
     return {

@@ -7,6 +7,10 @@ import {
   type DocumentReviewScope,
 } from './document-review-report'
 import {
+  foundationReviewPath,
+  foundationReviewStagingPath,
+} from './foundation-review'
+import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
 } from './types'
@@ -108,9 +112,8 @@ export function documentReviewAssignments(input: {
         relativeSourcePaths: [
           'docs/acceptance/gameplay-checklist.md',
           'docs/GDD.md',
-          reviewReportPath(
+          foundationReviewPath(
             input.workspacePath,
-            'foundation',
             input.approvedFoundationRevision,
           ),
         ],
@@ -157,6 +160,23 @@ export function finalReviewAssignment(input: {
             input.specialists.flatMap(assignment => assignment.sourcePaths),
           ),
         ]
+  if (input.scope === 'foundation')
+    return {
+      scope: input.scope,
+      role: 'final',
+      sourcePaths,
+      stagingOutputPaths: [
+        foundationReviewStagingPath(
+          input.workspacePath,
+          input.revision,
+          'review-final',
+        ),
+      ],
+      committedOutputPaths: [
+        foundationReviewPath(input.workspacePath, input.revision),
+      ],
+      verificationSourcePaths,
+    }
   return {
     scope: input.scope,
     role: 'final',

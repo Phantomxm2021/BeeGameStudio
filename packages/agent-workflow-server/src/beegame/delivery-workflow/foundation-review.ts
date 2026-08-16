@@ -201,6 +201,44 @@ async function readReview(path: string): Promise<{
   return { bytes, review: foundationReviewSchema.parse(value) }
 }
 
+export async function readFoundationReviewArtifact(input: {
+  workspacePath: string
+  path: string
+  expectedDigest?: string
+}): Promise<{
+  review: FoundationReview
+  path: string
+  digest: string
+  affectedPaths: FoundationDocumentPath[]
+}> {
+  const workspaceRoot = resolve(input.workspacePath)
+  const absolutePath = resolve(workspaceRoot, input.path)
+  const projectPath = relative(workspaceRoot, absolutePath)
+    .split('\\')
+    .join('/')
+  if (
+    projectPath === '..' ||
+    projectPath.startsWith('../') ||
+    projectPath.split('/').includes('..')
+  )
+    throw new Error('foundation review path escapes the active project')
+  const accepted = await readReview(absolutePath)
+  if (
+    absolutePath !==
+    foundationReviewPath(input.workspacePath, accepted.review.revision)
+  )
+    throw new Error('foundation review path does not match its revision')
+  const digest = createHash('sha256').update(accepted.bytes).digest('hex')
+  if (input.expectedDigest && input.expectedDigest !== digest)
+    throw new Error('foundation review digest does not match')
+  return {
+    review: accepted.review,
+    path: projectPath,
+    digest,
+    affectedPaths: foundationReviewAffectedPaths(accepted.review),
+  }
+}
+
 function validatePriorReview(
   current: FoundationReview,
   prior:
