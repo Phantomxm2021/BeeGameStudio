@@ -3,6 +3,7 @@ import {
   foundationReviewAffectedPaths,
   type FoundationReview,
 } from './foundation-review'
+import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
 import type {
   DispatchRecord,
   FoundationDocumentPath,
@@ -13,40 +14,7 @@ import type {
 } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
-type FoundationRemediationLaneDefinition = {
-  id: FoundationRemediationLaneId
-  ownedPaths: readonly FoundationDocumentPath[]
-}
-
-export const FOUNDATION_REMEDIATION_LANES = Object.freeze(
-  [
-    {
-      id: 'core-design',
-      ownedPaths: [
-        'docs/GDD.md',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        'docs/BALANCE_DESIGN.md',
-      ],
-    },
-    {
-      id: 'technical-assets',
-      ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-    },
-    {
-      id: 'presentation',
-      ownedPaths: [
-        'docs/ART_DIRECTION.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-      ],
-    },
-  ].map(lane =>
-    Object.freeze({
-      id: lane.id,
-      ownedPaths: Object.freeze([...lane.ownedPaths]),
-    }),
-  ),
-) as readonly FoundationRemediationLaneDefinition[]
+export const FOUNDATION_REMEDIATION_LANES = FOUNDATION_DOCUMENT_LANES
 
 export function createFoundationRemediationState(input: {
   reviewPath: string

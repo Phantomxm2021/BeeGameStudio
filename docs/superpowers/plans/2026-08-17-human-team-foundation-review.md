@@ -34,7 +34,7 @@
 - Produces `FOUNDATION_DOCUMENT_LANES`, the sole immutable lane/path registry.
 - Produces `writeFoundationReviewProjection({ workspacePath, revision, laneId })` returning `{ path, digest, byteLength }`.
 
-- [ ] **Step 1: Write failing partition tests**
+- [x] **Step 1: Write failing partition tests**
 
 ```ts
 expect(FOUNDATION_DOCUMENT_LANES.flatMap(lane => lane.ownedPaths))
@@ -43,14 +43,14 @@ expect(new Set(FOUNDATION_DOCUMENT_LANES.flatMap(lane => lane.ownedPaths)).size)
   .toBe(CANONICAL_FOUNDATION_DOCUMENTS.length)
 ```
 
-- [ ] **Step 2: Write failing projection tests**
+- [x] **Step 2: Write failing projection tests**
 
 Use marked fixtures for all eight documents. Assert each projection contains
 only external upstream `(path, sectionId)` pairs declared by owned document
 contracts, in canonical order, with exact content, line range, source digest,
 revision, lane ID, and tamper rejection.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-document-lanes.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-projection.test.ts
@@ -58,7 +58,7 @@ revision, lane ID, and tamper rejection.
 
 Expected: module-not-found failures.
 
-- [ ] **Step 4: Implement the registry and projection**
+- [x] **Step 4: Implement the registry and projection**
 
 Projection files use this strict shape and live under
 `.beegame/reviews/foundation/<revision>/projections/<lane>.json`:
@@ -75,7 +75,7 @@ type FoundationReviewProjection = {
 Extract marker-bounded bytes without summarizing them. Replace the remediation
 lane constant with an import from the shared registry.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-document-lanes.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-projection.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-remediation.test.ts
@@ -90,12 +90,8 @@ git commit -m "feat: define foundation review ownership lanes"
 ### Task 2: Lane Packets Replace Role Specialists
 
 **Files:**
-- Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-evidence.ts`
-- Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-evidence.test.ts`
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.ts`
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts`
-- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts`
-- Test: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts`
 
 **Interfaces:**
 - Produces strict `FoundationReviewLanePacket` with fixed lane/revision and at most 24 candidates.
@@ -114,16 +110,16 @@ lane, duplicate commit, evidence outside lane/projection authority, and an
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts
 ```
 
-- [ ] **Step 3: Implement packets and blocking-only prompts**
+- [ ] **Step 3: Implement the unreachable lane-packet boundary**
 
-Use `.beegame/reviews/foundation/<revision>/parts/<lane>.json`. Prompts list
-owned full paths and one projection path, forbid prose/style findings,
-verdicts, replacement text, source mutation, and Agent launch.
+Use `.beegame/reviews/foundation/<revision>/parts/<lane>.json`. Do not delete
+or route away from the old evidence module yet: the packet boundary remains
+unreachable until Task 3 atomically replaces every old role and prompt.
 
 - [ ] **Step 4: Run GREEN and commit**
 
 ```bash
-/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts
+/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts
 /Users/nswell/.bun/bin/bun run typecheck
 git diff --check
 git add packages/agent-workflow-server/src/beegame/delivery-workflow
@@ -148,6 +144,9 @@ git commit -m "refactor: replace reviewer specialists with lane packets"
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/schema.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts`
+- Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-evidence.ts`
+- Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-evidence.test.ts`
 - Test: `packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts`
 
 **Interfaces:**
@@ -186,7 +185,11 @@ review reset, and completed-delivery preservation without executable old roles.
 
 Change state invariants, paths, terminal roles, dispatch IDs, usage attribution,
 failure/retry/recovery, synthesis barrier, and controller routing together. Do
-not support old and new roles simultaneously.
+not support old and new roles simultaneously. In the same commit, replace the
+old specialist prompts with lane prompts that list owned full paths and one
+projection path; forbid prose/style findings, verdicts, replacement text,
+source mutation, and Agent launch. Delete the old evidence module only after
+all runtime imports have moved to lane packets.
 
 - [ ] **Step 5: Implement schema 22 to 23 migration**
 
