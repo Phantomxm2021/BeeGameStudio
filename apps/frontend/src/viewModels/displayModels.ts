@@ -169,6 +169,30 @@ const finiteNumber = (value: unknown): number | undefined => {
   return Number.isFinite(number) ? number : undefined
 }
 
+const normalizeReviewerUsage = (
+  value: unknown,
+): { input_tokens: number; cache_read_tokens: number; completion_tokens: number } | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const inputTokens = finiteNumber(source.input_tokens)
+  const cacheReadTokens = finiteNumber(source.cache_read_tokens)
+  const completionTokens = finiteNumber(source.completion_tokens)
+  if (
+    inputTokens === undefined ||
+    cacheReadTokens === undefined ||
+    completionTokens === undefined ||
+    inputTokens < 0 ||
+    cacheReadTokens < 0 ||
+    completionTokens < 0
+  )
+    return undefined
+  return {
+    input_tokens: inputTokens,
+    cache_read_tokens: cacheReadTokens,
+    completion_tokens: completionTokens,
+  }
+}
+
 const normalizeWorkflowTasks = (
   value: unknown,
 ): WorkflowCardTask[] | undefined => {
@@ -233,6 +257,8 @@ const normalizeDocumentReview = (
             failureReason:
               trimString(item.failureReason ?? item.failure_reason) ||
               undefined,
+            durationMs: finiteNumber(item.durationMs ?? item.duration_ms),
+            usage: normalizeReviewerUsage(item.usage),
           },
         ]
       })
@@ -263,6 +289,8 @@ const normalizeDocumentReview = (
       undefined,
     failureReason:
       trimString(source.failureReason ?? source.failure_reason) || undefined,
+    elapsedMs: finiteNumber(source.elapsedMs ?? source.elapsed_ms),
+    usage: normalizeReviewerUsage(source.usage),
     reports,
   }
 }

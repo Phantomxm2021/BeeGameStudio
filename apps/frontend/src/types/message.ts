@@ -55,6 +55,12 @@ export type WorkflowCardSubstage =
   | 'CHECKLIST_DRAFTING'
   | 'CHECKLIST_REVIEW'
 
+export interface WorkflowReviewerUsage {
+  input_tokens: number
+  cache_read_tokens: number
+  completion_tokens: number
+}
+
 export interface WorkflowDocumentReviewDisplay {
   scope?: 'foundation' | 'checklist' | 'complete'
   status?: 'pending' | 'running' | 'completed' | 'failed'
@@ -64,11 +70,15 @@ export interface WorkflowDocumentReviewDisplay {
   finalReportPath?: string
   finalReportMarkdown?: string
   failureReason?: string
+  elapsedMs?: number
+  usage?: WorkflowReviewerUsage
   reports: Array<{
     role: string
     path: string
     status: 'pending' | 'running' | 'completed' | 'failed'
     failureReason?: string
+    durationMs?: number
+    usage?: WorkflowReviewerUsage
   }>
 }
 

@@ -155,11 +155,23 @@ describe('displayModels', () => {
               scope: 'checklist',
               status: 'running',
               attempt: 2,
+              elapsedMs: 20_000,
+              usage: {
+                input_tokens: 220,
+                cache_read_tokens: 640,
+                completion_tokens: 96,
+              },
               reports: [
                 {
                   role: 'checklist',
                   path: 'parts/checklist.md',
                   status: 'running',
+                  durationMs: 10_000,
+                  usage: {
+                    input_tokens: 120,
+                    cache_read_tokens: 340,
+                    completion_tokens: 56,
+                  },
                 },
               ],
             },
@@ -235,11 +247,23 @@ describe('displayModels', () => {
           scope: 'checklist',
           status: 'running',
           attempt: 2,
+          elapsedMs: 20_000,
+          usage: {
+            input_tokens: 220,
+            cache_read_tokens: 640,
+            completion_tokens: 96,
+          },
           reports: [
             {
               role: 'checklist',
               path: 'parts/checklist.md',
               status: 'running',
+              durationMs: 10_000,
+              usage: {
+                input_tokens: 120,
+                cache_read_tokens: 340,
+                completion_tokens: 56,
+              },
             },
           ],
         },

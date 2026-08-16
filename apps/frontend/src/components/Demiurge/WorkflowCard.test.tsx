@@ -32,15 +32,27 @@ describe('WorkflowCard', () => {
             affectedPaths: ['docs/GDD.md'],
             finalReportPath: '.beegame/reviews/foundation/revision/review.md',
             finalReportMarkdown: '# Final review\n\nThe economy rule is not implementable.',
+            elapsedMs: 20_000,
+            usage: {
+              input_tokens: 220,
+              cache_read_tokens: 640,
+              completion_tokens: 96,
+            },
             reports: [
               {
-                role: 'gameplay',
-                path: '.beegame/reviews/foundation/revision/parts/gameplay.md',
+                role: 'core-systems',
+                path: '.beegame/reviews/foundation/revision/parts/core-systems.md',
                 status: 'completed',
+                durationMs: 10_000,
+                usage: {
+                  input_tokens: 120,
+                  cache_read_tokens: 340,
+                  completion_tokens: 56,
+                },
               },
               {
-                role: 'technical',
-                path: '.beegame/reviews/foundation/revision/parts/technical.md',
+                role: 'player-experience',
+                path: '.beegame/reviews/foundation/revision/parts/player-experience.md',
                 status: 'failed',
                 failureReason: 'provider stream ended before the report committed',
               },
@@ -53,7 +65,17 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('NEEDS_REVISION')).toBeInTheDocument();
     expect(screen.getByText('游戏设计文档 GDD')).toBeInTheDocument();
     expect(screen.getByText('The economy rule is not implementable.')).toBeInTheDocument();
-    expect(screen.getByText('gameplay · 已完成')).toBeInTheDocument();
+    expect(screen.getByText('核心系统 · 已完成')).toBeInTheDocument();
+    expect(screen.getByText('玩家体验 · failed')).toBeInTheDocument();
+    expect(screen.getByText('输入 120')).toBeInTheDocument();
+    expect(screen.getByText('缓存输入 340')).toBeInTheDocument();
+    expect(screen.getByText('输出 56')).toBeInTheDocument();
+    expect(screen.getByText('耗时 00:00:10')).toBeInTheDocument();
+    expect(screen.getByText('审计合计')).toBeInTheDocument();
+    expect(screen.getByText('输入 220')).toBeInTheDocument();
+    expect(screen.getByText('缓存输入 640')).toBeInTheDocument();
+    expect(screen.getByText('输出 96')).toBeInTheDocument();
+    expect(screen.getByText('墙钟 00:00:20')).toBeInTheDocument();
     expect(
       screen.getByText('provider stream ended before the report committed'),
     ).toBeInTheDocument();

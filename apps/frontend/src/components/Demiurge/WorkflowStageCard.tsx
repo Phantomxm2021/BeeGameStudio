@@ -59,6 +59,13 @@ const stageLabel: Record<string, string> = {
   DELIVERY: '交付',
 };
 
+const reviewRoleLabel: Record<string, string> = {
+  'core-systems': '核心系统',
+  'player-experience': '玩家体验',
+  'production-delivery': '生产交付',
+  final: '最终汇总',
+};
+
 const workerLabel: Record<string, string> = {
   'document-author': 'Document Author',
   'document-reviewer': 'Document Reviewer',
@@ -120,6 +127,9 @@ const formatDuration = (milliseconds: number): string => {
   const remainder = seconds % 60;
   return [hours, minutes, remainder].map(value => String(value).padStart(2, '0')).join(':');
 };
+
+const formatTokenCount = (tokens: number): string =>
+  new Intl.NumberFormat('zh-CN').format(Math.max(0, tokens));
 
 const copyText = async (text: string): Promise<boolean> => {
   try {
@@ -612,14 +622,45 @@ export function WorkflowStageCard({
                     {snapshot.documentReview.reports.map(report => (
                       <li key={`${report.role}:${report.path}`}>
                         <span>
-                          {report.role} · {report.status === 'completed' ? '已完成' : report.status}
+                          {reviewRoleLabel[report.role] || report.role} · {report.status === 'completed' ? '已完成' : report.status}
                         </span>
+                        {report.usage || report.durationMs !== undefined ? (
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] tabular-nums text-zinc-500">
+                            {report.usage ? (
+                              <>
+                                <span>输入 {formatTokenCount(report.usage.input_tokens)}</span>
+                                <span>缓存输入 {formatTokenCount(report.usage.cache_read_tokens)}</span>
+                                <span>输出 {formatTokenCount(report.usage.completion_tokens)}</span>
+                              </>
+                            ) : null}
+                            {report.durationMs !== undefined ? (
+                              <span>耗时 {formatDuration(report.durationMs)}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {report.failureReason ? (
                           <p className="mt-0.5 text-rose-300">{report.failureReason}</p>
                         ) : null}
                       </li>
                     ))}
                   </ul>
+                ) : null}
+                {snapshot.documentReview.usage || snapshot.documentReview.elapsedMs !== undefined ? (
+                  <div className="mt-3 border-t border-white/10 pt-2 text-[11px] tabular-nums text-zinc-400">
+                    <p className="font-medium text-zinc-300">审计合计</p>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                      {snapshot.documentReview.usage ? (
+                        <>
+                          <span>输入 {formatTokenCount(snapshot.documentReview.usage.input_tokens)}</span>
+                          <span>缓存输入 {formatTokenCount(snapshot.documentReview.usage.cache_read_tokens)}</span>
+                          <span>输出 {formatTokenCount(snapshot.documentReview.usage.completion_tokens)}</span>
+                        </>
+                      ) : null}
+                      {snapshot.documentReview.elapsedMs !== undefined ? (
+                        <span>墙钟 {formatDuration(snapshot.documentReview.elapsedMs)}</span>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : null}
                 {snapshot.documentReview.affectedPaths?.length ? (
                   <div className="mt-2 flex flex-wrap gap-1.5">
