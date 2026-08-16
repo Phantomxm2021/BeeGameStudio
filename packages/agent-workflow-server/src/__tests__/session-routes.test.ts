@@ -1256,11 +1256,11 @@ describe('delivery workflow session continuation', () => {
       verdict: 'READY',
       finalReportPath: reportPath,
       finalReportMarkdown: reportMarkdown,
-      elapsedMs: 20_000,
+      elapsedMs: 10_000,
       usage: {
-        input_tokens: 220,
-        cache_read_tokens: 640,
-        completion_tokens: 96,
+        input_tokens: 120,
+        cache_read_tokens: 340,
+        completion_tokens: 56,
       },
     })
     expect(

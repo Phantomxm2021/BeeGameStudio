@@ -13,53 +13,24 @@ const workspacePath = '/project'
 const revision = 'a'.repeat(64)
 
 describe('bounded document review topology', () => {
-  test('covers all foundation documents with three complete review domains', () => {
+  test('reviews all foundation documents once in the final assignment', () => {
     const assignments = documentReviewAssignments({
       scope: 'foundation',
       workspacePath,
       revision,
     })
+    const final = finalReviewAssignment({
+      scope: 'foundation',
+      workspacePath,
+      revision,
+      specialists: assignments,
+    })
 
-    expect(assignments.map(value => value.role)).toEqual([
-      'core-systems',
-      'player-experience',
-      'production-delivery',
-    ])
-    expect(assignments.map(value => value.sourcePaths)).toEqual([
-      [
-        resolve(workspacePath, 'docs/GDD.md'),
-        resolve(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
-        resolve(workspacePath, 'docs/BALANCE_DESIGN.md'),
-        resolve(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-      ],
-      [
-        resolve(workspacePath, 'docs/GDD.md'),
-        resolve(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'),
-        resolve(workspacePath, 'docs/ART_DIRECTION.md'),
-        resolve(workspacePath, 'docs/UI_UX_SPEC.md'),
-        resolve(workspacePath, 'docs/AUDIO_DESIGN.md'),
-      ],
-      [
-        resolve(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-        resolve(workspacePath, 'docs/ART_DIRECTION.md'),
-        resolve(workspacePath, 'docs/AUDIO_DESIGN.md'),
-        resolve(workspacePath, 'docs/ASSET_PLAN.md'),
-      ],
-    ])
-    expect(new Set(assignments.flatMap(value => value.sourcePaths))).toEqual(
-      new Set(
-        CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
-          resolve(workspacePath, path),
-        ),
-      ),
+    expect(assignments).toEqual([])
+    expect(final.sourcePaths).toEqual([])
+    expect(final.verificationSourcePaths).toEqual(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => resolve(workspacePath, path)),
     )
-    expect(assignments.every(value => value.sourcePaths.length <= 5)).toBe(true)
-    expect(
-      assignments.every(value => value.stagingOutputPaths.length === 1),
-    ).toBe(true)
-    expect(
-      assignments.every(value => value.committedOutputPaths.length === 1),
-    ).toBe(true)
   })
 
   test('uses one bounded checklist review against its accepted foundation authority', () => {
@@ -108,14 +79,14 @@ describe('bounded document review topology', () => {
     expect(assignments.every(value => value.sourcePaths.length <= 3)).toBe(true)
   })
 
-  test('final review consumes committed specialist reports and owns two outputs', () => {
+  test('consolidated reviews still consume committed specialist reports', () => {
     const specialists = documentReviewAssignments({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
     })
     const final = finalReviewAssignment({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
       specialists,
@@ -129,11 +100,11 @@ describe('bounded document review topology', () => {
     expect(final.committedOutputPaths).toEqual([
       resolve(
         workspacePath,
-        `.beegame/reviews/foundation/${revision}/review.md`,
+        `.beegame/reviews/complete/${revision}/review.md`,
       ),
       resolve(
         workspacePath,
-        `.beegame/reviews/foundation/${revision}/decision.json`,
+        `.beegame/reviews/complete/${revision}/decision.json`,
       ),
     ])
   })

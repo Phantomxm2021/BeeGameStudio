@@ -362,8 +362,11 @@ describe('resource-content worker prompts', () => {
         reviewScope: 'foundation',
         reviewRole: 'final',
         assignment: {
-          sourcePaths: ['/workspace/.beegame/reviews/core-systems.md'],
-          verificationSourcePaths: ['/workspace/docs/GDD.md'],
+          sourcePaths: [],
+          verificationSourcePaths: [
+            '/workspace/docs/GDD.md',
+            '/workspace/docs/TECHNICAL_DESIGN.md',
+          ],
           stagingOutputPaths: [
             '/workspace/.beegame/reviews/staging/review.md',
             '/workspace/.beegame/reviews/staging/decision.json',
@@ -372,12 +375,9 @@ describe('resource-content worker prompts', () => {
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
-    expect(finalReviewerPrompt).toContain(
-      'deduplicated owner-grouped blocking register',
-    )
-    expect(finalReviewerPrompt).toContain(
-      'Do not restate each specialist report',
-    )
+    expect(finalReviewerPrompt).toContain('Review all eight canonical foundation documents directly')
+    expect(finalReviewerPrompt).toContain('one deduplicated owner-grouped blocking register')
+    expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
   })
 
   test('keeps resource remediation inside the same Curator task', () => {

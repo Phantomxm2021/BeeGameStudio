@@ -622,7 +622,9 @@ export function WorkflowStageCard({
                     {snapshot.documentReview.reports.map(report => (
                       <li key={`${report.role}:${report.path}`}>
                         <span>
-                          {reviewRoleLabel[report.role] || report.role} · {report.status === 'completed' ? '已完成' : report.status}
+                          {snapshot.documentReview.scope === 'foundation' && report.role === 'final'
+                            ? '基础文档审计'
+                            : reviewRoleLabel[report.role] || report.role} · {report.status === 'completed' ? '已完成' : report.status}
                         </span>
                         {report.usage || report.durationMs !== undefined ? (
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] tabular-nums text-zinc-500">

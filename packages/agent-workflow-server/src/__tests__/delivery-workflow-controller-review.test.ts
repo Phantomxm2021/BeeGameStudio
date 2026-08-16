@@ -136,7 +136,7 @@ describe('document review controller terminal reconciliation', () => {
     })
   })
 
-  test('accepts a parallel Reviewer terminal and fills the freed dispatch slot', async () => {
+  test('persists usage for the direct Foundation Reviewer terminal', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-review-controller-'))
     workspaces.push(workspacePath)
     const confirmedBriefContext = 'Confirmed review controller brief'
@@ -201,20 +201,22 @@ describe('document review controller terminal reconciliation', () => {
 
     await controller.resume(run)
     expect(
-      started.map(request => request.contract.reviewRole).sort(),
-    ).toEqual(['core-systems', 'player-experience', 'production-delivery'])
-    const coreSystems = started.find(
-      request => request.contract.reviewRole === 'core-systems',
-    )!
-    const playerExperienceDispatch = started.find(
-      request => request.contract.reviewRole === 'player-experience',
+      started.filter(request => request.workerType === 'document-reviewer').map(request => request.contract.reviewRole),
+    ).toEqual(['final'])
+    const directReview = started.find(
+      request => request.contract.reviewRole === 'final',
     )!
     const reportPath = review.reports.find(
-      report => report.role === 'core-systems',
+      report => report.role === 'final',
     )!
       .path
     await mkdir(dirname(join(workspacePath, reportPath)), { recursive: true })
-    await writeFile(join(workspacePath, reportPath), '# Core systems review\n', 'utf8')
+    await writeFile(join(workspacePath, reportPath), '# Foundation review\n', 'utf8')
+    await writeFile(
+      join(workspacePath, reportPath.replace(/review\.md$/u, 'decision.json')),
+      '{}\n',
+      'utf8',
+    )
     await store.addWorkflowUsage(
       run.runId,
       {
@@ -224,33 +226,27 @@ describe('document review controller terminal reconciliation', () => {
         completion_tokens: 56,
         total_tokens: 516,
       },
-      coreSystems.dispatchId!,
-    )
-    await store.addWorkflowUsage(
-      run.runId,
-      {
-        input_tokens: 100,
-        cache_read_tokens: 300,
-        cache_creation_tokens: 4,
-        completion_tokens: 40,
-        total_tokens: 444,
-      },
-      playerExperienceDispatch.dispatchId!,
+      directReview.dispatchId!,
     )
 
-    await controller.dispatcher.completeDispatch(coreSystems.dispatchId!, {
+    await controller.dispatcher.completeDispatch(directReview.dispatchId!, {
       workerType: 'document-reviewer',
       status: 'completed',
       revision,
       scope: 'foundation',
-      role: 'core-systems',
-      reportPaths: [reportPath],
+      role: 'final',
+      reportPaths: [
+        reportPath,
+        reportPath.replace(/review\.md$/u, 'decision.json'),
+      ],
+      verdict: 'NEEDS_REVISION',
+      affectedPaths: ['docs/GDD.md'],
     })
 
     const progressed = await store.load()
     expect(
       progressed?.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'core-systems',
+        report => report.role === 'final',
       ),
     ).toMatchObject({
       status: 'completed',
@@ -264,82 +260,8 @@ describe('document review controller terminal reconciliation', () => {
     })
     expect(
       progressed?.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'core-systems',
+        report => report.role === 'final',
       )?.durationMs,
     ).toBeGreaterThanOrEqual(0)
-    expect(
-      started.map(request => request.contract.reviewRole).sort(),
-    ).toEqual(['core-systems', 'player-experience', 'production-delivery'])
-
-    const beforeRestart = (await store.load())!
-    const playerExperience = beforeRestart.documentReviewState.activeRun!.reports.find(
-      report => report.role === 'player-experience',
-    )!
-    await mkdir(dirname(join(workspacePath, playerExperience.path)), {
-      recursive: true,
-    })
-    await writeFile(
-      join(workspacePath, playerExperience.path),
-      '# Player experience review\n',
-      'utf8',
-    )
-    await store.save({
-      ...beforeRestart,
-      documentReviewState: {
-        ...beforeRestart.documentReviewState,
-        activeRun: {
-          ...beforeRestart.documentReviewState.activeRun!,
-          reports: beforeRestart.documentReviewState.activeRun!.reports.map(
-            report =>
-              report.role === 'player-experience'
-                ? {
-                    ...report,
-                    dispatch: {
-                      ...report.dispatch!,
-                      status: 'completed' as const,
-                      terminalResult: {
-                        workerType: 'document-reviewer',
-                        status: 'completed',
-                        revision,
-                        scope: 'foundation',
-                        role: 'player-experience',
-                        reportPaths: [playerExperience.path],
-                      },
-                      finishedAt: new Date().toISOString(),
-                    },
-                  }
-                : report,
-          ),
-        },
-      },
-    })
-    const restarted: WorkerDispatchRequest[] = []
-    const restartedController = createDeliveryWorkflowController({
-      workspacePath,
-      ownerId: run.ownerId,
-      workerPort: {
-        async start(request) {
-          restarted.push(request)
-          return {
-            sessionId: request.dispatchId!,
-            dispatchId: request.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await restartedController.resume((await store.load())!)
-
-    expect(
-      (await store.load())?.documentReviewState.activeRun?.reports.find(
-        report => report.role === 'player-experience',
-      ),
-    ).toMatchObject({ status: 'completed' })
-    expect(restarted).toEqual([])
   })
 })

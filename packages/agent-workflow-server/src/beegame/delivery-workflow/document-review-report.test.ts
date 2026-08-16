@@ -186,14 +186,14 @@ describe('project-local document review reports', () => {
   test('accepts only the assigned nonempty Markdown specialist report', async () => {
     const workspacePath = await workspace()
     const [assignment] = documentReviewAssignments({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
     })
     await mkdir(dirname(assignment.stagingOutputPaths[0]), { recursive: true })
     await writeFile(
       assignment.stagingOutputPaths[0],
-      '# Core systems review\n\nNo blocking findings.\n',
+      '# Complete gameplay review\n\nNo blocking findings.\n',
       'utf8',
     )
 
@@ -205,10 +205,10 @@ describe('project-local document review reports', () => {
     })
 
     expect(accepted).toEqual({
-      role: 'core-systems',
+      role: 'complete-gameplay',
       path: relative(workspacePath, assignment.committedOutputPaths[0]),
       digest: createHash('sha256')
-        .update('# Core systems review\n\nNo blocking findings.\n')
+        .update('# Complete gameplay review\n\nNo blocking findings.\n')
         .digest('hex'),
     })
   })
@@ -216,7 +216,7 @@ describe('project-local document review reports', () => {
   test('rejects success when canonical artifacts changed during review', async () => {
     const workspacePath = await workspace()
     const [assignment] = documentReviewAssignments({
-      scope: 'foundation',
+      scope: 'complete',
       workspacePath,
       revision,
     })

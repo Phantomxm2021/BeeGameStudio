@@ -6,7 +6,10 @@ import {
   reviewStagingPath,
   type DocumentReviewScope,
 } from './document-review-report'
-import { CANONICAL_ASSET_MANIFEST } from './types'
+import {
+  CANONICAL_ASSET_MANIFEST,
+  CANONICAL_FOUNDATION_DOCUMENTS,
+} from './types'
 
 export type DocumentReviewRole =
   | 'core-systems'
@@ -27,28 +30,6 @@ export type DocumentReviewAssignment = {
   committedOutputPaths: string[]
   verificationSourcePaths: string[]
 }
-
-const FOUNDATION_ROLE_PATHS = {
-  'core-systems': [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-    'docs/TECHNICAL_DESIGN.md',
-  ],
-  'player-experience': [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-  ],
-  'production-delivery': [
-    'docs/TECHNICAL_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/AUDIO_DESIGN.md',
-    'docs/ASSET_PLAN.md',
-  ],
-} as const
 
 const COMPLETE_ROLE_PATHS = {
   'complete-gameplay': [
@@ -113,14 +94,7 @@ export function documentReviewAssignments(input: {
   revision: string
   approvedFoundationRevision?: string
 }): DocumentReviewAssignment[] {
-  if (input.scope === 'foundation')
-    return Object.entries(FOUNDATION_ROLE_PATHS).map(([role, paths]) =>
-      specialistAssignment({
-        ...input,
-        role: role as keyof typeof FOUNDATION_ROLE_PATHS,
-        relativeSourcePaths: paths,
-      }),
-    )
+  if (input.scope === 'foundation') return []
 
   if (input.scope === 'checklist') {
     if (!input.approvedFoundationRevision)
@@ -169,6 +143,16 @@ export function finalReviewAssignment(input: {
   const sourcePaths = input.specialists.flatMap(
     assignment => assignment.committedOutputPaths,
   )
+  const verificationSourcePaths =
+    input.scope === 'foundation' && input.specialists.length === 0
+      ? CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+          resolve(input.workspacePath, path),
+        )
+      : [
+          ...new Set(
+            input.specialists.flatMap(assignment => assignment.sourcePaths),
+          ),
+        ]
   return {
     scope: input.scope,
     role: 'final',
@@ -193,10 +177,6 @@ export function finalReviewAssignment(input: {
       reviewReportPath(input.workspacePath, input.scope, input.revision),
       reviewDecisionPath(input.workspacePath, input.scope, input.revision),
     ],
-    verificationSourcePaths: [
-      ...new Set(
-        input.specialists.flatMap(assignment => assignment.sourcePaths),
-      ),
-    ],
+    verificationSourcePaths,
   }
 }

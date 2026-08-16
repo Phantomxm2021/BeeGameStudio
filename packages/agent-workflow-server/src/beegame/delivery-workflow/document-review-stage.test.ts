@@ -96,14 +96,12 @@ describe('document review run', () => {
     ).not.toBe(before)
   })
 
-  test('retry resets only failed Reviewer roles to pending', () => {
+  test('retry resets the failed direct Foundation Reviewer to pending', () => {
     const activeRun = createDocumentReviewRun({ scope: 'foundation', revision })
     activeRun.status = 'failed'
-    activeRun.failureReason = 'technical reviewer failed'
-    activeRun.reports[0].status = 'completed'
-    activeRun.reports[0].digest = 'c'.repeat(64)
-    activeRun.reports[1].status = 'failed'
-    activeRun.reports[1].failureReason = 'provider disconnected'
+    activeRun.failureReason = 'reviewer failed'
+    activeRun.reports[0].status = 'failed'
+    activeRun.reports[0].failureReason = 'provider disconnected'
     const run = createTestDeliveryRun({
       runId: 'review-retry-run',
       projectId: 'review-retry-project',
@@ -126,16 +124,13 @@ describe('document review run', () => {
     )
 
     expect(retried.documentReviewState.activeRun?.status).toBe('running')
-    expect(retried.documentReviewState.activeRun?.reports[0].status).toBe(
-      'completed',
-    )
-    expect(retried.documentReviewState.activeRun?.reports[1]).toMatchObject({
+    expect(retried.documentReviewState.activeRun?.reports[0]).toMatchObject({
       status: 'pending',
       failureReason: undefined,
     })
   })
 
-  test('dispatches at most three pending specialist roles concurrently', async () => {
+  test('dispatches one direct Foundation Reviewer over all canonical documents', async () => {
     const workspacePath = await workspace()
     const run = createDocumentReviewRun({ scope: 'foundation', revision })
 
@@ -145,17 +140,16 @@ describe('document review run', () => {
       revisionVerification,
     })
 
-    expect(dispatches).toHaveLength(3)
-    expect(dispatches.map(value => value.contract.reviewRole)).toEqual([
-      'core-systems',
-      'player-experience',
-      'production-delivery',
-    ])
+    expect(dispatches).toHaveLength(1)
+    expect(dispatches[0].contract.reviewRole).toBe('final')
+    expect(dispatches[0].contract.partDigests).toEqual({})
+    expect(dispatches[0].assignment.sourcePaths).toEqual([])
+    expect(dispatches[0].assignment.verificationSourcePaths).toHaveLength(8)
   })
 
-  test('dispatches the final Reviewer only after every specialist report commits', async () => {
+  test('dispatches the complete final Reviewer only after specialists commit', async () => {
     const workspacePath = await workspace()
-    let run = createDocumentReviewRun({ scope: 'foundation', revision })
+    let run = createDocumentReviewRun({ scope: 'complete', revision })
     for (const report of run.reports.filter(value => value.role !== 'final')) {
       const path = join(workspacePath, report.path)
       const text = `# ${report.role} review\n\nNo blocking findings.\n`
@@ -168,7 +162,7 @@ describe('document review run', () => {
           workerType: 'document-reviewer',
           status: 'completed',
           revision,
-          scope: 'foundation',
+          scope: 'complete',
           role: report.role,
           reportPaths: [relative(workspacePath, path)],
         },
@@ -183,7 +177,7 @@ describe('document review run', () => {
 
     expect(dispatches).toHaveLength(1)
     expect(dispatches[0].contract.reviewRole).toBe('final')
-    expect(Object.keys(dispatches[0].contract.partDigests)).toHaveLength(3)
+    expect(Object.keys(dispatches[0].contract.partDigests)).toHaveLength(4)
   })
 
   test('restarts an incomplete persisted five-role Foundation run on the same revision', async () => {
@@ -210,18 +204,13 @@ describe('document review run', () => {
 
     expect(recovered.revision).toBe(revision)
     expect(recovered.attempt).toBe(stale.attempt)
-    expect(recovered.reports.map(value => value.role)).toEqual([
-      'core-systems',
-      'player-experience',
-      'production-delivery',
-      'final',
-    ])
+    expect(recovered.reports.map(value => value.role)).toEqual(['final'])
     expect(recovered.reports.every(value => value.status === 'pending')).toBe(true)
   })
 
   test('preserves only committed siblings whose bytes still match on recovery', async () => {
     const workspacePath = await workspace()
-    const run = createDocumentReviewRun({ scope: 'foundation', revision })
+    const run = createDocumentReviewRun({ scope: 'complete', revision })
     const [gameplay, technical] = run.reports
     for (const report of [gameplay, technical]) {
       const path = join(workspacePath, report.path)
@@ -240,10 +229,10 @@ describe('document review run', () => {
     })
 
     expect(
-      recovered.reports.find(value => value.role === 'core-systems')?.status,
+      recovered.reports.find(value => value.role === 'complete-gameplay')?.status,
     ).toBe('completed')
     expect(
-      recovered.reports.find(value => value.role === 'player-experience')
+      recovered.reports.find(value => value.role === 'complete-technical')
         ?.status,
     ).toBe('pending')
   })
