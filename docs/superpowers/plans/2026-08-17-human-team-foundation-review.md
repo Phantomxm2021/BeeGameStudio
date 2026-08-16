@@ -98,25 +98,25 @@ git commit -m "feat: define foundation review ownership lanes"
 - Produces `acceptFoundationReviewLanePacket()` with source-authority and exact-observed-byte checks.
 - Removes `contract-specialist` and `integration-specialist` prompt vocabulary.
 
-- [ ] **Step 1: Write failing packet tests**
+- [x] **Step 1: Write failing packet tests**
 
 Cover strict fields, candidate cap, invalid UTF-8/JSON, stale revision, wrong
 lane, duplicate commit, evidence outside lane/projection authority, and an
 `observed` value absent from accepted source bytes.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts
 ```
 
-- [ ] **Step 3: Implement the unreachable lane-packet boundary**
+- [x] **Step 3: Implement the unreachable lane-packet boundary**
 
 Use `.beegame/reviews/foundation/<revision>/parts/<lane>.json`. Do not delete
 or route away from the old evidence module yet: the packet boundary remains
 unreachable until Task 3 atomically replaces every old role and prompt.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts
