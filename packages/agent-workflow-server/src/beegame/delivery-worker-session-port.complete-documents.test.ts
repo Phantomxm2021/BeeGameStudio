@@ -37,7 +37,7 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
-  test('projects the accepted conflict list and every coordinated repair target', async () => {
+  test('projects the accepted conflict list and repair paths without duplicating document bytes', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'repair-authority-'))
     try {
       const revision = 'a'.repeat(64)
@@ -105,9 +105,11 @@ describe('delivery worker complete document boundary', () => {
 
       expect(block).toContain('BEGIN ACCEPTED FOUNDATION REVIEW JSON')
       expect(block).toContain('Runtime authority disagrees')
-      expect(block).toContain('BEGIN CANONICAL REPAIR TARGET')
-      expect(block).toContain('# Current GDD')
-      expect(block).toContain('# Current Technical Design')
+      expect(block).toContain('docs/GDD.md')
+      expect(block).toContain('docs/TECHNICAL_DESIGN.md')
+      expect(block).not.toContain('BEGIN CANONICAL REPAIR TARGET')
+      expect(block).not.toContain('# Current GDD')
+      expect(block).not.toContain('# Current Technical Design')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

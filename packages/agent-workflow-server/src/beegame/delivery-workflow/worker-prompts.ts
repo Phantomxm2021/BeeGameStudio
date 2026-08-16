@@ -3,6 +3,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
+import { foundationReviewOutputContractInstruction } from './foundation-review'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
@@ -367,6 +368,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 'Before choosing a verdict, run one fixed coverage pass in this order: (1) authority, enumeration and cardinality; (2) state and outcome totality; (3) arithmetic, units, formulas and budgets; (4) owner-to-consumer references and duplicated facts; (5) runtime, production, asset and acceptance constraints; (6) player-facing art, UI, audio and accessibility mappings; (7) unresolved assumptions and external dependencies; (8) redundancy and human/agent usability. Keep the checking process internal; do not emit coverage prose or a checklist self-attestation.',
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
                 'Write exactly one JSON object to the sole contract.assignment.stagingOutputPaths entry. The object must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not write Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
+                foundationReviewOutputContractInstruction(),
                 'Each conflict must tell the repair Agent what is wrong, the exact evidence location, every canonical path whose bytes must change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose.',
                 ...(hasPriorReviewSource(request)
                   ? [

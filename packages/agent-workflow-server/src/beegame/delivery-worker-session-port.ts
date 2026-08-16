@@ -224,19 +224,10 @@ export async function buildDocumentAuthorAuthorityBlock(
       JSON.stringify(accepted.affectedPaths) !== JSON.stringify(affectedPaths)
     )
       throw new Error('document remediation paths do not match accepted review')
-    const targets = await Promise.all(
-      accepted.affectedPaths.map(async path => ({
-        path,
-        content: await readFile(resolve(request.workspacePath, path), 'utf8'),
-      })),
-    )
     return [
-      'The workflow service projected one accepted Foundation conflict list and every authorized repair target below. Coordinate every listed change across the complete path set in one turn, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
+      'The workflow service projected one accepted Foundation conflict list and the exact authorized repair paths below. Read only the current bytes needed for each listed conflict with native tools, coordinate every listed change across the complete path set in one turn, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
+      `Authorized repair paths: ${JSON.stringify(accepted.affectedPaths)}`,
       `--- BEGIN ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(accepted.review, null, 2)}\n--- END ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---`,
-      ...targets.map(
-        target =>
-          `--- BEGIN CANONICAL REPAIR TARGET: ${target.path} ---\n${target.content}\n--- END CANONICAL REPAIR TARGET: ${target.path} ---`,
-      ),
     ].join('\n\n')
   }
   if (
@@ -836,7 +827,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 )
               return createDeterministicCanonicalDocumentTerminal(
                 request,
-                receipt.targetPath,
+                [receipt.targetPath],
                 documentAuthoringMetrics(
                   sessionEvents(sessionId),
                   projectionMetrics(
@@ -864,9 +855,22 @@ export function createBeeGameDeliveryWorkerPort(input: {
               )
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+            const writtenPaths =
+              request.contract.authoringMode === 'remediation'
+                ? [
+                    ...new Set(
+                      completedMutationPaths(
+                        request.workspacePath,
+                        sessionEvents(sessionId).slice(
+                          eventOffsets.get(dispatchId) ?? 0,
+                        ),
+                      ),
+                    ),
+                  ]
+                : [targetPath]
             return createDeterministicCanonicalDocumentTerminal(
               request,
-              targetPath,
+              writtenPaths,
               documentAuthoringMetrics(
                 sessionEvents(sessionId),
                 projectionMetrics(documentAuthorityProjections.get(dispatchId)),
@@ -1012,7 +1016,7 @@ function projectionMetrics(projection?: FoundationAuthorityProjection) {
 
 function createDeterministicCanonicalDocumentTerminal(
   request: WorkerDispatchRequest,
-  targetPath: string,
+  writtenPaths: string[],
   authoringMetrics?: ReturnType<typeof documentAuthoringMetrics>,
 ) {
   if (!isCanonicalDocumentAuthor(request))
@@ -1020,7 +1024,7 @@ function createDeterministicCanonicalDocumentTerminal(
   return documentAuthorTerminalSchema.parse({
     workerType: 'document-author',
     status: 'completed',
-    writtenPaths: [targetPath],
+    writtenPaths,
     resolvedFindingIds: [],
     ...(authoringMetrics ? { authoringMetrics } : {}),
   })

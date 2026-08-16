@@ -132,6 +132,7 @@ export function createDocumentReviewRun(input: {
   revision: string
   attempt?: number
   approvedFoundationRevision?: string
+  priorReview?: { path: string; digest: string }
 }): DocumentReviewRun {
   const workspacePath = '/'
   const specialists = assignmentsForRun(input, workspacePath)
@@ -158,6 +159,12 @@ export function createDocumentReviewRun(input: {
       },
     ],
     attempt: input.attempt ?? 1,
+    ...(input.priorReview
+      ? {
+          priorReviewPath: input.priorReview.path,
+          priorReviewDigest: input.priorReview.digest,
+        }
+      : {}),
     ...(input.approvedFoundationRevision
       ? { approvedFoundationRevision: input.approvedFoundationRevision }
       : {}),
@@ -182,6 +189,21 @@ export function buildDocumentReviewDispatches(input: {
 }): DocumentReviewDispatch[] {
   if (input.run.status === 'completed' || input.run.status === 'failed')
     return []
+  const previousReport =
+    input.previousReport ??
+    (input.run.priorReviewPath && input.run.priorReviewDigest
+      ? {
+          path: input.run.priorReviewPath,
+          digest: input.run.priorReviewDigest,
+        }
+      : undefined)
+  const revisionVerification =
+    input.run.scope === 'foundation' && previousReport
+      ? {
+          ...input.revisionVerification,
+          prerequisiteReports: [previousReport],
+        }
+      : input.revisionVerification
   const specialists = assignmentsForRun(input.run, input.workspacePath)
   const stateByRole = new Map(
     input.run.reports.map(report => [report.role, report]),
@@ -207,7 +229,7 @@ export function buildDocumentReviewDispatches(input: {
           input.run,
           assignment,
           {},
-          input.revisionVerification,
+          revisionVerification,
         ),
       )
   }
@@ -219,7 +241,7 @@ export function buildDocumentReviewDispatches(input: {
     workspacePath: input.workspacePath,
     revision: input.run.revision,
     specialists,
-    previousReportPath: input.previousReport?.path,
+    previousReportPath: previousReport?.path,
   })
   const partDigests = Object.fromEntries(
     specialists.map(assignment => {
@@ -234,7 +256,7 @@ export function buildDocumentReviewDispatches(input: {
       input.run,
       final,
       partDigests,
-      input.revisionVerification,
+      revisionVerification,
     ),
   ]
 }

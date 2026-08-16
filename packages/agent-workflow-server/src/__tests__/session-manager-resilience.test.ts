@@ -672,7 +672,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('keeps out-of-project native file mutations behind explicit permission', async () => {
+  test('denies out-of-project workflow file mutations without blocking the worker', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-native-permission-relay-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined
@@ -710,20 +710,20 @@ describe('BeeGame session runtime resilience', () => {
         'project-1',
         workspacePath,
       ),
-    ).toEqual([
-      expect.objectContaining({
-        toolUseID: 'native-write-request',
-        toolName: 'Write',
-      }),
-    ])
-    manager.resolveProjectPermission(
-      'user-1',
-      'project-1',
-      workspacePath,
-      'native-write-request',
-      { behavior: 'allow', scope: 'once' },
-    )
-    expect(await decisionPromise).toEqual({ behavior: 'allow', scope: 'once' })
+    ).toEqual([])
+    expect(await decisionPromise).toEqual({
+      behavior: 'deny',
+      scope: 'once',
+      message: 'Workflow workers may not mutate files outside the project workspace.',
+    })
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({
+      autoDenied: true,
+      reason: 'workflow_workspace_boundary',
+    })
     manager.dispose()
   })
 

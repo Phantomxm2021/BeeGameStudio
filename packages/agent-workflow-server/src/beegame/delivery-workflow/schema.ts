@@ -225,6 +225,7 @@ const documentReviewStateSchema: z.ZodType<DocumentReviewState> = z
           .string()
           .regex(/^[a-f0-9]{64}$/u)
           .optional(),
+        priorReviewPath: z.string().min(1).optional(),
         priorReviewDigest: z
           .string()
           .regex(/^[a-f0-9]{64}$/u)

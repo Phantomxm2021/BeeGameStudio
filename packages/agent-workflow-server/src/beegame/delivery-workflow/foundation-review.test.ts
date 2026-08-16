@@ -167,6 +167,31 @@ describe('foundation review contract', () => {
     ).toEqual(['B2', 'B3'])
   })
 
+  test('preserves bounded verification evidence for each prior conflict status', () => {
+    const parsed = foundationReviewSchema.parse(
+      review({
+        verdict: 'READY',
+        priorReviewDigest: 'b'.repeat(64),
+        priorConflictStatus: [
+          {
+            id: 'B1',
+            status: 'closed',
+            note: 'The cited authority and every named consumer now agree.',
+          },
+        ],
+        conflicts: [],
+      }),
+    )
+
+    expect(parsed.priorConflictStatus).toEqual([
+      {
+        id: 'B1',
+        status: 'closed',
+        note: 'The cited authority and every named consumer now agree.',
+      },
+    ])
+  })
+
   test('atomically accepts one immutable review json bound to current bytes', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-review-'))
     const dispatchId = 'dispatch-1'

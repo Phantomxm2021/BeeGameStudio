@@ -7,6 +7,8 @@ import {
   type FoundationDocumentPath,
 } from './types'
 
+export const FOUNDATION_REVIEW_VERSION = 2
+
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 const conflictIdSchema = z.string().regex(/^B[1-9][0-9]*$/u)
 const foundationPathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
@@ -50,12 +52,13 @@ const priorConflictStatusSchema = z
   .object({
     id: conflictIdSchema,
     status: z.enum(['closed', 'open']),
+    note: z.string().trim().min(1).max(1_200).optional(),
   })
   .strict()
 
 export const foundationReviewSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(FOUNDATION_REVIEW_VERSION),
     scope: z.literal('foundation'),
     revision: digestSchema,
     verdict: z.enum(['READY', 'NEEDS_REVISION']),
@@ -114,6 +117,15 @@ export const foundationReviewSchema = z
         message: 'NEEDS_REVISION foundation review requires conflicts',
       })
   })
+
+export function foundationReviewOutputContractInstruction(): string {
+  return [
+    `version must be the integer ${FOUNDATION_REVIEW_VERSION}; scope must be the string foundation; revision must exactly equal the assigned revision; verdict must be READY or NEEDS_REVISION.`,
+    'priorConflictStatus must always be present as an array; use [] on the initial review. Each priorConflictStatus object may contain only id, status and an optional bounded note explaining the verification evidence. Include priorReviewDigest only for a verification review.',
+    'Conflict IDs must be B1, B2, B3 and so on with no suffix or descriptive text.',
+    'Each conflict evidence must be an array of objects containing only path, location and observed; never use a string. Each conflict changes must be an array of objects containing only path and action, with each path appearing at most once. acceptance must be an array of testable strings.',
+  ].join(' ')
+}
 
 export type FoundationReview = z.infer<typeof foundationReviewSchema>
 

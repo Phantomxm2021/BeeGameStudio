@@ -1853,6 +1853,24 @@ export class BeeGameSessionManager {
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
     }
+    if (record.workflowWorker === true && isFileMutationTool(request.toolName)) {
+      const decision = {
+        behavior: 'deny' as const,
+        scope: 'once' as const,
+        message:
+          'Workflow workers may not mutate files outside the project workspace.',
+      }
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'deny',
+        scope: 'once',
+        autoDenied: true,
+        reason: 'workflow_workspace_boundary',
+      })
+      return Promise.resolve(decision)
+    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,

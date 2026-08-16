@@ -345,6 +345,20 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain('permits incompatible implementations')
     expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
     expect(finalReviewerPrompt).toContain('one JSON object')
+    expect(finalReviewerPrompt).toContain('version must be the integer 2')
+    expect(finalReviewerPrompt).toContain(
+      'priorConflictStatus must always be present',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'may contain only id, status and an optional bounded note',
+    )
+    expect(finalReviewerPrompt).toContain('IDs must be B1, B2, B3')
+    expect(finalReviewerPrompt).toContain(
+      'evidence must be an array of objects',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'path, location and observed',
+    )
     expect(finalReviewerPrompt).toContain('priorConflictStatus')
     expect(finalReviewerPrompt).toContain('requiredOutcome')
     expect(finalReviewerPrompt).toContain('changes')

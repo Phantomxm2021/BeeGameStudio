@@ -179,6 +179,53 @@ describe('document review run', () => {
     })
   })
 
+  test('retry preserves the accepted prior report authority for Foundation verification', () => {
+    const priorReport = {
+      path: `.beegame/reviews/foundation/${'c'.repeat(64)}/review.json`,
+      digest: 'd'.repeat(64),
+    }
+    const activeRun = createDocumentReviewRun({
+      scope: 'foundation',
+      revision,
+      priorReview: priorReport,
+    })
+    activeRun.status = 'failed'
+    activeRun.reports[0].status = 'failed'
+    const run = createTestDeliveryRun({
+      runId: 'review-verification-retry-run',
+      projectId: 'review-verification-retry-project',
+      ownerId: 'review-verification-retry-owner',
+      foundationDraftComplete: true,
+    })
+    const retried = transitionDeliveryRun(
+      {
+        ...run,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        documentReviewState: {
+          approvals: {},
+          attempts: { foundation: 2, checklist: 0, complete: 0 },
+          activeRun,
+        },
+      },
+      { type: 'retry' },
+    )
+
+    const dispatches = buildDocumentReviewDispatches({
+      run: retried.documentReviewState.activeRun!,
+      workspacePath: '/workspace',
+      revisionVerification,
+    })
+
+    expect(dispatches[0]?.assignment.sourcePaths).toEqual([
+      join('/workspace', priorReport.path),
+    ])
+    expect(dispatches[0]?.contract.revisionVerification.prerequisiteReports).toEqual([
+      priorReport,
+    ])
+  })
+
   test('dispatches one direct Foundation Reviewer over all canonical documents', async () => {
     const workspacePath = await workspace()
     const run = createDocumentReviewRun({ scope: 'foundation', revision })

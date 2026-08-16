@@ -165,6 +165,8 @@ export type DocumentReviewRun = {
   reports: DocumentReviewReportState[]
   finalReportPath?: string
   finalReportDigest?: string
+  /** Accepted prior Foundation review path when this is the one verification review. */
+  priorReviewPath?: string
   /** Accepted prior Foundation review digest when this is the one verification review. */
   priorReviewDigest?: string
   verdict?: 'READY' | 'NEEDS_REVISION'
@@ -184,7 +186,7 @@ export type DocumentReviewReportApproval = {
   approvedAt: string
 }
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 19 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 20 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

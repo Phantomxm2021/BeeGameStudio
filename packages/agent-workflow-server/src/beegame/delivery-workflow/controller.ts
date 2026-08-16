@@ -1120,10 +1120,17 @@ export function createDeliveryWorkflowController(input: {
         }
         const previousReport =
           activeRun?.scope === reviewScope &&
-          activeRun.status === 'completed' &&
-          activeRun.verdict === 'NEEDS_REVISION' &&
-          activeRun.finalReportPath &&
-          activeRun.finalReportDigest
+          activeRun.priorReviewPath &&
+          activeRun.priorReviewDigest
+            ? {
+                path: activeRun.priorReviewPath,
+                digest: activeRun.priorReviewDigest,
+              }
+            : activeRun?.scope === reviewScope &&
+              activeRun.status === 'completed' &&
+              activeRun.verdict === 'NEEDS_REVISION' &&
+              activeRun.finalReportPath &&
+              activeRun.finalReportDigest
             ? {
                 path: activeRun.finalReportPath,
                 digest: activeRun.finalReportDigest,
@@ -1145,6 +1152,7 @@ export function createDeliveryWorkflowController(input: {
             scope: reviewScope,
             revision: reviewRevision,
             attempt,
+            ...(previousReport ? { priorReview: previousReport } : {}),
             ...(reviewScope === 'checklist'
               ? {
                   approvedFoundationRevision:
