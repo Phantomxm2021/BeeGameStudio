@@ -266,33 +266,33 @@ git commit -m "feat: verify foundation repairs by affected scope"
 - API/frontend remove the custom `foundationReview` display object.
 - Existing Task layout, icons, status text, progress, controls, and deck remain unchanged.
 
-- [ ] **Step 1: Write RED backend Task tests**
+- [x] **Step 1: Write RED backend Task tests**
 
 ```ts
 expect(projected.map(task => [task.title, task.status])).toEqual([
-  ['审查核心设计', 'completed'],
-  ['审查技术与资产', 'running'],
-  ['审查表现体验', 'running'],
-  ['汇总阻塞问题', 'pending'],
+  ['核心设计', 'completed'],
+  ['技术与资产', 'running'],
+  ['表现体验', 'running'],
+  ['阻塞问题汇总', 'pending'],
 ])
 ```
 
 Add repair and verification fixtures and assert exact failure propagation.
 
-- [ ] **Step 2: Write RED frontend Task tests**
+- [x] **Step 2: Write RED frontend Task tests**
 
 Assert existing completed/running/pending/failed/stopped Task icons and progress.
 Assert no custom Reviewer container, role row, token row, conflict panel,
 verdict badge, or remediation panel.
 
-- [ ] **Step 3: Remove the custom display path**
+- [x] **Step 3: Remove the custom display path**
 
 Delete `foundationReviewForDisplay()`, `WorkflowFoundationReviewDisplay`, all
 normalizers/adapters for it, and JSX beginning at
 `data-testid="workflow-review-report"`. Feed persisted review/remediation state
 to ordinary Task projection. Do not change Task CSS or icons.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/document-display-tasks.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts
@@ -316,12 +316,12 @@ git commit -m "refactor: show foundation review as workflow tasks"
 
 **Interfaces:** Leaves this approved design/plan as the only active Foundation Reviewer guidance.
 
-- [ ] **Step 1: Delete superseded files with `apply_patch`**
+- [x] **Step 1: Delete superseded files with `apply_patch`**
 
 Git history preserves them; the working tree no longer presents rejected
 architectures as current guidance.
 
-- [ ] **Step 2: Run the static legacy audit**
+- [x] **Step 2: Run the static legacy audit**
 
 ```bash
 rg -n "contract-specialist|integration-specialist|foundation-review-evidence|workflow-review-report|foundationReviewForDisplay|WorkflowFoundationReviewDisplay|review\.md|decision\.json|CHECKLIST_REVIEW|COMPREHENSIVE_REVIEW" packages/agent-workflow-server/src apps/frontend/src
@@ -330,7 +330,7 @@ rg -n "contract-specialist|integration-specialist|foundation-review-evidence|wor
 Expected: no production reference. A schema-22 rejection fixture may retain old
 literals only when explicitly testing migration.
 
-- [ ] **Step 3: Run full automated verification and commit cleanup**
+- [x] **Step 3: Run full automated verification and commit cleanup**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src
