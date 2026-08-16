@@ -57,33 +57,6 @@ const stageLabel: Record<string, string> = {
   DELIVERY: '交付',
 };
 
-const reviewRoleLabel: Record<string, string> = {
-  'contract-specialist': '契约完整性证据',
-  'integration-specialist': '跨文档集成证据',
-  final: '最终汇总',
-};
-
-const reviewStatusLabel = {
-  pending: '等待中',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
-} as const;
-
-const remediationLaneLabel = {
-  'core-design': '核心设计',
-  'technical-assets': '技术与资产',
-  presentation: '表现层',
-} as const;
-
-const remediationLaneStatusLabel = {
-  not_required: '无需修订',
-  pending: '等待修订',
-  running: '修订中',
-  completed: '已完成',
-  failed: '失败',
-} as const;
-
 const workerLabel: Record<string, string> = {
   'document-author': 'Document Author',
   'document-reviewer': 'Document Reviewer',
@@ -145,9 +118,6 @@ const formatDuration = (milliseconds: number): string => {
   const remainder = seconds % 60;
   return [hours, minutes, remainder].map(value => String(value).padStart(2, '0')).join(':');
 };
-
-const formatTokenCount = (tokens: number): string =>
-  new Intl.NumberFormat('zh-CN').format(Math.max(0, tokens));
 
 const copyText = async (text: string): Promise<boolean> => {
   try {
@@ -614,141 +584,6 @@ export function WorkflowStageCard({
             </div>
             {executionText ? <p className="mt-1 text-[11px] text-zinc-500">{executionText}</p> : null}
 
-            {snapshot.foundationReview ? (
-              <div
-                data-testid="workflow-review-report"
-                className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3"
-              >
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  {snapshot.foundationReview.verdict ? (
-                    <span
-                      className={snapshot.foundationReview.verdict === 'READY' ? 'text-emerald-300' : 'text-amber-300'}
-                    >
-                      {snapshot.foundationReview.verdict}
-                    </span>
-                  ) : null}
-                  <span className="text-zinc-500">
-                    {snapshot.foundationReview.mode === 'verification' ? '独立验证' : '初次审计'}
-                  </span>
-                </div>
-                {snapshot.foundationReview.roles.length ? (
-                  <ul className="mt-2 space-y-1 text-xs text-zinc-400">
-                    {snapshot.foundationReview.roles.map(report => (
-                      <li key={report.role}>
-                        <span>
-                          {report.role === 'final'
-                            ? snapshot.foundationReview?.mode === 'verification' ? '独立验证' : '冲突综合'
-                            : reviewRoleLabel[report.role] || report.role} · {reviewStatusLabel[report.status]}
-                        </span>
-                        {report.usage || report.durationMs !== undefined ? (
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] tabular-nums text-zinc-500">
-                            {report.usage ? (
-                              <>
-                                <span>输入 {formatTokenCount(report.usage.input_tokens)}</span>
-                                <span>缓存输入 {formatTokenCount(report.usage.cache_read_tokens)}</span>
-                                <span>输出 {formatTokenCount(report.usage.completion_tokens)}</span>
-                              </>
-                            ) : null}
-                            {report.durationMs !== undefined ? (
-                              <span>耗时 {formatDuration(report.durationMs)}</span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {report.failureReason ? (
-                          <p className="mt-0.5 text-rose-300">{report.failureReason}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {snapshot.foundationReview.conflicts ? (
-                  <div className="mt-3 border-t border-white/10 pt-3 text-xs">
-                    <p className="font-medium text-amber-200">
-                      {snapshot.foundationReview.conflicts.length} 个待修冲突
-                    </p>
-                    {snapshot.foundationReview.conflicts.length ? (
-                      <div className="mt-2 space-y-2">
-                        {snapshot.foundationReview.conflicts.map(conflict => (
-                          <details key={conflict.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                            <summary className="cursor-pointer font-medium text-zinc-200">
-                              {conflict.id} · {conflict.title}
-                            </summary>
-                            <div className="mt-3 space-y-3 text-zinc-400">
-                              <section>
-                                <p className="font-medium text-zinc-200">问题</p>
-                                <p className="mt-1">{conflict.problem}</p>
-                                <p className="mt-1 text-zinc-300">目标：{conflict.requiredOutcome}</p>
-                              </section>
-                              <section>
-                                <p className="font-medium text-zinc-200">修改</p>
-                                <ul className="mt-1 space-y-1">
-                                  {conflict.changes.map(change => (
-                                    <li key={`${conflict.id}:change:${change.path}`}>
-                                      {documentTitle[change.path] || change.path}：{change.action}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </section>
-                              <section>
-                                <p className="font-medium text-zinc-200">证据</p>
-                                <ul className="mt-1 space-y-1">
-                                  {conflict.evidence.map((evidence, index) => (
-                                    <li key={`${conflict.id}:evidence:${evidence.path}:${index}`}>
-                                      {documentTitle[evidence.path] || evidence.path} · {evidence.location}：{evidence.observed}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </section>
-                              <section>
-                                <p className="font-medium text-zinc-200">验收</p>
-                                <ul className="mt-1 list-disc space-y-1 pl-4">
-                                  {conflict.acceptance.map((condition, index) => (
-                                    <li key={`${conflict.id}:acceptance:${index}`}>{condition}</li>
-                                  ))}
-                                </ul>
-                              </section>
-                            </div>
-                          </details>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                {snapshot.foundationReview.lanes?.length ? (
-                  <div data-testid="workflow-remediation-lanes" className="mt-3 border-t border-white/10 pt-3 text-xs">
-                    <p className="font-medium text-zinc-200">并行修订</p>
-                    <ul className="mt-2 space-y-2">
-                      {snapshot.foundationReview.lanes.map(lane => (
-                        <li key={lane.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-medium text-zinc-200">{remediationLaneLabel[lane.id]}</span>
-                            <span className={lane.status === 'failed' ? 'text-rose-300' : lane.status === 'completed' ? 'text-emerald-300' : 'text-zinc-400'}>
-                              {remediationLaneStatusLabel[lane.status]}
-                            </span>
-                          </div>
-                          {lane.affectedPaths.length ? (
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-zinc-400">
-                              {lane.affectedPaths.map(path => (
-                                <span key={path}>{documentTitle[path] || path}</span>
-                              ))}
-                            </div>
-                          ) : null}
-                          {lane.durationMs !== undefined ? (
-                            <p className="mt-1 text-[11px] tabular-nums text-zinc-500">{formatDuration(lane.durationMs)}</p>
-                          ) : null}
-                          {lane.failureReason ? (
-                            <p className="mt-1 text-rose-300">{lane.failureReason}</p>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {snapshot.foundationReview.failureReason ? (
-                  <p className="mt-2 text-xs text-rose-300">{snapshot.foundationReview.failureReason}</p>
-                ) : null}
-              </div>
-            ) : null}
 
             {tasks.length > 0 ? (
               <div className="mt-4">

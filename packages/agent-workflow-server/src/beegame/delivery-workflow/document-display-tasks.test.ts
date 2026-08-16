@@ -59,14 +59,59 @@ describe('workflow display tasks', () => {
     ])
   })
 
-  test('does not duplicate Foundation Reviewer roles as generic document tasks', async () => {
+  test('projects Foundation review lanes and synthesis as ordinary tasks', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
       documentStep: 'FOUNDATION_REVIEW',
       workflowStatus: 'running',
       thinking: 'working',
+      foundationReview: {
+        mode: 'initial',
+        attempt: 1,
+        reports: [
+          { role: 'core-design', status: 'completed' },
+          { role: 'technical-assets', status: 'running' },
+          { role: 'presentation', status: 'running' },
+          { role: 'synthesis', status: 'pending' },
+        ],
+      },
     })
-    expect(tasks).toEqual([])
+    expect(tasks.map(task => [task.title, task.status])).toEqual([
+      ['核心设计', 'completed'],
+      ['技术与资产', 'running'],
+      ['表现体验', 'running'],
+      ['阻塞问题汇总', 'pending'],
+    ])
   })
 
+  test('projects repair lanes and targeted verification as ordinary tasks', async () => {
+    const tasks = projectDocumentDisplayTasks({
+      workspacePath: await workspace(),
+      documentStep: 'FOUNDATION_REVIEW',
+      workflowStatus: 'running',
+      thinking: 'working',
+      foundationReview: {
+        mode: 'verification',
+        attempt: 2,
+        reports: [{ role: 'verification', status: 'pending' }],
+      },
+      foundationRemediationLanes: [
+        { id: 'core-design', status: 'completed' },
+        { id: 'technical-assets', status: 'not_required' },
+        {
+          id: 'presentation',
+          status: 'failed',
+          failureReason: '表现修订失败',
+        },
+      ],
+    })
+
+    expect(tasks.map(task => [task.title, task.status])).toEqual([
+      ['修订核心设计', 'completed'],
+      ['修订技术与资产', 'completed'],
+      ['修订表现体验', 'failed'],
+      ['修订结果', 'pending'],
+    ])
+    expect(tasks[2].failureReason).toBe('表现修订失败')
+  })
 })

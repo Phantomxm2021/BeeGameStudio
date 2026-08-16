@@ -209,12 +209,6 @@ import {
 } from './beegame/delivery-workflow/document-display-tasks'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
-import {
-  foundationReviewAffectedPaths,
-  foundationReviewPath,
-  foundationReviewSchema,
-} from './beegame/delivery-workflow/foundation-review'
-import { FOUNDATION_REMEDIATION_LANES } from './beegame/delivery-workflow/foundation-remediation'
 
 type JsonObject = Record<string, unknown>
 
@@ -5979,153 +5973,99 @@ function workflowNextAction(
   return undefined
 }
 
-function foundationReviewForDisplay(
+function projectFoundationReviewTaskState(
   workflow: JsonObject,
-  workspacePath?: string,
-): JsonObject | undefined {
+): Parameters<typeof projectDocumentDisplayTasks>[0]['foundationReview'] {
   const state = isObject(workflow.foundationReviewState)
     ? workflow.foundationReviewState
     : undefined
-  const run = state
-  if (!run) return undefined
-  const roles: JsonObject[] = Array.isArray(run.reports)
-    ? run.reports.flatMap(report => {
-        if (
-          !isObject(report) ||
-          typeof report.role !== 'string' ||
-          typeof report.path !== 'string' ||
-          typeof report.status !== 'string'
-        )
-          return []
-        const reportUsage = isObject(report.usage)
-          ? {
-              input_tokens: Number(report.usage.input_tokens),
-              cache_read_tokens: Number(report.usage.cache_read_tokens),
-              completion_tokens: Number(report.usage.completion_tokens),
-            }
-          : undefined
-        const validUsage =
-          reportUsage &&
-          Object.values(reportUsage).every(
-            value => Number.isFinite(value) && value >= 0,
-          )
-            ? reportUsage
-            : undefined
-        return [
-          {
-            role: report.role,
-            status: report.status,
-            ...(typeof report.failureReason === 'string'
-              ? { failureReason: report.failureReason }
-              : {}),
-            ...(Number.isFinite(Number(report.durationMs)) &&
-            Number(report.durationMs) >= 0
-              ? { durationMs: Number(report.durationMs) }
-              : {}),
-            ...(validUsage ? { usage: validUsage } : {}),
-          },
-        ]
-      })
-    : []
-  const remediationState = isObject(workflow.foundationRemediationState)
+  if (
+    !state ||
+    (state.mode !== 'initial' && state.mode !== 'verification') ||
+    !Number.isInteger(state.attempt) ||
+    !Array.isArray(state.reports)
+  )
+    return undefined
+  const reports = state.reports.flatMap(report => {
+    if (
+      !isObject(report) ||
+      ![
+        'core-design',
+        'technical-assets',
+        'presentation',
+        'synthesis',
+        'verification',
+      ].includes(String(report.role)) ||
+      !['pending', 'running', 'completed', 'failed'].includes(
+        String(report.status),
+      )
+    )
+      return []
+    return [
+      {
+        role: report.role as
+          | 'core-design'
+          | 'technical-assets'
+          | 'presentation'
+          | 'synthesis'
+          | 'verification',
+        status: report.status as
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'failed',
+        ...(typeof report.failureReason === 'string'
+          ? { failureReason: report.failureReason }
+          : {}),
+      },
+    ]
+  })
+  return {
+    mode: state.mode,
+    attempt: Number(state.attempt),
+    reports,
+  }
+}
+
+function projectFoundationRemediationTaskState(
+  workflow: JsonObject,
+): Parameters<
+  typeof projectDocumentDisplayTasks
+>[0]['foundationRemediationLanes'] {
+  const state = isObject(workflow.foundationRemediationState)
     ? workflow.foundationRemediationState
     : undefined
-  const lanes = Array.isArray(remediationState?.lanes) &&
-    remediationState.lanes.length === FOUNDATION_REMEDIATION_LANES.length &&
-    remediationState.lanes.every((lane, index) => {
-      const expected = FOUNDATION_REMEDIATION_LANES[index]
-      return (
-        isObject(lane) &&
-        lane.id === expected?.id &&
-        Array.isArray(lane.affectedPaths) &&
-        lane.affectedPaths.every(path => typeof path === 'string') &&
-        ['not_required', 'pending', 'running', 'completed', 'failed'].includes(
-          String(lane.status),
-        )
-      )
-    })
-    ? remediationState.lanes.map(laneValue => {
-        const lane = laneValue as JsonObject
-        const dispatch = isObject(lane.dispatch) ? lane.dispatch : undefined
-        const receipt = isObject(lane.receipt) ? lane.receipt : undefined
-        const startedAt = Date.parse(String(dispatch?.startedAt ?? ''))
-        const finishedAt = Date.parse(
-          String(dispatch?.finishedAt ?? receipt?.committedAt ?? ''),
-        )
-        const durationMs =
-          Number.isFinite(startedAt) &&
-          Number.isFinite(finishedAt) &&
-          finishedAt >= startedAt
-            ? finishedAt - startedAt
-            : undefined
-        return {
-          id: lane.id,
-          status: lane.status,
-          affectedPaths: lane.affectedPaths,
-          ...(typeof lane.failureReason === 'string'
-            ? { failureReason: lane.failureReason }
-            : {}),
-          ...(durationMs !== undefined ? { durationMs } : {}),
-        }
-      })
-    : undefined
-  const finalReportPath =
-    typeof run.finalReportPath === 'string' ? run.finalReportPath : undefined
-  const finalReportDigest =
-    typeof run.finalReportDigest === 'string'
-      ? run.finalReportDigest
-      : undefined
-  let foundationReviewProjection: JsonObject | undefined
-  let reportIntegrityFailure: string | undefined
-  if (workspacePath && finalReportPath) {
-    const workspace = resolve(workspacePath)
-    const absolute = resolve(workspace, finalReportPath)
-    const child = relative(workspace, absolute)
-    if (child && !child.startsWith('..') && !isAbsolute(child)) {
-      try {
-        const bytes = readFileSync(absolute)
-        if (
-          !finalReportDigest ||
-          createHash('sha256').update(bytes).digest('hex') !== finalReportDigest
-        )
-          reportIntegrityFailure =
-            'document review report bytes no longer match the accepted digest'
-        else {
-          const review = foundationReviewSchema.parse(
-            JSON.parse(bytes.toString('utf8')),
-          )
-          if (
-            absolute !==
-              foundationReviewPath(workspacePath, review.revision) ||
-            review.revision !== run.revision ||
-            review.verdict !== run.verdict
-          )
-            reportIntegrityFailure =
-              'document review JSON does not match the accepted workflow state'
-          else
-            foundationReviewProjection = {
-              conflicts: review.conflicts,
-            }
-        }
-      } catch {
-        reportIntegrityFailure = 'document review JSON is unavailable or invalid'
-      }
-    }
-  }
-  return {
-    ...(typeof run.mode === 'string' ? { mode: run.mode } : {}),
-    ...(typeof run.revision === 'string' ? { revision: run.revision } : {}),
-    ...(typeof run.status === 'string' ? { status: run.status } : {}),
-    roles,
-    ...(typeof run.verdict === 'string' ? { verdict: run.verdict } : {}),
-    ...(foundationReviewProjection ?? {}),
-    ...(lanes ? { lanes } : {}),
-    ...(reportIntegrityFailure
-      ? { failureReason: reportIntegrityFailure }
-      : typeof run.failureReason === 'string'
-      ? { failureReason: run.failureReason }
-      : {}),
-  }
+  if (!state || !Array.isArray(state.lanes)) return undefined
+  return state.lanes.flatMap(lane => {
+    if (
+      !isObject(lane) ||
+      !['core-design', 'technical-assets', 'presentation'].includes(
+        String(lane.id),
+      ) ||
+      ![
+        'not_required',
+        'pending',
+        'running',
+        'completed',
+        'failed',
+      ].includes(String(lane.status))
+    )
+      return []
+    return [
+      {
+        id: lane.id as 'core-design' | 'technical-assets' | 'presentation',
+        status: lane.status as
+          | 'not_required'
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'failed',
+        ...(typeof lane.failureReason === 'string'
+          ? { failureReason: lane.failureReason }
+          : {}),
+      },
+    ]
+  })
 }
 
 function workflowViewForDisplay(
@@ -6160,7 +6100,6 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const review = foundationReviewForDisplay(workflow, workspacePath)
   const displayTasks =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -6211,6 +6150,9 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
+          foundationReview: projectFoundationReviewTaskState(workflow),
+          foundationRemediationLanes:
+            projectFoundationRemediationTaskState(workflow),
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
@@ -6253,7 +6195,10 @@ function workflowViewForDisplay(
         ),
       )
     : {}
-  const stageSnapshots = workflowStageSnapshotsForDisplay(workflow, review)
+  const stageSnapshots = workflowStageSnapshotsForDisplay(
+    workflow,
+    displayTasks,
+  )
   return {
     ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
     status: workflowStatus(workflow) || 'unknown',
@@ -6262,7 +6207,6 @@ function workflowViewForDisplay(
     ...(typeof workflow.documentStep === 'string'
       ? { documentStep: workflow.documentStep }
       : {}),
-    ...(review ? { foundationReview: review } : {}),
     tasks: displayTasks,
     evidence,
     ...(typeof workflow.activeTaskId === 'string'
@@ -6327,7 +6271,7 @@ function workflowViewForDisplay(
 
 function workflowStageSnapshotsForDisplay(
   workflow: JsonObject,
-  foundationReview?: JsonObject,
+  liveTasks: JsonObject[],
 ): JsonObject[] | undefined {
   if (!Array.isArray(workflow.stageSnapshots)) return undefined
   const currentProgress = projectDeliveryProgress(workflow)
@@ -6344,7 +6288,8 @@ function workflowStageSnapshotsForDisplay(
       index === reached.length - 1 &&
       snapshot.stageId === currentProgress.stageId &&
       snapshot.phaseIndex === currentProgress.phaseIndex
-    const tasks = snapshot.tasks.map(task => ({
+    const taskSource = isLive ? liveTasks : snapshot.tasks
+    const tasks = taskSource.map(task => ({
       id: task.id,
       title: task.title,
       status: task.status,
@@ -6377,7 +6322,6 @@ function workflowStageSnapshotsForDisplay(
         ? { convergencePass: snapshot.convergencePass }
         : {}),
       ...(snapshot.documentStep ? { documentStep: snapshot.documentStep } : {}),
-      ...(isLive && foundationReview ? { foundationReview } : {}),
       ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
       ...(snapshot.worker ? { worker: snapshot.worker } : {}),
       ...(snapshot.message
@@ -6390,8 +6334,8 @@ function workflowStageSnapshotsForDisplay(
         ? { currentItemId: snapshot.currentItemId }
         : {}),
       tasks,
-      completedTaskCount: snapshot.completedTaskCount,
-      totalTaskCount: snapshot.totalTaskCount,
+      completedTaskCount: tasks.filter(task => task.status === 'completed').length,
+      totalTaskCount: tasks.length,
       createdAt: snapshot.createdAt,
       updatedAt: snapshot.updatedAt,
       ...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),

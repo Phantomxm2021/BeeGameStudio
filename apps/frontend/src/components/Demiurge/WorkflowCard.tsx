@@ -15,7 +15,6 @@ const adaptLegacyWorkflow = (workflow: WorkflowCardPayload): WorkflowCardStageSn
   substage: workflow.substage,
   convergencePass: workflow.convergencePass,
   documentStep: workflow.documentStep,
-  foundationReview: workflow.foundationReview,
   worker: workflow.worker,
   thinking: workflow.thinking,
   executionStatus: workflow.executionStatus,

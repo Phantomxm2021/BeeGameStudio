@@ -125,54 +125,10 @@ describe('displayModels', () => {
         phaseCount: 9,
         substage: 'INITIAL_REVIEW',
         convergencePass: 2,
-        foundationReview: {
-          mode: 'verification',
-          revision: 'a'.repeat(64),
-          status: 'completed',
-          verdict: 'NEEDS_REVISION',
-          conflicts: [
-            {
-              id: 'B1',
-              title: 'Conflicting reward unit',
-              problem: 'Two units are used.',
-              requiredOutcome: 'Use one unit.',
-              evidence: [
-                {
-                  path: 'docs/GDD.md',
-                  location: 'Rewards',
-                  observed: 'Percent and integer are both present.',
-                },
-              ],
-              changes: [
-                { path: 'docs/GDD.md', action: 'Use integer rewards.' },
-              ],
-              acceptance: ['Only integer rewards remain.'],
-            },
-          ],
-          roles: [],
-          lanes: [
-            {
-              id: 'core-design',
-              status: 'running',
-              affectedPaths: ['docs/GDD.md'],
-              durationMs: 12000,
-            },
-            {
-              id: 'technical-assets',
-              status: 'failed',
-              affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
-              failureReason: '技术修订失败',
-            },
-            {
-              id: 'presentation',
-              status: 'not_required',
-              affectedPaths: [],
-            },
-          ],
-        },
         tasks: [{ id: 'task-1', title: 'Implement game', status: 'running' }],
       },
     })
+    expect(display?.workflow).not.toHaveProperty('foundationReview')
   })
 
   it('does not invent a workflow from transport phase fields', () => {
@@ -303,7 +259,7 @@ describe('displayModels', () => {
       },
     })
 
-    expect(display?.workflow?.stageSnapshots).toEqual([
+    expect(display?.workflow?.stageSnapshots).toMatchObject([
       {
         stageId: 'FOUNDATION',
         status: 'blocked',
@@ -313,23 +269,6 @@ describe('displayModels', () => {
         substage: 'INITIAL_REVIEW',
         convergencePass: 2,
         documentStep: 'FOUNDATION_REVIEW',
-        foundationReview: {
-          mode: 'initial',
-          revision: 'a'.repeat(64),
-          status: 'running',
-          roles: [
-            {
-              role: 'contract-specialist',
-              status: 'running',
-              durationMs: 10_000,
-              usage: {
-                input_tokens: 120,
-                cache_read_tokens: 340,
-                completion_tokens: 56,
-              },
-            },
-          ],
-        },
         worker: 'reviewer',
         thinking: 'checking findings',
         executionStatus: 'waiting',
@@ -379,6 +318,9 @@ describe('displayModels', () => {
         activeSince: '2026-08-06T09:00:30.000Z',
       },
     ])
+    expect(display?.workflow?.stageSnapshots?.[0]).not.toHaveProperty(
+      'foundationReview',
+    )
 
     expect(display?.workflow?.nextAction).toBe('retry')
     expect(display?.workflow?.recoverable).toBe(true)

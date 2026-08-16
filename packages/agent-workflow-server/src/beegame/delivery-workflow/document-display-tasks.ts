@@ -15,6 +15,7 @@ export type DocumentDisplayTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
   operation: 'write' | 'review' | 'produce'
+  failureReason?: string
 }
 
 export type AssetDisplayTaskInput = {
@@ -37,6 +38,95 @@ export type DocumentDisplayTaskInput = {
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
+  foundationReview?: {
+    mode: 'initial' | 'verification'
+    attempt: number
+    reports: Array<{
+      role:
+        | 'core-design'
+        | 'technical-assets'
+        | 'presentation'
+        | 'synthesis'
+        | 'verification'
+      status: 'pending' | 'running' | 'completed' | 'failed'
+      failureReason?: string
+    }>
+  }
+  foundationRemediationLanes?: Array<{
+    id: 'core-design' | 'technical-assets' | 'presentation'
+    status: 'not_required' | 'pending' | 'running' | 'completed' | 'failed'
+    failureReason?: string
+  }>
+}
+
+const reviewTaskTitle = {
+  'core-design': '核心设计',
+  'technical-assets': '技术与资产',
+  presentation: '表现体验',
+  synthesis: '阻塞问题汇总',
+  verification: '修订结果',
+} as const
+
+const repairTaskTitle = {
+  'core-design': '修订核心设计',
+  'technical-assets': '修订技术与资产',
+  presentation: '修订表现体验',
+} as const
+
+function visibleReviewStatus(
+  status: 'pending' | 'running' | 'completed' | 'failed',
+  workflowStatus?: string,
+): DocumentDisplayTask['status'] {
+  return status === 'running' && workflowStopped(workflowStatus)
+    ? 'stopped'
+    : status
+}
+
+function projectFoundationReviewTasks(
+  input: DocumentDisplayTaskInput,
+): DocumentDisplayTask[] {
+  const review = input.foundationReview
+  const remediation = input.foundationRemediationLanes
+  if (remediation?.length) {
+    const repairTasks: DocumentDisplayTask[] = remediation.map(lane => ({
+      id: `foundation-remediation:${lane.id}`,
+      title: repairTaskTitle[lane.id],
+      status:
+        lane.status === 'not_required'
+          ? 'completed'
+          : visibleReviewStatus(lane.status, input.workflowStatus),
+      attempt: review?.attempt ?? 1,
+      operation: 'write',
+      ...(lane.failureReason ? { failureReason: lane.failureReason } : {}),
+    }))
+    const verification = review?.reports.find(
+      report => report.role === 'verification',
+    )
+    return [
+      ...repairTasks,
+      {
+        id: 'review:foundation:verification',
+        title: reviewTaskTitle.verification,
+        status: verification
+          ? visibleReviewStatus(verification.status, input.workflowStatus)
+          : 'pending',
+        attempt: review?.attempt ?? 1,
+        operation: 'review',
+        ...(verification?.failureReason
+          ? { failureReason: verification.failureReason }
+          : {}),
+      },
+    ]
+  }
+  if (!review) return []
+  return review.reports.map(report => ({
+    id: `review:foundation:${report.role}`,
+    title: reviewTaskTitle[report.role],
+    status: visibleReviewStatus(report.status, input.workflowStatus),
+    attempt: review.attempt,
+    operation: 'review',
+    ...(report.failureReason ? { failureReason: report.failureReason } : {}),
+  }))
 }
 
 /**
@@ -48,7 +138,11 @@ export type DocumentDisplayTaskInput = {
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  if (input.documentStep === 'FOUNDATION_REVIEW') return []
+  if (
+    input.documentStep === 'FOUNDATION_REVIEW' ||
+    input.foundationRemediationLanes?.length
+  )
+    return projectFoundationReviewTasks(input)
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

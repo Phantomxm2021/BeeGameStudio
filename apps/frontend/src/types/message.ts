@@ -54,50 +54,6 @@ export type WorkflowCardSubstage =
   | 'REPAIRING'
   | 'CHECKLIST_DRAFTING'
 
-export interface WorkflowReviewerUsage {
-  input_tokens: number
-  cache_read_tokens: number
-  completion_tokens: number
-}
-
-export interface WorkflowFoundationReviewDisplay {
-  mode: 'initial' | 'verification'
-  revision: string
-  status?: 'pending' | 'running' | 'completed' | 'failed'
-  verdict?: 'READY' | 'NEEDS_REVISION'
-  conflicts?: Array<{
-    id: string
-    title: string
-    problem: string
-    requiredOutcome: string
-    evidence: Array<{
-      path: string
-      location: string
-      observed: string
-    }>
-    changes: Array<{
-      path: string
-      action: string
-    }>
-    acceptance: string[]
-  }>
-  lanes?: Array<{
-    id: 'core-design' | 'technical-assets' | 'presentation'
-    status: 'not_required' | 'pending' | 'running' | 'completed' | 'failed'
-    affectedPaths: string[]
-    failureReason?: string
-    durationMs?: number
-  }>
-  failureReason?: string
-  roles: Array<{
-    role: 'contract-specialist' | 'integration-specialist' | 'final'
-    status: 'pending' | 'running' | 'completed' | 'failed'
-    failureReason?: string
-    durationMs?: number
-    usage?: WorkflowReviewerUsage
-  }>
-}
-
 export interface WorkflowCardStageSnapshot {
   stageId: string
   status: WorkflowCardStatus
@@ -108,7 +64,6 @@ export interface WorkflowCardStageSnapshot {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  foundationReview?: WorkflowFoundationReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string
@@ -152,7 +107,6 @@ export interface WorkflowCardPayload {
   substage?: WorkflowCardSubstage
   convergencePass?: number
   documentStep?: string
-  foundationReview?: WorkflowFoundationReviewDisplay
   worker?: string
   thinking?: string
   executionStatus?: string

@@ -17,130 +17,64 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the actionable Foundation conflict list without raw JSON or Markdown', () => {
+  it('renders Foundation review through the standard task list', () => {
     render(
       <WorkflowCard
         workflow={{
-          runId: 'review-report-run',
-          status: 'blocked',
+          runId: 'review-tasks',
+          status: 'running',
           currentPhase: 'DOCUMENT_REVIEW',
-          foundationReview: {
-            mode: 'verification',
-            revision: 'a'.repeat(64),
-            status: 'completed',
-            verdict: 'NEEDS_REVISION',
-            conflicts: [{
-              id: 'B1',
-              title: 'Economy rule is not implementable',
-              problem: 'The reward owner and consumer use incompatible units.',
-              requiredOutcome: 'Use one integer reward unit.',
-              evidence: [{
-                path: 'docs/GDD.md',
-                location: 'Reward outcome',
-                observed: 'Rewards are expressed as a percentage.',
-              }],
-              changes: [{
-                path: 'docs/GDD.md',
-                action: 'Define rewards as integer currency units.',
-              }],
-              acceptance: ['All reward values use integer currency units.'],
-            }],
-            roles: [{
-              role: 'final',
-              status: 'completed',
-              durationMs: 10_000,
-              usage: {
-                input_tokens: 120,
-                cache_read_tokens: 340,
-                completion_tokens: 56,
-              },
-            }],
-            lanes: [
-              {
-                id: 'core-design',
-                status: 'running',
-                affectedPaths: ['docs/GDD.md'],
-                durationMs: 12_000,
-              },
-              {
-                id: 'technical-assets',
-                status: 'failed',
-                affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
-                failureReason: '技术修订写入失败',
-              },
-              {
-                id: 'presentation',
-                status: 'not_required',
-                affectedPaths: [],
-              },
-            ],
-          },
+          tasks: [
+            { id: 'review:core-design', title: '核心设计', status: 'completed', operation: 'review' },
+            { id: 'review:technical-assets', title: '技术与资产', status: 'running', operation: 'review' },
+            { id: 'review:presentation', title: '表现体验', status: 'pending', operation: 'review' },
+            { id: 'review:synthesis', title: '阻塞问题汇总', status: 'pending', operation: 'review' },
+          ],
         }}
       />,
     );
 
-    expect(screen.getByText('NEEDS_REVISION')).toBeInTheDocument();
-    expect(screen.getAllByText('游戏设计文档 GDD').length).toBeGreaterThan(0);
-    expect(screen.getByText('1 个待修冲突')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('B1 · Economy rule is not implementable'));
-    expect(screen.getByText('问题')).toBeInTheDocument();
-    expect(screen.getByText('The reward owner and consumer use incompatible units.')).toBeInTheDocument();
-    expect(screen.getByText('修改')).toBeInTheDocument();
-    expect(screen.getByText(/Define rewards as integer currency units/)).toBeInTheDocument();
-    expect(screen.getByText('证据')).toBeInTheDocument();
-    expect(screen.getByText(/Rewards are expressed as a percentage/)).toBeInTheDocument();
-    expect(screen.getByText('验收')).toBeInTheDocument();
-    expect(screen.getByText('All reward values use integer currency units.')).toBeInTheDocument();
-    expect(screen.queryByText(/"version":2/)).not.toBeInTheDocument();
-    expect(screen.getByText('独立验证 · 已完成')).toBeInTheDocument();
-    expect(screen.getByText('输入 120')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入 340')).toBeInTheDocument();
-    expect(screen.getByText('输出 56')).toBeInTheDocument();
-    expect(screen.getByText('耗时 00:00:10')).toBeInTheDocument();
-    expect(screen.getByText('核心设计')).toBeInTheDocument();
-    expect(screen.getByText('技术与资产')).toBeInTheDocument();
-    expect(screen.getByText('表现层')).toBeInTheDocument();
-    expect(screen.getByText('修订中')).toBeInTheDocument();
-    expect(screen.getByText('无需修订')).toBeInTheDocument();
-    expect(screen.getByText('技术修订写入失败')).toBeInTheDocument();
-    expect(screen.getByText('00:00:12')).toBeInTheDocument();
-    expect(screen.queryByText('review.md')).not.toBeInTheDocument();
-    expect(screen.queryByText('foundation-contract-specialist')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workflow-card-task-region')).toBeInTheDocument();
+    expect(screen.getByText('审计：核心设计')).toHaveClass('line-through');
+    expect(screen.getByText('审计：技术与资产')).toBeInTheDocument();
+    expect(screen.getByText('审计：表现体验')).toBeInTheDocument();
+    expect(screen.getByText('审计：阻塞问题汇总')).toBeInTheDocument();
+    expect(document.querySelector('[data-task-icon="review-completed"]')).toBeTruthy();
+    expect(document.querySelector('[data-task-icon="review-running"]')).toBeTruthy();
+    expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
   });
 
-  it('shows concurrent specialist failures as separate durable rows', () => {
+  it('shows reviewer failures as ordinary failed tasks', () => {
     render(
       <WorkflowCard
         workflow={{
           runId: 'review-failures',
           status: 'blocked',
           currentPhase: 'DOCUMENT_REVIEW',
-          foundationReview: {
-            mode: 'initial',
-            revision: 'b'.repeat(64),
-            status: 'failed',
-            roles: [
-              {
-                role: 'contract-specialist',
-                status: 'failed',
-                failureReason: '契约证据包写入失败',
-              },
-              {
-                role: 'integration-specialist',
-                status: 'failed',
-                failureReason: '集成证据包格式无效',
-              },
-              { role: 'final', status: 'pending' },
-            ],
-          },
+          tasks: [
+            {
+              id: 'review:core-design',
+              title: '核心设计',
+              status: 'failed',
+              operation: 'review',
+              failureReason: '核心设计审计失败',
+            },
+            {
+              id: 'review:technical-assets',
+              title: '技术与资产',
+              status: 'failed',
+              operation: 'review',
+              failureReason: '技术与资产审计失败',
+            },
+          ],
         }}
       />,
     );
 
-    expect(screen.getByText(/契约完整性证据 · 失败/)).toBeInTheDocument();
-    expect(screen.getByText(/跨文档集成证据 · 失败/)).toBeInTheDocument();
-    expect(screen.getByText('契约证据包写入失败')).toBeInTheDocument();
-    expect(screen.getByText('集成证据包格式无效')).toBeInTheDocument();
+    expect(screen.getByText('核心设计审计失败')).toBeInTheDocument();
+    expect(screen.getByText('技术与资产审计失败')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-task-icon="review-failed"]')).toHaveLength(2);
+    expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
   });
 
   it('renders a stage deck with navigation and only exposes the latest action', async () => {

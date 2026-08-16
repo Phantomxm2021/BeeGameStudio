@@ -1321,71 +1321,39 @@ describe('delivery workflow session continuation', () => {
     }
     expect(response.status).toBe(200)
     const workflow = payload.workflow as Record<string, unknown>
-    expect(workflow.foundationReview).toMatchObject({
-      mode: 'initial',
-      revision: reviewRevision,
-      verdict: 'NEEDS_REVISION',
-      conflicts: [
-        {
-          id: 'B1',
-          title: 'Economy result is not implementable',
-          problem: 'The reward owner and consumer use incompatible units.',
-          requiredOutcome: 'Use one integer reward unit.',
-        },
-      ],
-      lanes: [
-        {
-          id: 'core-design',
-          status: 'pending',
-          affectedPaths: ['docs/GDD.md'],
-        },
-        {
-          id: 'technical-assets',
-          status: 'failed',
-          affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
-          failureReason: '技术修订写入失败',
-          durationMs: 12_000,
-        },
-        {
-          id: 'presentation',
-          status: 'not_required',
-          affectedPaths: [],
-        },
-      ],
-    })
-    expect(workflow.foundationReview).not.toHaveProperty('finalReportMarkdown')
-    expect(workflow.foundationReview).not.toHaveProperty('finalReportPath')
+    expect(workflow).not.toHaveProperty('foundationReview')
     expect(workflow).not.toHaveProperty('documentReview')
-    expect(
-      (workflow.foundationReview as { roles: Array<Record<string, unknown>> })
-        .roles[0],
-    ).toMatchObject({
-      durationMs: 10_000,
-      usage: {
-        input_tokens: 120,
-        cache_read_tokens: 340,
-        completion_tokens: 56,
+    expect(workflow.tasks).toEqual([
+      {
+        id: 'foundation-remediation:core-design',
+        title: '修订核心设计',
+        status: 'pending',
+        attempt: 1,
+        operation: 'write',
       },
-    })
-    expect(
-      (workflow.foundationReview as { roles: Array<Record<string, unknown>> })
-        .roles[0],
-    ).not.toHaveProperty('path')
-    await writeFile(join(workspace, reportPath), '# tampered\n')
-    const tamperedResponse = await app.request(
-      `/api/projects/${projectId}/workflow`,
-    )
-    const tamperedPayload = (await tamperedResponse.json()) as {
-      workflow?: Record<string, unknown>
-    }
-    expect(
-      (tamperedPayload.workflow?.foundationReview as Record<string, unknown>)
-        .conflicts,
-    ).toBeUndefined()
-    expect(tamperedPayload.workflow?.foundationReview).toMatchObject({
-      failureReason:
-        'document review report bytes no longer match the accepted digest',
-    })
+      {
+        id: 'foundation-remediation:technical-assets',
+        title: '修订技术与资产',
+        status: 'failed',
+        attempt: 1,
+        operation: 'write',
+        failureReason: '技术修订写入失败',
+      },
+      {
+        id: 'foundation-remediation:presentation',
+        title: '修订表现体验',
+        status: 'completed',
+        attempt: 1,
+        operation: 'write',
+      },
+      {
+        id: 'review:foundation:verification',
+        title: '修订结果',
+        status: 'pending',
+        attempt: 1,
+        operation: 'review',
+      },
+    ])
     const cards = workflow.stageSnapshots as Array<Record<string, unknown>>
     expect(cards.map(card => card.phaseIndex)).toEqual([1, 2, 3])
     expect(cards[0]).toMatchObject({
