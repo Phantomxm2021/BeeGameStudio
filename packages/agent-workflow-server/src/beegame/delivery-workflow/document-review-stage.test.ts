@@ -15,6 +15,7 @@ import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-he
 import { transitionDeliveryRun } from './transition'
 import {
   acceptFoundationReview,
+  foundationReviewPath,
   foundationReviewStagingPath,
 } from './foundation-review'
 
@@ -333,7 +334,7 @@ describe('document review run', () => {
     expect(Object.keys(dispatches[0].contract.partDigests)).toHaveLength(4)
   })
 
-  test('restarts an incomplete persisted five-role Foundation run on the same revision', async () => {
+  test('fails closed on an incomplete persisted legacy Foundation topology', async () => {
     const workspacePath = await workspace()
     const current = createDocumentReviewRun({ scope: 'foundation', revision })
     const stale = {
@@ -355,10 +356,8 @@ describe('document review run', () => {
       currentRevision: revision,
     })
 
-    expect(recovered.revision).toBe(revision)
-    expect(recovered.attempt).toBe(stale.attempt)
-    expect(recovered.reports.map(value => value.role)).toEqual(['final'])
-    expect(recovered.reports.every(value => value.status === 'pending')).toBe(true)
+    expect(recovered.status).toBe('failed')
+    expect(recovered.failureReason).toContain('legacy Foundation review protocol')
   })
 
   test('preserves only committed siblings whose bytes still match on recovery', async () => {
@@ -407,6 +406,95 @@ describe('document review run', () => {
       true,
     )
     expect(recovered.attempt).toBe(run.attempt)
+  })
+
+  test('recovers a committed Foundation JSON after state persistence crashes', async () => {
+    const workspacePath = await workspace()
+    const run = createDocumentReviewRun({ scope: 'foundation', revision })
+    const path = foundationReviewPath(workspacePath, revision)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision,
+        verdict: 'READY',
+        priorConflictStatus: [],
+        conflicts: [],
+      })}\n`,
+    )
+
+    const recovered = await recoverDocumentReviewRun({
+      run,
+      workspacePath,
+      currentRevision: revision,
+    })
+
+    expect(recovered).toMatchObject({
+      status: 'completed',
+      verdict: 'READY',
+      affectedPaths: [],
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+    })
+  })
+
+  test('fails closed on stale digest, duplicate legacy artifact, or legacy topology', async () => {
+    const workspacePath = await workspace()
+    const path = foundationReviewPath(workspacePath, revision)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision,
+        verdict: 'READY',
+        priorConflictStatus: [],
+        conflicts: [],
+      })}\n`,
+    )
+    const completed = createDocumentReviewRun({ scope: 'foundation', revision })
+    completed.status = 'completed'
+    completed.finalReportPath = relative(workspacePath, path)
+    completed.finalReportDigest = 'f'.repeat(64)
+    completed.verdict = 'READY'
+    completed.affectedPaths = []
+    completed.reports[0].status = 'completed'
+    completed.reports[0].digest = 'f'.repeat(64)
+
+    const stale = await recoverDocumentReviewRun({
+      run: completed,
+      workspacePath,
+      currentRevision: revision,
+    })
+    expect(stale.status).toBe('failed')
+    expect(stale.failureReason).toContain('digest')
+
+    await writeFile(join(dirname(path), 'review.md'), '# legacy\n')
+    const duplicate = await recoverDocumentReviewRun({
+      run: createDocumentReviewRun({ scope: 'foundation', revision }),
+      workspacePath,
+      currentRevision: revision,
+    })
+    expect(duplicate.status).toBe('failed')
+    expect(duplicate.failureReason).toContain('legacy')
+
+    const legacy = createDocumentReviewRun({ scope: 'foundation', revision })
+    legacy.reports = [
+      {
+        role: 'final',
+        path: `.beegame/reviews/foundation/${revision}/review.md`,
+        status: 'pending',
+      },
+    ]
+    const legacyResult = await recoverDocumentReviewRun({
+      run: legacy,
+      workspacePath,
+      currentRevision: revision,
+    })
+    expect(legacyResult.status).toBe('failed')
+    expect(legacyResult.failureReason).toContain('legacy')
   })
 
   test.each([

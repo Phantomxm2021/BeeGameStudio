@@ -22,6 +22,7 @@ import {
   buildDocumentReviewDispatches,
   createDocumentReviewRun,
   hasCurrentDocumentReviewTopology,
+  recoverDocumentReviewRun,
   routeCompletedDocumentReview,
 } from './document-review-stage'
 import {
@@ -1063,7 +1064,60 @@ export function createDeliveryWorkflowController(input: {
                 run.confirmedBriefDigest,
               )
         let reviewRun = run
-        const activeRun = reviewRun.documentReviewState.activeRun
+        let activeRun = reviewRun.documentReviewState.activeRun
+        if (
+          activeRun?.scope === reviewScope &&
+          activeRun.revision === reviewRevision
+        ) {
+          const recovered = await recoverDocumentReviewRun({
+            run: activeRun,
+            workspacePath: input.workspacePath,
+            currentRevision: reviewRevision,
+          })
+          if (recovered.status === 'failed') {
+            await persist(
+              {
+                ...reviewRun,
+                status: 'needs_action',
+                blockedReason:
+                  recovered.failureReason ??
+                  'Foundation review recovery failed closed',
+                documentReviewState: {
+                  ...reviewRun.documentReviewState,
+                  activeRun: recovered,
+                },
+              },
+              'document.review.recovery.failed',
+            )
+            return
+          }
+          if (recovered.status === 'completed') {
+            const routed = routeCompletedDocumentReview({
+              run: {
+                ...reviewRun,
+                documentReviewState: {
+                  ...reviewRun.documentReviewState,
+                  activeRun: recovered,
+                },
+              },
+              review: recovered,
+            })
+            const persisted = await persist(
+              routed,
+              'document.review.commit.recovered',
+            )
+            if (persisted.status === 'running') await resumeUnlocked(persisted)
+            return
+          }
+          activeRun = recovered
+          reviewRun = {
+            ...reviewRun,
+            documentReviewState: {
+              ...reviewRun.documentReviewState,
+              activeRun: recovered,
+            },
+          }
+        }
         const previousReport =
           activeRun?.scope === reviewScope &&
           activeRun.status === 'completed' &&

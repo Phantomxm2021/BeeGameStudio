@@ -1477,6 +1477,22 @@ function buildProjectionRun(input: {
           'recovery_checkpoint_missing',
           `recovery cannot prove the ${scope} review revision`,
         )
+      if (scope === 'foundation' && rawActiveRun) {
+        const expectedPath = `.beegame/reviews/foundation/${revision}/review.json`
+        const rawReports = rawActiveRun.reports
+        const rawFinalPath = rawActiveRun.finalReportPath
+        const currentTopology =
+          Array.isArray(rawReports) &&
+          rawReports.length === 1 &&
+          stringValue(record(rawReports[0])?.role) === 'final' &&
+          stringValue(record(rawReports[0])?.path) === expectedPath &&
+          (rawFinalPath === undefined || rawFinalPath === expectedPath)
+        if (!currentTopology)
+          recoveryError(
+            'recovery_checkpoint_missing',
+            'legacy Foundation review protocol cannot be projected; restart Foundation review from the last intact snapshot',
+          )
+      }
       return {
         approvals: {},
         attempts: { ...attempts, [scope]: attempt },

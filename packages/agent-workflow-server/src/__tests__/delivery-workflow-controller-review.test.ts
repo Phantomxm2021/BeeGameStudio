@@ -23,6 +23,89 @@ afterEach(async () => {
 })
 
 describe('document review controller terminal reconciliation', () => {
+  test('recovers a committed Foundation JSON before redispatching Reviewer', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-review-commit-recovery-'))
+    workspaces.push(workspacePath)
+    const confirmedBriefContext = 'Confirmed review recovery brief'
+    const confirmedBriefDigest = createHash('sha256')
+      .update(confirmedBriefContext)
+      .digest('hex')
+    const revision = await computeCurrentDocumentReviewRevision({
+      workspacePath,
+      verification: {
+        kind: 'document',
+        confirmedBriefDigest,
+        prerequisiteReports: [],
+      },
+    })
+    const review = createDocumentReviewRun({
+      scope: 'foundation',
+      revision,
+      attempt: 1,
+    })
+    const reportPath = review.reports[0]!.path
+    await mkdir(dirname(join(workspacePath, reportPath)), { recursive: true })
+    await writeFile(
+      join(workspacePath, reportPath),
+      `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision,
+        verdict: 'READY',
+        priorConflictStatus: [],
+        conflicts: [],
+      })}\n`,
+    )
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'review-commit-recovery-run',
+        projectId: 'review-commit-recovery-project',
+        ownerId: 'review-commit-recovery-owner',
+        confirmedBriefContext,
+        confirmedBriefDigest,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      revision: { document: revision, workspace: 'uncomputed' },
+      documentReviewState: {
+        approvals: {},
+        attempts: { foundation: 1, checklist: 0, complete: 0 },
+        activeRun: review,
+      },
+    }
+    const store = createRunStore(workspacePath, run.ownerId)
+    await store.save(run)
+    const started: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath,
+      ownerId: run.ownerId,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await controller.resume(run)
+
+    expect(
+      started.filter(request => request.workerType === 'document-reviewer'),
+    ).toEqual([])
+    expect(await store.load()).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      documentReviewState: {
+        approvals: { foundation: { revision } },
+      },
+    })
+  })
+
   test('keeps an accepted final report complete when remediation startup fails', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-review-route-'))
     workspaces.push(workspacePath)

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { relative, resolve, sep } from 'node:path'
+import { lstat, readFile } from 'node:fs/promises'
+import { dirname, relative, resolve, sep } from 'node:path'
 import type {
   DeliveryRun,
   DocumentReviewReportState,
@@ -18,7 +18,10 @@ import type {
   DocumentReviewVerdict,
 } from './document-review-report'
 import { computeDocumentRevision, computeResourceRevision } from './revision'
-import { readFoundationReviewArtifact } from './foundation-review'
+import {
+  foundationReviewPath,
+  readFoundationReviewArtifact,
+} from './foundation-review'
 
 export type { DocumentReviewReportState, DocumentReviewRun } from './types'
 
@@ -352,6 +355,8 @@ export async function recoverDocumentReviewRun(input: {
         ? { approvedFoundationRevision: input.run.approvedFoundationRevision }
         : {}),
     })
+  if (input.run.scope === 'foundation')
+    return recoverFoundationReviewRun(input)
   if (
     input.run.status !== 'completed' &&
     !hasCurrentDocumentReviewTopology({
@@ -423,6 +428,136 @@ export async function recoverDocumentReviewRun(input: {
           verdict: undefined,
           affectedPaths: undefined,
         }),
+  }
+}
+
+async function recoveryPathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+function failFoundationReviewRecovery(
+  run: DocumentReviewRun,
+  reason: string,
+): DocumentReviewRun {
+  return {
+    ...run,
+    status: 'failed',
+    reports: run.reports.map(report =>
+      report.role === 'final'
+        ? { ...report, status: 'failed' as const, failureReason: reason }
+        : report,
+    ),
+    failureReason: reason,
+  }
+}
+
+async function recoverFoundationReviewRun(input: {
+  run: DocumentReviewRun
+  workspacePath: string
+  currentRevision: string
+}): Promise<DocumentReviewRun> {
+  const canonicalAbsolutePath = foundationReviewPath(
+    input.workspacePath,
+    input.run.revision,
+  )
+  const canonicalPath = relative(input.workspacePath, canonicalAbsolutePath)
+    .split(sep)
+    .join('/')
+  if (
+    input.run.reports.length !== 1 ||
+    input.run.reports[0]?.role !== 'final' ||
+    input.run.reports[0]?.path !== canonicalPath ||
+    (input.run.finalReportPath !== undefined &&
+      input.run.finalReportPath !== canonicalPath)
+  )
+    return failFoundationReviewRecovery(
+      input.run,
+      'legacy Foundation review protocol cannot be recovered; restart Foundation review',
+    )
+  const reviewDirectory = dirname(canonicalAbsolutePath)
+  if (
+    (await recoveryPathExists(resolve(reviewDirectory, 'review.md'))) ||
+    (await recoveryPathExists(resolve(reviewDirectory, 'decision.json'))) ||
+    (await recoveryPathExists(resolve(reviewDirectory, 'parts')))
+  )
+    return failFoundationReviewRecovery(
+      input.run,
+      'legacy Foundation review artifacts conflict with canonical review.json',
+    )
+  let accepted: Awaited<ReturnType<typeof readFoundationReviewArtifact>>
+  try {
+    accepted = await readFoundationReviewArtifact({
+      workspacePath: input.workspacePath,
+      path: canonicalPath,
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (
+        input.run.status === 'completed' ||
+        input.run.finalReportDigest ||
+        input.run.verdict
+      )
+        return failFoundationReviewRecovery(
+          input.run,
+          'canonical Foundation review.json is missing',
+        )
+      return {
+        ...input.run,
+        status: 'running',
+        reports: input.run.reports.map(report => ({
+          role: report.role,
+          path: report.path,
+          status: 'pending' as const,
+        })),
+        failureReason: undefined,
+      }
+    }
+    return failFoundationReviewRecovery(
+      input.run,
+      `canonical Foundation review.json is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (
+    input.run.finalReportDigest &&
+    input.run.finalReportDigest !== accepted.digest
+  )
+    return failFoundationReviewRecovery(
+      input.run,
+      'canonical Foundation review digest does not match persisted authority',
+    )
+  if (
+    input.run.priorReviewDigest !== undefined &&
+    input.run.priorReviewDigest !== accepted.review.priorReviewDigest
+  )
+    return failFoundationReviewRecovery(
+      input.run,
+      'canonical Foundation prior review digest does not match persisted authority',
+    )
+  return {
+    ...input.run,
+    status: 'completed',
+    reports: [
+      {
+        ...input.run.reports[0]!,
+        status: 'completed',
+        digest: accepted.digest,
+        failureReason: undefined,
+      },
+    ],
+    finalReportPath: accepted.path,
+    finalReportDigest: accepted.digest,
+    ...(accepted.review.priorReviewDigest
+      ? { priorReviewDigest: accepted.review.priorReviewDigest }
+      : { priorReviewDigest: undefined }),
+    verdict: accepted.review.verdict,
+    affectedPaths: [...accepted.affectedPaths],
+    failureReason: undefined,
   }
 }
 

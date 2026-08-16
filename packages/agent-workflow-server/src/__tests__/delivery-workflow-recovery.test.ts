@@ -66,6 +66,43 @@ import {
 } from '../beegame/delivery-workflow/revision'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
+function foundationRecoveryReviewJson(input: {
+  revision: string
+  priorReviewDigest?: string
+}): string {
+  return `${JSON.stringify({
+    version: 2,
+    scope: 'foundation',
+    revision: input.revision,
+    verdict: 'NEEDS_REVISION',
+    ...(input.priorReviewDigest
+      ? { priorReviewDigest: input.priorReviewDigest }
+      : {}),
+    priorConflictStatus: [],
+    conflicts: [
+      {
+        id: 'B1',
+        title: 'Recovery conflict',
+        problem: 'The accepted outcome still needs one document change.',
+        evidence: [
+          {
+            path: 'docs/GDD.md',
+            location: 'Core loop',
+            observed: 'The observable outcome is absent.',
+          },
+        ],
+        requiredOutcome: 'Define one observable outcome.',
+        changes: [
+          {
+            path: 'docs/GDD.md',
+            action: 'Define the observable outcome.',
+          },
+        ],
+        acceptance: ['The outcome is observable.'],
+      },
+    ],
+  })}\n`
+}
 const TEST_ACQUISITION_PROFILE = {
   dimensions: ['agnostic'] as const,
   asset_kinds: ['data'] as const,
@@ -3129,7 +3166,9 @@ describe('delivery workflow recovery', () => {
       report.digest = createHash('sha256').update(bytes).digest('hex')
     }
     const final = review.reports.find(report => report.role === 'final')!
-    const finalBytes = '# Accepted final review\n'
+    const finalBytes = foundationRecoveryReviewJson({
+      revision: documentRevision,
+    })
     const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
     await mkdir(join(workspace, final.path, '..'), { recursive: true })
     await writeFile(join(workspace, final.path), finalBytes)
@@ -3172,7 +3211,7 @@ describe('delivery workflow recovery', () => {
     ).toMatchObject({ status: 'completed', failureReason: undefined })
   })
 
-  test('explicit retry acknowledges the third completed review and resumes its remediation', async () => {
+  test('explicit retry cannot reopen a completed Foundation verification', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-retry-'))
     const ownerId = 'owner-review-limit-retry'
     const store = createRunStore(workspace, ownerId)
@@ -3191,7 +3230,11 @@ describe('delivery workflow recovery', () => {
       attempt: 3,
     })
     const final = review.reports.find(report => report.role === 'final')!
-    const finalBytes = '# Third final review\n'
+    const priorReviewDigest = 'e'.repeat(64)
+    const finalBytes = foundationRecoveryReviewJson({
+      revision: documentRevision,
+      priorReviewDigest,
+    })
     const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
     await mkdir(join(workspace, final.path, '..'), { recursive: true })
     await writeFile(join(workspace, final.path), finalBytes)
@@ -3200,15 +3243,16 @@ describe('delivery workflow recovery', () => {
     review.status = 'completed'
     review.finalReportPath = final.path
     review.finalReportDigest = finalDigest
+    review.priorReviewDigest = priorReviewDigest
     review.verdict = 'NEEDS_REVISION'
-    review.affectedPaths = ['docs/UI_UX_SPEC.md']
+    review.affectedPaths = ['docs/GDD.md']
     await store.save({
       ...initial,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       status: 'needs_action',
       revision: { ...initial.revision, document: documentRevision },
-      blockedReason: 'document review stopped after three consecutive reviews',
+      blockedReason: 'Foundation verification still requires revision',
       documentReviewState: {
         ...initial.documentReviewState,
         activeRun: review,
@@ -3223,15 +3267,15 @@ describe('delivery workflow recovery', () => {
     })
 
     expect(retried).toMatchObject({
-      phase: 'DOCUMENT_DRAFTING',
-      status: 'running',
-      blockedReason: undefined,
+      phase: 'DOCUMENT_REVIEW',
+      status: 'needs_action',
+      blockedReason: 'Foundation verification still requires revision',
     })
     expect(retried.documentReviewState.activeRun).toMatchObject({
       status: 'completed',
       verdict: 'NEEDS_REVISION',
-      affectedPaths: ['docs/UI_UX_SPEC.md'],
-      remediatedPaths: [],
+      affectedPaths: ['docs/GDD.md'],
+      priorReviewDigest,
       attempt: 3,
     })
   })

@@ -921,6 +921,8 @@ async function acknowledgeCompletedReviewRemediation(input: {
     review.verdict !== 'NEEDS_REVISION'
   )
     return undefined
+  if (review.scope === 'foundation' && review.priorReviewDigest)
+    return input.run
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
