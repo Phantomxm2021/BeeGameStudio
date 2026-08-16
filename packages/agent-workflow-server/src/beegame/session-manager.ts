@@ -1841,6 +1841,31 @@ export class BeeGameSessionManager {
       )
       return Promise.resolve({ ...authority, scope: 'once' })
     }
+    const workflowMutation = workflowFileMutationAuthority(record, request)
+    if (workflowMutation) {
+      this.append(
+        record,
+        'permission.resolved',
+        `${request.toolName}: ${workflowMutation.behavior}`,
+        {
+          type: 'permission.resolved',
+          toolUseID: request.toolUseID,
+          toolName: request.toolName,
+          decision: workflowMutation.behavior,
+          scope: 'once',
+          autoApproved: workflowMutation.behavior === 'allow',
+          autoDenied: workflowMutation.behavior === 'deny',
+          reason: workflowMutation.reason,
+        },
+      )
+      return Promise.resolve({
+        behavior: workflowMutation.behavior,
+        scope: 'once',
+        ...(workflowMutation.message
+          ? { message: workflowMutation.message }
+          : {}),
+      })
+    }
     if (authorizeProjectWorkspaceFileMutation(record, request)) {
       this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
         type: 'permission.resolved',
@@ -1852,24 +1877,6 @@ export class BeeGameSessionManager {
         reason: 'project_workspace_file_mutation',
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
-    }
-    if (record.workflowWorker === true && isFileMutationTool(request.toolName)) {
-      const decision = {
-        behavior: 'deny' as const,
-        scope: 'once' as const,
-        message:
-          'Workflow workers may not mutate files outside the project workspace.',
-      }
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        scope: 'once',
-        autoDenied: true,
-        reason: 'workflow_workspace_boundary',
-      })
-      return Promise.resolve(decision)
     }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
@@ -3638,6 +3645,64 @@ function authorizeProjectWorkspaceFileMutation(
   const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
   const rel = relative(workspaceRoot, targetPath)
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+type WorkflowFileMutationAuthority = {
+  behavior: 'allow' | 'deny'
+  reason:
+    | 'workflow_allowed_path'
+    | 'workflow_path_not_allowed'
+    | 'workflow_workspace_boundary'
+    | 'workflow_mutation_target_invalid'
+  message?: string
+}
+
+function workflowFileMutationAuthority(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): WorkflowFileMutationAuthority | undefined {
+  if (record.workflowWorker !== true || !isFileMutationTool(request.toolName))
+    return undefined
+  const artifactPath = getMutationArtifactPath(request.input)
+  if (!artifactPath)
+    return {
+      behavior: 'deny',
+      reason: 'workflow_mutation_target_invalid',
+      message: 'Workflow file mutations require one explicit target path.',
+    }
+  const workspaceRoot = resolveExistingPath(record.session.cwd)
+  const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
+  const workspaceRelative = relative(workspaceRoot, targetPath)
+  if (
+    workspaceRelative === '' ||
+    workspaceRelative.startsWith('..') ||
+    isAbsolute(workspaceRelative)
+  )
+    return {
+      behavior: 'deny',
+      reason: 'workflow_workspace_boundary',
+      message:
+        'Workflow workers may not mutate files outside the project workspace.',
+    }
+  const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
+    const configuredPath = entry.trim()
+    if (!configuredPath) return false
+    const directoryScope = /[\\/]$/u.test(configuredPath)
+    const allowedPath = resolveProspectivePath(
+      record.session.cwd,
+      configuredPath,
+    )
+    if (!directoryScope) return targetPath === allowedPath
+    const child = relative(allowedPath, targetPath)
+    return child !== '' && !child.startsWith('..') && !isAbsolute(child)
+  })
+  return allowed
+    ? { behavior: 'allow', reason: 'workflow_allowed_path' }
+    : {
+        behavior: 'deny',
+        reason: 'workflow_path_not_allowed',
+        message: 'Workflow workers may mutate only their assigned project paths.',
+      }
 }
 
 function resolveProspectivePath(cwd: string, artifactPath: string): string {

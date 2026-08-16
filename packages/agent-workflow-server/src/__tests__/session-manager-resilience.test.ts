@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -662,13 +662,163 @@ describe('BeeGame session runtime resilience', () => {
         .find(event => event.type === 'permission.resolved')?.payload,
     ).toMatchObject({
       autoApproved: true,
-      reason: 'project_workspace_file_mutation',
+      reason: 'workflow_allowed_path',
     })
     expect(
       manager
         .events(session.id)
         .find(event => event.type === 'permission.resolved')?.payload,
     ).not.toMatchObject({ reason: 'foundation_document_draft_checkpoint' })
+    manager.dispose()
+  })
+
+  test('denies workflow mutations outside the exact assigned paths without blocking', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-path-permission-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'sibling-document-write',
+            toolName: 'Write',
+            message: 'Write a document outside the assigned lane',
+            input: {
+              file_path: join(workspacePath, 'docs', 'AUDIO_DESIGN.md'),
+              content: '# Unauthorized sibling',
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+      workflowDocumentAuthorMode: 'remediation',
+      workflowAllowedPaths: ['docs/GDD.md'],
+    })
+
+    await manager.send(session.id, 'repair the assigned document')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
+    expect(await decisionPromise).toEqual({
+      behavior: 'deny',
+      scope: 'once',
+      message: 'Workflow workers may mutate only their assigned project paths.',
+    })
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({
+      autoDenied: true,
+      reason: 'workflow_path_not_allowed',
+    })
+    manager.dispose()
+  })
+
+  test('applies exact files and directory scopes without permitting symlink escapes', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-scope-permission-'))
+    const workspacePath = join(root, 'workspace')
+    const outsidePath = join(root, 'outside')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await mkdir(join(workspacePath, 'assets', 'content'), { recursive: true })
+    await mkdir(outsidePath, { recursive: true })
+    await symlink(
+      outsidePath,
+      join(workspacePath, 'assets', 'content', 'escape'),
+    )
+    let decisions: DashboardPermissionDecision[] = []
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisions = await Promise.all([
+            startInput.requestPermission!({
+              toolUseID: 'assigned-multi-edit',
+              toolName: 'MultiEdit',
+              message: 'Edit the assigned document',
+              input: { file_path: join(workspacePath, 'docs', 'GDD.md') },
+            }),
+            startInput.requestPermission!({
+              toolUseID: 'assigned-directory-write',
+              toolName: 'Write',
+              message: 'Write assigned resource content',
+              input: {
+                file_path: join(
+                  workspacePath,
+                  'assets',
+                  'content',
+                  'generated.json',
+                ),
+              },
+            }),
+            startInput.requestPermission!({
+              toolUseID: 'assigned-directory-escape',
+              toolName: 'Write',
+              message: 'Escape through a project symlink',
+              input: {
+                file_path: join(
+                  workspacePath,
+                  'assets',
+                  'content',
+                  'escape',
+                  'outside.json',
+                ),
+              },
+            }),
+          ])
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+      workflowDocumentAuthorMode: 'remediation',
+      workflowAllowedPaths: ['docs/GDD.md', 'assets/content/'],
+    })
+
+    await manager.send(session.id, 'complete assigned mutations')
+    await waitForIdle(manager, session.id)
+
+    expect(decisions).toEqual([
+      { behavior: 'allow', scope: 'once' },
+      { behavior: 'allow', scope: 'once' },
+      {
+        behavior: 'deny',
+        scope: 'once',
+        message:
+          'Workflow workers may not mutate files outside the project workspace.',
+      },
+    ])
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
     manager.dispose()
   })
 
