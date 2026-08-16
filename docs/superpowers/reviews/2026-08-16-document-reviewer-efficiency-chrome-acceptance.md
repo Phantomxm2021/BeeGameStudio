@@ -53,3 +53,49 @@ repair prose, create checkpoints, or write source documents.
 Checklist and Complete review remain unchanged. A new Chrome acceptance must
 measure the single Foundation report before this correction is considered
 accepted.
+
+## Corrected topology acceptance
+
+The corrected single-Reviewer topology was tested through the Web/React
+Dashboard on a new review copy:
+
+`review-copy--f984cfc8-9c1f-4f4c-8e98-411e0b4cd253`
+
+The Dashboard exposed exactly one role labelled `基础文档审计`. Native runtime
+evidence recorded exactly eight Read calls, one report Write and one decision
+Write. The session completed naturally without a BGS retry or watchdog.
+
+| Metric | Direct Reviewer | Target | Result |
+| --- | ---: | ---: | --- |
+| Uncached input | 251,029 | <= 500,000 | pass |
+| Cache input | 636,089 | <= 2,500,000 | pass |
+| Output | 27,074 | <= 110,000 | pass |
+| Total raw | 914,192 | <= 3,100,000 | pass |
+| Wall time | 00:07:23 | <= 00:30:00 | pass |
+| Report size | 14,887 bytes | observed only | pass |
+
+Against the old specialist phase before its Final Reviewer, uncached input fell
+56.5%, cache input fell 45.3%, output fell 76.4%, and wall time fell 43.6%.
+The comparison is conservative because the old run still required its Final
+Reviewer.
+
+The accepted `NEEDS_REVISION` report contains 16 deduplicated blocking
+findings, 4 non-blocking findings and 12 preservation contracts. It covers all
+eight owner documents; distinguishes owner defects from propagation surfaces;
+identifies arithmetic, rule, state, UI, audio, technical and asset-production
+defects; and gives downstream outcomes without rewriting source documents. It
+is readable by production staff and actionable for a downstream document
+owner. A future quality improvement may tighten evidence locations to exact
+headings or table rows, but this is not a correctness blocker.
+
+The source project remained unchanged. The review copy was byte-identical at
+the accepted review revision. After the report committed, the normal workflow
+entered report-driven remediation and began changing only the isolated copy's
+GDD before the acceptance harness could stop it. The fixed-port stack was then
+stopped to prevent further work. This does not alter the accepted report or the
+source project; future acceptance control should stop on the persisted final
+report event rather than wait for the next Dashboard poll.
+
+**Final verdict:** the direct Foundation Reviewer architecture passes the
+performance and report-quality gate. The three-specialist Foundation topology
+is rejected and has no production execution lane.

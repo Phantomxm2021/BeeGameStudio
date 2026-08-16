@@ -22,5 +22,5 @@ produce the authoritative Foundation review in one native Reviewer session.
 - [x] Show the Foundation final role as `基础文档审计` in Dashboard.
 - [x] Run backend, frontend, typecheck and diff validation.
 - [x] Commit the production change.
-- [ ] Restart fixed-port services and run fresh Web/React Chrome acceptance.
-- [ ] Record source equality, report quality, raw usage and wall time.
+- [x] Restart fixed-port services and run fresh Web/React Chrome acceptance.
+- [x] Record source equality, report quality, raw usage and wall time.
