@@ -4,9 +4,11 @@ import type { DispatchRecord, WorkflowUsage } from './types'
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 
 export type FoundationReviewRole =
-  | 'contract-specialist'
-  | 'integration-specialist'
-  | 'final'
+  | 'core-design'
+  | 'technical-assets'
+  | 'presentation'
+  | 'synthesis'
+  | 'verification'
 
 export type FoundationReviewMode = 'initial' | 'verification'
 
@@ -37,8 +39,12 @@ export type FoundationReviewState = {
 
 function reportPath(revision: string, role: FoundationReviewRole): string {
   const root = `.beegame/reviews/foundation/${revision}`
-  if (role === 'contract-specialist') return `${root}/parts/contract.json`
-  if (role === 'integration-specialist') return `${root}/parts/integration.json`
+  if (
+    role === 'core-design' ||
+    role === 'technical-assets' ||
+    role === 'presentation'
+  )
+    return `${root}/parts/${role}.json`
   return `${root}/review.json`
 }
 
@@ -50,8 +56,8 @@ export function assertFoundationReviewState(
     throw new Error('foundation review attempt must be a positive integer')
   const expectedRoles: FoundationReviewRole[] =
     state.mode === 'initial'
-      ? ['contract-specialist', 'integration-specialist', 'final']
-      : ['final']
+      ? ['core-design', 'technical-assets', 'presentation', 'synthesis']
+      : ['verification']
   if (
     state.reports.length !== expectedRoles.length ||
     state.reports.some((report, index) => report.role !== expectedRoles[index])
@@ -76,10 +82,10 @@ export function assertFoundationReviewState(
     state.mode === 'initial' &&
     final.status !== 'pending' &&
     !state.reports
-      .slice(0, 2)
+      .slice(0, 3)
       .every(report => report.status === 'completed' && report.digest)
   )
-    throw new Error('foundation final review requires completed specialist packets')
+    throw new Error('foundation synthesis requires completed lane packets')
   if (state.status === 'completed') {
     if (
       final.status !== 'completed' ||
@@ -103,8 +109,8 @@ export function createFoundationReviewState(input: {
   digestSchema.parse(input.revision)
   const roles: FoundationReviewRole[] =
     input.mode === 'initial'
-      ? ['contract-specialist', 'integration-specialist', 'final']
-      : ['final']
+      ? ['core-design', 'technical-assets', 'presentation', 'synthesis']
+      : ['verification']
   return assertFoundationReviewState({
     revision: input.revision,
     mode: input.mode,

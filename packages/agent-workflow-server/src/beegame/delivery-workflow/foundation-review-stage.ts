@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
-  acceptFoundationReviewEvidence,
-  foundationReviewEvidencePath,
-  foundationReviewEvidenceStagingPath,
-  type FoundationReviewSpecialistRole,
-} from './foundation-review-evidence'
+  FOUNDATION_DOCUMENT_LANES,
+  foundationDocumentLaneById,
+  type FoundationDocumentLaneId,
+} from './foundation-document-lanes'
+import {
+  acceptFoundationReviewLanePacket,
+  foundationReviewLanePacketPath,
+  foundationReviewLanePacketStagingPath,
+} from './foundation-review-lane-packet'
+import { writeFoundationReviewProjection } from './foundation-review-projection'
 import {
   acceptFoundationReview,
   foundationReviewPath,
@@ -23,11 +28,16 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationRemediationState,
 } from './types'
-import {
-  foundationReviewWorkerTerminalSchema,
-} from './worker-contracts'
+import { foundationReviewWorkerTerminalSchema } from './worker-contracts'
 
 const digestPattern = /^[a-f0-9]{64}$/u
+const laneIds = new Set<FoundationReviewRole>(
+  FOUNDATION_DOCUMENT_LANES.map(lane => lane.id),
+)
+
+function isLaneRole(role: FoundationReviewRole): role is FoundationDocumentLaneId {
+  return laneIds.has(role)
+}
 
 export type FoundationReviewAssignment = {
   scope: 'foundation'
@@ -49,7 +59,8 @@ export type FoundationReviewDispatch = {
     reviewRole: FoundationReviewRole
     assignment: FoundationReviewAssignment
     confirmedBriefDigest: string
-    packetDigests: Partial<Record<FoundationReviewSpecialistRole, string>>
+    packetDigests: Partial<Record<FoundationDocumentLaneId, string>>
+    projection?: { path: string; digest: string; byteLength: number }
     priorReview?: { path: string; digest: string }
     remediationReceipts?: Array<{
       laneId: string
@@ -66,127 +77,159 @@ function reportIsDispatchable(
   return report?.status === 'pending' && !report.dispatch
 }
 
-export function buildFoundationReviewDispatches(input: {
+function pendingRoles(state: FoundationReviewState): FoundationReviewRole[] {
+  if (state.mode === 'verification')
+    return reportIsDispatchable(state, 'verification') ? ['verification'] : []
+  const lanes = state.reports.slice(0, 3)
+  if (
+    lanes.every(report => report.status === 'completed' && report.digest) &&
+    reportIsDispatchable(state, 'synthesis')
+  )
+    return ['synthesis']
+  return lanes
+    .filter(report => reportIsDispatchable(state, report.role))
+    .map(report => report.role)
+}
+
+function completedPacketDigests(
+  state: FoundationReviewState,
+): Partial<Record<FoundationDocumentLaneId, string>> {
+  return Object.fromEntries(
+    state.reports.flatMap(report =>
+      isLaneRole(report.role) && typeof report.digest === 'string'
+        ? [[report.role, report.digest]]
+        : [],
+    ),
+  ) as Partial<Record<FoundationDocumentLaneId, string>>
+}
+
+function verificationReceipts(input: {
+  state: FoundationReviewState
+  remediationState?: FoundationRemediationState
+}): FoundationReviewDispatch['contract']['remediationReceipts'] {
+  if (input.state.mode !== 'verification') return undefined
+  const remediation = input.remediationState
+  if (
+    !remediation ||
+    remediation.reviewDigest !== input.state.priorReviewDigest ||
+    remediation.resultingRevision !== input.state.revision ||
+    !foundationRemediationReadyForVerification(remediation)
+  )
+    throw new Error(
+      'foundation verification requires the completed remediation receipt barrier',
+    )
+  return remediation.lanes.flatMap(lane =>
+    lane.status === 'not_required'
+      ? []
+      : lane.receipt
+        ? [{ laneId: lane.id, receipt: lane.receipt }]
+        : (() => {
+            throw new Error(`foundation verification receipt is missing: ${lane.id}`)
+          })(),
+  )
+}
+
+export async function buildFoundationReviewDispatches(input: {
   state: FoundationReviewState
   workspacePath: string
   confirmedBriefDigest: string
   remediationState?: FoundationRemediationState
-}): FoundationReviewDispatch[] {
+}): Promise<FoundationReviewDispatch[]> {
   const state = assertFoundationReviewState(input.state)
   if (!digestPattern.test(input.confirmedBriefDigest))
     throw new Error('foundation review confirmed brief digest is invalid')
-  const canonicalPaths = CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
-    resolve(input.workspacePath, path),
-  )
-  let roles: FoundationReviewRole[]
-  if (state.mode === 'verification') {
-    roles = reportIsDispatchable(state, 'final') ? ['final'] : []
-  } else {
-    const specialists = state.reports.slice(0, 2)
-    if (
-      specialists.every(report => report.status === 'completed' && report.digest) &&
-      reportIsDispatchable(state, 'final')
-    )
-      roles = ['final']
-    else
-      roles = specialists
-        .filter(report => reportIsDispatchable(state, report.role))
-        .map(report => report.role)
-  }
+  const roles = pendingRoles(state)
+  const packetDigests = completedPacketDigests(state)
+  const remediationReceipts = verificationReceipts({
+    state,
+    remediationState: input.remediationState,
+  })
 
-  const packetDigests = Object.fromEntries(
-    state.reports
-      .filter(
-        (report): report is typeof report & {
-          role: FoundationReviewSpecialistRole
-          digest: string
-        } => report.role !== 'final' && typeof report.digest === 'string',
-      )
-      .map(report => [report.role, report.digest]),
-  ) as Partial<Record<FoundationReviewSpecialistRole, string>>
-  const remediationReceipts =
-    state.mode === 'verification'
-      ? (() => {
-          const remediation = input.remediationState
-          if (
-            !remediation ||
-            remediation.reviewDigest !== state.priorReviewDigest ||
-            remediation.resultingRevision !== state.revision ||
-            !foundationRemediationReadyForVerification(remediation)
-          )
-            throw new Error(
-              'foundation verification requires the completed remediation receipt barrier',
-            )
-          return remediation.lanes.flatMap(lane =>
-            lane.status === 'not_required'
-              ? []
-              : lane.receipt
-                ? [{ laneId: lane.id, receipt: lane.receipt }]
-                : (() => {
-                    throw new Error(
-                      `foundation verification receipt is missing: ${lane.id}`,
-                    )
-                  })(),
-          )
-        })()
-      : undefined
-
-  return roles.map(role => {
-    const taskId = `review:foundation:${role}:${state.attempt}`
-    const specialist = role !== 'final'
-    const stagingPath = specialist
-      ? foundationReviewEvidenceStagingPath(
+  return Promise.all(
+    roles.map(async role => {
+      const taskId = `review:foundation:${role}:${state.attempt}`
+      let projection: FoundationReviewDispatch['contract']['projection']
+      let sourcePaths: string[]
+      let verificationSourcePaths: string[]
+      let stagingPath: string
+      let committedPath: string
+      if (isLaneRole(role)) {
+        const lane = foundationDocumentLaneById(role)
+        projection = await writeFoundationReviewProjection({
+          workspacePath: input.workspacePath,
+          revision: state.revision,
+          laneId: role,
+        })
+        sourcePaths = lane.ownedPaths.map(path => resolve(input.workspacePath, path))
+        verificationSourcePaths = [resolve(input.workspacePath, projection.path)]
+        stagingPath = foundationReviewLanePacketStagingPath(
           input.workspacePath,
           state.revision,
           role,
         )
-      : foundationReviewStagingPath(
+        committedPath = foundationReviewLanePacketPath(
           input.workspacePath,
           state.revision,
-          `foundation-${state.mode}-${state.attempt}-final`,
+          role,
         )
-    const committedPath = specialist
-      ? foundationReviewEvidencePath(input.workspacePath, state.revision, role)
-      : foundationReviewPath(input.workspacePath, state.revision)
-    const packetPaths = state.reports
-      .filter(report => report.role !== 'final')
-      .map(report => resolve(input.workspacePath, report.path))
-    const assignment: FoundationReviewAssignment = {
-      scope: 'foundation',
-      role,
-      sourcePaths: specialist
-        ? canonicalPaths
-        : state.mode === 'initial'
-          ? packetPaths
-          : [resolve(input.workspacePath, state.priorReviewPath!)],
-      verificationSourcePaths: specialist ? [] : canonicalPaths,
-      stagingOutputPaths: [stagingPath],
-      committedOutputPaths: [committedPath],
-    }
-    return {
-      idempotencyKey: taskId,
-      taskId,
-      role,
-      assignment,
-      contract: {
-        reviewScope: 'foundation',
-        reviewMode: state.mode,
-        reviewRole: role,
+      } else {
+        sourcePaths =
+          role === 'synthesis'
+            ? FOUNDATION_DOCUMENT_LANES.map(lane =>
+                foundationReviewLanePacketPath(
+                  input.workspacePath,
+                  state.revision,
+                  lane.id,
+                ),
+              )
+            : [resolve(input.workspacePath, state.priorReviewPath!)]
+        verificationSourcePaths =
+          role === 'verification'
+            ? CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
+                resolve(input.workspacePath, path),
+              )
+            : []
+        stagingPath = foundationReviewStagingPath(
+          input.workspacePath,
+          state.revision,
+          `foundation-${state.mode}-${state.attempt}-${role}`,
+        )
+        committedPath = foundationReviewPath(input.workspacePath, state.revision)
+      }
+      const assignment: FoundationReviewAssignment = {
+        scope: 'foundation',
+        role,
+        sourcePaths,
+        verificationSourcePaths,
+        stagingOutputPaths: [stagingPath],
+        committedOutputPaths: [committedPath],
+      }
+      return {
+        idempotencyKey: taskId,
+        taskId,
+        role,
         assignment,
-        confirmedBriefDigest: input.confirmedBriefDigest,
-        packetDigests,
-        ...(state.mode === 'verification'
-          ? {
-              priorReview: {
-                path: state.priorReviewPath!,
-                digest: state.priorReviewDigest!,
-              },
-              remediationReceipts,
-            }
-          : {}),
-      },
-    }
-  })
+        contract: {
+          reviewScope: 'foundation',
+          reviewMode: state.mode,
+          reviewRole: role,
+          assignment,
+          confirmedBriefDigest: input.confirmedBriefDigest,
+          packetDigests,
+          ...(projection ? { projection } : {}),
+          ...(state.mode === 'verification'
+            ? {
+                priorReview: {
+                  path: state.priorReviewPath!,
+                  digest: state.priorReviewDigest!,
+                },
+                remediationReceipts,
+              }
+            : {}),
+        },
+      }
+    }),
+  )
 }
 
 export async function acceptFoundationReviewWorkerTerminal(input: {
@@ -209,12 +252,18 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
   if (report.status === 'completed')
     throw new Error('foundation review report is already completed')
 
-  if (terminal.role !== 'final') {
-    const accepted = await acceptFoundationReviewEvidence({
+  if (isLaneRole(terminal.role)) {
+    const projection = await writeFoundationReviewProjection({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      laneId: terminal.role,
+    })
+    const accepted = await acceptFoundationReviewLanePacket({
       workspacePath: input.workspacePath,
       revision: state.revision,
       currentRevision: input.currentRevision,
-      role: terminal.role,
+      laneId: terminal.role,
+      projectionDigest: projection.digest,
     })
     return assertFoundationReviewState({
       ...state,
@@ -234,18 +283,17 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     })
   }
 
-  if (state.mode === 'initial') {
-    for (const specialist of state.reports.slice(0, 2)) {
-      if (specialist.status !== 'completed' || !specialist.digest)
-        throw new Error('foundation final review requires completed specialist packets')
-      const bytes = await readFile(resolve(input.workspacePath, specialist.path))
-      const digest = createHash('sha256').update(bytes).digest('hex')
-      if (digest !== specialist.digest)
-        throw new Error('foundation review specialist packet digest changed')
+  if (terminal.role === 'synthesis') {
+    for (const lane of state.reports.slice(0, 3)) {
+      if (lane.status !== 'completed' || !lane.digest)
+        throw new Error('foundation synthesis requires completed lane packets')
+      const bytes = await readFile(resolve(input.workspacePath, lane.path))
+      if (createHash('sha256').update(bytes).digest('hex') !== lane.digest)
+        throw new Error('foundation review lane packet digest changed')
     }
   }
   const priorReview =
-    state.mode === 'verification'
+    terminal.role === 'verification'
       ? await readFoundationReviewArtifact({
           workspacePath: input.workspacePath,
           path: state.priorReviewPath!,
@@ -256,7 +304,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     workspacePath: input.workspacePath,
     revision: state.revision,
     currentRevision: input.currentRevision,
-    dispatchId: `foundation-${state.mode}-${state.attempt}-final`,
+    dispatchId: `foundation-${state.mode}-${state.attempt}-${terminal.role}`,
     ...(priorReview
       ? { priorReview: { review: priorReview.review, digest: priorReview.digest } }
       : {}),
@@ -265,7 +313,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     ...state,
     status: 'completed',
     reports: state.reports.map(candidate =>
-      candidate.role === 'final'
+      candidate.role === terminal.role
         ? {
             ...candidate,
             path: accepted.path,

@@ -14,7 +14,7 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
+      revision: 'a'.repeat(64),
       contract: {
         confirmedBriefContext: '{"idea":"authoritative idea"}',
         confirmedBriefDigest: 'brief-digest',
@@ -160,7 +160,7 @@ describe('resource-content worker prompts', () => {
   test('never forwards native Write limit controls from workflow contracts', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
-      revision: 'revision',
+      revision: 'a'.repeat(64),
       workspacePath: '/workspace',
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
@@ -322,13 +322,15 @@ describe('resource-content worker prompts', () => {
       revision: 'revision',
       contract: {
         reviewScope: 'foundation',
-        reviewRole: 'final',
+        reviewMode: 'initial',
+        reviewRole: 'synthesis',
         assignment: {
-          sourcePaths: [],
-          verificationSourcePaths: [
-            '/workspace/docs/GDD.md',
-            '/workspace/docs/TECHNICAL_DESIGN.md',
+          sourcePaths: [
+            '/workspace/.beegame/reviews/foundation/revision/parts/core-design.json',
+            '/workspace/.beegame/reviews/foundation/revision/parts/technical-assets.json',
+            '/workspace/.beegame/reviews/foundation/revision/parts/presentation.json',
           ],
+          verificationSourcePaths: [],
           stagingOutputPaths: [
             '/workspace/.beegame/reviews/staging/review.json',
           ],
@@ -336,11 +338,9 @@ describe('resource-content worker prompts', () => {
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
-    expect(finalReviewerPrompt).toContain('Review all eight canonical foundation documents directly')
-    expect(finalReviewerPrompt).toContain('fixed coverage pass')
-    expect(finalReviewerPrompt).toContain('authority, enumeration and cardinality')
-    expect(finalReviewerPrompt).toContain('state and outcome totality')
-    expect(finalReviewerPrompt).toContain('arithmetic, units, formulas and budgets')
+    expect(finalReviewerPrompt).toContain('Read exactly the three accepted lane packets')
+    expect(finalReviewerPrompt).not.toContain('Review all eight canonical foundation documents directly')
+    expect(finalReviewerPrompt).not.toContain('fixed coverage pass')
     expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
     expect(finalReviewerPrompt).toContain('permits incompatible implementations')
     expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
@@ -368,16 +368,13 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('one non-blocking register')
     expect(finalReviewerPrompt).not.toContain('one preservation list')
     expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
-    expect(finalReviewerPrompt).not.toContain('foundation-contract-specialist')
-    expect(finalReviewerPrompt).not.toContain('foundation-integration-specialist')
+    expect(finalReviewerPrompt).not.toContain('contract-specialist')
+    expect(finalReviewerPrompt).not.toContain('integration-specialist')
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
-    expect(finalReviewerPrompt).toContain('deduplicate')
+    expect(finalReviewerPrompt).toContain('Deduplicate')
     expect(finalReviewerPrompt).toContain('sole canonical version 2 review.json')
-    expect(finalReviewerPrompt).toContain('accepted evidence packets')
-    expect(finalReviewerPrompt).toContain(
-      'verify cited source bytes with targeted reads',
-    )
+    expect(finalReviewerPrompt).toContain('accepted lane packets')
     expect(finalReviewerPrompt).toContain('launch another Agent or task')
 
     const specialistPrompt = buildWorkerPrompt({
@@ -387,40 +384,42 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
+      revision: 'a'.repeat(64),
       contract: {
         reviewScope: 'foundation',
         reviewMode: 'initial',
-        reviewRole: 'contract-specialist',
+        reviewRole: 'core-design',
         assignment: {
           sourcePaths: ['/workspace/docs/GDD.md'],
-          verificationSourcePaths: [],
+          verificationSourcePaths: [
+            '/workspace/.beegame/reviews/foundation/revision/projections/core-design.json',
+          ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/contract.json',
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/core-design.json',
           ],
         },
       },
     })
     expect(specialistPrompt).toContain(
-      'write one bounded Foundation review evidence packet',
+      'write one bounded Foundation review lane packet',
     )
     expect(specialistPrompt).toContain('do not decide the final verdict')
     expect(specialistPrompt).toContain('do not modify canonical documents')
     expect(specialistPrompt).toContain(
-      'authority, enumeration, cardinality, state and outcome totality',
+      'game rules, progression, level structure and balance',
     )
     expect(specialistPrompt).toContain('"version":1')
     expect(specialistPrompt).toContain('"scope":"foundation"')
-    expect(specialistPrompt).toContain('"role":"contract-specialist"')
+    expect(specialistPrompt).toContain('"lane":"core-design"')
     expect(specialistPrompt).toContain(
       'title, problem, evidence and blockingReason',
     )
     expect(specialistPrompt).toContain(
       'path, location and observed',
     )
-    expect(specialistPrompt).toContain('at most 32 candidates')
+    expect(specialistPrompt).toContain('at most 24 candidates')
     expect(specialistPrompt).toContain(
-      'Do not inspect .beegame workflow state or Bee Game Studio source code',
+      'Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code',
     )
     expect(specialistPrompt).not.toContain('Write one human-readable Markdown')
     expect(specialistPrompt).not.toContain('TaskOutput')
@@ -432,25 +431,27 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
+      revision: 'a'.repeat(64),
       contract: {
         reviewScope: 'foundation',
         reviewMode: 'initial',
-        reviewRole: 'integration-specialist',
+        reviewRole: 'technical-assets',
         assignment: {
           sourcePaths: ['/workspace/docs/GDD.md'],
-          verificationSourcePaths: [],
+          verificationSourcePaths: [
+            '/workspace/.beegame/reviews/foundation/revision/projections/technical-assets.json',
+          ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/integration.json',
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/technical-assets.json',
           ],
         },
       },
     })
     expect(integrationSpecialistPrompt).toContain(
-      'runtime and production closure, asset ownership, art, UI, audio and accessibility mappings',
+      'runtime architecture, production feasibility and asset responsibilities',
     )
     expect(integrationSpecialistPrompt).toContain(
-      '"role":"integration-specialist"',
+      '"lane":"technical-assets"',
     )
 
     const repeatReviewerPrompt = buildWorkerPrompt({
@@ -460,18 +461,15 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
-      taskId: 'review:foundation:final:5',
+      taskId: 'review:foundation:verification:5',
       revision: 'revision',
       contract: {
         reviewScope: 'foundation',
-        reviewRole: 'final',
-        revisionVerification: {
-          prerequisiteReports: [
-            {
-              path: '.beegame/reviews/foundation/old/review.json',
-              digest: 'a'.repeat(64),
-            },
-          ],
+        reviewMode: 'verification',
+        reviewRole: 'verification',
+        priorReview: {
+          path: '.beegame/reviews/foundation/old/review.json',
+          digest: 'a'.repeat(64),
         },
         assignment: {
           sourcePaths: [
@@ -488,7 +486,7 @@ describe('resource-content worker prompts', () => {
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
-    expect(repeatReviewerPrompt).toContain('prior accepted review')
+    expect(repeatReviewerPrompt).toContain('accepted prior review')
     expect(repeatReviewerPrompt).toContain('priorConflictStatus')
     expect(repeatReviewerPrompt).toContain(
       `"priorReviewDigest":"${'a'.repeat(64)}"`,

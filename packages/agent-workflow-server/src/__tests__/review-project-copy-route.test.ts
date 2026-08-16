@@ -6,8 +6,28 @@ import { createAgentWorkflowApp } from '../app'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 
 const roots: string[] = []
+
+function completeFoundationDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    `# ${contract.discipline}`,
+    '',
+    ...contract.sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `Accepted source authority for ${section.sectionId}.`,
+      '',
+    ]),
+    '<!-- beegame-production-materials -->',
+    '## Production Materials',
+    ...contract.productionMaterials.map(material => `- ${material}`),
+  ].join('\n')
+}
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'beegame-review-copy-route-'))
@@ -16,10 +36,10 @@ async function fixture() {
   const ownerId = 'review-copy-owner'
   const projectId = 'source-project'
   const sourceWorkspace = join(projectsRoot, 'users', ownerId, projectId)
-  for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
     const absolute = join(sourceWorkspace, path)
     await mkdir(dirname(absolute), { recursive: true })
-    await writeFile(absolute, `# source ${index}\n`, 'utf8')
+    await writeFile(absolute, completeFoundationDocument(path), 'utf8')
   }
   await mkdir(join(sourceWorkspace, '.beegame/workflow'), { recursive: true })
   await writeFile(
@@ -114,7 +134,7 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     expect(payload.project.id).not.toBe(projectId)
     expect(payload.project.root_path).not.toBe(sourceWorkspace)
     expect(payload.phase).toBe('DOCUMENT_REVIEW')
-    expect(workflowWorkerStarts()).toBe(2)
+    expect(workflowWorkerStarts()).toBe(3)
     const copiedStore = createRunStore(payload.project.root_path, ownerId)
     expect(await copiedStore.load()).toMatchObject({
       runId: payload.runId,

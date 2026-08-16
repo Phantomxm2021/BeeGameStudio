@@ -94,30 +94,47 @@ type SnapshotMigration = {
   migrated: boolean
 }
 
-/**
- * Schema 21 is the sole supported migration boundary. It contained the
- * retired Markdown Reviewer authority, so migration deliberately preserves
- * delivery artifacts and receipts while requiring a fresh Foundation review.
- */
+/** Schema 22 is the sole supported migration boundary. */
 function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return { value, migrated: false }
   const source = value as Record<string, unknown>
-  if (source.schemaVersion !== 21) return { value, migrated: false }
+  if (source.schemaVersion !== 22) return { value, migrated: false }
   const {
-    documentReviewState: _documentReviewState,
     foundationReviewState: _foundationReviewState,
+    ...preserved
+  } = source
+  if (source.phase === 'DELIVERY' && source.status === 'completed')
+    return {
+      migrated: true,
+      value: {
+        ...preserved,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      },
+    }
+  const reviewingFoundation =
+    source.documentStep === 'FOUNDATION_REVIEW' ||
+    _foundationReviewState !== undefined
+  if (!reviewingFoundation)
+    return {
+      migrated: true,
+      value: {
+        ...preserved,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      },
+    }
+  const {
     activeDispatch: _activeDispatch,
     pendingEvents: _pendingEvents,
     completedAt: _completedAt,
     blockedReason: _blockedReason,
     currentItemId: _currentItemId,
-    ...preserved
-  } = source
+    ...reviewReset
+  } = preserved
   return {
     migrated: true,
     value: {
-      ...preserved,
+      ...reviewReset,
       schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',

@@ -41,24 +41,33 @@ export const foundationReviewWorkerTerminalSchema = z
     status: z.literal('completed'),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
     mode: z.enum(['initial', 'verification']),
-    role: z.enum(['contract-specialist', 'integration-specialist', 'final']),
+    role: z.enum([
+      'core-design',
+      'technical-assets',
+      'presentation',
+      'synthesis',
+      'verification',
+    ]),
     reportPath: z.string().min(1),
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.mode === 'verification' && value.role !== 'final')
+    if (
+      (value.mode === 'verification' && value.role !== 'verification') ||
+      (value.mode === 'initial' && value.role === 'verification')
+    )
       context.addIssue({
         code: 'custom',
         path: ['role'],
-        message: 'Foundation verification permits only the final Reviewer',
+        message: 'Foundation Reviewer role does not match its mode',
       })
     const root = `.beegame/reviews/foundation/${value.revision}`
     const expected =
-      value.role === 'contract-specialist'
-        ? `${root}/parts/contract.json`
-        : value.role === 'integration-specialist'
-          ? `${root}/parts/integration.json`
-          : `${root}/review.json`
+      value.role === 'core-design' ||
+      value.role === 'technical-assets' ||
+      value.role === 'presentation'
+        ? `${root}/parts/${value.role}.json`
+        : `${root}/review.json`
     if (value.reportPath !== expected)
       context.addIssue({
         code: 'custom',

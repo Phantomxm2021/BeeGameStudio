@@ -12,7 +12,12 @@ describe('foundation review state', () => {
       createFoundationReviewState({ mode: 'initial', revision }).reports.map(
         report => report.role,
       ),
-    ).toEqual(['contract-specialist', 'integration-specialist', 'final'])
+    ).toEqual([
+      'core-design',
+      'technical-assets',
+      'presentation',
+      'synthesis',
+    ])
     expect(
       createFoundationReviewState({
         mode: 'verification',
@@ -20,7 +25,7 @@ describe('foundation review state', () => {
         priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
         priorReviewDigest: 'b'.repeat(64),
       }).reports.map(report => report.role),
-    ).toEqual(['final'])
+    ).toEqual(['verification'])
   })
 
   test('rejects topology, completion, barrier, revision, and prior-review mismatches', () => {
@@ -28,7 +33,12 @@ describe('foundation review state', () => {
     expect(() =>
       assertFoundationReviewState({
         ...initial,
-        reports: [initial.reports[0], initial.reports[0], initial.reports[2]],
+        reports: [
+          initial.reports[0],
+          initial.reports[0],
+          initial.reports[2],
+          initial.reports[3],
+        ],
       }),
     ).toThrow('foundation review report topology does not match mode')
     expect(() =>
@@ -43,12 +53,12 @@ describe('foundation review state', () => {
       assertFoundationReviewState({
         ...initial,
         reports: initial.reports.map(report =>
-          report.role === 'final'
+          report.role === 'synthesis'
             ? { ...report, status: 'running' as const }
             : report,
         ),
       }),
-    ).toThrow('foundation final review requires completed specialist packets')
+    ).toThrow('foundation synthesis requires completed lane packets')
     expect(() =>
       createFoundationReviewState({ mode: 'initial', revision: 'not-a-digest' }),
     ).toThrow()

@@ -1121,7 +1121,7 @@ export function createDeliveryWorkflowController(input: {
               'foundation.review.run.created',
             )
           }
-          const pending = buildFoundationReviewDispatches({
+          const pending = await buildFoundationReviewDispatches({
             state: reviewRun.foundationReviewState!,
             workspacePath: input.workspacePath,
             confirmedBriefDigest: reviewRun.confirmedBriefDigest,

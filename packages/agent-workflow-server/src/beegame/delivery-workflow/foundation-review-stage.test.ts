@@ -1,17 +1,49 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { describe, expect, test } from 'bun:test'
-import { foundationReviewEvidenceStagingPath } from './foundation-review-evidence'
+import { dirname, resolve } from 'node:path'
+import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
+import { foundationReviewLanePacketStagingPath } from './foundation-review-lane-packet'
 import { foundationReviewStagingPath } from './foundation-review'
 import { createFoundationReviewState } from './foundation-review-state'
 import type { FoundationRemediationState } from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
   acceptFoundationReviewWorkerTerminal,
   buildFoundationReviewDispatches,
 } from './foundation-review-stage'
+import { getGameDocumentContract } from './game-document-contracts'
 
 const revision = 'a'.repeat(64)
+const workspaces: string[] = []
+
+function sourceDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    `# ${contract.discipline}`,
+    '',
+    ...contract.sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `Exact ${path} content for ${section.sectionId}.`,
+      '',
+    ]),
+    '<!-- beegame-production-materials -->',
+    '## Production Materials',
+    'Not projected.',
+  ].join('\n')
+}
+
+async function workspace(): Promise<string> {
+  const root = await mkdtemp(resolve(tmpdir(), 'foundation-review-stage-'))
+  workspaces.push(root)
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+    const absolute = resolve(root, path)
+    await mkdir(dirname(absolute), { recursive: true })
+    await writeFile(absolute, sourceDocument(path), 'utf8')
+  }
+  return root
+}
 
 function completedRemediationState(): FoundationRemediationState {
   const ownedPaths = [
@@ -63,106 +95,112 @@ function completedRemediationState(): FoundationRemediationState {
   }
 }
 
-function completedSpecialists() {
+function completedLanes() {
   const state = createFoundationReviewState({ mode: 'initial', revision })
   return {
     ...state,
     status: 'running' as const,
-    reports: state.reports.map(report =>
-      report.role === 'final'
+    reports: state.reports.map((report, index) =>
+      report.role === 'synthesis'
         ? report
         : {
             ...report,
             status: 'completed' as const,
-            digest:
-              report.role === 'contract-specialist'
-                ? 'b'.repeat(64)
-                : 'c'.repeat(64),
+            digest: String(index + 1).repeat(64),
           },
     ),
   }
 }
 
-describe('foundation review dispatch barrier', () => {
-  test('dispatches both independent specialists before one final reviewer', () => {
+afterEach(async () => {
+  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
+})
+
+describe('foundation review lane dispatch barrier', () => {
+  test('dispatches three disjoint document lanes before packet-only synthesis', async () => {
+    const root = await workspace()
     const initial = createFoundationReviewState({ mode: 'initial', revision })
-    const specialistDispatches = buildFoundationReviewDispatches({
+    const laneDispatches = await buildFoundationReviewDispatches({
       state: initial,
-      workspacePath: '/workspace',
+      workspacePath: root,
       confirmedBriefDigest: 'd'.repeat(64),
     })
-    expect(specialistDispatches.map(dispatch => dispatch.role)).toEqual([
-      'contract-specialist',
-      'integration-specialist',
+
+    expect(laneDispatches.map(dispatch => dispatch.role)).toEqual([
+      'core-design',
+      'technical-assets',
+      'presentation',
     ])
     expect(
-      specialistDispatches.every(
-        dispatch =>
-          dispatch.assignment.stagingOutputPaths.length === 1 &&
-          dispatch.assignment.committedOutputPaths.length === 1 &&
-          dispatch.assignment.sourcePaths.length === 8,
+      laneDispatches.flatMap(dispatch => dispatch.assignment.sourcePaths),
+    ).toEqual(
+      FOUNDATION_DOCUMENT_LANES.flatMap(lane =>
+        lane.ownedPaths.map(path => resolve(root, path)),
+      ),
+    )
+    expect(
+      new Set(laneDispatches.flatMap(item => item.assignment.sourcePaths)).size,
+    ).toBe(8)
+    expect(
+      laneDispatches.every(
+        item =>
+          item.assignment.sourcePaths.length < 8 &&
+          item.assignment.verificationSourcePaths.length === 1 &&
+          item.contract.projection?.digest.match(/^[a-f0-9]{64}$/u),
       ),
     ).toBe(true)
 
-    const oneCompleted = {
-      ...initial,
-      status: 'running' as const,
-      reports: initial.reports.map(report =>
-        report.role === 'contract-specialist'
-          ? { ...report, status: 'completed' as const, digest: 'b'.repeat(64) }
-          : report.role === 'integration-specialist'
-            ? { ...report, status: 'running' as const }
-            : report,
-      ),
-    }
-    expect(
-      buildFoundationReviewDispatches({
-        state: oneCompleted,
-        workspacePath: '/workspace',
-        confirmedBriefDigest: 'd'.repeat(64),
-      }),
-    ).toEqual([])
-
-    const finalDispatches = buildFoundationReviewDispatches({
-      state: completedSpecialists(),
-      workspacePath: '/workspace',
+    const synthesis = await buildFoundationReviewDispatches({
+      state: completedLanes(),
+      workspacePath: root,
       confirmedBriefDigest: 'd'.repeat(64),
     })
-    expect(finalDispatches.map(dispatch => dispatch.role)).toEqual(['final'])
-    expect(finalDispatches[0].contract.packetDigests).toEqual({
-      'contract-specialist': 'b'.repeat(64),
-      'integration-specialist': 'c'.repeat(64),
+    expect(synthesis.map(dispatch => dispatch.role)).toEqual(['synthesis'])
+    expect(synthesis[0].assignment.sourcePaths).toEqual(
+      FOUNDATION_DOCUMENT_LANES.map(lane =>
+        resolve(
+          root,
+          `.beegame/reviews/foundation/${revision}/parts/${lane.id}.json`,
+        ),
+      ),
+    )
+    expect(synthesis[0].assignment.verificationSourcePaths).toEqual([])
+    expect(synthesis[0].contract.packetDigests).toEqual({
+      'core-design': '1'.repeat(64),
+      'technical-assets': '2'.repeat(64),
+      presentation: '3'.repeat(64),
     })
   })
 
-  test('resumes only the pending specialist while preserving its accepted sibling', () => {
+  test('resumes only a pending lane while preserving completed siblings', async () => {
+    const root = await workspace()
     const initial = createFoundationReviewState({ mode: 'initial', revision })
     const resumed = {
       ...initial,
       status: 'running' as const,
       reports: initial.reports.map(report =>
-        report.role === 'contract-specialist'
+        report.role === 'core-design'
           ? {
               ...report,
               status: 'completed' as const,
               digest: 'b'.repeat(64),
             }
-          : report,
+          : report.role === 'technical-assets'
+            ? { ...report, status: 'running' as const }
+            : report,
       ),
     }
 
-    const dispatches = buildFoundationReviewDispatches({
+    const dispatches = await buildFoundationReviewDispatches({
       state: resumed,
-      workspacePath: '/workspace',
+      workspacePath: root,
       confirmedBriefDigest: 'd'.repeat(64),
     })
-
-    expect(dispatches.map(dispatch => dispatch.role)).toEqual([
-      'integration-specialist',
-    ])
+    expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
   })
 
-  test('dispatches verification as one standalone final reviewer', () => {
+  test('dispatches verification as one standalone unit behind remediation receipts', async () => {
+    const root = await workspace()
     const state = createFoundationReviewState({
       mode: 'verification',
       revision,
@@ -170,97 +208,66 @@ describe('foundation review dispatch barrier', () => {
       priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
       priorReviewDigest: 'e'.repeat(64),
     })
-    const dispatches = buildFoundationReviewDispatches({
+    const dispatches = await buildFoundationReviewDispatches({
       state,
-      workspacePath: '/workspace',
+      workspacePath: root,
       confirmedBriefDigest: 'd'.repeat(64),
       remediationState: completedRemediationState(),
     })
-    expect(dispatches.map(dispatch => dispatch.role)).toEqual(['final'])
-    expect(dispatches[0].contract.reviewMode).toBe('verification')
+    expect(dispatches.map(dispatch => dispatch.role)).toEqual(['verification'])
     expect(dispatches[0].contract.priorReview).toEqual({
       path: '.beegame/reviews/foundation/prior/review.json',
       digest: 'e'.repeat(64),
     })
     expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
-    expect(dispatches[0].contract.remediationReceipts?.[0]?.laneId).toBe(
-      'core-design',
-    )
   })
 
-  test('accepts specialist and final bytes only for the assigned current revision', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-stage-'))
-    const initial = createFoundationReviewState({ mode: 'initial', revision })
-    const specialistPath = foundationReviewEvidenceStagingPath(
-      workspacePath,
-      revision,
-      'contract-specialist',
-    )
-    await mkdir(dirname(specialistPath), { recursive: true })
-    await writeFile(
-      specialistPath,
-      JSON.stringify({
-        version: 1,
-        scope: 'foundation',
-        revision,
-        role: 'contract-specialist',
-        candidates: [],
-      }),
-      'utf8',
-    )
-    const afterContract = await acceptFoundationReviewWorkerTerminal({
-      state: initial,
-      workspacePath,
-      currentRevision: revision,
-      terminal: {
-        workerType: 'document-reviewer',
-        status: 'completed',
-        revision,
-        mode: 'initial',
-        role: 'contract-specialist',
-        reportPath: `.beegame/reviews/foundation/${revision}/parts/contract.json`,
-      },
+  test('accepts three lane packets and one synthesis only for the current revision', async () => {
+    const root = await workspace()
+    let state = createFoundationReviewState({ mode: 'initial', revision })
+    await buildFoundationReviewDispatches({
+      state,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
     })
-    expect(afterContract.reports[0]).toMatchObject({
-      role: 'contract-specialist',
-      status: 'completed',
-    })
-    expect(afterContract.reports[0].digest).toMatch(/^[a-f0-9]{64}$/u)
 
-    const integrationPath = foundationReviewEvidenceStagingPath(
-      workspacePath,
-      revision,
-      'integration-specialist',
-    )
-    await mkdir(dirname(integrationPath), { recursive: true })
-    await writeFile(
-      integrationPath,
-      JSON.stringify({
-        version: 1,
-        scope: 'foundation',
+    for (const lane of FOUNDATION_DOCUMENT_LANES) {
+      const stagingPath = foundationReviewLanePacketStagingPath(
+        root,
         revision,
-        role: 'integration-specialist',
-        candidates: [],
-      }),
-      'utf8',
-    )
-    const readyForFinal = await acceptFoundationReviewWorkerTerminal({
-      state: afterContract,
-      workspacePath,
-      currentRevision: revision,
-      terminal: {
-        workerType: 'document-reviewer',
-        status: 'completed',
-        revision,
-        mode: 'initial',
-        role: 'integration-specialist',
-        reportPath: `.beegame/reviews/foundation/${revision}/parts/integration.json`,
-      },
-    })
+        lane.id,
+      )
+      await mkdir(dirname(stagingPath), { recursive: true })
+      await writeFile(
+        stagingPath,
+        JSON.stringify({
+          version: 1,
+          scope: 'foundation',
+          revision,
+          lane: lane.id,
+          candidates: [],
+        }),
+        'utf8',
+      )
+      state = await acceptFoundationReviewWorkerTerminal({
+        state,
+        workspacePath: root,
+        currentRevision: revision,
+        terminal: {
+          workerType: 'document-reviewer',
+          status: 'completed',
+          revision,
+          mode: 'initial',
+          role: lane.id,
+          reportPath: `.beegame/reviews/foundation/${revision}/parts/${lane.id}.json`,
+        },
+      })
+    }
+
     const finalStagingPath = foundationReviewStagingPath(
-      workspacePath,
+      root,
       revision,
-      'foundation-initial-1-final',
+      'foundation-initial-1-synthesis',
     )
     await mkdir(dirname(finalStagingPath), { recursive: true })
     await writeFile(
@@ -276,15 +283,15 @@ describe('foundation review dispatch barrier', () => {
       'utf8',
     )
     const completed = await acceptFoundationReviewWorkerTerminal({
-      state: readyForFinal,
-      workspacePath,
+      state,
+      workspacePath: root,
       currentRevision: revision,
       terminal: {
         workerType: 'document-reviewer',
         status: 'completed',
         revision,
         mode: 'initial',
-        role: 'final',
+        role: 'synthesis',
         reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
       },
     })
@@ -296,16 +303,16 @@ describe('foundation review dispatch barrier', () => {
 
     await expect(
       acceptFoundationReviewWorkerTerminal({
-        state: initial,
-        workspacePath,
+        state: createFoundationReviewState({ mode: 'initial', revision }),
+        workspacePath: root,
         currentRevision: 'f'.repeat(64),
         terminal: {
           workerType: 'document-reviewer',
           status: 'completed',
           revision,
           mode: 'initial',
-          role: 'integration-specialist',
-          reportPath: `.beegame/reviews/foundation/${revision}/parts/integration.json`,
+          role: 'core-design',
+          reportPath: `.beegame/reviews/foundation/${revision}/parts/core-design.json`,
         },
       }),
     ).rejects.toThrow('canonical artifacts changed during foundation review')

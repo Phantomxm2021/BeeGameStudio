@@ -1299,7 +1299,7 @@ describe('delivery worker session credentials', () => {
       const stagingPath = foundationReviewStagingPath(
         workspacePath,
         revision,
-        'foundation-initial-1-final',
+        'foundation-initial-1-synthesis',
       )
       await mkdir(dirname(stagingPath), { recursive: true })
       await writeFile(
@@ -1336,11 +1336,15 @@ describe('delivery worker session credentials', () => {
       })
       const assignment = {
         scope: 'foundation',
-        role: 'final',
-        sourcePaths: [],
-        verificationSourcePaths: CANONICAL_FOUNDATION_DOCUMENTS.map(path =>
-          join(workspacePath, path),
+        role: 'synthesis',
+        sourcePaths: ['core-design', 'technical-assets', 'presentation'].map(
+          lane =>
+            join(
+              workspacePath,
+              `.beegame/reviews/foundation/${revision}/parts/${lane}.json`,
+            ),
         ),
+        verificationSourcePaths: [],
         stagingOutputPaths: [stagingPath],
         committedOutputPaths: [
           join(workspacePath, `.beegame/reviews/foundation/${revision}/review.json`),
@@ -1360,7 +1364,7 @@ describe('delivery worker session credentials', () => {
         contract: {
           reviewScope: 'foundation',
           reviewMode: 'initial',
-          reviewRole: 'final',
+          reviewRole: 'synthesis',
           assignment,
           confirmedBriefDigest,
           packetDigests: {},
@@ -1374,7 +1378,7 @@ describe('delivery worker session credentials', () => {
         status: 'completed',
         revision,
         mode: 'initial',
-        role: 'final',
+        role: 'synthesis',
         reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
       })
     } finally {

@@ -44,6 +44,49 @@ export type FoundationReviewLanePacket = z.infer<
   typeof foundationReviewLanePacketSchema
 >
 
+const LANE_FOCUS: Record<FoundationDocumentLaneId, string> = {
+  'core-design':
+    'Review only game rules, progression, level structure and balance authority for blocking implementation or verification defects.',
+  'technical-assets':
+    'Review only runtime architecture, production feasibility and asset responsibilities for blocking implementation or verification defects.',
+  presentation:
+    'Review only art, UI/UX and audio experience contracts for blocking implementation or verification defects.',
+}
+
+export function foundationReviewLanePacketContractInstruction(input: {
+  revision: string
+  laneId: FoundationDocumentLaneId
+}): string {
+  digestSchema.parse(input.revision)
+  laneSchema.parse(input.laneId)
+  const shape = JSON.stringify({
+    version: 1,
+    scope: 'foundation',
+    revision: input.revision,
+    lane: input.laneId,
+    candidates: [
+      {
+        title: '<specific blocking defect>',
+        problem: '<why the contract cannot be implemented or verified>',
+        evidence: [
+          {
+            path: '<assigned full document or projected source path>',
+            location: '<heading, table row or stable locator>',
+            observed: '<bounded exact observation from accepted source bytes>',
+          },
+        ],
+        blockingReason: '<specific incompatible result or missing acceptance proof>',
+      },
+    ],
+  })
+  return [
+    LANE_FOCUS[input.laneId],
+    `Write exactly one JSON object with this exact shape and fixed identity: ${shape}`,
+    'The object may contain only version, scope, revision, lane and candidates. Each candidate may contain only title, problem, evidence and blockingReason. Each evidence item may contain only path, location and observed. Use at most 24 candidates; candidates may be empty when no blocking defect is proven.',
+    'Read the assigned full documents and the one assigned projection only. Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code. Write the JSON object once to the sole staging output path. Do not emit prose, decide the final verdict, propose replacement text, modify source documents or launch another Agent or task.',
+  ].join(' ')
+}
+
 function reviewDirectory(workspacePath: string, revision: string): string {
   digestSchema.parse(revision)
   return resolve(

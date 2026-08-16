@@ -60,7 +60,12 @@ const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
       mode: 'initial' | 'verification'
-      role: 'contract-specialist' | 'integration-specialist' | 'final'
+      role:
+        | 'core-design'
+        | 'technical-assets'
+        | 'presentation'
+        | 'synthesis'
+        | 'verification'
       assignment: {
         sourcePaths: string[]
         verificationSourcePaths: string[]
@@ -88,9 +93,11 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
   ] as const
   if (
     (mode !== 'initial' && mode !== 'verification') ||
-    (role !== 'contract-specialist' &&
-      role !== 'integration-specialist' &&
-      role !== 'final') ||
+    (role !== 'core-design' &&
+      role !== 'technical-assets' &&
+      role !== 'presentation' &&
+      role !== 'synthesis' &&
+      role !== 'verification') ||
     record.scope !== 'foundation' ||
     record.role !== role ||
     pathKeys.some(

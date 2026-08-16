@@ -2040,12 +2040,12 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
 
-  test('migrates schema 21 without trusting retired reviewer approval', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-21-'))
+  test('migrates schema 22 without retaining executable specialist roles', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-22-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
-      runId: 'run-schema-21',
-      projectId: 'project-schema-21',
+      runId: 'run-schema-22',
+      projectId: 'project-schema-22',
       ownerId: 'owner-1',
     })
     const preservedEvidence = {
@@ -2062,17 +2062,21 @@ describe('delivery workflow recovery', () => {
       store.paths.snapshot,
       `${JSON.stringify({
         ...initial,
-        schemaVersion: 21,
-        phase: 'DELIVERY',
-        documentStep: 'COMPREHENSIVE_REVIEW',
-        status: 'completed',
+        schemaVersion: 22,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'running',
         evidence: preservedEvidence,
-        documentReviewState: {
-          activeRun: {
-            status: 'completed',
-            verdict: 'READY',
-            finalReportPath: '.beegame/reviews/complete/review.md',
-          },
+        foundationReviewState: {
+          revision: 'a'.repeat(64),
+          mode: 'initial',
+          attempt: 1,
+          status: 'running',
+          reports: [
+            { role: 'contract-specialist', status: 'running' },
+            { role: 'integration-specialist', status: 'pending' },
+            { role: 'final', status: 'pending' },
+          ],
         },
       }, null, 2)}\n`,
       'utf8',
@@ -2090,11 +2094,55 @@ describe('delivery workflow recovery', () => {
       foundationDraftState: initial.foundationDraftState,
       resourceProductionState: initial.resourceProductionState,
     })
-    expect(migrated).not.toHaveProperty('documentReviewState')
     expect(migrated).not.toHaveProperty('foundationReviewState')
     expect(
       JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
     ).toMatchObject({ schemaVersion: DELIVERY_RUN_SCHEMA_VERSION })
+  })
+
+  test('preserves a completed schema 22 delivery without retaining old review roles', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-22-complete-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-22-complete',
+      projectId: 'project-schema-22-complete',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({
+        ...initial,
+        schemaVersion: 22,
+        phase: 'DELIVERY',
+        documentStep: undefined,
+        status: 'completed',
+        completedAt: '2026-08-17T00:00:00.000Z',
+        foundationReviewState: {
+          revision: 'a'.repeat(64),
+          mode: 'initial',
+          attempt: 1,
+          status: 'completed',
+          reports: [
+            { role: 'contract-specialist', status: 'completed' },
+            { role: 'integration-specialist', status: 'completed' },
+            { role: 'final', status: 'completed' },
+          ],
+          verdict: 'READY',
+        },
+      }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      phase: 'DELIVERY',
+      status: 'completed',
+      completedAt: '2026-08-17T00:00:00.000Z',
+    })
+    expect(migrated).not.toHaveProperty('foundationReviewState')
   })
 
   test.each([
@@ -3467,7 +3515,7 @@ describe('delivery workflow recovery', () => {
       priorReviewPath,
       priorReviewDigest: 'e'.repeat(64),
     })
-    const final = review.reports.find(report => report.role === 'final')!
+    const final = review.reports.find(report => report.role === 'verification')!
     const priorReviewDigest = 'e'.repeat(64)
     const finalBytes = foundationRecoveryReviewJson({
       revision: documentRevision,
@@ -3523,7 +3571,7 @@ describe('delivery workflow recovery', () => {
       revision: 'a'.repeat(64),
     })
     review.status = 'failed'
-    review.failureReason = 'integration specialist failed'
+    review.failureReason = 'technical-assets review failed'
     review.reports[0] = {
       ...review.reports[0],
       status: 'completed',
@@ -3532,17 +3580,17 @@ describe('delivery workflow recovery', () => {
     review.reports[1] = {
       ...review.reports[1],
       status: 'failed',
-      failureReason: 'integration specialist failed',
+      failureReason: 'technical-assets review failed',
       dispatch: {
-        dispatchId: 'integration-failed',
+        dispatchId: 'technical-assets-failed',
         workerType: 'document-reviewer',
         phase: 'DOCUMENT_REVIEW',
-        taskId: 'review:foundation:integration-specialist:1',
+        taskId: 'review:foundation:technical-assets:1',
         revision: 'a'.repeat(64),
         status: 'failed',
         startedAt: '2026-08-17T00:00:00.000Z',
         finishedAt: '2026-08-17T00:01:00.000Z',
-        failureReason: 'integration specialist failed',
+        failureReason: 'technical-assets review failed',
       },
     }
     const retried = transitionDeliveryRun(
@@ -3551,7 +3599,7 @@ describe('delivery workflow recovery', () => {
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
         status: 'needs_action',
-        blockedReason: 'integration specialist failed',
+        blockedReason: 'technical-assets review failed',
         foundationReviewState: review,
       },
       { type: 'retry' },
@@ -3559,17 +3607,18 @@ describe('delivery workflow recovery', () => {
 
     expect(retried.foundationReviewState?.reports).toEqual([
       expect.objectContaining({
-        role: 'contract-specialist',
+        role: 'core-design',
         status: 'completed',
         digest: 'b'.repeat(64),
       }),
       expect.objectContaining({
-        role: 'integration-specialist',
+        role: 'technical-assets',
         status: 'pending',
         dispatch: undefined,
         failureReason: undefined,
       }),
-      expect.objectContaining({ role: 'final', status: 'pending' }),
+      expect.objectContaining({ role: 'presentation', status: 'pending' }),
+      expect.objectContaining({ role: 'synthesis', status: 'pending' }),
     ])
   })
 
@@ -3948,7 +3997,7 @@ describe('delivery workflow recovery', () => {
         workerType: 'document-reviewer',
         contract: {
           reviewScope: 'foundation',
-          reviewRole: 'contract-specialist',
+          reviewRole: 'core-design',
           attempt: 1,
         },
       },
@@ -3968,7 +4017,7 @@ describe('delivery workflow recovery', () => {
         workerType: 'document-reviewer',
         contract: {
           reviewScope: 'foundation',
-          reviewRole: 'final',
+          reviewRole: 'synthesis',
           attempt: 1,
         },
       },
@@ -3984,7 +4033,7 @@ describe('delivery workflow recovery', () => {
           workerType: 'document-reviewer',
           contract: {
             reviewScope: 'foundation',
-            reviewRole: 'integration-specialist',
+            reviewRole: 'technical-assets',
             attempt: 1,
           },
         },

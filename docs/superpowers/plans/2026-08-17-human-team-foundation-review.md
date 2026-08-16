@@ -156,7 +156,7 @@ git commit -m "refactor: replace reviewer specialists with lane packets"
 - Synthesis receives exactly three accepted packet paths and no canonical full document.
 - Delivery schema becomes 23 with one schema-22 migration.
 
-- [ ] **Step 1: Write failing topology tests**
+- [x] **Step 1: Write failing topology tests**
 
 ```ts
 expect(initial.reports.map(report => report.role)).toEqual([
@@ -169,19 +169,19 @@ expect(laneDispatches.every(item => item.assignment.sourcePaths.length < 8)).toB
 After three accepted packets, assert one synthesis dispatch whose only sources
 are those packet paths.
 
-- [ ] **Step 2: Add failing recovery and migration tests**
+- [x] **Step 2: Add failing recovery and migration tests**
 
 Cover completed-sibling reuse, failed-only retry, reversed completion order,
 source/projection/packet tamper, synthesis failure, restart, schema-22 in-flight
 review reset, and completed-delivery preservation without executable old roles.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-state.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts
 ```
 
-- [ ] **Step 4: Implement one atomic role/protocol cutover**
+- [x] **Step 4: Implement one atomic role/protocol cutover**
 
 Change state invariants, paths, terminal roles, dispatch IDs, usage attribution,
 failure/retry/recovery, synthesis barrier, and controller routing together. Do
@@ -191,13 +191,13 @@ projection path; forbid prose/style findings, verdicts, replacement text,
 source mutation, and Agent launch. Delete the old evidence module only after
 all runtime imports have moved to lane packets.
 
-- [ ] **Step 5: Implement schema 22 to 23 migration**
+- [x] **Step 5: Implement schema 22 to 23 migration**
 
 Restart unsuccessful/in-flight old review from current document revision;
 preserve brief, documents, resources, implementation evidence, and completed
 delivery result. Retain no runtime old-packet adapter.
 
-- [ ] **Step 6: Run GREEN and commit**
+- [x] **Step 6: Run GREEN and commit**
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-state.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts

@@ -207,7 +207,13 @@ const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
     reports: z.array(
       z
         .object({
-          role: z.enum(['contract-specialist', 'integration-specialist', 'final']),
+          role: z.enum([
+            'core-design',
+            'technical-assets',
+            'presentation',
+            'synthesis',
+            'verification',
+          ]),
           path: z.string().min(1),
           status: z.enum(['pending', 'running', 'completed', 'failed']),
           dispatch: dispatchRecordSchema.optional(),
