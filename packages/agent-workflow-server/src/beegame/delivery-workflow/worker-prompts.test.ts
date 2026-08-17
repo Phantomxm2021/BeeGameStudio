@@ -1,8 +1,16 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { buildWorkerPrompt } from './worker-prompts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { getGameDocumentContract } from './game-document-contracts'
 import type { WorkerDispatchRequest } from './types'
+
+test('has no Foundation remediation prompt path', () => {
+  const source = readFileSync(new URL('./worker-prompts.ts', import.meta.url), 'utf8')
+  expect(source).not.toContain("authoringMode === 'remediation'")
+  expect(source).not.toContain('contract.remediation')
+  expect(source).not.toContain('remediationReceipts')
+})
 
 describe('resource-content worker prompts', () => {
   test('requires complete structured human-discipline documents', () => {
@@ -672,46 +680,6 @@ describe('resource-content worker prompts', () => {
     expect(prompt).toContain('implementable and testable')
     expect(prompt).not.toContain('Initial Reviewer owns')
     expect(prompt).not.toContain('Do not simulate builds or waves')
-  })
-
-  test('routes one accepted conflict list to one coordinated remediation Agent', () => {
-    const ownerPrompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'remediation',
-        remediation: {
-          reviewPath: '.beegame/reviews/foundation/revision/review.json',
-          reviewDigest: 'a'.repeat(64),
-          affectedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
-          sourceRevision: 'revision',
-        },
-        systemDeliveryContract: buildSystemDeliveryContract(),
-      },
-    })
-    expect(ownerPrompt).toContain('one coordinated turn')
-    expect(ownerPrompt).toContain('every conflict changes[].action')
-    expect(ownerPrompt).toContain('contract.remediation.affectedPaths')
-    expect(ownerPrompt).toContain('targeted closure check')
-    expect(ownerPrompt).toContain('Do not launch a broad new review')
-    expect(ownerPrompt).toContain('preserve unrelated approved content')
-    expect(ownerPrompt).toContain(
-      'Ensure every Markdown document in contract.remediation.affectedPaths is complete',
-    )
-    expect(ownerPrompt).toContain(
-      'The native runtime owns the file-operation sequence',
-    )
-    expect(ownerPrompt).toContain('end the turn normally')
-    expect(ownerPrompt).not.toContain('verify its final bytes')
-    expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
-    expect(ownerPrompt).not.toContain('foundationDocumentPath')
   })
 
   test('keeps the checklist minimal and scenario-level', () => {

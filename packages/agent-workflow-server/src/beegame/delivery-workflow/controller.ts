@@ -14,7 +14,6 @@ import {
 } from './change-request'
 import {
   completeDocumentDraft,
-  completeFoundationRemediationLane,
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
@@ -179,18 +178,14 @@ export function createDeliveryWorkflowController(input: {
     const reviewCheckpoint = run?.foundationReviewState?.reports.find(
       report => report.dispatch?.dispatchId === record.dispatchId,
     )
-    const remediationCheckpoint = run?.foundationRemediationState?.lanes.find(
-      lane => lane.dispatch?.dispatchId === record.dispatchId,
-    )
     if (
       !run ||
       (run.activeDispatch?.dispatchId !== record.dispatchId &&
         !foundationCheckpoint &&
-        !remediationCheckpoint &&
         !reviewCheckpoint)
     )
       return
-    let next: DeliveryRun = foundationCheckpoint || remediationCheckpoint
+    let next: DeliveryRun = foundationCheckpoint
       ? { ...run, activeDispatch: record }
       : { ...run, activeDispatch: undefined }
     if (result.workerType === 'change-impact-analyzer') {
@@ -271,10 +266,6 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? { completedPaths: [] }
             : next.foundationDraftState,
-        foundationRemediationState:
-          result.classification === 'documents_required'
-            ? undefined
-            : next.foundationRemediationState,
         resourceProductionState:
           result.classification === 'documents_required'
             ? { currentTask: 'RESOURCE_PLAN' }
@@ -319,17 +310,7 @@ export function createDeliveryWorkflowController(input: {
         request?.contract.documentSet === 'checklist'
           ? 'checklist'
           : 'foundation'
-      next = remediationCheckpoint
-        ? await completeFoundationRemediationLane({
-            run: {
-              ...next,
-              activeDispatch: record,
-              phase: 'DOCUMENT_DRAFTING',
-            },
-            workspacePath: input.workspacePath,
-            terminal: result,
-          })
-        : await completeDocumentDraft({
+      next = await completeDocumentDraft({
             run: {
               ...next,
               activeDispatch: record,
@@ -341,7 +322,7 @@ export function createDeliveryWorkflowController(input: {
             workspacePath: input.workspacePath,
             terminal: result,
             documentSet,
-          })
+      })
       if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
@@ -850,7 +831,6 @@ export function createDeliveryWorkflowController(input: {
       evidence: {},
       foundationReviewState: undefined,
       foundationDraftState: { completedPaths: [] },
-      foundationRemediationState: undefined,
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -1239,14 +1219,9 @@ export function createDeliveryWorkflowController(input: {
   ): Promise<unknown> {
     if (
       run.status === 'running' &&
-      ((run.activeDispatch &&
-        (run.activeDispatch.status === 'running' ||
-          Boolean(run.activeDispatch.terminalResult))) ||
-        run.foundationRemediationState?.lanes.some(
-          lane =>
-            lane.dispatch?.status === 'running' ||
-            Boolean(lane.dispatch?.terminalResult && !lane.receipt),
-        ))
+      run.activeDispatch &&
+      (run.activeDispatch.status === 'running' ||
+        Boolean(run.activeDispatch.terminalResult))
     ) {
       throw new Error(
         'A workflow worker result is still being reconciled; wait for the current phase to settle before submitting another change.',

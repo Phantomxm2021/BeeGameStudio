@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -37,85 +36,6 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
-  test('projects the accepted conflict list and repair paths without duplicating document bytes', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'repair-authority-'))
-    try {
-      const revision = 'a'.repeat(64)
-      await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await mkdir(
-        join(workspacePath, '.beegame/reviews/foundation', revision),
-        { recursive: true },
-      )
-      await writeFile(join(workspacePath, 'docs/GDD.md'), '# Current GDD\n')
-      await writeFile(
-        join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-        '# Current Technical Design\n',
-      )
-      const reviewPath = `.beegame/reviews/foundation/${revision}/review.json`
-      const reviewBytes = `${JSON.stringify({
-        version: 2,
-        scope: 'foundation',
-        revision,
-        verdict: 'NEEDS_REVISION',
-        priorConflictStatus: [],
-        conflicts: [
-          {
-            id: 'B1',
-            title: 'Runtime authority disagrees',
-            problem: 'Gameplay and runtime name incompatible states.',
-            evidence: [
-              {
-                path: 'docs/GDD.md',
-                location: 'Runtime state',
-                observed: 'The GDD names state A.',
-              },
-            ],
-            requiredOutcome: 'Both documents use one runtime state.',
-            changes: [
-              { path: 'docs/GDD.md', action: 'Use canonical state B.' },
-              {
-                path: 'docs/TECHNICAL_DESIGN.md',
-                action: 'Implement canonical state B.',
-              },
-            ],
-            acceptance: ['Both documents use state B.'],
-          },
-        ],
-      })}\n`
-      const reviewDigest = createHash('sha256').update(reviewBytes).digest('hex')
-      await writeFile(join(workspacePath, reviewPath), reviewBytes)
-
-      const block = await buildDocumentAuthorAuthorityBlock({
-        dispatchId: 'dispatch-remediation-authority',
-        runId: 'run-remediation-authority',
-        workerType: 'document-author',
-        workspacePath,
-        allowedPaths: ['docs/GDD.md'],
-        contract: {
-          authoringMode: 'remediation',
-          documentSet: 'foundation',
-          remediation: {
-            laneId: 'core-design',
-            reviewPath,
-            reviewDigest,
-            affectedPaths: ['docs/GDD.md'],
-            sourceRevision: revision,
-          },
-        },
-      } as never)
-
-      expect(block).toContain('BEGIN ACCEPTED FOUNDATION REVIEW JSON')
-      expect(block).toContain('Runtime authority disagrees')
-      expect(block).toContain('docs/GDD.md')
-      expect(block).toContain('docs/TECHNICAL_DESIGN.md')
-      expect(block).not.toContain('BEGIN CANONICAL REPAIR TARGET')
-      expect(block).not.toContain('# Current GDD')
-      expect(block).not.toContain('# Current Technical Design')
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
   test('persists only the exact selected upstream authority as complete input', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {

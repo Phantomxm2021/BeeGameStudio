@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -167,136 +167,14 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
-  test('derives remediation mutations from durable bytes after tool events are compacted', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'remediation-digests-'))
-    await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    const originals = {
-      'docs/TECHNICAL_DESIGN.md': '# Technical\nOriginal technical authority.\n',
-      'docs/ASSET_PLAN.md': '# Assets\nOriginal asset authority.\n',
-    }
-    await Promise.all(
-      Object.entries(originals).map(([path, body]) =>
-        writeFile(join(workspacePath, path), body),
-      ),
+  test('has no Foundation remediation session-port boundary', () => {
+    const source = readFileSync(
+      new URL('./delivery-worker-session-port.ts', import.meta.url),
+      'utf8',
     )
-    const previousDocumentDigests = Object.fromEntries(
-      Object.entries(originals).map(([path, body]) => [
-        path,
-        createHash('sha256').update(body).digest('hex'),
-      ]),
-    )
-    const reviewPath = `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`
-    const reviewBytes = `${JSON.stringify({
-      version: 2,
-      scope: 'foundation',
-      revision: 'a'.repeat(64),
-      verdict: 'NEEDS_REVISION',
-      priorConflictStatus: [],
-      conflicts: [
-        {
-          id: 'B1',
-          title: 'Technical and asset authority disagree',
-          problem: 'The two assigned documents cannot be implemented together.',
-          evidence: [
-            {
-              path: 'docs/TECHNICAL_DESIGN.md',
-              location: 'Authority',
-              observed: 'The technical authority uses the old rule.',
-            },
-          ],
-          requiredOutcome: 'Both documents use one implementable rule.',
-          changes: [
-            {
-              path: 'docs/TECHNICAL_DESIGN.md',
-              action: 'Adopt the repaired rule.',
-            },
-            {
-              path: 'docs/ASSET_PLAN.md',
-              action: 'Adopt the repaired rule.',
-            },
-          ],
-          acceptance: ['Both documents contain the repaired rule.'],
-        },
-      ],
-    })}\n`
-    await mkdir(join(workspacePath, '.beegame/reviews/foundation', 'a'.repeat(64)), {
-      recursive: true,
-    })
-    await writeFile(join(workspacePath, reviewPath), reviewBytes)
-    const events: Array<Record<string, unknown>> = []
-    const sessions = {
-      start: () => ({
-        id: 'repair-session',
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        cwd: workspacePath,
-      }),
-      updateAuthToken: () => undefined,
-      get: () => ({
-        id: 'repair-session',
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        cwd: workspacePath,
-      }),
-      events: () => events,
-      isWorkflowWorkerOpen: () => true,
-      sendWithDisplay: async () => {
-        await writeFile(
-          join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-          '# Technical\nRepaired technical authority.\n',
-        )
-        await writeFile(
-          join(workspacePath, 'docs/ASSET_PLAN.md'),
-          '# Assets\nRepaired asset authority.\n',
-        )
-        // A native compaction may retain the final result while discarding
-        // earlier Edit tool events. Durable file bytes remain authoritative.
-        events.push({ type: 'result', text: 'repair complete' })
-      },
-      stop: () => undefined,
-      disposeWorkflowWorker: async () => undefined,
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const request = {
-      dispatchId: 'repair-dispatch',
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'a'.repeat(64),
-      allowedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-      contract: {
-        authoringMode: 'remediation',
-        documentSet: 'foundation',
-        remediation: {
-          laneId: 'technical-assets',
-          reviewPath,
-          reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
-          affectedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-          sourceRevision: 'a'.repeat(64),
-        },
-        previousDocumentDigests,
-      },
-    } as const
-
-    await port.start(request as never)
-    await port.submit(request.dispatchId, 'Repair the assigned documents.')
-    const terminal = await port.waitForTerminal?.(request.dispatchId)
-
-    expect(terminal).toMatchObject({
-      workerType: 'document-author',
-      writtenPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-    })
-    await rm(workspacePath, { recursive: true, force: true })
+    expect(source).not.toContain('FOUNDATION_REMEDIATION_LANES')
+    expect(source).not.toContain('document remediation authority is invalid')
+    expect(source).not.toContain("authoringMode === 'remediation'")
   })
 
   test('persists a Reviewer structured output without requiring a Write tool call', async () => {

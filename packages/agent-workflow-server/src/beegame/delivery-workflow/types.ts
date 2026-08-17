@@ -60,46 +60,6 @@ export type FoundationDraftState = {
   documents?: FoundationDocumentCheckpoint[]
 }
 
-export type FoundationRemediationLaneId =
-  | 'core-design'
-  | 'technical-assets'
-  | 'presentation'
-
-export type FoundationRemediationLaneStatus =
-  | 'not_required'
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-
-export type FoundationRemediationReceipt = {
-  reviewDigest: string
-  sourceRevision: string
-  ownedPaths: FoundationDocumentPath[]
-  beforeDigests: Record<string, string>
-  afterDigests: Record<string, string>
-  committedAt: string
-}
-
-export type FoundationRemediationLane = {
-  id: FoundationRemediationLaneId
-  ownedPaths: FoundationDocumentPath[]
-  affectedPaths: FoundationDocumentPath[]
-  status: FoundationRemediationLaneStatus
-  baselineDigests?: Record<string, string>
-  dispatch?: DispatchRecord
-  receipt?: FoundationRemediationReceipt
-  failureReason?: string
-}
-
-export type FoundationRemediationState = {
-  reviewPath: string
-  reviewDigest: string
-  sourceRevision: string
-  lanes: FoundationRemediationLane[]
-  resultingRevision?: string
-}
-
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
   ...CANONICAL_PROJECT_DOCUMENTS,
 ] as const
@@ -361,8 +321,6 @@ export type DeliveryRun = {
   foundationReviewState?: FoundationReviewState
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
-  /** Exact parallel repair lanes derived from one accepted Foundation review. */
-  foundationRemediationState?: FoundationRemediationState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage

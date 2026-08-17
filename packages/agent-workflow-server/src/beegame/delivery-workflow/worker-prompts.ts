@@ -113,7 +113,6 @@ function formatContract(request: WorkerDispatchRequest): string {
       packetDigests: request.contract.packetDigests,
       projection: request.contract.projection,
       priorConflictIds: request.contract.priorConflictIds,
-      remediationReceipts: request.contract.remediationReceipts,
       allowedAffectedPaths: request.contract.allowedAffectedPaths,
     })
   }
@@ -208,56 +207,6 @@ function formatResourceContentContract(
       Object.hasOwn(contract, key) ? [[key, contract[key]]] : [],
     ),
   )
-  const remediation = contract.remediation
-  if (
-    remediation &&
-    typeof remediation === 'object' &&
-    !Array.isArray(remediation)
-  ) {
-    const findings = (remediation as Record<string, unknown>).findings
-    if (Array.isArray(findings)) {
-      const paths = new Set(
-        Array.isArray(contract.repairPaths)
-          ? contract.repairPaths.filter(
-              (path): path is string => typeof path === 'string',
-            )
-          : [],
-      )
-      projection.remediation = {
-        kind: (remediation as Record<string, unknown>).kind,
-        cycleId: (remediation as Record<string, unknown>).cycleId,
-        findings: findings
-          .filter(value => {
-            if (!value || typeof value !== 'object' || Array.isArray(value))
-              return false
-            const subjects = (value as Record<string, unknown>).subjects
-            return (
-              Array.isArray(subjects) &&
-              subjects.some(subject => {
-                if (
-                  !subject ||
-                  typeof subject !== 'object' ||
-                  Array.isArray(subject)
-                )
-                  return false
-                const subjectPath = (subject as Record<string, unknown>).path
-                return typeof subjectPath === 'string' && paths.has(subjectPath)
-              })
-            )
-          })
-          .map(value => {
-            const finding = value as Record<string, unknown>
-            return {
-              findingId: finding.findingId,
-              rootCause: finding.rootCause,
-              impact: finding.impact,
-              requiredOutcome: finding.requiredOutcome,
-              subjects: finding.subjects,
-            }
-          }),
-      }
-    }
-  }
   return projection
 }
 
@@ -287,18 +236,13 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           : request.contract.authoringMode === 'initial' ||
               request.contract.authoringMode === 'parallel-draft'
             ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
-            : 'Use the accepted Foundation review JSON and current target bytes projected by the workflow service. Apply every conflict change across exactly contract.remediation.affectedPaths in one coordinated turn, preserve unrelated approved content, and leave every authorized Markdown document complete when the turn ends.',
+            : 'Unsupported Foundation document authoring mode.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
               'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Cover core player paths, critical numeric boundaries, level/scene states, UI/audio feedback, visible resource outcomes and failure/recovery paths from the approved authority.',
               'Group the approved scenarios before authoring. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail.',
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
-              ...(request.contract.remediation
-                ? [
-                    'Read contract.remediation.reviewReportPath and resolve only the accepted checklist outcomes for docs/acceptance/gameplay-checklist.md.',
-                  ]
-                : []),
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
           : request.contract.authoringMode === 'parallel-draft'
@@ -337,11 +281,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                     : []),
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
-              : [
-                  'This is one accepted report-driven Foundation remediation. Modify exactly the canonical documents in contract.remediation.affectedPaths and no others.',
-                  'Use the projected review JSON as the complete conflict list. Apply every conflict changes[].action to its named path so the shared requiredOutcome and all acceptance conditions hold across documents. Preserve unrelated approved authority; do not reinterpret, rewrite, summarize or expand the review.',
-                  'For each accepted conflict, locate only the cited and directly dependent occurrences of the affected authority, state, formula, count, budget or reference before editing. Perform one targeted closure check against that conflict after editing. Do not launch a broad new review.',
-                ].join(' '),
+              : 'Unsupported Foundation document authoring mode.',
       ].join(' ')
     case 'document-reviewer':
       return [
@@ -360,7 +300,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           : request.contract.reviewRole === 'synthesis' &&
               request.contract.reviewMode === 'verification'
             ? [
-                'Read the accepted prior review and exactly the three accepted verification lane packets. Do not read canonical full documents. Reconcile duplicate lane statuses: a prior conflict is closed only when every lane assigned to that conflict reports it closed; it remains open when any assigned lane reports it open. Treat contract.remediationReceipts as byte-bound proof of completed repair lanes. Return the sole canonical version 2 review JSON object and do not launch another Agent or task.',
+                'Read the accepted prior review and exactly the three accepted verification lane packets. Do not read canonical full documents. Reconcile duplicate lane statuses: a prior conflict is closed only when every lane assigned to that conflict reports it closed; it remains open when any assigned lane reports it open. Return the sole canonical version 2 review JSON object and do not launch another Agent or task.',
                 foundationReviewOutputContractInstruction(),
                 'Set output priorReviewDigest exactly to contract.priorReviewDigest and account for every prior conflict in priorConflictStatus. Every open prior conflict must retain the same ID in conflicts; every closed prior conflict must be absent. New conflicts use new IDs. READY requires conflicts: []; NEEDS_REVISION requires at least one conflict.',
               ].join(' ')
@@ -395,18 +335,14 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       ].join(' ')
     case 'resource-planner':
       return [
-        request.contract.remediation
-          ? 'This is one accepted resource-plan repair batch. Apply only the supplied Manifest finding outcomes, preserve all unrelated approved requirements and resource records, and submit the complete corrected plan through AssetManifest. Do not repair inventory or content findings in this dispatch.'
-          : 'Create the canonical Resource Production plan from only contract.authorityPaths and the confirmed brief. ASSET_PLAN owns the complete resource duties, ART_DIRECTION owns presentation constraints, and TECHNICAL_DESIGN owns runtime-consumable output formats. Do not reopen review or read other project documents.',
+        'Create the canonical Resource Production plan from only contract.authorityPaths and the confirmed brief. ASSET_PLAN owns the complete resource duties, ART_DIRECTION owns presentation constraints, and TECHNICAL_DESIGN owns runtime-consumable output formats. Do not reopen review or read other project documents.',
         'Use AssetManifest submit_resource_plan exactly once. The service owns Manifest version, resource policy and canonical roots. Submit runtime target capabilities and complete stable requirements. Every requirement must include one structured acquisition_profile containing only canonical dimensions, asset kinds, usage tags, source-intrinsic required capabilities and approved style values. Composition, placement, scaling, connection, scene assembly and runtime behavior are content or implementation duties, never source-intrinsic acquisition constraints. Never infer this profile from IDs or filenames.',
         'Never use target output formats as source-format admission rules. Source material may use another format when the current target adapter declares a deterministic direct or conversion delivery capability.',
         'Do not browse the Resource Library, create or download files, write JSON/YAML, or implement gameplay. A successful plan submission ends this dispatch.',
       ].join(' ')
     case 'resource-curator':
       return [
-        request.contract.remediation
-          ? 'This is one accepted resource-inventory repair batch. Resolve only the supplied inventory findings against the established Manifest and approved Resource Library facts. Do not modify requirements or content files.'
-          : 'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
+        'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
         'Call ResourceLibrary match_requirements once. For a matched requirement, choose one returned bundle and judge only its authored metadata and technical facts, never filename, keywords, regular expressions, project names or requirement IDs. A no-match requirement may use one or more independently replaceable placeholders when its declared duties need separate resources; never mix library and placeholder decisions for one requirement.',
         'A suitable candidate may satisfy its requirement through direct delivery or a declared target conversion adapter. Choose exact candidate identities. Use a placeholder decision for every service-proven no-match group so missing library material never stops delivery.',
         'Submit one complete decision set through CommitResourceInventory. If a prior submission created a prepared or applying durable receipt, submit decisions: [] to resume that exact receipt instead of reconstructing decisions. It is the only mutation and terminal operation, preserves exact dependency closure, resumes durable progress after interruption, and derives bindings from the committed inventory. Do not write content or gameplay code.',
@@ -420,9 +356,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       return [
         `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Bee Game Studio's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
         'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
-        request.contract.remediation
-          ? 'This is one accepted resource-content repair batch. Resolve only the supplied content findings and preserve the protected canonical content. Do not attempt to repair Manifest, inventory or Resource Library findings.'
-          : 'When the complete writable set is ready, call CommitResourceContent once. The service serializes JSON/YAML and validates the merged set before replacing any file.',
+        'When the complete writable set is ready, call CommitResourceContent once. The service serializes JSON/YAML and validates the merged set before replacing any file.',
         'The service preserves every canonical document outside the exact writable path list during the atomic commit; never read, resubmit or rewrite those documents.',
         'If verified inventory is genuinely missing, call CommitResourceContent needs_inventory with the exact missing requirement IDs. Do not invent a path, identity or embedded substitute.',
       ].join(' ')
@@ -455,9 +389,6 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft')
         ? ''
-        : request.contract.authoringMode === 'remediation' &&
-            request.contract.documentSet === 'foundation'
-          ? 'Ensure every Markdown document in contract.remediation.affectedPaths is complete and committed, then end the turn normally. The native runtime owns the file-operation sequence.'
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`

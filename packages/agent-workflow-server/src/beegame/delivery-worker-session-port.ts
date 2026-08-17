@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import {
   access,
   mkdir,
@@ -33,12 +33,8 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import {
-  foundationReviewSchema,
-  readFoundationReviewArtifact,
-} from './delivery-workflow/foundation-review'
+import { foundationReviewSchema } from './delivery-workflow/foundation-review'
 import { foundationReviewLanePacketSchema } from './delivery-workflow/foundation-review-lane-packet'
-import { FOUNDATION_REMEDIATION_LANES } from './delivery-workflow/foundation-remediation'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -141,50 +137,6 @@ export async function buildDocumentAuthorAuthorityBlock(
   onProjection?: (projection: FoundationAuthorityProjection) => void,
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
-  if (request.contract.authoringMode === 'remediation') {
-    const remediation = request.contract.remediation as
-      | Record<string, unknown>
-      | undefined
-    const reviewPath = remediation?.reviewPath
-    const reviewDigest = remediation?.reviewDigest
-    const affectedPaths = remediation?.affectedPaths
-    const laneId = remediation?.laneId
-    const lane = FOUNDATION_REMEDIATION_LANES.find(
-      candidate => candidate.id === laneId,
-    )
-    if (
-      !lane ||
-      typeof reviewPath !== 'string' ||
-      typeof reviewDigest !== 'string' ||
-      !Array.isArray(affectedPaths) ||
-      affectedPaths.some(
-        path =>
-          typeof path !== 'string' ||
-          !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-      ) ||
-      !request.allowedPaths ||
-      JSON.stringify(request.allowedPaths) !== JSON.stringify(affectedPaths)
-    )
-      throw new Error('document remediation authority is invalid')
-    const accepted = await readFoundationReviewArtifact({
-      workspacePath: request.workspacePath,
-      path: reviewPath,
-      expectedDigest: reviewDigest,
-    })
-    const expectedLanePaths = lane.ownedPaths.filter(path =>
-      accepted.affectedPaths.includes(path),
-    )
-    if (
-      JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths)
-    )
-      throw new Error('document remediation paths do not match accepted review')
-    return [
-      'The workflow service projected one accepted Foundation conflict list and this lane\'s exact authorized repair paths below. Read only the current bytes needed for the conflicts assigned to these paths, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
-      `Remediation lane: ${lane.id}`,
-      `Authorized repair paths: ${JSON.stringify(expectedLanePaths)}`,
-      `--- BEGIN ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(accepted.review, null, 2)}\n--- END ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---`,
-    ].join('\n\n')
-  }
   if (
     request.contract.authoringMode === undefined &&
     request.contract.documentSet === 'checklist'
@@ -366,11 +318,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
-      const documentAuthorityBlock =
-        request.workerType === 'document-author' &&
-        request.contract.authoringMode === 'remediation'
-          ? await buildDocumentAuthorAuthorityBlock(request)
-          : ''
+      const documentAuthorityBlock = ''
       const reviewContract = reviewerAssignmentContract(request)
       const workflowJsonSchema =
         request.workerType === 'document-reviewer'
@@ -441,8 +389,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
             : {}),
         ...(request.workerType === 'document-author' &&
         (request.contract.authoringMode === 'initial' ||
-          request.contract.authoringMode === 'parallel-draft' ||
-          request.contract.authoringMode === 'remediation')
+          request.contract.authoringMode === 'parallel-draft')
           ? {
               workflowDocumentAuthorMode:
                 request.contract.authoringMode === 'parallel-draft'
@@ -822,13 +769,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
               )
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            const writtenPaths =
-              request.contract.authoringMode === 'remediation'
-                ? await changedRemediationPaths(request)
-                : [targetPath]
             return createDeterministicCanonicalDocumentTerminal(
               request,
-              writtenPaths,
+              [targetPath],
               documentAuthoringMetrics(
                 sessionEvents(sessionId),
                 projectionMetrics(documentAuthorityProjections.get(dispatchId)),
@@ -1784,40 +1727,4 @@ function completedMutationPaths(
         ).replaceAll('\\', '/'),
       )
   })
-}
-
-async function changedRemediationPaths(
-  request: WorkerDispatchRequest,
-): Promise<string[]> {
-  const remediation = request.contract.remediation
-  const affectedPaths =
-    remediation &&
-    typeof remediation === 'object' &&
-    !Array.isArray(remediation) &&
-    Array.isArray((remediation as Record<string, unknown>).affectedPaths)
-      ? ((remediation as Record<string, unknown>).affectedPaths as unknown[])
-      : []
-  const previousDocumentDigests = request.contract.previousDocumentDigests
-  if (
-    !previousDocumentDigests ||
-    typeof previousDocumentDigests !== 'object' ||
-    Array.isArray(previousDocumentDigests)
-  )
-    throw new Error('document remediation baseline digests are missing')
-  const baseline = previousDocumentDigests as Record<string, unknown>
-  const changed: string[] = []
-  for (const candidate of affectedPaths) {
-    if (typeof candidate !== 'string' || !candidate)
-      throw new Error('document remediation affected path is invalid')
-    const previousDigest = baseline[candidate]
-    if (
-      typeof previousDigest !== 'string' ||
-      !/^[a-f0-9]{64}$/u.test(previousDigest)
-    )
-      throw new Error('document remediation baseline digest is invalid')
-    const bytes = await readFile(resolve(request.workspacePath, candidate))
-    const currentDigest = createHash('sha256').update(bytes).digest('hex')
-    if (currentDigest !== previousDigest) changed.push(candidate)
-  }
-  return changed
 }

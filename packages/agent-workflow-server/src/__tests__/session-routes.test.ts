@@ -1249,7 +1249,7 @@ describe('delivery workflow session continuation', () => {
             .update(reportJson)
             .digest('hex'),
       },
-      foundationRemediationState: {
+      ...({ foundationRemediationState: {
         reviewPath: reportPath,
         reviewDigest: createHash('sha256').update(reportJson).digest('hex'),
         sourceRevision: reviewRevision,
@@ -1293,7 +1293,7 @@ describe('delivery workflow session continuation', () => {
             status: 'not_required',
           },
         ],
-      },
+      } } as any),
       currentMessage: 'live stage status',
       blockedReason: 'current-only recovery detail',
       usage: {

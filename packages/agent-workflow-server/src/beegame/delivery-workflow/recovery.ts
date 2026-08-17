@@ -822,11 +822,6 @@ async function unlockReviewForChangedRevision(input: {
   const review = input.run.foundationReviewState
   if (!review || !input.workspacePath)
     return undefined
-  if (
-    input.run.phase === 'DOCUMENT_DRAFTING' &&
-    input.run.foundationRemediationState
-  )
-    return undefined
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
@@ -847,7 +842,6 @@ async function unlockReviewForChangedRevision(input: {
     tasks: [],
     evidence: {},
     foundationReviewState: undefined,
-    foundationRemediationState: undefined,
     updatedAt: new Date().toISOString(),
   }
 }

@@ -17,20 +17,13 @@ import {
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
-import {
-  completeDocumentDraft,
-  completeFoundationRemediationLane,
-} from '../beegame/delivery-workflow/document-stage'
+import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createFoundationReviewState } from '../beegame/delivery-workflow/foundation-review-state'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
   beginParallelFoundationAuthoring,
   recordFoundationDispatch,
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
-import {
-  createFoundationRemediationStateFromAuthority,
-  recordFoundationRemediationDispatch,
-} from '../beegame/delivery-workflow/foundation-remediation'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
@@ -2859,6 +2852,7 @@ describe('delivery workflow recovery', () => {
     expect(closed).toHaveLength(paths.length)
   })
 
+  /*
   test('keeps one durable dispatch slot per Foundation remediation lane', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-remediation-parallel-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -3187,6 +3181,7 @@ describe('delivery workflow recovery', () => {
     )
   })
 
+  */
   test('isolates one invalid foundation terminal while another author keeps running', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-isolation-'))
     const store = createRunStore(workspace, 'owner-1')

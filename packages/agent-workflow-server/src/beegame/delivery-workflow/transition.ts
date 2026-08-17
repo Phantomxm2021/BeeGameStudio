@@ -214,7 +214,6 @@ export function transitionDeliveryRun(
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
         foundationDraftState: { completedPaths: [] },
-        foundationRemediationState: undefined,
         foundationReviewState: undefined,
         updatedAt: timestamp(),
       }

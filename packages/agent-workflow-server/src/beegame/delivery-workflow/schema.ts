@@ -7,7 +7,6 @@ import type {
   DispatchRecord,
   EvidenceRef,
   FoundationDraftState,
-  FoundationRemediationState,
   Revision,
   TasksPlannedEvent,
   TaskVerification,
@@ -16,7 +15,6 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { FoundationReviewState } from './foundation-review-state'
-import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
@@ -284,7 +282,7 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
     }
   })
 
-const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = z
+const foundationRemediationStateSchema: z.ZodType<Record<string, unknown>> = z
   .object({
     reviewPath: z.string().min(1),
     reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -335,14 +333,12 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = 
   .strict()
   .superRefine((state, context) => {
     if (
-      state.lanes.length !== FOUNDATION_REMEDIATION_LANES.length ||
+      state.lanes.length !== 3 ||
       state.lanes.some((lane, index) => {
-        const expected = FOUNDATION_REMEDIATION_LANES[index]
+        const expected = ['core-design', 'technical-assets', 'presentation'][index]
         return (
           !expected ||
-          lane.id !== expected.id ||
-          JSON.stringify(lane.ownedPaths) !==
-            JSON.stringify(expected.ownedPaths)
+          lane.id !== expected
         )
       })
     )
@@ -690,7 +686,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .strict(),
     foundationReviewState: foundationReviewStateSchema.optional(),
     foundationDraftState: foundationDraftStateSchema,
-    foundationRemediationState: foundationRemediationStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
@@ -712,9 +707,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       run.phase === 'IMPLEMENTATION' ||
       run.phase === 'IMPLEMENTATION_AUDIT' ||
       run.phase === 'ACCEPTANCE' ||
-      run.phase === 'DELIVERY' ||
-      (run.phase === 'DOCUMENT_DRAFTING' &&
-        run.foundationRemediationState !== undefined)
+      run.phase === 'DELIVERY'
     if (
       requiresCompletedFoundation &&
       run.foundationDraftState.completedPaths.length !==

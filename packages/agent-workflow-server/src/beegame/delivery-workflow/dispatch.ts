@@ -27,13 +27,8 @@ import {
   recordFoundationHandlerFailure,
 } from './foundation-authoring-batch'
 import {
-  recordFoundationRemediationDispatch,
-  recordFoundationRemediationFailure,
-} from './foundation-remediation'
-import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
-  type FoundationRemediationLaneId,
 } from './types'
 
 export type DispatchCredits = {
@@ -71,31 +66,6 @@ function foundationDispatch(
   )?.dispatch
 }
 
-function remediationLaneFor(
-  request: WorkerDispatchRequest,
-): FoundationRemediationLaneId | undefined {
-  if (
-    request.workerType !== 'document-author' ||
-    request.contract.authoringMode !== 'remediation'
-  )
-    return undefined
-  const laneId = (request.contract.remediation as { laneId?: unknown } | undefined)
-    ?.laneId
-  return typeof laneId === 'string' &&
-    ['core-design', 'technical-assets', 'presentation'].includes(laneId) &&
-    request.taskId === `foundation-remediation:${laneId}`
-    ? (laneId as FoundationRemediationLaneId)
-    : undefined
-}
-
-function remediationDispatch(
-  run: DeliveryRun,
-  laneId: FoundationRemediationLaneId,
-): DispatchRecord | undefined {
-  return run.foundationRemediationState?.lanes.find(lane => lane.id === laneId)
-    ?.dispatch
-}
-
 function reviewerRoleFor(request: WorkerDispatchRequest): string | undefined {
   const role = request.contract.reviewRole
   return request.workerType === 'document-reviewer' && typeof role === 'string'
@@ -119,7 +89,6 @@ function dispatchLocation(
   | {
       record: DispatchRecord
       path?: FoundationDocumentPath
-      remediationLaneId?: FoundationRemediationLaneId
       reviewRole?: string
     }
   | undefined {
@@ -128,12 +97,6 @@ function dispatchLocation(
   for (const document of run.foundationDraftState.documents ?? [])
     if (document.dispatch?.dispatchId === dispatchId)
       return { record: document.dispatch, path: document.path }
-  for (const lane of run.foundationRemediationState?.lanes ?? [])
-    if (lane.dispatch?.dispatchId === dispatchId)
-      return {
-        record: lane.dispatch,
-        remediationLaneId: lane.id,
-      }
   for (const report of run.foundationReviewState?.reports ?? [])
     if (report.dispatch?.dispatchId === dispatchId)
       return { record: report.dispatch, reviewRole: report.role }
@@ -150,54 +113,6 @@ function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
   return (run.foundationDraftState.documents ?? []).some(
     document => document.dispatch?.status === 'running',
   )
-}
-
-function hasRunningRemediationDispatch(run: DeliveryRun): boolean {
-  return (run.foundationRemediationState?.lanes ?? []).some(
-    lane => lane.dispatch?.status === 'running',
-  )
-}
-
-function withRemediationDispatch(
-  run: DeliveryRun,
-  laneId: FoundationRemediationLaneId,
-  dispatch: DispatchRecord,
-): DeliveryRun {
-  if (!run.foundationRemediationState)
-    throw new DispatchError(
-      'blocked',
-      'foundation remediation state is missing',
-    )
-  return {
-    ...run,
-    foundationRemediationState: recordFoundationRemediationDispatch(
-      run.foundationRemediationState,
-      laneId,
-      dispatch,
-    ),
-  }
-}
-
-function withRemediationDispatchRecord(
-  run: DeliveryRun,
-  laneId: FoundationRemediationLaneId,
-  dispatch: DispatchRecord,
-): DeliveryRun {
-  const state = run.foundationRemediationState
-  if (!state)
-    throw new DispatchError(
-      'blocked',
-      'foundation remediation state is missing',
-    )
-  return {
-    ...run,
-    foundationRemediationState: {
-      ...state,
-      lanes: state.lanes.map(lane =>
-        lane.id === laneId ? { ...lane, dispatch } : lane,
-      ),
-    },
-  }
 }
 
 function withFoundationDispatch(
@@ -293,12 +208,6 @@ function isolatedFoundationFailureStatus(
   run: DeliveryRun,
 ): DeliveryRun['status'] {
   return hasRunningFoundationDispatch(run) ? 'running' : 'needs_action'
-}
-
-function isolatedRemediationFailureStatus(
-  run: DeliveryRun,
-): DeliveryRun['status'] {
-  return hasRunningRemediationDispatch(run) ? 'running' : 'needs_action'
 }
 
 export class DispatchError extends Error {
@@ -517,11 +426,6 @@ function assertSingleResourceWorkAuthority(
   } as const
   const task = taskByWorker[request.workerType as keyof typeof taskByWorker]
   if (!task) return
-  if (request.contract.remediation !== undefined)
-    throw new DispatchError(
-      'blocked',
-      'resource remediation contracts are not part of Foundation review',
-    )
 }
 
 export function createDeliveryDispatcher(options: {
@@ -622,15 +526,12 @@ export function createDeliveryDispatcher(options: {
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
     const foundationPath = foundationPathFor(request)
-    const remediationLaneId = remediationLaneFor(request)
     const reviewRole = reviewerRoleFor(request)
     const durableDispatch = foundationPath
       ? foundationDispatch(run, foundationPath)
-      : remediationLaneId
-        ? remediationDispatch(run, remediationLaneId)
-        : reviewRole
-          ? reviewerDispatch(run, reviewRole)
-          : run.activeDispatch
+      : reviewRole
+        ? reviewerDispatch(run, reviewRole)
+        : run.activeDispatch
     if (
       durableDispatch?.status === 'completed' &&
       durableDispatch.phase === request.phase &&
@@ -658,25 +559,10 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'a regular delivery worker is already running',
       )
-    if (!foundationPath && !remediationLaneId && hasRunningFoundationDispatch(run))
+    if (!foundationPath && hasRunningFoundationDispatch(run))
       throw new DispatchError(
         'duplicate',
         'foundation document authoring batch is active',
-      )
-    if (
-      remediationLaneId &&
-      (run.activeDispatch?.status === 'running' ||
-        hasRunningFoundationDispatch(run) ||
-        hasRunningReviewerDispatch(run))
-    )
-      throw new DispatchError(
-        'duplicate',
-        'another delivery worker batch is active',
-      )
-    if (!remediationLaneId && hasRunningRemediationDispatch(run))
-      throw new DispatchError(
-        'duplicate',
-        'foundation remediation batch is active',
       )
     if (reviewRole && run.activeDispatch?.status === 'running')
       throw new DispatchError(
@@ -732,15 +618,12 @@ export function createDeliveryDispatcher(options: {
         if (current.status !== 'running')
           throw new DispatchError('blocked', 'delivery run is not running')
         const currentFoundationPath = foundationPathFor(request)
-        const currentRemediationLaneId = remediationLaneFor(request)
         const currentReviewRole = reviewerRoleFor(request)
         const active = currentFoundationPath
           ? foundationDispatch(current, currentFoundationPath)
-          : currentRemediationLaneId
-            ? remediationDispatch(current, currentRemediationLaneId)
-            : currentReviewRole
-              ? reviewerDispatch(current, currentReviewRole)
-              : current.activeDispatch
+          : currentReviewRole
+            ? reviewerDispatch(current, currentReviewRole)
+            : current.activeDispatch
         if (active) {
           if (
             active.phase === request.phase &&
@@ -766,30 +649,11 @@ export function createDeliveryDispatcher(options: {
           )
         if (
           !currentFoundationPath &&
-          !currentRemediationLaneId &&
           hasRunningFoundationDispatch(current)
         )
           throw new DispatchError(
             'duplicate',
             'foundation document authoring batch is active',
-          )
-        if (
-          currentRemediationLaneId &&
-          (current.activeDispatch?.status === 'running' ||
-            hasRunningFoundationDispatch(current) ||
-            hasRunningReviewerDispatch(current))
-        )
-          throw new DispatchError(
-            'duplicate',
-            'another delivery worker batch is active',
-          )
-        if (
-          !currentRemediationLaneId &&
-          hasRunningRemediationDispatch(current)
-        )
-          throw new DispatchError(
-            'duplicate',
-            'foundation remediation batch is active',
           )
         if (currentReviewRole && current.activeDispatch?.status === 'running')
           throw new DispatchError(
@@ -811,15 +675,9 @@ export function createDeliveryDispatcher(options: {
                 record,
               ),
             }
-          : currentRemediationLaneId
-            ? withRemediationDispatch(
-                current,
-                currentRemediationLaneId,
-                record,
-              )
-            : currentReviewRole
-              ? withReviewerDispatch(current, currentReviewRole, record)
-              : { ...current, activeDispatch: record }
+          : currentReviewRole
+            ? withReviewerDispatch(current, currentReviewRole, record)
+            : { ...current, activeDispatch: record }
         await options.store.commit(
           {
             ...next,
@@ -1016,34 +874,18 @@ export function createDeliveryDispatcher(options: {
             ),
             thinking: 'idle' as const,
           }
-        : location.remediationLaneId && run.foundationRemediationState
-          ? {
+        : location.reviewRole
+          ? withReviewerFailure(run, location.reviewRole, invalid, reason)
+          : {
               ...run,
-              foundationRemediationState: recordFoundationRemediationFailure(
-                withRemediationDispatchRecord(
-                  run,
-                  location.remediationLaneId,
-                  invalid,
-                ).foundationRemediationState!,
-                location.remediationLaneId,
-                reason,
-              ),
+              status: 'failed' as const,
+              blockedReason: reason,
+              activeDispatch: invalid,
               thinking: 'idle' as const,
             }
-          : location.reviewRole
-            ? withReviewerFailure(run, location.reviewRole, invalid, reason)
-            : {
-                ...run,
-                status: 'failed' as const,
-                blockedReason: reason,
-                activeDispatch: invalid,
-                thinking: 'idle' as const,
-              }
       const isolatedStatus = location.path
         ? isolatedFoundationFailureStatus(failedRun)
-        : location.remediationLaneId
-          ? isolatedRemediationFailureStatus(failedRun)
-          : failedRun.status
+        : failedRun.status
       await options.store.commit(
         {
           ...failedRun,
@@ -1099,25 +941,18 @@ export function createDeliveryDispatcher(options: {
     })
     const updatedWithDispatch = location.path
       ? withFoundationDispatch(run, location.path, completed)
-      : location.remediationLaneId
-        ? withRemediationDispatchRecord(
+      : location.reviewRole
+        ? withReviewerDispatch(
             run,
-            location.remediationLaneId,
+            location.reviewRole,
             completed,
+            performance,
           )
-        : location.reviewRole
-          ? withReviewerDispatch(
-              run,
-              location.reviewRole,
-              completed,
-              performance,
-            )
-          : { ...run, activeDispatch: completed }
+        : { ...run, activeDispatch: completed }
     const updated = {
       ...updatedWithDispatch,
       thinking:
         hasRunningFoundationDispatch(updatedWithDispatch) ||
-        hasRunningRemediationDispatch(updatedWithDispatch) ||
         hasRunningReviewerDispatch(updatedWithDispatch)
           ? ('working' as const)
           : ('idle' as const),
@@ -1219,30 +1054,14 @@ export function createDeliveryDispatcher(options: {
                   ),
               status: isolatedFoundationFailureStatus(current),
             }
-          : currentLocation.remediationLaneId &&
-              current.foundationRemediationState
-            ? {
-                ...current,
-                foundationRemediationState:
-                  recordFoundationRemediationFailure(
-                    withRemediationDispatchRecord(
-                      current,
-                      currentLocation.remediationLaneId,
-                      failed,
-                    ).foundationRemediationState!,
-                    currentLocation.remediationLaneId,
-                    reason,
-                  ),
-                status: isolatedRemediationFailureStatus(current),
-              }
-            : currentLocation.reviewRole
-              ? withReviewerFailure(
-                  current,
-                  currentLocation.reviewRole,
-                  failed,
-                  reason,
-                )
-              : { ...current, status, activeDispatch: failed }
+          : currentLocation.reviewRole
+            ? withReviewerFailure(
+                current,
+                currentLocation.reviewRole,
+                failed,
+                reason,
+              )
+            : { ...current, status, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedCurrent,
@@ -1317,38 +1136,19 @@ export function createDeliveryDispatcher(options: {
           terminalResult: undefined,
           finishedAt: location.record.finishedAt ?? now(),
         })
-        const failedRun = location.remediationLaneId &&
-            current.foundationRemediationState
+        const failedRun = location.path
           ? {
               ...current,
-              foundationRemediationState: recordFoundationRemediationFailure(
-                withRemediationDispatchRecord(
-                  current,
-                  location.remediationLaneId,
-                  failed,
-                ).foundationRemediationState!,
-                location.remediationLaneId,
+              foundationDraftState: recordFoundationHandlerFailure(
+                current.foundationDraftState,
+                location.path,
                 reason,
+                failed,
               ),
             }
-          : location.path
-            ? {
-                ...current,
-                foundationDraftState: recordFoundationHandlerFailure(
-                  current.foundationDraftState,
-                  location.path,
-                  reason,
-                  failed,
-                ),
-              }
-            : location.reviewRole
-              ? withReviewerFailure(
-                  current,
-                  location.reviewRole,
-                  failed,
-                  reason,
-                )
-              : { ...current, activeDispatch: failed }
+          : location.reviewRole
+            ? withReviewerFailure(current, location.reviewRole, failed, reason)
+            : { ...current, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedRun,
@@ -1398,29 +1198,14 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : location.remediationLaneId && run.foundationRemediationState
-        ? {
-            ...run,
-            foundationRemediationState: recordFoundationRemediationFailure(
-              withRemediationDispatchRecord(
-                run,
-                location.remediationLaneId,
-                failed,
-              ).foundationRemediationState!,
-              location.remediationLaneId,
-              reason,
-            ),
-          }
-        : location.reviewRole
-          ? withReviewerFailure(run, location.reviewRole, failed, reason)
-          : { ...run, activeDispatch: failed }
+      : location.reviewRole
+        ? withReviewerFailure(run, location.reviewRole, failed, reason)
+        : { ...run, activeDispatch: failed }
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(failedRun)
-      : location.remediationLaneId
-        ? isolatedRemediationFailureStatus(failedRun)
-        : location.reviewRole
-          ? failedRun.status
-          : 'failed'
+      : location.reviewRole
+        ? failedRun.status
+        : 'failed'
     await options.store.commit(
       {
         ...failedRun,
@@ -1428,7 +1213,6 @@ export function createDeliveryDispatcher(options: {
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
           hasRunningFoundationDispatch(failedRun) ||
-          hasRunningRemediationDispatch(failedRun) ||
           hasRunningReviewerDispatch(failedRun)
             ? 'working'
             : 'idle',
@@ -1471,29 +1255,14 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : location.remediationLaneId && run.foundationRemediationState
-        ? {
-            ...run,
-            foundationRemediationState: recordFoundationRemediationFailure(
-              withRemediationDispatchRecord(
-                run,
-                location.remediationLaneId,
-                interrupted,
-              ).foundationRemediationState!,
-              location.remediationLaneId,
-              reason,
-            ),
-          }
-        : location.reviewRole
-          ? withReviewerFailure(run, location.reviewRole, interrupted, reason)
-          : { ...run, activeDispatch: interrupted }
+      : location.reviewRole
+        ? withReviewerFailure(run, location.reviewRole, interrupted, reason)
+        : { ...run, activeDispatch: interrupted }
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(interruptedRun)
-      : location.remediationLaneId
-        ? isolatedRemediationFailureStatus(interruptedRun)
-        : location.reviewRole
-          ? interruptedRun.status
-          : 'needs_action'
+      : location.reviewRole
+        ? interruptedRun.status
+        : 'needs_action'
     await options.store.commit(
       {
         ...interruptedRun,
@@ -1501,7 +1270,6 @@ export function createDeliveryDispatcher(options: {
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
           hasRunningFoundationDispatch(interruptedRun) ||
-          hasRunningRemediationDispatch(interruptedRun) ||
           hasRunningReviewerDispatch(interruptedRun)
             ? 'working'
             : 'idle',
@@ -1536,22 +1304,9 @@ export function createDeliveryDispatcher(options: {
     })
     const stoppedRun = location.path
       ? withFoundationDispatch(run, location.path, stopped)
-      : location.remediationLaneId && run.foundationRemediationState
-        ? {
-            ...run,
-            foundationRemediationState: recordFoundationRemediationFailure(
-              withRemediationDispatchRecord(
-                run,
-                location.remediationLaneId,
-                stopped,
-              ).foundationRemediationState!,
-              location.remediationLaneId,
-              reason,
-            ),
-          }
-        : location.reviewRole
-          ? withReviewerFailure(run, location.reviewRole, stopped, reason)
-          : { ...run, activeDispatch: stopped }
+      : location.reviewRole
+        ? withReviewerFailure(run, location.reviewRole, stopped, reason)
+        : { ...run, activeDispatch: stopped }
     await options.store.commit(
       {
         ...stoppedRun,

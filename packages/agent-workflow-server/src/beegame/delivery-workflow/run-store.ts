@@ -391,17 +391,6 @@ function withDispatchUsage(
           },
         }
       : {}),
-    ...(run.foundationRemediationState
-      ? {
-          foundationRemediationState: {
-            ...run.foundationRemediationState,
-            lanes: run.foundationRemediationState.lanes.map(lane => ({
-              ...lane,
-              dispatch: update(lane.dispatch),
-            })),
-          },
-        }
-      : {}),
   }
 }
 
@@ -1267,9 +1256,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             )?.dispatch ??
             run.foundationReviewState?.reports.find(
               report => report.dispatch?.dispatchId === dispatchId,
-            )?.dispatch ??
-            run.foundationRemediationState?.lanes.find(
-              lane => lane.dispatch?.dispatchId === dispatchId,
             )?.dispatch
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
