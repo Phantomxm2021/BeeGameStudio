@@ -69,9 +69,14 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    ...(input.workflowMarkdownStreamContract ||
-    input.workflowDocumentAuthorMode === 'remediation'
+    ...(input.workflowMarkdownStreamContract
       ? ['--tools', '']
+      : []),
+    // The native CLI treats an empty --tools value as if no base-tool filter
+    // was supplied. Name the schema tool so every built-in tool is denied
+    // while the JSON-schema StructuredOutput tool remains available.
+    ...(input.workflowDocumentAuthorMode === 'remediation'
+      ? ['--tools', 'StructuredOutput']
       : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]

@@ -216,7 +216,7 @@ describe('native CLI process runner', () => {
     })
 
     expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('')
+    expect(command[command.indexOf('--tools') + 1]).toBe('StructuredOutput')
     expect(command).not.toContain('--disallowedTools')
   })
 
