@@ -170,7 +170,12 @@ validation error. Bee Game Studio does not interpret or repair the prose.
 ## Synthesis Selection Contract
 
 The synthesis worker receives exactly the three accepted Markdown lane
-receipts and their digests. It emits one compact Markdown selection receipt:
+receipts and their digests. It emits one compact Markdown selection receipt.
+The native response may place a contiguous ordinary-paragraph preface before
+the receipt H1. That preface is preserved byte-for-byte but is never parsed as
+review authority. Headings, lists, quotes, code, HTML, tables, or any other
+block type are forbidden before the unique receipt H1, and no content may
+follow the receipt.
 
 ```markdown
 # Foundation Review Selection

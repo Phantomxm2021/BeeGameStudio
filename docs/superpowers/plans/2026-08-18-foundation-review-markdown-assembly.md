@@ -232,7 +232,7 @@ export function parseFoundationReviewSelectionMarkdown(
 ): FoundationReviewSelection
 ```
 
-Require H1 `Foundation Review Selection`, one revision paragraph, and exactly three H2 sections in `Keep`, `Duplicate`, `Reject` order. Lists may be empty but must exist. Parse inline-code references from list nodes, reject tables and prose outside the grammar, and validate exact one-time accounting against `candidateReferences`.
+Allow only an optional contiguous sequence of ordinary top-level paragraphs before the unique H1 `Foundation Review Selection`; preserve those bytes but ignore their semantics. Reject every other prefix block and all trailing content. After the H1, require one revision paragraph and exactly three H2 sections in `Keep`, `Duplicate`, `Reject` order. Lists may be empty but must exist. Parse inline-code references from list nodes, reject tables and any other content outside the receipt subtree, and validate exact one-time accounting against `candidateReferences`.
 
 - [ ] **Step 4: Implement deterministic no-merge assembly**
 
