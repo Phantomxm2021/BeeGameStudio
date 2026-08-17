@@ -835,7 +835,7 @@ describe('BeeGame session runtime resilience', () => {
       .events(session.id)
       .filter(event => event.type === 'permission.resolved')
     expect(resolved).toHaveLength(4)
-    expect(resolved.map(event => event.payload.reason)).toEqual([
+    expect(resolved.map(event => event.payload?.reason)).toEqual([
       'project_workspace_boundary',
       'project_workspace_boundary',
       'project_workspace_boundary',
@@ -900,6 +900,65 @@ describe('BeeGame session runtime resilience', () => {
       { behavior: 'deny' },
     )
     expect(await decisionPromise).toEqual({ behavior: 'deny' })
+    manager.dispose()
+  })
+
+  test('preserves the project boundary denial when the workflow turn fails', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-project-boundary-failure-'))
+    const workspacePath = join(root, 'workspace')
+    const outsidePath = join(root, 'outside.json')
+    await mkdir(workspacePath, { recursive: true })
+    await writeFile(outsidePath, '{}')
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          const decision = await startInput.requestPermission!({
+            toolUseID: 'external-review-read',
+            toolName: 'Read',
+            message: 'Read an external review projection',
+            input: { file_path: outsidePath },
+          })
+          if (decision.behavior === 'deny') {
+            throw new Error(decision.message)
+          }
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'verify the repaired documents')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({
+      autoDenied: true,
+      reason: 'project_workspace_boundary',
+      input: { file_path: outsidePath },
+    })
+    expect(
+      manager.events(session.id).find(event => event.type === 'turn.failed')
+        ?.text,
+    ).toContain('outside the project workspace')
     manager.dispose()
   })
 
