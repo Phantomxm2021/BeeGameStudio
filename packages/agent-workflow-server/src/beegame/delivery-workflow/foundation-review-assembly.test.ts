@@ -140,11 +140,43 @@ describe('foundation review assembly', () => {
     expect(JSON.stringify(reversed)).toBe(JSON.stringify(forward))
   })
 
-  test('returns READY from empty receipts and empty selection sections', () => {
+  test('fails closed when a forged selection omits receipt candidates', () => {
+    expect(() =>
+      assembleFoundationReview({
+        revision,
+        laneReceipts,
+        selection: { revision, keep: [], duplicate: [], reject: [] },
+      }),
+    ).toThrow(
+      'foundation review selection must account for every lane candidate exactly once',
+    )
+  })
+
+  test('returns READY from three empty lane receipts and empty selection sections', () => {
+    const emptyLaneReceipts: FoundationReviewLaneReceipt[] = [
+      {
+        revision,
+        lane: 'core-design',
+        projectionDigest: 'b'.repeat(64),
+        candidates: [],
+      },
+      {
+        revision,
+        lane: 'technical-assets',
+        projectionDigest: 'c'.repeat(64),
+        candidates: [],
+      },
+      {
+        revision,
+        lane: 'presentation',
+        projectionDigest: 'd'.repeat(64),
+        candidates: [],
+      },
+    ]
     expect(
       assembleFoundationReview({
         revision,
-        laneReceipts: [],
+        laneReceipts: emptyLaneReceipts,
         selection: parseFoundationReviewSelectionMarkdown(
           [
             '# Foundation Review Selection',

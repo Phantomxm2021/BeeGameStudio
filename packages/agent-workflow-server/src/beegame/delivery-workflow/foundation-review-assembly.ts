@@ -24,6 +24,41 @@ function cloneCandidate(candidate: FoundationReviewCandidate, id: string) {
   }
 }
 
+function assertSelectionPartition(
+  selection: FoundationReviewSelection,
+  candidatesByReference: ReadonlyMap<string, FoundationReviewCandidate>,
+): void {
+  const accounted = [
+    ...selection.keep,
+    ...selection.duplicate.map(item => item.source),
+    ...selection.reject,
+  ]
+  for (const reference of [
+    ...accounted,
+    ...selection.duplicate.map(item => item.target),
+  ])
+    if (!candidatesByReference.has(reference))
+      throw new Error('foundation review selection reference is not available')
+  if (
+    accounted.length !== candidatesByReference.size ||
+    new Set(accounted).size !== accounted.length
+  )
+    throw new Error(
+      'foundation review selection must account for every lane candidate exactly once',
+    )
+  for (const reference of candidatesByReference.keys())
+    if (!accounted.includes(reference))
+      throw new Error(
+        'foundation review selection must account for every lane candidate exactly once',
+      )
+  for (const { source, target } of selection.duplicate) {
+    if (source === target)
+      throw new Error('foundation review duplicate cannot target itself')
+    if (!selection.keep.includes(target))
+      throw new Error('foundation review duplicate target is not retained')
+  }
+}
+
 export function assembleFoundationReview(input: {
   revision: string
   laneReceipts: FoundationReviewLaneReceipt[]
@@ -42,6 +77,7 @@ export function assembleFoundationReview(input: {
       candidatesByReference.set(candidate.reference, candidate)
     }
   }
+  assertSelectionPartition(input.selection, candidatesByReference)
 
   const conflicts = [...input.selection.keep]
     .sort(bytewiseCompare)
