@@ -212,9 +212,9 @@ describe('native initial document authoring', () => {
           problem: 'The two assigned documents cannot be implemented together.',
           evidence: [
             {
-              path: 'docs/TECHNICAL_DESIGN.md',
-              location: 'Authority',
-              observed: 'The technical authority uses the old rule.',
+              path: 'docs/ASSET_PLAN.md',
+              location: 'Asset authority',
+              observed: 'The asset authority demonstrates the conflicting rule.',
             },
           ],
           requiredOutcome: 'Both documents use one implementable rule.',

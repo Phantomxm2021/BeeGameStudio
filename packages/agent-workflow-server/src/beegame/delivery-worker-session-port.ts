@@ -376,13 +376,8 @@ async function buildFoundationRemediationAuthority(
     )
     .map(conflict => ({
       ...conflict,
-      evidence: conflict.evidence.filter(
-        evidence => evidence.path === targetPath,
-      ),
       changes: conflict.changes.filter(change => change.path === targetPath),
     }))
-  if (conflicts.some(conflict => conflict.evidence.length === 0))
-    throw new Error('document remediation conflict lacks target-scoped evidence')
   const sourceMarkdown = await readFile(
     resolve(request.workspacePath, targetPath),
     'utf8',
