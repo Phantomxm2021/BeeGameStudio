@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, rm } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import {
   FOUNDATION_DOCUMENT_LANES,
@@ -79,23 +79,11 @@ async function isRegularFile(path: string): Promise<boolean> {
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path)
-    return true
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
-}
-
 export async function atomicCommitReceipt(input: {
   stagingPath: string
   committedPath: string
   bytes: Buffer
 }): Promise<void> {
-  if (await pathExists(input.committedPath))
-    throw new Error('foundation review Markdown receipt is already committed')
   await mkdir(dirname(input.committedPath), { recursive: true })
   const temporaryPath = `${input.committedPath}.${process.pid}.${randomUUID()}.tmp`
   try {
@@ -106,9 +94,16 @@ export async function atomicCommitReceipt(input: {
     } finally {
       await receiptFile.close()
     }
-    if (await pathExists(input.committedPath))
-      throw new Error('foundation review Markdown receipt is already committed')
-    await rename(temporaryPath, input.committedPath)
+    try {
+      await link(temporaryPath, input.committedPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const existing = await readFile(input.committedPath)
+      if (!existing.equals(input.bytes))
+        throw new Error(
+          'foundation review Markdown receipt already exists with different bytes',
+        )
+    }
     const directory = await open(dirname(input.committedPath), 'r')
     try {
       await directory.sync()

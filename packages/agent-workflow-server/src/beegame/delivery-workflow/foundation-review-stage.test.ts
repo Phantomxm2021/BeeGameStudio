@@ -189,6 +189,25 @@ describe('foundation review lane dispatch barrier', () => {
     expect(await readFile(committedPath)).toEqual(validatedBytes)
   })
 
+  test('idempotently accepts identical committed receipt bytes and rejects conflicts', async () => {
+    const root = await workspace()
+    const stagingPath = resolve(root, '.beegame/reviews/.staging/selection.md')
+    const committedPath = resolve(root, '.beegame/reviews/selection.md')
+    const bytes = Buffer.from('immutable receipt bytes\n', 'utf8')
+    await mkdir(dirname(stagingPath), { recursive: true })
+    await writeFile(stagingPath, bytes)
+
+    await atomicCommitReceipt({ stagingPath, committedPath, bytes })
+    await atomicCommitReceipt({ stagingPath, committedPath, bytes })
+    await expect(
+      atomicCommitReceipt({
+        stagingPath,
+        committedPath,
+        bytes: Buffer.from('different receipt bytes\n', 'utf8'),
+      }),
+    ).rejects.toThrow('foundation review Markdown receipt already exists with different bytes')
+  })
+
   test('dispatches three disjoint document lanes before packet-only synthesis', async () => {
     const root = await workspace()
     const initial = createFoundationReviewState({ revision, attempt: 1 })
