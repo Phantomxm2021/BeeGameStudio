@@ -897,10 +897,16 @@ export async function reconcileRunOnStartup(input: {
     sessionIsOpen: input.sessionIsOpen,
   })
   try {
-    const reconciled = await restoreAcceptedReviewAfterRoutingFailure({
+    const changedReview = await unlockReviewForChangedRevision({
       run: acquired.run,
       workspacePath: input.store.workspacePath,
     })
+    const reconciled =
+      changedReview ??
+      (await restoreAcceptedReviewAfterRoutingFailure({
+        run: acquired.run,
+        workspacePath: input.store.workspacePath,
+      }))
     if (!reconciled) return acquired.run
     return input.store.commit(
       reconciled,
@@ -1044,18 +1050,19 @@ export async function retryRun(input: {
     )
       return acquired.run
     const restoredHandoff = undefined
+    const changedReview = restoredHandoff
+      ? undefined
+      : await unlockReviewForChangedRevision({
+          run: acquired.run,
+          workspacePath: input.workspacePath,
+        })
     const restoredAcceptedReview =
-      await restoreAcceptedReviewAfterRoutingFailure({
-        run: acquired.run,
-        workspacePath: input.workspacePath,
-      })
-    const changedReview =
-      restoredHandoff || restoredAcceptedReview
-        ? undefined
-        : await unlockReviewForChangedRevision({
+      !restoredHandoff && !changedReview
+        ? await restoreAcceptedReviewAfterRoutingFailure({
             run: acquired.run,
             workspacePath: input.workspacePath,
           })
+        : undefined
     const resourceRefresh =
       !restoredHandoff &&
       !changedReview &&

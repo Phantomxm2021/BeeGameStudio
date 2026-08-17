@@ -2476,10 +2476,10 @@ describe('delivery workflow recovery', () => {
       },
     })
     await controller.resume(retried)
-    expect(dispatched.map(request => request.contract.reviewRole)).toEqual([
-      'technical-assets',
-      'presentation',
-    ])
+    expect(dispatched).toHaveLength(2)
+    expect(
+      dispatched.map(request => request.contract.reviewRole as string).sort(),
+    ).toEqual(['presentation', 'technical-assets'])
   })
 
   test('startup routes a published NEEDS_REVISION review without reviewer redispatch', async () => {
@@ -2526,6 +2526,218 @@ describe('delivery workflow recovery', () => {
     expect(recovered?.blockedReason).toContain(
       recovered?.foundationReviewState?.finalReportPath,
     )
+  })
+
+  test('explicit retry discards stale review artifacts after documents change', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-retry-changed-'))
+    const ownerId = 'owner-review-retry-changed'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-retry-changed',
+      projectId: 'project-review-retry-changed',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const staleRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision: staleRevision,
+    })
+    await writeFile(
+      join(workspace, 'docs/GDD.md'),
+      `${matrixCompleteDocument('docs/GDD.md')}\nChanged after review.\n`,
+    )
+    const currentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const store = createRunStore(workspace, ownerId)
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      revision: { ...initial.revision, document: staleRevision },
+      foundationReviewState: createFoundationReviewState({
+        revision: staleRevision,
+      }),
+      blockedReason: 'review worker stopped',
+    })
+
+    const retried = await retryRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(retried.revision.document).toBe(currentRevision)
+    expect(retried.foundationReviewState).toBeUndefined()
+    const dispatched: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(request) {
+          dispatched.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.resume(retried)
+    expect(dispatched).toHaveLength(3)
+    expect(
+      dispatched.every(
+        request =>
+          request.revision === currentRevision &&
+          request.allowedPaths?.every(path => path.includes(currentRevision)),
+      ),
+    ).toBe(true)
+    const newReview = (await store.load())?.foundationReviewState
+    expect(newReview?.revision).toBe(currentRevision)
+    expect(newReview?.reports.map(report => report.status)).toEqual([
+      'running',
+      'running',
+      'running',
+      'pending',
+    ])
+    expect(newReview?.reports.map(report => report.digest)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
+
+  test('startup discards stale review artifacts after documents change', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-startup-changed-'))
+    const ownerId = 'owner-review-startup-changed'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-startup-changed',
+      projectId: 'project-review-startup-changed',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const staleRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision: staleRevision,
+    })
+    await writeFile(
+      join(workspace, 'docs/GDD.md'),
+      `${matrixCompleteDocument('docs/GDD.md')}\nChanged while offline.\n`,
+    )
+    const currentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const store = createRunStore(workspace, ownerId)
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      revision: { ...initial.revision, document: staleRevision },
+      foundationReviewState: createFoundationReviewState({
+        revision: staleRevision,
+      }),
+    })
+
+    const recovered = await reconcileRunOnStartup({ store })
+
+    expect(recovered?.revision.document).toBe(currentRevision)
+    expect(recovered?.foundationReviewState).toBeUndefined()
+    const dispatched: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(request) {
+          dispatched.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.resume(recovered!)
+    expect(dispatched).toHaveLength(3)
+    expect(
+      dispatched.every(
+        request =>
+          request.revision === currentRevision &&
+          request.allowedPaths?.every(path => path.includes(currentRevision)),
+      ),
+    ).toBe(true)
+    expect((await store.load())?.foundationReviewState?.revision).toBe(
+      currentRevision,
+    )
+  })
+
+  test('explicit retry fails closed on a tampered receipt for the current revision', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-retry-tampered-'))
+    const ownerId = 'owner-review-retry-tampered'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-retry-tampered',
+      projectId: 'project-review-retry-tampered',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const published = await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision,
+    })
+    await writeFile(
+      join(workspace, published.reports[0].path),
+      'tampered receipt\n',
+    )
+    const store = createRunStore(workspace, ownerId)
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      revision: { ...initial.revision, document: revision },
+      foundationReviewState: createFoundationReviewState({ revision }),
+      blockedReason: 'review worker stopped',
+    })
+
+    await expect(
+      retryRun({
+        store,
+        runId: initial.runId,
+        workspacePath: workspace,
+      }),
+    ).rejects.toThrow()
+    expect((await store.load())?.foundationReviewState?.revision).toBe(revision)
   })
 
   test.each([
