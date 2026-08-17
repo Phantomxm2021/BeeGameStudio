@@ -205,7 +205,7 @@ describe('native CLI process runner', () => {
     expect(command[command.indexOf('--tools') + 1]).toBe('')
   })
 
-  test('leaves the native tool inventory unchanged for a Foundation remediation writer', () => {
+  test('disables file tools for a projected Foundation remediation transaction', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_remediation_author',
       cwd: process.cwd(),
@@ -215,7 +215,8 @@ describe('native CLI process runner', () => {
       workflowDocumentAuthorMode: 'remediation',
     })
 
-    expect(command).not.toContain('--tools')
+    expect(command).toContain('--tools')
+    expect(command[command.indexOf('--tools') + 1]).toBe('')
     expect(command).not.toContain('--disallowedTools')
   })
 

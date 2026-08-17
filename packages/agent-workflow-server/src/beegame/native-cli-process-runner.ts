@@ -69,7 +69,10 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),
+    ...(input.workflowMarkdownStreamContract ||
+    input.workflowDocumentAuthorMode === 'remediation'
+      ? ['--tools', '']
+      : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
