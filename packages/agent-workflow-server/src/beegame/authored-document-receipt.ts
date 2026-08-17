@@ -192,7 +192,44 @@ export async function commitRemediatedDocumentMetadata(input: {
   const workspaceRoot = `${resolve(input.workspacePath)}/`
   if (!target.startsWith(workspaceRoot))
     throw new Error('remediated document path escapes the workspace')
-  const lines = (await readFile(target, 'utf8')).split('\n')
+  const markdown = await readFile(target, 'utf8')
+  await durableWrite(
+    target,
+    renderRemediatedDocumentMetadata({
+      markdown,
+      previousVersion: input.previousVersion,
+      previousUpdatedAt: input.previousUpdatedAt,
+      updatedAt,
+    }),
+  )
+}
+
+export function renderRemediatedDocumentMetadata(input: {
+  markdown: string
+  previousVersion: string
+  previousUpdatedAt: string
+  updatedAt: string
+}): string {
+  const previousParts = input.previousVersion.split('.').map(Number)
+  if (
+    previousParts.length !== 3 ||
+    previousParts.some((part, index) =>
+      !Number.isInteger(part) ||
+      part < 0 ||
+      String(part) !== input.previousVersion.split('.')[index]
+    )
+  )
+    throw new Error('remediated document previous version is invalid')
+  const previousTimestamp = Date.parse(input.previousUpdatedAt)
+  if (!Number.isFinite(previousTimestamp))
+    throw new Error('remediated document previous updated_at is invalid')
+  if (
+    !Number.isFinite(Date.parse(input.updatedAt)) ||
+    Date.parse(input.updatedAt) <= previousTimestamp
+  )
+    throw new Error('remediated document updated_at must advance')
+
+  const lines = input.markdown.split('\n')
   if (lines[0]?.trim() !== '---')
     throw new Error('remediated document front matter is missing')
   const closingIndex = lines.findIndex(
@@ -210,13 +247,13 @@ export async function commitRemediatedDocumentMetadata(input: {
       versionCount += 1
     }
     if (field === 'updated_at') {
-      lines[index] = `updated_at: ${updatedAt}`
+      lines[index] = `updated_at: ${input.updatedAt}`
       updatedAtCount += 1
     }
   }
   if (versionCount !== 1 || updatedAtCount !== 1)
     throw new Error('remediated document service metadata is invalid')
-  await durableWrite(target, lines.join('\n'))
+  return lines.join('\n')
 }
 
 export async function reconcileAuthoredDocumentReceipt(input: {
