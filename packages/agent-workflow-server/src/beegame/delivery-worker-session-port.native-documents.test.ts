@@ -402,7 +402,13 @@ describe('native initial document authoring', () => {
     await port.waitForTerminal?.(request.dispatchId)
 
     expect(prompts[0]).toContain('Submit the report through StructuredOutput')
+    expect(prompts[0]).toContain(
+      'Use native read and search capabilities as needed',
+    )
     expect(prompts[0]).toContain('Do not use Write or Edit')
+    expect(prompts[0]).not.toContain(
+      'native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged',
+    )
     expect(startInput?.workflowJsonSchema).toBeDefined()
     expect(
       (startInput?.workflowJsonSchema as Record<string, unknown> | undefined)

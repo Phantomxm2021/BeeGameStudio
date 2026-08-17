@@ -519,7 +519,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
             )
           : '')
       const nativeToolAutonomyInstruction =
-        request && request.workerType !== 'document-author'
+        request &&
+        request.workerType !== 'document-author' &&
+        request.workerType !== 'document-reviewer'
           ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
           : ''
       const atomicTaskEvidenceInstruction =
