@@ -848,14 +848,6 @@ async function unlockReviewForChangedRevision(input: {
   }
 }
 
-async function acknowledgeCompletedReviewRemediation(input: {
-  run: DeliveryRun
-  workspacePath?: string
-}): Promise<DeliveryRun | undefined> {
-  void input
-  return undefined
-}
-
 export async function reconcileRunOnStartup(input: {
   store: RunStore
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
@@ -994,15 +986,8 @@ export async function retryRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    const acknowledgedReview =
-      !restoredHandoff && !changedReview
-        ? await acknowledgeCompletedReviewRemediation({
-            run: acquired.run,
-            workspacePath: input.workspacePath,
-          })
-        : undefined
     const restoredAcceptedReview =
-      !restoredHandoff && !changedReview && !acknowledgedReview
+      !restoredHandoff && !changedReview
         ? await restoreAcceptedReviewAfterRoutingFailure({
             run: acquired.run,
             workspacePath: input.workspacePath,
@@ -1030,7 +1015,6 @@ export async function retryRun(input: {
     const resumed =
       restoredHandoff ??
       changedReview ??
-      acknowledgedReview ??
       restoredAcceptedReview ??
       transitionDeliveryRun(
         {

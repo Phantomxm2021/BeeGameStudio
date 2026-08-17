@@ -54,6 +54,7 @@ type ExpectedReceiptIdentity = {
   revision: string
   lane: FoundationDocumentLaneId
   projectionDigest: string
+  allowedEvidencePaths?: readonly string[]
 }
 
 function fail(message: string): never {
@@ -288,10 +289,12 @@ function assertLaneAuthority(
     changes: Array<{ path: string }>
   },
   lane: FoundationDocumentLaneId,
+  allowedEvidencePaths: readonly string[] = [],
 ): void {
   const ownedPaths = new Set(foundationDocumentLaneById(lane).ownedPaths)
+  const evidencePaths = new Set([...ownedPaths, ...allowedEvidencePaths])
   for (const evidence of candidate.evidence ?? [])
-    if (!ownedPaths.has(evidence.path as never))
+    if (!evidencePaths.has(evidence.path))
       fail('evidence path is outside lane authority')
   for (const change of candidate.changes ?? [])
     if (!ownedPaths.has(change.path as never))
@@ -302,6 +305,7 @@ function parseCandidate(
   nodes: Content[],
   start: number,
   lane: FoundationDocumentLaneId,
+  allowedEvidencePaths: readonly string[],
 ): { candidate: FoundationReviewCandidate; next: number } {
   const { reference, title } = candidateHeading(nodes[start], lane)
   const expectedHeadings = [
@@ -343,7 +347,7 @@ function parseCandidate(
     changes: parseChanges(sections.get('Changes')!),
     acceptance: parseAcceptance(sections.get('Acceptance')!),
   }
-  assertLaneAuthority(raw, lane)
+  assertLaneAuthority(raw, lane, allowedEvidencePaths)
   return {
     candidate: {
       reference,
@@ -392,7 +396,12 @@ export function parseFoundationReviewLaneMarkdown(
       (nodes[index] as Heading).depth !== 2
     )
       fail('candidate heading is invalid')
-    const parsed = parseCandidate(nodes, index, expected.lane)
+    const parsed = parseCandidate(
+      nodes,
+      index,
+      expected.lane,
+      expected.allowedEvidencePaths ?? [],
+    )
     if (
       candidates.some(
         candidate => candidate.reference === parsed.candidate.reference,
@@ -439,7 +448,7 @@ export function foundationReviewLaneMarkdownInstruction(
     '  Action: `<required action>`',
     '### Acceptance',
     '- `<mechanically-checkable condition>`',
-    `Every evidence and change path must be one of: ${ownedPaths}. Report at most 8 candidates; candidate references must be unique.`,
+    `Every change path must be one of: ${ownedPaths}. Evidence paths may additionally name a locally validated projection source path. Report at most 8 candidates; candidate references must be unique.`,
   ].join('\n\n')
 }
 

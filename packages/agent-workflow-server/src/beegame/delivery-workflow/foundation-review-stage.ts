@@ -13,7 +13,10 @@ import {
   type FoundationReviewLaneReceipt,
   type FoundationReviewSelection,
 } from './foundation-review-markdown'
-import { writeFoundationReviewProjection } from './foundation-review-projection'
+import {
+  readFoundationReviewProjection,
+  writeFoundationReviewProjection,
+} from './foundation-review-projection'
 import {
   commitAssembledFoundationReview,
   foundationReviewLaneReceiptPath,
@@ -132,6 +135,12 @@ async function readLaneReceipt(input: {
     revision: input.state.revision,
     laneId: input.laneId,
   })
+  const validatedProjection = await readFoundationReviewProjection({
+    workspacePath: input.workspacePath,
+    revision: input.state.revision,
+    laneId: input.laneId,
+    expectedDigest: projection.digest,
+  })
   const path = foundationReviewLaneReceiptPath(
     input.workspacePath,
     input.state.revision,
@@ -146,6 +155,9 @@ async function readLaneReceipt(input: {
     revision: input.state.revision,
     lane: input.laneId,
     projectionDigest: projection.digest,
+    allowedEvidencePaths: validatedProjection.projection.sources.map(
+      source => source.path,
+    ),
   })
 }
 
@@ -178,6 +190,7 @@ async function acceptLaneReceipt(input: {
   currentRevision: string
   laneId: FoundationDocumentLaneId
   projectionDigest: string
+  allowedEvidencePaths: readonly string[]
 }): Promise<{
   receipt: FoundationReviewLaneReceipt
   path: string
@@ -197,6 +210,7 @@ async function acceptLaneReceipt(input: {
     revision: input.revision,
     lane: input.laneId,
     projectionDigest: input.projectionDigest,
+    allowedEvidencePaths: input.allowedEvidencePaths,
   })
   const committedPath = foundationReviewLaneReceiptPath(
     input.workspacePath,
@@ -397,12 +411,21 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       revision: state.revision,
       laneId: terminal.role,
     })
+    const validatedProjection = await readFoundationReviewProjection({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      laneId: terminal.role,
+      expectedDigest: projection.digest,
+    })
     const accepted = await acceptLaneReceipt({
       workspacePath: input.workspacePath,
       revision: state.revision,
       currentRevision: input.currentRevision,
       laneId: terminal.role,
       projectionDigest: projection.digest,
+      allowedEvidencePaths: validatedProjection.projection.sources.map(
+        source => source.path,
+      ),
     })
     return assertFoundationReviewState({
       ...state,
