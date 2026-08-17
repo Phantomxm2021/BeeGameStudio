@@ -213,6 +213,12 @@ describe('workflow stage card history', () => {
       }),
     ).toBe(false)
     expect(
+      isWorkflowStageCardSnapshot({
+        ...snapshot,
+        convergencePass: 2,
+      }),
+    ).toBe(false)
+    expect(
       isFrozenWorkflowStageCardEvent({
         ...event,
         stageSnapshot: { ...snapshot, phaseIndex: 2 },

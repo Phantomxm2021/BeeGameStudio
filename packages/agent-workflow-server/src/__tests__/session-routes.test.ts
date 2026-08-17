@@ -1313,6 +1313,7 @@ describe('delivery workflow session continuation', () => {
     ).toBe(false)
     const cards = workflow.stageSnapshots as Array<Record<string, unknown>>
     expect(cards.map(card => card.phaseIndex)).toEqual([1, 2, 3])
+    expect(cards.some(card => 'convergencePass' in card)).toBe(false)
     expect(cards[0]).toMatchObject({
       stageId: 'BRIEF_CONFIRMED',
       status: 'completed',

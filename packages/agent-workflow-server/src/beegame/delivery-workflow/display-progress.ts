@@ -18,7 +18,6 @@ export type DeliveryProgress = {
   phaseIndex: number
   phaseCount: number
   substage?: DeliveryProgressSubstage
-  convergencePass?: number
 }
 
 export function projectDeliveryProgress(

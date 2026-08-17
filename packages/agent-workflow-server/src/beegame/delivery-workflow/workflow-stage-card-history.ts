@@ -35,7 +35,6 @@ export type WorkflowStageCardSnapshot = {
   status: DeliveryRunStatus
   currentPhase: string
   substage?: DeliveryProgressSubstage
-  convergencePass?: number
   documentStep?: string
   thinking?: 'working' | 'waiting' | 'idle'
   worker?: string
@@ -142,6 +141,7 @@ export function isWorkflowStageCardSnapshot(
   value: unknown,
 ): value is WorkflowStageCardSnapshot {
   if (!isRecord(value)) return false
+  if ('convergencePass' in value) return false
   const stageId = value.stageId as DeliveryProgressStage
   if (!DELIVERY_PROGRESS_STAGES.includes(stageId)) return false
   if (
@@ -161,13 +161,6 @@ export function isWorkflowStageCardSnapshot(
       'REPAIRING',
       'CHECKLIST_DRAFTING',
     ].includes(value.substage as DeliveryProgressSubstage)
-  )
-    return false
-  if (
-    value.convergencePass !== undefined &&
-    (typeof value.convergencePass !== 'number' ||
-      !Number.isInteger(value.convergencePass) ||
-      value.convergencePass <= 0)
   )
     return false
   if (
@@ -497,9 +490,6 @@ export function projectCurrentStageCard(input: {
     status: workflowStatus(run),
     currentPhase: run.phase,
     ...(progress.substage ? { substage: progress.substage } : {}),
-    ...(progress.convergencePass
-      ? { convergencePass: progress.convergencePass }
-      : {}),
     ...(run.documentStep ? { documentStep: run.documentStep } : {}),
     thinking: workflowThinking(run),
     ...(run.activeDispatch?.workerType

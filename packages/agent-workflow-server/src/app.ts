@@ -6271,9 +6271,6 @@ function workflowStageSnapshotsForDisplay(
       status: snapshot.status,
       currentPhase: snapshot.currentPhase,
       ...(snapshot.substage ? { substage: snapshot.substage } : {}),
-      ...(snapshot.convergencePass
-        ? { convergencePass: snapshot.convergencePass }
-        : {}),
       ...(snapshot.documentStep ? { documentStep: snapshot.documentStep } : {}),
       ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
       ...(snapshot.worker ? { worker: snapshot.worker } : {}),
