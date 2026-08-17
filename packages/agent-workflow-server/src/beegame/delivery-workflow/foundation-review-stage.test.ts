@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
@@ -45,15 +46,18 @@ async function workspace(): Promise<string> {
   return root
 }
 
-function completedRemediationState(): FoundationRemediationState {
+function completedRemediationState(input: {
+  reviewPath: string
+  reviewDigest: string
+}): FoundationRemediationState {
   const ownedPaths = [
     'docs/GDD.md',
     'docs/LEVEL_SCENE_DESIGN.md',
     'docs/BALANCE_DESIGN.md',
   ] as const
   return {
-    reviewPath: '.beegame/reviews/foundation/prior/review.json',
-    reviewDigest: 'e'.repeat(64),
+    reviewPath: input.reviewPath,
+    reviewDigest: input.reviewDigest,
     sourceRevision: 'f'.repeat(64),
     resultingRevision: revision,
     lanes: [
@@ -63,7 +67,7 @@ function completedRemediationState(): FoundationRemediationState {
         affectedPaths: ['docs/GDD.md'],
         status: 'completed',
         receipt: {
-          reviewDigest: 'e'.repeat(64),
+          reviewDigest: input.reviewDigest,
           sourceRevision: 'f'.repeat(64),
           ownedPaths: [...ownedPaths],
           beforeDigests: Object.fromEntries(
@@ -199,32 +203,111 @@ describe('foundation review lane dispatch barrier', () => {
     expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
   })
 
-  test('dispatches verification as one standalone unit behind remediation receipts', async () => {
+  test('removes an uncommitted lane draft before redispatch', async () => {
     const root = await workspace()
+    const stagingPath = foundationReviewLanePacketStagingPath(
+      root,
+      revision,
+      'presentation',
+    )
+    await mkdir(dirname(stagingPath), { recursive: true })
+    await writeFile(stagingPath, '{"stale":true}', 'utf8')
+
+    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const resumed = {
+      ...initial,
+      status: 'running' as const,
+      reports: initial.reports.map(report =>
+        report.role === 'core-design' || report.role === 'technical-assets'
+          ? {
+              ...report,
+              status: 'completed' as const,
+              digest:
+                report.role === 'core-design'
+                  ? 'b'.repeat(64)
+                  : 'c'.repeat(64),
+            }
+          : report,
+      ),
+    }
+
+    const dispatches = await buildFoundationReviewDispatches({
+      state: resumed,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+
+    expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
+    await expect(readFile(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('dispatches verification as three bounded lanes behind remediation receipts', async () => {
+    const root = await workspace()
+    const priorRevision = 'c'.repeat(64)
+    const priorReviewPath = `.beegame/reviews/foundation/${priorRevision}/review.json`
+    const priorBytes = Buffer.from(
+      `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision: priorRevision,
+        verdict: 'NEEDS_REVISION',
+        priorConflictStatus: [],
+        conflicts: [
+          {
+            id: 'B1',
+            title: 'Core rule mismatch',
+            problem: 'The GDD cannot be implemented consistently.',
+            evidence: [
+              { path: 'docs/GDD.md', location: 'Rules', observed: 'Mismatch.' },
+            ],
+            requiredOutcome: 'Use one rule.',
+            changes: [{ path: 'docs/GDD.md', action: 'Align the rule.' }],
+            acceptance: ['The rule is unique.'],
+          },
+        ],
+      }, null, 2)}\n`,
+    )
+    await mkdir(dirname(resolve(root, priorReviewPath)), { recursive: true })
+    await writeFile(resolve(root, priorReviewPath), priorBytes)
+    const priorReviewDigest = createHash('sha256').update(priorBytes).digest('hex')
     const state = createFoundationReviewState({
       mode: 'verification',
       revision,
       attempt: 2,
-      priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
-      priorReviewDigest: 'e'.repeat(64),
+      priorReviewPath,
+      priorReviewDigest,
     })
     const dispatches = await buildFoundationReviewDispatches({
       state,
       workspacePath: root,
       confirmedBriefDigest: 'd'.repeat(64),
-      remediationState: completedRemediationState(),
+      remediationState: completedRemediationState({
+        reviewPath: priorReviewPath,
+        reviewDigest: priorReviewDigest,
+      }),
     })
-    expect(dispatches.map(dispatch => dispatch.role)).toEqual(['verification'])
+    expect(dispatches.map(dispatch => dispatch.role)).toEqual([
+      'core-design',
+      'technical-assets',
+      'presentation',
+    ])
     expect(dispatches[0].contract.priorReview).toEqual({
-      path: '.beegame/reviews/foundation/prior/review.json',
-      digest: 'e'.repeat(64),
+      path: priorReviewPath,
+      digest: priorReviewDigest,
     })
     expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
+    expect(dispatches.map(dispatch => dispatch.contract.priorConflictIds)).toEqual([
+      ['B1'],
+      [],
+      [],
+    ])
     expect(dispatches[0].assignment.sourcePaths).toEqual([
-      resolve(root, '.beegame/reviews/foundation/prior/review.json'),
+      resolve(root, 'docs/GDD.md'),
+      resolve(root, 'docs/LEVEL_SCENE_DESIGN.md'),
+      resolve(root, 'docs/BALANCE_DESIGN.md'),
     ])
     expect(dispatches[0].assignment.verificationSourcePaths).toEqual([
-      resolve(root, 'docs/GDD.md'),
+      resolve(root, priorReviewPath),
       resolve(
         root,
         `.beegame/reviews/foundation/${revision}/projections/core-design.json`,
@@ -258,6 +341,7 @@ describe('foundation review lane dispatch barrier', () => {
           scope: 'foundation',
           revision,
           lane: lane.id,
+          mode: 'initial',
           candidates: [],
         }),
         'utf8',

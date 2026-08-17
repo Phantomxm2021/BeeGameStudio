@@ -2024,9 +2024,10 @@ describe('delivery workflow recovery', () => {
       ownerId: 'owner-1',
     })
     await mkdir(store.paths.directory, { recursive: true })
+    const obsoleteVersion = 21
     const obsoleteSnapshot = JSON.stringify({
       ...initial,
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 2,
+      schemaVersion: obsoleteVersion,
       activeDispatch: {
         retiredStateMarker: true,
       },
@@ -2035,7 +2036,7 @@ describe('delivery workflow recovery', () => {
 
     await expect(store.load()).rejects.toMatchObject({
       code: 'obsolete',
-      message: `unsupported workflow snapshot schema version ${DELIVERY_RUN_SCHEMA_VERSION - 2}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+      message: `unsupported workflow snapshot schema version ${obsoleteVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
     })
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
   })
@@ -2095,6 +2096,87 @@ describe('delivery workflow recovery', () => {
       resourceProductionState: initial.resourceProductionState,
     })
     expect(migrated).not.toHaveProperty('foundationReviewState')
+    expect(
+      JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
+    ).toMatchObject({ schemaVersion: DELIVERY_RUN_SCHEMA_VERSION })
+  })
+
+  test('migrates the schema 23 single verification worker into three lanes and synthesis', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-23-review-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-23-review',
+      projectId: 'project-schema-23-review',
+      ownerId: 'owner-1',
+    })
+    const revision = 'a'.repeat(64)
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({
+        ...initial,
+        schemaVersion: 23,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: 'single verification failed after context compaction',
+        foundationReviewState: {
+          revision,
+          mode: 'verification',
+          attempt: 2,
+          status: 'failed',
+          priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
+          priorReviewDigest: 'b'.repeat(64),
+          reports: [
+            {
+              role: 'verification',
+              path: `.beegame/reviews/foundation/${revision}/review.json`,
+              status: 'failed',
+              failureReason: 'schema drift',
+            },
+          ],
+        },
+      }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated).toMatchObject({
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      status: 'running',
+      foundationReviewState: {
+        mode: 'verification',
+        status: 'running',
+        reports: [
+          { role: 'core-design', status: 'pending' },
+          { role: 'technical-assets', status: 'pending' },
+          { role: 'presentation', status: 'pending' },
+          { role: 'synthesis', status: 'pending' },
+        ],
+      },
+    })
+    expect(migrated?.blockedReason).toBeUndefined()
+  })
+
+  test('migrates schema 24 remediation state without inventing a mutation baseline', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-24-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-24',
+      projectId: 'project-schema-24',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({ ...initial, schemaVersion: 24 }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated?.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
     expect(
       JSON.parse(await readFile(store.paths.snapshot, 'utf8')),
     ).toMatchObject({ schemaVersion: DELIVERY_RUN_SCHEMA_VERSION })
@@ -2884,6 +2966,50 @@ describe('delivery workflow recovery', () => {
 
   })
 
+  test('does not discard an interrupted remediation when its owned documents changed', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-remediation-retry-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const reviewRevision = 'a'.repeat(64)
+    const initial = createTestDeliveryRun({
+      runId: 'run-remediation-retry',
+      projectId: 'project-remediation-retry',
+      ownerId: 'owner-1',
+      documentRevision: reviewRevision,
+    })
+    const remediation = createFoundationRemediationStateFromAuthority({
+      reviewPath: `.beegame/reviews/foundation/${reviewRevision}/review.json`,
+      reviewDigest: 'b'.repeat(64),
+      sourceRevision: reviewRevision,
+      affectedPaths: ['docs/GDD.md'],
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs/GDD.md'), '# partially repaired\n')
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: undefined,
+      status: 'stopped',
+      blockedReason: 'user stopped workflow',
+      foundationReviewState: createFoundationReviewState({
+        mode: 'initial',
+        revision: reviewRevision,
+      }),
+      foundationRemediationState: remediation,
+    })
+
+    const resumed = await resumeRun({
+      store,
+      runId: initial.runId,
+      workspacePath: workspace,
+    })
+
+    expect(resumed.phase).toBe('DOCUMENT_DRAFTING')
+    expect(resumed.foundationRemediationState?.reviewDigest).toBe(
+      remediation.reviewDigest,
+    )
+    expect(resumed.foundationReviewState?.revision).toBe(reviewRevision)
+  })
+
   test('waits for every required remediation receipt before Foundation verification', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-remediation-barrier-'))
     await mkdir(join(workspace, 'docs'), { recursive: true })
@@ -3515,7 +3641,11 @@ describe('delivery workflow recovery', () => {
       priorReviewPath,
       priorReviewDigest: 'e'.repeat(64),
     })
-    const final = review.reports.find(report => report.role === 'verification')!
+    for (const report of review.reports.slice(0, 3)) {
+      report.status = 'completed'
+      report.digest = createHash('sha256').update(report.role).digest('hex')
+    }
+    const final = review.reports.find(report => report.role === 'synthesis')!
     const priorReviewDigest = 'e'.repeat(64)
     const finalBytes = foundationRecoveryReviewJson({
       revision: documentRevision,

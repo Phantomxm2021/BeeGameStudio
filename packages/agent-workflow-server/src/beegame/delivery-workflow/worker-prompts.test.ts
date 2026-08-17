@@ -401,7 +401,7 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(specialistPrompt).toContain(
-      'write one bounded Foundation review lane packet',
+      'return one bounded Foundation review lane packet JSON object',
     )
     expect(specialistPrompt).toContain('do not decide the final verdict')
     expect(specialistPrompt).toContain('do not modify canonical documents')
@@ -417,7 +417,14 @@ describe('resource-content worker prompts', () => {
     expect(specialistPrompt).toContain(
       'path, location and observed',
     )
-    expect(specialistPrompt).toContain('at most 24 candidates')
+    expect(specialistPrompt).toContain('8 highest-priority proven blockers')
+    expect(specialistPrompt).toContain('Never write an absolute path')
+    expect(specialistPrompt).toContain(
+      'Submit the complete contracted object once through StructuredOutput',
+    )
+    expect(specialistPrompt).not.toContain(
+      'Finish only after every assigned report file is fully written',
+    )
     expect(specialistPrompt).toContain(
       'Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code',
     )
@@ -454,6 +461,40 @@ describe('resource-content worker prompts', () => {
       '"lane":"technical-assets"',
     )
 
+    const verificationLanePrompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'a'.repeat(64),
+      contract: {
+        reviewScope: 'foundation',
+        reviewMode: 'verification',
+        reviewRole: 'core-design',
+        priorReview: {
+          path: '.beegame/reviews/foundation/old/review.json',
+          digest: 'b'.repeat(64),
+        },
+        priorConflictIds: ['B1', 'B4'],
+        assignment: {
+          sourcePaths: ['/workspace/docs/GDD.md'],
+          verificationSourcePaths: [
+            '/workspace/.beegame/reviews/foundation/old/review.json',
+            '/workspace/.beegame/reviews/foundation/new/projections/core-design.json',
+          ],
+          stagingOutputPaths: [
+            '/workspace/.beegame/reviews/foundation/new/.staging/parts/core-design.json',
+          ],
+        },
+      },
+    })
+    expect(verificationLanePrompt).toContain(
+      `"priorReviewDigest":"${'b'.repeat(64)}"`,
+    )
+    expect(verificationLanePrompt).toContain('B1, B4')
+
     const repeatReviewerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -461,23 +502,24 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
-      taskId: 'review:foundation:verification:5',
-      revision: 'revision',
+      taskId: 'review:foundation:synthesis:5',
+      revision: 'a'.repeat(64),
       contract: {
         reviewScope: 'foundation',
         reviewMode: 'verification',
-        reviewRole: 'verification',
+        reviewRole: 'synthesis',
         priorReview: {
           path: '.beegame/reviews/foundation/old/review.json',
           digest: 'a'.repeat(64),
         },
         assignment: {
           sourcePaths: [
-            '/workspace/.beegame/reviews/foundation/old/review.json',
+            '/workspace/.beegame/reviews/foundation/new/parts/core-design.json',
+            '/workspace/.beegame/reviews/foundation/new/parts/technical-assets.json',
+            '/workspace/.beegame/reviews/foundation/new/parts/presentation.json',
           ],
           verificationSourcePaths: [
-            '/workspace/docs/GDD.md',
-            '/workspace/docs/TECHNICAL_DESIGN.md',
+            '/workspace/.beegame/reviews/foundation/old/review.json',
           ],
           stagingOutputPaths: [
             '/workspace/.beegame/reviews/staging/review.json',
@@ -487,6 +529,7 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(repeatReviewerPrompt).toContain('accepted prior review')
+    expect(repeatReviewerPrompt).toContain('three accepted verification lane packets')
     expect(repeatReviewerPrompt).toContain('priorConflictStatus')
     expect(repeatReviewerPrompt).toContain(
       `"priorReviewDigest":"${'a'.repeat(64)}"`,

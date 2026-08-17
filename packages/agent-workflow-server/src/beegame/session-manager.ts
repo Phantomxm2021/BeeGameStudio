@@ -261,6 +261,8 @@ export type BeeGameSessionRunnerStartInput = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  /** Native structured-output authority for workers that must return JSON. */
+  workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
@@ -391,6 +393,7 @@ type SessionRecord = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   atomicTaskPlannerEvidenceWriteGranted?: boolean
@@ -566,6 +569,7 @@ export type StartBeeGameSessionInput = {
   workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
+  workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
@@ -714,6 +718,9 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowReadOnlyPaths
         ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
+        : {}),
+      ...(input.workflowJsonSchema
+        ? { workflowJsonSchema: structuredClone(input.workflowJsonSchema) }
         : {}),
       ...(input.workflowDocumentAuthorMode
         ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
@@ -1417,6 +1424,9 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowReadOnlyPaths
             ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
+            : {}),
+          ...(record.workflowJsonSchema
+            ? { workflowJsonSchema: structuredClone(record.workflowJsonSchema) }
             : {}),
           ...(record.workflowDocumentAuthorMode
             ? {

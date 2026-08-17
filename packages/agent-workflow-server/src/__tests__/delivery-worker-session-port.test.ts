@@ -887,6 +887,9 @@ describe('delivery worker session credentials', () => {
             affectedPaths: writtenPaths,
             sourceRevision,
           },
+          previousDocumentDigests: {
+            'docs/GDD.md': 'a'.repeat(64),
+          },
         },
       })
       for (const [index, path] of writtenPaths.entries()) {
@@ -1301,24 +1304,23 @@ describe('delivery worker session credentials', () => {
         revision,
         'foundation-initial-1-synthesis',
       )
-      await mkdir(dirname(stagingPath), { recursive: true })
-      await writeFile(
-        stagingPath,
-        `${JSON.stringify({
+      const reviewText = `${JSON.stringify({
           version: 2,
           scope: 'foundation',
           revision,
           verdict: 'READY',
           priorConflictStatus: [],
           conflicts: [],
-        })}\n`,
-        'utf8',
-      )
+        })}\n`
       const events = [
         {
           id: 'foundation-review-result',
           type: 'result' as const,
-          text: 'completed',
+          text: '',
+          payload: {
+            type: 'result' as const,
+            structured_output: JSON.parse(reviewText),
+          },
           createdAt: new Date(),
         },
       ]

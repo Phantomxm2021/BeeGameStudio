@@ -5994,7 +5994,6 @@ function projectFoundationReviewTaskState(
         'technical-assets',
         'presentation',
         'synthesis',
-        'verification',
       ].includes(String(report.role)) ||
       !['pending', 'running', 'completed', 'failed'].includes(
         String(report.status),
@@ -6007,8 +6006,7 @@ function projectFoundationReviewTaskState(
           | 'core-design'
           | 'technical-assets'
           | 'presentation'
-          | 'synthesis'
-          | 'verification',
+          | 'synthesis',
         status: report.status as
           | 'pending'
           | 'running'

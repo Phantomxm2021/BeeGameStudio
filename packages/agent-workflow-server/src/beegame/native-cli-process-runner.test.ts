@@ -155,6 +155,30 @@ describe('native CLI process runner', () => {
     expect(command.some(value => value.startsWith('--agents='))).toBe(false)
   })
 
+  test('exposes only native read and search tools to a Reviewer', () => {
+    const workflowJsonSchema = {
+      type: 'object',
+      properties: { version: { const: 1 } },
+      required: ['version'],
+      additionalProperties: false,
+    }
+    const command = nativeRuntimeCommand({
+      sessionId: 'foundation-reviewer',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-reviewer',
+      workflowJsonSchema,
+    })
+
+    expect(command).toContain('--tools')
+    expect(command[command.indexOf('--tools') + 1]).toBe('Read,Grep,Glob')
+    expect(command).toContain('--json-schema')
+    expect(command[command.indexOf('--json-schema') + 1]).toBe(
+      JSON.stringify(workflowJsonSchema),
+    )
+  })
+
   test('disables native tools only for a foundation Markdown stream turn', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_stream_author',

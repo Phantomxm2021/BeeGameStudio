@@ -119,7 +119,36 @@ export const foundationReviewSchema = z
   })
 
 export function foundationReviewOutputContractInstruction(): string {
+  const rootShape = JSON.stringify({
+    version: FOUNDATION_REVIEW_VERSION,
+    scope: 'foundation',
+    revision: '<assigned-64-hex-revision>',
+    verdict: '<READY-or-NEEDS_REVISION>',
+    priorReviewDigest: '<verification-only-64-hex-digest>',
+    priorConflictStatus: [
+      { id: 'B1', status: '<closed-or-open>', note: '<optional-bounded-note>' },
+    ],
+    conflicts: [
+      {
+        id: 'B1',
+        title: '<blocking-defect-title>',
+        problem: '<why-the-contract-cannot-be-implemented-or-verified>',
+        evidence: [
+          {
+            path: 'docs/GDD.md',
+            location: '<stable-location>',
+            observed: '<bounded-observation>',
+          },
+        ],
+        requiredOutcome: '<shared-required-outcome>',
+        changes: [{ path: 'docs/GDD.md', action: '<required-action>' }],
+        acceptance: ['<mechanically-checkable-condition>'],
+      },
+    ],
+  })
   return [
+    `The root object has exactly this shape: ${rootShape}`,
+    'There is no root-level acceptance field. acceptance exists only inside each conflicts item. Do not add summary, severity, impact, coverage, notes or any other root or conflict field.',
     `version must be the integer ${FOUNDATION_REVIEW_VERSION}; scope must be the string foundation; revision must exactly equal the assigned revision; verdict must be READY or NEEDS_REVISION.`,
     'priorConflictStatus must always be present as an array; use [] on the initial review. Each priorConflictStatus object may contain only id, status and an optional bounded note explaining the verification evidence. Include priorReviewDigest only for a verification review.',
     'Conflict IDs must be B1, B2, B3 and so on with no suffix or descriptive text.',

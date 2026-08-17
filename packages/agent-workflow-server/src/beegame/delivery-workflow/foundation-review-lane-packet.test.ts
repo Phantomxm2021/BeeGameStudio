@@ -74,6 +74,7 @@ function packet(overrides: Record<string, unknown> = {}) {
     scope: 'foundation',
     revision,
     lane: 'technical-assets',
+    mode: 'initial',
     candidates: [candidate()],
     ...overrides,
   }
@@ -104,7 +105,7 @@ describe('foundation review lane packets', () => {
     ).toThrow()
     expect(() =>
       foundationReviewLanePacketSchema.parse(
-        packet({ candidates: Array.from({ length: 25 }, candidate) }),
+        packet({ candidates: Array.from({ length: 9 }, candidate) }),
       ),
     ).toThrow()
     expect(() =>
@@ -112,6 +113,54 @@ describe('foundation review lane packets', () => {
         packet({ candidates: [candidate({ replacementText: 'Rewrite it.' })] }),
       ),
     ).toThrow()
+  })
+
+  test('canonicalizes workspace-confined absolute evidence paths before commit', async () => {
+    const root = await workspace()
+    const projection = await writeFoundationReviewProjection({
+      workspacePath: root,
+      revision,
+      laneId: 'technical-assets',
+    })
+    await stagePacket(
+      root,
+      packet({
+        candidates: [
+          candidate({
+            evidence: [
+              {
+                path: resolve(root, 'docs/TECHNICAL_DESIGN.md'),
+                location: 'Architecture',
+                observed:
+                  'Exact docs/TECHNICAL_DESIGN.md content for architecture.',
+              },
+            ],
+          }),
+        ],
+      }),
+    )
+
+    const accepted = await acceptFoundationReviewLanePacket({
+      workspacePath: root,
+      revision,
+      currentRevision: revision,
+      laneId: 'technical-assets',
+      projectionDigest: projection.digest,
+      mode: 'initial',
+    })
+    const committed = JSON.parse(
+      await readFile(
+        foundationReviewLanePacketPath(root, revision, 'technical-assets'),
+        'utf8',
+      ),
+    )
+
+    expect(accepted.packet.candidates[0]?.evidence[0]?.path).toBe(
+      'docs/TECHNICAL_DESIGN.md',
+    )
+    expect(committed.candidates[0].evidence[0].path).toBe(
+      'docs/TECHNICAL_DESIGN.md',
+    )
   })
 
   test('atomically accepts exact observations from owned and projected source bytes', async () => {
@@ -129,6 +178,7 @@ describe('foundation review lane packets', () => {
       currentRevision: revision,
       laneId: 'technical-assets',
       projectionDigest: projection.digest,
+      mode: 'initial',
     })
     const committed = await readFile(
       foundationReviewLanePacketPath(root, revision, 'technical-assets'),
@@ -148,6 +198,7 @@ describe('foundation review lane packets', () => {
         currentRevision: revision,
         laneId: 'technical-assets',
         projectionDigest: projection.digest,
+        mode: 'initial',
       }),
     ).rejects.toThrow('foundation review lane packet is already committed')
   })
@@ -161,6 +212,7 @@ describe('foundation review lane packets', () => {
         currentRevision: 'b'.repeat(64),
         laneId: 'technical-assets',
         projectionDigest: 'c'.repeat(64),
+        mode: 'initial',
       }),
     ).rejects.toThrow('canonical artifacts changed during foundation review')
 
@@ -178,6 +230,7 @@ describe('foundation review lane packets', () => {
         currentRevision: revision,
         laneId: 'technical-assets',
         projectionDigest: roleProjection.digest,
+        mode: 'initial',
       }),
     ).rejects.toThrow('foundation review lane packet lane does not match')
 
@@ -221,6 +274,7 @@ describe('foundation review lane packets', () => {
         currentRevision: revision,
         laneId: 'core-design',
         projectionDigest: outsideProjection.digest,
+        mode: 'initial',
       }),
     ).rejects.toThrow('foundation review evidence path is outside lane authority')
 
@@ -244,6 +298,7 @@ describe('foundation review lane packets', () => {
         currentRevision: revision,
         laneId: 'technical-assets',
         projectionDigest: jsonProjection.digest,
+        mode: 'initial',
       }),
     ).rejects.toThrow('foundation review lane packet is not valid JSON')
 
@@ -267,11 +322,12 @@ describe('foundation review lane packets', () => {
         currentRevision: revision,
         laneId: 'technical-assets',
         projectionDigest: utfProjection.digest,
+        mode: 'initial',
       }),
     ).rejects.toThrow('foundation review lane packet is not valid UTF-8')
   })
 
-  test('rejects an absent observation even when the document path is authorized', async () => {
+  test('accepts a derived observation when its source path and revision are authorized', async () => {
     const root = await workspace()
     const projection = await writeFoundationReviewProjection({
       workspacePath: root,
@@ -287,7 +343,8 @@ describe('foundation review lane packets', () => {
               {
                 path: 'docs/TECHNICAL_DESIGN.md',
                 location: 'Architecture',
-                observed: 'A fabricated observation.',
+                observed:
+                  'The two accepted rows imply incompatible implementation totals.',
               },
             ],
           }),
@@ -295,14 +352,76 @@ describe('foundation review lane packets', () => {
       }),
     )
 
+    const accepted = await acceptFoundationReviewLanePacket({
+      workspacePath: root,
+      revision,
+      currentRevision: revision,
+      laneId: 'technical-assets',
+      projectionDigest: projection.digest,
+      mode: 'initial',
+    })
+
+    expect(accepted.packet.candidates[0]?.evidence[0]?.observed).toBe(
+      'The two accepted rows imply incompatible implementation totals.',
+    )
+  })
+
+  test('binds verification packets to the prior digest and exact lane conflict set', async () => {
+    const root = await workspace()
+    const projection = await writeFoundationReviewProjection({
+      workspacePath: root,
+      revision,
+      laneId: 'technical-assets',
+    })
+    await stagePacket(
+      root,
+      packet({
+        mode: 'verification',
+        priorReviewDigest: 'b'.repeat(64),
+        priorConflictStatus: [
+          { id: 'B2', status: 'closed', note: 'The runtime contract now agrees.' },
+        ],
+        candidates: [],
+      }),
+    )
+    const accepted = await acceptFoundationReviewLanePacket({
+      workspacePath: root,
+      revision,
+      currentRevision: revision,
+      laneId: 'technical-assets',
+      projectionDigest: projection.digest,
+      mode: 'verification',
+      priorReviewDigest: 'b'.repeat(64),
+      priorConflictIds: ['B2'],
+    })
+    expect(accepted.packet.mode).toBe('verification')
+
+    const mismatchRoot = await workspace()
+    const mismatchProjection = await writeFoundationReviewProjection({
+      workspacePath: mismatchRoot,
+      revision,
+      laneId: 'technical-assets',
+    })
+    await stagePacket(
+      mismatchRoot,
+      packet({
+        mode: 'verification',
+        priorReviewDigest: 'b'.repeat(64),
+        priorConflictStatus: [],
+        candidates: [],
+      }),
+    )
     await expect(
       acceptFoundationReviewLanePacket({
-        workspacePath: root,
+        workspacePath: mismatchRoot,
         revision,
         currentRevision: revision,
         laneId: 'technical-assets',
-        projectionDigest: projection.digest,
+        projectionDigest: mismatchProjection.digest,
+        mode: 'verification',
+        priorReviewDigest: 'b'.repeat(64),
+        priorConflictIds: ['B2'],
       }),
-    ).rejects.toThrow('foundation review evidence is absent from accepted source bytes')
+    ).rejects.toThrow('prior conflict coverage does not match')
   })
 })

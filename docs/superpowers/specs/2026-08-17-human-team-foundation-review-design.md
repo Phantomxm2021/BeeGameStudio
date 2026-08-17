@@ -118,10 +118,13 @@ type FoundationReviewLanePacket = {
 }
 ```
 
-Packets contain at most 24 candidates. Acceptance verifies that every evidence
-path belongs to the lane's full documents or contracted projection, and that
-each bounded `observed` value occurs in the accepted source bytes. Invalid or
-stale evidence fails the owning task; Bee Game Studio never repairs it.
+Packets contain at most 8 highest-priority candidates. Acceptance verifies that
+every evidence path belongs to the lane's full documents or contracted
+projection and that the packet is bound to the accepted source revision and
+projection digest. `observed` is the Reviewer's bounded calculation or
+cross-section observation, not a required verbatim quote. Invalid authority or
+stale evidence fails the owning task; Bee Game Studio never interprets or
+repairs review semantics.
 
 Packets contain no verdict, replacement prose, correct-item summary,
 non-blocking register, coverage narrative, or preservation list.
@@ -139,10 +142,18 @@ receipts, and delivery gate remain.
 - `repair:presentation`
 
 They run concurrently and retain their existing exclusive write ownership.
-After all required receipts commit, one `review:verification` task reads the
-prior review, changed document ranges, and directly dependent contracted
-sections. It checks prior conflicts and direct regressions only. It never starts
-another full review or automatic second repair cycle.
+After all required receipts commit, the same three disjoint responsibility
+lanes verify only the prior conflicts that touch their owned documents. Each
+lane reads its 2–3 owned documents, the prior review and one dependency
+projection, then emits one bounded verification packet. A lightweight
+`synthesis` unit reads only the prior review and the three packets. It closes a
+cross-lane conflict only when every responsible lane reports it closed. It
+never reads all eight canonical documents or starts another full review. If
+the first verification still reports actionable conflicts, those exact
+conflicts create one final targeted repair pass followed by one final
+three-lane verification. Attempt three is terminal: `READY` advances and
+`NEEDS_REVISION` stops as `needs_action`. This bounded loop prevents both a
+premature manual stop and an unbounded repair cycle.
 
 ## State and Recovery
 
@@ -153,18 +164,22 @@ Initial review state contains exactly four ordered units:
 3. `presentation`
 4. `synthesis`
 
-Verification state contains only `verification`.
+Verification state uses the same four ordered units. This is one execution
+topology with a mode-specific packet contract, not a second Reviewer path.
 
 Every unit persists status, dispatch, path, digest, duration, usage, and exact
 failure. Explicit retry resets only failed units. Accepted siblings are reused.
 Synthesis starts only after all three packet digests are accepted. Source or
 projection revision changes invalidate the complete initial review.
 
-Schema 22 snapshots are migrated once to schema 23. In-flight or unsuccessful
+Schema 22 snapshots are migrated once to schema 24. In-flight or unsuccessful
 old Reviewer state and remediation state are discarded and restarted from the
 current canonical document revision. Completed delivery runs retain their
 delivery result but do not retain an executable old Reviewer state. No runtime
 parser or adapter for old specialist packets remains after migration.
+Schema 23 snapshots with the removed single verification worker are migrated
+once into the three verification lanes plus synthesis, preserving prior-review
+and remediation authority while discarding the failed single-worker dispatch.
 
 ## Workflow Card
 
@@ -179,8 +194,9 @@ Task icons:
 - stopped: stopped icon.
 
 During initial review the Task list shows three discipline review tasks and one
-conflict synthesis task. During remediation it shows only affected repair
-tasks. During verification it shows one verification task.
+conflict synthesis task. During remediation it shows the three repair tasks and
+one user-facing verification Task. The three internal verification lanes remain
+aggregated behind that Task so workflow mechanics do not leak into Dashboard.
 
 The main card does not show roles, packet names, JSON, revision, digest,
 per-worker token metrics, evidence prose, or a separate conflict panel. The

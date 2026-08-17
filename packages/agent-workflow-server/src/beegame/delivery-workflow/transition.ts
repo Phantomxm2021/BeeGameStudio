@@ -1,6 +1,7 @@
 import { parseDeliveryRun } from './schema'
 import { retryFoundationFailures } from './foundation-authoring-batch'
 import { retryFoundationRemediationFailures } from './foundation-remediation'
+import { MAX_FOUNDATION_REVIEW_ATTEMPTS } from './foundation-review-state'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -480,10 +481,11 @@ export function transitionDeliveryRun(
         run.phase === 'DOCUMENT_REVIEW' &&
         run.foundationReviewState?.mode === 'verification' &&
         run.foundationReviewState.status === 'completed' &&
-        run.foundationReviewState.verdict === 'NEEDS_REVISION'
+        run.foundationReviewState.verdict === 'NEEDS_REVISION' &&
+        run.foundationReviewState.attempt >= MAX_FOUNDATION_REVIEW_ATTEMPTS
       )
         fail(
-          'Foundation verification is final; resolve the remaining conflicts manually before starting a new workflow run',
+          'Foundation review reached its bounded remediation limit; resolve the remaining conflicts manually before starting a new workflow run',
         )
       next = {
         ...run,
@@ -505,19 +507,23 @@ export function transitionDeliveryRun(
                 ),
             }
           : {}),
-        ...(run.phase === 'DOCUMENT_REVIEW' && run.foundationReviewState
+        ...(run.phase === 'DOCUMENT_REVIEW' &&
+        run.foundationReviewState &&
+        run.foundationReviewState.status !== 'completed'
           ? {
               foundationReviewState: {
                 ...run.foundationReviewState,
                 status: 'running' as const,
                 failureReason: undefined,
                 reports: run.foundationReviewState.reports.map(report =>
-                  report.status === 'failed' ||
-                  report.dispatch?.status === 'failed'
+                  report.status !== 'completed'
                     ? {
                         ...report,
                         status: 'pending' as const,
                         dispatch: undefined,
+                        digest: undefined,
+                        durationMs: undefined,
+                        usage: undefined,
                         failureReason: undefined,
                       }
                     : report,

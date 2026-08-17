@@ -8,7 +8,6 @@ export type FoundationReviewRole =
   | 'technical-assets'
   | 'presentation'
   | 'synthesis'
-  | 'verification'
 
 export type FoundationReviewMode = 'initial' | 'verification'
 
@@ -37,6 +36,31 @@ export type FoundationReviewState = {
   failureReason?: string
 }
 
+export const MAX_FOUNDATION_REVIEW_ATTEMPTS = 3
+
+export function foundationReviewHasAcceptedFinal(
+  state: FoundationReviewState,
+): boolean {
+  return Boolean(
+    state.verdict &&
+      state.finalReportPath &&
+      state.finalReportDigest &&
+      state.reports.every(
+        report => report.status === 'completed' && report.digest,
+      ),
+  )
+}
+
+export function foundationReviewMayStartRemediation(
+  state: FoundationReviewState,
+): boolean {
+  return (
+    foundationReviewHasAcceptedFinal(state) &&
+    state.verdict === 'NEEDS_REVISION' &&
+    (state.mode === 'initial' || state.attempt < MAX_FOUNDATION_REVIEW_ATTEMPTS)
+  )
+}
+
 function reportPath(revision: string, role: FoundationReviewRole): string {
   const root = `.beegame/reviews/foundation/${revision}`
   if (
@@ -54,10 +78,12 @@ export function assertFoundationReviewState(
   digestSchema.parse(state.revision)
   if (!Number.isSafeInteger(state.attempt) || state.attempt < 1)
     throw new Error('foundation review attempt must be a positive integer')
-  const expectedRoles: FoundationReviewRole[] =
-    state.mode === 'initial'
-      ? ['core-design', 'technical-assets', 'presentation', 'synthesis']
-      : ['verification']
+  const expectedRoles: FoundationReviewRole[] = [
+    'core-design',
+    'technical-assets',
+    'presentation',
+    'synthesis',
+  ]
   if (
     state.reports.length !== expectedRoles.length ||
     state.reports.some((report, index) => report.role !== expectedRoles[index])
@@ -79,7 +105,6 @@ export function assertFoundationReviewState(
   }
   const final = state.reports[state.reports.length - 1]
   if (
-    state.mode === 'initial' &&
     final.status !== 'pending' &&
     !state.reports
       .slice(0, 3)
@@ -107,10 +132,12 @@ export function createFoundationReviewState(input: {
   priorReviewDigest?: string
 }): FoundationReviewState {
   digestSchema.parse(input.revision)
-  const roles: FoundationReviewRole[] =
-    input.mode === 'initial'
-      ? ['core-design', 'technical-assets', 'presentation', 'synthesis']
-      : ['verification']
+  const roles: FoundationReviewRole[] = [
+    'core-design',
+    'technical-assets',
+    'presentation',
+    'synthesis',
+  ]
   return assertFoundationReviewState({
     revision: input.revision,
     mode: input.mode,

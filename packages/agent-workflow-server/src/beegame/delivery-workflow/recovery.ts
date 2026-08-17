@@ -36,6 +36,7 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
+import { MAX_FOUNDATION_REVIEW_ATTEMPTS } from './foundation-review-state'
 
 export {
   inspectWorkflowSnapshot,
@@ -812,7 +813,8 @@ function reviewRetryIsLocked(run: DeliveryRun): boolean {
     run.phase === 'DOCUMENT_REVIEW' &&
       run.foundationReviewState?.mode === 'verification' &&
       run.foundationReviewState.status === 'completed' &&
-      run.foundationReviewState.verdict === 'NEEDS_REVISION',
+      run.foundationReviewState.verdict === 'NEEDS_REVISION' &&
+      run.foundationReviewState.attempt >= MAX_FOUNDATION_REVIEW_ATTEMPTS,
   )
 }
 
@@ -830,6 +832,11 @@ async function unlockReviewForChangedRevision(input: {
 }): Promise<DeliveryRun | undefined> {
   const review = input.run.foundationReviewState
   if (!review || !input.workspacePath)
+    return undefined
+  if (
+    input.run.phase === 'DOCUMENT_DRAFTING' &&
+    input.run.foundationRemediationState
+  )
     return undefined
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,

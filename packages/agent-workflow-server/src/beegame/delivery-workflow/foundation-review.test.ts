@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   acceptFoundationReview,
   foundationReviewAffectedPaths,
+  foundationReviewOutputContractInstruction,
   foundationReviewPath,
   foundationReviewSchema,
   foundationReviewStagingPath,
@@ -55,6 +56,11 @@ function review(overrides: Record<string, unknown> = {}) {
 }
 
 describe('foundation review contract', () => {
+  test('states one exact root shape with acceptance only inside conflicts', () => {
+    const instruction = foundationReviewOutputContractInstruction()
+    expect(instruction).toContain('The root object has exactly')
+    expect(instruction).toContain('There is no root-level acceptance field')
+  })
   test('derives a canonical unique remediation path set from conflict changes', () => {
     const parsed = foundationReviewSchema.parse(
       review({

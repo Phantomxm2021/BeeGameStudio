@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the two all-document Reviewer workers with three disjoint human-team review tasks, packet-only synthesis, existing parallel remediation, targeted verification, and the original Workflow Card Task presentation.
+**Goal:** Replace every all-document Reviewer worker with three disjoint human-team review lanes, packet-only synthesis, parallel remediation, lane-bounded verification, and the original Workflow Card Task presentation.
 
 **Architecture:** One shared lane registry owns both review and remediation document groups. Each lane worker receives its own full documents plus one deterministic cross-lane section projection and commits one bounded packet. Synthesis reads only accepted packets; the UI receives ordinary Tasks and no Reviewer-specific display object.
 
@@ -94,15 +94,16 @@ git commit -m "feat: define foundation review ownership lanes"
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-review-lane-packet.test.ts`
 
 **Interfaces:**
-- Produces strict `FoundationReviewLanePacket` with fixed lane/revision and at most 24 candidates.
+- Produces strict `FoundationReviewLanePacket` with fixed lane/revision and at most 8 highest-priority candidates.
 - Produces `acceptFoundationReviewLanePacket()` with source-authority and exact-observed-byte checks.
 - Removes `contract-specialist` and `integration-specialist` prompt vocabulary.
 
 - [x] **Step 1: Write failing packet tests**
 
-Cover strict fields, candidate cap, invalid UTF-8/JSON, stale revision, wrong
-lane, duplicate commit, evidence outside lane/projection authority, and an
-`observed` value absent from accepted source bytes.
+Cover strict fields, candidate cap, canonical absolute-path normalization,
+invalid UTF-8/JSON, stale revision, wrong lane, duplicate commit, evidence
+outside lane/projection authority, and a derived observation bound to an
+authorized source revision.
 
 - [x] **Step 2: Run RED**
 
@@ -151,10 +152,10 @@ git commit -m "refactor: replace reviewer specialists with lane packets"
 
 **Interfaces:**
 - Initial units: `core-design`, `technical-assets`, `presentation`, `synthesis`.
-- Verification unit: `verification` only.
+- Verification units: `core-design`, `technical-assets`, `presentation`, `synthesis`.
 - Lane dispatches receive owned full paths and one projection path.
 - Synthesis receives exactly three accepted packet paths and no canonical full document.
-- Delivery schema becomes 23 with one schema-22 migration.
+- Delivery schema becomes 24 with schema-22 cleanup and a one-way schema-23 single-verification migration.
 
 - [x] **Step 1: Write failing topology tests**
 
@@ -221,19 +222,22 @@ git commit -m "refactor: route foundation review through document lanes"
 **Interfaces:**
 - Retains three exclusive repair lanes and receipts.
 - Starts only affected repair lanes.
-- Verification receives prior review, accepted receipts, modified paths, and directly dependent contract sections, not all eight full documents.
+- Each verification lane receives its owned 2–3 documents, the prior review,
+  accepted receipts, exact prior conflict IDs and one dependency projection.
+  Synthesis receives only the prior review and three verification packets.
 
 - [x] **Step 1: Write RED repair/verification scope tests**
 
 Assert affected lanes launch concurrently, unaffected lanes stay
 `not_required`, write paths are disjoint, sibling receipts survive retry, and
-verification starts only after the receipt barrier without unrelated documents.
+three verification lanes start only after the receipt barrier, remain disjoint,
+and never place all eight documents in one context.
 
 - [x] **Step 2: Implement targeted verification and run GREEN**
 
-Verification checks every prior conflict and direct dependency, preserves open
-IDs, writes one canonical review, and stops at `needs_action` rather than
-starting initial reviewers or a second repair cycle.
+Each lane accounts for its exact prior conflict subset. Synthesis requires every
+prior ID, preserves open IDs, writes one canonical review, and stops at
+`needs_action` rather than starting another repair cycle.
 
 - [x] **Step 3: Commit**
 
@@ -366,8 +370,11 @@ original Task list shows normal status icons without a custom Reviewer panel.
 - [ ] **Step 3: Verify repair and targeted verification**
 
 For `NEEDS_REVISION`, confirm only affected repair Tasks run, receipts persist,
-successful siblings survive retry, and one verification Task runs without
-restarting initial reviewers.
+successful siblings survive retry, three internal verification lanes run, and
+Dashboard keeps one aggregated verification Task. If verification attempt two
+still needs revision, confirm one second targeted repair pass starts
+automatically and attempt three is the final verification; no fourth review or
+third repair pass may be created.
 
 - [ ] **Step 4: Record performance and quality evidence**
 

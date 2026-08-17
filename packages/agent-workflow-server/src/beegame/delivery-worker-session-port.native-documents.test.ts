@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -166,6 +167,253 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
+  test('derives remediation mutations from durable bytes after tool events are compacted', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'remediation-digests-'))
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    const originals = {
+      'docs/TECHNICAL_DESIGN.md': '# Technical\nOriginal technical authority.\n',
+      'docs/ASSET_PLAN.md': '# Assets\nOriginal asset authority.\n',
+    }
+    await Promise.all(
+      Object.entries(originals).map(([path, body]) =>
+        writeFile(join(workspacePath, path), body),
+      ),
+    )
+    const previousDocumentDigests = Object.fromEntries(
+      Object.entries(originals).map(([path, body]) => [
+        path,
+        createHash('sha256').update(body).digest('hex'),
+      ]),
+    )
+    const reviewPath = `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`
+    const reviewBytes = `${JSON.stringify({
+      version: 2,
+      scope: 'foundation',
+      revision: 'a'.repeat(64),
+      verdict: 'NEEDS_REVISION',
+      priorConflictStatus: [],
+      conflicts: [
+        {
+          id: 'B1',
+          title: 'Technical and asset authority disagree',
+          problem: 'The two assigned documents cannot be implemented together.',
+          evidence: [
+            {
+              path: 'docs/TECHNICAL_DESIGN.md',
+              location: 'Authority',
+              observed: 'The technical authority uses the old rule.',
+            },
+          ],
+          requiredOutcome: 'Both documents use one implementable rule.',
+          changes: [
+            {
+              path: 'docs/TECHNICAL_DESIGN.md',
+              action: 'Adopt the repaired rule.',
+            },
+            {
+              path: 'docs/ASSET_PLAN.md',
+              action: 'Adopt the repaired rule.',
+            },
+          ],
+          acceptance: ['Both documents contain the repaired rule.'],
+        },
+      ],
+    })}\n`
+    await mkdir(join(workspacePath, '.beegame/reviews/foundation', 'a'.repeat(64)), {
+      recursive: true,
+    })
+    await writeFile(join(workspacePath, reviewPath), reviewBytes)
+    const events: Array<Record<string, unknown>> = []
+    const sessions = {
+      start: () => ({
+        id: 'repair-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      updateAuthToken: () => undefined,
+      get: () => ({
+        id: 'repair-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      events: () => events,
+      isWorkflowWorkerOpen: () => true,
+      sendWithDisplay: async () => {
+        await writeFile(
+          join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+          '# Technical\nRepaired technical authority.\n',
+        )
+        await writeFile(
+          join(workspacePath, 'docs/ASSET_PLAN.md'),
+          '# Assets\nRepaired asset authority.\n',
+        )
+        // A native compaction may retain the final result while discarding
+        // earlier Edit tool events. Durable file bytes remain authoritative.
+        events.push({ type: 'result', text: 'repair complete' })
+      },
+      stop: () => undefined,
+      disposeWorkflowWorker: async () => undefined,
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    const request = {
+      dispatchId: 'repair-dispatch',
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'a'.repeat(64),
+      allowedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+      contract: {
+        authoringMode: 'remediation',
+        documentSet: 'foundation',
+        remediation: {
+          laneId: 'technical-assets',
+          reviewPath,
+          reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
+          affectedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+          sourceRevision: 'a'.repeat(64),
+        },
+        previousDocumentDigests,
+      },
+    } as const
+
+    await port.start(request as never)
+    await port.submit(request.dispatchId, 'Repair the assigned documents.')
+    const terminal = await port.waitForTerminal?.(request.dispatchId)
+
+    expect(terminal).toMatchObject({
+      workerType: 'document-author',
+      writtenPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+    })
+    await rm(workspacePath, { recursive: true, force: true })
+  })
+
+  test('persists a Reviewer structured output without requiring a Write tool call', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-raw-json-'))
+    const revision = 'a'.repeat(64)
+    const stagingPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      '.staging/parts/core-design.json',
+    )
+    const committedPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      'parts/core-design.json',
+    )
+    const packet = {
+      version: 1,
+      scope: 'foundation',
+      revision,
+      lane: 'core-design',
+      mode: 'initial',
+      candidates: [],
+    }
+    const prompts: string[] = []
+    const events: Array<Record<string, unknown>> = []
+    let startInput: Record<string, unknown> | undefined
+    const sessions = {
+      start: (input: Record<string, unknown>) => {
+        startInput = input
+        return {
+          id: 'review-session',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          cwd: workspacePath,
+        }
+      },
+      updateAuthToken: () => undefined,
+      get: () => ({
+        id: 'review-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      events: () => events,
+      isWorkflowWorkerOpen: () => true,
+      sendWithDisplay: async (_sessionId: string, prompt: string) => {
+        prompts.push(prompt)
+        events.push({
+          type: 'result',
+          text: 'This visible text is not the Reviewer authority.',
+          payload: {
+            type: 'result',
+            structured_output: packet,
+            num_turns: 1,
+            usage: {
+              input_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              output_tokens: 0,
+            },
+            permission_denials: [],
+          },
+        })
+      },
+      stop: () => undefined,
+      disposeWorkflowWorker: async () => undefined,
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    const request = {
+      dispatchId: 'review-dispatch',
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision,
+      contract: {
+        reviewMode: 'initial',
+        reviewRole: 'core-design',
+        assignment: {
+          scope: 'foundation',
+          role: 'core-design',
+          sourcePaths: [join(workspacePath, 'docs/GDD.md')],
+          verificationSourcePaths: [],
+          stagingOutputPaths: [stagingPath],
+          committedOutputPaths: [committedPath],
+        },
+      },
+    } as const
+
+    await port.start(request as never)
+    await port.submit(request.dispatchId, 'Review the assigned lane.')
+    await port.waitForTerminal?.(request.dispatchId)
+
+    expect(prompts[0]).toContain('Submit the report through StructuredOutput')
+    expect(prompts[0]).toContain('Do not use Write or Edit')
+    expect(startInput?.workflowJsonSchema).toBeDefined()
+    expect(
+      (startInput?.workflowJsonSchema as Record<string, unknown> | undefined)
+        ?.$schema,
+    ).toBe(
+      'http://json-schema.org/draft-07/schema#',
+    )
+    expect(JSON.parse(await readFile(stagingPath, 'utf8'))).toEqual(packet)
+    await rm(workspacePath, { recursive: true, force: true })
+  })
+
   test.skip('legacy calibration session resume is removed', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
     const prompts: string[] = []

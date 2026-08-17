@@ -125,8 +125,22 @@ export function recordFoundationRemediationDispatch(
     throw new Error(`foundation remediation lane is not pending: ${laneId}`)
   if (dispatch.taskId !== `foundation-remediation:${laneId}`)
     throw new Error('foundation remediation dispatch task does not match lane')
+  const suppliedBaseline = dispatch.request?.contract.previousDocumentDigests
+  const baselineDigests =
+    suppliedBaseline &&
+    typeof suppliedBaseline === 'object' &&
+    !Array.isArray(suppliedBaseline)
+      ? (suppliedBaseline as Record<string, string>)
+      : lane.baselineDigests
+  if (
+    lane.baselineDigests &&
+    (!baselineDigests ||
+      !isDeepStrictEqual(lane.baselineDigests, baselineDigests))
+  )
+    throw new Error('foundation remediation retry changed its baseline')
   return replaceLane(state, {
     ...lane,
+    ...(baselineDigests ? { baselineDigests: { ...baselineDigests } } : {}),
     status: 'running',
     dispatch,
     failureReason: undefined,
@@ -190,6 +204,11 @@ export function commitFoundationRemediationReceipt(
     afterDigests: { ...input.afterDigests },
     committedAt: input.committedAt,
   }
+  if (
+    lane.baselineDigests &&
+    !isDeepStrictEqual(lane.baselineDigests, input.beforeDigests)
+  )
+    throw new Error('foundation remediation receipt changed its baseline')
   if (lane.status === 'completed' && isDeepStrictEqual(lane.receipt, receipt))
     return state
   if (

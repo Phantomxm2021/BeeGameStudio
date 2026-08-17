@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
+import { lstat, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import {
   foundationDocumentLaneById,
@@ -30,15 +30,32 @@ const candidateSchema = z
   })
   .strict()
 
-export const foundationReviewLanePacketSchema = z
+const priorConflictStatusSchema = z
   .object({
+    id: z.string().regex(/^B[1-9][0-9]*$/u),
+    status: z.enum(['closed', 'open']),
+    note: z.string().trim().min(1).max(1_200),
+  })
+  .strict()
+
+const basePacketSchema = z.object({
     version: z.literal(1),
     scope: z.literal('foundation'),
     revision: digestSchema,
     lane: laneSchema,
-    candidates: z.array(candidateSchema).max(24),
+    candidates: z.array(candidateSchema).max(8),
   })
-  .strict()
+
+export const foundationReviewLanePacketSchema = z.discriminatedUnion('mode', [
+  basePacketSchema.extend({ mode: z.literal('initial') }).strict(),
+  basePacketSchema
+    .extend({
+      mode: z.literal('verification'),
+      priorReviewDigest: digestSchema,
+      priorConflictStatus: z.array(priorConflictStatusSchema).max(64),
+    })
+    .strict(),
+])
 
 export type FoundationReviewLanePacket = z.infer<
   typeof foundationReviewLanePacketSchema
@@ -56,14 +73,32 @@ const LANE_FOCUS: Record<FoundationDocumentLaneId, string> = {
 export function foundationReviewLanePacketContractInstruction(input: {
   revision: string
   laneId: FoundationDocumentLaneId
+  mode: 'initial' | 'verification'
+  priorReviewDigest?: string
+  priorConflictIds?: string[]
 }): string {
   digestSchema.parse(input.revision)
   laneSchema.parse(input.laneId)
+  if (input.mode === 'verification') {
+    digestSchema.parse(input.priorReviewDigest)
+    if (!input.priorConflictIds) throw new Error('verification packet requires prior conflicts')
+  }
   const shape = JSON.stringify({
     version: 1,
     scope: 'foundation',
     revision: input.revision,
     lane: input.laneId,
+    mode: input.mode,
+    ...(input.mode === 'verification'
+      ? {
+          priorReviewDigest: input.priorReviewDigest,
+          priorConflictStatus: (input.priorConflictIds ?? []).map(id => ({
+            id,
+            status: '<closed-or-open>',
+            note: '<specific verification observation>',
+          })),
+        }
+      : {}),
     candidates: [
       {
         title: '<specific blocking defect>',
@@ -72,7 +107,7 @@ export function foundationReviewLanePacketContractInstruction(input: {
           {
             path: '<assigned full document or projected source path>',
             location: '<heading, table row or stable locator>',
-            observed: '<bounded exact observation from accepted source bytes>',
+            observed: '<bounded observation derived from accepted source bytes>',
           },
         ],
         blockingReason: '<specific incompatible result or missing acceptance proof>',
@@ -81,9 +116,14 @@ export function foundationReviewLanePacketContractInstruction(input: {
   })
   return [
     LANE_FOCUS[input.laneId],
-    `Write exactly one JSON object with this exact shape and fixed identity: ${shape}`,
-    'The object may contain only version, scope, revision, lane and candidates. Each candidate may contain only title, problem, evidence and blockingReason. Each evidence item may contain only path, location and observed. Use at most 24 candidates; candidates may be empty when no blocking defect is proven.',
-    'Read the assigned full documents and the one assigned projection only. Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code. Write the JSON object once to the sole staging output path. Do not emit prose, decide the final verdict, propose replacement text, modify source documents or launch another Agent or task.',
+    `Return exactly one JSON object with this exact shape and fixed identity: ${shape}`,
+    `The object may contain only the fields shown in the shape. Each candidate may contain only title, problem, evidence and blockingReason. Each evidence item may contain only path, location and observed. Every evidence path must be one of these exact project-relative canonical paths: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}. Never write an absolute path. Report only the 8 highest-priority proven blockers; candidates may be empty when no blocking defect is proven.`,
+    ...(input.mode === 'verification'
+      ? [
+          `Account for exactly these prior conflict IDs, in this order, and no others: ${(input.priorConflictIds ?? []).join(', ') || '<none>'}. A closed item is fixed in every assigned document; an open item remains a blocking candidate with evidence.`,
+        ]
+      : []),
+    'Read the assigned full documents and the one assigned projection only. Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code. Submit the object once through StructuredOutput. Do not emit prose, decide the final verdict, propose replacement text, modify source documents or launch another Agent or task.',
   ].join(' ')
 }
 
@@ -130,7 +170,49 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-async function readPacket(path: string): Promise<{
+function normalizeEvidencePath(workspacePath: string, value: unknown): unknown {
+  if (typeof value !== 'string' || !isAbsolute(value)) return value
+  const projectRelative = relative(resolve(workspacePath), resolve(value))
+    .split('\\')
+    .join('/')
+  return CANONICAL_FOUNDATION_DOCUMENTS.includes(
+    projectRelative as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+  )
+    ? projectRelative
+    : value
+}
+
+function normalizePacketEvidencePaths(
+  workspacePath: string,
+  value: unknown,
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const packet = value as Record<string, unknown>
+  if (!Array.isArray(packet.candidates)) return value
+  return {
+    ...packet,
+    candidates: packet.candidates.map(candidate => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+        return candidate
+      const record = candidate as Record<string, unknown>
+      if (!Array.isArray(record.evidence)) return candidate
+      return {
+        ...record,
+        evidence: record.evidence.map(evidence => {
+          if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence))
+            return evidence
+          const item = evidence as Record<string, unknown>
+          return {
+            ...item,
+            path: normalizeEvidencePath(workspacePath, item.path),
+          }
+        }),
+      }
+    }),
+  }
+}
+
+async function readPacket(path: string, workspacePath: string): Promise<{
   bytes: Buffer
   packet: FoundationReviewLanePacket
 }> {
@@ -149,9 +231,12 @@ async function readPacket(path: string): Promise<{
   } catch {
     throw new Error('foundation review lane packet is not valid JSON')
   }
+  const packet = foundationReviewLanePacketSchema.parse(
+    normalizePacketEvidencePaths(workspacePath, value),
+  )
   return {
-    bytes,
-    packet: foundationReviewLanePacketSchema.parse(value),
+    bytes: Buffer.from(`${JSON.stringify(packet, null, 2)}\n`, 'utf8'),
+    packet,
   }
 }
 
@@ -176,23 +261,36 @@ async function assertEvidenceAuthority(input: {
     contents.push(source.content)
     projectedByPath.set(source.path, contents)
   }
-  const ownedBytes = new Map<string, string>()
-  for (const path of lane.ownedPaths)
-    ownedBytes.set(path, await readFile(resolve(input.workspacePath, path), 'utf8'))
-
   for (const candidate of input.packet.candidates) {
     for (const evidence of candidate.evidence) {
-      const acceptedBytes = ownedPaths.has(evidence.path)
-        ? [ownedBytes.get(evidence.path)!]
-        : projectedByPath.get(evidence.path)
-      if (!acceptedBytes)
+      if (
+        !ownedPaths.has(evidence.path) &&
+        !projectedByPath.has(evidence.path)
+      )
         throw new Error('foundation review evidence path is outside lane authority')
-      if (!acceptedBytes.some(bytes => bytes.includes(evidence.observed)))
-        throw new Error(
-          'foundation review evidence is absent from accepted source bytes',
-        )
     }
   }
+}
+
+function assertVerificationAuthority(input: {
+  packet: FoundationReviewLanePacket
+  mode: 'initial' | 'verification'
+  priorReviewDigest?: string
+  priorConflictIds?: string[]
+}): void {
+  if (input.packet.mode !== input.mode)
+    throw new Error('foundation review lane packet mode does not match')
+  if (input.mode === 'initial') return
+  if (input.packet.mode !== 'verification') throw new Error('verification packet is invalid')
+  if (input.packet.priorReviewDigest !== input.priorReviewDigest)
+    throw new Error('foundation review lane packet prior digest does not match')
+  const actual = input.packet.priorConflictStatus.map(item => item.id)
+  const expected = input.priorConflictIds ?? []
+  if (
+    actual.length !== expected.length ||
+    actual.some((id, index) => id !== expected[index])
+  )
+    throw new Error('foundation review lane packet prior conflict coverage does not match')
 }
 
 export async function acceptFoundationReviewLanePacket(input: {
@@ -201,6 +299,9 @@ export async function acceptFoundationReviewLanePacket(input: {
   currentRevision: string
   laneId: FoundationDocumentLaneId
   projectionDigest: string
+  mode: 'initial' | 'verification'
+  priorReviewDigest?: string
+  priorConflictIds?: string[]
 }): Promise<{
   path: string
   digest: string
@@ -225,11 +326,17 @@ export async function acceptFoundationReviewLanePacket(input: {
     input.revision,
     input.laneId,
   )
-  const accepted = await readPacket(stagedPath)
+  const accepted = await readPacket(stagedPath, input.workspacePath)
   if (accepted.packet.revision !== input.revision)
     throw new Error('foundation review lane packet revision does not match')
   if (accepted.packet.lane !== input.laneId)
     throw new Error('foundation review lane packet lane does not match')
+  assertVerificationAuthority({
+    packet: accepted.packet,
+    mode: input.mode,
+    priorReviewDigest: input.priorReviewDigest,
+    priorConflictIds: input.priorConflictIds,
+  })
   await assertEvidenceAuthority({
     workspacePath: input.workspacePath,
     revision: input.revision,
@@ -237,6 +344,8 @@ export async function acceptFoundationReviewLanePacket(input: {
     projectionDigest: input.projectionDigest,
     packet: accepted.packet,
   })
+
+  await writeFile(stagedPath, accepted.bytes)
 
   const stagedFile = await open(stagedPath, 'r')
   try {

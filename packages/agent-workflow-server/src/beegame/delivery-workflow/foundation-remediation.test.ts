@@ -226,6 +226,54 @@ describe('foundation remediation lanes', () => {
       }),
     ).toThrow('mutation paths do not match the lane assignment')
   })
+
+  test('preserves the first mutation baseline across an interrupted retry', () => {
+    const sourceRevision = digest('a')
+    const state = createFoundationRemediationState({
+      reviewPath: `.beegame/reviews/foundation/${sourceRevision}/review.json`,
+      reviewDigest: digest('b'),
+      review: review(sourceRevision, ['docs/GDD.md']),
+    })
+    const baseline = ownedDigests('core-design', 'c')
+    const firstDispatch: DispatchRecord = {
+      ...dispatch('core-design'),
+      request: {
+        dispatchId: 'dispatch-core-design',
+        runId: 'run-1',
+        ownerId: 'owner-1',
+        projectId: 'project-1',
+        workspacePath: '/workspace',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'foundation-remediation:core-design',
+        revision: sourceRevision,
+        contract: { previousDocumentDigests: baseline },
+      },
+    }
+    const failed = recordFoundationRemediationFailure(
+      recordFoundationRemediationDispatch(
+        state,
+        'core-design',
+        firstDispatch,
+      ),
+      'core-design',
+      'interrupted',
+    )
+    const retried = retryFoundationRemediationFailures(failed)
+
+    expect(retried.lanes[0]?.status).toBe('pending')
+    expect(retried.lanes[0]?.baselineDigests).toEqual(baseline)
+    expect(
+      parseDeliveryRun({
+        ...createTestDeliveryRun({
+          runId: 'run-1',
+          projectId: 'project-1',
+          ownerId: 'owner-1',
+        }),
+        foundationRemediationState: retried,
+      }).foundationRemediationState?.lanes[0]?.baselineDigests,
+    ).toEqual(baseline)
+  })
 })
 
 function foundationRemediationLanesAreFrozen(): boolean {

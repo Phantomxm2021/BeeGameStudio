@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   assertFoundationReviewState,
   createFoundationReviewState,
+  foundationReviewMayStartRemediation,
 } from './foundation-review-state'
 
 const revision = 'a'.repeat(64)
@@ -25,7 +26,12 @@ describe('foundation review state', () => {
         priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
         priorReviewDigest: 'b'.repeat(64),
       }).reports.map(report => report.role),
-    ).toEqual(['verification'])
+    ).toEqual([
+      'core-design',
+      'technical-assets',
+      'presentation',
+      'synthesis',
+    ])
   })
 
   test('rejects topology, completion, barrier, revision, and prior-review mismatches', () => {
@@ -77,5 +83,34 @@ describe('foundation review state', () => {
         priorReviewDigest: 'b'.repeat(64),
       }),
     ).toThrow('initial review cannot contain prior review authority')
+  })
+
+  test('allows at most two bounded remediation passes', () => {
+    const completed = (attempt: number) => ({
+      ...createFoundationReviewState({
+        mode: 'verification' as const,
+        revision,
+        attempt,
+        priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
+        priorReviewDigest: 'b'.repeat(64),
+      }),
+      status: 'completed' as const,
+      verdict: 'NEEDS_REVISION' as const,
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+      finalReportDigest: 'c'.repeat(64),
+      reports: createFoundationReviewState({
+        mode: 'verification' as const,
+        revision,
+        attempt,
+        priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
+        priorReviewDigest: 'b'.repeat(64),
+      }).reports.map(report => ({
+        ...report,
+        status: 'completed' as const,
+        digest: 'd'.repeat(64),
+      })),
+    })
+    expect(foundationReviewMayStartRemediation(completed(2))).toBe(true)
+    expect(foundationReviewMayStartRemediation(completed(3))).toBe(false)
   })
 })

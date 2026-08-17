@@ -47,7 +47,6 @@ export type DocumentDisplayTaskInput = {
         | 'technical-assets'
         | 'presentation'
         | 'synthesis'
-        | 'verification'
       status: 'pending' | 'running' | 'completed' | 'failed'
       failureReason?: string
     }>
@@ -64,7 +63,6 @@ const reviewTaskTitle = {
   'technical-assets': '技术与资产',
   presentation: '表现体验',
   synthesis: '阻塞问题汇总',
-  verification: '修订结果',
 } as const
 
 const repairTaskTitle = {
@@ -99,21 +97,30 @@ function projectFoundationReviewTasks(
       operation: 'write',
       ...(lane.failureReason ? { failureReason: lane.failureReason } : {}),
     }))
-    const verification = review?.reports.find(
-      report => report.role === 'verification',
+    const verificationReports = review?.reports ?? []
+    const failedVerification = verificationReports.find(
+      report => report.status === 'failed',
     )
+    const verificationStatus = verificationReports.some(
+      report => report.status === 'running',
+    )
+      ? 'running'
+      : failedVerification
+        ? 'failed'
+        : verificationReports.length > 0 &&
+            verificationReports.every(report => report.status === 'completed')
+          ? 'completed'
+          : 'pending'
     return [
       ...repairTasks,
       {
         id: 'review:foundation:verification',
-        title: reviewTaskTitle.verification,
-        status: verification
-          ? visibleReviewStatus(verification.status, input.workflowStatus)
-          : 'pending',
+        title: '修订结果',
+        status: visibleReviewStatus(verificationStatus, input.workflowStatus),
         attempt: review?.attempt ?? 1,
         operation: 'review',
-        ...(verification?.failureReason
-          ? { failureReason: verification.failureReason }
+        ...(failedVerification?.failureReason
+          ? { failureReason: failedVerification.failureReason }
           : {}),
       },
     ]

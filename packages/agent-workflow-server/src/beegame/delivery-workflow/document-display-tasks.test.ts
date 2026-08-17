@@ -93,7 +93,12 @@ describe('workflow display tasks', () => {
       foundationReview: {
         mode: 'verification',
         attempt: 2,
-        reports: [{ role: 'verification', status: 'pending' }],
+        reports: [
+          { role: 'core-design', status: 'pending' },
+          { role: 'technical-assets', status: 'pending' },
+          { role: 'presentation', status: 'pending' },
+          { role: 'synthesis', status: 'pending' },
+        ],
       },
       foundationRemediationLanes: [
         { id: 'core-design', status: 'completed' },

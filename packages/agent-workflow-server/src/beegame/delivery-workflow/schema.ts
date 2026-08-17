@@ -212,7 +212,6 @@ const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
             'technical-assets',
             'presentation',
             'synthesis',
-            'verification',
           ]),
           path: z.string().min(1),
           status: z.enum(['pending', 'running', 'completed', 'failed']),
@@ -306,6 +305,12 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = 
             'completed',
             'failed',
           ]),
+          baselineDigests: z
+            .record(
+              z.string().min(1),
+              z.string().regex(/^[a-f0-9]{64}$/u),
+            )
+            .optional(),
           dispatch: dispatchRecordSchema.optional(),
           receipt: z
             .object({
@@ -401,6 +406,16 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = 
           code: 'custom',
           path: ['lanes', index],
           message: 'pending remediation lane cannot contain execution state',
+        })
+      if (
+        lane.baselineDigests &&
+        JSON.stringify(Object.keys(lane.baselineDigests).sort()) !==
+          JSON.stringify([...lane.ownedPaths].sort())
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'baselineDigests'],
+          message: 'foundation remediation baseline must cover every owned path',
         })
       if (
         lane.status === 'failed' &&

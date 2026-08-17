@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   access,
   mkdir,
@@ -9,6 +9,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
+import { z } from 'zod/v4'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
@@ -32,7 +33,11 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { readFoundationReviewArtifact } from './delivery-workflow/foundation-review'
+import {
+  foundationReviewSchema,
+  readFoundationReviewArtifact,
+} from './delivery-workflow/foundation-review'
+import { foundationReviewLanePacketSchema } from './delivery-workflow/foundation-review-lane-packet'
 import { FOUNDATION_REMEDIATION_LANES } from './delivery-workflow/foundation-remediation'
 import type {
   BeeGameSessionManager,
@@ -65,7 +70,6 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
         | 'technical-assets'
         | 'presentation'
         | 'synthesis'
-        | 'verification'
       assignment: {
         sourcePaths: string[]
         verificationSourcePaths: string[]
@@ -96,8 +100,7 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
     (role !== 'core-design' &&
       role !== 'technical-assets' &&
       role !== 'presentation' &&
-      role !== 'synthesis' &&
-      role !== 'verification') ||
+      role !== 'synthesis') ||
     record.scope !== 'foundation' ||
     record.role !== role ||
     pathKeys.some(
@@ -369,6 +372,15 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? await buildDocumentAuthorAuthorityBlock(request)
           : ''
       const reviewContract = reviewerAssignmentContract(request)
+      const workflowJsonSchema =
+        request.workerType === 'document-reviewer'
+          ? z.toJSONSchema(
+              request.contract.reviewRole === 'synthesis'
+                ? foundationReviewSchema
+                : foundationReviewLanePacketSchema,
+              { target: 'draft-7' },
+            )
+          : undefined
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -395,6 +407,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
+        ...(workflowJsonSchema ? { workflowJsonSchema } : {}),
         workflowAllowedPaths:
           reviewContract?.assignment.stagingOutputPaths ??
           request.allowedPaths ??
@@ -526,7 +539,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'document-author'
           ? ''
           : request?.workerType === 'document-reviewer'
-            ? 'Write only the contracted project-local review report files and end the turn normally. File bytes are the only completion authority.'
+            ? 'Submit the report through StructuredOutput exactly once. Use native read and search capabilities as needed. Do not use Write or Edit and do not author a report file. Bee Game Studio validates and atomically persists the structured result to the sole contracted staging path.'
             : request?.workerType === 'change-impact-analyzer'
               ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
               : request?.workerType === 'question-answerer'
@@ -809,16 +822,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
             const writtenPaths =
               request.contract.authoringMode === 'remediation'
-                ? [
-                    ...new Set(
-                      completedMutationPaths(
-                        request.workspacePath,
-                        sessionEvents(sessionId).slice(
-                          eventOffsets.get(dispatchId) ?? 0,
-                        ),
-                      ),
-                    ),
-                  ]
+                ? await changedRemediationPaths(request)
                 : [targetPath]
             return createDeterministicCanonicalDocumentTerminal(
               request,
@@ -1140,7 +1144,29 @@ async function createDeterministicDocumentReviewTerminal(input: {
 }) {
   const contract = reviewerAssignmentContract(input.request)
   if (!contract) throw new Error('Foundation Reviewer contract is missing')
-  void input.events
+  const result = [...input.events]
+    .reverse()
+    .find(event => event.type === 'result')
+  const payload = result?.payload
+  const report =
+    payload && typeof payload === 'object' && 'structured_output' in payload
+      ? payload.structured_output
+      : undefined
+  if (report === undefined)
+    throw new Error('Foundation Reviewer returned no structured output')
+  const stagingPath = resolve(contract.assignment.stagingOutputPaths[0])
+  const relativeStagingPath = relative(input.request.workspacePath, stagingPath)
+  if (
+    !relativeStagingPath ||
+    relativeStagingPath === '..' ||
+    relativeStagingPath.startsWith('../') ||
+    relativeStagingPath.startsWith('..\\')
+  )
+    throw new Error('Foundation Reviewer staging path escapes the project')
+  await durableWriteProjection(
+    stagingPath,
+    `${JSON.stringify(report, null, 2)}\n`,
+  )
   return foundationReviewWorkerTerminalSchema.parse({
     workerType: 'document-reviewer',
     status: 'completed',
@@ -1756,4 +1782,40 @@ function completedMutationPaths(
         ).replaceAll('\\', '/'),
       )
   })
+}
+
+async function changedRemediationPaths(
+  request: WorkerDispatchRequest,
+): Promise<string[]> {
+  const remediation = request.contract.remediation
+  const affectedPaths =
+    remediation &&
+    typeof remediation === 'object' &&
+    !Array.isArray(remediation) &&
+    Array.isArray((remediation as Record<string, unknown>).affectedPaths)
+      ? ((remediation as Record<string, unknown>).affectedPaths as unknown[])
+      : []
+  const previousDocumentDigests = request.contract.previousDocumentDigests
+  if (
+    !previousDocumentDigests ||
+    typeof previousDocumentDigests !== 'object' ||
+    Array.isArray(previousDocumentDigests)
+  )
+    throw new Error('document remediation baseline digests are missing')
+  const baseline = previousDocumentDigests as Record<string, unknown>
+  const changed: string[] = []
+  for (const candidate of affectedPaths) {
+    if (typeof candidate !== 'string' || !candidate)
+      throw new Error('document remediation affected path is invalid')
+    const previousDigest = baseline[candidate]
+    if (
+      typeof previousDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(previousDigest)
+    )
+      throw new Error('document remediation baseline digest is invalid')
+    const bytes = await readFile(resolve(request.workspacePath, candidate))
+    const currentDigest = createHash('sha256').update(bytes).digest('hex')
+    if (currentDigest !== previousDigest) changed.push(candidate)
+  }
+  return changed
 }

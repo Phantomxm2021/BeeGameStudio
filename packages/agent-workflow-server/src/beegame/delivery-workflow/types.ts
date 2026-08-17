@@ -86,6 +86,7 @@ export type FoundationRemediationLane = {
   ownedPaths: FoundationDocumentPath[]
   affectedPaths: FoundationDocumentPath[]
   status: FoundationRemediationLaneStatus
+  baselineDigests?: Record<string, string>
   dispatch?: DispatchRecord
   receipt?: FoundationRemediationReceipt
   failureReason?: string
@@ -177,7 +178,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 23 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 25 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

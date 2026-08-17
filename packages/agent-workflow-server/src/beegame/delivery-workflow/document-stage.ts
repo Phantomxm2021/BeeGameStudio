@@ -206,12 +206,14 @@ export async function startDocumentStage(input: {
             return metadata ? [[path, metadata]] : []
           }),
         )
-        const previousDocumentDigests = Object.fromEntries(
-          lane.ownedPaths.map(path => [
-            path,
-            readDocumentDigest(input.workspacePath, path),
-          ]),
-        )
+        const previousDocumentDigests =
+          lane.baselineDigests ??
+          Object.fromEntries(
+            lane.ownedPaths.map(path => [
+              path,
+              readDocumentDigest(input.workspacePath, path),
+            ]),
+          )
         return input.dispatcher.dispatch({
           runId: input.run.runId,
           ownerId: input.run.ownerId,

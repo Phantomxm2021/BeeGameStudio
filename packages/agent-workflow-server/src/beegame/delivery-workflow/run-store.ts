@@ -94,11 +94,62 @@ type SnapshotMigration = {
   migrated: boolean
 }
 
-/** Schema 22 is the sole supported migration boundary. */
 function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return { value, migrated: false }
   const source = value as Record<string, unknown>
+  if (source.schemaVersion === 24)
+    return {
+      migrated: true,
+      value: { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION },
+    }
+  if (source.schemaVersion === 23) {
+    const review = source.foundationReviewState
+    const reviewRecord =
+      review && typeof review === 'object' && !Array.isArray(review)
+        ? (review as Record<string, unknown>)
+        : undefined
+    const reports = Array.isArray(reviewRecord?.reports)
+      ? reviewRecord.reports
+      : []
+    const hasSingleVerification =
+      reviewRecord?.mode === 'verification' &&
+      reports.length === 1 &&
+      (reports[0] as Record<string, unknown> | undefined)?.role === 'verification'
+    if (!hasSingleVerification)
+      return {
+        migrated: true,
+        value: { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION },
+      }
+    const revision = String(reviewRecord!.revision)
+    const root = `.beegame/reviews/foundation/${revision}`
+    const {
+      finalReportPath: _finalReportPath,
+      finalReportDigest: _finalReportDigest,
+      verdict: _verdict,
+      failureReason: _failureReason,
+      ...reviewAuthority
+    } = reviewRecord!
+    return {
+      migrated: true,
+      value: {
+        ...source,
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+        status: 'running',
+        blockedReason: undefined,
+        foundationReviewState: {
+          ...reviewAuthority,
+          status: 'running',
+          reports: [
+            ['core-design', `${root}/parts/core-design.json`],
+            ['technical-assets', `${root}/parts/technical-assets.json`],
+            ['presentation', `${root}/parts/presentation.json`],
+            ['synthesis', `${root}/review.json`],
+          ].map(([role, path]) => ({ role, path, status: 'pending' })),
+        },
+      },
+    }
+  }
   if (source.schemaVersion !== 22) return { value, migrated: false }
   const {
     foundationReviewState: _foundationReviewState,

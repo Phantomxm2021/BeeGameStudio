@@ -9,6 +9,14 @@ import { foundationReviewLanePacketContractInstruction } from './foundation-revi
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
+function reviewerPriorDigest(contract: Record<string, unknown>): string | undefined {
+  const priorReview = contract.priorReview
+  if (!priorReview || typeof priorReview !== 'object' || Array.isArray(priorReview))
+    return undefined
+  const digest = (priorReview as Record<string, unknown>).digest
+  return typeof digest === 'string' ? digest : undefined
+}
+
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
@@ -96,15 +104,7 @@ function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
   if (request.workerType === 'document-reviewer') {
-    const priorReview = request.contract.priorReview
-    const priorReviewRecord =
-      priorReview && typeof priorReview === 'object' && !Array.isArray(priorReview)
-        ? (priorReview as Record<string, unknown>)
-        : undefined
-    const priorReviewDigest =
-      typeof priorReviewRecord?.digest === 'string'
-        ? priorReviewRecord.digest
-        : undefined
+    const priorReviewDigest = reviewerPriorDigest(request.contract)
     return JSON.stringify({
       reviewScope: request.contract.reviewScope,
       reviewRole: request.contract.reviewRole,
@@ -112,7 +112,7 @@ function formatContract(request: WorkerDispatchRequest): string {
       assignment: request.contract.assignment,
       packetDigests: request.contract.packetDigests,
       projection: request.contract.projection,
-      verificationProjections: request.contract.verificationProjections,
+      priorConflictIds: request.contract.priorConflictIds,
       remediationReceipts: request.contract.remediationReceipts,
       allowedAffectedPaths: request.contract.allowedAffectedPaths,
     })
@@ -346,19 +346,21 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-reviewer':
       return [
         'Act only as the review unit named by contract.reviewRole. Read only contract.assignment.sourcePaths and contract.assignment.verificationSourcePaths.',
-        'Write only the exact paths in contract.assignment.stagingOutputPaths. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
-        request.contract.reviewRole === 'synthesis'
+        'Submit exactly one report through the native StructuredOutput tool. Do not use Write or Edit and do not author a report file. Bee Game Studio validates and atomically persists the structured result to the sole contract.assignment.stagingOutputPaths entry. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
+        request.contract.reviewRole === 'synthesis' &&
+        request.contract.reviewMode === 'initial'
           ? [
                 'Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version 2 review.json. Do not launch another Agent or task.',
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-                'Write exactly one JSON object to the sole contract.assignment.stagingOutputPaths entry. The object must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not write Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
+                'Return exactly one JSON object. It must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
                 foundationReviewOutputContractInstruction(),
                 'Each conflict must tell the repair Agent what is wrong, the exact evidence location, every canonical path whose bytes must change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose.',
                 'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives write authority from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
               ].join(' ')
-          : request.contract.reviewRole === 'verification'
+          : request.contract.reviewRole === 'synthesis' &&
+              request.contract.reviewMode === 'verification'
             ? [
-                'Read the accepted prior review first, then verify every prior conflict against only the assigned repaired documents and dependency projections. Treat contract.remediationReceipts as byte-bound proof of completed repair lanes. Write the sole canonical version 2 review.json and do not launch another Agent or task.',
+                'Read the accepted prior review and exactly the three accepted verification lane packets. Do not read canonical full documents. Reconcile duplicate lane statuses: a prior conflict is closed only when every lane assigned to that conflict reports it closed; it remains open when any assigned lane reports it open. Treat contract.remediationReceipts as byte-bound proof of completed repair lanes. Return the sole canonical version 2 review JSON object and do not launch another Agent or task.',
                 foundationReviewOutputContractInstruction(),
                 'Set output priorReviewDigest exactly to contract.priorReviewDigest and account for every prior conflict in priorConflictStatus. Every open prior conflict must retain the same ID in conflicts; every closed prior conflict must be absent. New conflicts use new IDs. READY requires conflicts: []; NEEDS_REVISION requires at least one conflict.',
               ].join(' ')
@@ -366,10 +368,26 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 request.contract.reviewRole === 'technical-assets' ||
                 request.contract.reviewRole === 'presentation'
             ? [
-                'Review only the assigned document lane and write one bounded Foundation review lane packet to the sole staging path. Cite exact accepted bytes, do not decide the final verdict, do not propose replacement prose, and do not modify canonical documents.',
+                'Review only the assigned document lane and return one bounded Foundation review lane packet JSON object. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
                 foundationReviewLanePacketContractInstruction({
                   revision: request.revision,
                   laneId: request.contract.reviewRole,
+                  mode:
+                    request.contract.reviewMode === 'verification'
+                      ? 'verification'
+                      : 'initial',
+                  ...(request.contract.reviewMode === 'verification'
+                    ? {
+                        priorReviewDigest: reviewerPriorDigest(request.contract),
+                        priorConflictIds: Array.isArray(
+                          request.contract.priorConflictIds,
+                        )
+                          ? request.contract.priorConflictIds.filter(
+                              (id): id is string => typeof id === 'string',
+                            )
+                          : undefined,
+                      }
+                    : {}),
                 }),
               ].join(' ')
             : 'Unsupported Foundation review role.',
@@ -444,7 +462,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'document-reviewer':
-      return 'Finish only after every assigned report file is fully written. End the turn normally; the committed report bytes, not response prose or a structured submission tool, are the completion authority.'
+      return 'Submit the complete contracted object once through StructuredOutput. Bee Game Studio owns validation and atomic persistence; do not write report files yourself.'
     case 'resource-planner':
       return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
     case 'resource-curator':

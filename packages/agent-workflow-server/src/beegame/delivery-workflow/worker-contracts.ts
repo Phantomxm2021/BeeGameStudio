@@ -46,21 +46,11 @@ export const foundationReviewWorkerTerminalSchema = z
       'technical-assets',
       'presentation',
       'synthesis',
-      'verification',
     ]),
     reportPath: z.string().min(1),
   })
   .strict()
   .superRefine((value, context) => {
-    if (
-      (value.mode === 'verification' && value.role !== 'verification') ||
-      (value.mode === 'initial' && value.role === 'verification')
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['role'],
-        message: 'Foundation Reviewer role does not match its mode',
-      })
     const root = `.beegame/reviews/foundation/${value.revision}`
     const expected =
       value.role === 'core-design' ||

@@ -22,7 +22,10 @@ import {
   acceptFoundationReviewWorkerTerminal,
   buildFoundationReviewDispatches,
 } from './foundation-review-stage'
-import { createFoundationReviewState } from './foundation-review-state'
+import {
+  createFoundationReviewState,
+  foundationReviewMayStartRemediation,
+} from './foundation-review-state'
 import { readFoundationReviewArtifact } from './foundation-review'
 import {
   completeResourceTask,
@@ -389,11 +392,11 @@ export function createDeliveryWorkflowController(input: {
               status: 'running',
               blockedReason: undefined,
             }
-          } else if (acceptedState.mode === 'verification') {
+          } else if (!foundationReviewMayStartRemediation(acceptedState)) {
             next = {
               ...next,
               status: 'needs_action',
-              blockedReason: `Foundation verification still requires revision; see ${acceptedState.finalReportPath}`,
+              blockedReason: `Foundation review reached its bounded remediation limit and still requires revision; see ${acceptedState.finalReportPath}`,
             }
           } else {
             const review = await readFoundationReviewArtifact({
@@ -1081,13 +1084,51 @@ export function createDeliveryWorkflowController(input: {
           )
           let reviewRun = run
           if (
+            reviewRun.foundationReviewState &&
+            foundationReviewMayStartRemediation(
+              reviewRun.foundationReviewState,
+            ) &&
+            reviewRun.foundationReviewState.finalReportPath &&
+            reviewRun.foundationReviewState.finalReportDigest &&
+            reviewRun.foundationRemediationState?.reviewDigest !==
+              reviewRun.foundationReviewState.finalReportDigest
+          ) {
+            const review = await readFoundationReviewArtifact({
+              workspacePath: input.workspacePath,
+              path: reviewRun.foundationReviewState.finalReportPath,
+              expectedDigest:
+                reviewRun.foundationReviewState.finalReportDigest,
+            })
+            reviewRun = await persist(
+              {
+                ...reviewRun,
+                phase: 'DOCUMENT_DRAFTING',
+                documentStep: undefined,
+                status: 'running',
+                foundationRemediationState:
+                  createFoundationRemediationStateFromAuthority({
+                    reviewPath: review.path,
+                    reviewDigest: review.digest,
+                    sourceRevision: review.review.revision,
+                    affectedPaths: review.affectedPaths,
+                  }),
+                blockedReason: undefined,
+              },
+              'foundation.review.remediation.created',
+            )
+            await resumeUnlocked(reviewRun)
+            return
+          }
+          if (
             reviewRun.foundationRemediationState?.resultingRevision ===
               reviewRevision &&
-            reviewRun.foundationReviewState?.mode === 'initial' &&
+            reviewRun.foundationReviewState &&
             reviewRun.foundationReviewState.status === 'completed' &&
             reviewRun.foundationReviewState.verdict === 'NEEDS_REVISION' &&
             reviewRun.foundationReviewState.finalReportPath &&
-            reviewRun.foundationReviewState.finalReportDigest
+            reviewRun.foundationReviewState.finalReportDigest &&
+            reviewRun.foundationRemediationState.reviewDigest ===
+              reviewRun.foundationReviewState.finalReportDigest
           ) {
             reviewRun = await persist(
               {
