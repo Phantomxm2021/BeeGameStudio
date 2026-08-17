@@ -112,4 +112,3 @@ fully ceased. That observation is not part of the causal chain for the final
 Reviewer failure. It requires an independent reproduction covering dispatch
 identity, managed-session disposal, abort propagation, and process termination.
 No cancellation code is changed as part of the v3 contract repair.
-
