@@ -204,20 +204,23 @@ async function acceptLaneReceipt(input: {
     input.revision,
     input.laneId,
   )
-  if (!(await isRegularFile(stagingPath)))
+  const committedPath = foundationReviewLaneReceiptPath(
+    input.workspacePath,
+    input.revision,
+    input.laneId,
+  )
+  const sourcePath = (await isRegularFile(stagingPath))
+    ? stagingPath
+    : committedPath
+  if (!(await isRegularFile(sourcePath)))
     throw new Error('foundation review lane receipt is unavailable')
-  const bytes = await readFile(stagingPath)
+  const bytes = await readFile(sourcePath)
   const receipt = parseFoundationReviewLaneMarkdown(bytes.toString('utf8'), {
     revision: input.revision,
     lane: input.laneId,
     projectionDigest: input.projectionDigest,
     allowedEvidencePaths: input.allowedEvidencePaths,
   })
-  const committedPath = foundationReviewLaneReceiptPath(
-    input.workspacePath,
-    input.revision,
-    input.laneId,
-  )
   await atomicCommitReceipt({ stagingPath, committedPath, bytes })
   return {
     receipt,
@@ -241,19 +244,22 @@ async function acceptSelectionReceipt(input: {
     input.revision,
     input.dispatchId,
   )
-  if (!(await isRegularFile(stagingPath)))
+  const committedPath = foundationReviewSelectionPath(
+    input.workspacePath,
+    input.revision,
+  )
+  const sourcePath = (await isRegularFile(stagingPath))
+    ? stagingPath
+    : committedPath
+  if (!(await isRegularFile(sourcePath)))
     throw new Error('foundation review selection receipt is unavailable')
-  const bytes = await readFile(stagingPath)
+  const bytes = await readFile(sourcePath)
   const selection = parseFoundationReviewSelectionMarkdown(
     bytes.toString('utf8'),
     {
       revision: input.revision,
       candidateReferences: input.candidateReferences,
     },
-  )
-  const committedPath = foundationReviewSelectionPath(
-    input.workspacePath,
-    input.revision,
   )
   await atomicCommitReceipt({ stagingPath, committedPath, bytes })
   return {
