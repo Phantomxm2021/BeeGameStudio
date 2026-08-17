@@ -757,6 +757,152 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('denies project file reads that escape the workspace boundary without blocking', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-project-read-boundary-'))
+    const workspacePath = join(root, 'workspace')
+    const outsidePath = join(root, 'outside')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await mkdir(outsidePath, { recursive: true })
+    await writeFile(join(outsidePath, 'private.json'), '{}')
+    await symlink(outsidePath, join(workspacePath, 'docs', 'escape'))
+    let decisionPromises: Promise<DashboardPermissionDecision>[] = []
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromises = [
+            startInput.requestPermission!({
+              toolUseID: 'parent-directory-read',
+              toolName: 'Read',
+              message: 'Read outside through a parent directory',
+              input: { file_path: '../outside/private.json' },
+            }),
+            startInput.requestPermission!({
+              toolUseID: 'symlink-escape-read',
+              toolName: 'Read',
+              message: 'Read outside through a symlink',
+              input: { file_path: 'docs/escape/private.json' },
+            }),
+            startInput.requestPermission!({
+              toolUseID: 'absolute-external-grep',
+              toolName: 'Grep',
+              message: 'Search an external directory',
+              input: { path: outsidePath },
+            }),
+            startInput.requestPermission!({
+              toolUseID: 'missing-read-target',
+              toolName: 'Read',
+              message: 'Read without a target',
+              input: {},
+            }),
+          ]
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'review project documents')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([])
+    const decisions = await Promise.all(decisionPromises)
+    expect(decisions.map(decision => decision.behavior)).toEqual([
+      'deny',
+      'deny',
+      'deny',
+      'deny',
+    ])
+    expect(decisions[0]?.message).toContain('outside the project workspace')
+    expect(decisions[1]?.message).toContain('outside the project workspace')
+    expect(decisions[2]?.message).toContain('outside the project workspace')
+    expect(decisions[3]?.message).toContain('project-local target path')
+    const resolved = manager
+      .events(session.id)
+      .filter(event => event.type === 'permission.resolved')
+    expect(resolved).toHaveLength(4)
+    expect(resolved.map(event => event.payload.reason)).toEqual([
+      'project_workspace_boundary',
+      'project_workspace_boundary',
+      'project_workspace_boundary',
+      'project_workspace_target_invalid',
+    ])
+    for (const event of resolved) {
+      expect(event.payload).toMatchObject({ autoDenied: true })
+      expect(event.payload).toHaveProperty('input')
+    }
+    manager.dispose()
+  })
+
+  test('leaves unsupported tools on the existing permission path', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-project-tool-permission-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'project-bash-request',
+            toolName: 'Bash',
+            message: 'Run a shell command',
+            input: { command: 'pwd' },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-reviewer',
+    })
+
+    await manager.send(session.id, 'inspect the project')
+    await waitForIdle(manager, session.id)
+
+    expect(
+      manager.pendingPermissionsForProject(
+        'user-1',
+        'project-1',
+        workspacePath,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        toolUseID: 'project-bash-request',
+        toolName: 'Bash',
+      }),
+    ])
+    manager.resolveProjectPermission(
+      'user-1',
+      'project-1',
+      workspacePath,
+      'project-bash-request',
+      { behavior: 'deny' },
+    )
+    expect(await decisionPromise).toEqual({ behavior: 'deny' })
+    manager.dispose()
+  })
+
   test('denies workflow mutations outside the exact assigned paths without blocking', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-workflow-path-permission-'))
     const workspacePath = join(root, 'workspace')
