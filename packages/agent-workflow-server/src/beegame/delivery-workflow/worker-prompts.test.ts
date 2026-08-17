@@ -376,13 +376,7 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain('permits incompatible implementations')
     expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
     expect(finalReviewerPrompt).toContain('one JSON object')
-    expect(finalReviewerPrompt).toContain('version must be the integer 2')
-    expect(finalReviewerPrompt).toContain(
-      'priorConflictStatus must always be present',
-    )
-    expect(finalReviewerPrompt).toContain(
-      'must equal []',
-    )
+    expect(finalReviewerPrompt).toContain('version must be the integer 3')
     expect(finalReviewerPrompt).toContain('IDs must be B1, B2, B3')
     expect(finalReviewerPrompt).toContain(
       'evidence must be an array of objects',
@@ -390,7 +384,7 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain(
       'path, location and observed',
     )
-    expect(finalReviewerPrompt).toContain('priorConflictStatus')
+    expect(finalReviewerPrompt).not.toContain('priorConflictStatus')
     expect(finalReviewerPrompt).not.toContain('priorReviewDigest')
     expect(finalReviewerPrompt).toContain('requiredOutcome')
     expect(finalReviewerPrompt).toContain('changes')
@@ -405,7 +399,7 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
     expect(finalReviewerPrompt).toContain('Deduplicate')
-    expect(finalReviewerPrompt).toContain('sole canonical version 2 review.json')
+    expect(finalReviewerPrompt).toContain('sole canonical version 3 review.json')
     expect(finalReviewerPrompt).toContain('accepted lane packets')
     expect(finalReviewerPrompt).toContain('launch another Agent or task')
 

@@ -1154,11 +1154,10 @@ describe('delivery worker session credentials', () => {
         'foundation-initial-1-synthesis',
       )
       const reviewText = `${JSON.stringify({
-          version: 2,
+          version: 3,
           scope: 'foundation',
           revision,
           verdict: 'READY',
-          priorConflictStatus: [],
           conflicts: [],
         })}\n`
       const events = [
@@ -1173,8 +1172,10 @@ describe('delivery worker session credentials', () => {
           createdAt: new Date(),
         },
       ]
+      let startInput: { workflowJsonSchema?: unknown } | undefined
       const sessions = {
-        start() {
+        start(input: { workflowJsonSchema?: unknown }) {
+          startInput = input
           return { id: 'session-foundation-reviewer' }
         },
         events() {
@@ -1220,6 +1221,11 @@ describe('delivery worker session credentials', () => {
           packetDigests: {},
         },
       })
+
+      const schemaText = JSON.stringify(startInput?.workflowJsonSchema)
+      expect(schemaText).not.toContain('priorConflictStatus')
+      expect(schemaText).not.toContain('priorReviewDigest')
+      expect(schemaText).not.toContain('"not"')
 
       expect(
         await port.waitForTerminal!('dispatch-foundation-review'),

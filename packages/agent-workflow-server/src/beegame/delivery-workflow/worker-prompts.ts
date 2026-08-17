@@ -3,7 +3,10 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
-import { foundationReviewOutputContractInstruction } from './foundation-review'
+import {
+  FOUNDATION_REVIEW_VERSION,
+  foundationReviewOutputContractInstruction,
+} from './foundation-review'
 import { foundationReviewLanePacketContractInstruction } from './foundation-review-lane-packet'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
@@ -274,9 +277,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Submit exactly one report through the native StructuredOutput tool. Do not use Write or Edit and do not author a report file. Bee Game Studio validates and atomically persists the structured result to the sole contract.assignment.stagingOutputPaths entry. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
         request.contract.reviewRole === 'synthesis'
           ? [
-                'Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version 2 review.json. Do not launch another Agent or task.',
+                `Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version ${FOUNDATION_REVIEW_VERSION} review.json. Do not launch another Agent or task.`,
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-                'Return exactly one JSON object. It must contain only version, scope, revision, verdict, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
+                'Return exactly one JSON object. It must contain only version, scope, revision, verdict and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
                 foundationReviewOutputContractInstruction(),
                 'Each conflict must state what is wrong, the exact evidence location, every canonical path whose bytes would need to change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose or launch follow-up work.',
                 'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives affected-path metadata from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',

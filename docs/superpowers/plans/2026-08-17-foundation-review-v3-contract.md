@@ -113,7 +113,7 @@ git commit -m "fix: replace foundation review with v3 contract"
 **Files:**
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts`
-- Modify: `packages/agent-workflow-server/src/beegame/delivery-worker-session-port.native-documents.test.ts`
+- Modify: `packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts`
 
 **Interfaces:**
 - Consumes: the Task 1 `foundationReviewSchema` and `FOUNDATION_REVIEW_VERSION`.
@@ -131,7 +131,8 @@ expect(finalReviewerPrompt).not.toContain('priorReviewDigest')
 expect(finalReviewerPrompt).toContain('sole canonical version 3 review.json')
 ```
 
-Extend the existing native document test that captures `workflowJsonSchema`:
+Extend the existing synthesis terminal test by capturing the real
+`sessions.start(input)` argument and asserting its `workflowJsonSchema`:
 
 ```ts
 const schemaText = JSON.stringify(startInput?.workflowJsonSchema)
@@ -145,13 +146,14 @@ expect(schemaText).not.toContain('"not"')
 Run:
 
 ```bash
-bun test packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.native-documents.test.ts
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts
 ```
 
 Expected: `worker-prompts.test.ts` FAILS because the hard-coded synthesis
-instruction still names version 2 and `priorConflictStatus`. The native schema
-test may already pass after Task 1; that confirms it is an integration guard,
-not a duplicate production patch.
+instruction still names version 2 and `priorConflictStatus`. The synthesis
+session-boundary assertion passes after Task 1 and proves the delivery port
+actually selects the canonical v3 schema rather than the specialist lane
+schema.
 
 - [ ] **Step 3: Implement the minimal prompt change**
 
@@ -177,7 +179,7 @@ Run the Task 2 command again. Expected: both files PASS.
 - [ ] **Step 5: Commit the Reviewer boundary cleanup**
 
 ```bash
-git add packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/beegame/delivery-worker-session-port.native-documents.test.ts
+git add packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts
 git commit -m "fix: publish reviewer v3 structured output"
 ```
 
@@ -329,4 +331,3 @@ scoped issue. Commit only the report:
 git add docs/superpowers/reviews/2026-08-17-remediation-clean-slate-chrome-acceptance.md
 git commit -m "docs: record reviewer v3 chrome acceptance"
 ```
-
