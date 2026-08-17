@@ -9,29 +9,15 @@ import { foundationReviewLanePacketContractInstruction } from './foundation-revi
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
-function reviewerPriorDigest(
-  contract: Record<string, unknown>,
-): string | undefined {
+function reviewerPriorDigest(contract: Record<string, unknown>): string | undefined {
   const priorReview = contract.priorReview
-  if (
-    !priorReview ||
-    typeof priorReview !== 'object' ||
-    Array.isArray(priorReview)
-  )
+  if (!priorReview || typeof priorReview !== 'object' || Array.isArray(priorReview))
     return undefined
   const digest = (priorReview as Record<string, unknown>).digest
   return typeof digest === 'string' ? digest : undefined
 }
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
-  if (
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation' &&
-    !['initial', 'parallel-draft', 'remediation'].includes(
-      String(request.contract.authoringMode),
-    )
-  )
-    throw new Error('Foundation document authoring mode is unsupported')
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -66,7 +52,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const foundationAuthorArtifacts =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
-    ['initial', 'parallel-draft', 'remediation'].includes(
+    ['initial', 'parallel-draft'].includes(
       String(request.contract.authoringMode),
     ) &&
     typeof request.contract.foundationDocumentPath === 'string'
@@ -301,9 +287,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           : request.contract.authoringMode === 'initial' ||
               request.contract.authoringMode === 'parallel-draft'
             ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
-            : request.contract.authoringMode === 'remediation'
-              ? `Author replacement bodies only for the byte-bound canonical units assigned in the accepted path-scoped conflict transaction for ${String(request.contract.foundationDocumentPath)}. Return exactly one contracted JSON object; Bee Game Studio validates and atomically persists the assembled document.`
-              : 'Author the assigned document through its canonical contract.',
+            : 'Use the accepted Foundation review JSON and current target bytes projected by the workflow service. Apply every conflict change across exactly contract.remediation.affectedPaths in one coordinated turn, preserve unrelated approved content, and leave every authorized Markdown document complete when the turn ends.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
@@ -354,8 +338,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
               : [
-                  `This is one accepted report-driven Foundation remediation for ${String(request.contract.foundationDocumentPath)}. Resolve every assigned conflict ID through the smallest sufficient set of replacement bodies. Do not reproduce unchanged units, headings, metadata, or protocol markers.`,
-                  'The service owns assembly and commit. The dedicated verification stage owns closure review.',
+                  'This is one accepted report-driven Foundation remediation. Modify exactly the canonical documents in contract.remediation.affectedPaths and no others.',
+                  'Use the projected review JSON as the complete conflict list. Apply every conflict changes[].action to its named path so the shared requiredOutcome and all acceptance conditions hold across documents. Preserve unrelated approved authority; do not reinterpret, rewrite, summarize or expand the review.',
+                  'For each accepted conflict, locate only the cited and directly dependent occurrences of the affected authority, state, formula, count, budget or reference before editing. Perform one targeted closure check against that conflict after editing. Do not launch a broad new review.',
                 ].join(' '),
       ].join(' ')
     case 'document-reviewer':
@@ -365,13 +350,13 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.reviewRole === 'synthesis' &&
         request.contract.reviewMode === 'initial'
           ? [
-              'Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version 2 review.json. Do not launch another Agent or task.',
-              'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-              'Return exactly one JSON object. It must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
-              foundationReviewOutputContractInstruction(),
-              'Each conflict must tell the repair Agent what is wrong, the exact evidence location, every canonical path whose bytes must change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose.',
-              'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives write authority from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
-            ].join(' ')
+                'Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version 2 review.json. Do not launch another Agent or task.',
+                'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
+                'Return exactly one JSON object. It must contain only version, scope, revision, verdict, optional priorReviewDigest, priorConflictStatus and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
+                foundationReviewOutputContractInstruction(),
+                'Each conflict must tell the repair Agent what is wrong, the exact evidence location, every canonical path whose bytes must change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose.',
+                'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives write authority from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
+              ].join(' ')
           : request.contract.reviewRole === 'synthesis' &&
               request.contract.reviewMode === 'verification'
             ? [
@@ -382,32 +367,30 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : request.contract.reviewRole === 'core-design' ||
                 request.contract.reviewRole === 'technical-assets' ||
                 request.contract.reviewRole === 'presentation'
-              ? [
-                  'Review only the assigned document lane and return one bounded Foundation review lane packet JSON object. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
-                  foundationReviewLanePacketContractInstruction({
-                    revision: request.revision,
-                    laneId: request.contract.reviewRole,
-                    mode:
-                      request.contract.reviewMode === 'verification'
-                        ? 'verification'
-                        : 'initial',
-                    ...(request.contract.reviewMode === 'verification'
-                      ? {
-                          priorReviewDigest: reviewerPriorDigest(
-                            request.contract,
-                          ),
-                          priorConflictIds: Array.isArray(
-                            request.contract.priorConflictIds,
-                          )
-                            ? request.contract.priorConflictIds.filter(
-                                (id): id is string => typeof id === 'string',
-                              )
-                            : undefined,
-                        }
-                      : {}),
-                  }),
-                ].join(' ')
-              : 'Unsupported Foundation review role.',
+            ? [
+                'Review only the assigned document lane and return one bounded Foundation review lane packet JSON object. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
+                foundationReviewLanePacketContractInstruction({
+                  revision: request.revision,
+                  laneId: request.contract.reviewRole,
+                  mode:
+                    request.contract.reviewMode === 'verification'
+                      ? 'verification'
+                      : 'initial',
+                  ...(request.contract.reviewMode === 'verification'
+                    ? {
+                        priorReviewDigest: reviewerPriorDigest(request.contract),
+                        priorConflictIds: Array.isArray(
+                          request.contract.priorConflictIds,
+                        )
+                          ? request.contract.priorConflictIds.filter(
+                              (id): id is string => typeof id === 'string',
+                            )
+                          : undefined,
+                      }
+                    : {}),
+                }),
+              ].join(' ')
+            : 'Unsupported Foundation review role.',
         'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',
       ].join(' ')
     case 'resource-planner':
@@ -472,8 +455,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft')
         ? ''
-        : request.contract.authoringMode === 'remediation'
-          ? 'Return exactly one result matching the supplied JSON schema. Do not write or edit project files; Bee Game Studio validates and atomically commits the transaction.'
+        : request.contract.authoringMode === 'remediation' &&
+            request.contract.documentSet === 'foundation'
+          ? 'Ensure every Markdown document in contract.remediation.affectedPaths is complete and committed, then end the turn normally. The native runtime owns the file-operation sequence.'
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`

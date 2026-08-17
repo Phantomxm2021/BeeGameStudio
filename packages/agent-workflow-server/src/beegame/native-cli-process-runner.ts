@@ -25,18 +25,16 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stderr: ReadableStream<Uint8Array>
 }
 
-export function createNativeCliProcessRunner(
-  options: {
-    command?: string[]
-    observabilityFactory?: (input: {
-      workspacePath: string
-      sessionId: string
-      provider: string
-      model: string
-      launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
-    }) => RuntimeObservability
-  } = {},
-): BeeGameSessionRunner {
+export function createNativeCliProcessRunner(options: {
+  command?: string[]
+  observabilityFactory?: (input: {
+    workspacePath: string
+    sessionId: string
+    provider: string
+    model: string
+    launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
+  }) => RuntimeObservability
+} = {}): BeeGameSessionRunner {
   return {
     async start(input) {
       return NativeCliProcessRuntime.start(
@@ -69,15 +67,7 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    ...(input.workflowMarkdownStreamContract
-      ? ['--tools', '']
-      : []),
-    // The native CLI treats an empty --tools value as if no base-tool filter
-    // was supplied. Name the schema tool so every built-in tool is denied
-    // while the JSON-schema StructuredOutput tool remains available.
-    ...(input.workflowDocumentAuthorMode === 'remediation'
-      ? ['--tools', 'StructuredOutput']
-      : []),
+    ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
@@ -141,21 +131,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
-    if (this.disposed)
-      throw new Error('Bee Game Studio native runtime is closed')
+    if (this.disposed) throw new Error('Bee Game Studio native runtime is closed')
     if (this.activeTurn)
-      throw new Error(
-        'Bee Game Studio native runtime already has an active turn',
-      )
+      throw new Error('Bee Game Studio native runtime already has an active turn')
     if (input.signal.aborted) return
 
     await new Promise<void>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       const abort = () => {
         this.child.kill('SIGTERM')
-        this.failActiveTurn(
-          new Error('Bee Game Studio native turn was aborted'),
-        )
+        this.failActiveTurn(new Error('Bee Game Studio native turn was aborted'))
       }
       input.signal.addEventListener('abort', abort, { once: true })
       this.activeTurn = {
@@ -301,10 +286,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           message: `${toolName} requires permission.`,
           input: toolInput,
         })
-      : ({
-          behavior: 'deny',
-          message: 'Permission authority is unavailable.',
-        } as const)
+      : ({ behavior: 'deny', message: 'Permission authority is unavailable.' } as const)
     this.write(permissionResponse(requestId, toolUseID, toolInput, decision))
   }
 
@@ -352,11 +334,7 @@ function runtimeIdentity(env: Record<string, string>): {
   provider: string
   model: string
 } {
-  if (
-    env.ANTHROPIC_BASE_URL ||
-    env.ANTHROPIC_AUTH_TOKEN ||
-    env.ANTHROPIC_API_KEY
-  )
+  if (env.ANTHROPIC_BASE_URL || env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY)
     return {
       provider: 'anthropic',
       model: selectedRuntimeModel(env, 'ANTHROPIC'),
@@ -412,8 +390,7 @@ function permissionResponse(
             }
           : {
               behavior: 'deny',
-              message:
-                decision.message ?? 'Permission denied by user settings.',
+              message: decision.message ?? 'Permission denied by user settings.',
               toolUseID,
               decisionClassification: 'user_reject',
             },
@@ -457,10 +434,8 @@ async function* ndjsonLines(
 }
 
 function isErrorResult(message: Record<string, unknown>): boolean {
-  return (
-    message.is_error === true ||
+  return message.is_error === true ||
     (typeof message.subtype === 'string' && message.subtype !== 'success')
-  )
 }
 
 function isMissingVisibleMarkdownResult(
@@ -506,6 +481,8 @@ function nativeTaskNotification(
         ? message.value
         : JSON.stringify(message),
     ...(typeof message.uuid === 'string' ? { uuid: message.uuid } : {}),
-    ...(typeof message.isMeta === 'boolean' ? { isMeta: message.isMeta } : {}),
+    ...(typeof message.isMeta === 'boolean'
+      ? { isMeta: message.isMeta }
+      : {}),
   }
 }

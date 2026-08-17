@@ -64,41 +64,10 @@ function expectedSelectors(laneId: FoundationDocumentLaneId): string[] {
 }
 
 afterEach(async () => {
-  await Promise.all(
-    workspaces.splice(0).map(path => rm(path, { recursive: true })),
-  )
+  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
 })
 
 describe('foundation review projections', () => {
-  test('persists projected Markdown as bounded physical lines', async () => {
-    const root = await workspace()
-    const sourcePath = resolve(root, 'docs/GDD.md')
-    const source = await readFile(sourcePath, 'utf8')
-    await writeFile(
-      sourcePath,
-      source.replace(
-        'Exact docs/GDD.md content for core_loop.',
-        Array.from(
-          { length: 160 },
-          (_, index) =>
-            `Projected authority row ${index + 1}: ${'x'.repeat(48)}`,
-        ).join('\n'),
-      ),
-      'utf8',
-    )
-
-    const accepted = await writeFoundationReviewProjection({
-      workspacePath: root,
-      revision: 'd'.repeat(64),
-      laneId: 'presentation',
-    })
-    const bytes = await readFile(resolve(root, accepted.path), 'utf8')
-
-    expect(
-      Math.max(...bytes.split('\n').map(line => line.length)),
-    ).toBeLessThan(2_048)
-  })
-
   test('writes only contract-declared cross-lane source sections', async () => {
     const root = await workspace()
     const revision = 'a'.repeat(64)

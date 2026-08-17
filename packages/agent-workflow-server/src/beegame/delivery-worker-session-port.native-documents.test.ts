@@ -11,7 +11,6 @@ import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
 import { commitAuthoredFoundationDocument } from './authored-document-receipt'
-import { buildFoundationRemediationTransactionRequest } from './delivery-workflow/foundation-remediation-transaction'
 
 function count(value: string, needle: string): number {
   return value.split(needle).length - 1
@@ -168,24 +167,11 @@ function fakeSessions(input: {
 }
 
 describe('native initial document authoring', () => {
-  test('repairs one document in an isolated native session', async () => {
+  test('derives remediation mutations from durable bytes after tool events are compacted', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'remediation-digests-'))
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    const technicalBody = renderTestCompleteGameDocument(
-      'docs/TECHNICAL_DESIGN.md',
-      completeTestSubmission('docs/TECHNICAL_DESIGN.md'),
-    )
-    const technicalSource = [
-      '---',
-      'document_id: TECHNICAL_DESIGN',
-      'version: 1.0.0',
-      'updated_at: 2026-08-17T10:00:00.000Z',
-      '---',
-      technicalBody.trimEnd(),
-      '',
-    ].join('\n')
     const originals = {
-      'docs/TECHNICAL_DESIGN.md': technicalSource,
+      'docs/TECHNICAL_DESIGN.md': '# Technical\nOriginal technical authority.\n',
       'docs/ASSET_PLAN.md': '# Assets\nOriginal asset authority.\n',
     }
     await Promise.all(
@@ -193,11 +179,12 @@ describe('native initial document authoring', () => {
         writeFile(join(workspacePath, path), body),
       ),
     )
-    const previousDocumentDigests = {
-      'docs/TECHNICAL_DESIGN.md': createHash('sha256')
-        .update(originals['docs/TECHNICAL_DESIGN.md'])
-        .digest('hex'),
-    }
+    const previousDocumentDigests = Object.fromEntries(
+      Object.entries(originals).map(([path, body]) => [
+        path,
+        createHash('sha256').update(body).digest('hex'),
+      ]),
+    )
     const reviewPath = `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`
     const reviewBytes = `${JSON.stringify({
       version: 2,
@@ -212,9 +199,9 @@ describe('native initial document authoring', () => {
           problem: 'The two assigned documents cannot be implemented together.',
           evidence: [
             {
-              path: 'docs/ASSET_PLAN.md',
-              location: 'Asset authority',
-              observed: 'The asset authority demonstrates the conflicting rule.',
+              path: 'docs/TECHNICAL_DESIGN.md',
+              location: 'Authority',
+              observed: 'The technical authority uses the old rule.',
             },
           ],
           requiredOutcome: 'Both documents use one implementable rule.',
@@ -232,45 +219,20 @@ describe('native initial document authoring', () => {
         },
       ],
     })}\n`
-    await mkdir(
-      join(workspacePath, '.beegame/reviews/foundation', 'a'.repeat(64)),
-      {
-        recursive: true,
-      },
-    )
-    await writeFile(join(workspacePath, reviewPath), reviewBytes)
-    const acceptedReview = JSON.parse(reviewBytes) as {
-      conflicts: Array<Record<string, unknown>>
-    }
-    const transaction = buildFoundationRemediationTransactionRequest({
-      sourcePath: 'docs/TECHNICAL_DESIGN.md',
-      sourceMarkdown: technicalSource,
-      reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
-      sourceRevision: 'a'.repeat(64),
-      conflicts: acceptedReview.conflicts.map(conflict => ({
-        ...conflict,
-        changes: (conflict.changes as Array<Record<string, unknown>>).filter(
-          change => change.path === 'docs/TECHNICAL_DESIGN.md',
-        ),
-      })) as never,
+    await mkdir(join(workspacePath, '.beegame/reviews/foundation', 'a'.repeat(64)), {
+      recursive: true,
     })
-    const patchedUnit = transaction.units.find(unit =>
-      unit.unitId.startsWith('section:'),
-    )!
+    await writeFile(join(workspacePath, reviewPath), reviewBytes)
     const events: Array<Record<string, unknown>> = []
-    let startInput: Record<string, unknown> | undefined
     const sessions = {
-      start: (input: Record<string, unknown>) => {
-        startInput = input
-        return {
-          id: 'repair-session',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          cwd: workspacePath,
-        }
-      },
+      start: () => ({
+        id: 'repair-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
       updateAuthToken: () => undefined,
       get: () => ({
         id: 'repair-session',
@@ -283,26 +245,17 @@ describe('native initial document authoring', () => {
       events: () => events,
       isWorkflowWorkerOpen: () => true,
       sendWithDisplay: async () => {
-        events.push({
-          type: 'result',
-          text: 'repair complete',
-          payload: {
-            structured_output: {
-              version: 1,
-              sourcePath: 'docs/TECHNICAL_DESIGN.md',
-              sourceDigest: transaction.sourceDigest,
-              resolvedConflictIds: ['B1'],
-              patches: [
-                {
-                  unitId: patchedUnit.unitId,
-                  expectedBodyDigest: patchedUnit.bodyDigest,
-                  replacementBody:
-                    'The repaired runtime authority has one observable implementation boundary.',
-                },
-              ],
-            },
-          },
-        })
+        await writeFile(
+          join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
+          '# Technical\nRepaired technical authority.\n',
+        )
+        await writeFile(
+          join(workspacePath, 'docs/ASSET_PLAN.md'),
+          '# Assets\nRepaired asset authority.\n',
+        )
+        // A native compaction may retain the final result while discarding
+        // earlier Edit tool events. Durable file bytes remain authoritative.
+        events.push({ type: 'result', text: 'repair complete' })
       },
       stop: () => undefined,
       disposeWorkflowWorker: async () => undefined,
@@ -320,18 +273,16 @@ describe('native initial document authoring', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: 'a'.repeat(64),
-      allowedPaths: ['docs/TECHNICAL_DESIGN.md'],
+      allowedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
       contract: {
         authoringMode: 'remediation',
         documentSet: 'foundation',
-        foundationDocumentPath: 'docs/TECHNICAL_DESIGN.md',
         remediation: {
-          laneId: 'technical-design',
+          laneId: 'technical-assets',
           reviewPath,
           reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
-          affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
+          affectedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
           sourceRevision: 'a'.repeat(64),
-          sourceDigest: transaction.sourceDigest,
         },
         previousDocumentDigests,
       },
@@ -343,56 +294,8 @@ describe('native initial document authoring', () => {
 
     expect(terminal).toMatchObject({
       workerType: 'document-author',
-      writtenPaths: ['docs/TECHNICAL_DESIGN.md'],
-      remediationReceipt: {
-        targetPath: 'docs/TECHNICAL_DESIGN.md',
-        patchedUnitIds: [patchedUnit.unitId],
-      },
+      writtenPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
     })
-    expect(startInput?.workflowMarkdownStreamContract).toBeUndefined()
-    expect(startInput?.workflowJsonSchema).toBeDefined()
-    expect(startInput?.workflowDocumentAuthorMode).toBe('remediation')
-    expect(await readFile(join(workspacePath, 'docs/ASSET_PLAN.md'), 'utf8')).toBe(
-      originals['docs/ASSET_PLAN.md'],
-    )
-    expect(
-      await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8'),
-    ).toContain('The repaired runtime authority')
-
-    let recoveredNativeStarts = 0
-    let recoveredNativeSubmits = 0
-    const recoveryPort = createBeeGameDeliveryWorkerPort({
-      sessions: {
-        start: () => {
-          recoveredNativeStarts += 1
-          throw new Error('a committed remediation must not restart the model')
-        },
-        updateAuthToken: () => undefined,
-        get: () => undefined,
-        events: () => [],
-        isWorkflowWorkerOpen: () => false,
-        sendWithDisplay: async () => {
-          recoveredNativeSubmits += 1
-        },
-        stop: () => undefined,
-        disposeWorkflowWorker: async () => undefined,
-      } as never,
-      userId: 'user',
-    })
-    await recoveryPort.start(request as never)
-    await recoveryPort.submit(request.dispatchId, 'Do not run again.')
-    const recoveredTerminal = await recoveryPort.waitForTerminal?.(
-      request.dispatchId,
-    )
-
-    expect(recoveredTerminal).toMatchObject({
-      workerType: 'document-author',
-      writtenPaths: ['docs/TECHNICAL_DESIGN.md'],
-      remediationReceipt: (terminal as { remediationReceipt: unknown })
-        .remediationReceipt,
-    })
-    expect(recoveredNativeStarts).toBe(0)
-    expect(recoveredNativeSubmits).toBe(0)
     await rm(workspacePath, { recursive: true, force: true })
   })
 
@@ -504,15 +407,15 @@ describe('native initial document authoring', () => {
     expect(
       (startInput?.workflowJsonSchema as Record<string, unknown> | undefined)
         ?.$schema,
-    ).toBe('http://json-schema.org/draft-07/schema#')
+    ).toBe(
+      'http://json-schema.org/draft-07/schema#',
+    )
     expect(JSON.parse(await readFile(stagingPath, 'utf8'))).toEqual(packet)
     await rm(workspacePath, { recursive: true, force: true })
   })
 
   test.skip('legacy calibration session resume is removed', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-resume-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
     const prompts: string[] = []
     const sessionIds: string[] = []
     const disposedSessionIds: string[] = []
@@ -662,9 +565,7 @@ describe('native initial document authoring', () => {
   })
 
   test('fails closed when a requested resume session is unavailable or busy', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-resume-gate-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-gate-'))
     const states = new Map<
       string,
       { status: 'running' | 'stopped'; turnStatus: 'idle' | 'running' }
@@ -695,11 +596,7 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      for (const sessionId of [
-        'unknown-session',
-        'stopped-session',
-        'busy-session',
-      ])
+      for (const sessionId of ['unknown-session', 'stopped-session', 'busy-session'])
         await expect(
           port.start(
             parallelRequest(
@@ -716,9 +613,7 @@ describe('native initial document authoring', () => {
   })
 
   test('creates a fresh native session for every document dispatch', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-sessions-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-sessions-'))
     const sessionIds: string[] = []
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -733,12 +628,8 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      const first = await port.start(
-        request(workspacePath, 'dispatch-one') as never,
-      )
-      const second = await port.start(
-        request(workspacePath, 'dispatch-two') as never,
-      )
+      const first = await port.start(request(workspacePath, 'dispatch-one') as never)
+      const second = await port.start(request(workspacePath, 'dispatch-two') as never)
 
       expect(first.sessionId).not.toBe(second.sessionId)
       expect(new Set(sessionIds).size).toBe(2)
@@ -758,12 +649,7 @@ describe('native initial document authoring', () => {
         completeTestSubmission('docs/GDD.md'),
       )
       const port = createBeeGameDeliveryWorkerPort({
-        sessions: fakeSessions({
-          workspacePath,
-          body,
-          prompts,
-          sessionIds,
-        }) as never,
+        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
         userId: 'user',
         confirmedBriefContext:
           '{"kind":"confirmed_build_brief","marker":"unique-authority"}',
@@ -776,9 +662,7 @@ describe('native initial document authoring', () => {
 
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
-      expect(count(prompts[0]!, 'complete raw Markdown body')).toBeGreaterThan(
-        0,
-      )
+      expect(count(prompts[0]!, 'complete raw Markdown body')).toBeGreaterThan(0)
       expect(prompts[0]).toContain('Do not call tools')
       expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
       expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
@@ -820,35 +704,23 @@ describe('native initial document authoring', () => {
   })
 
   test('preserves incomplete native output and reports the final contract failure', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-incomplete-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-incomplete-'))
     const prompts: string[] = []
     const sessionIds: string[] = []
     const body = '# Incomplete GDD\n\nNative progress remains on disk.\n'
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const port = createBeeGameDeliveryWorkerPort({
-        sessions: fakeSessions({
-          workspacePath,
-          body,
-          prompts,
-          sessionIds,
-        }) as never,
+        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
         userId: 'user',
       })
 
       await port.start(request(workspacePath, 'dispatch-incomplete') as never)
-      await port.submit(
-        'dispatch-incomplete',
-        'original complete document prompt',
-      )
+      await port.submit('dispatch-incomplete', 'original complete document prompt')
       await expect(
         port.waitForTerminal?.('dispatch-incomplete'),
       ).rejects.toThrow(/complete game document/i)
-      await expect(
-        readFile(join(workspacePath, 'docs/GDD.md'), 'utf8'),
-      ).rejects.toThrow()
+      await expect(readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).rejects.toThrow()
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
     } finally {
@@ -857,9 +729,7 @@ describe('native initial document authoring', () => {
   })
 
   test('reports the authoritative commit failure appended while draining the native turn', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-drain-failure-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-drain-failure-'))
     const events: Array<Record<string, unknown>> = []
     let failureAppended = false
     try {
@@ -917,9 +787,7 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      await port.start(
-        request(workspacePath, 'dispatch-drain-failure') as never,
-      )
+      await port.start(request(workspacePath, 'dispatch-drain-failure') as never)
       await port.submit('dispatch-drain-failure', 'complete document prompt')
       await expect(
         port.waitForTerminal?.('dispatch-drain-failure'),
@@ -932,9 +800,7 @@ describe('native initial document authoring', () => {
   })
 
   test('fails once without a hidden correction turn', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'native-document-correction-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-correction-'))
     const prompts: string[] = []
     const sessionIds: string[] = []
     try {
@@ -960,10 +826,7 @@ describe('native initial document authoring', () => {
       })
 
       await port.start(request(workspacePath, 'dispatch-correction') as never)
-      await port.submit(
-        'dispatch-correction',
-        'original complete document prompt',
-      )
+      await port.submit('dispatch-correction', 'original complete document prompt')
       await expect(
         port.waitForTerminal?.('dispatch-correction'),
       ).rejects.toThrow(/canonical heading/i)

@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import { createFoundationReviewState } from './foundation-review-state'
-import {
-  createFoundationRemediationStateFromAuthority,
-  recordFoundationRemediationDispatch,
-} from './foundation-remediation'
 import { transitionDeliveryRun } from './transition'
 
 const revision = 'a'.repeat(64)
@@ -91,61 +87,5 @@ describe('delivery workflow retry', () => {
     expect(retried.foundationReviewState?.reports[0]?.digest).toBe('b'.repeat(64))
     expect(retried.foundationReviewState?.reports[1]?.dispatch).toBeUndefined()
     expect(retried.foundationReviewState?.reports[2]?.failureReason).toBeUndefined()
-  })
-
-  test('restarts an interrupted remediation as a fresh transaction', () => {
-    const base = createTestDeliveryRun({
-      projectId: 'remediation-retry',
-      ownerId: 'owner-remediation-retry',
-    })
-    const sourceDigest = 'c'.repeat(64)
-    const remediation = recordFoundationRemediationDispatch(
-      createFoundationRemediationStateFromAuthority({
-        reviewPath: '.beegame/reviews/foundation/review.json',
-        reviewDigest: 'b'.repeat(64),
-        sourceRevision: revision,
-        affectedPaths: ['docs/GDD.md'],
-      }),
-      'gdd',
-      {
-        dispatchId: 'interrupted-remediation',
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: 'foundation-remediation:gdd',
-        revision,
-        status: 'running',
-        startedAt: new Date().toISOString(),
-        request: {
-          dispatchId: 'interrupted-remediation',
-          runId: base.runId,
-          ownerId: base.ownerId,
-          projectId: base.projectId,
-          workspacePath: '/workspace',
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          taskId: 'foundation-remediation:gdd',
-          revision,
-          contract: { remediation: { sourceDigest } },
-        },
-      },
-    )
-    const retried = transitionDeliveryRun(
-      {
-        ...base,
-        phase: 'DOCUMENT_DRAFTING',
-        status: 'stopped',
-        blockedReason: 'user stopped workflow',
-        foundationRemediationState: remediation,
-      },
-      { type: 'retry' },
-    )
-
-    expect(retried.foundationRemediationState?.lanes[0]).toMatchObject({
-      status: 'pending',
-      sourceDigest,
-    })
-    expect(
-      retried.foundationRemediationState?.lanes[0]?.dispatch,
-    ).toBeUndefined()
   })
 })

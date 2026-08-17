@@ -1,7 +1,6 @@
 import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
-import { foundationRemediationTransactionReceiptSchema } from './foundation-remediation-transaction'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
@@ -11,7 +10,6 @@ export const documentAuthorTerminalSchema = z
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
-    remediationReceipt: foundationRemediationTransactionReceiptSchema.optional(),
     authoringMetrics: z
       .object({
         inputTokens: z.number().int().nonnegative(),

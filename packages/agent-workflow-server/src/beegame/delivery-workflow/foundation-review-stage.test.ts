@@ -7,7 +7,6 @@ import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
 import { foundationReviewLanePacketStagingPath } from './foundation-review-lane-packet'
 import { foundationReviewStagingPath } from './foundation-review'
 import { createFoundationReviewState } from './foundation-review-state'
-import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import type { FoundationRemediationState } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
@@ -19,9 +18,7 @@ import { getGameDocumentContract } from './game-document-contracts'
 const revision = 'a'.repeat(64)
 const workspaces: string[] = []
 
-function sourceDocument(
-  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-): string {
+function sourceDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
   return [
     `# ${contract.discipline}`,
@@ -53,37 +50,52 @@ function completedRemediationState(input: {
   reviewPath: string
   reviewDigest: string
 }): FoundationRemediationState {
-  const ownedPaths = ['docs/GDD.md'] as const
+  const ownedPaths = [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+  ] as const
   return {
     reviewPath: input.reviewPath,
     reviewDigest: input.reviewDigest,
     sourceRevision: 'f'.repeat(64),
     resultingRevision: revision,
-    lanes: FOUNDATION_REMEDIATION_LANES.map(lane =>
-      lane.id === 'gdd'
-        ? {
-            id: lane.id,
-            ownedPaths: [...ownedPaths],
-            affectedPaths: ['docs/GDD.md'],
-            status: 'completed' as const,
-            sourceDigest: '1'.repeat(64),
-            receipt: {
-              reviewDigest: input.reviewDigest,
-              sourceRevision: 'f'.repeat(64),
-              targetPath: 'docs/GDD.md',
-              sourceDigest: '1'.repeat(64),
-              patchedUnitIds: ['section:authority'],
-              finalDigest: '2'.repeat(64),
-              committedAt: '2026-08-17T00:00:00.000Z',
-            },
-          }
-        : {
-            id: lane.id,
-            ownedPaths: [...lane.ownedPaths],
-            affectedPaths: [],
-            status: 'not_required' as const,
-          },
-    ),
+    lanes: [
+      {
+        id: 'core-design',
+        ownedPaths: [...ownedPaths],
+        affectedPaths: ['docs/GDD.md'],
+        status: 'completed',
+        receipt: {
+          reviewDigest: input.reviewDigest,
+          sourceRevision: 'f'.repeat(64),
+          ownedPaths: [...ownedPaths],
+          beforeDigests: Object.fromEntries(
+            ownedPaths.map(path => [path, '1'.repeat(64)]),
+          ),
+          afterDigests: Object.fromEntries(
+            ownedPaths.map(path => [path, '2'.repeat(64)]),
+          ),
+          committedAt: '2026-08-17T00:00:00.000Z',
+        },
+      },
+      {
+        id: 'technical-assets',
+        ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
+        affectedPaths: [],
+        status: 'not_required',
+      },
+      {
+        id: 'presentation',
+        ownedPaths: [
+          'docs/ART_DIRECTION.md',
+          'docs/UI_UX_SPEC.md',
+          'docs/AUDIO_DESIGN.md',
+        ],
+        affectedPaths: [],
+        status: 'not_required',
+      },
+    ],
   }
 }
 
@@ -105,9 +117,7 @@ function completedLanes() {
 }
 
 afterEach(async () => {
-  await Promise.all(
-    workspaces.splice(0).map(path => rm(path, { recursive: true })),
-  )
+  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
 })
 
 describe('foundation review lane dispatch barrier', () => {
@@ -213,7 +223,9 @@ describe('foundation review lane dispatch barrier', () => {
               ...report,
               status: 'completed' as const,
               digest:
-                report.role === 'core-design' ? 'b'.repeat(64) : 'c'.repeat(64),
+                report.role === 'core-design'
+                  ? 'b'.repeat(64)
+                  : 'c'.repeat(64),
             }
           : report,
       ),
@@ -226,9 +238,7 @@ describe('foundation review lane dispatch barrier', () => {
     })
 
     expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
-    await expect(readFile(stagingPath)).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
+    await expect(readFile(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   test('dispatches verification as three bounded lanes behind remediation receipts', async () => {
@@ -236,40 +246,30 @@ describe('foundation review lane dispatch barrier', () => {
     const priorRevision = 'c'.repeat(64)
     const priorReviewPath = `.beegame/reviews/foundation/${priorRevision}/review.json`
     const priorBytes = Buffer.from(
-      `${JSON.stringify(
-        {
-          version: 2,
-          scope: 'foundation',
-          revision: priorRevision,
-          verdict: 'NEEDS_REVISION',
-          priorConflictStatus: [],
-          conflicts: [
-            {
-              id: 'B1',
-              title: 'Core rule mismatch',
-              problem: 'The GDD cannot be implemented consistently.',
-              evidence: [
-                {
-                  path: 'docs/GDD.md',
-                  location: 'Rules',
-                  observed: 'Mismatch.',
-                },
-              ],
-              requiredOutcome: 'Use one rule.',
-              changes: [{ path: 'docs/GDD.md', action: 'Align the rule.' }],
-              acceptance: ['The rule is unique.'],
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
+      `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision: priorRevision,
+        verdict: 'NEEDS_REVISION',
+        priorConflictStatus: [],
+        conflicts: [
+          {
+            id: 'B1',
+            title: 'Core rule mismatch',
+            problem: 'The GDD cannot be implemented consistently.',
+            evidence: [
+              { path: 'docs/GDD.md', location: 'Rules', observed: 'Mismatch.' },
+            ],
+            requiredOutcome: 'Use one rule.',
+            changes: [{ path: 'docs/GDD.md', action: 'Align the rule.' }],
+            acceptance: ['The rule is unique.'],
+          },
+        ],
+      }, null, 2)}\n`,
     )
     await mkdir(dirname(resolve(root, priorReviewPath)), { recursive: true })
     await writeFile(resolve(root, priorReviewPath), priorBytes)
-    const priorReviewDigest = createHash('sha256')
-      .update(priorBytes)
-      .digest('hex')
+    const priorReviewDigest = createHash('sha256').update(priorBytes).digest('hex')
     const state = createFoundationReviewState({
       mode: 'verification',
       revision,
@@ -296,9 +296,11 @@ describe('foundation review lane dispatch barrier', () => {
       digest: priorReviewDigest,
     })
     expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
-    expect(
-      dispatches.map(dispatch => dispatch.contract.priorConflictIds),
-    ).toEqual([['B1'], [], []])
+    expect(dispatches.map(dispatch => dispatch.contract.priorConflictIds)).toEqual([
+      ['B1'],
+      [],
+      [],
+    ])
     expect(dispatches[0].assignment.sourcePaths).toEqual([
       resolve(root, 'docs/GDD.md'),
       resolve(root, 'docs/LEVEL_SCENE_DESIGN.md'),

@@ -16,16 +16,12 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { FoundationReviewState } from './foundation-review-state'
-import {
-  FOUNDATION_REMEDIATION_LANES,
-  FOUNDATION_REMEDIATION_LANE_IDS,
-} from './foundation-remediation'
+import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
-import { foundationRemediationTransactionReceiptSchema } from './foundation-remediation-transaction'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
@@ -220,10 +216,7 @@ const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
           path: z.string().min(1),
           status: z.enum(['pending', 'running', 'completed', 'failed']),
           dispatch: dispatchRecordSchema.optional(),
-          digest: z
-            .string()
-            .regex(/^[a-f0-9]{64}$/u)
-            .optional(),
+          digest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
           durationMs: z.number().finite().nonnegative().optional(),
           usage: workflowUsageSchema.optional(),
           failureReason: z.string().min(1).optional(),
@@ -231,15 +224,9 @@ const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
         .strict(),
     ),
     priorReviewPath: z.string().min(1).optional(),
-    priorReviewDigest: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/u)
-      .optional(),
+    priorReviewDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
     finalReportPath: z.string().min(1).optional(),
-    finalReportDigest: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/u)
-      .optional(),
+    finalReportDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
     verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
     failureReason: z.string().min(1).optional(),
   })
@@ -300,149 +287,180 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
     }
   })
 
-const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> =
-  z
-    .object({
-      reviewPath: z.string().min(1),
-      reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-      sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
-      lanes: z.array(
-        z
-          .object({
-            id: z.enum(FOUNDATION_REMEDIATION_LANE_IDS),
-            ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
-            affectedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
-            status: z.enum([
-              'not_required',
-              'pending',
-              'running',
-              'completed',
-              'failed',
-            ]),
-            sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-            dispatch: dispatchRecordSchema.optional(),
-            receipt: foundationRemediationTransactionReceiptSchema.optional(),
-            failureReason: z.string().min(1).optional(),
-          })
-          .strict(),
-      ),
-      resultingRevision: z
-        .string()
-        .regex(/^[a-f0-9]{64}$/u)
-        .optional(),
-    })
-    .strict()
-    .superRefine((state, context) => {
-      if (
-        state.lanes.length !== FOUNDATION_REMEDIATION_LANES.length ||
-        state.lanes.some((lane, index) => {
-          const expected = FOUNDATION_REMEDIATION_LANES[index]
-          return (
-            !expected ||
-            lane.id !== expected.id ||
-            JSON.stringify(lane.ownedPaths) !==
-              JSON.stringify(expected.ownedPaths)
-          )
+const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> = z
+  .object({
+    reviewPath: z.string().min(1),
+    reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    lanes: z.array(
+      z
+        .object({
+          id: z.enum(['core-design', 'technical-assets', 'presentation']),
+          ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+          affectedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+          status: z.enum([
+            'not_required',
+            'pending',
+            'running',
+            'completed',
+            'failed',
+          ]),
+          baselineDigests: z
+            .record(
+              z.string().min(1),
+              z.string().regex(/^[a-f0-9]{64}$/u),
+            )
+            .optional(),
+          dispatch: dispatchRecordSchema.optional(),
+          receipt: z
+            .object({
+              reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+              sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+              ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
+              beforeDigests: z.record(
+                z.string().min(1),
+                z.string().regex(/^[a-f0-9]{64}$/u),
+              ),
+              afterDigests: z.record(
+                z.string().min(1),
+                z.string().regex(/^[a-f0-9]{64}$/u),
+              ),
+              committedAt: z.string().datetime(),
+            })
+            .strict()
+            .optional(),
+          failureReason: z.string().min(1).optional(),
         })
+        .strict(),
+    ),
+    resultingRevision: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+  })
+  .strict()
+  .superRefine((state, context) => {
+    if (
+      state.lanes.length !== FOUNDATION_REMEDIATION_LANES.length ||
+      state.lanes.some((lane, index) => {
+        const expected = FOUNDATION_REMEDIATION_LANES[index]
+        return (
+          !expected ||
+          lane.id !== expected.id ||
+          JSON.stringify(lane.ownedPaths) !==
+            JSON.stringify(expected.ownedPaths)
+        )
+      })
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['lanes'],
+        message: 'foundation remediation lanes must use canonical definitions',
+      })
+    for (const [index, lane] of state.lanes.entries()) {
+      const expectedAffected = lane.ownedPaths.filter(path =>
+        lane.affectedPaths.includes(path),
+      )
+      if (
+        JSON.stringify(lane.affectedPaths) !== JSON.stringify(expectedAffected)
       )
         context.addIssue({
           code: 'custom',
-          path: ['lanes'],
+          path: ['lanes', index, 'affectedPaths'],
           message:
-            'foundation remediation lanes must use canonical definitions',
+            'foundation remediation affected paths must be unique canonical owned paths',
         })
-      for (const [index, lane] of state.lanes.entries()) {
-        const expectedAffected = lane.ownedPaths.filter(path =>
-          lane.affectedPaths.includes(path),
-        )
+      if (
+        (lane.status === 'not_required') !==
+        (lane.affectedPaths.length === 0)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'status'],
+          message:
+            'foundation remediation not-required state must match empty affected paths',
+        })
+      if (
+        lane.status === 'not_required' &&
+        (lane.dispatch || lane.receipt || lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'not-required remediation lane cannot contain execution state',
+        })
+      if (lane.status === 'completed' && !lane.receipt)
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'receipt'],
+          message: 'completed remediation lane requires one receipt',
+        })
+      if (lane.status === 'running' && !lane.dispatch)
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'dispatch'],
+          message: 'running remediation lane requires one dispatch',
+        })
+      if (
+        lane.status === 'pending' &&
+        (lane.dispatch || lane.receipt || lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'pending remediation lane cannot contain execution state',
+        })
+      if (
+        lane.baselineDigests &&
+        JSON.stringify(Object.keys(lane.baselineDigests).sort()) !==
+          JSON.stringify([...lane.ownedPaths].sort())
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'baselineDigests'],
+          message: 'foundation remediation baseline must cover every owned path',
+        })
+      if (
+        lane.status === 'failed' &&
+        (!lane.dispatch || !lane.failureReason)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index],
+          message: 'failed remediation lane requires its dispatch and reason',
+        })
+      if (lane.receipt && lane.status !== 'completed')
+        context.addIssue({
+          code: 'custom',
+          path: ['lanes', index, 'receipt'],
+          message: 'only a completed remediation lane may contain a receipt',
+        })
+      if (lane.receipt) {
         if (
-          JSON.stringify(lane.affectedPaths) !==
-          JSON.stringify(expectedAffected)
+          lane.receipt.reviewDigest !== state.reviewDigest ||
+          lane.receipt.sourceRevision !== state.sourceRevision ||
+          JSON.stringify(lane.receipt.ownedPaths) !==
+            JSON.stringify(lane.ownedPaths)
         )
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index, 'affectedPaths'],
-            message:
-              'foundation remediation affected paths must be unique canonical owned paths',
-          })
-        if (
-          (lane.status === 'not_required') !==
-          (lane.affectedPaths.length === 0)
-        )
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index, 'status'],
-            message:
-              'foundation remediation not-required state must match empty affected paths',
-          })
-        if (
-          lane.status === 'not_required' &&
-          (lane.dispatch || lane.receipt || lane.failureReason)
-        )
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index],
-            message:
-              'not-required remediation lane cannot contain execution state',
-          })
-        if (lane.status === 'completed' && !lane.receipt)
           context.addIssue({
             code: 'custom',
             path: ['lanes', index, 'receipt'],
-            message: 'completed remediation lane requires one receipt',
+            message:
+              'foundation remediation receipt must match its review and lane authority',
           })
-        if (lane.status === 'running' && !lane.dispatch)
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index, 'dispatch'],
-            message: 'running remediation lane requires one dispatch',
-          })
+        const expectedKeys = [...lane.ownedPaths].sort()
         if (
-          lane.status === 'pending' &&
-          (lane.dispatch || lane.receipt || lane.failureReason)
+          JSON.stringify(Object.keys(lane.receipt.beforeDigests).sort()) !==
+            JSON.stringify(expectedKeys) ||
+          JSON.stringify(Object.keys(lane.receipt.afterDigests).sort()) !==
+            JSON.stringify(expectedKeys)
         )
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index],
-            message: 'pending remediation lane cannot contain execution state',
-          })
-        if (
-          (lane.status === 'running' || lane.status === 'completed' || lane.status === 'failed') &&
-          !lane.sourceDigest
-        )
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index, 'sourceDigest'],
-            message: 'executed remediation lane requires its source digest',
-          })
-        if (lane.status === 'failed' && (!lane.dispatch || !lane.failureReason))
-          context.addIssue({
-            code: 'custom',
-            path: ['lanes', index],
-            message: 'failed remediation lane requires its dispatch and reason',
-          })
-        if (lane.receipt && lane.status !== 'completed')
           context.addIssue({
             code: 'custom',
             path: ['lanes', index, 'receipt'],
-            message: 'only a completed remediation lane may contain a receipt',
+            message:
+              'foundation remediation receipt must cover every owned path digest',
           })
-        if (lane.receipt) {
-          if (
-            lane.receipt.reviewDigest !== state.reviewDigest ||
-            lane.receipt.sourceRevision !== state.sourceRevision ||
-            lane.receipt.targetPath !== lane.affectedPaths[0] ||
-            lane.receipt.sourceDigest !== lane.sourceDigest
-          )
-            context.addIssue({
-              code: 'custom',
-              path: ['lanes', index, 'receipt'],
-              message:
-                'foundation remediation receipt must match its review and lane authority',
-            })
-        }
       }
-    })
+    }
+  })
 
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
   .object({
@@ -451,7 +469,11 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
     type: z.string().min(1),
     phase: z.enum(DELIVERY_PHASES),
     documentStep: z
-      .enum(['FOUNDATION_DRAFTING', 'FOUNDATION_REVIEW', 'CHECKLIST_DRAFTING'])
+      .enum([
+        'FOUNDATION_DRAFTING',
+        'FOUNDATION_REVIEW',
+        'CHECKLIST_DRAFTING',
+      ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
     revision: revisionSchema,
@@ -650,7 +672,11 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     changeRationale: z.string().min(1).optional(),
     phase: z.enum(DELIVERY_PHASES),
     documentStep: z
-      .enum(['FOUNDATION_DRAFTING', 'FOUNDATION_REVIEW', 'CHECKLIST_DRAFTING'])
+      .enum([
+        'FOUNDATION_DRAFTING',
+        'FOUNDATION_REVIEW',
+        'CHECKLIST_DRAFTING',
+      ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
     revision: revisionSchema,
@@ -703,6 +729,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         message:
           'foundation review and downstream phases require all durable authoring checkpoints',
       })
+
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>

@@ -814,6 +814,118 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('derives every completed native edit path for one Foundation remediation lane', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'beegame-coordinated-remediation-'),
+    )
+    const events: Array<Record<string, unknown>> = []
+    const sessions = {
+      start() {
+        return { id: 'session-coordinated-remediation' }
+      },
+      updateAuthToken() {},
+      events() {
+        return events
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      const writtenPaths = ['docs/GDD.md']
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of writtenPaths)
+        await writeFile(join(workspacePath, path), `# Updated ${path}\n`)
+      const sourceRevision = 'b'.repeat(64)
+      const reviewPath = `.beegame/reviews/foundation/${sourceRevision}/review.json`
+      const reviewBytes = `${JSON.stringify({
+        version: 2,
+        scope: 'foundation',
+        revision: sourceRevision,
+        verdict: 'NEEDS_REVISION',
+        priorConflictStatus: [],
+        conflicts: [
+          {
+            id: 'B1',
+            title: 'Shared authority mismatch',
+            problem: 'Two documents disagree.',
+            evidence: [
+              {
+                path: writtenPaths[0],
+                location: 'Rules',
+                observed: 'The documents disagree.',
+              },
+            ],
+            requiredOutcome: 'Both documents agree.',
+            changes: writtenPaths.map(path => ({
+              path,
+              action: 'Use the shared authority.',
+            })),
+            acceptance: ['Both documents use the shared authority.'],
+          },
+        ],
+      })}\n`
+      await mkdir(join(workspacePath, '.beegame/reviews/foundation', sourceRevision), {
+        recursive: true,
+      })
+      await writeFile(join(workspacePath, reviewPath), reviewBytes)
+      await port.start({
+        dispatchId: 'dispatch-coordinated-remediation',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: writtenPaths,
+        contract: {
+          authoringMode: 'remediation',
+          documentSet: 'foundation',
+          remediation: {
+            laneId: 'core-design',
+            reviewPath,
+            reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
+            affectedPaths: writtenPaths,
+            sourceRevision,
+          },
+          previousDocumentDigests: {
+            'docs/GDD.md': 'a'.repeat(64),
+          },
+        },
+      })
+      for (const [index, path] of writtenPaths.entries()) {
+        const toolUseID = `edit-${index}`
+        events.push(
+          {
+            id: `${toolUseID}-started`,
+            type: 'tool.started',
+            text: '',
+            createdAt: new Date(),
+            payload: { toolUseID, toolName: 'Edit', input: { file_path: path } },
+          },
+          {
+            id: `${toolUseID}-completed`,
+            type: 'tool.completed',
+            text: '',
+            createdAt: new Date(),
+            payload: { toolUseID, toolName: 'Edit', input: { file_path: path } },
+          },
+        )
+      }
+      events.push({
+        id: 'result-coordinated-remediation',
+        type: 'result',
+        text: 'Remediation complete.',
+        createdAt: new Date(),
+      })
+
+      await expect(
+        port.waitForTerminal?.('dispatch-coordinated-remediation'),
+      ).resolves.toMatchObject({ writtenPaths })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('reports a missing assigned document instead of a missing BeeGame tool', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-missing-author-'),
@@ -1193,13 +1305,13 @@ describe('delivery worker session credentials', () => {
         'foundation-initial-1-synthesis',
       )
       const reviewText = `${JSON.stringify({
-        version: 2,
-        scope: 'foundation',
-        revision,
-        verdict: 'READY',
-        priorConflictStatus: [],
-        conflicts: [],
-      })}\n`
+          version: 2,
+          scope: 'foundation',
+          revision,
+          verdict: 'READY',
+          priorConflictStatus: [],
+          conflicts: [],
+        })}\n`
       const events = [
         {
           id: 'foundation-review-result',
@@ -1237,10 +1349,7 @@ describe('delivery worker session credentials', () => {
         verificationSourcePaths: [],
         stagingOutputPaths: [stagingPath],
         committedOutputPaths: [
-          join(
-            workspacePath,
-            `.beegame/reviews/foundation/${revision}/review.json`,
-          ),
+          join(workspacePath, `.beegame/reviews/foundation/${revision}/review.json`),
         ],
       } as const
 
@@ -1264,16 +1373,16 @@ describe('delivery worker session credentials', () => {
         },
       })
 
-      expect(await port.waitForTerminal!('dispatch-foundation-review')).toEqual(
-        {
-          workerType: 'document-reviewer',
-          status: 'completed',
-          revision,
-          mode: 'initial',
-          role: 'synthesis',
-          reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
-        },
-      )
+      expect(
+        await port.waitForTerminal!('dispatch-foundation-review'),
+      ).toEqual({
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'synthesis',
+        reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+      })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

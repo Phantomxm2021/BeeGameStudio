@@ -8,7 +8,6 @@ import {
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
-import type { FoundationRemediationLaneId } from './types'
 
 export type DocumentDisplayTask = {
   id: string
@@ -43,13 +42,17 @@ export type DocumentDisplayTaskInput = {
     mode: 'initial' | 'verification'
     attempt: number
     reports: Array<{
-      role: 'core-design' | 'technical-assets' | 'presentation' | 'synthesis'
+      role:
+        | 'core-design'
+        | 'technical-assets'
+        | 'presentation'
+        | 'synthesis'
       status: 'pending' | 'running' | 'completed' | 'failed'
       failureReason?: string
     }>
   }
   foundationRemediationLanes?: Array<{
-    id: FoundationRemediationLaneId
+    id: 'core-design' | 'technical-assets' | 'presentation'
     status: 'not_required' | 'pending' | 'running' | 'completed' | 'failed'
     failureReason?: string
   }>
@@ -63,14 +66,9 @@ const reviewTaskTitle = {
 } as const
 
 const repairTaskTitle = {
-  gdd: '修订 GDD',
-  'level-scene-design': '修订关卡与场景设计',
-  'balance-design': '修订数值与平衡设计',
-  'technical-design': '修订技术设计',
-  'asset-plan': '修订资产计划',
-  'art-direction': '修订美术方向',
-  'ui-ux-spec': '修订 UI/UX 规范',
-  'audio-design': '修订音频设计',
+  'core-design': '修订核心设计',
+  'technical-assets': '修订技术与资产',
+  presentation: '修订表现体验',
 } as const
 
 function visibleReviewStatus(
@@ -235,8 +233,8 @@ export function projectDocumentDisplayTasks(
                 ? 'completed'
                 : 'pending'
               : exists
-                ? 'completed'
-                : 'pending',
+                  ? 'completed'
+                  : 'pending',
       attempt: 0,
       operation,
     }

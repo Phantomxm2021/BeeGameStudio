@@ -61,14 +61,9 @@ export type FoundationDraftState = {
 }
 
 export type FoundationRemediationLaneId =
-  | 'gdd'
-  | 'level-scene-design'
-  | 'balance-design'
-  | 'technical-design'
-  | 'asset-plan'
-  | 'art-direction'
-  | 'ui-ux-spec'
-  | 'audio-design'
+  | 'core-design'
+  | 'technical-assets'
+  | 'presentation'
 
 export type FoundationRemediationLaneStatus =
   | 'not_required'
@@ -77,15 +72,21 @@ export type FoundationRemediationLaneStatus =
   | 'completed'
   | 'failed'
 
-export type FoundationRemediationReceipt =
-  FoundationRemediationTransactionReceipt
+export type FoundationRemediationReceipt = {
+  reviewDigest: string
+  sourceRevision: string
+  ownedPaths: FoundationDocumentPath[]
+  beforeDigests: Record<string, string>
+  afterDigests: Record<string, string>
+  committedAt: string
+}
 
 export type FoundationRemediationLane = {
   id: FoundationRemediationLaneId
   ownedPaths: FoundationDocumentPath[]
   affectedPaths: FoundationDocumentPath[]
   status: FoundationRemediationLaneStatus
-  sourceDigest?: string
+  baselineDigests?: Record<string, string>
   dispatch?: DispatchRecord
   receipt?: FoundationRemediationReceipt
   failureReason?: string
@@ -177,7 +178,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 27 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 25 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -414,4 +415,3 @@ export type DeliveryWorkerPort = {
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }
 import type { FoundationReviewState } from './foundation-review-state'
-import type { FoundationRemediationTransactionReceipt } from './foundation-remediation-transaction'

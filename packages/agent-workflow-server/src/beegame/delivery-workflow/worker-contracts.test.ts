@@ -1,28 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  documentAuthorTerminalSchema,
-  foundationReviewWorkerTerminalSchema,
-} from './worker-contracts'
-
-test('binds a foundation remediation terminal to its committed receipt', () => {
-  const receipt = {
-    reviewDigest: 'a'.repeat(64),
-    sourceRevision: 'b'.repeat(64),
-    targetPath: 'docs/GDD.md' as const,
-    sourceDigest: 'c'.repeat(64),
-    patchedUnitIds: ['section:core-loop'],
-    finalDigest: 'd'.repeat(64),
-    committedAt: '2026-08-17T11:00:00.000Z',
-  }
-  expect(
-    documentAuthorTerminalSchema.parse({
-      workerType: 'document-author',
-      status: 'completed',
-      writtenPaths: ['docs/GDD.md'],
-      remediationReceipt: receipt,
-    }),
-  ).toMatchObject({ remediationReceipt: receipt })
-})
+import { foundationReviewWorkerTerminalSchema } from './worker-contracts'
 
 describe('foundation review worker terminal contract', () => {
   test('binds initial and verification lanes plus synthesis to exact committed artifacts', () => {

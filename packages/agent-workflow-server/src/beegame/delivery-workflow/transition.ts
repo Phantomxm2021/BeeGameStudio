@@ -1,6 +1,6 @@
 import { parseDeliveryRun } from './schema'
 import { retryFoundationFailures } from './foundation-authoring-batch'
-import { restartIncompleteFoundationRemediation } from './foundation-remediation'
+import { retryFoundationRemediationFailures } from './foundation-remediation'
 import { MAX_FOUNDATION_REVIEW_ATTEMPTS } from './foundation-review-state'
 import type {
   AtomicTask,
@@ -502,7 +502,7 @@ export function transitionDeliveryRun(
         run.foundationRemediationState
           ? {
               foundationRemediationState:
-                restartIncompleteFoundationRemediation(
+                retryFoundationRemediationFailures(
                   run.foundationRemediationState,
                 ),
             }

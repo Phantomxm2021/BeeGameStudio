@@ -77,39 +77,6 @@ describe('WorkflowCard', () => {
     expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
   });
 
-  it('shows each remediation document as a checked or failed task', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'remediation-tasks',
-          status: 'blocked',
-          currentPhase: 'DOCUMENT_REVIEW',
-          tasks: [
-            {
-              id: 'foundation-remediation:gdd',
-              title: '修订 GDD',
-              status: 'completed',
-              operation: 'write',
-            },
-            {
-              id: 'foundation-remediation:technical-design',
-              title: '修订技术设计',
-              status: 'failed',
-              operation: 'write',
-              failureReason: '目标文档在提交前发生变化',
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('修订 GDD')).toHaveClass('line-through');
-    expect(screen.getByLabelText('任务状态：已完成')).toHaveAttribute('data-task-icon', 'write-completed');
-    expect(screen.getByText('目标文档在提交前发生变化')).toBeInTheDocument();
-    expect(screen.getByLabelText('任务状态：编写失败')).toHaveAttribute('data-task-icon', 'write-failed');
-    expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
-  });
-
   it('renders a stage deck with navigation and only exposes the latest action', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     render(

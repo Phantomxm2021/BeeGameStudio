@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto'
-import {
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  writeFile,
-} from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { projectFoundationAuthority } from '../foundation-authority-projection'
@@ -29,13 +22,7 @@ const sourceSchema = z
     sectionId: z.string().min(1),
     startLine: z.number().int().positive(),
     lineCount: z.number().int().positive(),
-    content: z.preprocess(
-      value =>
-        Array.isArray(value) && value.every(line => typeof line === 'string')
-          ? value.join('\n')
-          : value,
-      z.string().min(1),
-    ),
+    content: z.string().min(1),
     digest: digestSchema,
   })
   .strict()
@@ -93,17 +80,7 @@ function stagingProjectionPath(
 }
 
 function canonicalBytes(projection: FoundationReviewProjection): string {
-  return `${JSON.stringify(
-    {
-      ...projection,
-      sources: projection.sources.map(source => ({
-        ...source,
-        content: source.content.split('\n'),
-      })),
-    },
-    null,
-    2,
-  )}\n`
+  return `${JSON.stringify(projection, null, 2)}\n`
 }
 
 async function isFile(path: string): Promise<boolean> {
@@ -124,10 +101,7 @@ async function buildProjection(input: {
   const lane = foundationDocumentLaneById(input.laneId)
   const documents = new Map<FoundationDocumentPath, string>()
   for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
-    documents.set(
-      path,
-      await readFile(resolve(input.workspacePath, path), 'utf8'),
-    )
+    documents.set(path, await readFile(resolve(input.workspacePath, path), 'utf8'))
   const owned = new Set(lane.ownedPaths)
   const selected = new Map<
     string,
@@ -199,14 +173,10 @@ export async function writeFoundationReviewProjection(input: {
   } else {
     const existing = await readFile(committed)
     if (createHash('sha256').update(existing).digest('hex') !== digest)
-      throw new Error(
-        'foundation review projection already exists with different bytes',
-      )
+      throw new Error('foundation review projection already exists with different bytes')
   }
   return {
-    path: relative(resolve(input.workspacePath), committed)
-      .split('\\')
-      .join('/'),
+    path: relative(resolve(input.workspacePath), committed).split('\\').join('/'),
     digest,
     byteLength: Buffer.byteLength(bytes),
   }
@@ -234,9 +204,7 @@ export async function readFoundationReviewProjection(input: {
       throw new Error('foundation review projection is unavailable')
     bytes = await readFile(absolute)
   } catch (error) {
-    if (
-      (error as Error).message === 'foundation review projection is unavailable'
-    )
+    if ((error as Error).message === 'foundation review projection is unavailable')
       throw error
     throw new Error('foundation review projection is unavailable')
   }
@@ -250,27 +218,17 @@ export async function readFoundationReviewProjection(input: {
     throw new Error('foundation review projection is invalid')
   }
   const projection = foundationReviewProjectionSchema.parse(value)
-  if (
-    projection.revision !== input.revision ||
-    projection.lane !== input.laneId
-  )
+  if (projection.revision !== input.revision || projection.lane !== input.laneId)
     throw new Error('foundation review projection identity changed')
   for (const source of projection.sources) {
     const contract = getGameDocumentContract(source.path)
-    if (
-      !contract.sections.some(section => section.sectionId === source.sectionId)
-    )
+    if (!contract.sections.some(section => section.sectionId === source.sectionId))
       throw new Error('foundation review projection source contract changed')
-    if (
-      createHash('sha256').update(source.content).digest('hex') !==
-      source.digest
-    )
+    if (createHash('sha256').update(source.content).digest('hex') !== source.digest)
       throw new Error('foundation review projection source digest changed')
   }
   return {
-    path: relative(resolve(input.workspacePath), absolute)
-      .split('\\')
-      .join('/'),
+    path: relative(resolve(input.workspacePath), absolute).split('\\').join('/'),
     digest,
     projection,
   }

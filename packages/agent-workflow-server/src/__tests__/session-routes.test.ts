@@ -1204,52 +1204,52 @@ describe('delivery workflow session continuation', () => {
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       foundationReviewState: {
-        ...createFoundationReviewState({
-          mode: 'initial',
-          revision: reviewRevision,
-          attempt: 1,
-        }),
-        reports: createFoundationReviewState({
-          mode: 'initial',
-          revision: reviewRevision,
-          attempt: 1,
-        }).reports.map((report, index) =>
-          index < 2
-            ? {
-                ...report,
-                status: 'completed' as const,
-                durationMs: index === 0 ? 10_000 : 15_000,
-                usage: {
-                  input_tokens: index === 0 ? 120 : 100,
-                  cache_read_tokens: index === 0 ? 340 : 300,
-                  cache_creation_tokens: index === 0 ? 3 : 4,
-                  completion_tokens: index === 0 ? 56 : 40,
-                  total_tokens: index === 0 ? 519 : 444,
-                },
-                dispatch: {
-                  dispatchId: `review-display-${index}`,
-                  workerType: 'document-reviewer' as const,
-                  phase: 'DOCUMENT_REVIEW' as const,
-                  revision: reviewRevision,
+          ...createFoundationReviewState({
+            mode: 'initial',
+            revision: reviewRevision,
+            attempt: 1,
+          }),
+          reports: createFoundationReviewState({
+            mode: 'initial',
+            revision: reviewRevision,
+            attempt: 1,
+          }).reports.map((report, index) =>
+            index < 2
+              ? {
+                  ...report,
                   status: 'completed' as const,
-                  startedAt:
-                    index === 0
-                      ? '2026-08-06T00:00:00.000Z'
-                      : '2026-08-06T00:00:05.000Z',
-                  finishedAt:
-                    index === 0
-                      ? '2026-08-06T00:00:10.000Z'
-                      : '2026-08-06T00:00:20.000Z',
-                },
-              }
-            : report,
-        ),
-        status: 'completed',
-        verdict: 'NEEDS_REVISION',
-        finalReportPath: reportPath,
-        finalReportDigest: createHash('sha256')
-          .update(reportJson)
-          .digest('hex'),
+                  durationMs: index === 0 ? 10_000 : 15_000,
+                  usage: {
+                    input_tokens: index === 0 ? 120 : 100,
+                    cache_read_tokens: index === 0 ? 340 : 300,
+                    cache_creation_tokens: index === 0 ? 3 : 4,
+                    completion_tokens: index === 0 ? 56 : 40,
+                    total_tokens: index === 0 ? 519 : 444,
+                  },
+                  dispatch: {
+                    dispatchId: `review-display-${index}`,
+                    workerType: 'document-reviewer' as const,
+                    phase: 'DOCUMENT_REVIEW' as const,
+                    revision: reviewRevision,
+                    status: 'completed' as const,
+                    startedAt:
+                      index === 0
+                        ? '2026-08-06T00:00:00.000Z'
+                        : '2026-08-06T00:00:05.000Z',
+                    finishedAt:
+                      index === 0
+                        ? '2026-08-06T00:00:10.000Z'
+                        : '2026-08-06T00:00:20.000Z',
+                  },
+                }
+              : report,
+          ),
+          status: 'completed',
+          verdict: 'NEEDS_REVISION',
+          finalReportPath: reportPath,
+          finalReportDigest: createHash('sha256')
+            .update(reportJson)
+            .digest('hex'),
       },
       foundationRemediationState: {
         reviewPath: reportPath,
@@ -1257,33 +1257,24 @@ describe('delivery workflow session continuation', () => {
         sourceRevision: reviewRevision,
         lanes: [
           {
-            id: 'gdd',
-            ownedPaths: ['docs/GDD.md'],
+            id: 'core-design',
+            ownedPaths: [
+              'docs/GDD.md',
+              'docs/LEVEL_SCENE_DESIGN.md',
+              'docs/BALANCE_DESIGN.md',
+            ],
             affectedPaths: ['docs/GDD.md'],
             status: 'pending',
           },
           {
-            id: 'level-scene-design',
-            ownedPaths: ['docs/LEVEL_SCENE_DESIGN.md'],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-          {
-            id: 'balance-design',
-            ownedPaths: ['docs/BALANCE_DESIGN.md'],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-          {
-            id: 'technical-design',
-            ownedPaths: ['docs/TECHNICAL_DESIGN.md'],
+            id: 'technical-assets',
+            ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
             affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
             status: 'failed',
-            sourceDigest: 'b'.repeat(64),
             failureReason: '技术修订写入失败',
             dispatch: {
-              dispatchId: 'foundation-remediation-technical-design',
-              taskId: 'foundation-remediation:technical-design',
+              dispatchId: 'foundation-remediation-technical-assets',
+              taskId: 'foundation-remediation:technical-assets',
               workerType: 'document-author',
               phase: 'DOCUMENT_DRAFTING',
               revision: reviewRevision,
@@ -1294,26 +1285,12 @@ describe('delivery workflow session continuation', () => {
             },
           },
           {
-            id: 'art-direction',
-            ownedPaths: ['docs/ART_DIRECTION.md'],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-          {
-            id: 'ui-ux-spec',
-            ownedPaths: ['docs/UI_UX_SPEC.md'],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-          {
-            id: 'audio-design',
-            ownedPaths: ['docs/AUDIO_DESIGN.md'],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-          {
-            id: 'asset-plan',
-            ownedPaths: ['docs/ASSET_PLAN.md'],
+            id: 'presentation',
+            ownedPaths: [
+              'docs/ART_DIRECTION.md',
+              'docs/UI_UX_SPEC.md',
+              'docs/AUDIO_DESIGN.md',
+            ],
             affectedPaths: [],
             status: 'not_required',
           },
@@ -1348,58 +1325,23 @@ describe('delivery workflow session continuation', () => {
     expect(workflow).not.toHaveProperty('documentReview')
     expect(workflow.tasks).toEqual([
       {
-        id: 'foundation-remediation:gdd',
-        title: '修订 GDD',
+        id: 'foundation-remediation:core-design',
+        title: '修订核心设计',
         status: 'pending',
         attempt: 1,
         operation: 'write',
       },
       {
-        id: 'foundation-remediation:level-scene-design',
-        title: '修订关卡与场景设计',
-        status: 'completed',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:balance-design',
-        title: '修订数值与平衡设计',
-        status: 'completed',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:technical-design',
-        title: '修订技术设计',
+        id: 'foundation-remediation:technical-assets',
+        title: '修订技术与资产',
         status: 'failed',
         attempt: 1,
         operation: 'write',
         failureReason: '技术修订写入失败',
       },
       {
-        id: 'foundation-remediation:art-direction',
-        title: '修订美术方向',
-        status: 'completed',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:ui-ux-spec',
-        title: '修订 UI/UX 规范',
-        status: 'completed',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:audio-design',
-        title: '修订音频设计',
-        status: 'completed',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:asset-plan',
-        title: '修订资产计划',
+        id: 'foundation-remediation:presentation',
+        title: '修订表现体验',
         status: 'completed',
         attempt: 1,
         operation: 'write',

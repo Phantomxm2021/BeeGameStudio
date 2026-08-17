@@ -3,6 +3,7 @@ import {
   foundationReviewAffectedPaths,
   type FoundationReview,
 } from './foundation-review'
+import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
 import type {
   DispatchRecord,
   FoundationDocumentPath,
@@ -13,51 +14,7 @@ import type {
 } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
-export const FOUNDATION_REMEDIATION_LANE_IDS = [
-  'gdd',
-  'level-scene-design',
-  'balance-design',
-  'technical-design',
-  'art-direction',
-  'ui-ux-spec',
-  'audio-design',
-  'asset-plan',
-] as const
-
-export const FOUNDATION_REMEDIATION_LANES = Object.freeze([
-  Object.freeze({
-    id: 'gdd' as const,
-    ownedPaths: Object.freeze(['docs/GDD.md'] as const),
-  }),
-  Object.freeze({
-    id: 'level-scene-design' as const,
-    ownedPaths: Object.freeze(['docs/LEVEL_SCENE_DESIGN.md'] as const),
-  }),
-  Object.freeze({
-    id: 'balance-design' as const,
-    ownedPaths: Object.freeze(['docs/BALANCE_DESIGN.md'] as const),
-  }),
-  Object.freeze({
-    id: 'technical-design' as const,
-    ownedPaths: Object.freeze(['docs/TECHNICAL_DESIGN.md'] as const),
-  }),
-  Object.freeze({
-    id: 'art-direction' as const,
-    ownedPaths: Object.freeze(['docs/ART_DIRECTION.md'] as const),
-  }),
-  Object.freeze({
-    id: 'ui-ux-spec' as const,
-    ownedPaths: Object.freeze(['docs/UI_UX_SPEC.md'] as const),
-  }),
-  Object.freeze({
-    id: 'audio-design' as const,
-    ownedPaths: Object.freeze(['docs/AUDIO_DESIGN.md'] as const),
-  }),
-  Object.freeze({
-    id: 'asset-plan' as const,
-    ownedPaths: Object.freeze(['docs/ASSET_PLAN.md'] as const),
-  }),
-])
+export const FOUNDATION_REMEDIATION_LANES = FOUNDATION_DOCUMENT_LANES
 
 export function createFoundationRemediationState(input: {
   reviewPath: string
@@ -137,8 +94,7 @@ function laneFor(
   laneId: FoundationRemediationLaneId,
 ): FoundationRemediationLane {
   const lane = state.lanes.find(candidate => candidate.id === laneId)
-  if (!lane)
-    throw new Error(`foundation remediation lane is missing: ${laneId}`)
+  if (!lane) throw new Error(`foundation remediation lane is missing: ${laneId}`)
   return lane
 }
 
@@ -169,24 +125,22 @@ export function recordFoundationRemediationDispatch(
     throw new Error(`foundation remediation lane is not pending: ${laneId}`)
   if (dispatch.taskId !== `foundation-remediation:${laneId}`)
     throw new Error('foundation remediation dispatch task does not match lane')
-  const remediation = dispatch.request?.contract.remediation
-  const suppliedSourceDigest =
-    remediation && typeof remediation === 'object' && !Array.isArray(remediation)
-      ? (remediation as Record<string, unknown>).sourceDigest
-      : undefined
-  const sourceDigest =
-    typeof suppliedSourceDigest === 'string'
-      ? suppliedSourceDigest
-      : lane.sourceDigest
+  const suppliedBaseline = dispatch.request?.contract.previousDocumentDigests
+  const baselineDigests =
+    suppliedBaseline &&
+    typeof suppliedBaseline === 'object' &&
+    !Array.isArray(suppliedBaseline)
+      ? (suppliedBaseline as Record<string, string>)
+      : lane.baselineDigests
   if (
-    !sourceDigest ||
-    !/^[a-f0-9]{64}$/u.test(sourceDigest) ||
-    (lane.sourceDigest && lane.sourceDigest !== sourceDigest)
+    lane.baselineDigests &&
+    (!baselineDigests ||
+      !isDeepStrictEqual(lane.baselineDigests, baselineDigests))
   )
-    throw new Error('foundation remediation retry changed its source digest')
+    throw new Error('foundation remediation retry changed its baseline')
   return replaceLane(state, {
     ...lane,
-    sourceDigest,
+    ...(baselineDigests ? { baselineDigests: { ...baselineDigests } } : {}),
     status: 'running',
     dispatch,
     failureReason: undefined,
@@ -199,8 +153,7 @@ export function recordFoundationRemediationFailure(
   reason: string,
 ): FoundationRemediationState {
   const lane = laneFor(state, laneId)
-  if (!reason.trim())
-    throw new Error('foundation remediation failure is required')
+  if (!reason.trim()) throw new Error('foundation remediation failure is required')
   if (lane.status !== 'running')
     throw new Error(`foundation remediation lane is not running: ${laneId}`)
   return replaceLane(state, {
@@ -213,13 +166,13 @@ export function recordFoundationRemediationFailure(
   })
 }
 
-export function restartIncompleteFoundationRemediation(
+export function retryFoundationRemediationFailures(
   state: FoundationRemediationState,
 ): FoundationRemediationState {
   return {
     ...state,
     lanes: state.lanes.map(lane =>
-      lane.status === 'failed' || lane.status === 'running'
+      lane.status === 'failed'
         ? {
             ...lane,
             status: 'pending' as const,
@@ -236,11 +189,26 @@ export function commitFoundationRemediationReceipt(
   input: {
     laneId: FoundationRemediationLaneId
     dispatchId: string
-    receipt: FoundationRemediationReceipt
+    writtenPaths: readonly string[]
+    beforeDigests: Record<string, string>
+    afterDigests: Record<string, string>
+    committedAt: string
   },
 ): FoundationRemediationState {
   const lane = laneFor(state, input.laneId)
-  const receipt = input.receipt
+  const receipt: FoundationRemediationReceipt = {
+    reviewDigest: state.reviewDigest,
+    sourceRevision: state.sourceRevision,
+    ownedPaths: [...lane.ownedPaths],
+    beforeDigests: { ...input.beforeDigests },
+    afterDigests: { ...input.afterDigests },
+    committedAt: input.committedAt,
+  }
+  if (
+    lane.baselineDigests &&
+    !isDeepStrictEqual(lane.baselineDigests, input.beforeDigests)
+  )
+    throw new Error('foundation remediation receipt changed its baseline')
   if (lane.status === 'completed' && isDeepStrictEqual(lane.receipt, receipt))
     return state
   if (
@@ -248,16 +216,16 @@ export function commitFoundationRemediationReceipt(
     lane.dispatch?.dispatchId !== input.dispatchId
   )
     throw new Error('foundation remediation receipt has no running dispatch')
-  if (receipt.reviewDigest !== state.reviewDigest)
-    throw new Error('foundation remediation receipt review changed')
-  if (receipt.sourceRevision !== state.sourceRevision)
-    throw new Error('foundation remediation receipt revision changed')
-  if (receipt.targetPath !== lane.affectedPaths[0])
-    throw new Error('foundation remediation receipt target does not match lane')
-  if (!lane.sourceDigest || receipt.sourceDigest !== lane.sourceDigest)
-    throw new Error('foundation remediation receipt source digest changed')
-  if (new Set(receipt.patchedUnitIds).size !== receipt.patchedUnitIds.length)
-    throw new Error('foundation remediation receipt patch units are invalid')
+  if (!isDeepStrictEqual(input.writtenPaths, lane.affectedPaths))
+    throw new Error('mutation paths do not match the lane assignment')
+  const ownedKeys = [...lane.ownedPaths].sort()
+  for (const digests of [input.beforeDigests, input.afterDigests]) {
+    if (
+      !isDeepStrictEqual(Object.keys(digests).sort(), ownedKeys) ||
+      Object.values(digests).some(value => !/^[a-f0-9]{64}$/u.test(value))
+    )
+      throw new Error('foundation remediation receipt digests are incomplete')
+  }
   return replaceLane(state, {
     ...lane,
     status: 'completed',
