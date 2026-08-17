@@ -107,6 +107,7 @@ export async function atomicCommitReceipt(input: {
           'foundation review Markdown receipt already exists with different bytes',
         )
     }
+    await rm(temporaryPath)
     const directory = await open(dirname(input.committedPath), 'r')
     try {
       await directory.sync()

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
@@ -199,6 +199,9 @@ describe('foundation review lane dispatch barrier', () => {
 
     await atomicCommitReceipt({ stagingPath, committedPath, bytes })
     await atomicCommitReceipt({ stagingPath, committedPath, bytes })
+    expect(
+      (await readdir(dirname(committedPath))).filter(name => name.endsWith('.tmp')),
+    ).toEqual([])
     await expect(
       atomicCommitReceipt({
         stagingPath,
