@@ -4,129 +4,130 @@ Date: 2026-08-18
 
 Branch: `codex/remediation-clean-slate`
 
-Tested implementation: `1693664900c43f0686ee2326262a4db82c2866ab`
+Tested implementation: `ff7bed1b51ab34b2eb375f8516046399b667b425`
 
-Verdict: **ACCEPTED — NEEDS_REVISION**
+Verdict: **FAILED — presentation receipt rejected before synthesis**
 
 ## Scope and environment
 
-Acceptance attempt 4 exercised only the Foundation Reviewer path through the
-Web/React Dashboard in the user's Chrome. It created a new project and run
+Final acceptance attempt 5 exercised only the Foundation Reviewer path through
+the Web/React Dashboard in the user's Chrome. It created a new project and run
 from the previously accepted eight-document project
-`floating-city-reef-restoration--c18e01c86ec5`. It did not retry an earlier
-run. No model setting, source document, native runtime core, or acceptance
-project content was changed to influence the result.
+`floating-city-reef-restoration--c18e01c86ec5`. It did not retry or resume an
+earlier run. No model setting, source document, native runtime core, or
+acceptance project content was changed to influence the result.
 
 - Fixed ports: frontend `62173`, runtime `62174`, billing `62175`, skills
   `62176`, resources `62177`
 - Configured model: `ark-code-latest`
-- Project: `review-copy--f53d4e18-dd3d-4039-acb5-1c96d730beb8`
-- Project path: `/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/review-copy--f53d4e18-dd3d-4039-acb5-1c96d730beb8`
-- Workflow run: `76320bf0-ef6b-4463-8a7e-abe96644f6a2`
+- Project: `review-copy--0a39f6ee-4d51-4e96-9237-5a4759927293`
+- Project path: `/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/review-copy--0a39f6ee-4d51-4e96-9237-5a4759927293`
+- Workflow run: `9746a355-da3b-4af5-a965-a3c15180de94`
 - Source revision: `8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a`
 - Persisted workflow schema: `27`
 
-## Chrome observation and terminal
+## Chrome observation and exact failure boundary
 
-The Dashboard exposed exactly four ordinary Reviewer tasks. The three lane
-dispatches started at `2026-08-17T20:33:55.367Z`,
-`2026-08-17T20:33:55.379Z`, and `2026-08-17T20:33:55.393Z`, a 26 ms
-concurrent start window. Chrome showed all three lanes as `审计中` while
-synthesis remained `待审计`.
+The Dashboard exposed exactly four ordinary Reviewer tasks. The presentation,
+technical/assets, and core-design dispatches started at
+`2026-08-17T21:49:37.286Z`, `2026-08-17T21:49:37.300Z`, and
+`2026-08-17T21:49:37.311Z`, a 25 ms concurrent start window. Chrome showed all
+three lanes as `审计中` while synthesis remained `待审计`.
 
-All three lanes became `已审计`, progress became `3 / 4`, and blocker
-synthesis changed to `审计中`. At elapsed `00:05:33`, the Dashboard showed
-all four tasks as `已审计` and the exact accepted terminal message:
+Core design and technical/assets became `已审计`. At elapsed `00:04:27`,
+Chrome first showed presentation as `审计失败` with the exact error:
 
 ```text
-Foundation review requires revision; see .beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/review.json
+foundation review lane Markdown evidence path is outside lane authority
 ```
 
-Stable persisted workflow status is `needs_action` because the accepted
-Reviewer verdict is `NEEDS_REVISION`; this is not a workflow failure.
-`foundationReviewState.status` is `completed`, its failure reason is absent,
-and its verdict is `NEEDS_REVISION`. The visible retry action was not
-selected, and no later stage was entered.
+Synthesis was still `待审计`. The workflow was stopped immediately through the
+visible Chrome `Stop task` action. The stable Dashboard state is `已暂停`, with
+core and technical/assets completed, presentation failed, and synthesis
+pending. The visible `继续` action was not selected. No retry, resume, patch,
+or later stage was attempted.
+
+The exact failing workflow event is `dispatch.failed` for presentation at
+`2026-08-17T21:53:23.267Z`, dispatch
+`6d9ecf39-9781-43a9-b66f-5c13a94960a5`, with the reason above. The last native
+event for that provider turn is `turn_terminal` at
+`2026-08-17T21:53:23.046Z`, outcome `success`, last event type `result`, so this
+was local receipt validation rather than a provider/stream error. After the
+other already-running lane settled, the last native event overall was a
+successful technical/assets `turn_terminal` at `2026-08-17T21:53:29.016Z`.
+The final workflow event is the deliberate `run.stopped` at
+`2026-08-17T21:54:12.039Z` with reason `user stopped workflow`.
 
 ## Four task outcomes and usage
 
-Durations and usage come from persisted Reviewer performance records. Cache
-creation was zero for every task.
+Cache creation was zero for all three dispatched tasks. Durations are the
+dispatch-start to terminal-event intervals; synthesis never dispatched.
 
 | Task | Outcome | Duration | Input | Cache input | Output |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Core design | completed; receipt committed | 306.146 s | 73,791 | 46,969 | 21,363 |
-| Technical and assets | completed; receipt committed | 282.212 s | 57,924 | 14,319 | 19,685 |
-| Presentation | completed; receipt committed | 291.628 s | 120,857 | 176,016 | 19,076 |
-| Blocker synthesis | completed; selection committed | 26.581 s | 34,756 | 26,164 | 1,753 |
-| **Reviewer total** | **accepted NEEDS_REVISION** | **332.872 s wall** | **287,328** | **263,468** | **61,877** |
+| Core design | completed; receipt committed | 211.998 s | 73,776 | 46,927 | 15,022 |
+| Technical and assets | completed; receipt committed | 231.825 s | 57,905 | 14,304 | 15,595 |
+| Presentation | failed local authority validation; no receipt committed | 225.982 s | 144,949 | 151,856 | 14,879 |
+| Blocker synthesis | pending; never dispatched | n/a | 0 | 0 | 0 |
+| **Reviewer total** | **failed and manually stopped** | **274.753 s UI wall** | **276,630** | **213,087** | **45,496** |
 
-The four native sessions made thirteen `Read` calls: four core, two
-technical/assets, four presentation, and three synthesis. They made zero
+The three native sessions made ten tool calls, all `Read`: four core, two
+technical/assets, and four presentation. They made zero actual
 `StructuredOutput`, `Write`, `Edit`, shell, or Agent tool calls.
 
-## Receipt and report evidence
+## Projection authority and persisted artifacts
 
-All five contracted artifacts exist, and every persisted digest matches the
-file's SHA-256.
+Each lane request used only its canonical source documents plus its exact
+projection file. For every lane, `protectedPaths` equals `sourcePaths`, and
+the sole staging/committed output pair is the lane's exact `.md` receipt path.
+The projection contracts match the persisted files byte-for-byte:
 
-| Artifact | Contracted path | Bytes | SHA-256 |
+| Lane | Projection bytes | Contract and file SHA-256 |
+| --- | ---: | --- |
+| Core design | 143 | `e35c58f90e936b1fe6dc3a1542ad7ca0984c5b8f8af5eb59efb3f8438a887fa7` |
+| Technical/assets | 90,087 | `b897a35673894f03d5d62bf0345cc0f8f50d9844d4779c5fd776eae3b84ed3ce` |
+| Presentation | 57,474 | `a82b8755345a4acd44012eecd048eba6c481feccfcd1406898f06aeef4cec2e4` |
+
+Raw tool-use records show every `Read` target is a contracted canonical source
+or that lane's contracted projection. All three visible Markdown results carry
+the exact contracted revision, lane, and `Projection:` digest. The presentation
+result nevertheless cited the relative projection path as Evidence in multiple
+candidates, and the local authority gate rejected the result with the exact
+error above. Per acceptance scope this document records, but does not patch or
+retry, that boundary.
+
+Only two of the three required lane receipts were committed:
+
+| Artifact | Result | Bytes | SHA-256 |
 | --- | --- | ---: | --- |
-| Core receipt | `.beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/parts/core-design.md` | 21,484 | `19fe2f4d404e41584362c1e9e48b1cc4312cd9c64c88f631bb875c4ec0a257b7` |
-| Technical/assets receipt | `.beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/parts/technical-assets.md` | 22,151 | `be09477756b53d656c7776ad10db0fe4209d91ec06185586c3c32da4f6d13b6c` |
-| Presentation receipt | `.beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/parts/presentation.md` | 19,951 | `6c5c0e9cdaad6a8ab559c688ba30889f8751b497b637fb72e7b9db059cf16b61` |
-| Selection receipt | `.beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/selection.md` | 653 | `e763f3baeed9f85b5bbe4f6d325b0805cc14d82beb6f0cf015942e4298060a14` |
-| Canonical report | `.beegame/reviews/foundation/8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a/review.json` | 70,367 | `749bee6523d87c8e3c0e15214a42d0e586e6698058a6926ce2acd5927177da90` |
+| `parts/core-design.md` | committed | 20,569 | `680bc0e486977c1c3b31c5fefcf9fb6a1fcb5e56a19798b0f83812fceb2123b1` |
+| `parts/technical-assets.md` | committed | 18,381 | `c5e82fd6afe29b1168e1d32fafe453815c1d5cf669cb880542d41077d9bc14cb` |
+| `parts/presentation.md` | absent after rejection | n/a | n/a |
+| `selection.md` | absent; synthesis not dispatched | n/a | n/a |
+| `review.json` | absent; assembly not reached | n/a | n/a |
 
-Each lane receipt parses to exactly eight unique candidates. The selection
-accounts for all 24 references exactly once as 24 Keep, zero Duplicate, and
-zero Reject. The three lane receipts total 63,586 bytes; `selection.md` is
-653 bytes, or 1.03% of the receipt total, materially smaller because it
-contains references only.
+Because selection and canonical report do not exist, kept-record equality,
+canonical replay, final-report revision/digest, implementation sufficiency,
+and synthesis compactness are unfulfilled rather than passed.
 
-## Deterministic assembly and quality audit
-
-A read-only replay parsed the exact persisted lane and selection Markdown and
-ran deterministic assembly. It produced 24 conflicts, was deeply equal to the
-persisted `review.json`, and its canonical pretty-printed bytes plus terminal
-newline were byte-for-byte equal to the file. Therefore the report contains
-the kept source records without Reviewer prose rewriting, in deterministic
-canonical order. The report has:
-
-- version `3`;
-- scope `foundation`;
-- revision exactly equal to the reviewed source revision;
-- verdict `NEEDS_REVISION`;
-- canonical conflict IDs `B1` through `B24`;
-- digest equal to persisted `finalReportDigest`.
-
-All 24 kept conflicts contain a nonempty problem, one or more evidence entries
-with path/location/observation, a nonempty required outcome, one or more
-document changes with path/action, and one or more nonempty testable acceptance
-conditions. Thus an implementation Agent can identify the problem, evidence
-location, required document changes, and testable result without reading
-narrative review prose.
-
-## Native and dispatch boundary
+## Native Markdown, retry, and stage boundary
 
 - Recursive inspection found zero `workflowJsonSchema` fields in persisted
   Reviewer dispatches.
-- Each of the four raw logs contains only `Read` tool uses and zero
-  `StructuredOutput` tool-use blocks.
-- All four raw provider logs end in result subtype `success`, stop reason
-  `end_turn`, with no provider error; every runtime log ends in
-  `session.stopped`.
-- Exactly four `dispatch.started` events exist: the three lane reviewers and
-  one synthesis reviewer. Every dispatch is
-  `review:foundation:*` / `document-reviewer`.
-- No remediation, verification, checklist, resource, implementation, or
-  acceptance dispatch exists.
+- Raw/native logs contain ten actual `Read` tool-use blocks and zero actual
+  `StructuredOutput` blocks. Prompt prose mentioning the forbidden tool is not
+  counted as a tool use.
+- Exactly three `dispatch.started` events exist, all attempt-1
+  `review:foundation:*:1` lane tasks and all worker type `document-reviewer`.
+- Event types contain no retry, resume, or restart event. Task IDs are unique,
+  `foundationReviewState.attempt` is `1`, and no implicit restart occurred.
+- No synthesis, remediation, verification, checklist, resource,
+  implementation, or acceptance dispatch exists.
 
 ## Source hash comparison
 
-All eight canonical source SHA-256 values were captured immediately after the
-new review copy started and again after the accepted Reviewer terminal. Every
-value was unchanged.
+All eight canonical SHA-256 values were captured immediately after copy/start
+and again after the stop boundary. Every value was unchanged.
 
 | Source document | Before | After |
 | --- | --- | --- |
@@ -143,24 +144,24 @@ value was unchanged.
 
 | Requirement | Result | Evidence |
 | --- | --- | --- |
-| Three lane tasks started concurrently | pass | three starts within 26 ms |
-| Native Markdown path only | pass | zero StructuredOutput uses and zero `workflowJsonSchema` fields |
-| Three exact `parts/*.md` receipts exist | pass | exact paths, sizes, and digests above |
-| Synthesis dispatch exists | pass | synthesis started after all three lanes completed |
-| One compact `selection.md` exists | pass | 653 bytes; 1.03% of lane receipt bytes |
-| One deterministic canonical `review.json` exists | pass | canonical replay is byte-identical |
-| `review.json` revision equals source revision | pass | exact revision string equality |
-| Canonical conflicts equal kept source records | pass | 24 Keep references replay to 24 byte-identical canonical records |
-| All eight canonical source hashes are unchanged | pass | before/after table above |
-| No remediation or verification dispatch exists | pass | exactly four Foundation Reviewer dispatches only |
-| Kept conflicts are implementation-sufficient | pass | all 24 satisfy the complete field audit |
-| Synthesis output is materially smaller than receipts | pass | 653 bytes versus 63,586 bytes |
+| Three lane tasks started concurrently | pass | three starts within 25 ms |
+| Native Markdown path only | pass | only `Read`; zero actual StructuredOutput and zero `workflowJsonSchema` |
+| Strict shared projection inputs/digests | pass to dispatch/result identity | exact contracted files, digests, and allowed Read targets |
+| Three exact `parts/*.md` receipts exist | **fail** | presentation receipt rejected; only two committed |
+| Synthesis dispatch exists | **fail** | synthesis remained pending |
+| One compact `selection.md` exists | **fail** | absent |
+| One deterministic canonical `review.json` exists | **fail** | absent |
+| All eight canonical source hashes unchanged | pass | before/after table above |
+| No implicit restart or retry | pass | attempt 1, unique task IDs, no matching events |
+| No remediation or verification dispatch | pass | three Foundation lane dispatches only |
+| Kept conflicts are implementation-sufficient | unfulfilled | no selection or canonical report |
 
 ## Conclusion
 
-Attempt 4 accepts the sole Reviewer path at its intended `NEEDS_REVISION`
-terminal. Three concurrent native Markdown lanes committed immutable receipts,
-synthesis committed a compact reference-only selection, and deterministic
-local assembly committed the canonical report with an exact persisted digest.
-The source documents remained byte-identical, no later stage dispatched, and
-no retry or remediation action was selected.
+Final attempt 5 does not accept the Reviewer path on tested commit
+`ff7bed1b51ab34b2eb375f8516046399b667b425`. Chrome proved the three lanes
+started concurrently through the native Markdown-only path and preserved all
+sources, but presentation failed the local projected-evidence authority gate.
+The run was stopped immediately, leaving synthesis and canonical assembly
+unreached. No retry, resume, remediation, verification, or later workflow
+stage ran.
