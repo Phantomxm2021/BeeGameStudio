@@ -1166,11 +1166,10 @@ describe('delivery workflow session continuation', () => {
     const reviewRevision = 'a'.repeat(64)
     const reportPath = `.beegame/reviews/foundation/${reviewRevision}/review.json`
     const reportJson = `${JSON.stringify({
-      version: 2,
+      version: 3,
       scope: 'foundation',
       revision: reviewRevision,
       verdict: 'NEEDS_REVISION',
-      priorConflictStatus: [],
       conflicts: [
         {
           id: 'B1',

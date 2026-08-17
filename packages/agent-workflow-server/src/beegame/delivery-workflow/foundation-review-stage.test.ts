@@ -249,11 +249,10 @@ describe('foundation review lane dispatch barrier', () => {
     await writeFile(
       finalStagingPath,
       JSON.stringify({
-        version: 2,
+        version: 3,
         scope: 'foundation',
         revision,
         verdict: 'READY',
-        priorConflictStatus: [],
         conflicts: [],
       }),
       'utf8',
