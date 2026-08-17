@@ -1,115 +1,167 @@
-# Foundation Review v3 Contract Design
+# Foundation Review v3 Three-Lane Assembly Design
 
-## Problem
+## Goal
 
-The remediation clean-slate refactor removed verification execution but retained
-the obsolete `priorConflictStatus` root field. The field is currently expressed
-as `z.array(z.never()).max(0)`, which compiles to the following JSON Schema:
+Produce one revision-bound, actionable Foundation Review from three parallel
+Reviewer lanes without asking a fourth model turn to rewrite the lane results.
+Bee Game Studio validates, orders, deduplicates exact repeats, assigns IDs and
+persists the report; it does not author or semantically merge review content.
 
-```json
-{
-  "maxItems": 0,
-  "type": "array",
-  "items": { "not": {} }
-}
-```
+## Evidence and Problem
 
-In two Reviewer-only Chrome runs, the three specialist lanes completed while
-the final synthesis repeatedly stopped at `priorConflictStatus`. Restoring
-Credit did not change the failure. The contract is therefore the primary
-functional defect; document writing, project files, and remediation execution
-are outside this repair.
+The v3 schema removal of obsolete verification fields fixed one proven schema
+defect. Chrome acceptance then exposed two independent lifecycle failures:
 
-## Decision
+1. a lane Reviewer successfully submitted corrected `StructuredOutput`, but the
+   native process waited for a later prose result, crossed the compaction
+   boundary at 175,354 tokens and attempted to submit the result again;
+2. the fourth synthesis Reviewer read 24 already accepted candidates, began
+   rewriting them as one larger report, emitted only 1,087 bytes of its tool
+   input and then produced no further SSE, tool result, error or terminal event.
 
-Replace Foundation Review v2 with a strict v3 contract. Remove the obsolete
-verification fields instead of preserving their shape or adding compatibility.
+The first failure is closed by treating a validated structured-output tool
+result as the terminal result of a BGS structured worker. The second failure is
+architectural: a fourth model repeats accepted text and makes one large output
+the sole completion point. Retry, watchdog and prompt changes retain that
+failure mode and are not part of this design.
 
-The v3 root object contains exactly:
+## Approaches Considered
+
+### Selected: complete lane conflicts plus deterministic assembly
+
+Each of the three Reviewer lanes returns complete, repair-ready conflicts.
+BGS assembles the three packets without semantic rewriting. This preserves
+parallelism, eliminates the largest structured generation and keeps BGS inside
+its validation and persistence boundary.
+
+### Rejected: retain a smaller semantic merge Agent
+
+A merge Agent would still need to decide equivalence, could discard distinct
+defects and would remain another remote completion point. The product does not
+need semantic merging; exact repeats can be removed deterministically.
+
+### Rejected: chunk or retry the fourth synthesis
+
+Chunking adds state, recovery and partial-output contracts. Retrying repeats
+the most expensive operation and does not address silent upstream interruption.
+Both retain the wrong ownership boundary.
+
+## Reviewer Topology
+
+Exactly three model-backed Reviewer tasks remain:
+
+1. `core-design` owns GDD, level/scene and balance;
+2. `technical-assets` owns technical design and asset plan;
+3. `presentation` owns art direction, UI/UX and audio.
+
+There is no `synthesis` Reviewer role, dispatch, prompt, worker terminal or UI
+task. All three lanes run concurrently and read only their owned documents plus
+their accepted authority projection.
+
+## Complete Lane Contract
+
+Each lane packet is revision-bound and contains at most eight conflicts. Every
+conflict contains exactly:
 
 ```text
-version
-scope
-revision
-verdict
-conflicts
+ownerPath
+title
+problem
+evidence[] { path, location, observed }
+requiredOutcome
+changes[] { path, action }
+acceptance[]
 ```
 
-`FOUNDATION_REVIEW_VERSION` becomes `3`. Existing v2 review artifacts are not
-migrated or accepted. A workflow encountering one must perform a fresh review
-for the current document revision.
+The Reviewer must emit `changes` in canonical Foundation document order.
+`ownerPath` must equal its first path, and the emitting lane must own
+`ownerPath`. BGS rejects an unsorted value instead of rewriting it.
+This gives every cross-document defect one deterministic reporting owner and
+prevents the same defect being intentionally reported by two lanes.
 
-## Scope
+Every conflict must already tell a repair worker what is wrong, where the proof
+is, which document bytes must change, the shared required outcome and how to
+verify completion. Lanes do not draft replacement prose and do not modify
+documents.
 
-The change includes:
+## Deterministic Assembly
 
-- the canonical Foundation Review schema and TypeScript type;
-- the final Reviewer output example and contract instruction;
-- the final Reviewer prompt root-field instruction;
-- fixtures and tests that construct or assert Foundation Review reports;
-- schema-boundary tests for the JSON Schema sent to the native Reviewer;
-- focused Reviewer-only Chrome acceptance after automated verification.
+After all three packets are accepted for the same current document revision,
+BGS performs one local assembly operation:
 
-The change excludes:
+1. reread and verify all three packet bytes and persisted digests;
+2. validate packet revision, lane identity, evidence authority and conflict
+   ownership;
+3. visit packets in fixed order `core-design`, `technical-assets`,
+   `presentation`, preserving conflict order inside each packet;
+4. compute a canonical fingerprint from the complete conflict value excluding
+   its eventual ID;
+5. retain the first byte-equivalent canonical conflict for each fingerprint;
+6. assign `B1`, `B2`, ... in the resulting order;
+7. derive `READY` only when the list is empty, otherwise derive
+   `NEEDS_REVISION`;
+8. validate the assembled v3 object and atomically persist `review.json`.
 
-- document authoring and remediation;
-- changes to the native core or provider protocol;
-- retry policy, stream watchdogs, or model configuration;
-- migration or fallback parsing for v2 reports;
-- the independently observed stop/cancellation latency.
+Exact deduplication never compares only titles or evidence locations and never
+combines fields. Similar wording, overlapping evidence or related outcomes are
+not sufficient to delete an item. This avoids silently merging distinct
+defects. The deterministic ownership rule is the primary duplicate prevention;
+fingerprinting is only a final guard for exact repeats.
 
-## Contract and Data Flow
+## Identity and Failure Semantics
 
-The BGS delivery worker converts the canonical Zod schema to Draft 7 JSON
-Schema and supplies it as the final Reviewer's `StructuredOutput` contract.
-The final Reviewer reads accepted specialist lane packets, emits one v3 object,
-and BGS validates and persists that object only after the current-revision
-checks already required by the review stage.
+- Assembly is allowed only after all three lane packets are committed for the
+  same active revision.
+- A changed document revision, packet digest, lane identity or projection
+  authority fails closed and produces no final report.
+- An invalid owner path, unsorted/duplicate change path, malformed evidence or
+  incomplete repair contract fails the responsible lane.
+- Existing committed lane siblings survive retry; only a failed lane is
+  redispatched.
+- Assembly contains no remote model call and is safe to repeat: identical
+  packet bytes produce identical `review.json` bytes and digest.
+- v2 reports and legacy verification fields remain rejected. No fallback,
+  migration or dual execution path is introduced.
 
-No component may synthesize, ignore, or strip legacy verification fields.
-Strict parsing rejects extra root fields, including `priorConflictStatus` and
-`priorReviewDigest`.
+## BGS Boundary
 
-## Failure Semantics
+BGS may validate identities, verify digests, apply the fixed lane/item order,
+remove exact duplicates, assign mechanical IDs, derive the verdict and
+atomically persist bytes. BGS may not invent a conflict, rewrite model-authored prose, choose
+between semantically similar findings, repair invalid lane output or modify the
+eight source documents.
 
-- A v2 report is rejected as a contract-version mismatch.
-- A report with legacy verification fields is rejected as an extra-field
-  violation.
-- `READY` with conflicts and `NEEDS_REVISION` without conflicts remain invalid.
-- Invalid output remains a Reviewer failure; BGS does not repair model output.
-- The Reviewer workflow does not advance to remediation during acceptance.
+The native core and provider protocol remain unchanged.
 
-## Tests
+## Workflow and Dashboard
 
-Implementation follows red-green-refactor.
+The Foundation Review stage exposes three tasks, not four. The Dashboard shows
+each lane as pending, reviewing, reviewed or failed. When all three are
+reviewed, deterministic assembly either completes the stage or surfaces its
+exact validation failure. No separate “blocking issue synthesis” task or Agent
+status remains.
 
-The first failing tests must prove that the current code still:
+`NEEDS_REVISION` remains a terminal review outcome for this clean-slate scope.
+Chrome acceptance stops after displaying the accepted report and does not start
+any remediation logic.
 
-1. emits `priorConflictStatus` and `items: { not: {} }` in the workflow JSON
-   Schema;
-2. accepts version 2 rather than version 3;
-3. includes the legacy field in the final Reviewer prompt.
+## Test and Acceptance Contract
 
-The completed tests must prove:
+Implementation uses red-green-refactor and must prove:
 
-- emitted JSON Schema has exactly the five v3 root properties;
-- the emitted schema contains no `not` keyword and no legacy verification
-  field;
-- v3 valid reports parse and v2/legacy reports fail;
-- final Reviewer prompts describe only the v3 fields;
-- report acceptance, recovery, session-port, and UI projection focused suites
-  remain green.
+- every lane conflict is complete and owned by its lane;
+- the old candidate-only packet and all `synthesis` contracts are rejected or
+  absent;
+- three valid packets assemble to canonical v3 bytes with stable IDs, order,
+  verdict and digest;
+- exact duplicate conflicts retain the first item without merging;
+- similar but non-identical conflicts are both preserved;
+- stale packets, changed digests, missing lanes and invalid ownership fail
+  before `review.json` is committed;
+- retry preserves completed siblings and redispatches only a failed lane;
+- the Dashboard renders exactly three Reviewer tasks;
+- focused backend, frontend, typecheck and diff checks pass.
 
-After automated verification, Chrome acceptance runs only the Reviewer stage
-against an unchanged copy of the previously accepted eight documents. It must
-complete all specialist and final tasks, persist the final report, preserve all
-eight source-document hashes, and stop before remediation.
-
-## Separate Follow-up
-
-The UI stop action persisted a stopped workflow before the upstream request
-fully ceased. That observation is not part of the causal chain for the final
-Reviewer failure. It requires an independent reproduction covering dispatch
-identity, managed-session disposal, abort propagation, and process termination.
-No cancellation code is changed as part of the v3 contract repair.
-
+Chrome acceptance uses an unchanged copy of the accepted eight-document
+project. It must complete all three lanes, persist one v3 `review.json`, retain
+all eight source hashes, show no synthesis task, and stop before remediation.
