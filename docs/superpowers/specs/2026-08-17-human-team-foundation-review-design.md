@@ -24,8 +24,9 @@ authoring stage.
   tasks.
 - Review workers alone decide whether a semantic conflict exists.
 - Bee Game Studio does not summarize documents, invent findings, merge semantic
-  claims, write repairs, control native Read/Write/Edit calls, or modify the
-  native runtime core.
+  claims, write repairs, choose a Reviewer's read/search sequence, or modify the
+  native runtime core. It may declare the Reviewer role's fixed read-only
+  capability envelope; that envelope is not a content-generation policy.
 - There is one Reviewer execution path, one canonical `review.json`, one
   remediation state, and one verification pass. No compatibility execution
   branch or hidden fallback remains.
@@ -54,6 +55,27 @@ After all three packets commit, one `review:synthesis` worker reads only those
 packets. It removes duplicates, confirms shared outcomes, and writes the sole
 canonical version 2 `review.json`. It does not perform another complete source
 review.
+
+## Reviewer Capability Boundary
+
+Every Foundation Reviewer process receives the native `Read`, `Grep`, and
+`Glob` tools plus the internal `StructuredOutput` channel created by
+`--json-schema`. It does not receive mutation tools, shell execution, or Agent
+launch capability.
+
+This is a least-privilege role contract, not workflow-owned reasoning. The
+Reviewer decides what to read within its immutable assignment, how to analyze
+the evidence, and which semantic conflicts to report. Bee Game Studio only
+declares the read-only capability set, project-confined source paths, schema,
+revision, and output destination. It never dictates individual tool calls or
+creates semantic fallback results.
+
+The read-only capability boundary is required even when project permissions
+automatically approve requests. Direct workflow path checks cover native file
+mutation tools but do not turn arbitrary shell execution into a read-only
+operation. Removing the Reviewer capability boundary without an equivalent
+process-level read-only sandbox would therefore permit mutation outside the
+Reviewer contract.
 
 ## Cross-Group Evidence
 
@@ -255,7 +277,10 @@ credit, compaction, full document Read count, projected bytes, packet/report
 digests, and final task states. Acceptance requires exactly eight full-document
 assignments across the three initial workers, no worker context compaction,
 natural Task checkmarks in the existing Workflow Card, and a semantically
-actionable canonical `review.json`.
+actionable canonical `review.json`. Runtime evidence must also prove that each
+Reviewer process exposes only `Read`, `Grep`, `Glob`, and the internal
+`StructuredOutput` channel, while document-author and remediation processes
+retain their normal native tool inventory.
 
 ## Design Self-Review
 
