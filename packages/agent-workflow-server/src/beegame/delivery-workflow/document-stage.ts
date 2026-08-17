@@ -19,6 +19,7 @@ import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { readFoundationReviewArtifact } from './foundation-review'
 import {
   commitFoundationRemediationReceipt,
+  FOUNDATION_REMEDIATION_LANES,
   foundationRemediationReadyForVerification,
   pendingFoundationRemediationLanes,
 } from './foundation-remediation'
@@ -195,7 +196,9 @@ export async function startDocumentStage(input: {
       !exactStringSet(repairPaths, accepted.affectedPaths) ||
       accepted.review.revision !== remediationState.sourceRevision
     )
-      throw new Error('foundation remediation paths do not match accepted review')
+      throw new Error(
+        'foundation remediation paths do not match accepted review',
+      )
     const pending = pendingFoundationRemediationLanes(remediationState)
     if (!pending.length) return remediationState
     return Promise.all(
@@ -228,6 +231,7 @@ export async function startDocumentStage(input: {
             confirmedBriefDigest: input.run.confirmedBriefDigest,
             confirmedBriefContext: input.run.confirmedBriefContext,
             documentSet: 'foundation',
+            foundationDocumentPath: lane.affectedPaths[0],
             systemDeliveryContract: buildSystemDeliveryContract(),
             authoringMode: 'remediation',
             remediation: {
@@ -292,14 +296,11 @@ export async function startDocumentStage(input: {
       'foundation drafting has no remaining canonical document task',
     )
   const previousDocumentMetadata = input.run.changeRequest
-      ? (() => {
-          const metadata = readDocumentMetadata(
-            input.workspacePath,
-            initialPath,
-          )
-          return metadata ? { [initialPath]: metadata } : undefined
-        })()
-      : undefined
+    ? (() => {
+        const metadata = readDocumentMetadata(input.workspacePath, initialPath)
+        return metadata ? { [initialPath]: metadata } : undefined
+      })()
+    : undefined
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -367,9 +368,11 @@ export async function completeFoundationRemediationLane(input: {
   audit?: ReadinessAudit
 }): Promise<DeliveryRun> {
   const state = input.run.foundationRemediationState
-  const dispatch = state?.lanes.find(
-    lane => lane.dispatch?.dispatchId === input.run.activeDispatch?.dispatchId,
-  )?.dispatch ?? input.run.activeDispatch
+  const dispatch =
+    state?.lanes.find(
+      lane =>
+        lane.dispatch?.dispatchId === input.run.activeDispatch?.dispatchId,
+    )?.dispatch ?? input.run.activeDispatch
   const remediation = dispatch?.request?.contract.remediation as
     | { laneId?: unknown }
     | undefined
@@ -377,7 +380,7 @@ export async function completeFoundationRemediationLane(input: {
   if (
     !state ||
     typeof laneId !== 'string' ||
-    !['core-design', 'technical-assets', 'presentation'].includes(laneId) ||
+    !FOUNDATION_REMEDIATION_LANES.some(lane => lane.id === laneId) ||
     !dispatch
   )
     throw new Error('foundation remediation terminal has no lane authority')
@@ -453,9 +456,13 @@ export async function completeFoundationRemediationLane(input: {
     if (typeof before !== 'string' || !/^[a-f0-9]{64}$/u.test(before))
       throw new Error('foundation remediation before digests are invalid')
     if (!lane.affectedPaths.includes(path) && before !== after)
-      throw new Error(`foundation remediation changed an unassigned path: ${path}`)
+      throw new Error(
+        `foundation remediation changed an unassigned path: ${path}`,
+      )
     if (lane.affectedPaths.includes(path) && before === after)
-      throw new Error(`foundation remediation did not change assigned path: ${path}`)
+      throw new Error(
+        `foundation remediation did not change assigned path: ${path}`,
+      )
   }
   const nextState = commitFoundationRemediationReceipt(state, {
     laneId: laneId as FoundationRemediationLaneId,
@@ -554,8 +561,8 @@ export async function completeDocumentDraft(input: {
       ? 'canonical document commit cannot declare finding closure'
       : undefined
   const metadataCommitIssues: string[] = []
-  const previousMetadata = input.run.activeDispatch?.request?.contract
-    .previousDocumentMetadata
+  const previousMetadata =
+    input.run.activeDispatch?.request?.contract.previousDocumentMetadata
   if (
     outOfScope.length === 0 &&
     !resolvedFindingIssue &&

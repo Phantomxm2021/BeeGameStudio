@@ -3,7 +3,6 @@ import {
   foundationReviewAffectedPaths,
   type FoundationReview,
 } from './foundation-review'
-import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
 import type {
   DispatchRecord,
   FoundationDocumentPath,
@@ -14,7 +13,51 @@ import type {
 } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
-export const FOUNDATION_REMEDIATION_LANES = FOUNDATION_DOCUMENT_LANES
+export const FOUNDATION_REMEDIATION_LANE_IDS = [
+  'gdd',
+  'level-scene-design',
+  'balance-design',
+  'technical-design',
+  'art-direction',
+  'ui-ux-spec',
+  'audio-design',
+  'asset-plan',
+] as const
+
+export const FOUNDATION_REMEDIATION_LANES = Object.freeze([
+  Object.freeze({
+    id: 'gdd' as const,
+    ownedPaths: Object.freeze(['docs/GDD.md'] as const),
+  }),
+  Object.freeze({
+    id: 'level-scene-design' as const,
+    ownedPaths: Object.freeze(['docs/LEVEL_SCENE_DESIGN.md'] as const),
+  }),
+  Object.freeze({
+    id: 'balance-design' as const,
+    ownedPaths: Object.freeze(['docs/BALANCE_DESIGN.md'] as const),
+  }),
+  Object.freeze({
+    id: 'technical-design' as const,
+    ownedPaths: Object.freeze(['docs/TECHNICAL_DESIGN.md'] as const),
+  }),
+  Object.freeze({
+    id: 'art-direction' as const,
+    ownedPaths: Object.freeze(['docs/ART_DIRECTION.md'] as const),
+  }),
+  Object.freeze({
+    id: 'ui-ux-spec' as const,
+    ownedPaths: Object.freeze(['docs/UI_UX_SPEC.md'] as const),
+  }),
+  Object.freeze({
+    id: 'audio-design' as const,
+    ownedPaths: Object.freeze(['docs/AUDIO_DESIGN.md'] as const),
+  }),
+  Object.freeze({
+    id: 'asset-plan' as const,
+    ownedPaths: Object.freeze(['docs/ASSET_PLAN.md'] as const),
+  }),
+])
 
 export function createFoundationRemediationState(input: {
   reviewPath: string
@@ -94,7 +137,8 @@ function laneFor(
   laneId: FoundationRemediationLaneId,
 ): FoundationRemediationLane {
   const lane = state.lanes.find(candidate => candidate.id === laneId)
-  if (!lane) throw new Error(`foundation remediation lane is missing: ${laneId}`)
+  if (!lane)
+    throw new Error(`foundation remediation lane is missing: ${laneId}`)
   return lane
 }
 
@@ -153,7 +197,8 @@ export function recordFoundationRemediationFailure(
   reason: string,
 ): FoundationRemediationState {
   const lane = laneFor(state, laneId)
-  if (!reason.trim()) throw new Error('foundation remediation failure is required')
+  if (!reason.trim())
+    throw new Error('foundation remediation failure is required')
   if (lane.status !== 'running')
     throw new Error(`foundation remediation lane is not running: ${laneId}`)
   return replaceLane(state, {

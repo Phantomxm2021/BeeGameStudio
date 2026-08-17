@@ -101,10 +101,10 @@ describe('workflow display tasks', () => {
         ],
       },
       foundationRemediationLanes: [
-        { id: 'core-design', status: 'completed' },
-        { id: 'technical-assets', status: 'not_required' },
+        { id: 'gdd', status: 'completed' },
+        { id: 'technical-design', status: 'not_required' },
         {
-          id: 'presentation',
+          id: 'art-direction',
           status: 'failed',
           failureReason: '表现修订失败',
         },
@@ -112,9 +112,9 @@ describe('workflow display tasks', () => {
     })
 
     expect(tasks.map(task => [task.title, task.status])).toEqual([
-      ['修订核心设计', 'completed'],
-      ['修订技术与资产', 'completed'],
-      ['修订表现体验', 'failed'],
+      ['修订 GDD', 'completed'],
+      ['修订技术设计', 'completed'],
+      ['修订美术方向', 'failed'],
       ['修订结果', 'pending'],
     ])
     expect(tasks[2].failureReason).toBe('表现修订失败')

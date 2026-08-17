@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { parseDeliveryRun, parseWorkflowEvent } from './schema'
+import { FOUNDATION_REMEDIATION_LANES } from './foundation-remediation'
 import { assertDeliveryRunInvariants } from './transition'
 import {
   activeElapsedWithinStage,
@@ -94,10 +95,112 @@ type SnapshotMigration = {
   migrated: boolean
 }
 
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.some(([, entry]) => typeof entry !== 'string')) return undefined
+  return Object.fromEntries(entries) as Record<string, string>
+}
+
+function migrateSchema25Remediation(
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const state = source.foundationRemediationState
+  if (!state || typeof state !== 'object' || Array.isArray(state))
+    return { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+  const stateRecord = state as Record<string, unknown>
+  const oldLanes = Array.isArray(stateRecord.lanes)
+    ? stateRecord.lanes.filter(
+        (lane): lane is Record<string, unknown> =>
+          !!lane && typeof lane === 'object' && !Array.isArray(lane),
+      )
+    : []
+  if (
+    oldLanes.length === FOUNDATION_REMEDIATION_LANES.length &&
+    oldLanes.every(
+      (lane, index) => lane.id === FOUNDATION_REMEDIATION_LANES[index]?.id,
+    )
+  )
+    return { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+
+  const lanes = FOUNDATION_REMEDIATION_LANES.map(definition => {
+    const path = definition.ownedPaths[0]
+    const oldLane = oldLanes.find(
+      lane => Array.isArray(lane.ownedPaths) && lane.ownedPaths.includes(path),
+    )
+    const affected =
+      !!oldLane &&
+      Array.isArray(oldLane.affectedPaths) &&
+      oldLane.affectedPaths.includes(path)
+    if (!affected)
+      return {
+        id: definition.id,
+        ownedPaths: [...definition.ownedPaths],
+        affectedPaths: [],
+        status: 'not_required',
+      }
+
+    const baseline = stringRecord(oldLane?.baselineDigests)
+    const pathBaseline = baseline?.[path]
+    const receipt = oldLane?.receipt
+    const receiptRecord =
+      receipt && typeof receipt === 'object' && !Array.isArray(receipt)
+        ? (receipt as Record<string, unknown>)
+        : undefined
+    const beforeDigests = stringRecord(receiptRecord?.beforeDigests)
+    const afterDigests = stringRecord(receiptRecord?.afterDigests)
+    const completed =
+      oldLane?.status === 'completed' &&
+      typeof receiptRecord?.reviewDigest === 'string' &&
+      typeof receiptRecord.sourceRevision === 'string' &&
+      typeof receiptRecord.committedAt === 'string' &&
+      typeof beforeDigests?.[path] === 'string' &&
+      typeof afterDigests?.[path] === 'string'
+    return {
+      id: definition.id,
+      ownedPaths: [...definition.ownedPaths],
+      affectedPaths: [path],
+      status: completed ? 'completed' : 'pending',
+      ...(pathBaseline ? { baselineDigests: { [path]: pathBaseline } } : {}),
+      ...(completed
+        ? {
+            receipt: {
+              reviewDigest: receiptRecord.reviewDigest,
+              sourceRevision: receiptRecord.sourceRevision,
+              ownedPaths: [path],
+              beforeDigests: { [path]: beforeDigests[path] },
+              afterDigests: { [path]: afterDigests[path] },
+              committedAt: receiptRecord.committedAt,
+            },
+          }
+        : {}),
+    }
+  })
+  const allAffectedCompleted = lanes.every(
+    lane => lane.status === 'not_required' || lane.status === 'completed',
+  )
+  const { activeDispatch: _activeDispatch, ...withoutActiveDispatch } = source
+  return {
+    ...withoutActiveDispatch,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    foundationRemediationState: {
+      ...stateRecord,
+      lanes,
+      ...(!allAffectedCompleted ? { resultingRevision: undefined } : {}),
+    },
+  }
+}
+
 function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return { value, migrated: false }
   const source = value as Record<string, unknown>
+  if (source.schemaVersion === 25)
+    return {
+      migrated: true,
+      value: migrateSchema25Remediation(source),
+    }
   if (source.schemaVersion === 24)
     return {
       migrated: true,
@@ -115,7 +218,8 @@ function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
     const hasSingleVerification =
       reviewRecord?.mode === 'verification' &&
       reports.length === 1 &&
-      (reports[0] as Record<string, unknown> | undefined)?.role === 'verification'
+      (reports[0] as Record<string, unknown> | undefined)?.role ===
+        'verification'
     if (!hasSingleVerification)
       return {
         migrated: true,
@@ -151,10 +255,7 @@ function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
     }
   }
   if (source.schemaVersion !== 22) return { value, migrated: false }
-  const {
-    foundationReviewState: _foundationReviewState,
-    ...preserved
-  } = source
+  const { foundationReviewState: _foundationReviewState, ...preserved } = source
   if (source.phase === 'DELIVERY' && source.status === 'completed')
     return {
       migrated: true,
@@ -1259,7 +1360,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const usageDispatch =
         run.activeDispatch?.dispatchId === dispatchId
           ? run.activeDispatch
-          : run.foundationDraftState.documents?.find(
+          : (run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch ??
             run.foundationReviewState?.reports.find(
@@ -1267,7 +1368,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             )?.dispatch ??
             run.foundationRemediationState?.lanes.find(
               lane => lane.dispatch?.dispatchId === dispatchId,
-            )?.dispatch
+            )?.dispatch)
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =

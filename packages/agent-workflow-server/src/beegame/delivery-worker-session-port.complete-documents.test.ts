@@ -3,9 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  buildDocumentAuthorAuthorityBlock,
-} from './delivery-worker-session-port'
+import { buildDocumentAuthorAuthorityBlock } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 
@@ -37,7 +35,7 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
-  test('projects the accepted conflict list and repair paths without duplicating document bytes', async () => {
+  test('projects only path-scoped conflicts without controlling native tools', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'repair-authority-'))
     try {
       const revision = 'a'.repeat(64)
@@ -82,7 +80,9 @@ describe('delivery worker complete document boundary', () => {
           },
         ],
       })}\n`
-      const reviewDigest = createHash('sha256').update(reviewBytes).digest('hex')
+      const reviewDigest = createHash('sha256')
+        .update(reviewBytes)
+        .digest('hex')
       await writeFile(join(workspacePath, reviewPath), reviewBytes)
 
       const block = await buildDocumentAuthorAuthorityBlock({
@@ -94,8 +94,9 @@ describe('delivery worker complete document boundary', () => {
         contract: {
           authoringMode: 'remediation',
           documentSet: 'foundation',
+          foundationDocumentPath: 'docs/GDD.md',
           remediation: {
-            laneId: 'core-design',
+            laneId: 'gdd',
             reviewPath,
             reviewDigest,
             affectedPaths: ['docs/GDD.md'],
@@ -104,11 +105,16 @@ describe('delivery worker complete document boundary', () => {
         },
       } as never)
 
-      expect(block).toContain('BEGIN ACCEPTED FOUNDATION REVIEW JSON')
+      expect(block).toContain('BEGIN ACCEPTED PATH-SCOPED REVIEW JSON')
       expect(block).toContain('Runtime authority disagrees')
       expect(block).toContain('docs/GDD.md')
-      expect(block).toContain('docs/TECHNICAL_DESIGN.md')
-      expect(block).not.toContain('BEGIN CANONICAL REPAIR TARGET')
+      expect(block).not.toContain('docs/TECHNICAL_DESIGN.md')
+      expect(block).not.toContain('BEGIN CURRENT CANONICAL DOCUMENT')
+      expect(block).toContain('Authorized repair path: docs/GDD.md')
+      expect(block).not.toContain('exactly once')
+      expect(block).not.toContain('native Read')
+      expect(block).not.toContain('native Edit')
+      expect(block).not.toContain('Return the complete repaired document')
       expect(block).not.toContain('# Current GDD')
       expect(block).not.toContain('# Current Technical Design')
     } finally {
@@ -165,34 +171,37 @@ describe('delivery worker complete document boundary', () => {
       expect(projected.targetPath).toBe('docs/UI_UX_SPEC.md')
       expect(projected.sources.length).toBeGreaterThan(0)
       expect(
-        projected.sources.every((source: {
-          sections?: Array<{
-            sectionId?: unknown
-            startLine?: unknown
-            lineCount?: unknown
-            content?: unknown
-            digest?: unknown
-          }>
-        }) =>
-          source.sections?.every(
-            section =>
-              typeof section.sectionId === 'string' &&
-              Number.isInteger(section.startLine) &&
-              Number(section.startLine) > 0 &&
-              Number.isInteger(section.lineCount) &&
-              Number(section.lineCount) > 0 &&
-              typeof section.content === 'string' &&
-              section.content.includes(
-                `Authority content for ${String(section.sectionId)}.`,
-              ) &&
-              typeof section.digest === 'string' &&
-              /^[a-f0-9]{64}$/.test(section.digest),
-          ),
+        projected.sources.every(
+          (source: {
+            sections?: Array<{
+              sectionId?: unknown
+              startLine?: unknown
+              lineCount?: unknown
+              content?: unknown
+              digest?: unknown
+            }>
+          }) =>
+            source.sections?.every(
+              section =>
+                typeof section.sectionId === 'string' &&
+                Number.isInteger(section.startLine) &&
+                Number(section.startLine) > 0 &&
+                Number.isInteger(section.lineCount) &&
+                Number(section.lineCount) > 0 &&
+                typeof section.content === 'string' &&
+                section.content.includes(
+                  `Authority content for ${String(section.sectionId)}.`,
+                ) &&
+                typeof section.digest === 'string' &&
+                /^[a-f0-9]{64}$/.test(section.digest),
+            ),
         ),
       ).toBe(true)
       expect(projected.sources[0]).not.toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
-      expect(projected.sources[0].sections[0]).not.toHaveProperty('contentLines')
+      expect(projected.sources[0].sections[0]).not.toHaveProperty(
+        'contentLines',
+      )
       expect(block).toContain('Authority content for')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')

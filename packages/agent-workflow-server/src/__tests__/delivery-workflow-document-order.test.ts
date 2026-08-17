@@ -14,8 +14,10 @@ import {
 const revision = 'a'.repeat(64)
 
 describe('Foundation remediation document order', () => {
-  test('dispatches the three exact owner lanes concurrently', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'review-coordinated-repair-'))
+  test('dispatches one streamed writer per affected document concurrently', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'review-coordinated-repair-'),
+    )
     try {
       const affectedPaths = [
         'docs/GDD.md',
@@ -33,17 +35,30 @@ describe('Foundation remediation document order', () => {
         revision,
         verdict: 'NEEDS_REVISION',
         priorConflictStatus: [],
-        conflicts: [{
-          id: 'B1',
-          title: 'Shared production contract is inconsistent',
-          problem: 'Owned documents disagree on one required outcome.',
-          evidence: [{ path: 'docs/GDD.md', location: 'Core loop', observed: 'The outcome differs.' }],
-          requiredOutcome: 'All owners express one implementable outcome.',
-          changes: affectedPaths.map(path => ({ path, action: `Align ${path}.` })),
-          acceptance: ['All paths encode the same outcome.'],
-        }],
+        conflicts: [
+          {
+            id: 'B1',
+            title: 'Shared production contract is inconsistent',
+            problem: 'Owned documents disagree on one required outcome.',
+            evidence: [
+              {
+                path: 'docs/GDD.md',
+                location: 'Core loop',
+                observed: 'The outcome differs.',
+              },
+            ],
+            requiredOutcome: 'All owners express one implementable outcome.',
+            changes: affectedPaths.map(path => ({
+              path,
+              action: `Align ${path}.`,
+            })),
+            acceptance: ['All paths encode the same outcome.'],
+          },
+        ],
       })}\n`
-      const reviewDigest = createHash('sha256').update(reviewBytes).digest('hex')
+      const reviewDigest = createHash('sha256')
+        .update(reviewBytes)
+        .digest('hex')
       await mkdir(dirname(join(workspacePath, reviewPath)), { recursive: true })
       await writeFile(join(workspacePath, reviewPath), reviewBytes)
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -60,12 +75,13 @@ describe('Foundation remediation document order', () => {
           foundationDraftComplete: true,
         }),
         phase: 'DOCUMENT_DRAFTING' as const,
-        foundationRemediationState: createFoundationRemediationStateFromAuthority({
-          reviewPath,
-          reviewDigest,
-          sourceRevision: revision,
-          affectedPaths: [...affectedPaths],
-        }),
+        foundationRemediationState:
+          createFoundationRemediationStateFromAuthority({
+            reviewPath,
+            reviewDigest,
+            sourceRevision: revision,
+            affectedPaths: [...affectedPaths],
+          }),
       }
       const dispatched: WorkerDispatchRequest[] = []
 
@@ -81,15 +97,26 @@ describe('Foundation remediation document order', () => {
       })
 
       expect(dispatched.map(request => request.taskId)).toEqual([
-        'foundation-remediation:core-design',
-        'foundation-remediation:technical-assets',
-        'foundation-remediation:presentation',
+        'foundation-remediation:gdd',
+        'foundation-remediation:level-scene-design',
+        'foundation-remediation:balance-design',
+        'foundation-remediation:technical-design',
+        'foundation-remediation:art-direction',
+        'foundation-remediation:ui-ux-spec',
+        'foundation-remediation:asset-plan',
       ])
       expect(dispatched.map(request => request.allowedPaths)).toEqual([
-        ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/BALANCE_DESIGN.md'],
-        ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-        ['docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md'],
+        ['docs/GDD.md'],
+        ['docs/LEVEL_SCENE_DESIGN.md'],
+        ['docs/BALANCE_DESIGN.md'],
+        ['docs/TECHNICAL_DESIGN.md'],
+        ['docs/ART_DIRECTION.md'],
+        ['docs/UI_UX_SPEC.md'],
+        ['docs/ASSET_PLAN.md'],
       ])
+      expect(
+        dispatched.map(request => request.contract.foundationDocumentPath),
+      ).toEqual([...affectedPaths])
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

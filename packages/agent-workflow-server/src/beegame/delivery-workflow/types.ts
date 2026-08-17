@@ -61,9 +61,14 @@ export type FoundationDraftState = {
 }
 
 export type FoundationRemediationLaneId =
-  | 'core-design'
-  | 'technical-assets'
-  | 'presentation'
+  | 'gdd'
+  | 'level-scene-design'
+  | 'balance-design'
+  | 'technical-design'
+  | 'asset-plan'
+  | 'art-direction'
+  | 'ui-ux-spec'
+  | 'audio-design'
 
 export type FoundationRemediationLaneStatus =
   | 'not_required'
@@ -178,7 +183,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 25 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 26 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

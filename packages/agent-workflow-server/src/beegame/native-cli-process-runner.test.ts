@@ -112,20 +112,24 @@ describe('native CLI process runner', () => {
     expect(nativeRuntimeCommand(input)).not.toContain(
       '--resume=beegame_route_only',
     )
-    expect(() => nativeRuntimeCommand({
-      ...input,
-      resumeSessionId: 'beegame_route_only',
-    })).toThrow('native resume session ID must be a UUID')
+    expect(() =>
+      nativeRuntimeCommand({
+        ...input,
+        resumeSessionId: 'beegame_route_only',
+      }),
+    ).toThrow('native resume session ID must be a UUID')
   })
 
   test('resumes only an explicit native UUID', () => {
     const nativeSessionId = '550e8400-e29b-41d4-a716-446655440000'
-    expect(nativeRuntimeCommand({
-      sessionId: 'beegame_route_only',
-      resumeSessionId: nativeSessionId,
-      cwd: process.cwd(),
-      env: {},
-    })).toContain(`--resume=${nativeSessionId}`)
+    expect(
+      nativeRuntimeCommand({
+        sessionId: 'beegame_route_only',
+        resumeSessionId: nativeSessionId,
+        cwd: process.cwd(),
+        env: {},
+      }),
+    ).toContain(`--resume=${nativeSessionId}`)
   })
 
   test('does not replace the native document author tool inventory', () => {
@@ -137,7 +141,9 @@ describe('native CLI process runner', () => {
       workflowWorkerType: 'document-author',
     })
 
-    expect(command.some(argument => argument.startsWith('--tools='))).toBe(false)
+    expect(command.some(argument => argument.startsWith('--tools='))).toBe(
+      false,
+    )
     expect(
       command.some(argument => argument.startsWith('--allowedTools=')),
     ).toBe(false)
@@ -197,6 +203,20 @@ describe('native CLI process runner', () => {
 
     expect(command).toContain('--tools')
     expect(command[command.indexOf('--tools') + 1]).toBe('')
+  })
+
+  test('leaves the native tool inventory unchanged for a Foundation remediation writer', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_remediation_author',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-author',
+      workflowDocumentAuthorMode: 'remediation',
+    })
+
+    expect(command).not.toContain('--tools')
+    expect(command).not.toContain('--disallowedTools')
   })
 
   test('forwards native messages and resolves only on result', async () => {
@@ -270,9 +290,7 @@ describe('native CLI process runner', () => {
       })
     }
 
-    expect(nativeSessionIds).toEqual([
-      '550e8400-e29b-41d4-a716-446655440000',
-    ])
+    expect(nativeSessionIds).toEqual(['550e8400-e29b-41d4-a716-446655440000'])
     expect(results.map(result => result.received_session_id)).toEqual([
       '',
       '550e8400-e29b-41d4-a716-446655440000',
@@ -314,9 +332,7 @@ describe('native CLI process runner', () => {
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
-    ).rejects.toThrow(
-      'native model response ended without visible Markdown',
-    )
+    ).rejects.toThrow('native model response ended without visible Markdown')
     runtime.dispose?.()
   })
 

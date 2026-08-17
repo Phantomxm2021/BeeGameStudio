@@ -27,6 +27,7 @@ import {
   recordFoundationHandlerFailure,
 } from './foundation-authoring-batch'
 import {
+  FOUNDATION_REMEDIATION_LANES,
   recordFoundationRemediationDispatch,
   recordFoundationRemediationFailure,
 } from './foundation-remediation'
@@ -79,10 +80,11 @@ function remediationLaneFor(
     request.contract.authoringMode !== 'remediation'
   )
     return undefined
-  const laneId = (request.contract.remediation as { laneId?: unknown } | undefined)
-    ?.laneId
+  const laneId = (
+    request.contract.remediation as { laneId?: unknown } | undefined
+  )?.laneId
   return typeof laneId === 'string' &&
-    ['core-design', 'technical-assets', 'presentation'].includes(laneId) &&
+    FOUNDATION_REMEDIATION_LANES.some(lane => lane.id === laneId) &&
     request.taskId === `foundation-remediation:${laneId}`
     ? (laneId as FoundationRemediationLaneId)
     : undefined
@@ -107,9 +109,8 @@ function reviewerDispatch(
   run: DeliveryRun,
   role: string,
 ): DispatchRecord | undefined {
-  return run.foundationReviewState?.reports.find(
-    report => report.role === role,
-  )?.dispatch
+  return run.foundationReviewState?.reports.find(report => report.role === role)
+    ?.dispatch
 }
 
 function dispatchLocation(
@@ -252,7 +253,10 @@ function withReviewerDispatch(
         ),
       },
     }
-  throw new DispatchError('blocked', `Foundation review role ${role} is missing`)
+  throw new DispatchError(
+    'blocked',
+    `Foundation review role ${role} is missing`,
+  )
 }
 
 function withReviewerFailure(
@@ -658,7 +662,11 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'a regular delivery worker is already running',
       )
-    if (!foundationPath && !remediationLaneId && hasRunningFoundationDispatch(run))
+    if (
+      !foundationPath &&
+      !remediationLaneId &&
+      hasRunningFoundationDispatch(run)
+    )
       throw new DispatchError(
         'duplicate',
         'foundation document authoring batch is active',
@@ -783,10 +791,7 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'another delivery worker batch is active',
           )
-        if (
-          !currentRemediationLaneId &&
-          hasRunningRemediationDispatch(current)
-        )
+        if (!currentRemediationLaneId && hasRunningRemediationDispatch(current))
           throw new DispatchError(
             'duplicate',
             'foundation remediation batch is active',
@@ -812,11 +817,7 @@ export function createDeliveryDispatcher(options: {
               ),
             }
           : currentRemediationLaneId
-            ? withRemediationDispatch(
-                current,
-                currentRemediationLaneId,
-                record,
-              )
+            ? withRemediationDispatch(current, currentRemediationLaneId, record)
             : currentReviewRole
               ? withReviewerDispatch(current, currentReviewRole, record)
               : { ...current, activeDispatch: record }
@@ -1223,16 +1224,15 @@ export function createDeliveryDispatcher(options: {
               current.foundationRemediationState
             ? {
                 ...current,
-                foundationRemediationState:
-                  recordFoundationRemediationFailure(
-                    withRemediationDispatchRecord(
-                      current,
-                      currentLocation.remediationLaneId,
-                      failed,
-                    ).foundationRemediationState!,
+                foundationRemediationState: recordFoundationRemediationFailure(
+                  withRemediationDispatchRecord(
+                    current,
                     currentLocation.remediationLaneId,
-                    reason,
-                  ),
+                    failed,
+                  ).foundationRemediationState!,
+                  currentLocation.remediationLaneId,
+                  reason,
+                ),
                 status: isolatedRemediationFailureStatus(current),
               }
             : currentLocation.reviewRole
@@ -1317,38 +1317,38 @@ export function createDeliveryDispatcher(options: {
           terminalResult: undefined,
           finishedAt: location.record.finishedAt ?? now(),
         })
-        const failedRun = location.remediationLaneId &&
-            current.foundationRemediationState
-          ? {
-              ...current,
-              foundationRemediationState: recordFoundationRemediationFailure(
-                withRemediationDispatchRecord(
-                  current,
-                  location.remediationLaneId,
-                  failed,
-                ).foundationRemediationState!,
-                location.remediationLaneId,
-                reason,
-              ),
-            }
-          : location.path
+        const failedRun =
+          location.remediationLaneId && current.foundationRemediationState
             ? {
                 ...current,
-                foundationDraftState: recordFoundationHandlerFailure(
-                  current.foundationDraftState,
-                  location.path,
+                foundationRemediationState: recordFoundationRemediationFailure(
+                  withRemediationDispatchRecord(
+                    current,
+                    location.remediationLaneId,
+                    failed,
+                  ).foundationRemediationState!,
+                  location.remediationLaneId,
                   reason,
-                  failed,
                 ),
               }
-            : location.reviewRole
-              ? withReviewerFailure(
-                  current,
-                  location.reviewRole,
-                  failed,
-                  reason,
-                )
-              : { ...current, activeDispatch: failed }
+            : location.path
+              ? {
+                  ...current,
+                  foundationDraftState: recordFoundationHandlerFailure(
+                    current.foundationDraftState,
+                    location.path,
+                    reason,
+                    failed,
+                  ),
+                }
+              : location.reviewRole
+                ? withReviewerFailure(
+                    current,
+                    location.reviewRole,
+                    failed,
+                    reason,
+                  )
+                : { ...current, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedRun,

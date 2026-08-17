@@ -207,6 +207,8 @@ import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
 } from './beegame/delivery-workflow/document-display-tasks'
+import { FOUNDATION_REMEDIATION_LANES } from './beegame/delivery-workflow/foundation-remediation'
+import type { FoundationRemediationLaneId } from './beegame/delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
@@ -2331,9 +2333,10 @@ export function createAgentWorkflowApp(
           .deleteProject(c.req.raw, user, registeredProjectId)
           .catch(() => undefined)
       if (destinationWorkspacePath)
-        await rm(destinationWorkspacePath, { recursive: true, force: true }).catch(
-          () => undefined,
-        )
+        await rm(destinationWorkspacePath, {
+          recursive: true,
+          force: true,
+        }).catch(() => undefined)
       if (error instanceof ProjectQuotaExceededError)
         return c.json(
           {
@@ -6007,11 +6010,7 @@ function projectFoundationReviewTaskState(
           | 'technical-assets'
           | 'presentation'
           | 'synthesis',
-        status: report.status as
-          | 'pending'
-          | 'running'
-          | 'completed'
-          | 'failed',
+        status: report.status as 'pending' | 'running' | 'completed' | 'failed',
         ...(typeof report.failureReason === 'string'
           ? { failureReason: report.failureReason }
           : {}),
@@ -6037,21 +6036,17 @@ function projectFoundationRemediationTaskState(
   return state.lanes.flatMap(lane => {
     if (
       !isObject(lane) ||
-      !['core-design', 'technical-assets', 'presentation'].includes(
-        String(lane.id),
+      !FOUNDATION_REMEDIATION_LANES.some(
+        definition => definition.id === String(lane.id),
       ) ||
-      ![
-        'not_required',
-        'pending',
-        'running',
-        'completed',
-        'failed',
-      ].includes(String(lane.status))
+      !['not_required', 'pending', 'running', 'completed', 'failed'].includes(
+        String(lane.status),
+      )
     )
       return []
     return [
       {
-        id: lane.id as 'core-design' | 'technical-assets' | 'presentation',
+        id: lane.id as FoundationRemediationLaneId,
         status: lane.status as
           | 'not_required'
           | 'pending'
@@ -6332,7 +6327,8 @@ function workflowStageSnapshotsForDisplay(
         ? { currentItemId: snapshot.currentItemId }
         : {}),
       tasks,
-      completedTaskCount: tasks.filter(task => task.status === 'completed').length,
+      completedTaskCount: tasks.filter(task => task.status === 'completed')
+        .length,
       totalTaskCount: tasks.length,
       createdAt: snapshot.createdAt,
       updatedAt: snapshot.updatedAt,

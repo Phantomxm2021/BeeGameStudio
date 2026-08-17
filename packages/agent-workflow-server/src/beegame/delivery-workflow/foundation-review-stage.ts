@@ -32,7 +32,9 @@ const laneIds = new Set<FoundationReviewRole>(
   FOUNDATION_DOCUMENT_LANES.map(lane => lane.id),
 )
 
-function isLaneRole(role: FoundationReviewRole): role is FoundationDocumentLaneId {
+function isLaneRole(
+  role: FoundationReviewRole,
+): role is FoundationDocumentLaneId {
   return laneIds.has(role)
 }
 
@@ -62,7 +64,9 @@ export type FoundationReviewDispatch = {
     priorConflictIds?: string[]
     remediationReceipts?: Array<{
       laneId: string
-      receipt: NonNullable<FoundationRemediationState['lanes'][number]['receipt']>
+      receipt: NonNullable<
+        FoundationRemediationState['lanes'][number]['receipt']
+      >
     }>
   }
 }
@@ -102,7 +106,9 @@ async function priorConflictIdsByLane(input: {
       lane.id,
       prior.review.conflicts
         .filter(conflict =>
-          conflict.changes.some(change => lane.ownedPaths.includes(change.path)),
+          conflict.changes.some(change =>
+            lane.ownedPaths.includes(change.path),
+          ),
         )
         .map(conflict => conflict.id),
     ]),
@@ -142,7 +148,9 @@ function verificationReceipts(input: {
       : lane.receipt
         ? [{ laneId: lane.id, receipt: lane.receipt }]
         : (() => {
-            throw new Error(`foundation verification receipt is missing: ${lane.id}`)
+            throw new Error(
+              `foundation verification receipt is missing: ${lane.id}`,
+            )
           })(),
   )
 }
@@ -182,7 +190,9 @@ export async function buildFoundationReviewDispatches(input: {
           revision: state.revision,
           laneId: role,
         })
-        sourcePaths = lane.ownedPaths.map(path => resolve(input.workspacePath, path))
+        sourcePaths = lane.ownedPaths.map(path =>
+          resolve(input.workspacePath, path),
+        )
         verificationSourcePaths = [
           ...(state.mode === 'verification'
             ? [resolve(input.workspacePath, state.priorReviewPath!)]
@@ -216,7 +226,10 @@ export async function buildFoundationReviewDispatches(input: {
           state.revision,
           `foundation-${state.mode}-${state.attempt}-${role}`,
         )
-        committedPath = foundationReviewPath(input.workspacePath, state.revision)
+        committedPath = foundationReviewPath(
+          input.workspacePath,
+          state.revision,
+        )
       }
       const assignment: FoundationReviewAssignment = {
         scope: 'foundation',
@@ -273,9 +286,13 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     terminal.revision !== input.currentRevision
   )
     throw new Error('canonical artifacts changed during foundation review')
-  const report = state.reports.find(candidate => candidate.role === terminal.role)
+  const report = state.reports.find(
+    candidate => candidate.role === terminal.role,
+  )
   if (!report || terminal.reportPath !== report.path)
-    throw new Error('foundation review terminal does not match its assigned role')
+    throw new Error(
+      'foundation review terminal does not match its assigned role',
+    )
   if (report.status === 'completed')
     throw new Error('foundation review report is already completed')
 
@@ -344,13 +361,12 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       state,
       remediationState: input.remediationState,
     })
-    for (const lane of input.remediationState!.lanes)
-      if (lane.status === 'completed')
-        await writeFoundationReviewProjection({
-          workspacePath: input.workspacePath,
-          revision: state.revision,
-          laneId: lane.id,
-        })
+    for (const lane of FOUNDATION_DOCUMENT_LANES)
+      await writeFoundationReviewProjection({
+        workspacePath: input.workspacePath,
+        revision: state.revision,
+        laneId: lane.id,
+      })
   }
   const accepted = await acceptFoundationReview({
     workspacePath: input.workspacePath,
@@ -358,7 +374,12 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     currentRevision: input.currentRevision,
     dispatchId: `foundation-${state.mode}-${state.attempt}-${terminal.role}`,
     ...(priorReview
-      ? { priorReview: { review: priorReview.review, digest: priorReview.digest } }
+      ? {
+          priorReview: {
+            review: priorReview.review,
+            digest: priorReview.digest,
+          },
+        }
       : {}),
   })
   return assertFoundationReviewState({

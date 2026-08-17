@@ -338,12 +338,20 @@ describe('resource-content worker prompts', () => {
         allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
-    expect(finalReviewerPrompt).toContain('Read exactly the three accepted lane packets')
-    expect(finalReviewerPrompt).not.toContain('Review all eight canonical foundation documents directly')
+    expect(finalReviewerPrompt).toContain(
+      'Read exactly the three accepted lane packets',
+    )
+    expect(finalReviewerPrompt).not.toContain(
+      'Review all eight canonical foundation documents directly',
+    )
     expect(finalReviewerPrompt).not.toContain('fixed coverage pass')
     expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
-    expect(finalReviewerPrompt).toContain('permits incompatible implementations')
-    expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
+    expect(finalReviewerPrompt).toContain(
+      'permits incompatible implementations',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'unambiguous duplicate wording is non-blocking',
+    )
     expect(finalReviewerPrompt).toContain('one JSON object')
     expect(finalReviewerPrompt).toContain('version must be the integer 2')
     expect(finalReviewerPrompt).toContain(
@@ -356,9 +364,7 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain(
       'evidence must be an array of objects',
     )
-    expect(finalReviewerPrompt).toContain(
-      'path, location and observed',
-    )
+    expect(finalReviewerPrompt).toContain('path, location and observed')
     expect(finalReviewerPrompt).toContain('priorConflictStatus')
     expect(finalReviewerPrompt).toContain('requiredOutcome')
     expect(finalReviewerPrompt).toContain('changes')
@@ -367,13 +373,17 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('decision.json')
     expect(finalReviewerPrompt).not.toContain('one non-blocking register')
     expect(finalReviewerPrompt).not.toContain('one preservation list')
-    expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
+    expect(finalReviewerPrompt).not.toContain(
+      'Consolidate the committed specialist',
+    )
     expect(finalReviewerPrompt).not.toContain('contract-specialist')
     expect(finalReviewerPrompt).not.toContain('integration-specialist')
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
     expect(finalReviewerPrompt).toContain('Deduplicate')
-    expect(finalReviewerPrompt).toContain('sole canonical version 2 review.json')
+    expect(finalReviewerPrompt).toContain(
+      'sole canonical version 2 review.json',
+    )
     expect(finalReviewerPrompt).toContain('accepted lane packets')
     expect(finalReviewerPrompt).toContain('launch another Agent or task')
 
@@ -414,9 +424,7 @@ describe('resource-content worker prompts', () => {
     expect(specialistPrompt).toContain(
       'title, problem, evidence and blockingReason',
     )
-    expect(specialistPrompt).toContain(
-      'path, location and observed',
-    )
+    expect(specialistPrompt).toContain('path, location and observed')
     expect(specialistPrompt).toContain('8 highest-priority proven blockers')
     expect(specialistPrompt).toContain('Never write an absolute path')
     expect(specialistPrompt).toContain(
@@ -457,9 +465,7 @@ describe('resource-content worker prompts', () => {
     expect(integrationSpecialistPrompt).toContain(
       'runtime architecture, production feasibility and asset responsibilities',
     )
-    expect(integrationSpecialistPrompt).toContain(
-      '"lane":"technical-assets"',
-    )
+    expect(integrationSpecialistPrompt).toContain('"lane":"technical-assets"')
 
     const verificationLanePrompt = buildWorkerPrompt({
       runId: 'run',
@@ -529,7 +535,9 @@ describe('resource-content worker prompts', () => {
       },
     })
     expect(repeatReviewerPrompt).toContain('accepted prior review')
-    expect(repeatReviewerPrompt).toContain('three accepted verification lane packets')
+    expect(repeatReviewerPrompt).toContain(
+      'three accepted verification lane packets',
+    )
     expect(repeatReviewerPrompt).toContain('priorConflictStatus')
     expect(repeatReviewerPrompt).toContain(
       `"priorReviewDigest":"${'a'.repeat(64)}"`,
@@ -674,7 +682,7 @@ describe('resource-content worker prompts', () => {
     expect(prompt).not.toContain('Do not simulate builds or waves')
   })
 
-  test('routes one accepted conflict list to one coordinated remediation Agent', () => {
+  test('routes one accepted conflict list to one isolated document writer', () => {
     const ownerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -683,35 +691,34 @@ describe('resource-content worker prompts', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: 'revision',
-      allowedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+      allowedPaths: ['docs/GDD.md'],
       contract: {
         documentSet: 'foundation',
         authoringMode: 'remediation',
+        foundationDocumentPath: 'docs/GDD.md',
         remediation: {
+          laneId: 'gdd',
           reviewPath: '.beegame/reviews/foundation/revision/review.json',
           reviewDigest: 'a'.repeat(64),
-          affectedPaths: ['docs/GDD.md', 'docs/TECHNICAL_DESIGN.md'],
+          affectedPaths: ['docs/GDD.md'],
           sourceRevision: 'revision',
         },
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(ownerPrompt).toContain('one coordinated turn')
-    expect(ownerPrompt).toContain('every conflict changes[].action')
-    expect(ownerPrompt).toContain('contract.remediation.affectedPaths')
-    expect(ownerPrompt).toContain('targeted closure check')
-    expect(ownerPrompt).toContain('Do not launch a broad new review')
-    expect(ownerPrompt).toContain('preserve unrelated approved content')
+    expect(ownerPrompt).toContain('accepted path-scoped conflict list')
+    expect(ownerPrompt).toContain('Preserve unrelated approved authority')
+    expect(ownerPrompt).not.toContain('exactly once')
+    expect(ownerPrompt).not.toContain('native Read')
+    expect(ownerPrompt).not.toContain('native Edit')
+    expect(ownerPrompt).not.toContain('SearchExtraTools')
     expect(ownerPrompt).toContain(
-      'Ensure every Markdown document in contract.remediation.affectedPaths is complete',
+      'native runtime owns the file-operation sequence',
     )
-    expect(ownerPrompt).toContain(
-      'The native runtime owns the file-operation sequence',
-    )
-    expect(ownerPrompt).toContain('end the turn normally')
+    expect(ownerPrompt).not.toContain('one streamed response')
+    expect(ownerPrompt).toContain('do not rewrite the complete document')
     expect(ownerPrompt).not.toContain('verify its final bytes')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
-    expect(ownerPrompt).not.toContain('foundationDocumentPath')
   })
 
   test('keeps the checklist minimal and scenario-level', () => {

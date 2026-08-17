@@ -65,11 +65,7 @@ const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
       mode: 'initial' | 'verification'
-      role:
-        | 'core-design'
-        | 'technical-assets'
-        | 'presentation'
-        | 'synthesis'
+      role: 'core-design' | 'technical-assets' | 'presentation' | 'synthesis'
       assignment: {
         sourcePaths: string[]
         verificationSourcePaths: string[]
@@ -174,15 +170,29 @@ export async function buildDocumentAuthorAuthorityBlock(
     const expectedLanePaths = lane.ownedPaths.filter(path =>
       accepted.affectedPaths.includes(path),
     )
-    if (
-      JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths)
-    )
+    if (JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths))
       throw new Error('document remediation paths do not match accepted review')
+    if (expectedLanePaths.length !== 1)
+      throw new Error('document remediation must own exactly one document')
+    const targetPath = expectedLanePaths[0]
+    const projectedReview = {
+      ...accepted.review,
+      conflicts: accepted.review.conflicts
+        .filter(conflict =>
+          conflict.changes.some(change => change.path === targetPath),
+        )
+        .map(conflict => ({
+          ...conflict,
+          changes: conflict.changes.filter(
+            change => change.path === targetPath,
+          ),
+        })),
+    }
     return [
-      'The workflow service projected one accepted Foundation conflict list and this lane\'s exact authorized repair paths below. Read only the current bytes needed for the conflicts assigned to these paths, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
+      'The workflow service projected one accepted Foundation conflict list for one authorized path. Repair only that path, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
       `Remediation lane: ${lane.id}`,
-      `Authorized repair paths: ${JSON.stringify(expectedLanePaths)}`,
-      `--- BEGIN ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(accepted.review, null, 2)}\n--- END ACCEPTED FOUNDATION REVIEW JSON: ${accepted.path} ---`,
+      `Authorized repair path: ${targetPath}`,
+      `--- BEGIN ACCEPTED PATH-SCOPED REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(projectedReview, null, 2)}\n--- END ACCEPTED PATH-SCOPED REVIEW JSON: ${accepted.path} ---`,
     ].join('\n\n')
   }
   if (
@@ -868,7 +878,7 @@ function isFoundationDocumentAuthoringTurn(
 ): boolean {
   return (
     request.workerType === 'document-author' &&
-    ['initial', 'parallel-draft'].includes(
+    ['initial', 'parallel-draft', 'remediation'].includes(
       String(request.contract.authoringMode),
     ) &&
     request.contract.documentSet === 'foundation' &&
@@ -884,8 +894,7 @@ function isStreamedFoundationAuthoringTurn(
 ): boolean {
   return (
     isFoundationDocumentAuthoringTurn(request) &&
-    (request.contract.authoringMode === 'initial' ||
-      request.contract.authoringMode === 'parallel-draft')
+    request.contract.authoringMode !== 'remediation'
   )
 }
 
@@ -894,6 +903,11 @@ async function initialFoundationDocumentTurnPrompt(
 ): Promise<string | undefined> {
   if (!isFoundationDocumentAuthoringTurn(request)) return undefined
   const path = request.contract.foundationDocumentPath as never
+  if (request.contract.authoringMode === 'remediation')
+    return [
+      `Repair only ${path} according to the accepted path-scoped conflict projection included above. Preserve unrelated approved content and leave the document complete.`,
+      'The dedicated verification stage owns the independent re-review.',
+    ].join('\n\n')
   let targetExists = true
   try {
     await access(resolve(request.workspacePath, path))
