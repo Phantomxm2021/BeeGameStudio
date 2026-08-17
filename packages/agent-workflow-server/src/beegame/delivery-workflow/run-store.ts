@@ -130,7 +130,7 @@ export async function inspectWorkflowSnapshot(input: {
       digest,
       parsedValue,
       error: new WorkflowStoreError(
-        `unsupported workflow snapshot schema version ${snapshotVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        `workflow snapshot schema version ${snapshotVersion} is obsolete; start a new workflow with schema version ${DELIVERY_RUN_SCHEMA_VERSION}`,
         'obsolete',
       ),
     }
@@ -621,7 +621,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
     ) {
       throw new WorkflowStoreError(
-        `unsupported workflow snapshot schema version ${snapshotVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+        `workflow snapshot schema version ${snapshotVersion} is obsolete; start a new workflow with schema version ${DELIVERY_RUN_SCHEMA_VERSION}`,
         'obsolete',
       )
     }

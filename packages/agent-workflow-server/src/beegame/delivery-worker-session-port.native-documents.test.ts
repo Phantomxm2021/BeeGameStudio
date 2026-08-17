@@ -191,7 +191,7 @@ describe('native initial document authoring', () => {
       workspacePath,
       '.beegame/reviews/foundation',
       revision,
-      'parts/core-design.json',
+      'parts/core-design.md',
     )
     const markdown = [
       '# Foundation Review Packet',
@@ -310,7 +310,7 @@ describe('native initial document authoring', () => {
       workspacePath,
       '.beegame/reviews/foundation',
       revision,
-      'review.json',
+      'selection.md',
     )
     const candidateReferences = [
       'core-design:C1',

@@ -23,6 +23,7 @@ const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   24: 'facee311b19a5f1ebc85ff6a762d7a8ef9909ec8502fa530765f52263d3073df',
   25: '8aee130912d5c1b6313946d8ed6579ba470443667fe3fb7b218ad782367975ef',
   26: '88dcdf3314759e405f38b211fa56dcc8642b4bf3e7547b12983aba9c03557245',
+  27: 'f1437b7488bf6a0844e14eeda637189c9dd681e68bd5d202082acd6528df84b7',
 }
 
 function canonicalize(value: unknown): unknown {

@@ -1194,12 +1194,15 @@ describe('delivery worker session credentials', () => {
           lane =>
             join(
               workspacePath,
-              `.beegame/reviews/foundation/${revision}/parts/${lane}.json`,
+              `.beegame/reviews/foundation/${revision}/parts/${lane}.md`,
             ),
         ),
         stagingOutputPaths: [stagingPath],
         committedOutputPaths: [
-          join(workspacePath, `.beegame/reviews/foundation/${revision}/review.json`),
+          join(
+            workspacePath,
+            `.beegame/reviews/foundation/${revision}/selection.md`,
+          ),
         ],
       } as const
 
@@ -1233,7 +1236,7 @@ describe('delivery worker session credentials', () => {
         revision,
         mode: 'initial',
         role: 'synthesis',
-        reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+        reportPath: `.beegame/reviews/foundation/${revision}/selection.md`,
       })
       expect(await readFile(stagingPath, 'utf8')).toBe(
         `${selectionMarkdown}\n`,

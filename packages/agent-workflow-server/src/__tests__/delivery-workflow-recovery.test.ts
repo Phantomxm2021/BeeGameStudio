@@ -2036,9 +2036,132 @@ describe('delivery workflow recovery', () => {
 
     await expect(store.load()).rejects.toMatchObject({
       code: 'obsolete',
-      message: `unsupported workflow snapshot schema version ${obsoleteVersion}; current version is ${DELIVERY_RUN_SCHEMA_VERSION}`,
+      message: `workflow snapshot schema version ${obsoleteVersion} is obsolete; start a new workflow with schema version ${DELIVERY_RUN_SCHEMA_VERSION}`,
     })
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(obsoleteSnapshot)
+  })
+
+  test('rejects schema-26 snapshots with executable JSON reviewer lane packets', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-reviewer-schema-26-'))
+    const ownerId = 'owner-reviewer-schema-26'
+    const projectId = 'project-reviewer-schema-26'
+    const store = createRunStore(workspace, ownerId)
+    const revision = 'a'.repeat(64)
+    const review = createFoundationReviewState({ revision })
+    const obsoleteReview = {
+      ...review,
+      reports: review.reports.map(report => ({
+        ...report,
+        path:
+          report.role === 'synthesis'
+            ? `.beegame/reviews/foundation/${revision}/review.json`
+            : `.beegame/reviews/foundation/${revision}/parts/${report.role}.json`,
+      })),
+    }
+    const snapshot = {
+      ...createTestDeliveryRun({
+        runId: 'run-reviewer-schema-26',
+        projectId,
+        ownerId,
+        documentRevision: revision,
+      }),
+      schemaVersion: 26,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      foundationReviewState: obsoleteReview,
+    }
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(store.paths.snapshot, `${JSON.stringify(snapshot)}\n`)
+
+    await expect(
+      recoverAndResumeRun({
+        store,
+        workspacePath: workspace,
+        ownerId,
+        projectId,
+        confirmedBriefContext: snapshot.confirmedBriefContext,
+        stopWorkspaceWorkers: async () => undefined,
+        resumeCurrentRun: async () => undefined,
+      }),
+    ).rejects.toThrow('workflow snapshot schema version 26 is obsolete')
+  })
+
+  test('preserves current Markdown receipt and final review digests during recovery', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-reviewer-schema-current-'))
+    const ownerId = 'owner-reviewer-schema-current'
+    const projectId = 'project-reviewer-schema-current'
+    const store = createRunStore(workspace, ownerId)
+    const revision = 'b'.repeat(64)
+    const review = createFoundationReviewState({ revision })
+    for (const report of review.reports) {
+      const bytes = Buffer.from(`receipt-${report.role}\n`)
+      await mkdir(join(workspace, report.path, '..'), { recursive: true })
+      await writeFile(join(workspace, report.path), bytes)
+      report.status = 'completed'
+      report.digest = createHash('sha256').update(bytes).digest('hex')
+    }
+    const finalReportPath = `.beegame/reviews/foundation/${revision}/review.json`
+    const finalBytes = foundationRecoveryReviewJson({ revision })
+    const finalReportDigest = createHash('sha256')
+      .update(finalBytes)
+      .digest('hex')
+    await writeFile(join(workspace, finalReportPath), finalBytes)
+    const current = {
+      ...createTestDeliveryRun({
+        runId: 'run-reviewer-schema-current',
+        projectId,
+        ownerId,
+        documentRevision: revision,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'needs_action' as const,
+      foundationReviewState: {
+        ...review,
+        status: 'completed' as const,
+        finalReportPath,
+        finalReportDigest,
+        verdict: 'NEEDS_REVISION' as const,
+      },
+    }
+    await store.save(current)
+
+    const recovered = await recoverAndResumeRun({
+      store,
+      workspacePath: workspace,
+      ownerId,
+      projectId,
+      confirmedBriefContext: current.confirmedBriefContext,
+      stopWorkspaceWorkers: async () => undefined,
+      resumeCurrentRun: async () => undefined,
+    })
+
+    expect(
+      recovered.foundationReviewState?.reports.map(report => report.path),
+    ).toEqual(review.reports.map(report => report.path))
+    expect(
+      recovered.foundationReviewState?.reports.map(report => report.digest),
+    ).toEqual(review.reports.map(report => report.digest))
+    for (const report of review.reports) {
+      if (!report.digest)
+        throw new Error('completed recovery receipt fixture requires a digest')
+      expect(
+        createHash('sha256')
+          .update(await readFile(join(workspace, report.path)))
+          .digest('hex'),
+      ).toBe(report.digest)
+    }
+    expect(recovered.foundationReviewState?.finalReportPath).toBe(
+      finalReportPath,
+    )
+    expect(recovered.foundationReviewState?.finalReportDigest).toBe(
+      finalReportDigest,
+    )
+    expect(
+      createHash('sha256')
+        .update(await readFile(join(workspace, finalReportPath)))
+        .digest('hex'),
+    ).toBe(finalReportDigest)
   })
 
   test.each([

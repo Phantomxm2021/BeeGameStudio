@@ -15,7 +15,6 @@ test('has no Foundation remediation prompt path', () => {
 test('has no executable post-report Foundation verification contract', () => {
   const sources = [
     './foundation-review.ts',
-    './foundation-review-lane-packet.ts',
     './foundation-review-stage.ts',
     './worker-contracts.ts',
     './worker-prompts.ts',
