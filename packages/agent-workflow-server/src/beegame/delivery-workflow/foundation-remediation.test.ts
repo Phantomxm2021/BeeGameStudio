@@ -205,10 +205,7 @@ describe('foundation remediation lanes', () => {
     updated = commitFoundationRemediationReceipt(updated, {
       laneId: 'gdd',
       dispatchId: coreDispatch.dispatchId,
-      writtenPaths: ['docs/GDD.md'],
-      beforeDigests: ownedDigests('gdd', 'c'),
-      afterDigests: ownedDigests('gdd', 'd'),
-      committedAt: '2026-08-16T00:00:00.000Z',
+      receipt: remediationReceipt('gdd', state, 'c', 'd'),
     })
     updated = recordFoundationRemediationFailure(
       updated,
@@ -241,32 +238,29 @@ describe('foundation remediation lanes', () => {
     const completed = commitFoundationRemediationReceipt(redispatched, {
       laneId: 'ui-ux-spec',
       dispatchId: presentationDispatch.dispatchId,
-      writtenPaths: ['docs/UI_UX_SPEC.md'],
-      beforeDigests: ownedDigests('ui-ux-spec', 'e'),
-      afterDigests: ownedDigests('ui-ux-spec', 'f'),
-      committedAt: '2026-08-16T00:01:00.000Z',
+      receipt: remediationReceipt('ui-ux-spec', state, 'c', 'f'),
     })
     expect(foundationRemediationReadyForVerification(completed)).toBe(true)
     expect(() =>
       commitFoundationRemediationReceipt(redispatched, {
         laneId: 'ui-ux-spec',
         dispatchId: presentationDispatch.dispatchId,
-        writtenPaths: ['docs/AUDIO_DESIGN.md'],
-        beforeDigests: ownedDigests('ui-ux-spec', 'e'),
-        afterDigests: ownedDigests('ui-ux-spec', 'f'),
-        committedAt: '2026-08-16T00:01:00.000Z',
+        receipt: {
+          ...remediationReceipt('ui-ux-spec', state, 'c', 'f'),
+          targetPath: 'docs/AUDIO_DESIGN.md',
+        },
       }),
-    ).toThrow('mutation paths do not match the lane assignment')
+    ).toThrow('foundation remediation receipt target does not match lane')
   })
 
-  test('preserves the first mutation baseline across an interrupted retry', () => {
+  test('preserves the first source digest across an interrupted retry', () => {
     const sourceRevision = digest('a')
     const state = createFoundationRemediationState({
       reviewPath: `.beegame/reviews/foundation/${sourceRevision}/review.json`,
       reviewDigest: digest('b'),
       review: review(sourceRevision, ['docs/GDD.md']),
     })
-    const baseline = ownedDigests('gdd', 'c')
+    const sourceDigest = digest('c')
     const firstDispatch: DispatchRecord = {
       ...dispatch('gdd'),
       request: {
@@ -279,7 +273,7 @@ describe('foundation remediation lanes', () => {
         phase: 'DOCUMENT_DRAFTING',
         taskId: 'foundation-remediation:gdd',
         revision: sourceRevision,
-        contract: { previousDocumentDigests: baseline },
+        contract: { remediation: { sourceDigest } },
       },
     }
     const failed = recordFoundationRemediationFailure(
@@ -290,7 +284,7 @@ describe('foundation remediation lanes', () => {
     const retried = retryFoundationRemediationFailures(failed)
 
     expect(retried.lanes[0]?.status).toBe('pending')
-    expect(retried.lanes[0]?.baselineDigests).toEqual(baseline)
+    expect(retried.lanes[0]?.sourceDigest).toBe(sourceDigest)
     expect(
       parseDeliveryRun({
         ...createTestDeliveryRun({
@@ -299,8 +293,8 @@ describe('foundation remediation lanes', () => {
           ownerId: 'owner-1',
         }),
         foundationRemediationState: retried,
-      }).foundationRemediationState?.lanes[0]?.baselineDigests,
-    ).toEqual(baseline)
+      }).foundationRemediationState?.lanes[0]?.sourceDigest,
+    ).toBe(sourceDigest)
   })
 })
 
@@ -314,6 +308,7 @@ function foundationRemediationLanesAreFrozen(): boolean {
 }
 
 function dispatch(laneId: FoundationRemediationLaneId): DispatchRecord {
+  const sourceDigest = digest('c')
   return {
     dispatchId: `dispatch-${laneId}`,
     workerType: 'document-author',
@@ -322,13 +317,35 @@ function dispatch(laneId: FoundationRemediationLaneId): DispatchRecord {
     revision: digest('a'),
     status: 'running',
     startedAt: '2026-08-16T00:00:00.000Z',
+    request: {
+      dispatchId: `dispatch-${laneId}`,
+      runId: 'run-1',
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: `foundation-remediation:${laneId}`,
+      revision: digest('a'),
+      contract: { remediation: { sourceDigest } },
+    },
   }
 }
 
-function ownedDigests(
+function remediationReceipt(
   laneId: FoundationRemediationLaneId,
-  value: string,
-): Record<string, string> {
+  state: ReturnType<typeof createFoundationRemediationState>,
+  sourceValue: string,
+  finalValue: string,
+) {
   const lane = FOUNDATION_REMEDIATION_LANES.find(entry => entry.id === laneId)!
-  return Object.fromEntries(lane.ownedPaths.map(path => [path, digest(value)]))
+  return {
+    reviewDigest: state.reviewDigest,
+    sourceRevision: state.sourceRevision,
+    targetPath: lane.ownedPaths[0],
+    sourceDigest: digest(sourceValue),
+    patchedUnitIds: ['section:authority'],
+    finalDigest: digest(finalValue),
+    committedAt: '2026-08-16T00:01:00.000Z',
+  }
 }

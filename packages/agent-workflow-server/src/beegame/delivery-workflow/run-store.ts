@@ -122,7 +122,7 @@ function migrateSchema25Remediation(
       (lane, index) => lane.id === FOUNDATION_REMEDIATION_LANES[index]?.id,
     )
   )
-    return { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+    return { ...source, schemaVersion: 26 }
 
   const lanes = FOUNDATION_REMEDIATION_LANES.map(definition => {
     const path = definition.ownedPaths[0]
@@ -183,7 +183,7 @@ function migrateSchema25Remediation(
   const { activeDispatch: _activeDispatch, ...withoutActiveDispatch } = source
   return {
     ...withoutActiveDispatch,
-    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    schemaVersion: 26,
     foundationRemediationState: {
       ...stateRecord,
       lanes,
@@ -192,14 +192,135 @@ function migrateSchema25Remediation(
   }
 }
 
+function migrateSchema26Remediation(
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const state = source.foundationRemediationState
+  if (!state || typeof state !== 'object' || Array.isArray(state))
+    return { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+
+  if (
+    typeof source.phase === 'string' &&
+    [
+      'RESOURCE_PREPARATION',
+      'ATOMIC_TASK_PLANNING',
+      'IMPLEMENTATION',
+      'IMPLEMENTATION_AUDIT',
+      'ACCEPTANCE',
+      'DELIVERY',
+    ].includes(source.phase)
+  ) {
+    const { foundationRemediationState: _legacy, ...preserved } = source
+    return { ...preserved, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+  }
+
+  const stateRecord = state as Record<string, unknown>
+  const oldLanes = Array.isArray(stateRecord.lanes)
+    ? stateRecord.lanes.filter(
+        (lane): lane is Record<string, unknown> =>
+          !!lane && typeof lane === 'object' && !Array.isArray(lane),
+      )
+    : []
+  const restartReason = 'legacy remediation transaction must be restarted'
+  const lanes = FOUNDATION_REMEDIATION_LANES.map(definition => {
+    const oldLane = oldLanes.find(lane => lane.id === definition.id)
+    const affectedPaths = Array.isArray(oldLane?.affectedPaths)
+      ? oldLane.affectedPaths.filter(
+          (path): path is (typeof definition.ownedPaths)[number] =>
+            definition.ownedPaths.includes(path as never),
+        )
+      : []
+    if (!affectedPaths.length)
+      return {
+        id: definition.id,
+        ownedPaths: [...definition.ownedPaths],
+        affectedPaths: [],
+        status: 'not_required',
+      }
+    if (oldLane?.status === 'pending')
+      return {
+        id: definition.id,
+        ownedPaths: [...definition.ownedPaths],
+        affectedPaths,
+        status: 'pending',
+      }
+
+    const baseline = stringRecord(oldLane?.baselineDigests)
+    const receipt =
+      oldLane?.receipt &&
+      typeof oldLane.receipt === 'object' &&
+      !Array.isArray(oldLane.receipt)
+        ? (oldLane.receipt as Record<string, unknown>)
+        : undefined
+    const beforeDigests = stringRecord(receipt?.beforeDigests)
+    const sourceDigest = baseline?.[affectedPaths[0]!] ?? beforeDigests?.[affectedPaths[0]!]
+    const dispatch =
+      oldLane?.dispatch &&
+      typeof oldLane.dispatch === 'object' &&
+      !Array.isArray(oldLane.dispatch)
+        ? {
+            ...(oldLane.dispatch as Record<string, unknown>),
+            status: 'failed',
+            failureReason:
+              oldLane.status === 'failed'
+                ? oldLane.failureReason
+                : restartReason,
+          }
+        : undefined
+    if (
+      typeof sourceDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(sourceDigest) ||
+      !dispatch
+    )
+      throw new WorkflowStoreError(
+        'legacy remediation state cannot prove its restart authority',
+        'obsolete',
+      )
+    const failureReason =
+      oldLane?.status === 'failed' && typeof oldLane.failureReason === 'string'
+        ? oldLane.failureReason
+        : restartReason
+    return {
+      id: definition.id,
+      ownedPaths: [...definition.ownedPaths],
+      affectedPaths,
+      status: 'failed',
+      sourceDigest,
+      dispatch,
+      failureReason,
+    }
+  })
+  const { activeDispatch: _activeDispatch, ...withoutActiveDispatch } = source
+  return {
+    ...withoutActiveDispatch,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    status: lanes.some(lane => lane.status === 'failed')
+      ? 'needs_action'
+      : source.status,
+    ...(lanes.some(lane => lane.status === 'failed')
+      ? { blockedReason: restartReason }
+      : {}),
+    foundationRemediationState: {
+      ...stateRecord,
+      resultingRevision: undefined,
+      lanes,
+    },
+  }
+}
+
 function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return { value, migrated: false }
   const source = value as Record<string, unknown>
+  if (source.schemaVersion === 26)
+    return {
+      migrated: true,
+      value: migrateSchema26Remediation(source),
+    }
   if (source.schemaVersion === 25)
     return {
       migrated: true,
-      value: migrateSchema25Remediation(source),
+      value: migrateSchema26Remediation(migrateSchema25Remediation(source)),
     }
   if (source.schemaVersion === 24)
     return {

@@ -203,20 +203,9 @@ export async function startDocumentStage(input: {
     if (!pending.length) return remediationState
     return Promise.all(
       pending.map(lane => {
-        const previousDocumentMetadata = Object.fromEntries(
-          lane.affectedPaths.flatMap(path => {
-            const metadata = readDocumentMetadata(input.workspacePath, path)
-            return metadata ? [[path, metadata]] : []
-          }),
-        )
-        const previousDocumentDigests =
-          lane.baselineDigests ??
-          Object.fromEntries(
-            lane.ownedPaths.map(path => [
-              path,
-              readDocumentDigest(input.workspacePath, path),
-            ]),
-          )
+        const sourceDigest =
+          lane.sourceDigest ??
+          readDocumentDigest(input.workspacePath, lane.affectedPaths[0]!)
         return input.dispatcher.dispatch({
           runId: input.run.runId,
           ownerId: input.run.ownerId,
@@ -240,11 +229,8 @@ export async function startDocumentStage(input: {
               reviewDigest: accepted.digest,
               affectedPaths: [...lane.affectedPaths],
               sourceRevision: remediationState.sourceRevision,
+              sourceDigest,
             },
-            previousDocumentDigests,
-            ...(Object.keys(previousDocumentMetadata).length
-              ? { previousDocumentMetadata }
-              : {}),
           },
         })
       }),
@@ -405,72 +391,24 @@ export async function completeFoundationRemediationLane(input: {
   )
   if (!exactStringSet(normalizedWrittenPaths, lane.affectedPaths))
     throw new Error('mutation paths do not match the lane assignment')
-  if ((input.terminal.resolvedFindingIds?.length ?? 0) > 0)
-    throw new Error('document remediation cannot declare finding closure')
-  const previousMetadata = dispatch.request?.contract.previousDocumentMetadata
+  const receipt = input.terminal.remediationReceipt
+  if (!receipt)
+    throw new Error('foundation remediation terminal receipt is missing')
   if (
-    previousMetadata &&
-    typeof previousMetadata === 'object' &&
-    !Array.isArray(previousMetadata)
+    readDocumentDigest(input.workspacePath, receipt.targetPath) !==
+    receipt.finalDigest
   )
-    for (const path of lane.affectedPaths) {
-      const previous = (previousMetadata as Record<string, unknown>)[path]
-      if (!previous || typeof previous !== 'object' || Array.isArray(previous))
-        continue
-      const version = (previous as Record<string, unknown>).version
-      const updatedAt = (previous as Record<string, unknown>).updatedAt
-      if (typeof version === 'string' && typeof updatedAt === 'string')
-        await commitRemediatedDocumentMetadata({
-          workspacePath: input.workspacePath,
-          targetPath: path,
-          previousVersion: version,
-          previousUpdatedAt: updatedAt,
-        })
-    }
+    throw new Error(
+      `foundation remediation receipt no longer matches current bytes: ${receipt.targetPath}`,
+    )
   const contentIssues = lane.affectedPaths.flatMap(path =>
     completeFoundationDocumentIssues(input.workspacePath, path),
   )
-  const metadataIssues = documentMetadataIssues({
-    workspacePath: input.workspacePath,
-    writtenPaths: [...lane.affectedPaths],
-    previous: previousMetadata,
-  })
-  if (contentIssues.length || metadataIssues.length)
-    throw new Error([...contentIssues, ...metadataIssues].join('; '))
-  const beforeDigests = dispatch.request?.contract.previousDocumentDigests
-  if (
-    !beforeDigests ||
-    typeof beforeDigests !== 'object' ||
-    Array.isArray(beforeDigests)
-  )
-    throw new Error('foundation remediation before digests are missing')
-  const afterDigests = Object.fromEntries(
-    lane.ownedPaths.map(path => [
-      path,
-      readDocumentDigest(input.workspacePath, path),
-    ]),
-  )
-  for (const path of lane.ownedPaths) {
-    const before = (beforeDigests as Record<string, unknown>)[path]
-    const after = afterDigests[path]
-    if (typeof before !== 'string' || !/^[a-f0-9]{64}$/u.test(before))
-      throw new Error('foundation remediation before digests are invalid')
-    if (!lane.affectedPaths.includes(path) && before !== after)
-      throw new Error(
-        `foundation remediation changed an unassigned path: ${path}`,
-      )
-    if (lane.affectedPaths.includes(path) && before === after)
-      throw new Error(
-        `foundation remediation did not change assigned path: ${path}`,
-      )
-  }
+  if (contentIssues.length) throw new Error(contentIssues.join('; '))
   const nextState = commitFoundationRemediationReceipt(state, {
     laneId: laneId as FoundationRemediationLaneId,
     dispatchId: dispatch.dispatchId,
-    writtenPaths: [...lane.affectedPaths],
-    beforeDigests: beforeDigests as Record<string, string>,
-    afterDigests,
-    committedAt: new Date().toISOString(),
+    receipt,
   })
   if (!foundationRemediationReadyForVerification(nextState))
     return {
@@ -485,14 +423,15 @@ export async function completeFoundationRemediationLane(input: {
     if (completedLane.status === 'not_required') continue
     if (!completedLane.receipt)
       throw new Error('foundation remediation receipt is missing')
-    for (const path of completedLane.ownedPaths)
-      if (
-        readDocumentDigest(input.workspacePath, path) !==
-        completedLane.receipt.afterDigests[path]
+    if (
+      readDocumentDigest(
+        input.workspacePath,
+        completedLane.receipt.targetPath,
+      ) !== completedLane.receipt.finalDigest
+    )
+      throw new Error(
+        `foundation remediation receipt no longer matches current bytes: ${completedLane.receipt.targetPath}`,
       )
-        throw new Error(
-          `foundation remediation receipt no longer matches current bytes: ${path}`,
-        )
   }
   const readiness = input.audit
     ? input.audit(input.workspacePath, {

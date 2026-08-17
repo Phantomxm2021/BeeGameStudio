@@ -331,6 +331,7 @@ describe('native initial document authoring', () => {
           reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
           affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
           sourceRevision: 'a'.repeat(64),
+          sourceDigest: transaction.sourceDigest,
         },
         previousDocumentDigests,
       },

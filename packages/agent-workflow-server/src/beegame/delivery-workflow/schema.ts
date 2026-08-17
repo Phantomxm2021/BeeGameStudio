@@ -25,6 +25,7 @@ import {
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
+import { foundationRemediationTransactionReceiptSchema } from './foundation-remediation-transaction'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
@@ -318,27 +319,9 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> =
               'completed',
               'failed',
             ]),
-            baselineDigests: z
-              .record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/u))
-              .optional(),
+            sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
             dispatch: dispatchRecordSchema.optional(),
-            receipt: z
-              .object({
-                reviewDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-                sourceRevision: z.string().regex(/^[a-f0-9]{64}$/u),
-                ownedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
-                beforeDigests: z.record(
-                  z.string().min(1),
-                  z.string().regex(/^[a-f0-9]{64}$/u),
-                ),
-                afterDigests: z.record(
-                  z.string().min(1),
-                  z.string().regex(/^[a-f0-9]{64}$/u),
-                ),
-                committedAt: z.string().datetime(),
-              })
-              .strict()
-              .optional(),
+            receipt: foundationRemediationTransactionReceiptSchema.optional(),
             failureReason: z.string().min(1).optional(),
           })
           .strict(),
@@ -424,15 +407,13 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> =
             message: 'pending remediation lane cannot contain execution state',
           })
         if (
-          lane.baselineDigests &&
-          JSON.stringify(Object.keys(lane.baselineDigests).sort()) !==
-            JSON.stringify([...lane.ownedPaths].sort())
+          (lane.status === 'running' || lane.status === 'completed' || lane.status === 'failed') &&
+          !lane.sourceDigest
         )
           context.addIssue({
             code: 'custom',
-            path: ['lanes', index, 'baselineDigests'],
-            message:
-              'foundation remediation baseline must cover every owned path',
+            path: ['lanes', index, 'sourceDigest'],
+            message: 'executed remediation lane requires its source digest',
           })
         if (lane.status === 'failed' && (!lane.dispatch || !lane.failureReason))
           context.addIssue({
@@ -450,27 +431,14 @@ const foundationRemediationStateSchema: z.ZodType<FoundationRemediationState> =
           if (
             lane.receipt.reviewDigest !== state.reviewDigest ||
             lane.receipt.sourceRevision !== state.sourceRevision ||
-            JSON.stringify(lane.receipt.ownedPaths) !==
-              JSON.stringify(lane.ownedPaths)
+            lane.receipt.targetPath !== lane.affectedPaths[0] ||
+            lane.receipt.sourceDigest !== lane.sourceDigest
           )
             context.addIssue({
               code: 'custom',
               path: ['lanes', index, 'receipt'],
               message:
                 'foundation remediation receipt must match its review and lane authority',
-            })
-          const expectedKeys = [...lane.ownedPaths].sort()
-          if (
-            JSON.stringify(Object.keys(lane.receipt.beforeDigests).sort()) !==
-              JSON.stringify(expectedKeys) ||
-            JSON.stringify(Object.keys(lane.receipt.afterDigests).sort()) !==
-              JSON.stringify(expectedKeys)
-          )
-            context.addIssue({
-              code: 'custom',
-              path: ['lanes', index, 'receipt'],
-              message:
-                'foundation remediation receipt must cover every owned path digest',
             })
         }
       }

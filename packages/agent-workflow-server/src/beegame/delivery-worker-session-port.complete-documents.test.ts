@@ -118,6 +118,7 @@ describe('delivery worker complete document boundary', () => {
             reviewDigest,
             affectedPaths: ['docs/GDD.md'],
             sourceRevision: revision,
+            sourceDigest: createHash('sha256').update(source).digest('hex'),
           },
         },
       } as never)

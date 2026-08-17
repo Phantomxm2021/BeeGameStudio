@@ -169,22 +169,24 @@ export function recordFoundationRemediationDispatch(
     throw new Error(`foundation remediation lane is not pending: ${laneId}`)
   if (dispatch.taskId !== `foundation-remediation:${laneId}`)
     throw new Error('foundation remediation dispatch task does not match lane')
-  const suppliedBaseline = dispatch.request?.contract.previousDocumentDigests
-  const baselineDigests =
-    suppliedBaseline &&
-    typeof suppliedBaseline === 'object' &&
-    !Array.isArray(suppliedBaseline)
-      ? (suppliedBaseline as Record<string, string>)
-      : lane.baselineDigests
+  const remediation = dispatch.request?.contract.remediation
+  const suppliedSourceDigest =
+    remediation && typeof remediation === 'object' && !Array.isArray(remediation)
+      ? (remediation as Record<string, unknown>).sourceDigest
+      : undefined
+  const sourceDigest =
+    typeof suppliedSourceDigest === 'string'
+      ? suppliedSourceDigest
+      : lane.sourceDigest
   if (
-    lane.baselineDigests &&
-    (!baselineDigests ||
-      !isDeepStrictEqual(lane.baselineDigests, baselineDigests))
+    !sourceDigest ||
+    !/^[a-f0-9]{64}$/u.test(sourceDigest) ||
+    (lane.sourceDigest && lane.sourceDigest !== sourceDigest)
   )
-    throw new Error('foundation remediation retry changed its baseline')
+    throw new Error('foundation remediation retry changed its source digest')
   return replaceLane(state, {
     ...lane,
-    ...(baselineDigests ? { baselineDigests: { ...baselineDigests } } : {}),
+    sourceDigest,
     status: 'running',
     dispatch,
     failureReason: undefined,
@@ -234,26 +236,11 @@ export function commitFoundationRemediationReceipt(
   input: {
     laneId: FoundationRemediationLaneId
     dispatchId: string
-    writtenPaths: readonly string[]
-    beforeDigests: Record<string, string>
-    afterDigests: Record<string, string>
-    committedAt: string
+    receipt: FoundationRemediationReceipt
   },
 ): FoundationRemediationState {
   const lane = laneFor(state, input.laneId)
-  const receipt: FoundationRemediationReceipt = {
-    reviewDigest: state.reviewDigest,
-    sourceRevision: state.sourceRevision,
-    ownedPaths: [...lane.ownedPaths],
-    beforeDigests: { ...input.beforeDigests },
-    afterDigests: { ...input.afterDigests },
-    committedAt: input.committedAt,
-  }
-  if (
-    lane.baselineDigests &&
-    !isDeepStrictEqual(lane.baselineDigests, input.beforeDigests)
-  )
-    throw new Error('foundation remediation receipt changed its baseline')
+  const receipt = input.receipt
   if (lane.status === 'completed' && isDeepStrictEqual(lane.receipt, receipt))
     return state
   if (
@@ -261,16 +248,16 @@ export function commitFoundationRemediationReceipt(
     lane.dispatch?.dispatchId !== input.dispatchId
   )
     throw new Error('foundation remediation receipt has no running dispatch')
-  if (!isDeepStrictEqual(input.writtenPaths, lane.affectedPaths))
-    throw new Error('mutation paths do not match the lane assignment')
-  const ownedKeys = [...lane.ownedPaths].sort()
-  for (const digests of [input.beforeDigests, input.afterDigests]) {
-    if (
-      !isDeepStrictEqual(Object.keys(digests).sort(), ownedKeys) ||
-      Object.values(digests).some(value => !/^[a-f0-9]{64}$/u.test(value))
-    )
-      throw new Error('foundation remediation receipt digests are incomplete')
-  }
+  if (receipt.reviewDigest !== state.reviewDigest)
+    throw new Error('foundation remediation receipt review changed')
+  if (receipt.sourceRevision !== state.sourceRevision)
+    throw new Error('foundation remediation receipt revision changed')
+  if (receipt.targetPath !== lane.affectedPaths[0])
+    throw new Error('foundation remediation receipt target does not match lane')
+  if (!lane.sourceDigest || receipt.sourceDigest !== lane.sourceDigest)
+    throw new Error('foundation remediation receipt source digest changed')
+  if (new Set(receipt.patchedUnitIds).size !== receipt.patchedUnitIds.length)
+    throw new Error('foundation remediation receipt patch units are invalid')
   return replaceLane(state, {
     ...lane,
     status: 'completed',

@@ -66,12 +66,14 @@ function completedRemediationState(input: {
             ownedPaths: [...ownedPaths],
             affectedPaths: ['docs/GDD.md'],
             status: 'completed' as const,
+            sourceDigest: '1'.repeat(64),
             receipt: {
               reviewDigest: input.reviewDigest,
               sourceRevision: 'f'.repeat(64),
-              ownedPaths: [...ownedPaths],
-              beforeDigests: { 'docs/GDD.md': '1'.repeat(64) },
-              afterDigests: { 'docs/GDD.md': '2'.repeat(64) },
+              targetPath: 'docs/GDD.md',
+              sourceDigest: '1'.repeat(64),
+              patchedUnitIds: ['section:authority'],
+              finalDigest: '2'.repeat(64),
               committedAt: '2026-08-17T00:00:00.000Z',
             },
           }

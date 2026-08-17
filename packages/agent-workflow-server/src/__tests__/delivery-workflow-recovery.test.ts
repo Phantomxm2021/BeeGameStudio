@@ -29,6 +29,7 @@ import {
 } from '../beegame/delivery-workflow/foundation-authoring-batch'
 import {
   createFoundationRemediationStateFromAuthority,
+  FOUNDATION_REMEDIATION_LANES,
   recordFoundationRemediationDispatch,
 } from '../beegame/delivery-workflow/foundation-remediation'
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
@@ -2268,6 +2269,140 @@ describe('delivery workflow recovery', () => {
     ])
   })
 
+  test('fails closed when schema 26 remediation receipts cannot prove body-unit transactions', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-26-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-26',
+      projectId: 'project-schema-26',
+      ownerId: 'owner-1',
+    })
+    const dispatch = (laneId: string, path: string, failureReason?: string) => ({
+      dispatchId: `dispatch-${laneId}`,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: `foundation-remediation:${laneId}`,
+      revision: 'a'.repeat(64),
+      status: failureReason ? 'failed' : 'completed',
+      startedAt: '2026-08-16T00:00:00.000Z',
+      ...(failureReason ? { failureReason } : {}),
+      request: {
+        dispatchId: `dispatch-${laneId}`,
+        runId: initial.runId,
+        ownerId: initial.ownerId,
+        projectId: initial.projectId,
+        workspacePath: workspace,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: `foundation-remediation:${laneId}`,
+        revision: 'a'.repeat(64),
+        allowedPaths: [path],
+        contract: {
+          authoringMode: 'remediation',
+          previousDocumentDigests: { [path]: 'c'.repeat(64) },
+        },
+      },
+    })
+    const legacyLanes = FOUNDATION_REMEDIATION_LANES.map(lane => {
+      if (lane.id !== 'gdd' && lane.id !== 'ui-ux-spec')
+        return {
+          id: lane.id,
+          ownedPaths: [...lane.ownedPaths],
+          affectedPaths: [],
+          status: 'not_required',
+        }
+      const path = lane.ownedPaths[0]
+      const failed = lane.id === 'ui-ux-spec'
+      return {
+        id: lane.id,
+        ownedPaths: [...lane.ownedPaths],
+        affectedPaths: [path],
+        status: failed ? 'failed' : 'completed',
+        baselineDigests: { [path]: 'c'.repeat(64) },
+        dispatch: dispatch(
+          lane.id,
+          path,
+          failed ? 'provider disconnected' : undefined,
+        ),
+        ...(failed
+          ? { failureReason: 'provider disconnected' }
+          : {
+              receipt: {
+                reviewDigest: 'b'.repeat(64),
+                sourceRevision: 'a'.repeat(64),
+                ownedPaths: [path],
+                beforeDigests: { [path]: 'c'.repeat(64) },
+                afterDigests: { [path]: 'd'.repeat(64) },
+                committedAt: '2026-08-16T00:01:00.000Z',
+              },
+            }),
+      }
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify(
+        {
+          ...initial,
+          schemaVersion: 26,
+          phase: 'DOCUMENT_DRAFTING',
+          activeDispatch: dispatch('gdd', 'docs/GDD.md'),
+          foundationRemediationState: {
+            reviewPath: '.beegame/reviews/foundation/revision/review.json',
+            reviewDigest: 'b'.repeat(64),
+            sourceRevision: 'a'.repeat(64),
+            lanes: legacyLanes,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated?.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
+    expect(migrated?.activeDispatch).toBeUndefined()
+    expect(migrated?.foundationRemediationState?.lanes[0]).toMatchObject({
+      status: 'failed',
+      sourceDigest: 'c'.repeat(64),
+      failureReason: 'legacy remediation transaction must be restarted',
+    })
+    expect(migrated?.foundationRemediationState?.lanes[5]).toMatchObject({
+      status: 'failed',
+      sourceDigest: 'c'.repeat(64),
+      failureReason: 'provider disconnected',
+    })
+    expect(migrated?.foundationRemediationState?.lanes[0]?.receipt).toBeUndefined()
+  })
+
+  test('drops historical schema 26 remediation state after Foundation review', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-26-late-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-schema-26-late',
+      projectId: 'project-schema-26-late',
+      ownerId: 'owner-1',
+    })
+    await mkdir(store.paths.directory, { recursive: true })
+    await writeFile(
+      store.paths.snapshot,
+      `${JSON.stringify({
+        ...initial,
+        schemaVersion: 26,
+        phase: 'RESOURCE_PREPARATION',
+        foundationRemediationState: { legacy: true },
+      })}\n`,
+      'utf8',
+    )
+
+    const migrated = await store.load()
+
+    expect(migrated?.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
+    expect(migrated?.foundationRemediationState).toBeUndefined()
+  })
+
   test('preserves a completed schema 22 delivery without retaining old review roles', async () => {
     workspace = await mkdtemp(
       join(tmpdir(), 'beegame-storage-schema-22-complete-'),
@@ -3021,6 +3156,7 @@ describe('delivery workflow recovery', () => {
             reviewDigest: foundationRemediationState.reviewDigest,
             sourceRevision: revision,
             affectedPaths: [...lane.affectedPaths],
+            sourceDigest: 'c'.repeat(64),
           },
         },
       })
@@ -3171,16 +3307,10 @@ describe('delivery workflow recovery', () => {
       const lane = run.foundationRemediationState!.lanes.find(
         candidate => candidate.id === laneId,
       )!
-      const beforeDigests = Object.fromEntries(
-        await Promise.all(
-          lane.ownedPaths.map(async path => [
-            path,
-            createHash('sha256')
-              .update(await readFile(join(workspace, path)))
-              .digest('hex'),
-          ]),
-        ),
-      )
+      const targetPath = lane.affectedPaths[0]!
+      const sourceDigest = createHash('sha256')
+        .update(await readFile(join(workspace, targetPath)))
+        .digest('hex')
       const dispatch = {
         dispatchId: `dispatch-${laneId}`,
         workerType: 'document-author' as const,
@@ -3204,8 +3334,8 @@ describe('delivery workflow recovery', () => {
             remediation: {
               laneId,
               affectedPaths: [...lane.affectedPaths],
+              sourceDigest,
             },
-            previousDocumentDigests: beforeDigests,
           },
         },
       }
@@ -3223,6 +3353,18 @@ describe('delivery workflow recovery', () => {
           join(workspace, path),
           `${await readFile(join(workspace, path), 'utf8')}\n`,
         )
+      const finalDigest = createHash('sha256')
+        .update(await readFile(join(workspace, targetPath)))
+        .digest('hex')
+      const remediationReceipt = {
+        reviewDigest,
+        sourceRevision: revision,
+        targetPath,
+        sourceDigest,
+        patchedUnitIds: ['section:authority'],
+        finalDigest,
+        committedAt: '2026-08-16T00:01:00.000Z',
+      }
       if (laneId === 'ui-ux-spec') {
         const siblingPath = join(workspace, 'docs/GDD.md')
         const stableSibling = await readFile(siblingPath)
@@ -3239,7 +3381,7 @@ describe('delivery workflow recovery', () => {
               workerType: 'document-author',
               status: 'completed',
               writtenPaths: [...lane.affectedPaths],
-              resolvedFindingIds: [],
+              remediationReceipt,
             },
           }),
         ).rejects.toThrow(
@@ -3255,7 +3397,7 @@ describe('delivery workflow recovery', () => {
           workerType: 'document-author',
           status: 'completed',
           writtenPaths: [...lane.affectedPaths],
-          resolvedFindingIds: [],
+          remediationReceipt,
         },
       })
       if (laneId === 'gdd') {

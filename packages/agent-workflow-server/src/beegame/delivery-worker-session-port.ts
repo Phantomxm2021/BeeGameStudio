@@ -367,6 +367,8 @@ async function buildFoundationRemediationAuthority(
     sourceRevision: remediation.sourceRevision,
     conflicts,
   })
+  if (remediation.sourceDigest !== transaction.sourceDigest)
+    throw new Error('document remediation source digest is invalid')
   const previousMetadata = remediationDocumentMetadata(sourceMarkdown)
   return {
     request: transaction,
