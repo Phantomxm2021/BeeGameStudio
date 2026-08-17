@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
@@ -10,6 +17,7 @@ import {
   acceptFoundationReviewWorkerTerminal,
   atomicCommitReceipt,
   buildFoundationReviewDispatches,
+  reconcileFoundationReviewStateFromArtifacts,
 } from './foundation-review-stage'
 import { getGameDocumentContract } from './game-document-contracts'
 
@@ -200,7 +208,9 @@ describe('foundation review lane dispatch barrier', () => {
     await atomicCommitReceipt({ stagingPath, committedPath, bytes })
     await atomicCommitReceipt({ stagingPath, committedPath, bytes })
     expect(
-      (await readdir(dirname(committedPath))).filter(name => name.endsWith('.tmp')),
+      (await readdir(dirname(committedPath))).filter(name =>
+        name.endsWith('.tmp'),
+      ),
     ).toEqual([])
     await expect(
       atomicCommitReceipt({
@@ -208,7 +218,9 @@ describe('foundation review lane dispatch barrier', () => {
         committedPath,
         bytes: Buffer.from('different receipt bytes\n', 'utf8'),
       }),
-    ).rejects.toThrow('foundation review Markdown receipt already exists with different bytes')
+    ).rejects.toThrow(
+      'foundation review Markdown receipt already exists with different bytes',
+    )
   })
 
   test('dispatches three disjoint document lanes before packet-only synthesis', async () => {
@@ -314,6 +326,83 @@ describe('foundation review lane dispatch barrier', () => {
       confirmedBriefDigest: 'd'.repeat(64),
     })
     expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
+  })
+
+  test('recovers committed lane receipts while leaving only missing work pending', async () => {
+    const root = await workspace()
+    const accepted = await acceptLanes(root, { includeCandidates: true })
+    await rm(resolve(root, accepted.state.reports[1].path))
+
+    const recovered = await reconcileFoundationReviewStateFromArtifacts({
+      state: createFoundationReviewState({ revision, attempt: 1 }),
+      workspacePath: root,
+      currentRevision: revision,
+    })
+
+    expect(
+      recovered.reports.map(report => [report.role, report.status]),
+    ).toEqual([
+      ['core-design', 'completed'],
+      ['technical-assets', 'pending'],
+      ['presentation', 'completed'],
+      ['synthesis', 'pending'],
+    ])
+    expect(recovered.reports[0].digest).toBe(accepted.state.reports[0].digest)
+    expect(recovered.reports[1].digest).toBeUndefined()
+    expect(recovered.status).toBe('running')
+  })
+
+  test.each([
+    {
+      name: 'stale current revision',
+      tamper: async () => 'f'.repeat(64),
+    },
+    {
+      name: 'tampered projection',
+      tamper: async (input: {
+        root: string
+        accepted: Awaited<ReturnType<typeof acceptLanes>>
+      }) => {
+        await writeFile(
+          resolve(
+            input.root,
+            input.accepted.dispatches[0].contract.projection!.path,
+          ),
+          '{}\n',
+        )
+        return revision
+      },
+    },
+    {
+      name: 'tampered receipt',
+      tamper: async (input: {
+        root: string
+        accepted: Awaited<ReturnType<typeof acceptLanes>>
+      }) => {
+        await writeFile(
+          resolve(input.root, input.accepted.state.reports[0].path),
+          'tampered receipt\n',
+        )
+        return revision
+      },
+    },
+  ])('fails closed during $name recovery', async scenario => {
+    const root = await workspace()
+    const accepted = await acceptLanes(root, { includeCandidates: true })
+    const currentRevision = await scenario.tamper({ root, accepted })
+
+    await expect(
+      reconcileFoundationReviewStateFromArtifacts({
+        state: createFoundationReviewState({ revision, attempt: 1 }),
+        workspacePath: root,
+        currentRevision,
+      }),
+    ).rejects.toThrow()
+    await expect(
+      readFile(
+        resolve(root, `.beegame/reviews/foundation/${revision}/review.json`),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   test('removes an uncommitted lane draft before redispatch', async () => {
@@ -423,6 +512,127 @@ describe('foundation review lane dispatch barrier', () => {
         },
       }),
     ).rejects.toThrow('canonical artifacts changed during foundation review')
+  })
+
+  test('assembles and accepts the final review from committed selection artifacts', async () => {
+    const root = await workspace()
+    const acceptedLanes = await acceptLanes(root, { includeCandidates: true })
+    const [synthesis] = await buildFoundationReviewDispatches({
+      state: acceptedLanes.state,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+    await mkdir(dirname(synthesis.assignment.stagingOutputPaths[0]), {
+      recursive: true,
+    })
+    await writeFile(
+      synthesis.assignment.stagingOutputPaths[0],
+      selectionMarkdown({
+        keep: ['core-design:C1'],
+        reject: ['technical-assets:C1', 'presentation:C1'],
+      }),
+      'utf8',
+    )
+    const completed = await acceptFoundationReviewWorkerTerminal({
+      state: acceptedLanes.state,
+      workspacePath: root,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'synthesis',
+        reportPath: `.beegame/reviews/foundation/${revision}/selection.md`,
+      },
+    })
+    await rm(resolve(root, completed.finalReportPath!))
+
+    const recovered = await reconcileFoundationReviewStateFromArtifacts({
+      state: createFoundationReviewState({ revision, attempt: 1 }),
+      workspacePath: root,
+      currentRevision: revision,
+    })
+
+    expect(recovered).toMatchObject({
+      status: 'completed',
+      verdict: 'NEEDS_REVISION',
+      finalReportPath: `.beegame/reviews/foundation/${revision}/review.json`,
+      reports: [
+        { role: 'core-design', status: 'completed' },
+        { role: 'technical-assets', status: 'completed' },
+        { role: 'presentation', status: 'completed' },
+        { role: 'synthesis', status: 'completed' },
+      ],
+    })
+    expect(recovered.finalReportDigest).toBe(
+      createHash('sha256')
+        .update(await readFile(resolve(root, recovered.finalReportPath!)))
+        .digest('hex'),
+    )
+  })
+
+  test('accepts an identical published final review and rejects different bytes', async () => {
+    const root = await workspace()
+    const acceptedLanes = await acceptLanes(root, { includeCandidates: true })
+    const [synthesis] = await buildFoundationReviewDispatches({
+      state: acceptedLanes.state,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+    await mkdir(dirname(synthesis.assignment.stagingOutputPaths[0]), {
+      recursive: true,
+    })
+    await writeFile(
+      synthesis.assignment.stagingOutputPaths[0],
+      selectionMarkdown({
+        keep: ['core-design:C1'],
+        reject: ['technical-assets:C1', 'presentation:C1'],
+      }),
+      'utf8',
+    )
+    const completed = await acceptFoundationReviewWorkerTerminal({
+      state: acceptedLanes.state,
+      workspacePath: root,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'synthesis',
+        reportPath: `.beegame/reviews/foundation/${revision}/selection.md`,
+      },
+    })
+
+    const recovered = await reconcileFoundationReviewStateFromArtifacts({
+      state: createFoundationReviewState({ revision, attempt: 1 }),
+      workspacePath: root,
+      currentRevision: revision,
+    })
+    expect(recovered.finalReportDigest).toBe(completed.finalReportDigest)
+
+    const finalPath = resolve(root, completed.finalReportPath!)
+    const different = `${JSON.stringify(
+      {
+        version: 3,
+        scope: 'foundation',
+        revision,
+        verdict: 'READY',
+        conflicts: [],
+      },
+      null,
+      2,
+    )}\n`
+    await writeFile(finalPath, different, 'utf8')
+    await expect(
+      reconcileFoundationReviewStateFromArtifacts({
+        state: createFoundationReviewState({ revision, attempt: 1 }),
+        workspacePath: root,
+        currentRevision: revision,
+      }),
+    ).rejects.toThrow('foundation review already exists with different bytes')
+    expect(await readFile(finalPath, 'utf8')).toBe(different)
   })
 
   test('rejects tampered synthesis inputs before replacing an existing canonical review', async () => {

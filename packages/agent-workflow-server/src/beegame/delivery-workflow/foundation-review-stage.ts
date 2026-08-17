@@ -21,6 +21,7 @@ import {
   commitAssembledFoundationReview,
   foundationReviewLaneReceiptPath,
   foundationReviewLaneReceiptStagingPath,
+  foundationReviewPath,
   foundationReviewSelectionPath,
   foundationReviewSelectionStagingPath,
 } from './foundation-review'
@@ -36,7 +37,9 @@ const laneIds = new Set<FoundationReviewRole>(
   FOUNDATION_DOCUMENT_LANES.map(lane => lane.id),
 )
 
-function isLaneRole(role: FoundationReviewRole): role is FoundationDocumentLaneId {
+function isLaneRole(
+  role: FoundationReviewRole,
+): role is FoundationDocumentLaneId {
   return laneIds.has(role)
 }
 
@@ -301,6 +304,164 @@ function completedPacketDigests(
   ) as Partial<Record<FoundationDocumentLaneId, string>>
 }
 
+export async function reconcileFoundationReviewStateFromArtifacts(input: {
+  state: FoundationReviewState
+  workspacePath: string
+  currentRevision: string
+}): Promise<FoundationReviewState> {
+  const state = assertFoundationReviewState(input.state)
+  if (state.revision !== input.currentRevision)
+    throw new Error('canonical artifacts changed during foundation review')
+
+  const reports = [...state.reports]
+  for (const lane of FOUNDATION_DOCUMENT_LANES) {
+    const index = reports.findIndex(report => report.role === lane.id)
+    const committedPath = foundationReviewLaneReceiptPath(
+      input.workspacePath,
+      state.revision,
+      lane.id,
+    )
+    if (!(await isRegularFile(committedPath))) {
+      reports[index] = {
+        role: lane.id,
+        path: state.reports[index].path,
+        status: 'pending',
+      }
+      continue
+    }
+    const projection = await writeFoundationReviewProjection({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      laneId: lane.id,
+    })
+    const validatedProjection = await readFoundationReviewProjection({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      laneId: lane.id,
+      expectedDigest: projection.digest,
+    })
+    const accepted = await acceptLaneReceipt({
+      workspacePath: input.workspacePath,
+      revision: state.revision,
+      currentRevision: input.currentRevision,
+      laneId: lane.id,
+      projectionDigest: projection.digest,
+      allowedEvidencePaths: validatedProjection.projection.sources.map(
+        source => source.path,
+      ),
+    })
+    reports[index] = {
+      ...state.reports[index],
+      path: accepted.path,
+      digest: accepted.digest,
+      status: 'completed',
+      failureReason: undefined,
+    }
+  }
+
+  const synthesisIndex = reports.findIndex(
+    report => report.role === 'synthesis',
+  )
+  const lanesCompleted = reports
+    .slice(0, 3)
+    .every(report => report.status === 'completed' && report.digest)
+  if (!lanesCompleted) {
+    reports[synthesisIndex] = {
+      role: 'synthesis',
+      path: state.reports[synthesisIndex].path,
+      status: 'pending',
+    }
+    return assertFoundationReviewState({
+      ...state,
+      status: 'running',
+      reports,
+      finalReportPath: undefined,
+      finalReportDigest: undefined,
+      verdict: undefined,
+      failureReason: undefined,
+    })
+  }
+
+  const selectionPath = foundationReviewSelectionPath(
+    input.workspacePath,
+    state.revision,
+  )
+  if (!(await isRegularFile(selectionPath))) {
+    if (
+      await isRegularFile(
+        foundationReviewPath(input.workspacePath, state.revision),
+      )
+    )
+      throw new Error(
+        'foundation review final report exists without its selection receipt',
+      )
+    reports[synthesisIndex] = {
+      role: 'synthesis',
+      path: state.reports[synthesisIndex].path,
+      status: 'pending',
+    }
+    return assertFoundationReviewState({
+      ...state,
+      status: 'running',
+      reports,
+      finalReportPath: undefined,
+      finalReportDigest: undefined,
+      verdict: undefined,
+      failureReason: undefined,
+    })
+  }
+
+  const reconciledState = assertFoundationReviewState({
+    ...state,
+    status: 'running',
+    reports,
+    finalReportPath: undefined,
+    finalReportDigest: undefined,
+    verdict: undefined,
+    failureReason: undefined,
+  })
+  const laneReceipts = await readLaneReceipts({
+    state: reconciledState,
+    workspacePath: input.workspacePath,
+  })
+  const dispatchId = `foundation-initial-${state.attempt}-synthesis`
+  const acceptedSelection = await acceptSelectionReceipt({
+    workspacePath: input.workspacePath,
+    revision: state.revision,
+    dispatchId,
+    candidateReferences: candidateReferences(laneReceipts),
+  })
+  const review = assembleFoundationReview({
+    revision: state.revision,
+    laneReceipts,
+    selection: acceptedSelection.selection,
+  })
+  const accepted = await commitAssembledFoundationReview({
+    workspacePath: input.workspacePath,
+    revision: state.revision,
+    currentRevision: input.currentRevision,
+    dispatchId,
+    review,
+  })
+  reports[synthesisIndex] = {
+    ...state.reports[synthesisIndex],
+    path: acceptedSelection.path,
+    digest: acceptedSelection.digest,
+    status: 'completed',
+    failureReason: undefined,
+  }
+
+  return assertFoundationReviewState({
+    ...state,
+    status: 'completed',
+    reports,
+    finalReportPath: accepted.path,
+    finalReportDigest: accepted.digest,
+    verdict: accepted.review.verdict,
+    failureReason: undefined,
+  })
+}
+
 export async function buildFoundationReviewDispatches(input: {
   state: FoundationReviewState
   workspacePath: string
@@ -406,9 +567,13 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     terminal.revision !== input.currentRevision
   )
     throw new Error('canonical artifacts changed during foundation review')
-  const report = state.reports.find(candidate => candidate.role === terminal.role)
+  const report = state.reports.find(
+    candidate => candidate.role === terminal.role,
+  )
   if (!report || terminal.reportPath !== report.path)
-    throw new Error('foundation review terminal does not match its assigned role')
+    throw new Error(
+      'foundation review terminal does not match its assigned role',
+    )
   if (report.status === 'completed')
     throw new Error('foundation review report is already completed')
 
@@ -457,45 +622,15 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     state,
     workspacePath: input.workspacePath,
   })
-  const acceptedSelection = await acceptSelectionReceipt({
+  await acceptSelectionReceipt({
     workspacePath: input.workspacePath,
     revision: state.revision,
     dispatchId,
     candidateReferences: candidateReferences(initialReceipts),
   })
-  const laneReceipts = await readLaneReceipts({
+  return reconcileFoundationReviewStateFromArtifacts({
     state,
     workspacePath: input.workspacePath,
-  })
-  const review = assembleFoundationReview({
-    revision: state.revision,
-    laneReceipts,
-    selection: acceptedSelection.selection,
-  })
-  const accepted = await commitAssembledFoundationReview({
-    workspacePath: input.workspacePath,
-    revision: state.revision,
     currentRevision: input.currentRevision,
-    dispatchId,
-    review,
-  })
-  return assertFoundationReviewState({
-    ...state,
-    status: 'completed',
-    reports: state.reports.map(candidate =>
-      candidate.role === terminal.role
-        ? {
-            ...candidate,
-            path: acceptedSelection.path,
-            digest: acceptedSelection.digest,
-            status: 'completed' as const,
-            failureReason: undefined,
-          }
-        : candidate,
-    ),
-    finalReportPath: accepted.path,
-    finalReportDigest: accepted.digest,
-    verdict: accepted.review.verdict,
-    failureReason: undefined,
   })
 }

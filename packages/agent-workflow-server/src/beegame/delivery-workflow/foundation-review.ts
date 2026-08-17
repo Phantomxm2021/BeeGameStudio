@@ -1,5 +1,14 @@
-import { createHash } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import {
@@ -125,13 +134,7 @@ function assertSegment(value: string, label: string): void {
 
 function reviewDirectory(workspacePath: string, revision: string): string {
   assertDigest(revision)
-  return resolve(
-    workspacePath,
-    '.beegame',
-    'reviews',
-    'foundation',
-    revision,
-  )
+  return resolve(workspacePath, '.beegame', 'reviews', 'foundation', revision)
 }
 
 export function foundationReviewPath(
@@ -147,7 +150,11 @@ export function foundationReviewLaneReceiptPath(
   laneId: FoundationDocumentLaneId,
 ): string {
   foundationDocumentLaneById(laneId)
-  return resolve(reviewDirectory(workspacePath, revision), 'parts', `${laneId}.md`)
+  return resolve(
+    reviewDirectory(workspacePath, revision),
+    'parts',
+    `${laneId}.md`,
+  )
 }
 
 export function foundationReviewLaneReceiptStagingPath(
@@ -348,6 +355,7 @@ export async function commitAssembledFoundationReview(input: {
 }> {
   assertDigest(input.revision)
   assertDigest(input.currentRevision)
+  assertSegment(input.dispatchId, 'foundation review dispatch ID')
   if (input.revision !== input.currentRevision)
     throw new Error('canonical artifacts changed during foundation review')
   const review = foundationReviewSchema.parse(input.review)
@@ -357,25 +365,31 @@ export async function commitAssembledFoundationReview(input: {
   const validated = foundationReviewSchema.parse(
     JSON.parse(bytes.toString('utf8')),
   )
-  const stagedPath = foundationReviewStagingPath(
-    input.workspacePath,
-    input.revision,
-    input.dispatchId,
-  )
   const committedPath = foundationReviewPath(
     input.workspacePath,
     input.revision,
   )
-  await mkdir(dirname(stagedPath), { recursive: true })
-  await writeFile(stagedPath, bytes)
-  const stagedFile = await open(stagedPath, 'r')
-  try {
-    await stagedFile.sync()
-  } finally {
-    await stagedFile.close()
-  }
   await mkdir(dirname(committedPath), { recursive: true })
-  await rename(stagedPath, committedPath)
+  const temporaryPath = `${committedPath}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    const stagedFile = await open(temporaryPath, 'wx')
+    try {
+      await stagedFile.writeFile(bytes)
+      await stagedFile.sync()
+    } finally {
+      await stagedFile.close()
+    }
+    try {
+      await link(temporaryPath, committedPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const existing = await readFile(committedPath)
+      if (!existing.equals(bytes))
+        throw new Error('foundation review already exists with different bytes')
+    }
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
   const directory = await open(dirname(committedPath), 'r')
   try {
     await directory.sync()

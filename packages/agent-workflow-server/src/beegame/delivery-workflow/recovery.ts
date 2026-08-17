@@ -36,6 +36,7 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
+import { reconcileFoundationReviewStateFromArtifacts } from './foundation-review-stage'
 
 export {
   inspectWorkflowSnapshot,
@@ -813,8 +814,45 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
   run: DeliveryRun
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
-  void input
-  return undefined
+  const state = input.run.foundationReviewState
+  if (
+    !state ||
+    state.status === 'completed' ||
+    !input.workspacePath ||
+    input.run.phase !== 'DOCUMENT_REVIEW' ||
+    input.run.documentStep !== 'FOUNDATION_REVIEW'
+  )
+    return undefined
+  const currentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const reconciled = await reconcileFoundationReviewStateFromArtifacts({
+    state,
+    workspacePath: input.workspacePath,
+    currentRevision,
+  })
+  const base = {
+    ...input.run,
+    foundationReviewState: reconciled,
+    blockedReason: undefined,
+    updatedAt: new Date().toISOString(),
+  }
+  if (reconciled.status !== 'completed') return { ...base, status: 'running' }
+  return reconciled.verdict === 'READY'
+    ? {
+        ...base,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
+        status: 'running',
+      }
+    : {
+        ...base,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: `Foundation review requires revision; see ${reconciled.finalReportPath}`,
+      }
 }
 
 async function unlockReviewForChangedRevision(input: {
@@ -822,8 +860,7 @@ async function unlockReviewForChangedRevision(input: {
   workspacePath?: string
 }): Promise<DeliveryRun | undefined> {
   const review = input.run.foundationReviewState
-  if (!review || !input.workspacePath)
-    return undefined
+  if (!review || !input.workspacePath) return undefined
   const documentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
@@ -852,7 +889,34 @@ export async function reconcileRunOnStartup(input: {
   store: RunStore
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun | null> {
-  return input.store.reconcile(input.sessionIsOpen ?? (async () => false))
+  const initial = await input.store.load()
+  if (!initial) return null
+  const acquired = await acquireAndLoad({
+    store: input.store,
+    runId: initial.runId,
+    sessionIsOpen: input.sessionIsOpen,
+  })
+  try {
+    const reconciled = await restoreAcceptedReviewAfterRoutingFailure({
+      run: acquired.run,
+      workspacePath: input.store.workspacePath,
+    })
+    if (!reconciled) return acquired.run
+    return input.store.commit(
+      reconciled,
+      {
+        runId: reconciled.runId,
+        type: 'foundation.review.artifacts.reconciled',
+        phase: reconciled.phase,
+        status: reconciled.status,
+        revision: reconciled.revision,
+      },
+      undefined,
+      acquired.lease,
+    )
+  } finally {
+    await acquired.unlock()
+  }
 }
 
 async function acquireAndLoad(input: {
@@ -980,19 +1044,18 @@ export async function retryRun(input: {
     )
       return acquired.run
     const restoredHandoff = undefined
-    const changedReview = restoredHandoff
-      ? undefined
-      : await unlockReviewForChangedRevision({
-          run: acquired.run,
-          workspacePath: input.workspacePath,
-        })
     const restoredAcceptedReview =
-      !restoredHandoff && !changedReview
-        ? await restoreAcceptedReviewAfterRoutingFailure({
+      await restoreAcceptedReviewAfterRoutingFailure({
+        run: acquired.run,
+        workspacePath: input.workspacePath,
+      })
+    const changedReview =
+      restoredHandoff || restoredAcceptedReview
+        ? undefined
+        : await unlockReviewForChangedRevision({
             run: acquired.run,
             workspacePath: input.workspacePath,
           })
-        : undefined
     const resourceRefresh =
       !restoredHandoff &&
       !changedReview &&
@@ -1002,14 +1065,16 @@ export async function retryRun(input: {
         acquired.run,
         auditAssetContract(input.workspacePath),
       )
-    const retryBaseRun = restoredAcceptedReview ?? (resourceRefresh
-      ? {
-          ...acquired.run,
-          resourceProductionState: {
-            currentTask: 'RESOURCE_INVENTORY' as const,
-          },
-        }
-      : acquired.run)
+    const retryBaseRun =
+      restoredAcceptedReview ??
+      (resourceRefresh
+        ? {
+            ...acquired.run,
+            resourceProductionState: {
+              currentTask: 'RESOURCE_INVENTORY' as const,
+            },
+          }
+        : acquired.run)
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =

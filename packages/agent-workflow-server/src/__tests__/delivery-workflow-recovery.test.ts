@@ -19,6 +19,11 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createFoundationReviewState } from '../beegame/delivery-workflow/foundation-review-state'
+import {
+  acceptFoundationReviewWorkerTerminal,
+  buildFoundationReviewDispatches,
+} from '../beegame/delivery-workflow/foundation-review-stage'
+import { FOUNDATION_DOCUMENT_LANES } from '../beegame/delivery-workflow/foundation-document-lanes'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
 import {
   beginParallelFoundationAuthoring,
@@ -113,6 +118,143 @@ function foundationRecoveryReviewJson(input: { revision: string }): string {
       },
     ],
   })}\n`
+}
+
+function recoveryLaneMarkdown(input: {
+  revision: string
+  lane: (typeof FOUNDATION_DOCUMENT_LANES)[number]
+  projectionDigest: string
+  includeCandidate?: boolean
+}): string {
+  const identity = [
+    '# Foundation Review Packet',
+    '',
+    `Revision: \`${input.revision}\``,
+    '',
+    `Lane: \`${input.lane.id}\``,
+    '',
+    `Projection: \`${input.projectionDigest}\``,
+  ]
+  if (!input.includeCandidate) return `${identity.join('\n')}\n`
+  const path = input.lane.ownedPaths[0]
+  return [
+    ...identity,
+    '',
+    `## \`${input.lane.id}:C1\` — Recovery conflict`,
+    '',
+    '### Problem',
+    'The accepted outcome still needs one document change.',
+    '',
+    '### Evidence',
+    `- Path: ${path}`,
+    '',
+    '  Location: Contract section',
+    '',
+    '  Observed: The observable outcome is absent.',
+    '',
+    '### Required outcome',
+    'Define one observable outcome.',
+    '',
+    '### Changes',
+    `- Path: ${path}`,
+    '',
+    '  Action: Define the observable outcome.',
+    '',
+    '### Acceptance',
+    '- The outcome is observable.',
+    '',
+  ].join('\n')
+}
+
+function recoverySelectionMarkdown(
+  revision: string,
+  keep: string[] = [],
+): string {
+  return [
+    '# Foundation Review Selection',
+    '',
+    `Revision: \`${revision}\``,
+    '',
+    '## Keep',
+    ...(keep.length ? keep.map(reference => `- \`${reference}\``) : ['-']),
+    '',
+    '## Duplicate',
+    '-',
+    '',
+    '## Reject',
+    '-',
+    '',
+  ].join('\n')
+}
+
+async function publishFoundationReviewArtifacts(input: {
+  workspacePath: string
+  revision: string
+  needsRevision?: boolean
+}) {
+  let state = createFoundationReviewState({ revision: input.revision })
+  const laneDispatches = await buildFoundationReviewDispatches({
+    state,
+    workspacePath: input.workspacePath,
+    confirmedBriefDigest: 'd'.repeat(64),
+  })
+  for (const dispatch of laneDispatches) {
+    const lane = FOUNDATION_DOCUMENT_LANES.find(
+      candidate => candidate.id === dispatch.role,
+    )!
+    const stagingPath = dispatch.assignment.stagingOutputPaths[0]
+    await mkdir(join(stagingPath, '..'), { recursive: true })
+    await writeFile(
+      stagingPath,
+      recoveryLaneMarkdown({
+        revision: input.revision,
+        lane,
+        projectionDigest: dispatch.contract.projection!.digest,
+        includeCandidate: input.needsRevision && lane.id === 'core-design',
+      }),
+    )
+    state = await acceptFoundationReviewWorkerTerminal({
+      state,
+      workspacePath: input.workspacePath,
+      currentRevision: input.revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision: input.revision,
+        mode: 'initial',
+        role: lane.id,
+        reportPath: state.reports.find(report => report.role === lane.id)!.path,
+      },
+    })
+  }
+  const [synthesis] = await buildFoundationReviewDispatches({
+    state,
+    workspacePath: input.workspacePath,
+    confirmedBriefDigest: 'd'.repeat(64),
+  })
+  await mkdir(join(synthesis.assignment.stagingOutputPaths[0], '..'), {
+    recursive: true,
+  })
+  await writeFile(
+    synthesis.assignment.stagingOutputPaths[0],
+    recoverySelectionMarkdown(
+      input.revision,
+      input.needsRevision ? ['core-design:C1'] : [],
+    ),
+  )
+  return acceptFoundationReviewWorkerTerminal({
+    state,
+    workspacePath: input.workspacePath,
+    currentRevision: input.revision,
+    terminal: {
+      workerType: 'document-reviewer',
+      status: 'completed',
+      revision: input.revision,
+      mode: 'initial',
+      role: 'synthesis',
+      reportPath: state.reports[3].path,
+    },
+  })
 }
 const TEST_ACQUISITION_PROFILE = {
   dimensions: ['agnostic'] as const,
@@ -2087,7 +2229,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('preserves current Markdown receipt and final review digests during recovery', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-reviewer-schema-current-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-reviewer-schema-current-'),
+    )
     const ownerId = 'owner-reviewer-schema-current'
     const projectId = 'project-reviewer-schema-current'
     const store = createRunStore(workspace, ownerId)
@@ -2162,6 +2306,226 @@ describe('delivery workflow recovery', () => {
         .update(await readFile(join(workspace, finalReportPath)))
         .digest('hex'),
     ).toBe(finalReportDigest)
+  })
+
+  test('startup reconciles a published READY review before controller dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-startup-final-'))
+    const ownerId = 'owner-review-startup-final'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-startup-final',
+      projectId: 'project-review-startup-final',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision,
+    })
+    const crashed = {
+      ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'running' as const,
+      revision: { ...initial.revision, document: revision },
+      foundationReviewState: createFoundationReviewState({ revision }),
+    }
+    const store = createRunStore(workspace, ownerId)
+    await store.save(crashed)
+
+    const recovered = await reconcileRunOnStartup({ store })
+
+    expect(recovered).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      status: 'running',
+      foundationReviewState: { status: 'completed', verdict: 'READY' },
+    })
+    const dispatched: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(request) {
+          dispatched.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.resume(recovered!)
+    expect(await store.load()).toMatchObject({
+      documentStep: 'CHECKLIST_DRAFTING',
+      foundationReviewState: { status: 'completed', verdict: 'READY' },
+    })
+    expect(
+      dispatched.every(request => request.workerType !== 'document-reviewer'),
+    ).toBe(true)
+  })
+
+  test('explicit retry reconciles committed lanes before redispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-retry-lane-'))
+    const ownerId = 'owner-review-retry-lane'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-retry-lane',
+      projectId: 'project-review-retry-lane',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const published = await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision,
+    })
+    for (const report of published.reports.slice(1))
+      await rm(join(workspace, report.path), { force: true })
+    await rm(join(workspace, published.finalReportPath!), { force: true })
+    const failedReview = createFoundationReviewState({ revision })
+    failedReview.status = 'failed'
+    failedReview.failureReason = 'worker stopped after receipt publication'
+    failedReview.reports[0] = {
+      ...failedReview.reports[0],
+      status: 'failed',
+      failureReason: failedReview.failureReason,
+      dispatch: {
+        dispatchId: 'review-core-terminal-before-state',
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        taskId: 'review:foundation:core-design:1',
+        revision,
+        status: 'completed',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        terminalResult: {
+          workerType: 'document-reviewer',
+          status: 'completed',
+          revision,
+          mode: 'initial',
+          role: 'core-design',
+          reportPath: failedReview.reports[0].path,
+        },
+      },
+    }
+    const failed = {
+      ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'needs_action' as const,
+      revision: { ...initial.revision, document: revision },
+      foundationReviewState: failedReview,
+      blockedReason: failedReview.failureReason,
+    }
+    const store = createRunStore(workspace, ownerId)
+    await store.save(failed)
+
+    const retried = await retryRun({
+      store,
+      runId: failed.runId,
+      workspacePath: workspace,
+    })
+
+    expect(
+      retried.foundationReviewState?.reports.map(report => [
+        report.role,
+        report.status,
+      ]),
+    ).toEqual([
+      ['core-design', 'completed'],
+      ['technical-assets', 'pending'],
+      ['presentation', 'pending'],
+      ['synthesis', 'pending'],
+    ])
+    expect(retried.status).toBe('running')
+    expect(
+      retried.foundationReviewState?.reports[0].dispatch?.terminalResult,
+    ).toBeDefined()
+    const dispatched: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(request) {
+          dispatched.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.resume(retried)
+    expect(dispatched.map(request => request.contract.reviewRole)).toEqual([
+      'technical-assets',
+      'presentation',
+    ])
+  })
+
+  test('startup routes a published NEEDS_REVISION review without reviewer redispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-startup-needs-'))
+    const ownerId = 'owner-review-startup-needs'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-startup-needs',
+      projectId: 'project-review-startup-needs',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    await publishFoundationReviewArtifacts({
+      workspacePath: workspace,
+      revision,
+      needsRevision: true,
+    })
+    const crashed = {
+      ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'running' as const,
+      revision: { ...initial.revision, document: revision },
+      foundationReviewState: createFoundationReviewState({ revision }),
+    }
+    const store = createRunStore(workspace, ownerId)
+    await store.save(crashed)
+
+    const recovered = await reconcileRunOnStartup({ store })
+
+    expect(recovered).toMatchObject({
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      foundationReviewState: {
+        status: 'completed',
+        verdict: 'NEEDS_REVISION',
+      },
+    })
+    expect(recovered?.blockedReason).toContain(
+      recovered?.foundationReviewState?.finalReportPath,
+    )
   })
 
   test.each([
