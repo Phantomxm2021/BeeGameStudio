@@ -268,7 +268,7 @@ Expected: zero failures.
 - [ ] **Step 2: Run Dashboard regression tests**
 
 ```bash
-bun test apps/frontend/src/components/Demiurge/WorkflowCard.test.tsx
+bun run --cwd apps/frontend test:run -- src/components/Demiurge/WorkflowCard.test.tsx
 ```
 
 Expected: zero failures; Reviewer tasks and stopped state remain display-only
