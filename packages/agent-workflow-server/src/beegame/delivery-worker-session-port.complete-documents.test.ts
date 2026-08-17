@@ -6,6 +6,10 @@ import { join } from 'node:path'
 import { buildDocumentAuthorAuthorityBlock } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../__tests__/complete-game-document-fixture'
 
 function canonicalSource(
   path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
@@ -84,6 +88,19 @@ describe('delivery worker complete document boundary', () => {
         .update(reviewBytes)
         .digest('hex')
       await writeFile(join(workspacePath, reviewPath), reviewBytes)
+      const source = [
+        '---',
+        'document_id: GDD',
+        'version: 1.0.0',
+        'updated_at: 2026-08-17T10:00:00.000Z',
+        '---',
+        renderTestCompleteGameDocument(
+          'docs/GDD.md',
+          completeTestSubmission('docs/GDD.md'),
+        ).trimEnd(),
+        '',
+      ].join('\n')
+      await writeFile(join(workspacePath, 'docs/GDD.md'), source)
 
       const block = await buildDocumentAuthorAuthorityBlock({
         dispatchId: 'dispatch-remediation-authority',
@@ -105,12 +122,17 @@ describe('delivery worker complete document boundary', () => {
         },
       } as never)
 
-      expect(block).toContain('BEGIN ACCEPTED PATH-SCOPED REVIEW JSON')
+      expect(block).toContain('BEGIN FOUNDATION REMEDIATION TRANSACTION JSON')
       expect(block).toContain('Runtime authority disagrees')
       expect(block).toContain('docs/GDD.md')
       expect(block).not.toContain('docs/TECHNICAL_DESIGN.md')
-      expect(block).not.toContain('BEGIN CURRENT CANONICAL DOCUMENT')
-      expect(block).toContain('Authorized repair path: docs/GDD.md')
+      const transactionJson = block
+        .split('\n')
+        .slice(2, -1)
+        .join('\n')
+      expect(JSON.parse(transactionJson).sourceMarkdown).toBe(source)
+      expect(block.split('"sourceMarkdown"').length - 1).toBe(1)
+      expect(block).toContain('"units"')
       expect(block).not.toContain('exactly once')
       expect(block).not.toContain('native Read')
       expect(block).not.toContain('native Edit')

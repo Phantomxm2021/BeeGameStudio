@@ -59,6 +59,12 @@ import {
 } from './foundation-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { readAuthoredDocumentReceipt } from './authored-document-receipt'
+import {
+  buildFoundationRemediationTransactionRequest,
+  foundationRemediationResultSchema,
+  type FoundationRemediationTransactionRequest,
+} from './delivery-workflow/foundation-remediation-transaction'
+import { commitFoundationRemediationTransaction } from './foundation-remediation-commit'
 
 const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
@@ -137,64 +143,8 @@ export async function buildDocumentAuthorAuthorityBlock(
   onProjection?: (projection: FoundationAuthorityProjection) => void,
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
-  if (request.contract.authoringMode === 'remediation') {
-    const remediation = request.contract.remediation as
-      | Record<string, unknown>
-      | undefined
-    const reviewPath = remediation?.reviewPath
-    const reviewDigest = remediation?.reviewDigest
-    const affectedPaths = remediation?.affectedPaths
-    const laneId = remediation?.laneId
-    const lane = FOUNDATION_REMEDIATION_LANES.find(
-      candidate => candidate.id === laneId,
-    )
-    if (
-      !lane ||
-      typeof reviewPath !== 'string' ||
-      typeof reviewDigest !== 'string' ||
-      !Array.isArray(affectedPaths) ||
-      affectedPaths.some(
-        path =>
-          typeof path !== 'string' ||
-          !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-      ) ||
-      !request.allowedPaths ||
-      JSON.stringify(request.allowedPaths) !== JSON.stringify(affectedPaths)
-    )
-      throw new Error('document remediation authority is invalid')
-    const accepted = await readFoundationReviewArtifact({
-      workspacePath: request.workspacePath,
-      path: reviewPath,
-      expectedDigest: reviewDigest,
-    })
-    const expectedLanePaths = lane.ownedPaths.filter(path =>
-      accepted.affectedPaths.includes(path),
-    )
-    if (JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths))
-      throw new Error('document remediation paths do not match accepted review')
-    if (expectedLanePaths.length !== 1)
-      throw new Error('document remediation must own exactly one document')
-    const targetPath = expectedLanePaths[0]
-    const projectedReview = {
-      ...accepted.review,
-      conflicts: accepted.review.conflicts
-        .filter(conflict =>
-          conflict.changes.some(change => change.path === targetPath),
-        )
-        .map(conflict => ({
-          ...conflict,
-          changes: conflict.changes.filter(
-            change => change.path === targetPath,
-          ),
-        })),
-    }
-    return [
-      'The workflow service projected one accepted Foundation conflict list for one authorized path. Repair only that path, preserve unrelated approved content, and do not reinterpret or expand the review scope.',
-      `Remediation lane: ${lane.id}`,
-      `Authorized repair path: ${targetPath}`,
-      `--- BEGIN ACCEPTED PATH-SCOPED REVIEW JSON: ${accepted.path} ---\n${JSON.stringify(projectedReview, null, 2)}\n--- END ACCEPTED PATH-SCOPED REVIEW JSON: ${accepted.path} ---`,
-    ].join('\n\n')
-  }
+  if (request.contract.authoringMode === 'remediation')
+    return (await buildFoundationRemediationAuthority(request)).block
   if (
     request.contract.authoringMode === undefined &&
     request.contract.documentSet === 'checklist'
@@ -317,6 +267,122 @@ export async function buildDocumentAuthorAuthorityBlock(
   ].join('\n\n')
 }
 
+type PreparedFoundationRemediation = {
+  block: string
+  request: FoundationRemediationTransactionRequest
+  previousMetadata: { version: string; updatedAt: string }
+  committedAt: string
+}
+
+function remediationDocumentMetadata(markdown: string): {
+  version: string
+  updatedAt: string
+} {
+  const lines = markdown.split('\n')
+  if (lines[0]?.trim() !== '---')
+    throw new Error('document remediation target metadata is missing')
+  let version: string | undefined
+  let updatedAt: string | undefined
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    if (line.trim() === '---') break
+    const separator = line.indexOf(':')
+    if (separator < 1) continue
+    const key = line.slice(0, separator).trim()
+    const value = line.slice(separator + 1).trim()
+    if (key === 'version') version = value
+    if (key === 'updated_at') updatedAt = value
+  }
+  if (!version || !updatedAt || !Number.isFinite(Date.parse(updatedAt)))
+    throw new Error('document remediation target metadata is invalid')
+  return { version, updatedAt }
+}
+
+async function buildFoundationRemediationAuthority(
+  request: WorkerDispatchRequest,
+): Promise<PreparedFoundationRemediation> {
+  const remediation = request.contract.remediation as
+    | Record<string, unknown>
+    | undefined
+  const reviewPath = remediation?.reviewPath
+  const reviewDigest = remediation?.reviewDigest
+  const affectedPaths = remediation?.affectedPaths
+  const laneId = remediation?.laneId
+  const lane = FOUNDATION_REMEDIATION_LANES.find(
+    candidate => candidate.id === laneId,
+  )
+  if (
+    !lane ||
+    typeof reviewPath !== 'string' ||
+    typeof reviewDigest !== 'string' ||
+    !Array.isArray(affectedPaths) ||
+    affectedPaths.some(
+      path =>
+        typeof path !== 'string' ||
+        !CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
+    ) ||
+    !request.allowedPaths ||
+    JSON.stringify(request.allowedPaths) !== JSON.stringify(affectedPaths)
+  )
+    throw new Error('document remediation authority is invalid')
+  const accepted = await readFoundationReviewArtifact({
+    workspacePath: request.workspacePath,
+    path: reviewPath,
+    expectedDigest: reviewDigest,
+  })
+  if (
+    typeof remediation?.sourceRevision !== 'string' ||
+    remediation.sourceRevision !== accepted.review.revision
+  )
+    throw new Error('document remediation source revision is invalid')
+  const expectedLanePaths = lane.ownedPaths.filter(path =>
+    accepted.affectedPaths.includes(path),
+  )
+  if (JSON.stringify(expectedLanePaths) !== JSON.stringify(affectedPaths))
+    throw new Error('document remediation paths do not match accepted review')
+  if (expectedLanePaths.length !== 1)
+    throw new Error('document remediation must own exactly one document')
+  const targetPath = expectedLanePaths[0]
+  const conflicts = accepted.review.conflicts
+    .filter(conflict =>
+      conflict.changes.some(change => change.path === targetPath),
+    )
+    .map(conflict => ({
+      ...conflict,
+      evidence: conflict.evidence.filter(
+        evidence => evidence.path === targetPath,
+      ),
+      changes: conflict.changes.filter(change => change.path === targetPath),
+    }))
+  if (conflicts.some(conflict => conflict.evidence.length === 0))
+    throw new Error('document remediation conflict lacks target-scoped evidence')
+  const sourceMarkdown = await readFile(
+    resolve(request.workspacePath, targetPath),
+    'utf8',
+  )
+  const transaction = buildFoundationRemediationTransactionRequest({
+    sourcePath: targetPath,
+    sourceMarkdown,
+    reviewDigest,
+    sourceRevision: remediation.sourceRevision,
+    conflicts,
+  })
+  const previousMetadata = remediationDocumentMetadata(sourceMarkdown)
+  return {
+    request: transaction,
+    previousMetadata,
+    committedAt: new Date(
+      Date.parse(previousMetadata.updatedAt) + 1,
+    ).toISOString(),
+    block: [
+      'Bee Game Studio projected one byte-bound Foundation remediation transaction. Author only replacement bodies for the listed canonical units and return exactly one result matching the contracted JSON schema. Do not rewrite headings, protocol markers, metadata, or files.',
+      `--- BEGIN FOUNDATION REMEDIATION TRANSACTION JSON: ${accepted.path} ---`,
+      JSON.stringify(transaction, null, 2),
+      `--- END FOUNDATION REMEDIATION TRANSACTION JSON: ${accepted.path} ---`,
+    ].join('\n'),
+  }
+}
+
 async function durableWriteProjection(
   path: string,
   content: string,
@@ -359,6 +425,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
     string,
     FoundationAuthorityProjection
   >()
+  const foundationRemediationTransactions = new Map<
+    string,
+    PreparedFoundationRemediation
+  >()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
@@ -376,14 +446,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
-      const documentAuthorityBlock =
+      const preparedRemediation =
         request.workerType === 'document-author' &&
         request.contract.authoringMode === 'remediation'
-          ? await buildDocumentAuthorAuthorityBlock(request)
-          : ''
+          ? await buildFoundationRemediationAuthority(request)
+          : undefined
+      const documentAuthorityBlock = preparedRemediation?.block ?? ''
       const reviewContract = reviewerAssignmentContract(request)
       const workflowJsonSchema =
-        request.workerType === 'document-reviewer'
+        request.workerType === 'document-author' &&
+        request.contract.authoringMode === 'remediation'
+          ? z.toJSONSchema(foundationRemediationResultSchema, {
+              target: 'draft-7',
+            })
+          : request.workerType === 'document-reviewer'
           ? z.toJSONSchema(
               request.contract.reviewRole === 'synthesis'
                 ? foundationReviewSchema
@@ -492,6 +568,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
+      if (preparedRemediation)
+        foundationRemediationTransactions.set(dispatchId, preparedRemediation)
       eventOffsets.set(dispatchId, 0)
       records.set(dispatchId, {
         dispatchId,
@@ -770,6 +848,24 @@ export function createBeeGameDeliveryWorkerPort(input: {
               'resource content author completed without an accepted durable receipt',
             )
           if (request && isCanonicalDocumentAuthor(request)) {
+            if (request.contract.authoringMode === 'remediation') {
+              const prepared = foundationRemediationTransactions.get(dispatchId)
+              if (!prepared)
+                throw new Error(
+                  'foundation remediation transaction authority is missing',
+                )
+              return createDeterministicFoundationRemediationTerminal({
+                request,
+                events,
+                prepared,
+                metrics: documentAuthoringMetrics(
+                  sessionEvents(sessionId),
+                  projectionMetrics(
+                    documentAuthorityProjections.get(dispatchId),
+                  ),
+                ),
+              })
+            }
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
@@ -830,13 +926,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
               )
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            const writtenPaths =
-              request.contract.authoringMode === 'remediation'
-                ? await changedRemediationPaths(request)
-                : [targetPath]
             return createDeterministicCanonicalDocumentTerminal(
               request,
-              writtenPaths,
+              [targetPath],
               documentAuthoringMetrics(
                 sessionEvents(sessionId),
                 projectionMetrics(documentAuthorityProjections.get(dispatchId)),
@@ -905,7 +997,7 @@ async function initialFoundationDocumentTurnPrompt(
   const path = request.contract.foundationDocumentPath as never
   if (request.contract.authoringMode === 'remediation')
     return [
-      `Repair only ${path} according to the accepted path-scoped conflict projection included above. Preserve unrelated approved content and leave the document complete.`,
+      `Author only the replacement bodies requested by the byte-bound transaction for ${path}. Return one object matching the supplied schema; do not return the full document.`,
       'The dedicated verification stage owns the independent re-review.',
     ].join('\n\n')
   let targetExists = true
@@ -1093,6 +1185,44 @@ async function createDeterministicStructuredTerminal(input: {
         'resource content terminal requires a committed durable content receipt',
       )
   }
+}
+
+async function createDeterministicFoundationRemediationTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+  prepared: PreparedFoundationRemediation
+  metrics: ReturnType<typeof documentAuthoringMetrics>
+}) {
+  const resultEvent = [...input.events]
+    .reverse()
+    .find(event => event.type === 'result')
+  const payload = resultEvent?.payload
+  const structuredOutput =
+    payload && typeof payload === 'object' && 'structured_output' in payload
+      ? payload.structured_output
+      : undefined
+  if (structuredOutput === undefined)
+    throw new Error('foundation remediation returned no structured output')
+  const result = foundationRemediationResultSchema.parse(structuredOutput)
+  const dispatchId = input.request.dispatchId
+  if (typeof dispatchId !== 'string' || !dispatchId)
+    throw new Error('foundation remediation dispatch identity is missing')
+  const receipt = await commitFoundationRemediationTransaction({
+    workspacePath: input.request.workspacePath,
+    dispatchId,
+    request: input.prepared.request,
+    result,
+    previousMetadata: input.prepared.previousMetadata,
+    committedAt: input.prepared.committedAt,
+  })
+  return documentAuthorTerminalSchema.parse({
+    workerType: 'document-author',
+    status: 'completed',
+    writtenPaths: [receipt.targetPath],
+    resolvedFindingIds: result.resolvedConflictIds,
+    remediationReceipt: receipt,
+    authoringMetrics: input.metrics,
+  })
 }
 
 function completedToolInputs(
@@ -1796,40 +1926,4 @@ function completedMutationPaths(
         ).replaceAll('\\', '/'),
       )
   })
-}
-
-async function changedRemediationPaths(
-  request: WorkerDispatchRequest,
-): Promise<string[]> {
-  const remediation = request.contract.remediation
-  const affectedPaths =
-    remediation &&
-    typeof remediation === 'object' &&
-    !Array.isArray(remediation) &&
-    Array.isArray((remediation as Record<string, unknown>).affectedPaths)
-      ? ((remediation as Record<string, unknown>).affectedPaths as unknown[])
-      : []
-  const previousDocumentDigests = request.contract.previousDocumentDigests
-  if (
-    !previousDocumentDigests ||
-    typeof previousDocumentDigests !== 'object' ||
-    Array.isArray(previousDocumentDigests)
-  )
-    throw new Error('document remediation baseline digests are missing')
-  const baseline = previousDocumentDigests as Record<string, unknown>
-  const changed: string[] = []
-  for (const candidate of affectedPaths) {
-    if (typeof candidate !== 'string' || !candidate)
-      throw new Error('document remediation affected path is invalid')
-    const previousDigest = baseline[candidate]
-    if (
-      typeof previousDigest !== 'string' ||
-      !/^[a-f0-9]{64}$/u.test(previousDigest)
-    )
-      throw new Error('document remediation baseline digest is invalid')
-    const bytes = await readFile(resolve(request.workspacePath, candidate))
-    const currentDigest = createHash('sha256').update(bytes).digest('hex')
-    if (currentDigest !== previousDigest) changed.push(candidate)
-  }
-  return changed
 }

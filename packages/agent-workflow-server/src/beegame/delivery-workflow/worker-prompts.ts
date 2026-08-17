@@ -294,7 +294,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               request.contract.authoringMode === 'parallel-draft'
             ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
             : request.contract.authoringMode === 'remediation'
-              ? `Repair only ${String(request.contract.foundationDocumentPath)} according to the accepted path-scoped conflict list projected in the request. Preserve unrelated approved content and leave the document complete.`
+              ? `Author replacement bodies only for the byte-bound canonical units assigned in the accepted path-scoped conflict transaction for ${String(request.contract.foundationDocumentPath)}. Return exactly one contracted JSON object; Bee Game Studio validates and atomically persists the assembled document.`
               : 'Use the accepted Foundation review JSON and current target bytes projected by the workflow service. Apply every conflict change across exactly contract.remediation.affectedPaths in one coordinated turn, preserve unrelated approved content, and leave every authorized Markdown document complete when the turn ends.',
         request.contract.documentSet === 'checklist'
           ? [
@@ -346,8 +346,8 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
               : [
-                  `This is one accepted report-driven Foundation remediation for ${String(request.contract.foundationDocumentPath)}. Apply every assigned changes[].action so the shared requiredOutcome and acceptance conditions hold. Preserve unrelated approved authority byte-for-byte where possible; do not rewrite the complete document.`,
-                  'The dedicated verification stage owns closure review.',
+                  `This is one accepted report-driven Foundation remediation for ${String(request.contract.foundationDocumentPath)}. Resolve every assigned conflict ID through the smallest sufficient set of replacement bodies. Do not reproduce unchanged units, headings, metadata, or protocol markers.`,
+                  'The service owns assembly and commit. The dedicated verification stage owns closure review.',
                 ].join(' '),
       ].join(' ')
     case 'document-reviewer':
@@ -464,6 +464,8 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft')
         ? ''
+        : request.contract.authoringMode === 'remediation'
+          ? 'Return exactly one result matching the supplied JSON schema. Do not write or edit project files; Bee Game Studio validates and atomically commits the transaction.'
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`

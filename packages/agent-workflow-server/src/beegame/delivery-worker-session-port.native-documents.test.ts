@@ -11,6 +11,7 @@ import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
 import { commitAuthoredFoundationDocument } from './authored-document-receipt'
+import { buildFoundationRemediationTransactionRequest } from './delivery-workflow/foundation-remediation-transaction'
 
 function count(value: string, needle: string): number {
   return value.split(needle).length - 1
@@ -170,9 +171,21 @@ describe('native initial document authoring', () => {
   test('repairs one document in an isolated native session', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'remediation-digests-'))
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    const technicalBody = renderTestCompleteGameDocument(
+      'docs/TECHNICAL_DESIGN.md',
+      completeTestSubmission('docs/TECHNICAL_DESIGN.md'),
+    )
+    const technicalSource = [
+      '---',
+      'document_id: TECHNICAL_DESIGN',
+      'version: 1.0.0',
+      'updated_at: 2026-08-17T10:00:00.000Z',
+      '---',
+      technicalBody.trimEnd(),
+      '',
+    ].join('\n')
     const originals = {
-      'docs/TECHNICAL_DESIGN.md':
-        '# Technical\nOriginal technical authority.\n',
+      'docs/TECHNICAL_DESIGN.md': technicalSource,
       'docs/ASSET_PLAN.md': '# Assets\nOriginal asset authority.\n',
     }
     await Promise.all(
@@ -226,6 +239,24 @@ describe('native initial document authoring', () => {
       },
     )
     await writeFile(join(workspacePath, reviewPath), reviewBytes)
+    const acceptedReview = JSON.parse(reviewBytes) as {
+      conflicts: Array<Record<string, unknown>>
+    }
+    const transaction = buildFoundationRemediationTransactionRequest({
+      sourcePath: 'docs/TECHNICAL_DESIGN.md',
+      sourceMarkdown: technicalSource,
+      reviewDigest: createHash('sha256').update(reviewBytes).digest('hex'),
+      sourceRevision: 'a'.repeat(64),
+      conflicts: acceptedReview.conflicts.map(conflict => ({
+        ...conflict,
+        changes: (conflict.changes as Array<Record<string, unknown>>).filter(
+          change => change.path === 'docs/TECHNICAL_DESIGN.md',
+        ),
+      })) as never,
+    })
+    const patchedUnit = transaction.units.find(unit =>
+      unit.unitId.startsWith('section:'),
+    )!
     const events: Array<Record<string, unknown>> = []
     let startInput: Record<string, unknown> | undefined
     const sessions = {
@@ -252,14 +283,26 @@ describe('native initial document authoring', () => {
       events: () => events,
       isWorkflowWorkerOpen: () => true,
       sendWithDisplay: async () => {
-        await writeFile(
-          join(workspacePath, 'docs/TECHNICAL_DESIGN.md'),
-          renderTestCompleteGameDocument(
-            'docs/TECHNICAL_DESIGN.md',
-            completeTestSubmission('docs/TECHNICAL_DESIGN.md'),
-          ),
-        )
-        events.push({ type: 'result', text: 'repair complete' })
+        events.push({
+          type: 'result',
+          text: 'repair complete',
+          payload: {
+            structured_output: {
+              version: 1,
+              sourcePath: 'docs/TECHNICAL_DESIGN.md',
+              sourceDigest: transaction.sourceDigest,
+              resolvedConflictIds: ['B1'],
+              patches: [
+                {
+                  unitId: patchedUnit.unitId,
+                  expectedBodyDigest: patchedUnit.bodyDigest,
+                  replacementBody:
+                    'The repaired runtime authority has one observable implementation boundary.',
+                },
+              ],
+            },
+          },
+        })
       },
       stop: () => undefined,
       disposeWorkflowWorker: async () => undefined,
@@ -300,9 +343,20 @@ describe('native initial document authoring', () => {
     expect(terminal).toMatchObject({
       workerType: 'document-author',
       writtenPaths: ['docs/TECHNICAL_DESIGN.md'],
+      remediationReceipt: {
+        targetPath: 'docs/TECHNICAL_DESIGN.md',
+        patchedUnitIds: [patchedUnit.unitId],
+      },
     })
     expect(startInput?.workflowMarkdownStreamContract).toBeUndefined()
+    expect(startInput?.workflowJsonSchema).toBeDefined()
     expect(startInput?.workflowDocumentAuthorMode).toBe('remediation')
+    expect(await readFile(join(workspacePath, 'docs/ASSET_PLAN.md'), 'utf8')).toBe(
+      originals['docs/ASSET_PLAN.md'],
+    )
+    expect(
+      await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8'),
+    ).toContain('The repaired runtime authority')
     await rm(workspacePath, { recursive: true, force: true })
   })
 

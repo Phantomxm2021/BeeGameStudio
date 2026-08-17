@@ -706,17 +706,15 @@ describe('resource-content worker prompts', () => {
         systemDeliveryContract: buildSystemDeliveryContract(),
       },
     })
-    expect(ownerPrompt).toContain('accepted path-scoped conflict list')
-    expect(ownerPrompt).toContain('Preserve unrelated approved authority')
-    expect(ownerPrompt).not.toContain('exactly once')
+    expect(ownerPrompt).toContain('accepted path-scoped conflict transaction')
+    expect(ownerPrompt).toContain('replacement bodies')
+    expect(ownerPrompt).toContain('exactly one contracted JSON object')
     expect(ownerPrompt).not.toContain('native Read')
     expect(ownerPrompt).not.toContain('native Edit')
     expect(ownerPrompt).not.toContain('SearchExtraTools')
-    expect(ownerPrompt).toContain(
-      'native runtime owns the file-operation sequence',
-    )
+    expect(ownerPrompt).not.toContain('file-operation sequence')
     expect(ownerPrompt).not.toContain('one streamed response')
-    expect(ownerPrompt).toContain('do not rewrite the complete document')
+    expect(ownerPrompt).toContain('Do not reproduce unchanged units')
     expect(ownerPrompt).not.toContain('verify its final bytes')
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
   })
