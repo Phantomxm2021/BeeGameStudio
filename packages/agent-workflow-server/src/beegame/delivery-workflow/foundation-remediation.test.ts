@@ -9,7 +9,7 @@ import {
   pendingFoundationRemediationLanes,
   recordFoundationRemediationDispatch,
   recordFoundationRemediationFailure,
-  retryFoundationRemediationFailures,
+  restartIncompleteFoundationRemediation,
 } from './foundation-remediation'
 import { parseDeliveryRun } from './schema'
 import type { DispatchRecord, FoundationRemediationLaneId } from './types'
@@ -214,7 +214,7 @@ describe('foundation remediation lanes', () => {
     )
 
     expect(foundationRemediationReadyForVerification(updated)).toBe(false)
-    const retried = retryFoundationRemediationFailures(updated)
+    const retried = restartIncompleteFoundationRemediation(updated)
     expect(retried.lanes.map(lane => lane.status)).toEqual([
       'completed',
       'not_required',
@@ -281,7 +281,7 @@ describe('foundation remediation lanes', () => {
       'gdd',
       'interrupted',
     )
-    const retried = retryFoundationRemediationFailures(failed)
+    const retried = restartIncompleteFoundationRemediation(failed)
 
     expect(retried.lanes[0]?.status).toBe('pending')
     expect(retried.lanes[0]?.sourceDigest).toBe(sourceDigest)

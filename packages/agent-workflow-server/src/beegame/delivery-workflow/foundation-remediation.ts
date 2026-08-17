@@ -213,13 +213,13 @@ export function recordFoundationRemediationFailure(
   })
 }
 
-export function retryFoundationRemediationFailures(
+export function restartIncompleteFoundationRemediation(
   state: FoundationRemediationState,
 ): FoundationRemediationState {
   return {
     ...state,
     lanes: state.lanes.map(lane =>
-      lane.status === 'failed'
+      lane.status === 'failed' || lane.status === 'running'
         ? {
             ...lane,
             status: 'pending' as const,
